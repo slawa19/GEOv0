@@ -18,7 +18,7 @@ This repository contains the **specification and architecture of GEO v0.1**, plu
 
 ---
 
-[![CI](https://github.com/slawa19/GEOv0/actions/workflows/ci.yml/badge.svg)](https://github.com/slawa19/GEOv0/actions)
+<!-- CI badge: add when GitHub Actions workflow is configured -->
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Spec](https://img.shields.io/badge/spec-GEO%20v0.1-informational)
 ![Docs](https://img.shields.io/badge/docs-EN%20%7C%20RU%20%7C%20PL-brightgreen)
