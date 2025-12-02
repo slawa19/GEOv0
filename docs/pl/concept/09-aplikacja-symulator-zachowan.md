@@ -8,8 +8,8 @@
 
 1. [Wprowadzenie](#1-wprowadzenie)  
 2. [Główny zakres funkcjonalny symulatora](#2-główny-zakres-funkcjonalny-symulatora)  
-   - 2.1. [Konfiguracja „świata”](#21-konfiguracja-świata---generacja-sieci)  
-   - 2.2. [Scenariusze zachowań](#22-scenariusze-zachowań---modele-interakcji)  
+   - 2.1. [Konfiguracja „świata”](#21-konfiguracja-świata-generacja-sieci)  
+   - 2.2. [Scenariusze zachowań](#22-scenariusze-zachowań-modele-interakcji)  
    - 2.3. [Sterowanie obciążeniem](#23-sterowanie-obciążeniem)  
    - 2.4. [Integracja z API jądra](#24-integracja-z-rzeczywistym-api-jądra)  
 3. [Wizualizacja i analityka](#3-wizualizacja-i-analityka)  
@@ -17,7 +17,7 @@
    - 3.2. [Metryki zagregowane](#32-metryki-zagregowane-w-czasie)  
    - 3.3. [Wskaźniki efektywności protokołu](#33-wskaźniki-efektywności-protokołu)  
    - 3.4. [Tryb „replay”](#34-tryb-replay)  
-4. [Konfiguracja i scenariusze „pod TZ”](#4-konfiguracja-i-scenariusze-pod-tz)  
+4. [Konfiguracja i scenariusze „pod specyfikację”](#4-konfiguracja-i-scenariusze-pod-specyfikację)  
 5. [Koncepcja wizualizacji](#5-koncepcja-wizualizacji)  
 6. [Ekran „Mapa społeczności”](#6-ekran-mapa-społeczności)  
    - 6.1. [Kompozycja ekranu](#61-kompozycja-ekranu)  
@@ -42,6 +42,7 @@
     - 12.4. [Main Canvas](#124-main-canvas)  
     - 12.5. [Right Sidebar](#125-right-sidebar)  
     - 12.6. [Stany ekranu](#126-stany-ekranu-jako-całości)  
+13. [Integracja AI z symulatorem scenariuszy i zachowań](#13-integracja-ai-z-symulatorem-scenariuszy-i-zachowań)  
 
 ---
 
@@ -64,7 +65,7 @@ Aplikacja łączy się z API huba jako wiele „wirtualnych użytkowników” (u
 - zbadać, jak różne topologie zaufania i modele zachowań wpływają na:
   - efektywność wzajemnych kompensat (clearing),
   - rozkład długów/kredytów,
-  - średnią długość tras i częstotliwość odrzucanych płatności;
+  - średnią długość tras i częstotliwość odrzuconych płatności;
 - wykryć błędy i wąskie gardła jeszcze przed wdrożeniem dla „prawdziwych” użytkowników.
 
 ---
@@ -98,7 +99,7 @@ Parametry:
 
 Symulator potrafi:
 
-- **wczytywać gotowe scenariusze JSON** (tryb podstawowy),
+- **wczytywać gotowe scenariusze JSON** (tryb podstawowy dla MVP);
 - w trybie rozszerzonym — generować automatycznie sieć według parametrów (po MVP).
 
 ### 2.2. Scenariusze zachowań — modele interakcji
@@ -109,32 +110,31 @@ Modele opisujące, jak uczestnicy działają w czasie:
 - **„wymiana klastrowa”** — intensywniejsza wymiana w obrębie podgrup, rzadsza między nimi;
 - **„klient‑dostawca”** — jedni głównie sprzedają, inni głównie kupują;
 - **scenariusze stresowe**:
-  - skoki aktywności,
-  - wyłączanie części uczestników (status `suspended`),
+  - skoki aktywności;
+  - wyłączanie części uczestników (status `suspended`);
   - gwałtowne zmiany limitów na trustlines.
 
-Parametry modeli:
+Modele powinny mieć możliwość konfiguracji:
 
-- intensywność transakcji (ile płatności na sekundę/minutę/godzinę);
-- rozkład kwot płatności;
-- prawdopodobieństwo modyfikacji trustlines (podnoszenie/obniżanie limitów, zamykanie).
+- intensywności transakcji (ile płatności na sekundę/minutę/godzinę);
+- rozkładu kwot płatności;
+- prawdopodobieństwa modyfikacji trustlines (podnoszenie/obniżanie limitów, zamykanie).
 
 ### 2.3. Sterowanie obciążeniem
 
 > **MVP:** jeden „suwak” intensywności (0–100%) zamiast wielu profili.
 
-Możliwość dynamicznego sterowania:
+Możliwości:
 
-- łączną liczbą aktywnych „wirtualnych użytkowników”;
-- **intensywnością symulacji**:
-
-  - 0% — pauza;
+- dynamiczna zmiana łącznej liczby aktywnych „wirtualnych użytkowników”;
+- **intensywność symulacji** — jeden suwak 0–100%:
+  - 0% — pauza symulacji;
   - 25% — spokojny dzień;
   - 50% — normalne obciążenie;
   - 75% — godzina szczytu;
   - 100% — test przeciążeniowy.
 
-Dla trybu rozszerzonego:
+W trybie rozszerzonym:
 
 - proporcje typów operacji:
   - % płatności,
@@ -143,17 +143,17 @@ Dla trybu rozszerzonego:
 
 ### 2.4. Integracja z rzeczywistym API jądra
 
-Symulator **nie** powinien manipulować stanem bezpośrednio w bazie danych, tylko używać takich samych interfejsów jak realne klienty:
+Symulator **nie** powinien manipulować stanem bezpośrednio w bazie danych — korzysta z tych samych interfejsów, co realne klienty:
 
 - rejestracja uczestników przez API;
 - tworzenie trustlines przez API;
-- wysyłanie `PAYMENT_REQUEST` i oczekiwanie na wynik;
-- śledzenie stanów transakcji (polling/WS).
+- wysyłanie `PAYMENT_REQUEST` i oczekiwanie wyniku;
+- monitorowanie stanów transakcji.
 
 Dzięki temu testujemy:
 
-- prawdziwą warstwę protokołu i logiki,
-- a nie tylko wewnętrzne funkcje.
+- rzeczywistą warstwę protokołu i logiki,
+- a nie jedynie wewnętrzne metody.
 
 ---
 
@@ -163,7 +163,7 @@ Kluczowa część — **wizualne pokazanie stanu i dynamiki sieci**.
 
 ### 3.1. Graf sieci zaufania i długów
 
-- **Węzły** — uczestnicy.
+- **Węzły** — uczestnicy;
 - **Krawędzie**:
   - trustlines (limity),
   - na nich nałożone bieżące długi.
@@ -173,68 +173,73 @@ Atrybuty wizualne:
 - kolor i grubość krawędzi:
   - wielkość limitu;
   - stopień wykorzystania (dług/limit).
-- Możliwość:
-  - włączania/wyłączania:
-    - linii zaufania (limity),
-    - długów (realne zobowiązania);
-  - podświetlania ścieżek konkretnej płatności;
-  - oglądania, które krawędzie najczęściej występują w clearingu.
+
+Możliwości:
+
+- włączanie/wyłączanie:
+  - linii zaufania;
+  - długów;
+- podświetlanie tras konkretnych płatności;
+- podgląd, które krawędzie najczęściej występują w clearingu.
 
 ### 3.2. Metryki zagregowane w czasie
 
-> **MVP:** 4–5 kluczowych metryk zamiast rozbudowanej tablicy.
+> **MVP:** 4–5 kluczowych metryk zamiast rozbudowanej tabeli.
 
 **Kluczowe metryki:**
 
-| Metryka                | Cel                                      |
-|------------------------|------------------------------------------|
-| Całkowity wolumen długu| Skala zadłużenia w sieci                |
-| % udanych płatności    | Ocena „sprawności” protokołu            |
-| Średnia długość ścieżki| Efektywność grafu zaufania               |
-| Wolumen clearingu      | Jak dużo długu „znika” dzięki clearingowi|
-| Top‑5 wąskich gardeł   | Wydajnościowe i ryzykowne węzły          |
+| Metryka                  | Cel                                      |
+|--------------------------|------------------------------------------|
+| Całkowity wolumen długu  | Skala zadłużenia w sieci                |
+| % udanych płatności      | Ocena „sprawności” protokołu            |
+| Średnia długość ścieżki  | Efektywność grafu zaufania              |
+| Wolumen clearingu        | Jak dużo długu „znika” w clearingu      |
+| Top‑5 wąskich gardeł     | Wydajnościowe i ryzykowne węzły         |
 
 **Metryki rozszerzone (po MVP):**
 
 - rozkład długości ścieżek;
 - przyczyny odrzuconych płatności:
-  - brak ścieżki,
-  - niewystarczający limit,
+  - brak ścieżki;
+  - niewystarczający limit;
   - timeout 2PC;
-- wykresy czasowe (time series), z możliwością odtwarzania.
+- wykresy czasowe, z możliwością odtwarzania.
 
 ### 3.3. Wskaźniki efektywności protokołu
 
-- **Efektywność clearingu** — stosunek sumy „sklearingowanych” kwot do sumy wszystkich płatności;
-- **Koncentracja długu** — które węzły stają się wąskimi gardłami (na nich koncentrują się długi);
-- **Stabilność sieci** — jak często docieramy do stanu, w którym nowe płatności się nie udają głównie przez przeciążenie limitów.
+- **Efektywność clearingu** — stosunek sumy sklearingowanych kwot do sumy wszystkich płatności;
+- **Koncentracja długu** — które węzły stają się wąskimi gardłami (duża koncentracja długów);
+- **Stabilność sieci** — jak często docieramy do stanu, w którym nowe płatności nie przechodzą z powodu przeciążenia limitów na krytycznych krawędziach.
 
 ### 3.4. Tryb „replay”
 
-> ⚠️ **Nie na MVP** — wymaga złożonej serializacji stanu. Zaplanowane po podstawowej wersji.
+> ⚠️ **Nie na MVP** — wymaga złożonej serializacji stanu, planowany po wdrożeniu podstaw.
 
 - Możliwość nagrania przebiegu (lub jego fragmentu);
-- Odtwarzanie z różną prędkością;
-- Porównywanie zachowania różnych wersji protokołu/algorytmów dla tego samego scenariusza.
+- odtwarzanie z różną prędkością;
+- porównywanie zachowania różnych wersji protokołu/algorytmów.
 
 ---
 
-## 4. Konfiguracja i scenariusze „pod TZ”
+## 4. Konfiguracja i scenariusze „pod specyfikację”
 
-Na potrzeby formalnych wymagań (TЗ) aplikacja może obsługiwać:
+Na potrzeby formalnych specyfikacji aplikacja może wspierać:
 
-- **silnik scenariuszy**:
+- **Silnik scenariuszy:**
   - prosty język skryptowy / DSL lub opis w pliku konfiguracyjnym;
   - definiowanie faz, zdarzeń, polityk zachowań.
 
-- **Parametry scenariuszy:**
+- **Parametry scenariusza:**
   - generacja topologii sieci (liczba węzłów, gęstość, rozkład limitów);
-  - profile zachowań (scenariusze 2.2);
+  - profile zachowań (z 2.2);
   - harmonogram zdarzeń (np. co 10 minut zmiana parametrów).
 
-- **Powtarzalność eksperymentów**:
+- **Powtarzalność eksperymentów:**
   - stałe ziarno losowości (seed);
-  - zapisywanie konfiguracji i wyników, by dało się eksperyment powtórzyć lub porównać z innym.
+  - zapisywanie konfiguracji i wyników do późniejszego odtworzenia lub porównania.
+
+- **Obsługa różnych wersji backendu GEO:**
+  - możliwość uruchamiania symulacji przeciwko różnym wersjom jądra (np. v0.1, v0.2).
 
 ---
 
@@ -243,19 +248,19 @@ Na potrzeby formalnych wymagań (TЗ) aplikacja może obsługiwać:
 Aplikacja wizualna może mieć dwa główne tryby:
 
 1. **„Radar społeczno‑ekonomiczny”** — widok całej społeczności:
-   - kto jest kim (typy, role),
-   - kto z kim jest połączony,
+   - kto jest kim (typ, rola),
+   - kto z kim ma relacje zaufania,
    - jak przepływa wartość.
 
-2. **„Pulpit uczestnika”** — widok w perspektywie pojedynczego użytkownika (lub roli):
+2. **„Pulpit uczestnika”** — widok z perspektywy pojedynczego użytkownika (lub roli):
    - moje linie zaufania,
    - moje długi i należności,
-   - moje akcje (płatności, zmiany limitów, zgoda na clearing).
+   - moje działania (płatności, zmiany limitów, zgoda na clearing itd.).
 
-Oba tryby mogą być dostępne:
+Oba tryby dostępne:
 
-- w przeglądarce (web),
-- w natywnym/wieloplatformowym kliencie.
+- w przeglądarce (web);
+- w kliencie natywnym/wieloplatformowym.
 
 ---
 
@@ -263,53 +268,47 @@ Oba tryby mogą być dostępne:
 
 ### 6.1. Kompozycja ekranu
 
-Wideo:
+- **Centrum** — interaktywny graf:  
+  węzły = uczestnicy, krawędzie = relacje zaufania/długu.
 
-- **centrum** — interaktywny graf:
-
-  - węzły = uczestnicy,
-  - krawędzie = relacje zaufania/długu.
-
-- **lewy panel** — filtry i warstwy:
-
-  - pokazywanie/ukrywanie:
-    - linii zaufania,
-    - długów;
+- **Lewa kolumna** — filtry i warstwy:
+  - pokazuj/ukrywaj:
+    - linie zaufania,
+    - długi;
   - wybór ekwiwalentu;
-  - podstawowe filtry uczestników.
+  - filtrowanie uczestników.
 
-- **prawy panel** — szczegóły zaznaczonego elementu:
+- **Prawa kolumna** — szczegóły zaznaczonego elementu:
+  - jeśli wybrany uczestnik: profil, agregaty, dostępne akcje;
+  - jeśli wybrane połączenie: trustline + dług.
 
-  - jeśli wybrany uczestnik: karta profilu, agregaty, możliwe akcje;
-  - jeśli wybrane połączenie: szczegóły trustline i długu.
-
-- **górny pasek** — tryby wizualizacji i status symulacji:
-
-  - „Network” / „Metrics” / (w przyszłości) „Replay”,
-  - wskaźniki połączenia i stanu symulacji.
+- **Top Bar** — tryby wizualizacji i status symulacji:
+  - „Network” / „Metrics” / (później) „Replay”;
+  - wskaźniki połączenia i stanu.
 
 ### 6.2. Prezentacja uczestników (węzłów)
 
 Każdy uczestnik to **ikona + etykieta**:
 
-- **Kształt / ikona** ~ typ:
+- **Kształt / ikona** odzwierciedla typ:
 
-  | Typ           | Kształt      |
-  |---------------|--------------|
-  | `person`      | okrąg        |
-  | `organization`| kwadrat      |
-  | `hub`         | sześciokąt   |
+  | Typ           | Kształt    |
+  |---------------|------------|
+  | `person`      | koło       |
+  | `organization`| kwadrat    |
+  | `hub`         | sześciokąt |
 
-- **Kolor** ~ status:
+- **Kolor** odzwierciedla status:
 
-  | Status       | Kolor    |
-  |--------------|----------|
-  | `active`     | zielony  |
-  | `suspended`  | żółty    |
-  | `left`       | szary    |
+  | Status       | Kolor       |
+  |--------------|-------------|
+  | `active`     | zielony     |
+  | `suspended`  | żółty       |
+  | `left`       | szary       |
   | „ryzykowny”  | np. czerwona ramka |
 
-Po najechaniu: tooltip (nazwa, rola, liczba powiązań). Po kliknięciu: prawa sekcja z pełnymi informacjami.
+Po najechaniu: tooltip (nazwa, rola, liczba powiązań).  
+Po kliknięciu: szczegóły w prawym panelu.
 
 ### 6.3. Prezentacja połączeń (TrustLines i długi)
 
@@ -317,17 +316,17 @@ Pomiędzy uczestnikami:
 
 - **TrustLines**:
   - cienkie linie ze strzałką `from → to`;
-  - grubość lub nasycenie — w zależności od limitu.
+  - grubość lub nasycenie = wielkość limitu.
 
-- **Debts**:
-  - grubsze, wyraźniejsze linie;
+- **Długi**:
+  - grubsze, bardziej wyraziste linie;
   - kierunek: od dłużnika do wierzyciela;
-  - intensywność — wielkość długu.
+  - intensywność = rozmiar długu.
 
 Użytkownik może:
 
-- włączać/wyłączać warstwę trustlines / długów;
-- podświetlić wszystkie połączenia konkretnego węzła (ego‑graph).
+- przełączać widok „tylko trustlines” / „tylko długi”;
+- podświetlić ego‑graf (wszystkie połączenia wybranego węzła).
 
 ---
 
@@ -338,40 +337,40 @@ Użytkownik może:
 Grupowanie wg:
 
 - typu (`person`, `organization`, `hub`);
-- roli (np. „koordynator”, „dostawca”, „klient hurtowy”).
+- roli (np. „koordynator”, „dostawca usług”, „klient hurtowy”).
 
-Wizualnie:
+Prezentacja:
 
-- kolory / ikony;
-- możliwość filtracji i podświetlania grup.
+- kolorami / ikonami;
+- z możliwością filtrowania i podświetlania grup.
 
 ### 7.2. Po klastrach zaufania
 
-> ⚠️ **MVP:** bez automatycznej klasteryzacji. Na początek tylko ręczne grupowanie wg typów (7.1).
+> ⚠️ **MVP:** bez automatycznej klasteryzacji; tylko ręczne grupowanie wg typów (7.1).
 
-W rozszerzonym trybie:
+W wersji rozszerzonej:
 
-- automatyczne wykrywanie klastrów w grafie:
+- automatyczne wykrywanie klastrów:
 
-  - skupiska silnie powiązanych węzłów;
-  - lokalne „społeczności w społeczności”.
+  - grupy silnie powiązanych węzłów,
+  - „społeczności w społeczności”.
 
-Wizualizacja:
+Wizualnie:
 
-- węzły w klastrze z tym samym tłem/ramką;
-- tryb „spłaszczania klastrów” do super‑węzłów.
+- węzły klastra z tym samym tłem/ramką;
+- tryb „zwijania klastrów” do super‑węzłów.
 
 ### 7.3. Po parametrach finansowych
 
 Filtry / gradienty:
 
-- wg bilansu netto (plus/minus);
-- wg aktywności (liczba operacji w okresie).
+- wg bilansu netto (dłużnik/kredytor);
+- wg aktywności (liczba operacji).
 
-Pozwala zauważyć:
+Pozwala to:
 
-- wąskie gardła (węzły z wysokim ruchem i zadłużeniem);
-- uczestników z dużym ryzykiem kredytowym.
+- wykryć wąskie gardła;
+- zidentyfikować uczestników o wysokim ryzyku kredytowym.
 
 ---
 
@@ -381,16 +380,16 @@ Pozwala zauważyć:
 
 **Zwykły uczestnik**, klikając innego uczestnika, może:
 
-- **otworzyć profil** — zobaczyć dane publiczne i relacje (trustlines);
+- **otworzyć panel profilu** — zobaczyć dane publiczne i relacje;
 - **utworzyć/zmienić linię zaufania** — ustawić limit, wybrać ekwiwalent, politykę;
-- **zainicjować płatność** — zadeklarować kwotę i ekwiwalent;
-- **zobaczyć historię interakcji** — lista operacji `PAYMENT`, `TRUST_LINE_*`, `CLEARING`.
+- **zainicjować płatność** — podać kwotę i ekwiwalent, zobaczyć wstępną ścieżkę;
+- **zobaczyć historię interakcji** — lista płatności, zmian trustlines.
 
 **Administrator/koordynator** dodatkowo:
 
 - zmienić status (`suspended`, `left`);
-- zobaczyć flagi ryzyka i anomalie;
-- przejść do narzędzi zarządzania sporami.
+- zobaczyć sygnały ryzyka i anomalie;
+- przejść do narzędzi rozwiązywania sporów.
 
 ### 8.2. Akcje na liniach zaufania i długach
 
@@ -398,36 +397,35 @@ Kliknięcie krawędzi:
 
 - pokazuje:
 
-  - parametry trustline `A→B`: limit, polityka, data utworzenia;
-  - parametry długu `B→A`: suma, historia zmian.
+  - szczegóły trustline `A→B`: limit, polityka, data utworzenia/zmiany;
+  - szczegóły długu `B→A`: kwota, historia.
 
 **Zwykły uczestnik** (jeśli to jego trustline):
 
 - może zmienić limit/politykę;
-- może zamknąć trustline (zgodnie z regułami protokołu).
+- może zamknąć linię zaufania (zgodnie z zasadami protokołu).
 
 **Administrator**:
 
-- ma wgląd w dodatkowe dane techniczne;
-- może inicjować analitykę/korekty (w miarę zasad społeczności).
+- widzi dodatkowe dane techniczne;
+- może inicjować analitykę i korekty.
 
 ---
 
 ## 9. Tryb „Ścieżki płatności i clearing”
 
-Dla transparentności:
+Dla przejrzystości pracy protokołu:
 
 - wybór konkretnej płatności (`tx_id`) podświetla **trasę**:
+  - węzły i krawędzie;
+  - strzałki pokazujące przepływ długu.
 
-  - węzły i krawędzie udział biorące;
-  - strzałki pokazujące kierunek przepływu długu.
-
-**Clearing:**
+**Tryb wizualizacji clearingu**:
 
 - wybór transakcji `CLEARING`:
 
   - podświetla cykl (np. `A → B → C → A`);
-  - przy każdej krawędzi: dług „przed” i „po” (ile zostało „sklearingowane”).
+  - przy każdej krawędzi: dług „przed” i „po”.
 
 ---
 
@@ -440,14 +438,14 @@ Tabela / lista:
   - nazwa,
   - typ,
   - bilans netto,
-  - liczba trustlines wejściowych/wyjściowych,
-  - wskaźniki aktywności / ryzyka.
+  - liczba wejściowych/wyjściowych trustlines,
+  - wskaźniki aktywności i ryzyka.
 
 Akcje:
 
-- filtracja, sortowanie;
-- kliknięcie — przejście do szczegółów uczestnika i podświetlenie na grafie;
-- operacje grupowe (dla admina): eksport, powiadomienia itd.
+- filtrowanie, sortowanie;
+- kliknięcie → szczegóły uczestnika + podświetlenie na grafie;
+- operacje zbiorcze (dla adminów): eksport, wysyłka powiadomień.
 
 ---
 
@@ -455,83 +453,101 @@ Akcje:
 
 ### 11.1. Główny stos (React)
 
-Dla webowego narzędzia analityczno‑symulacyjnego React zapewnia:
+Dla przeglądarkowego narzędzia analityczno‑symulacyjnego:
 
-- dojrzałe ekosystemy,
-- wiele gotowych komponentów,
-- bardzo dobrą obsługę przez agentów AI (React + TS to dzisiaj „język ojczysty” wielu modeli).
+- dojrzały ekosystem;
+- wiele gotowych komponentów;
+- bardzo dobra obsługa przez agentów AI (React + TS).
 
 **Propozycja:**
 
-| Warstwa      | Technologia                 |
-|--------------|-----------------------------|
-| Język        | TypeScript                  |
-| UI           | React                       |
-| UI‑kit       | MUI (Material UI)           |
-| Graf sieci   | `react-force-graph-2d`      |
-| Wykresy      | `Recharts`                  |
-| API          | React Query (TanStack)      |
-| Bundling     | Vite                        |
+| Warstwa       | Technologia           |
+|---------------|-----------------------|
+| Język         | TypeScript            |
+| UI            | React                 |
+| UI‑kit        | MUI (Material UI)     |
+| Graf sieci    | `react-force-graph-2d`|
+| Wykresy       | `Recharts`            |
+| Warstwa API   | React Query (TanStack)|
+| Bundling      | Vite                  |
 
 Ograniczenia:
 
-- **Rozmiar grafu** — powyżej ~100 węzłów przełączać w tryb uproszczony (listy, agregaty).
-- **Częstotliwość odświeżania** — throttling do 2–3 odświeżeń na sekundę dla płynności.
-- Możliwość pracy offline na zapisanym snapshot’cie.
+- **Rozmiar grafu** — powyżej ok. 100 węzłów przechodzić w tryb uproszczony (agregaty, listy).
+- **Częstotliwość odświeżania** — throttling do 2–3 odświeżeń/s.
+- **Offline** — praca na zapisanym snapshot’cie.
 
 ### 11.2. Alternatywa (Python)
 
-Jeśli chcemy całkowicie uniknąć frontendu JS:
+Jeśli chcemy uniknąć JS:
 
 **Dash (Plotly Dash):**
 
 - layout + callbacki w Pythonie;
-- komponent `dash-cytoscape` do grafu;
+- `dash-cytoscape` do grafu;
 - `plotly` do wykresów.
 
 **Streamlit:**
 
 - bardzo prosty w konfiguracji;
-- dobre do prototypów i analizy ad‑hoc;
-- dla złożonego grafu potrzeba pracy dodatkowej.
+- świetny do prototypów i analizy ad‑hoc;
+- dla złożonego grafu wymaga więcej pracy.
 
 ---
 
 ## 12. Specyfikacja UI ekranu „Mapa społeczności”
 
+Kompaktowa, ale szczegółowa specyfikacja (React/Flutter).
+
 ### 12.1. Struktura ogólna ekranu
 
-Hierarchia:
+Ekran podzielony na 4 główne obszary (funkcje AI są wbudowane w istniejący układ, nie przeciążając Main Canvas):
+
+1. **Top Bar** — nawigacja, tryby, status symulacji oraz szybkie akcje AI (wyjaśnij, zaproponuj test stresowy, otwórz panel promptów).
+2. **Left Sidebar** — filtry, warstwy, wybór scenariusza/symulacji oraz **panel scenariuszy AI**: wprowadzanie tekstu naturalnego, podgląd wygenerowanych scenariuszy i patchy, historia zapytań.
+3. **Main Canvas** — centralne płótno z grafem uczestników, z nałożonymi owerlejami AI (wąskie gardła, obszary ryzyka, podgląd scenariuszy stresowych).
+4. **Right Sidebar** — panel szczegółów zaznaczonego elementu, w tym zakładka **„AI Insight”** z lokalnymi wyjaśnieniami i proponowanymi działaniami.
 
 ```text
 CommunityMapPage
 ├── TopBar
 └── Layout
     ├── LeftSidebar
+    │   └── AiScenarioPanel
     ├── MainCanvas
     │   └── GraphView
     └── RightSidebar
+        └── DetailsPanels (w tym AI Insight)
 ```
 
 ### 12.2. Top Bar
 
 **Komponent: `TopBar`**
 
-Elementy:
+| Element           | Komponent                   | Stany                                  |
+|-------------------|-----------------------------|----------------------------------------|
+| Logo              | `AppLogo`                  | normalne, kompaktowe                   |
+| Tryby widoku      | `ViewModeTabs`             | `activeTab: 'Network' \| 'Metrics'` (⚠️ Replay — nie na MVP) |
+| Status            | `SimulationStatusIndicator`| `connectionStatus`, `simulationStatus` |
+| Sterowanie sym.   | `SimulationControls`       | Start/Stop/Pause/Resume/Speed          |
+| Szybkie akcje AI  | `AiQuickActions`           | `canExplain`, `canSuggestStress`, `isBusy` |
 
-- logo (`AppLogo`);
-- zakładki trybów (`ViewModeTabs`): `'Network' | 'Metrics'`;
-- wskaźnik połączenia / stanu symulacji (`SimulationStatusIndicator`);
-- przyciski sterujące (`SimulationControls`): start/stop/pause, suwak prędkości.
+**`AiQuickActions` — przykładowe przyciski:**
 
-Skróty klawiszowe:
+- `ExplainCurrentView` — poproś AI o wyjaśnienie aktualnego stanu widocznego fragmentu grafu (`/ai/explain-current-state`).
+- `SuggestStressScenarios` — poproś AI o 1–3 scenariusze stresowe dla bieżącego świata (`/ai/generate-stress-scenarios`).
+- `OpenAiPanel` — otwórz panel scenariuszy AI w lewym sidebarze i ustaw fokus w polu tekstowym.
 
-| Klawisz | Akcja                      |
-|---------|----------------------------|
-| Space   | pauza / wznowienie        |
-| R       | reset scenariusza         |
-| + / -   | zmiana prędkości          |
-| Esc     | odznaczenie zaznaczenia   |
+**Skróty klawiszowe:**
+
+| Klawisz | Akcja                                                      |
+|---------|------------------------------------------------------------|
+| Space   | pauza / wznowienie symulacji                              |
+| R       | reset scenariusza                                          |
+| + / -   | zwiększenie/zmniejszenie prędkości                         |
+| Esc     | usunięcie zaznaczenia / zamknięcie paneli modalnych       |
+| E       | poproś AI o wyjaśnienie bieżącego stanu (`ExplainCurrentView`) |
+| T       | poproś AI o scenariusze stresowe (`SuggestStressScenarios`) |
 
 ### 12.3. Left Sidebar
 
@@ -539,20 +555,87 @@ Skróty klawiszowe:
 
 Sekcje:
 
-- `QuickStartBanner` — propozycja wczytania demo‑scenariusza;
-- `ScenarioSelector` — wybór scenariusza;
-- `LayerToggles` — przełączniki warstw (trustlines, długi, ścieżki, klastry);
-- `FiltersPanel` — filtry uczestników;
+- `QuickStartBanner` — propozycja wczytania scenariusza demo przy pierwszym uruchomieniu.
+- `ScenarioSelector` — wybór scenariusza (w tym generowanych przez AI).
+- `AiScenarioPanel` — panel interakcji z „pisarzem scenariuszy AI”.
+- `LayerToggles` — przełączniki warstw.
+- `FiltersPanel` — filtry uczestników.
 - `ExportButton` — eksport grafu (PNG/SVG).
+
+**`AiScenarioPanel` zawiera:**
+
+- `AiPromptInput` — wielowierszowe pole tekstowe:
+  - placeholder: „Opisz świat, zachowania lub zmiany, które chcesz zasymulować…”
+  - przyciski:
+    - `GenerateScenario` — stworzenie nowego scenariusza od zera;
+    - `ApplyPatch` — zastosowanie zmian do bieżącego scenariusza.
+- `AiSummaryBox` — krótkie podsumowanie ostatniej odpowiedzi AI:
+  - liczba uczestników/klastrów;
+  - główne profile zachowań i ich udział;
+  - opis proponowanych zmian/zdarzeń.
+- `AiRequestsHistory` — lista ostatnich 3–5 zapytań/odpowiedzi:
+  - kliknięcie pozycji → podgląd diff JSON / podgląd na grafie.
+- `AiStatusBar` — stan:
+  - `idle` / `thinking` / `error`, z komunikatem w razie błędu.
+
+**Stan `AiScenarioPanel`:**
+
+```ts
+ai.state: 'idle' | 'thinking' | 'error';
+
+ai.lastRequest?: {
+  text: string;
+  type: 'scenario' | 'patch';
+  createdAt: string;
+};
+
+ai.lastResultSummary?: {
+  participantsCount: number;
+  groupsCount: number;
+  mainProfiles: Array<{ id: string; share: number }>;
+  mainNotes: string[];
+};
+```
+
+**`LayerToggles` — stan:**
+
+```ts
+showTrustLines: boolean;
+showDebts: boolean;
+showPaymentRoutes: boolean;
+showClusters: boolean;
+showAiOverlays: boolean; // owerleje generowane przez AI
+```
+
+**`FiltersPanel` — stan:**
+
+```ts
+filter.types: { person: boolean; organization: boolean; hub: boolean };
+filter.statuses: { active: boolean; suspended: boolean; left: boolean };
+filter.equivalentCode: string | 'ANY';
+filter.netBalanceRange: [number, number];
+filter.activityRange: [number, number];
+filter.aiFlags?: {
+  bottleneckOnly?: boolean;      // tylko „wąskie gardła” wg AI
+  overTrustedOnly?: boolean;     // „nadmiernie ufne” węzły
+  stressAffectedOnly?: boolean;  // uczestnicy dotknięci scenariuszem stresowym
+};
+```
 
 ### 12.4. Main Canvas
 
 **Komponent: `GraphView`**
 
-Typy:
+Nakładka na np. `react-force-graph` z obsługą owerleji AI:
 
 ```ts
 type PID = string;
+
+interface AiFlags {
+  bottleneck?: boolean;      // wąskie gardło wg AI
+  overTrusted?: boolean;     // „zbyt ufny” węzeł
+  stressAffected?: boolean;  // dotknięty scenariuszem stresowym
+}
 
 interface ParticipantNode {
   id: PID;
@@ -562,6 +645,7 @@ interface ParticipantNode {
   netBalance: number;
   activityScore: number;
   clusterId?: string;
+  aiFlags?: AiFlags;
 }
 
 interface LinkEdge {
@@ -573,60 +657,232 @@ interface LinkEdge {
   limit?: number;
   amount?: number;
   utilization?: number;
+  aiFlags?: {
+    bottleneck?: boolean;
+    stressAffected?: boolean;
+  };
+}
+
+interface AiHighlight {
+  nodeIds?: PID[];
+  linkIds?: string[];
+  reason?: string; // krótkie objaśnienie do legendy / tooltipa
 }
 ```
 
-Props:
+**Props:**
 
 - `nodes: ParticipantNode[]`
 - `links: LinkEdge[]`
 - `viewMode: 'trustlines' | 'debts' | 'combined'`
 - `highlightedNodeId?: PID`
 - `highlightedLinkId?: string`
+- `aiHighlight?: AiHighlight`
 - `onNodeClick(nodeId: PID)`
 - `onLinkClick(linkId: string)`
 - `onBackgroundClick()`
+- `onAreaSelect?(bounds: { x1: number; y1: number; x2: number; y2: number })`
+
+**Stany wizualne węzłów:**
+
+| Typ           | Kształt   |
+|---------------|-----------|
+| `person`      | koło      |
+| `organization`| kwadrat   |
+| `hub`         | sześciokąt|
+
+| Status       | Kolor  |
+|--------------|--------|
+| `active`     | zielony|
+| `suspended`  | żółty  |
+| `left`       | szary  |
+
+Dodatkowe flagi AI:
+
+- `bottleneck` — grubsza ramka, ikona „⚠”;
+- `overTrusted` — dodatkowa obwódka;
+- `stressAffected` — półprzezroczyste wypełnienie lub pulsowanie przy podglądzie planu.
 
 ### 12.5. Right Sidebar
 
 **Komponent: `RightSidebar`**
 
-Widoki:
+Podkomponenty:
 
 - `NodeDetailsPanel` — gdy zaznaczony węzeł;
 - `LinkDetailsPanel` — gdy zaznaczone połączenie;
-- `EmptySelectionPanel` — gdy nic nie zaznaczono.
+- `AiInsightPanel` — zakładka z wyjaśnieniem AI i rekomendacjami;
+- `EmptySelectionPanel` — gdy nic nie wybrano.
 
-`NodeDetailsPanel` zawiera:
+**`NodeDetailsPanel` — struktura:**
 
-1. Nagłówek z profilem.
+1. Nagłówek z profilem (nazwa, typ, status).
 2. Kluczowe metryki (bilans, liczba trustlines).
-3. Listę powiązań (zakładki: TrustLines / Debts).
-4. Akcje (utworzenie trustline, inicjowanie płatności, widok historii).
+3. Lista połączeń (zakładki: TrustLines / Debts).
+4. Akcje (Create TrustLine, Initiate Payment, View History).
+5. Wskaźniki ryzyka wg AI (jeśli `aiFlags`):
 
-`LinkDetailsPanel`:
+   - „Bottleneck”, „Over‑trust”, „Stress‑affected”.
+
+**`LinkDetailsPanel` — struktura:**
 
 1. Tytuł (`A → B`, typ).
 2. Pola główne (limit/amount, polityka).
-3. Sparkline zmienności w czasie.
-4. Akcje (edycja limitu/polityki, zamknięcie linii).
+3. Wykres zmian (sparkline).
+4. Akcje (Edit Limit, Edit Policy, Close TrustLine).
+5. Flagi AI (krytyczna krawędź, wąskie gardło itd.).
+
+**`AiInsightPanel` — struktura:**
+
+1. Nagłówek (`AI Insight for [node/edge/area]`).
+2. Tekstowe wyjaśnienie od AI (`/ai/explain-current-state`).
+3. Lista czynników:
+   - udział w obciążeniu;
+   - rola w sukcesach/porażkach;
+   - udział w scenariuszach stresowych.
+4. **Proponowane plany działań AI** (jeśli dostępne, patrz 13.7):
+   - karty z opisem i przewidywanym efektem;
+   - przyciski: „Uruchom symulację planu” i „Zastosuj do bieżącej symulacji”.
+5. Rekomendacje ręczne:
+
+   - „Zmniejsz limity na tych trustlines”;
+   - „Dodaj alternatywne ścieżki z pominięciem tego węzła”;
+   - „Zmień profile zachowań części uczestników” (link do `AiScenarioPanel`).
 
 ### 12.6. Stany ekranu jako całości
 
-- **Brak danych** — „empty state” z sugestią wczytania scenariusza.
-- **Ładowanie** — skeletony bądź loader.
-- **Błąd** — baner błędu i stan `SimulationStatusIndicator = 'error'`.
+| Stan                  | Zachowanie |
+|-----------------------|------------|
+| Empty/No‑Data         | GraphView pokazuje stan pusty, `AiScenarioPanel` sugeruje wczytanie demo lub wygenerowanie scenariusza przez AI |
+| Loading               | Skeletony / loader, `SimulationStatusIndicator = 'loading'` |
+| Error                 | Baner błędu, `SimulationStatusIndicator = 'error'`; `AiScenarioPanel` może pokazywać błąd AI/walidacji |
+| AI request in progress| `AiScenarioPanel` i `AiQuickActions` w stanie `thinking`, część przycisków zablokowana |
+| AI overlay active     | Podświetlenia wg `aiHighlight`, legenda/Right Sidebar opisuje typ owerleja (wąskie gardła, stres itd.) |
+| Action plan selected  | `AiInsightPanel` pokazuje szczegóły planu, `MainCanvas` może wizualizować podgląd patcha przed zastosowaniem |
+
+---
+
+## 13. Integracja AI z symulatorem scenariuszy i zachowań
+
+> Cel: pozwolić użytkownikowi **po ludzku** opisać społeczność, zachowania i „przekosy” (biasy), a AI zamieni to w formalny scenariusz. Dodatkowo: generować wyjaśnienia, scenariusze stresowe oraz **konkretne plany antykryzysowe**.
+
+### 13.1. Rola AI i architektura ogólna
+
+AI nie zastępuje jądra symulatora, a działa jak **„kompilator scenariuszy”**:
+
+- wejście: opis naturalnym językiem (prompt);
+- wyjście: scenariusz JSON/DSL:
+
+  - uczestnicy;
+  - trustlines;
+  - profile zachowań;
+  - zdarzenia i scenariusze stresowe.
+
+**Komponenty:**
+
+1. **Simulation Core** (opisany wcześniej):
+   - czyta konfigurację (JSON/DSL);
+   - uruchamia symulację (tick‑based / event‑based);
+   - rozmawia z prawdziwym API GEO.
+
+2. **Scenario Config Store**:
+   - przechowuje scenariusze i wersje (`scenarioId`, `version`);
+   - przechowuje seedy losowości;
+   - metadane: autor, prompt użytkownika, model AI.
+
+3. **AI Scenario & Behavior Engine (nowa usługa)**:
+   - REST/gRPC:
+     - `POST /ai/scenario-from-text`;
+     - `POST /ai/patch-from-text`;
+     - `POST /ai/explain-current-state`;
+     - `POST /ai/generate-stress-scenarios`;
+     - `POST /ai/recommend-crisis-actions`.
+   - wewnątrz: LLM + warstwa post‑processingu pilnująca schematu.
+
+4. **UI (klient React)**:
+   - panel asystenta AI:
+     - pole tekstowe;
+     - przyciski: „Generuj scenariusz”, „Zastosuj zmiany”, „Wyjaśnij stan”, „Zaproponuj test stresowy”, „Zaproponuj plan wyjścia z kryzysu”;
+   - reszta UI jak w sekcjach 6–12.
+
+### 13.2. Format scenariusza (DSL/JSON) dla AI
+
+Do wiarygodnej integracji potrzebny jest prosty format scenariusza (jak w przykładach powyżej): `participants`, `trustlines`, `behaviorProfiles`, `groups`, `events`.
+
+### 13.3. Przepływy UX z AI
+
+- **Tworzenie scenariusza od zera:** użytkownik opisuje świat tekstowo → `scenario-from-text` → podsumowanie + graf → „Start” symulacji.
+- **Modyfikacje w locie:** użytkownik formułuje instrukcje typu „usuń ten hub”, „wzmocnij zaufanie wewnątrz dzielnicy B” → `patch-from-text` → patch JSON → nowa wersja scenariusza.
+
+### 13.4. Patch’e z tekstu (dynamiczne modyfikacje)
+
+Opisane jako logiczne filtry i operacje (`scaleLimitBy`, zmiany profili zachowań), następnie rozwijane na konkretne węzły/krawędzie.
+
+### 13.5. Wyjaśnianie stanu („dlaczego tu jest wąskie gardło?”)
+
+AI na podstawie `snapshot` + pytania generuje:
+
+- tekstową diagnozę (które węzły/krawędzie są krytyczne i dlaczego);
+- powiązanie z metrykami (`successRate`, `avgRouteLength`, itp.).
+
+### 13.6. Automatyczna generacja scenariuszy stresowych
+
+AI proponuje zestaw scenariuszy:
+
+- „Liquidity shock”,
+- „Panic episode”,
+- „Hub failure”,
+- „Credit crunch”,
+
+każdy z opisem + patch’em wydarzeń (`events[]`).
+
+### 13.7. Rekomendacje działań antykryzysowych
+
+AI nie tylko opisuje problem, ale także:
+
+- generuje **kilka planów działań** (`actionPlans[]`),
+- do każdego planu:
+  - patch (`trustlines`, `behaviorProfiles`, `participants`);
+  - `expectedImpact` (prognoza metryk);
+  - `rationale` (uzasadnienie);
+  - opcjonalny `simulationPreviewId` (przegląd „what‑if”).
+
+UI:
+
+- pokazuje plany w `AiInsightPanel` oraz na zakładce „Metrics”;
+- pozwala:
+  - odpalić symulację planu;
+  - (po potwierdzeniu) zastosować patch do bieżącej symulacji.
+
+AI **nigdy** nie stosuje patchy automatycznie — zawsze wymaga świadomej decyzji użytkownika.
+
+### 13.8. Minimalny plan wdrożenia AI
+
+1. Zdefiniować i udokumentować schemat scenariusza (`participants`, `trustlines`, `behaviorProfiles`, `groups`, `events`).
+2. Dodać w backendzie API scenariuszy (`/scenario`, `/scenario/:id/patch`, `/run`).
+3. Uruchomić prostą usługę AI z `scenario-from-text`.
+4. Dodać panel scenariuszy AI w UI.
+5. Rozszerzyć usługę AI o `patch-from-text`, `explain-current-state`, `generate-stress-scenarios`, `recommend-crisis-actions`.
+6. Rozbudować UI o:
+   - szybkie przyciski AI,
+   - wyświetlanie wyników AI jako owerleje, filtry, wyjaśnienia,
+   - integrację planów działań z `AiInsightPanel` i widokiem metryk.
 
 ---
 
 ## Podsumowanie
 
-Ten dokument opisuje pełny symulator‑wizualizator sieci GEO.  
-Dla **MVP** wystarczy:
+Dokument opisuje pełny symulator‑wizualizator sieci GEO. Dla **MVP** wystarczy:
 
 1. Strona z grafem uczestników,
 2. Panel szczegółów po prawej,
-3. Przycisk „start symulacji” (np. scenariusz „random market”),
+3. Przycisk „Start symulacji” (np. scenariusz „random market”),
 4. 3–4 podstawowe metryki w czasie rzeczywistym.
 
-Reszta sekcji stanowi rozszerzenia, które mogą być dodawane etapami, w miarę potrzeb społeczności i rozwoju protokołu GEO.
+Kolejnym krokiem jest warstwa integracji z AI (sekcja 13), która umożliwia:
+
+- opis świata i zachowań językiem naturalnym,
+- automatyczną generację i modyfikację scenariuszy,
+- otrzymywanie wyjaśnień stanu sieci i wąskich gardeł,
+- budowanie scenariuszy stresowych dla testów odporności,
+- a także **otrzymywanie konkretnych planów antykryzysowych**, które można bezpiecznie przetestować w symulacji i częściowo przenieść do realnych polityk protokołu GEO.
