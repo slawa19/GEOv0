@@ -58,15 +58,17 @@ They did huge theoretical work. They invented cool routing algorithms and concep
 
 We dusted off that shelf. We looked at their blueprints and decided: let's make it simpler. No need to immediately build "world brain". Let's make tool that can be launched in specific cooperative, coworking or settlement tomorrow.
 
-### What We're Building Now
+### What We Are Building Now
 
-We developed simplified protocol version — **GEO v0.1**. We discarded everything extra: complex consensus mechanisms, global blockchain chase, excess abstractions.
+We have designed **GEO v0.1** — a lightweight and pragmatic version of the protocol. We decisively cut away everything that hindered the launch: cumbersome global consensus mechanisms, the need for a single blockchain, and excessive technical abstractions.
 
-**Community-hub** stands at our architecture center. It's server serving one specific community. It stores trust graph, calculates routes and seeks cycles for clearing. Yes, at start it's centralized node — simpler and more reliable for MVP. But architecture is built so data belongs to users: all critical actions (credit line opening, clearing confirmation) are signed by cryptographic keys on user device. Server is just secretary and calculator, not owner of your money.
+The heart of the new architecture is the **Community-hub**. This is a node that serves one specific community. It maintains the trust graph, calculates routes for transactions, and finds closed debt loops for their automatic settlement (clearing).
 
-In future such hubs of different communities will be able to connect to each other, forming web. District cooperative will be able to interact with city time bank, and that — with freelancer professional union. But we start small.
+At the start, this is indeed a centralized service — it is more reliable and faster for launching an MVP. However, the architecture is designed so that **control remains with the users**. All significant actions — whether opening a credit line or confirming a payment — are signed with private cryptographic keys directly on the participants' devices. The server here plays the role of an honest secretary and an efficient calculator, but by no means the owner of your assets.
 
-We already have specifications ready: what transactions look like, how two-phase commit works (so payment doesn't get lost en route), how exactly algorithm searches debt cycles. We know what technology stack to use — reliable, proven tools.
+In the future, hubs of independent communities will be able to establish connections with each other, forming a global distributed network. A district cooperative will be able to interact with a city time bank, and that — with a professional union of freelancers. But our path begins with something small — a working tool for local groups.
+
+We already have detailed specifications ready: transaction formats, atomic change protocols (two-phase commit), and algorithms for finding clearing cycles. We have defined the technology stack — these are reliable, time-tested open-source tools.
 
 ### We Need Your Brains and Hands
 

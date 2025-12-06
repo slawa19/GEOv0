@@ -94,13 +94,11 @@ If you have money — wonderful, they can be combined with GEO. If money is temp
 
 ## Reference: What Happened Earlier with GEO and Why We're Making "v0.1"
 
-GEO idea as "internet of value" was already raised several years ago. Original GEO Protocol existed — very ambitious technical project. It was conceived as universal second layer over different blockchains, as global trustline and mutual settlement network between any participants: people, organizations, services.
+GEO idea as "internet of value" was already raised several years ago. The GEO protocol as we know it today is the result of a long evolution and, unfortunately, the loss of its original vision. Initially, it was a grand project to create an "internet of value": a universal system for mutual settlement built on trust rather than money. Technically, it was meticulously designed, from its own p2p architecture to the most complex payment routing algorithms.
 
-Original protocol had many strong ideas. Developers thought through complex p2p architecture, own network protocol, advanced payment routing, smart algorithms for splitting payments across multiple paths. On paper this looked powerful.
+But its technical elegance became its curse. The project proved to be so complex that it alienated its primary audience—local communities that needed a simple and straightforward solution.
 
-But there was problem: all this turned out excessively complex for implementation. To raise network node, one had to understand quite heavy technology. Communities wanting simply "exchange among themselves humanely" found it hard to enter.
-
-At some point original project focus shifted. From global mutual credit network idea it increasingly turned into another cryptocurrency exchange working on separate protocol parts. There's nothing criminal in this, but original "trust economy" vision was thus pushed aside.
+At some point, after securing funding, the project veered off its intended course. The noble idea of building a "trust economy" devolved into the creation of yet another cryptocurrency exchange. Thus, the ambitious dream of a global mutual credit network was cast aside in favor of a more commercially viable, but mundane, model.
 
 We decided to step back and ask ourselves: if we discard excess complexity, what's simplest GEO version we can implement to bring benefit right now?
 
@@ -114,7 +112,7 @@ GEO project in new edition now has several foundational documents and ideas.
 
 First — **GEO v0.1 protocol** itself. It describes humanely but sufficiently formally what entities exist in system: participants with cryptographic identifiers, equivalents, trust lines, debts, transactions. It also prescribes how payment looks from network perspective, how route is chosen through trust connections, how errors are handled, how cycle clearing works.
 
-Second — **MVP GEO architecture for local community**. We didn't limit to theory but detailed how this can work practically: one "community hub" that stores data, coordinates payments and clearing, provides web interface to participants. Participant enters through browser, generates key locally, creates trust lines, makes payments, sees their state.
+Second — **MVP GEO architecture for local community**. We didn’t limit to theory but detailed how this can work practically: one “community hub” that stores data, coordinates payments and clearing, provides an interface to participants. Participant enters through mobile app, generates key locally, creates trust lines, makes payments, sees their state.
 
 Hub meanwhile doesn't "own" money and doesn't make decisions for people. It simply executes general rules embedded in protocol: checks limits, ensures nobody exceeds trusted credit bounds, seeks netting opportunities.
 
