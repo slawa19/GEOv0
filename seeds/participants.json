@@ -1,0 +1,37 @@
+[
+  {
+    "pid": "PID_ALICE",
+    "display_name": "Alice (Test)",
+    "type": "person",
+    "status": "active",
+    "public_key": "TEST_PUBKEY_ALICE_BASE64"
+  },
+  {
+    "pid": "PID_BOB",
+    "display_name": "Bob (Test)",
+    "type": "person",
+    "status": "active",
+    "public_key": "TEST_PUBKEY_BOB_BASE64"
+  },
+  {
+    "pid": "PID_CAROL",
+    "display_name": "Carol (Test)",
+    "type": "person",
+    "status": "active",
+    "public_key": "TEST_PUBKEY_CAROL_BASE64"
+  },
+  {
+    "pid": "PID_DAVE",
+    "display_name": "Dave (Test)",
+    "type": "person",
+    "status": "active",
+    "public_key": "TEST_PUBKEY_DAVE_BASE64"
+  },
+  {
+    "pid": "PID_HUB_ADMIN",
+    "display_name": "Hub Admin (Test)",
+    "type": "organization",
+    "status": "active",
+    "public_key": "TEST_PUBKEY_ADMIN_BASE64"
+  }
+]

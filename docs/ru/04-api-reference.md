@@ -373,6 +373,8 @@ Authorization: Bearer {token}
 
 ### 5.1. Проверить ёмкость
 
+Назначение: проверить, может ли отправитель оплатить **конкретную сумму** `amount` адресату `to` в заданном `equivalent` (с учётом текущих лимитов trustlines, занятых резервов и параметров маршрутизации).
+
 ```http
 GET /payments/capacity?to={pid}&equivalent={code}&amount={amount}
 Authorization: Bearer {token}
@@ -388,7 +390,48 @@ Authorization: Bearer {token}
 }
 ```
 
-### 5.2. Создать платёж
+### 5.2. Рассчитать максимум (max-flow)
+
+Назначение: получить оценку **максимально возможной суммы** платежа от текущего пользователя к `to` в заданном `equivalent` и диагностическую информацию (состав путей и узкие места). Используется для UI подсказок и для тестирования производительности алгоритмов маршрутизации.
+
+```http
+GET /payments/max-flow?to={pid}&equivalent={code}
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "max_amount": "1500.00",
+  "paths": [
+    {
+      "path": ["my_pid", "p2", "p3", "recipient_pid"],
+      "capacity": "700.00"
+    },
+    {
+      "path": ["my_pid", "p4", "recipient_pid"],
+      "capacity": "800.00"
+    }
+  ],
+  "bottlenecks": [
+    {
+      "from": "my_pid",
+      "to": "p2",
+      "limit": "1000.00",
+      "used": "400.00",
+      "available": "600.00"
+    }
+  ],
+  "algorithm": "limited_multipath",
+  "computed_at": "2025-11-29T12:00:00Z"
+}
+```
+
+**Примечания:**
+- Реализация по умолчанию должна соответствовать режиму маршрутизации, заданному конфигом (см. [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)).
+- Если включён экспериментальный режим **full multipath**, ответ может содержать больше путей и дополнительные поля диагностики, но контракт (наличие `max_amount`) сохраняется.
+
+### 5.3. Создать платёж
 
 ```http
 POST /payments

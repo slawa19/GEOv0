@@ -1,0 +1,37 @@
+[
+  {
+    "from": "PID_ALICE",
+    "to": "PID_BOB",
+    "equivalent": "UAH",
+    "limit": "1000.00",
+    "policy": {}
+  },
+  {
+    "from": "PID_BOB",
+    "to": "PID_CAROL",
+    "equivalent": "UAH",
+    "limit": "800.00",
+    "policy": {}
+  },
+  {
+    "from": "PID_CAROL",
+    "to": "PID_DAVE",
+    "equivalent": "UAH",
+    "limit": "600.00",
+    "policy": {}
+  },
+  {
+    "from": "PID_ALICE",
+    "to": "PID_CAROL",
+    "equivalent": "UAH",
+    "limit": "400.00",
+    "policy": {}
+  },
+  {
+    "from": "PID_BOB",
+    "to": "PID_DAVE",
+    "equivalent": "UAH",
+    "limit": "500.00",
+    "policy": {}
+  }
+]

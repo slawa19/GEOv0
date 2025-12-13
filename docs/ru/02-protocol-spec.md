@@ -427,10 +427,12 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 
 | Поле | Описание | По умолчанию |
 |------|----------|--------------|
-| `max_hops` | Максимальная длина пути | 6 |
-| `max_paths` | Максимум маршрутов | 3 |
+| `max_hops` | Максимальная длина пути (верхняя граница) | 6 (из `routing.max_path_length`) |
+| `max_paths` | Максимум путей/маршрутов в платеже | 3 (из `routing.max_paths_per_payment`) |
 | `timeout_ms` | Таймаут транзакции | 5000 |
 | `avoid` | Исключить участников | [] |
+
+Примечание: Hub может ограничивать `max_hops/max_paths/timeout_ms` сверху своими настройками, даже если клиент запросил больше.
 
 ### 6.3. Маршрутизация
 
@@ -517,97 +519,95 @@ def split_payment(amount, paths):
     return result
 ```
 
-#### 6.3.5. Max Flow алгоритм (расширенный)
+#### 6.3.5. Режимы multipath и Full multipath mode (экспериментально)
 
-Для больших платежей или оптимальной маршрутизации используется алгоритм максимального потока:
+В MVP рекомендуется **ограниченный multipath**: поиск нескольких путей и разбиение суммы по ним, с жёсткими лимитами на «стоимость» поиска.
+
+**Baseline (по умолчанию): limited multipath**
+- Используется `k-shortest paths`/BFS‑эвристика + разбиение суммы (см. разделы 6.3.2–6.3.4).
+- Количество путей ограничено `routing.max_paths_per_payment` (по умолчанию 3).
+- Предсказуемая сложность и объяснимость.
+
+**Опция: Full multipath mode (экспериментальный режим для бенчмарков)**
+- Выключен по умолчанию, включается через конфигурацию (по сути feature‑flag).
+- Цель: перф‑тесты сети и сравнение алгоритмов маршрутизации, не усложняя основной режим.
+- Не гарантирует «математически оптимальный» max‑flow в условиях budget/таймаутов.
+
+**Минимальные параметры для поддержки full‑режима:**
+- `routing.multipath_mode`: `limited` | `full` (по умолчанию `limited`)
+- `routing.max_paths_per_payment`: 1..N (по умолчанию 3) — *нужно уметь менять для перф‑проверок*
+- `routing.max_path_length`: 1..N (по умолчанию 6)
+- `routing.path_finding_timeout_ms`: общий таймаут на routing (по умолчанию 500)
+- `routing.full_multipath_budget_ms`: дополнительный budget времени/стоимости для `full` (по умолчанию 1000)
+- `routing.full_multipath_max_iterations`: ограничение итераций (по умолчанию 100)
+- Observability: метрики по времени/стоимости (см. ниже)
+
+**Ограничения, чтобы не усложнять архитектуру:**
+1. Full‑режим не меняет протокол и форматы сообщений: на выходе всегда те же `routes`.
+2. Full‑режим обязан соблюдать budget/таймауты и в худшем случае корректно возвращать `ABORT (no routes)` или fallback на `limited`.
+3. В full‑режиме допускается эвристика (k‑shortest + разбиение) как референсная реализация; max‑flow остаётся опциональным.
+
+Ниже приведён пример возможной реализации «max‑flow‑подобного» подхода (опционально):
 
 ```python
-def max_flow_routing(graph, source, target, required_amount, equivalent):
+def max_flow_routing(
+    graph,
+    source,
+    target,
+    required_amount,
+    equivalent,
+    *,
+    budget_ms: int,
+    max_iterations: int
+):
     """
-    Алгоритм Эдмондса-Карпа для максимального потока.
-    
-    Находит оптимальное распределение потока по сети,
-    минимизируя количество задействованных рёбер.
+    Экспериментальный full multipath: max-flow (Edmonds–Karp/Dinic-like)
+    с ограничителями budget/итераций. Не обязателен для MVP.
     """
-    # Построить residual graph
+    start = monotonic_ms()
     residual = build_residual_graph(graph, equivalent)
-    
+
     total_flow = Decimal("0")
     flow_assignment = defaultdict(Decimal)
-    
+    iterations = 0
+
     while total_flow < required_amount:
-        # BFS для поиска augmenting path
+        if monotonic_ms() - start > budget_ms:
+            break
+        if iterations >= max_iterations:
+            break
+        iterations += 1
+
         path = bfs_find_path(residual, source, target)
-        
-        if not path:
-            break  # Нет пути — достигнут max flow
-        
-        # Найти bottleneck
-        bottleneck = min(
-            residual[u][v]["capacity"] 
-            for u, v in zip(path[:-1], path[1:])
-        )
-        
-        # Ограничить bottleneck оставшейся суммой
-        augment = min(bottleneck, required_amount - total_flow)
-        
-        # Обновить residual graph и flow assignment
-        for u, v in zip(path[:-1], path[1:]):
-            residual[u][v]["capacity"] -= augment
-            residual[v][u]["capacity"] += augment  # Reverse edge
-            flow_assignment[(u, v)] += augment
-        
-        total_flow += augment
-    
-    if total_flow < required_amount:
-        raise InsufficientCapacity(
-            f"Max flow {total_flow} < required {required_amount}"
-        )
-    
-    # Преобразовать flow_assignment в пути
-    return decompose_flow_to_paths(flow_assignment, source, target)
-
-
-def decompose_flow_to_paths(flow_assignment, source, target):
-    """
-    Разложить поток на набор путей (flow decomposition).
-    
-    Результат: список {path: [...], amount: X}
-    """
-    paths = []
-    remaining_flow = flow_assignment.copy()
-    
-    while True:
-        # DFS для поиска пути с положительным потоком
-        path = dfs_find_flow_path(remaining_flow, source, target)
         if not path:
             break
-        
-        # Найти минимальный поток на пути
-        min_flow = min(
-            remaining_flow[(u, v)] 
+
+        bottleneck = min(
+            residual[u][v]["capacity"]
             for u, v in zip(path[:-1], path[1:])
         )
-        
-        # Вычесть из remaining
+        augment = min(bottleneck, required_amount - total_flow)
+
         for u, v in zip(path[:-1], path[1:]):
-            remaining_flow[(u, v)] -= min_flow
-            if remaining_flow[(u, v)] == 0:
-                del remaining_flow[(u, v)]
-        
-        paths.append({"path": path, "amount": min_flow})
-    
-    return paths
+            residual[u][v]["capacity"] -= augment
+            residual[v][u]["capacity"] += augment
+            flow_assignment[(u, v)] += augment
+
+        total_flow += augment
+
+    if total_flow < required_amount:
+        raise InsufficientCapacity(
+            f"full multipath could not route: {total_flow} < {required_amount}"
+        )
+
+    return decompose_flow_to_paths(flow_assignment, source, target)
 ```
 
-**Когда использовать Max Flow:**
-
-| Сценарий | Алгоритм | Причина |
-|----------|----------|---------|
-| Малые платежи (< 1000) | k-shortest paths | Быстрее, достаточно |
-| Большие платежи | Max Flow | Оптимальное распределение |
-| Фрагментированная сеть | Max Flow | Использует все возможности |
-| Проверка capacity | Max Flow | Точный ответ "можно/нельзя" |
+**Метрики (минимум):**
+- `routing_duration_ms` (по режимам `limited/full`)
+- `routes_count` и `unique_nodes_in_routes`
+- `routing_budget_exhausted_total` (сколько раз упёрлись в budget/таймаут)
+- `routing_insufficient_capacity_total`
 
 #### 6.3.6. Атомарность Multi-path платежей
 
@@ -967,19 +967,24 @@ def apply_commit(participant, tx_id):
 #### 7.2.1. Триггерный поиск (после каждой транзакции)
 
 ```python
-def find_cycles_triggered(changed_edges, max_length=4):
+def find_cycles_triggered(changed_edges, max_length: int):
     """
-    Поиск коротких циклов вокруг изменённых рёбер
+    Поиск коротких циклов вокруг изменённых рёбер.
+
+    max_length задаётся конфигурацией `clearing.trigger_cycles_max_length`
+    (по умолчанию 4). Для перф‑проверок допускается временное изменение
+    этого параметра, но требуется жёстко ограничивать «стоимость» поиска
+    (лимиты по времени/кол-ву кандидатов).
     """
     cycles = []
-    
+
     for edge in changed_edges:
         # Поиск циклов длины 3
         cycles += find_triangles(edge)
-        
+
         # Поиск циклов длины 4
         cycles += find_quadrangles(edge)
-    
+
     return deduplicate(cycles)
 ```
 

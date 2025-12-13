@@ -1,0 +1,833 @@
+openapi: 3.0.3
+info:
+  title: GEO Hub API
+  version: 0.1
+  description: |
+    OpenAPI spec for GEO Hub (MVP v0.1). Derived from docs/ru/04-api-reference.md.
+servers:
+  - url: /
+tags:
+  - name: Auth
+  - name: Participants
+  - name: TrustLines
+  - name: Payments
+  - name: Balance
+security:
+  - BearerAuth: []
+
+paths:
+  /auth/challenge:
+    post:
+      tags: [Auth]
+      summary: Start challenge-response auth flow
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChallengeRequest'
+      responses:
+        '200':
+          description: Challenge created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Complete challenge-response and issue JWT tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /participants:
+    get:
+      tags: [Participants]
+      summary: Search participants
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Search query
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [person, organization, hub]
+          description: Type filter
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+          description: Max results
+      responses:
+        '200':
+          description: Participants list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipantsList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Participants]
+      summary: Register participant
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantCreateRequest'
+      responses:
+        '201':
+          description: Participant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /participants/{pid}:
+    get:
+      tags: [Participants]
+      summary: Get participant
+      parameters:
+        - $ref: '#/components/parameters/PidPath'
+      responses:
+        '200':
+          description: Participant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /trustlines:
+    get:
+      tags: [TrustLines]
+      summary: List trustlines
+      parameters:
+        - in: query
+          name: direction
+          schema:
+            type: string
+            enum: [outgoing, incoming, all]
+            default: all
+        - in: query
+          name: equivalent
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trustlines list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustLinesList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [TrustLines]
+      summary: Create trustline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrustLineCreateRequest'
+      responses:
+        '201':
+          description: Trustline created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustLine'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /trustlines/{id}:
+    patch:
+      tags: [TrustLines]
+      summary: Update trustline
+      parameters:
+        - $ref: '#/components/parameters/TrustLineIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrustLineUpdateRequest'
+      responses:
+        '200':
+          description: Trustline updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustLine'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [TrustLines]
+      summary: Close trustline
+      parameters:
+        - $ref: '#/components/parameters/TrustLineIdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignedRequest'
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /payments/capacity:
+    get:
+      tags: [Payments]
+      summary: Check capacity for a concrete payment amount
+      parameters:
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+          description: Recipient PID
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: amount
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]+(\.[0-9]+)?$'
+          description: Amount as decimal string
+      responses:
+        '200':
+          description: Capacity result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapacityResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /payments/max-flow:
+    get:
+      tags: [Payments]
+      summary: Estimate maximum transferable amount and diagnostics
+      parameters:
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+          description: Recipient PID
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Max-flow result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaxFlowResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /payments:
+    post:
+      tags: [Payments]
+      summary: Create payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreateRequest'
+      responses:
+        '200':
+          description: Payment created (committed or aborted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    get:
+      tags: [Payments]
+      summary: List payments
+      parameters:
+        - in: query
+          name: direction
+          schema:
+            type: string
+            enum: [sent, received, all]
+            default: all
+        - in: query
+          name: equivalent
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [COMMITTED, ABORTED, all]
+            default: all
+        - in: query
+          name: from_date
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to_date
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      responses:
+        '200':
+          description: Payments list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentsList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /payments/{tx_id}:
+    get:
+      tags: [Payments]
+      summary: Get payment by tx_id
+      parameters:
+        - in: path
+          name: tx_id
+          required: true
+          schema:
+            type: string
+          description: Transaction id
+      responses:
+        '200':
+          description: Payment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /balance:
+    get:
+      tags: [Balance]
+      summary: Get aggregated balance by equivalents
+      responses:
+        '200':
+          description: Balance summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /balance/debts:
+    get:
+      tags: [Balance]
+      summary: Get debts details
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: direction
+          schema:
+            type: string
+            enum: [outgoing, incoming, all]
+            default: all
+      responses:
+        '200':
+          description: Debts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DebtsDetails'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PidPath:
+      in: path
+      name: pid
+      required: true
+      schema:
+        type: string
+    TrustLineIdPath:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+
+    SignedRequest:
+      type: object
+      properties:
+        signature:
+          type: string
+          description: base64 signature
+
+    ChallengeRequest:
+      type: object
+      required: [pid]
+      properties:
+        pid:
+          type: string
+
+    ChallengeResponse:
+      type: object
+      required: [challenge, expires_at]
+      properties:
+        challenge:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required: [pid, challenge, signature]
+      properties:
+        pid:
+          type: string
+        challenge:
+          type: string
+        signature:
+          type: string
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, token_type]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+
+    Participant:
+      type: object
+      required: [pid, status]
+      properties:
+        pid:
+          type: string
+        display_name:
+          type: string
+        type:
+          type: string
+          enum: [person, organization, hub]
+        status:
+          type: string
+          enum: [active, frozen, banned]
+        public_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ParticipantCreateRequest:
+      type: object
+      required: [display_name, public_key, signature]
+      properties:
+        display_name:
+          type: string
+        type:
+          type: string
+          enum: [person, organization, hub]
+          default: person
+        public_key:
+          type: string
+        profile:
+          type: object
+          additionalProperties: true
+        signature:
+          type: string
+
+    ParticipantsList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Participant'
+
+    TrustLine:
+      type: object
+      required: [id, from, to, equivalent, limit, used]
+      properties:
+        id:
+          type: integer
+        from:
+          type: string
+        to:
+          type: string
+        equivalent:
+          type: string
+        limit:
+          type: string
+        used:
+          type: string
+        policy:
+          type: object
+          additionalProperties: true
+
+    TrustLinesList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrustLine'
+
+    TrustLineCreateRequest:
+      type: object
+      required: [to, equivalent, limit, signature]
+      properties:
+        to:
+          type: string
+        equivalent:
+          type: string
+        limit:
+          type: string
+        policy:
+          type: object
+          additionalProperties: true
+        signature:
+          type: string
+
+    TrustLineUpdateRequest:
+      type: object
+      properties:
+        limit:
+          type: string
+        policy:
+          type: object
+          additionalProperties: true
+        signature:
+          type: string
+
+    CapacityResponse:
+      type: object
+      required: [can_pay, max_amount, routes_count, estimated_hops]
+      properties:
+        can_pay:
+          type: boolean
+        max_amount:
+          type: string
+        routes_count:
+          type: integer
+        estimated_hops:
+          type: integer
+
+    MaxFlowPath:
+      type: object
+      required: [path, capacity]
+      properties:
+        path:
+          type: array
+          items:
+            type: string
+        capacity:
+          type: string
+
+    Bottleneck:
+      type: object
+      required: [from, to, limit, used, available]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        limit:
+          type: string
+        used:
+          type: string
+        available:
+          type: string
+
+    MaxFlowResponse:
+      type: object
+      required: [max_amount, paths, bottlenecks, algorithm, computed_at]
+      properties:
+        max_amount:
+          type: string
+        paths:
+          type: array
+          items:
+            $ref: '#/components/schemas/MaxFlowPath'
+        bottlenecks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Bottleneck'
+        algorithm:
+          type: string
+        computed_at:
+          type: string
+          format: date-time
+
+    PaymentCreateRequest:
+      type: object
+      required: [to, equivalent, amount, signature]
+      properties:
+        to:
+          type: string
+        equivalent:
+          type: string
+        amount:
+          type: string
+        description:
+          type: string
+        constraints:
+          type: object
+          additionalProperties: true
+        signature:
+          type: string
+
+    PaymentRoute:
+      type: object
+      required: [path, amount]
+      properties:
+        path:
+          type: array
+          items:
+            type: string
+        amount:
+          type: string
+
+    PaymentError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    PaymentResult:
+      type: object
+      required: [tx_id, status, from, to, equivalent, amount, created_at]
+      properties:
+        tx_id:
+          type: string
+        status:
+          type: string
+          enum: [COMMITTED, ABORTED]
+        from:
+          type: string
+        to:
+          type: string
+        equivalent:
+          type: string
+        amount:
+          type: string
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentRoute'
+        error:
+          $ref: '#/components/schemas/PaymentError'
+        created_at:
+          type: string
+          format: date-time
+        committed_at:
+          type: string
+          format: date-time
+
+    PaymentsList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentResult'
+
+    BalanceEquivalent:
+      type: object
+      required: [code, total_debt, total_credit, net_balance, available_to_spend, available_to_receive]
+      properties:
+        code:
+          type: string
+        total_debt:
+          type: string
+        total_credit:
+          type: string
+        net_balance:
+          type: string
+        available_to_spend:
+          type: string
+        available_to_receive:
+          type: string
+
+    BalanceSummary:
+      type: object
+      required: [equivalents]
+      properties:
+        equivalents:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceEquivalent'
+
+    DebtsDetails:
+      type: object
+      required: [outgoing]
+      properties:
+        outgoing:
+          type: array
+          items:
+            type: object
+            required: [creditor, equivalent, amount]
+            properties:
+              creditor:
+                type: string
+              creditor_name:
+                type: string
+              equivalent:
+                type: string
+              amount:
+                type: string
+        incoming:
+          type: array
+          items:
+            type: object
+            required: [debtor, equivalent, amount]
+            properties:
+              debtor:
+                type: string
+              debtor_name:
+                type: string
+              equivalent:
+                type: string
+              amount:
+                type: string

@@ -182,6 +182,19 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 
 ## 4. Конфигурация
 
+### 4.0. Схема конфигурации (env + YAML)
+
+В проекте используется два уровня конфигурации:
+
+1) **Переменные окружения (.env)** — инфраструктура и секреты (URL БД/Redis, секреты JWT, режим debug, базовые лимиты запросов и т.п.).
+2) **YAML конфиг хаба** — параметры протокола и поведения: `routing.*`, `clearing.*`, `limits.*`, `feature_flags.*`, `observability.*` (см. пример `geo-hub-config.yaml` в [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)).
+
+Полный список параметров, их дефолты, диапазоны и пометки **runtime (через админку)** vs **restart/migration** находятся в [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1).
+
+Важно для MVP: параметры, которые ожидаемо придётся подкручивать в пилоте **без рестарта** (через админку/оператора), включают как минимум:
+- `routing.max_paths_per_payment` (перф‑проверки multipath/full‑multipath);
+- `clearing.trigger_cycles_max_length` (перф‑проверки клиринга).
+
 ### 4.1. Переменные окружения
 
 ```bash
@@ -212,9 +225,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES=60
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # Лимиты
-MAX_PAYMENT_HOPS=6
-MAX_CLEARING_CYCLE_LENGTH=6
-PAYMENT_TIMEOUT_SECONDS=30
+# Примечание: для MVP каноничные протокольные/продуктовые параметры задаются в YAML
+# (см. [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)).
+# Переменные окружения ниже приведены как пример деплоя/совместимости.
+MAX_PAYMENT_HOPS=6                 # (если поддерживается) alias для `routing.max_path_length`
+PAYMENT_TIMEOUT_SECONDS=30         # общий timeout операции (если поддерживается)
 
 # Rate limiting
 RATE_LIMIT_PER_MINUTE=100
@@ -238,7 +253,7 @@ LOG_LEVEL=INFO
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
-MAX_PAYMENT_HOPS=6
+MAX_PAYMENT_HOPS=6                 # (если поддерживается) alias для `routing.max_path_length`
 CLEARING_INTERVAL_SECONDS=300
 ```
 

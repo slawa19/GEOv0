@@ -1,0 +1,5 @@
+[
+  { "code": "UAH", "precision": 2, "type": "fiat_like", "name": "Ukrainian Hryvnia" },
+  { "code": "HOUR", "precision": 1, "type": "time_like", "name": "Hour" },
+  { "code": "KWH", "precision": 2, "type": "utility_like", "name": "kWh" }
+]
