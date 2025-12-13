@@ -1203,14 +1203,15 @@ ON transactions(initiator_id, created_at DESC);
 │                                                          │
 │  Client                              Server              │
 │    │                                   │                 │
-│    │──── GET /auth/challenge ─────────►│                 │
+│    │──── POST /auth/challenge ────────►│                 │
+│    │      { pid }                      │                 │
 │    │                                   │                 │
 │    │◄─── { challenge: "random" } ──────│                 │
 │    │                                   │                 │
 │    │  sign(challenge, private_key)     │                 │
 │    │                                   │                 │
 │    │──── POST /auth/login ────────────►│                 │
-│    │      { pid, signature }           │                 │
+│    │      { pid, challenge, signature }│                 │
 │    │                                   │ verify(sig, pk) │
 │    │◄─── { access_token, refresh } ────│                 │
 │    │                                   │                 │

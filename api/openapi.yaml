@@ -445,7 +445,9 @@ components:
       name: id
       required: true
       schema:
-        type: integer
+        type: string
+        format: uuid
+        description: TrustLine UUID
 
   responses:
     BadRequest:
@@ -537,6 +539,7 @@ components:
       properties:
         pid:
           type: string
+          description: Participant identifier (derived from public_key)
         display_name:
           type: string
         type:
@@ -544,10 +547,25 @@ components:
           enum: [person, organization, hub]
         status:
           type: string
-          enum: [active, frozen, banned]
+          enum: [active, suspended, left, deleted]
+          description: |
+            Participant status:
+            - active: normal operation
+            - suspended: temporarily frozen by admin (can be unfrozen)
+            - left: participant voluntarily left the community
+            - deleted: participant removed from system
+        verification_level:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: Verification level (0=unverified, 3=fully verified)
         public_key:
           type: string
+          description: Ed25519 public key (base64)
         created_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
 
@@ -583,20 +601,38 @@ components:
       required: [id, from, to, equivalent, limit, used]
       properties:
         id:
-          type: integer
+          type: string
+          format: uuid
+          description: TrustLine UUID
         from:
           type: string
+          description: PID of trustline creator (creditor)
         to:
           type: string
+          description: PID of trustee (potential debtor)
         equivalent:
           type: string
+          description: Equivalent code (e.g. UAH, HOUR)
         limit:
           type: string
+          description: Maximum debt allowed (decimal string)
         used:
           type: string
+          description: Current debt against this line (decimal string)
+        available:
+          type: string
+          description: Available credit (limit - used)
         policy:
           type: object
           additionalProperties: true
+          description: TrustLine policy settings
+        status:
+          type: string
+          enum: [active, frozen, closed]
+          description: TrustLine status
+        created_at:
+          type: string
+          format: date-time
 
     TrustLinesList:
       type: object
