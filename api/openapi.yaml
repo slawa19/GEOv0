@@ -1,17 +1,35 @@
 openapi: 3.0.3
+
 info:
   title: GEO Hub API
-  version: 0.1
+  version: "0.1"
   description: |
-    OpenAPI spec for GEO Hub (MVP v0.1). Derived from docs/ru/04-api-reference.md.
+    OpenAPI spec for GEO Hub (MVP v0.1).
+
+    Canonical contract source: docs/ru/04-api-reference.md.
+    Base URL: /api/v1
+
+    Response envelope (normative):
+    - Success:
+        { "success": true, "data": ... }
+      For paginated endpoints:
+        { "success": true, "data": [...], "pagination": {...} }
+    - Error:
+        { "success": false, "error": { "code": "...", "message": "...", "details": {...} } }
+
 servers:
-  - url: /
+  - url: /api/v1
+
 tags:
   - name: Auth
   - name: Participants
   - name: TrustLines
   - name: Payments
   - name: Balance
+  - name: Admin
+  - name: WebSocket
+  - name: TestOnly
+
 security:
   - BearerAuth: []
 
@@ -20,47 +38,190 @@ paths:
     post:
       tags: [Auth]
       summary: Start challenge-response auth flow
+      description: |
+        Starts challenge-response authentication flow.
+        Public endpoint (no Bearer token required).
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChallengeRequest'
+              $ref: "#/components/schemas/ChallengeRequest"
       responses:
-        '200':
+        "200":
           description: Challenge created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChallengeResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ChallengeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /auth/login:
     post:
       tags: [Auth]
       summary: Complete challenge-response and issue JWT tokens
+      description: |
+        Completes challenge-response auth and issues access/refresh tokens.
+        Public endpoint (no Bearer token required).
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LoginRequest'
+              $ref: "#/components/schemas/LoginRequest"
       responses:
-        '200':
+        "200":
           description: Tokens issued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenPair'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
-  /participants:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register participant
+      description: |
+        Registers a new participant in the hub.
+        Public endpoint (no Bearer token required).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Participant registered
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Participant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      description: |
+        Exchanges refresh token for a new access token.
+        Public endpoint (no Bearer token required).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Tokens refreshed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/RefreshResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /participants/me:
+    get:
+      tags: [Participants]
+      summary: Get current participant
+      responses:
+        "200":
+          description: Current participant
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ParticipantMe"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      tags: [Participants]
+      summary: Update current participant profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParticipantUpdateRequest"
+      responses:
+        "200":
+          description: Participant updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ParticipantMe"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /participants/{pid}:
+    get:
+      tags: [Participants]
+      summary: Get participant by PID
+      parameters:
+        - $ref: "#/components/parameters/PidPath"
+      responses:
+        "200":
+          description: Participant
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ParticipantPublic"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /participants/search:
     get:
       tags: [Participants]
       summary: Search participants
@@ -69,68 +230,32 @@ paths:
           name: q
           schema:
             type: string
-          description: Search query
+          description: Search query (by name)
         - in: query
           name: type
           schema:
             type: string
             enum: [person, organization, hub]
           description: Type filter
-        - in: query
-          name: limit
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 20
-          description: Max results
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
       responses:
-        '200':
-          description: Participants list
+        "200":
+          description: Participants list (paginated)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ParticipantsList'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-
-    post:
-      tags: [Participants]
-      summary: Register participant
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ParticipantCreateRequest'
-      responses:
-        '201':
-          description: Participant created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Participant'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-
-  /participants/{pid}:
-    get:
-      tags: [Participants]
-      summary: Get participant
-      parameters:
-        - $ref: '#/components/parameters/PidPath'
-      responses:
-        '200':
-          description: Participant
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Participant'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ParticipantPublic"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /trustlines:
     get:
@@ -147,15 +272,30 @@ paths:
           name: equivalent
           schema:
             type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [active, frozen, closed]
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
       responses:
-        '200':
-          description: Trustlines list
+        "200":
+          description: Trustlines list (paginated)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TrustLinesList'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TrustLine"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     post:
       tags: [TrustLines]
@@ -165,65 +305,107 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TrustLineCreateRequest'
+              $ref: "#/components/schemas/TrustLineCreateRequest"
       responses:
-        '201':
+        "201":
           description: Trustline created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TrustLine'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TrustLine"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /trustlines/{id}:
+    get:
+      tags: [TrustLines]
+      summary: Get trustline by id
+      parameters:
+        - $ref: "#/components/parameters/TrustLineIdPath"
+      responses:
+        "200":
+          description: Trustline
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TrustLine"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
     patch:
       tags: [TrustLines]
       summary: Update trustline
       parameters:
-        - $ref: '#/components/parameters/TrustLineIdPath'
+        - $ref: "#/components/parameters/TrustLineIdPath"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TrustLineUpdateRequest'
+              $ref: "#/components/schemas/TrustLineUpdateRequest"
       responses:
-        '200':
+        "200":
           description: Trustline updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TrustLine'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TrustLine"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
     delete:
       tags: [TrustLines]
       summary: Close trustline
       parameters:
-        - $ref: '#/components/parameters/TrustLineIdPath'
+        - $ref: "#/components/parameters/TrustLineIdPath"
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SignedRequest'
+              $ref: "#/components/schemas/SignedRequest"
       responses:
-        '204':
-          description: Deleted
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
+        "200":
+          description: Trustline closed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /payments/capacity:
     get:
@@ -246,19 +428,24 @@ paths:
           required: true
           schema:
             type: string
-            pattern: '^[0-9]+(\.[0-9]+)?$'
+            pattern: "^[0-9]+(\\.[0-9]+)?$"
           description: Amount as decimal string
       responses:
-        '200':
+        "200":
           description: Capacity result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CapacityResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/CapacityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /payments/max-flow:
     get:
@@ -277,16 +464,21 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: Max-flow result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MaxFlowResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/MaxFlowResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /payments:
     post:
@@ -297,18 +489,23 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PaymentCreateRequest'
+              $ref: "#/components/schemas/PaymentCreateRequest"
       responses:
-        '200':
+        "200":
           description: Payment created (committed or aborted)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaymentResult'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PaymentResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
     get:
       tags: [Payments]
@@ -340,28 +537,25 @@ paths:
           schema:
             type: string
             format: date-time
-        - in: query
-          name: page
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
-        - in: query
-          name: per_page
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 20
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
       responses:
-        '200':
-          description: Payments list
+        "200":
+          description: Payments list (paginated)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaymentsList'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PaymentResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /payments/{tx_id}:
     get:
@@ -373,32 +567,42 @@ paths:
           required: true
           schema:
             type: string
-          description: Transaction id
+          description: Transaction id (UUID)
       responses:
-        '200':
+        "200":
           description: Payment details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaymentResult'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PaymentResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /balance:
     get:
       tags: [Balance]
       summary: Get aggregated balance by equivalents
       responses:
-        '200':
+        "200":
           description: Balance summary
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BalanceSummary'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/BalanceSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /balance/debts:
     get:
@@ -417,14 +621,488 @@ paths:
             enum: [outgoing, incoming, all]
             default: all
       responses:
-        '200':
-          description: Debts
+        "200":
+          description: Debts details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DebtsDetails'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DebtsDetails"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /balance/history:
+    get:
+      tags: [Balance]
+      summary: Balance history (by equivalent)
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: from_date
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to_date
+          schema:
+            type: string
+            format: date
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
+      responses:
+        "200":
+          description: Balance history entries (paginated)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/BalanceHistoryEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /ws:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket endpoint (conceptual)
+      description: |
+        WebSocket endpoint:
+        wss://hub.example.com/api/v1/ws?token={access_token}
+
+        Note: OpenAPI does not fully model WebSocket interaction.
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)
+
+  # ===========================================================================
+  # Admin endpoints (require admin/operator role)
+  # ===========================================================================
+  /admin/config:
+    get:
+      tags: [Admin]
+      summary: Get current configuration
+      description: Returns current runtime configuration (read-only view).
+      responses:
+        "200":
+          description: Configuration
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [Admin]
+      summary: Update runtime configuration
+      description: |
+        Update runtime-mutable configuration parameters.
+        Only parameters marked as "runtime" in config-reference.md can be changed.
+        All changes are logged to audit_log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          updated:
+                            type: array
+                            items:
+                              type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/feature-flags:
+    get:
+      tags: [Admin]
+      summary: Get feature flags
+      responses:
+        "200":
+          description: Feature flags
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          multipath_enabled:
+                            type: boolean
+                          full_multipath_enabled:
+                            type: boolean
+                          clearing_enabled:
+                            type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [Admin]
+      summary: Update feature flags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                multipath_enabled:
+                  type: boolean
+                full_multipath_enabled:
+                  type: boolean
+                clearing_enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Feature flags updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/participants/{pid}/freeze:
+    post:
+      tags: [Admin]
+      summary: Freeze participant
+      description: |
+        Temporarily freeze a participant (status -> suspended).
+        Frozen participants cannot perform operations.
+        Logged to audit_log with reason.
+      parameters:
+        - $ref: "#/components/parameters/PidPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  description: Reason for freezing (required for audit)
+      responses:
+        "200":
+          description: Participant frozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/participants/{pid}/unfreeze:
+    post:
+      tags: [Admin]
+      summary: Unfreeze participant
+      description: Restore participant to active status.
+      parameters:
+        - $ref: "#/components/parameters/PidPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Participant unfrozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/audit-log:
+    get:
+      tags: [Admin]
+      summary: Get audit log entries
+      parameters:
+        - in: query
+          name: action
+          schema:
+            type: string
+          description: Filter by action type
+        - in: query
+          name: actor_id
+          schema:
+            type: string
+          description: Filter by actor
+        - in: query
+          name: from_date
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to_date
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AuditLogEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/events:
+    get:
+      tags: [Admin]
+      summary: Get domain events (timeline)
+      description: |
+        Query domain events for investigation and debugging.
+        Supports filtering by correlation IDs (run_id, scenario_id, tx_id).
+      parameters:
+        - in: query
+          name: event_type
+          schema:
+            type: string
+          description: Filter by event type (e.g. payment.committed)
+        - in: query
+          name: actor_pid
+          schema:
+            type: string
+        - in: query
+          name: tx_id
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: run_id
+          schema:
+            type: string
+            format: uuid
+          description: Filter by test run (for debugging)
+        - in: query
+          name: scenario_id
+          schema:
+            type: string
+          description: Filter by test scenario (for debugging)
+        - in: query
+          name: from_date
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to_date
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
+      responses:
+        "200":
+          description: Domain events
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/DomainEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ===========================================================================
+  # Test-only endpoints (dev/test environment only)
+  # ===========================================================================
+  /_test/reset:
+    post:
+      tags: [TestOnly]
+      summary: Reset state (dev/test only)
+      description: |
+        DEV/TEST ONLY.
+
+        Resets storage state (DB + Redis) to an empty baseline.
+        Must be disabled in production (routes not registered or guarded by config).
+      security: []
+      responses:
+        "200":
+          description: State reset completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [reset]
+                        properties:
+                          reset:
+                            type: boolean
+                            example: true
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /_test/seed:
+    post:
+      tags: [TestOnly]
+      summary: Seed a test scenario/topology (dev/test only)
+      description: |
+        DEV/TEST ONLY.
+
+        Seeds typical topologies required by e2e scenarios (TS-xx) for fast setup:
+        - cycles for clearing
+        - multiple independent routes for multipath
+        - narrow bottlenecks for concurrency tests
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestSeedRequest"
+      responses:
+        "200":
+          description: Seeded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TestSeedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /_test/snapshot:
+    get:
+      tags: [TestOnly]
+      summary: Snapshot current state (dev/test only)
+      description: |
+        DEV/TEST ONLY.
+
+        Returns a snapshot of relevant state for assertions and artifact export.
+        If include_events=true, includes domain events for provided run_id/scenario_id
+        (or for the current request context).
+      security: []
+      parameters:
+        - in: query
+          name: include_events
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: run_id
+          schema:
+            type: string
+            format: uuid
+          description: Run identifier (pytest session)
+        - in: query
+          name: scenario_id
+          schema:
+            type: string
+          description: Scenario identifier (e.g., TS-12)
+      responses:
+        "200":
+          description: Snapshot returned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TestSnapshot"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
 components:
   securitySchemes:
@@ -440,6 +1118,7 @@ components:
       required: true
       schema:
         type: string
+      description: Participant identifier (PID)
     TrustLineIdPath:
       in: path
       name: id
@@ -447,7 +1126,23 @@ components:
       schema:
         type: string
         format: uuid
-        description: TrustLine UUID
+      description: TrustLine UUID
+
+    PageQuery:
+      in: query
+      name: page
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PerPageQuery:
+      in: query
+      name: per_page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
 
   responses:
     BadRequest:
@@ -455,44 +1150,92 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: "#/components/schemas/ErrorEnvelope"
     Unauthorized:
       description: Unauthorized
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     NotFound:
       description: Not found
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: "#/components/schemas/ErrorEnvelope"
 
   schemas:
+    # === Envelope ===
+    SuccessEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        data: {}
+
+    PaginationEnvelope:
+      type: object
+      required: [pagination]
+      properties:
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
     ErrorEnvelope:
       type: object
-      required: [error]
+      required: [success, error]
       properties:
+        success:
+          type: boolean
+          example: false
         error:
           type: object
           required: [code, message]
           properties:
             code:
               type: string
+              example: E002
             message:
               type: string
+              example: Insufficient capacity
             details:
               type: object
               additionalProperties: true
 
+    Pagination:
+      type: object
+      required: [total, page, per_page, pages]
+      properties:
+        total:
+          type: integer
+          example: 150
+        page:
+          type: integer
+          example: 1
+        per_page:
+          type: integer
+          example: 20
+        pages:
+          type: integer
+          example: 8
+
+    # === Common ===
     SignedRequest:
       type: object
+      required: [signature]
       properties:
         signature:
           type: string
           description: base64 signature
 
+    # === Auth ===
     ChallengeRequest:
       type: object
       required: [pid]
@@ -520,66 +1263,116 @@ components:
           type: string
         signature:
           type: string
+        device_info:
+          type: object
+          additionalProperties: true
 
-    TokenPair:
+    LoginResponse:
       type: object
-      required: [access_token, refresh_token, token_type]
+      required: [access_token, refresh_token, expires_in, participant]
       properties:
         access_token:
           type: string
         refresh_token:
           type: string
-        token_type:
-          type: string
-          example: Bearer
+        expires_in:
+          type: integer
+          example: 3600
+        participant:
+          $ref: "#/components/schemas/ParticipantPublic"
 
-    Participant:
+    RegisterRequest:
       type: object
-      required: [pid, status]
+      required: [public_key, display_name, signature]
+      properties:
+        public_key:
+          type: string
+          description: base64 encoded Ed25519 public key (32 bytes)
+        display_name:
+          type: string
+        profile:
+          type: object
+          additionalProperties: true
+        signature:
+          type: string
+          description: base64 signature of registration proof
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    RefreshResponse:
+      type: object
+      required: [access_token, refresh_token, expires_in]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+          example: 3600
+
+    # === Participants ===
+    ParticipantBase:
+      type: object
+      required: [pid, display_name, status]
       properties:
         pid:
           type: string
-          description: Participant identifier (derived from public_key)
         display_name:
           type: string
-        type:
-          type: string
-          enum: [person, organization, hub]
         status:
           type: string
           enum: [active, suspended, left, deleted]
-          description: |
-            Participant status:
-            - active: normal operation
-            - suspended: temporarily frozen by admin (can be unfrozen)
-            - left: participant voluntarily left the community
-            - deleted: participant removed from system
         verification_level:
           type: integer
           minimum: 0
           maximum: 3
-          description: Verification level (0=unverified, 3=fully verified)
-        public_key:
-          type: string
-          description: Ed25519 public key (base64)
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+        profile:
+          type: object
+          additionalProperties: true
 
-    ParticipantCreateRequest:
+    Participant:
+      allOf:
+        - $ref: "#/components/schemas/ParticipantBase"
+        - type: object
+          properties:
+            public_key:
+              type: string
+              description: base64 encoded Ed25519 public key (32 bytes)
+            created_at:
+              type: string
+              format: date-time
+
+    ParticipantPublic:
+      allOf:
+        - $ref: "#/components/schemas/ParticipantBase"
+        - type: object
+          properties:
+            public_stats:
+              type: object
+              additionalProperties: true
+
+    ParticipantMe:
+      allOf:
+        - $ref: "#/components/schemas/ParticipantBase"
+        - type: object
+          properties:
+            created_at:
+              type: string
+              format: date-time
+            stats:
+              type: object
+              additionalProperties: true
+
+    ParticipantUpdateRequest:
       type: object
-      required: [display_name, public_key, signature]
       properties:
         display_name:
-          type: string
-        type:
-          type: string
-          enum: [person, organization, hub]
-          default: person
-        public_key:
           type: string
         profile:
           type: object
@@ -587,14 +1380,10 @@ components:
         signature:
           type: string
 
-    ParticipantsList:
+    # === TrustLines ===
+    TrustLinePolicy:
       type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/Participant'
+      additionalProperties: true
 
     TrustLine:
       type: object
@@ -603,13 +1392,14 @@ components:
         id:
           type: string
           format: uuid
-          description: TrustLine UUID
         from:
           type: string
           description: PID of trustline creator (creditor)
         to:
           type: string
           description: PID of trustee (potential debtor)
+        to_display_name:
+          type: string
         equivalent:
           type: string
           description: Equivalent code (e.g. UAH, HOUR)
@@ -623,25 +1413,13 @@ components:
           type: string
           description: Available credit (limit - used)
         policy:
-          type: object
-          additionalProperties: true
-          description: TrustLine policy settings
+          $ref: "#/components/schemas/TrustLinePolicy"
         status:
           type: string
           enum: [active, frozen, closed]
-          description: TrustLine status
         created_at:
           type: string
           format: date-time
-
-    TrustLinesList:
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/TrustLine'
 
     TrustLineCreateRequest:
       type: object
@@ -654,8 +1432,7 @@ components:
         limit:
           type: string
         policy:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/TrustLinePolicy"
         signature:
           type: string
 
@@ -665,11 +1442,11 @@ components:
         limit:
           type: string
         policy:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/TrustLinePolicy"
         signature:
           type: string
 
+    # === Payments ===
     CapacityResponse:
       type: object
       required: [can_pay, max_amount, routes_count, estimated_hops]
@@ -718,11 +1495,11 @@ components:
         paths:
           type: array
           items:
-            $ref: '#/components/schemas/MaxFlowPath'
+            $ref: "#/components/schemas/MaxFlowPath"
         bottlenecks:
           type: array
           items:
-            $ref: '#/components/schemas/Bottleneck'
+            $ref: "#/components/schemas/Bottleneck"
         algorithm:
           type: string
         computed_at:
@@ -776,6 +1553,7 @@ components:
       properties:
         tx_id:
           type: string
+          description: UUID
         status:
           type: string
           enum: [COMMITTED, ABORTED]
@@ -790,9 +1568,9 @@ components:
         routes:
           type: array
           items:
-            $ref: '#/components/schemas/PaymentRoute'
+            $ref: "#/components/schemas/PaymentRoute"
         error:
-          $ref: '#/components/schemas/PaymentError'
+          $ref: "#/components/schemas/PaymentError"
         created_at:
           type: string
           format: date-time
@@ -800,15 +1578,7 @@ components:
           type: string
           format: date-time
 
-    PaymentsList:
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/PaymentResult'
-
+    # === Balance ===
     BalanceEquivalent:
       type: object
       required: [code, total_debt, total_credit, net_balance, available_to_spend, available_to_receive]
@@ -833,11 +1603,11 @@ components:
         equivalents:
           type: array
           items:
-            $ref: '#/components/schemas/BalanceEquivalent'
+            $ref: "#/components/schemas/BalanceEquivalent"
 
     DebtsDetails:
       type: object
-      required: [outgoing]
+      required: [outgoing, incoming]
       properties:
         outgoing:
           type: array
@@ -867,3 +1637,115 @@ components:
                 type: string
               amount:
                 type: string
+
+    BalanceHistoryEntry:
+      type: object
+      required: [timestamp, equivalent, delta, reason]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        equivalent:
+          type: string
+        delta:
+          type: string
+          description: Signed decimal string (e.g. "-10.00", "5.00")
+        reason:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    # === Test-only (dev/test) ===
+    TestSeedRequest:
+      type: object
+      required: [scenario]
+      properties:
+        scenario:
+          type: string
+          description: Scenario/topology id (e.g. "triangle", "multipath_2_routes")
+        params:
+          type: object
+          additionalProperties: true
+        seed:
+          type: string
+          description: Optional seed to make generated data deterministic
+
+    TestSeedResponse:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: object
+          additionalProperties: true
+
+    TestSnapshot:
+      type: object
+      description: Snapshot of current state for assertions and artifacts.
+      additionalProperties: true
+    # === Admin ===
+    AuditLogEntry:
+      type: object
+      required: [id, timestamp, action]
+      properties:
+        id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        actor_id:
+          type: string
+        actor_role:
+          type: string
+        action:
+          type: string
+          description: Action type (e.g. participant.freeze, config.update)
+        object_type:
+          type: string
+        object_id:
+          type: string
+        reason:
+          type: string
+        before_state:
+          type: object
+          additionalProperties: true
+        after_state:
+          type: object
+          additionalProperties: true
+        request_id:
+          type: string
+        ip_address:
+          type: string
+
+    DomainEvent:
+      type: object
+      required: [event_id, event_type, timestamp]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          description: Event type (e.g. payment.committed, trustline.created)
+        timestamp:
+          type: string
+          format: date-time
+        run_id:
+          type: string
+          format: uuid
+          description: Test run correlation ID
+        scenario_id:
+          type: string
+          description: Test scenario correlation ID
+        request_id:
+          type: string
+          format: uuid
+        tx_id:
+          type: string
+          format: uuid
+        actor_pid:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true

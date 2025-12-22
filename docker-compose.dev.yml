@@ -1,0 +1,55 @@
+# GEO Hub — Docker Compose (Development Override)
+# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    # Use uvicorn with reload for development
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      - ENVIRONMENT=dev
+      - ENABLE_TEST_ENDPOINTS=true
+      - LOG_LEVEL=DEBUG
+      - LOG_FORMAT=text
+    volumes:
+      # Full mount for hot-reload
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./migrations:/app/migrations
+    # No restart in dev - fail fast
+    restart: "no"
+
+  # pgAdmin for database management (dev only)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: geo-hub-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@geo.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - geo-network
+    profiles:
+      - tools
+
+  # Redis Commander for Redis inspection (dev only)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: geo-hub-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - geo-network
+    profiles:
+      - tools

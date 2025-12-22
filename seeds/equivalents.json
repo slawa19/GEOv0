@@ -1,5 +1,20 @@
 [
-  { "code": "UAH", "precision": 2, "type": "fiat_like", "name": "Ukrainian Hryvnia" },
-  { "code": "HOUR", "precision": 1, "type": "time_like", "name": "Hour" },
-  { "code": "KWH", "precision": 2, "type": "utility_like", "name": "kWh" }
+  {
+    "code": "UAH",
+    "precision": 2,
+    "description": "Ukrainian Hryvnia",
+    "metadata": {"type": "fiat", "iso_code": "UAH"}
+  },
+  {
+    "code": "HOUR",
+    "precision": 1,
+    "description": "Time-based unit (1 hour of work)",
+    "metadata": {"type": "time"}
+  },
+  {
+    "code": "KWH",
+    "precision": 2,
+    "description": "Kilowatt-hour (energy unit)",
+    "metadata": {"type": "commodity"}
+  }
 ]

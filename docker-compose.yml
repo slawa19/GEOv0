@@ -1,0 +1,102 @@
+# GEO Hub — Docker Compose
+# Development and local testing configuration
+
+services:
+  # ===========================================================================
+  # Application
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geo-hub-app
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - DATABASE_URL=postgresql+asyncpg://geo_hub:geo_hub_password@db:5432/geo_hub
+      - DATABASE_URL_SYNC=postgresql://geo_hub:geo_hub_password@db:5432/geo_hub
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-prod}
+      - ENABLE_TEST_ENDPOINTS=${ENABLE_TEST_ENDPOINTS:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount for development hot-reload (remove in production)
+      - ./app:/app/app:ro
+    networks:
+      - geo-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # PostgreSQL Database
+  # ===========================================================================
+  db:
+    image: postgres:15-alpine
+    container_name: geo-hub-db
+    environment:
+      POSTGRES_USER: geo_hub
+      POSTGRES_PASSWORD: geo_hub_password
+      POSTGRES_DB: geo_hub
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geo_hub -d geo_hub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - geo-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Redis (cache, locks, sessions)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: geo-hub-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - geo-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Database migrations (run once)
+  # ===========================================================================
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geo-hub-migrate
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      - DATABASE_URL_SYNC=postgresql://geo_hub:geo_hub_password@db:5432/geo_hub
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - geo-network
+    profiles:
+      - migrate
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  geo-network:
+    driver: bridge
