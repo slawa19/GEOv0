@@ -525,6 +525,26 @@ Authorization: Bearer {token}
 
 ## 6. Баланс
 
+### 6.0. Эквиваленты (справочник)
+
+Назначение: получить read-only список эквивалентов, известных данному Hub. Используется для автодополнения и валидации в клиентских приложениях.
+
+```http
+GET /equivalents
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {"code": "UAH", "name": "Ukrainian Hryvnia"},
+    {"code": "HOUR", "name": "Hour"}
+  ]
+}
+```
+
 ### 6.1. Общий баланс
 
 ```http
@@ -783,7 +803,81 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 
 Доступны только пользователям с ролями `admin`, `operator`, `auditor`.
 
-### 9.1. Аналитика и Граф
+Формат ответов — стандартный envelope (см. раздел 1.3).
+
+### 9.0. Health/Ready (root endpoints)
+
+Назначение: probes для деплоя/мониторинга. Эти эндпоинты обслуживаются **на корне** (пример: `http://localhost:8000/health`), а не под `/api/v1`.
+
+- `GET /health`
+- `GET /ready`
+
+### 9.0. Конфигурация и feature flags
+
+#### Получить текущую конфигурацию (read-only view)
+`GET /admin/config`
+
+#### Обновить runtime-конфигурацию (runtime subset)
+`PATCH /admin/config`
+
+#### Получить feature flags
+`GET /admin/feature-flags`
+
+#### Обновить feature flags
+`PATCH /admin/feature-flags`
+
+### 9.1. Участники (операционные действия)
+
+#### Freeze участника
+`POST /admin/participants/{pid}/freeze`
+
+**Request Body:**
+```json
+{
+  "reason": "Suspicious activity"
+}
+```
+
+#### Unfreeze участника
+`POST /admin/participants/{pid}/unfreeze`
+
+#### Список участников (пагинация)
+`GET /admin/participants?q={...}&status={...}&type={...}`
+
+#### Карточка участника
+`GET /admin/participants/{pid}`
+
+### 9.2. Эквиваленты (справочник, admin)
+
+#### Список эквивалентов
+`GET /admin/equivalents?include_inactive=false`
+
+#### Создать эквивалент
+`POST /admin/equivalents`
+
+#### Обновить эквивалент
+`PATCH /admin/equivalents/{code}`
+
+### 9.3. Транзакции и клиринг
+
+#### Список транзакций
+`GET /admin/transactions?tx_id={...}&initiator_pid={...}&type={...}&state={...}&equivalent={...}`
+
+#### Детали транзакции
+`GET /admin/transactions/{tx_id}`
+
+#### Список клиринговых транзакций
+`GET /admin/clearing?state={...}&equivalent={...}`
+
+### 9.4. Аудит и события
+
+#### Audit log (пагинация)
+`GET /admin/audit-log`
+
+#### Events timeline (пагинация)
+`GET /admin/events`
+
+### 9.5. Аналитика и граф
 
 #### Получение данных графа
 `GET /admin/analytics/graph?equivalent=UAH`
@@ -801,7 +895,10 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 }
 ```
 
-### 9.2. Целостность системы
+#### Агрегированная аналитика (ликвидность/клиринг)
+`GET /admin/analytics/stats?equivalent={code?}&from_date={...}&to_date={...}`
+
+### 9.6. Целостность системы
 
 #### Статус проверки инвариантов
 `GET /admin/integrity/status`
@@ -809,7 +906,7 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 #### Запуск проверки
 `POST /admin/integrity/check`
 
-### 9.3. Управление инцидентами
+### 9.7. Управление инцидентами
 
 #### Принудительная отмена транзакции
 `POST /admin/transactions/{tx_id}/abort`

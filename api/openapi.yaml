@@ -25,6 +25,7 @@ tags:
   - name: Participants
   - name: TrustLines
   - name: Payments
+  - name: Equivalents
   - name: Balance
   - name: Admin
   - name: WebSocket
@@ -34,6 +35,43 @@ security:
   - BearerAuth: []
 
 paths:
+  /health:
+    get:
+      tags: [Admin]
+      summary: Health check (liveness)
+      description: |
+        Liveness probe.
+        Note: This endpoint is served at the root (not under /api/v1).
+      security: []
+      servers:
+        - url: /
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /ready:
+    get:
+      tags: [Admin]
+      summary: Readiness check
+      description: |
+        Readiness probe.
+        Note: This endpoint is served at the root (not under /api/v1).
+      security: []
+      servers:
+        - url: /
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /auth/challenge:
     post:
       tags: [Auth]
@@ -679,6 +717,30 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /equivalents:
+    get:
+      tags: [Equivalents]
+      summary: List supported equivalents
+      description: |
+        Returns a read-only list of equivalents known to this Hub.
+        Intended for client UI autocomplete and validation.
+      responses:
+        "200":
+          description: Equivalents list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/EquivalentInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /ws:
     get:
       tags: [WebSocket]
@@ -881,6 +943,342 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /admin/participants:
+    get:
+      tags: [Admin]
+      summary: List participants (admin)
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Search query (pid or display_name)
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [active, suspended, left, deleted, all]
+            default: all
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [person, organization, hub, all]
+            default: all
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
+      responses:
+        "200":
+          description: Participants list (paginated)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminParticipant"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/participants/{pid}:
+    get:
+      tags: [Admin]
+      summary: Get participant (admin)
+      parameters:
+        - $ref: "#/components/parameters/PidPath"
+      responses:
+        "200":
+          description: Participant
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AdminParticipant"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/equivalents:
+    get:
+      tags: [Admin]
+      summary: List equivalents (admin)
+      parameters:
+        - in: query
+          name: include_inactive
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Equivalents list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminEquivalent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      tags: [Admin]
+      summary: Create equivalent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminEquivalentUpsert"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AdminEquivalent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/equivalents/{code}:
+    patch:
+      tags: [Admin]
+      summary: Update equivalent
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminEquivalentUpsert"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AdminEquivalent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/transactions:
+    get:
+      tags: [Admin]
+      summary: List transactions (admin)
+      parameters:
+        - in: query
+          name: tx_id
+          schema:
+            type: string
+        - in: query
+          name: initiator_pid
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+            description: Transaction type (PAYMENT, CLEARING, TRUST_LINE_*, etc)
+        - in: query
+          name: state
+          schema:
+            type: string
+            description: Transaction state (COMMITTED, ABORTED, PREPARE_IN_PROGRESS, etc)
+        - in: query
+          name: equivalent
+          schema:
+            type: string
+          description: Equivalent code (if applicable)
+        - in: query
+          name: from_date
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to_date
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
+      responses:
+        "200":
+          description: Transactions list (paginated)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/transactions/{tx_id}:
+    get:
+      tags: [Admin]
+      summary: Get transaction details (admin)
+      parameters:
+        - in: path
+          name: tx_id
+          required: true
+          schema:
+            type: string
+          description: Transaction id (UUID)
+      responses:
+        "200":
+          description: Transaction
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AdminTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/clearing:
+    get:
+      tags: [Admin]
+      summary: List clearing transactions (admin)
+      description: Convenience endpoint for transactions filtered by type=CLEARING.
+      parameters:
+        - in: query
+          name: state
+          schema:
+            type: string
+        - in: query
+          name: equivalent
+          schema:
+            type: string
+        - in: query
+          name: from_date
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to_date
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PerPageQuery"
+      responses:
+        "200":
+          description: Clearing transactions (paginated)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AdminTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/analytics/stats:
+    get:
+      tags: [Admin]
+      summary: Get liquidity/clearing analytics stats
+      parameters:
+        - in: query
+          name: equivalent
+          schema:
+            type: string
+          description: Optional equivalent filter
+        - in: query
+          name: from_date
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to_date
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Analytics stats
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AdminAnalyticsStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /admin/audit-log:
     get:
       tags: [Admin]
@@ -992,6 +1390,126 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /admin/analytics/graph:
+    get:
+      tags: [Admin]
+      summary: Get network graph data
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+          description: Equivalent code to build graph for
+      responses:
+        "200":
+          description: Graph data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/NetworkGraphData"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/integrity/status:
+    get:
+      tags: [Admin]
+      summary: Get integrity checks status
+      responses:
+        "200":
+          description: Integrity status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/IntegrityStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/integrity/check:
+    post:
+      tags: [Admin]
+      summary: Run deep integrity scan
+      description: |
+        Triggers a deep integrity scan. Intended for operators.
+        Implementation may be synchronous or asynchronous; contract guarantees a response body.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Integrity scan started/completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/transactions/{tx_id}/abort:
+    post:
+      tags: [Admin]
+      summary: Force abort transaction
+      description: |
+        Force-aborts a transaction to unlock reserved limits.
+        Must be logged to audit_log with reason.
+      parameters:
+        - in: path
+          name: tx_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Transaction id (UUID)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AbortTransactionRequest"
+      responses:
+        "200":
+          description: Aborted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   # ===========================================================================
   # Test-only endpoints (dev/test environment only)
@@ -1234,6 +1752,18 @@ components:
         signature:
           type: string
           description: base64 signature
+
+    EquivalentInfo:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Equivalent code (e.g. UAH, HOUR)
+        name:
+          type: string
+          nullable: true
+          description: Optional human-readable name
 
     # === Auth ===
     ChallengeRequest:
@@ -1749,3 +2279,213 @@ components:
         payload:
           type: object
           additionalProperties: true
+
+    NetworkGraphData:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkGraphNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkGraphEdge"
+
+    NetworkGraphNode:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          description: Participant PID
+        label:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+
+    NetworkGraphEdge:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          description: From PID
+        to:
+          type: string
+          description: To PID
+        limit:
+          type: string
+          nullable: true
+        debt:
+          type: string
+          nullable: true
+        used:
+          type: string
+          nullable: true
+        available:
+          type: string
+          nullable: true
+
+    IntegrityStatus:
+      type: object
+      required: [checks]
+      properties:
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntegrityCheck"
+        last_run_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    IntegrityCheck:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [PASS, FAIL, WARN]
+        last_check_at:
+          type: string
+          format: date-time
+          nullable: true
+        details:
+          type: object
+          additionalProperties: true
+
+    AbortTransactionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    AdminParticipant:
+      allOf:
+        - $ref: "#/components/schemas/ParticipantPublic"
+        - type: object
+          properties:
+            status:
+              type: string
+            verification_level:
+              type: integer
+              nullable: true
+            created_at:
+              type: string
+              format: date-time
+              nullable: true
+            updated_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    AdminEquivalent:
+      type: object
+      required: [code, precision, is_active]
+      properties:
+        code:
+          type: string
+        description:
+          type: string
+          nullable: true
+        precision:
+          type: integer
+          description: Decimal precision
+        metadata:
+          type: object
+          additionalProperties: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminEquivalentUpsert:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Equivalent code (2..16 chars)
+        description:
+          type: string
+          nullable: true
+        precision:
+          type: integer
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        is_active:
+          type: boolean
+          nullable: true
+
+    AdminTransaction:
+      type: object
+      required: [tx_id, type, state, created_at]
+      properties:
+        tx_id:
+          type: string
+        type:
+          type: string
+        state:
+          type: string
+        initiator_pid:
+          type: string
+          nullable: true
+        equivalent:
+          type: string
+          nullable: true
+        payload:
+          type: object
+          additionalProperties: true
+        signatures:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        error:
+          type: object
+          nullable: true
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminAnalyticsStats:
+      type: object
+      description: |
+        Aggregated analytics for liquidity/clearing dashboards.
+        Shape may evolve; fields are intentionally extensible.
+      properties:
+        computed_at:
+          type: string
+          format: date-time
+          nullable: true
+        equivalent:
+          type: string
+          nullable: true
+        summary:
+          type: object
+          additionalProperties: true
+        series:
+          type: array
+          items:
+            type: object
+            additionalProperties: true

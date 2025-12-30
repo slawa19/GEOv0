@@ -17,7 +17,7 @@
 ### 1.1. UI подход
 
 Для MVP выбран **Вариант B: SPA (Single Page Application)**.
-- **Стек:** Python (FastAPI) + Vue.js 3 (Composition API) + Tailwind CSS.
+- **Стек:** Python (FastAPI) + Vue.js 3 (Composition API) + Tailwind CSS (опционально).
 - **Библиотека компонентов:** Element Plus (рекомендуется для админок).
 - **Визуализация графов:** v-network-graph или D3.js.
 
