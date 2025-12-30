@@ -229,7 +229,7 @@ Preflight (проверка возможности):
 ### 7.5. Trust / ContactDetails / TrustlineEdit
 
 Контакты/участники:
-- `GET /participants/search?q={...}&limit={...}`
+- `GET /participants/search?q={...}&page={...}&per_page={...}`
 - `GET /participants/{pid}`
 
 Trustlines:
@@ -243,6 +243,25 @@ Trustlines:
 Профиль:
 - `GET /participants/me`
 - `PATCH /participants/me`
+
+### 7.7. WebSocket (реальное время)
+
+Подключение:
+- `wss://{hub_base_url}/api/v1/ws?token={access_token}`
+
+Подписка на события (минимальный набор):
+- `payment.received` — входящий платёж
+- `trustline.updated` — изменение линии доверия
+- `clearing.completed` — выполнен клиринг
+
+Heartbeat:
+- Клиент отправляет `ping` каждые 30 секунд при отсутствии исходящего трафика.
+- Если 90 секунд нет входящих сообщений — считать соединение разорванным.
+
+Reconnect стратегия (нормативно, согласовано с `04-api-reference.md` §7.6):
+- Переподключаться с exponential backoff: 1s, 2s, 5s, 10s, 30s.
+- После переподключения: заново `subscribe`, сверить состояние через REST.
+- Готовность к дубликатам и пропускам событий (at-most-once доставка).
 
 ---
 

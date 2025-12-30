@@ -156,17 +156,17 @@
 
 ### 5.2. Минимальная схема audit-log события
 
-Рекомендуемый формат записи (лог + таблица в БД):
-- `event_id`
+Рекомендуемый формат записи (лог + таблица в БД), согласованный с `api/openapi.yaml`:
+- `id` (uuid)
 - `timestamp`
-- `actor` (user id / service)
+- `actor_id` (user id / service)
 - `actor_role`
 - `action` (enum)
 - `object_type` (config/feature_flag/participant/equivalent/...)
 - `object_id`
 - `reason` (обязателен для freeze/ban и изменения критичных лимитов)
-- `before` / `after` (diff)
-- `request_id` / `ip` / `user_agent`
+- `before_state` / `after_state` (diff)
+- `request_id` / `ip_address`
 
 ---
 

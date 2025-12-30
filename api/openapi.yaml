@@ -943,6 +943,77 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /admin/participants/{pid}/ban:
+    post:
+      tags: [Admin]
+      summary: Ban participant
+      description: |
+        Permanently ban a participant (status -> deleted).
+        Banned participants cannot be restored without manual intervention.
+        Logged to audit_log with reason.
+      parameters:
+        - $ref: "#/components/parameters/PidPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  description: Reason for banning (required for audit)
+      responses:
+        "200":
+          description: Participant banned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/participants/{pid}/unban:
+    post:
+      tags: [Admin]
+      summary: Unban participant
+      description: Restore banned participant to active status.
+      parameters:
+        - $ref: "#/components/parameters/PidPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  description: Reason for unbanning (required for audit)
+      responses:
+        "200":
+          description: Participant unbanned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /admin/participants:
     get:
       tags: [Admin]

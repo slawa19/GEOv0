@@ -616,6 +616,14 @@ Authorization: Bearer {token}
 
 ## 7. WebSocket API
 
+### 7.0. QR/Deeplink схема
+
+Формат QR-кодов и deeplink для клиентских приложений описан в [`docs/ru/pwa-client-ui-spec.md` §5](pwa-client-ui-spec.md).
+
+Кратко:
+- Схема: `geo://v1/...`
+- Типы: `participant` (профиль), `pay` (запрос платежа)
+
 ### 7.1. Подключение
 
 ```

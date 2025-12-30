@@ -130,8 +130,13 @@ UI:
 ### 4.7. Feature Flags
 
 UI:
-- Переключатели: `multipath_enabled`, `full_multipath_enabled`, `clearing_enabled`.
-- Для экспериментальных — warning.
+- Переключатели:
+  - `feature_flags.multipath_enabled`
+  - `feature_flags.full_multipath_enabled`
+  - `clearing.enabled` (из секции `clearing.*`, отображается как «Clearing enabled»)
+- Для экспериментальных (например, `full_multipath_enabled`) — warning.
+
+Примечание: `clearing.enabled` технически находится в секции `clearing.*` конфига (см. `config-reference.md`), но для удобства UI отображается вместе с feature flags.
 
 ### 4.8. Audit Log
 
@@ -145,9 +150,9 @@ UI:
 - Фильтры: `event_type`, `actor_pid`, `tx_id`, `run_id`, `scenario_id`, диапазон дат.
 - Таблица/таймлайн.
 
-### 4.10. Equivalents (optional / Phase 2)
+### 4.10. Equivalents (MVP)
 
-Цель: управление справочником эквивалентов.
+Цель: управление справочником эквивалентов (входит в MVP согласно `admin-console-minimal-spec.md` §3.4).
 
 UI:
 - Таблица: `code`, `description`, `precision`, `is_active`.
@@ -224,12 +229,16 @@ UI правила:
 - `GET /admin/feature-flags`
 - `PATCH /admin/feature-flags`
 
+Примечание: endpoint возвращает/принимает `multipath_enabled`, `full_multipath_enabled`, `clearing_enabled`. Параметр `clearing_enabled` технически соответствует `clearing.enabled` в конфиге, но для удобства UI объединён с feature flags.
+
 UI правила:
 - Любая операция изменения должна требовать явного подтверждения (минимум: confirm dialog).
 
 ### 6.3. Participants
 - `POST /admin/participants/{pid}/freeze` (body: `{reason}`)
 - `POST /admin/participants/{pid}/unfreeze` (body: `{reason?}`)
+- `POST /admin/participants/{pid}/ban` (body: `{reason}`)
+- `POST /admin/participants/{pid}/unban` (body: `{reason}`)
 
 UI правила:
 - `reason` обязателен для freeze.
@@ -239,9 +248,9 @@ UI правила:
 - `GET /admin/audit-log` (paginated)
 - `GET /admin/events` (paginated)
 
-Поля (ориентиры для отображения):
-- AuditLogEntry: `timestamp`, `actor_id`, `actor_role`, `action`, `object_type`, `object_id`, `reason`.
-- DomainEvent: `timestamp`, `event_type`, `actor_pid`, `tx_id`, `run_id`, `scenario_id`.
+Поля (ориентиры для отображения, согласованы с `api/openapi.yaml`):
+- AuditLogEntry: `id`, `timestamp`, `actor_id`, `actor_role`, `action`, `object_type`, `object_id`, `reason`, `before_state`, `after_state`, `request_id`, `ip_address`.
+- DomainEvent: `event_id`, `event_type`, `timestamp`, `actor_pid`, `tx_id`, `run_id`, `scenario_id`, `payload`.
 
 ### 6.5. Graph / Integrity / Incidents
 - `GET /admin/analytics/graph?equivalent={code}`
