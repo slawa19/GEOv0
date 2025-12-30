@@ -779,6 +779,50 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 
 ---
 
+## 9. Admin API (Служебные эндпоинты)
+
+Доступны только пользователям с ролями `admin`, `operator`, `auditor`.
+
+### 9.1. Аналитика и Граф
+
+#### Получение данных графа
+`GET /admin/analytics/graph?equivalent=UAH`
+
+**Ответ:**
+```json
+{
+  "nodes": [
+    { "id": "PID1", "label": "Alice", "type": "person" },
+    { "id": "PID2", "label": "Bob", "type": "organization" }
+  ],
+  "edges": [
+    { "from": "PID1", "to": "PID2", "limit": "1000.00", "debt": "200.00" }
+  ]
+}
+```
+
+### 9.2. Целостность системы
+
+#### Статус проверки инвариантов
+`GET /admin/integrity/status`
+
+#### Запуск проверки
+`POST /admin/integrity/check`
+
+### 9.3. Управление инцидентами
+
+#### Принудительная отмена транзакции
+`POST /admin/transactions/{tx_id}/abort`
+
+**Request Body:**
+```json
+{
+  "reason": "Manual intervention due to node timeout"
+}
+```
+
+---
+
 ## OpenAPI Specification
 
 Полная OpenAPI 3.0 спецификация доступна:
