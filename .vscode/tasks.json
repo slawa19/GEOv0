@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Qdrant: up (docker compose)",
+      "type": "shell",
+      "command": "pwsh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "$ErrorActionPreference = 'Stop'; if (-not (Test-Path 'docker-compose.yml')) { throw 'docker-compose.yml not found in workspace root.' }; $composeKind = $null; try { docker compose version *> $null; $composeKind = 'docker compose' } catch {}; if (-not $composeKind) { try { docker-compose version *> $null; $composeKind = 'docker-compose' } catch {} }; if (-not $composeKind) { throw 'Docker Compose not found. Install/enable Docker Desktop.' }; if ($composeKind -eq 'docker compose') { docker compose up -d qdrant } else { docker-compose up -d qdrant }"
+      ],
+      "problemMatcher": [],
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "reveal": "never",
+        "panel": "dedicated",
+        "clear": false
+      }
+    }
+  ]
+}
