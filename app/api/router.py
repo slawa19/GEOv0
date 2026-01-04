@@ -1,7 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.api import deps
 from app.api.v1 import auth, participants, trustlines, payments, balance, clearing
 
-api_router = APIRouter()
+api_router = APIRouter(dependencies=[Depends(deps.rate_limit)])
 
 api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
 api_router.include_router(participants.router, prefix="/participants", tags=["Participants"])

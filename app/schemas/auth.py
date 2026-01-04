@@ -16,4 +16,4 @@ class LoginRequest(BaseModel):
 class TokenPair(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: str = Field(default="Bearer", example="Bearer")
+    token_type: str = Field(default="Bearer", json_schema_extra={"example": "Bearer"})

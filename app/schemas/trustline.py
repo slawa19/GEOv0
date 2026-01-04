@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 class TrustLineBase(BaseModel):
     policy: Optional[Dict[str, Any]] = None
@@ -19,9 +20,7 @@ class TrustLine(TrustLineBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-        populate_by_name = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 class TrustLineCreateRequest(BaseModel):
     to: str

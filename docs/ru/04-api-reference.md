@@ -13,7 +13,7 @@
 4. [Линии доверия](#4-линии-доверия)
 5. [Платежи](#5-платежи)
 6. [Баланс](#6-баланс)
-7. [WebSocket API](#7-websocket-api)
+7. [Клиринг](#7-клиринг)
 8. [Коды ошибок](#8-коды-ошибок)
 
 ---
@@ -36,43 +36,31 @@ Development: http://localhost:8000/api/v1
 
 ### 1.3. Стандартный ответ
 
-**Успех:**
-```json
-{
-  "success": true,
-  "data": { ... }
-}
-```
+Канонический контракт ответов описан в [api/openapi.yaml](../../api/openapi.yaml).
 
-**Ошибка:**
+В v0.1 большинство успешных ответов — **plain JSON** (без envelope вида `{success,data}`).
+
+**Ошибка (единый формат):**
 ```json
 {
-  "success": false,
   "error": {
     "code": "E001",
     "message": "Human readable message",
-    "details": { ... }
+    "details": {"any": "payload"}
   }
 }
 ```
 
 ### 1.4. Пагинация
 
-```json
-{
-  "data": [...],
-  "pagination": {
-    "total": 150,
-    "page": 1,
-    "per_page": 20,
-    "pages": 8
-  }
-}
-```
+В v0.1 используется простая пагинация через query параметры `page` и `per_page`.
+
+Форма успешного ответа зависит от конкретного эндпоинта (см. OpenAPI). Например, list-эндпоинты
+возвращают объект вида `{ "items": [...] }`.
 
 **Query параметры:**
 - `page` (default: 1)
-- `per_page` (default: 20, max: 100)
+- `per_page` (default: 20, max: 200)
 
 ---
 
@@ -449,6 +437,7 @@ Authorization: Bearer {token}
 ```http
 POST /payments
 Authorization: Bearer {token}
+Idempotency-Key: {key}   # optional
 Content-Type: application/json
 
 {
@@ -463,6 +452,8 @@ Content-Type: application/json
   "signature": "base64_signature"
 }
 ```
+
+**Idempotency-Key (опционально):** если повторить запрос с тем же ключом, сервер вернёт тот же результат. Если ключ повторно используется с другим payload — вернётся `409 Conflict`.
 
 **Response (success):**
 ```json
@@ -537,10 +528,9 @@ Authorization: Bearer {token}
 **Response:**
 ```json
 {
-  "success": true,
-  "data": [
-    {"code": "UAH", "name": "Ukrainian Hryvnia"},
-    {"code": "HOUR", "name": "Hour"}
+  "items": [
+    {"code": "UAH", "description": "Ukrainian Hryvnia", "precision": 2},
+    {"code": "HOUR", "description": "Hour", "precision": 2}
   ]
 }
 ```
@@ -614,155 +604,45 @@ Authorization: Bearer {token}
 
 ---
 
-## 7. WebSocket API
-
-### 7.0. QR/Deeplink схема
-
-Формат QR-кодов и deeplink для клиентских приложений описан в [`docs/ru/pwa-client-ui-spec.md` §5](pwa-client-ui-spec.md).
-
-Кратко:
-- Схема: `geo://v1/...`
-- Типы: `participant` (профиль), `pay` (запрос платежа)
-
-### 7.1. Подключение
-
-```
-wss://hub.example.com/api/v1/ws?token={access_token}
-```
-
-### 7.2. Формат сообщений
-
-```json
-{
-  "type": "event_type",
-  "payload": { ... },
-  "timestamp": "2025-11-29T12:00:00Z"
-}
-```
-
-### 7.3. События от сервера
-
-#### Новый входящий платёж
-
-```json
-{
-  "type": "payment.received",
-  "payload": {
-    "tx_id": "uuid",
-    "from": "sender_pid",
     "from_name": "Alice",
-    "amount": "100.00",
-    "equivalent": "UAH",
-    "description": "За услуги"
-  }
-}
+## 7. Клиринг
+
+Канонический контракт — в [api/openapi.yaml](../../api/openapi.yaml).
+
+### 7.1. Список циклов долгов (по эквиваленту)
+
+```http
+GET /clearing/cycles?equivalent=UAH&max_depth=6
+Authorization: Bearer {access_token}
 ```
 
-#### Изменение линии доверия
-
+**Response:**
 ```json
 {
-  "type": "trustline.updated",
-  "payload": {
-    "id": "uuid",
-    "from": "bob_pid",
-    "limit": "1500.00",
-    "previous_limit": "1000.00"
-  }
+  "cycles": [
+    [
+      {"debt_id": "uuid", "debtor": "A", "creditor": "B", "amount": "10.00"},
+      {"debt_id": "uuid", "debtor": "B", "creditor": "C", "amount": "10.00"},
+      {"debt_id": "uuid", "debtor": "C", "creditor": "A", "amount": "10.00"}
+    ]
+  ]
 }
 ```
 
-#### Выполнен клиринг
+### 7.2. Автоклиринг циклов (по эквиваленту)
 
+```http
+POST /clearing/auto?equivalent=UAH
+Authorization: Bearer {access_token}
+```
+
+**Response:**
 ```json
 {
-  "type": "clearing.completed",
-  "payload": {
-    "tx_id": "uuid",
-    "cycle": ["my_pid", "bob_pid", "charlie_pid", "my_pid"],
-    "amount": "50.00",
-    "equivalent": "UAH",
-    "my_debt_reduced": "50.00"
-  }
+  "equivalent": "UAH",
+  "cleared_cycles": 2
 }
 ```
-
-### 7.4. Команды от клиента
-
-#### Ping
-
-```json
-{
-  "type": "ping"
-}
-```
-
-**Ответ:**
-```json
-{
-  "type": "pong",
-  "timestamp": "2025-11-29T12:00:00Z"
-}
-```
-
-#### Подписка на события
-
-```json
-{
-  "type": "subscribe",
-  "payload": {
-    "events": ["payment.received", "trustline.updated"]
-  }
-}
-```
-
-#### Отписка от событий
-
-```json
-{
-  "type": "unsubscribe",
-  "payload": {
-    "events": ["payment.received"]
-  }
-}
-```
-
-### 7.5. Heartbeat (normative)
-
-- Клиент отправляет `ping` каждые 30 секунд при отсутствии исходящего трафика.
-- Сервер отвечает `pong` и обновляет `timestamp`.
-- Если в течение 90 секунд нет ни одного входящего сообщения (включая `pong`) — клиент должен считать соединение разорванным и переподключиться.
-
-### 7.6. Переподключение (reconnect) и устойчивость (normative)
-
-- Клиент должен переподключаться с backoff (например, 1s, 2s, 5s, 10s, 30s).
-- Клиент должен быть готов к дубликатам событий и не полагаться на доставку ровно один раз.
-- После переподключения клиент должен:
-  1) заново выполнить `subscribe`;
-  2) при необходимости сверить состояние через REST (например, история/список доверительных линий/платежей), так как WS не гарантирует доставку пропущенных событий.
-
-### 7.7. Гарантии доставки и порядок (normative)
-
-- Доставка: best-effort (at-most-once). Возможны пропуски и дубликаты при сетевых сбоях.
-- Порядок: порядок сообщений гарантируется только *в рамках одного соединения*; между переподключениями порядок не гарантируется.
-
-### 7.8. Ошибки WebSocket (normative)
-
-Сервер может отправлять сообщение типа `error`:
-
-```json
-{
-  "type": "error",
-  "payload": {
-    "code": "E014",
-    "message": "Too many requests",
-    "details": { }
-  },
-  "timestamp": "2025-11-29T12:00:00Z"
-}
-```
-
-После ошибок уровня auth (например, невалидный token) сервер может закрыть соединение.
 
 ---
 
@@ -791,7 +671,6 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 
 ```json
 {
-  "success": false,
   "error": {
     "code": "E003",
     "message": "Trust line limit exceeded",
@@ -807,132 +686,11 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 
 ---
 
-## 9. Admin API (Служебные эндпоинты)
-
-Доступны только пользователям с ролями `admin`, `operator`, `auditor`.
-
-Формат ответов — стандартный envelope (см. раздел 1.3).
-
-### 9.0. Health/Ready (root endpoints)
-
-Назначение: probes для деплоя/мониторинга. Эти эндпоинты обслуживаются **на корне** (пример: `http://localhost:8000/health`), а не под `/api/v1`.
-
-- `GET /health`
-- `GET /ready`
-
-### 9.0. Конфигурация и feature flags
-
-#### Получить текущую конфигурацию (read-only view)
-`GET /admin/config`
-
-#### Обновить runtime-конфигурацию (runtime subset)
-`PATCH /admin/config`
-
-#### Получить feature flags
-`GET /admin/feature-flags`
-
-#### Обновить feature flags
-`PATCH /admin/feature-flags`
-
-### 9.1. Участники (операционные действия)
-
-#### Freeze участника
-`POST /admin/participants/{pid}/freeze`
-
-**Request Body:**
-```json
-{
-  "reason": "Suspicious activity"
-}
-```
-
-#### Unfreeze участника
-`POST /admin/participants/{pid}/unfreeze`
-
-#### Список участников (пагинация)
-`GET /admin/participants?q={...}&status={...}&type={...}`
-
-#### Карточка участника
-`GET /admin/participants/{pid}`
-
-### 9.2. Эквиваленты (справочник, admin)
-
-#### Список эквивалентов
-`GET /admin/equivalents?include_inactive=false`
-
-#### Создать эквивалент
-`POST /admin/equivalents`
-
-#### Обновить эквивалент
-`PATCH /admin/equivalents/{code}`
-
-### 9.3. Транзакции и клиринг
-
-#### Список транзакций
-`GET /admin/transactions?tx_id={...}&initiator_pid={...}&type={...}&state={...}&equivalent={...}`
-
-#### Детали транзакции
-`GET /admin/transactions/{tx_id}`
-
-#### Список клиринговых транзакций
-`GET /admin/clearing?state={...}&equivalent={...}`
-
-### 9.4. Аудит и события
-
-#### Audit log (пагинация)
-`GET /admin/audit-log`
-
-#### Events timeline (пагинация)
-`GET /admin/events`
-
-### 9.5. Аналитика и граф
-
-#### Получение данных графа
-`GET /admin/analytics/graph?equivalent=UAH`
-
-**Ответ:**
-```json
-{
-  "nodes": [
-    { "id": "PID1", "label": "Alice", "type": "person" },
-    { "id": "PID2", "label": "Bob", "type": "organization" }
-  ],
-  "edges": [
-    { "from": "PID1", "to": "PID2", "limit": "1000.00", "debt": "200.00" }
-  ]
-}
-```
-
-#### Агрегированная аналитика (ликвидность/клиринг)
-`GET /admin/analytics/stats?equivalent={code?}&from_date={...}&to_date={...}`
-
-### 9.6. Целостность системы
-
-#### Статус проверки инвариантов
-`GET /admin/integrity/status`
-
-#### Запуск проверки
-`POST /admin/integrity/check`
-
-### 9.7. Управление инцидентами
-
-#### Принудительная отмена транзакции
-`POST /admin/transactions/{tx_id}/abort`
-
-**Request Body:**
-```json
-{
-  "reason": "Manual intervention due to node timeout"
-}
-```
-
----
-
 ## OpenAPI Specification
 
 Полная OpenAPI 3.0 спецификация доступна:
 - JSON: `/api/v1/openapi.json`
-- YAML: `/api/v1/openapi.yaml`
+- YAML (в репозитории): `api/openapi.yaml`
 - Swagger UI: `/api/v1/docs`
 - ReDoc: `/api/v1/redoc`
 

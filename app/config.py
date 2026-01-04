@@ -9,8 +9,20 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./geov0.db"
 
+    # Database pool (applies to client/server DBs like Postgres; SQLite uses NullPool)
+    DB_POOL_PRE_PING: bool = True
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_SECONDS: int = 30
+    DB_POOL_RECYCLE_SECONDS: int = 1800
+
+    # Database transaction isolation
+    # Applied for Postgres connections only.
+    DB_POSTGRES_ISOLATION_LEVEL: str = "SERIALIZABLE"
+
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_ENABLED: bool = False
 
     # JWT
     JWT_SECRET: str = "dev-secret-change-me-please-32chars!!"
@@ -27,6 +39,35 @@ class Settings(BaseSettings):
 
     # Payment Engine
     PREPARE_LOCK_TTL_SECONDS: int = 30
+
+    # Recovery (startup + periodic cleanup)
+    RECOVERY_ENABLED: bool = True
+    RECOVERY_INTERVAL_SECONDS: int = 60
+    PAYMENT_TX_STUCK_TIMEOUT_SECONDS: int = 120
+
+    # Payment Routing (MVP limits)
+    ROUTING_MAX_HOPS: int = 6
+    ROUTING_MAX_PATHS: int = 3
+    ROUTING_PATH_FINDING_TIMEOUT_MS: int = 50
+    ROUTING_GRAPH_CACHE_TTL_SECONDS: int = 0
+
+    # Max-flow diagnostics (MVP limits)
+    MAX_FLOW_MAX_HOPS: int = 7
+
+    # Balance
+    BALANCE_SUMMARY_CACHE_TTL_SECONDS: int = 0
+
+    # Rate limiting (in-memory, best-effort)
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_REQUESTS_PER_WINDOW: int = 120
+
+    # Observability
+    METRICS_ENABLED: bool = True
+
+    # Integrity checkpoints
+    INTEGRITY_CHECKPOINT_ENABLED: bool = True
+    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 300
 
 
 settings = Settings()

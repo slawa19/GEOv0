@@ -1,8 +1,32 @@
 import pytest
 from httpx import AsyncClient
 import base64
+import json
 from app.core.auth.crypto import generate_keypair
 from nacl.signing import SigningKey
+
+
+def _sign_payment_request(
+    *,
+    signing_key: SigningKey,
+    from_pid: str,
+    to_pid: str,
+    equivalent: str,
+    amount: str,
+    description=None,
+    constraints=None,
+) -> str:
+    payload = {
+        "to": to_pid,
+        "equivalent": equivalent,
+        "amount": amount,
+        "description": description,
+        "constraints": constraints,
+    }
+    message = (
+        f"geo:payment:request:{from_pid}:" + json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    ).encode("utf-8")
+    return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
 
 async def register_and_login(client: AsyncClient, name: str) -> dict:
     pub, priv = generate_keypair()
@@ -37,7 +61,12 @@ async def register_and_login(client: AsyncClient, name: str) -> dict:
     assert resp.status_code == 200
     tokens = resp.json()
 
-    return {"pid": pid, "pub": pub, "priv": priv, "headers": {"Authorization": f"Bearer {tokens['access_token']}"}}
+    return {
+        "pid": pid,
+        "pub": pub,
+        "priv": priv,
+        "headers": {"Authorization": f"Bearer {tokens['access_token']}"},
+    }
 
 @pytest.mark.asyncio
 async def test_register_and_auth(client: AsyncClient):
@@ -191,7 +220,19 @@ async def test_direct_payment(client: AsyncClient, db_session):
     assert resp.json()["can_pay"] is True
     
     # Execute Payment
-    pay_data = {"to": bob["pid"], "equivalent": "USD", "amount": "10.00"}
+    alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    pay_data = {
+        "to": bob["pid"],
+        "equivalent": "USD",
+        "amount": "10.00",
+        "signature": _sign_payment_request(
+            signing_key=alice_signing_key,
+            from_pid=alice["pid"],
+            to_pid=bob["pid"],
+            equivalent="USD",
+            amount="10.00",
+        ),
+    }
     resp = await client.post("/api/v1/payments", json=pay_data, headers=alice["headers"])
     assert resp.status_code == 200
     result = resp.json()
@@ -244,12 +285,95 @@ async def test_multihop_payment(client: AsyncClient, db_session):
     await client.post("/api/v1/trustlines", headers=carol["headers"], json={"to": bob["pid"], "equivalent": "USD", "limit": "100.00"})
     
     # A pays C
-    pay_data = {"to": carol["pid"], "equivalent": "USD", "amount": "50.00"}
+    alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    pay_data = {
+        "to": carol["pid"],
+        "equivalent": "USD",
+        "amount": "50.00",
+        "signature": _sign_payment_request(
+            signing_key=alice_signing_key,
+            from_pid=alice["pid"],
+            to_pid=carol["pid"],
+            equivalent="USD",
+            amount="50.00",
+        ),
+    }
     resp = await client.post("/api/v1/payments", json=pay_data, headers=alice["headers"])
     assert resp.status_code == 200
     assert resp.json()["status"] == "COMMITTED"
     
     # Check paths logic if possible, but status COMPLETED confirms it worked.
+
+
+@pytest.mark.asyncio
+async def test_multipath_payment(client: AsyncClient, db_session):
+    # A pays D using 2 disjoint paths:
+    #   A -> B -> D (capacity 30)
+    #   A -> C -> D (capacity 30)
+    # Single-path 50 would fail; multipath 50 should succeed (30 + 20).
+
+    # Seed USD
+    from app.db.models.equivalent import Equivalent
+    from sqlalchemy import select
+
+    result = await db_session.execute(select(Equivalent).where(Equivalent.code == "USD"))
+    usd = result.scalar_one_or_none()
+    if not usd:
+        usd = Equivalent(code="USD", description="US Dollar", precision=2)
+        db_session.add(usd)
+        await db_session.commit()
+        await db_session.refresh(usd)
+
+    a = await register_and_login(client, "A_Multi")
+    b = await register_and_login(client, "B_Multi")
+    c = await register_and_login(client, "C_Multi")
+    d = await register_and_login(client, "D_Multi")
+
+    # Trustlines enabling payments along edges:
+    # For X -> Y, need trustline Y trusts X (Y -> X)
+    await client.post(
+        "/api/v1/trustlines",
+        headers=b["headers"],
+        json={"to": a["pid"], "equivalent": "USD", "limit": "30.00"},
+    )
+    await client.post(
+        "/api/v1/trustlines",
+        headers=d["headers"],
+        json={"to": b["pid"], "equivalent": "USD", "limit": "30.00"},
+    )
+
+    await client.post(
+        "/api/v1/trustlines",
+        headers=c["headers"],
+        json={"to": a["pid"], "equivalent": "USD", "limit": "30.00"},
+    )
+    await client.post(
+        "/api/v1/trustlines",
+        headers=d["headers"],
+        json={"to": c["pid"], "equivalent": "USD", "limit": "30.00"},
+    )
+
+    # Payment should succeed via multipath.
+    a_signing_key = SigningKey(base64.b64decode(a["priv"]))
+    pay_data = {
+        "to": d["pid"],
+        "equivalent": "USD",
+        "amount": "50.00",
+        "signature": _sign_payment_request(
+            signing_key=a_signing_key,
+            from_pid=a["pid"],
+            to_pid=d["pid"],
+            equivalent="USD",
+            amount="50.00",
+        ),
+    }
+    resp = await client.post("/api/v1/payments", json=pay_data, headers=a["headers"])
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "COMMITTED"
+    assert float(body["amount"]) == 50.0
+    assert body.get("routes") is not None
+    assert len(body["routes"]) == 2
 
 
 @pytest.mark.asyncio
@@ -285,11 +409,59 @@ async def test_clearing(client: AsyncClient, db_session):
     
     # Create Cycle of Debts
     # A pays B 10
-    await client.post("/api/v1/payments", headers=alice["headers"], json={"to": bob["pid"], "equivalent": "USD", "amount": "10.00"})
+    alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    await client.post(
+        "/api/v1/payments",
+        headers=alice["headers"],
+        json={
+            "to": bob["pid"],
+            "equivalent": "USD",
+            "amount": "10.00",
+            "signature": _sign_payment_request(
+                signing_key=alice_signing_key,
+                from_pid=alice["pid"],
+                to_pid=bob["pid"],
+                equivalent="USD",
+                amount="10.00",
+            ),
+        },
+    )
     # B pays C 10
-    await client.post("/api/v1/payments", headers=bob["headers"], json={"to": carol["pid"], "equivalent": "USD", "amount": "10.00"})
+    bob_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+    await client.post(
+        "/api/v1/payments",
+        headers=bob["headers"],
+        json={
+            "to": carol["pid"],
+            "equivalent": "USD",
+            "amount": "10.00",
+            "signature": _sign_payment_request(
+                signing_key=bob_signing_key,
+                from_pid=bob["pid"],
+                to_pid=carol["pid"],
+                equivalent="USD",
+                amount="10.00",
+            ),
+        },
+    )
     # C pays A 10
-    await client.post("/api/v1/payments", headers=carol["headers"], json={"to": alice["pid"], "equivalent": "USD", "amount": "10.00"})
+    carol_signing_key = SigningKey(base64.b64decode(carol["priv"]))
+    await client.post(
+        "/api/v1/payments",
+        headers=carol["headers"],
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "amount": "10.00",
+            "signature": _sign_payment_request(
+                signing_key=carol_signing_key,
+                from_pid=carol["pid"],
+                to_pid=alice["pid"],
+                equivalent="USD",
+                amount="10.00",
+            ),
+        },
+    )
     
     # Now we have a cycle A->B->C->A of 10 USD.
     

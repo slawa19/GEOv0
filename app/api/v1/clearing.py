@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.core.clearing.service import ClearingService
 from app.schemas.clearing import ClearingAutoResponse, ClearingCyclesResponse
+from app.utils.distributed_lock import redis_distributed_lock
+from app.utils.validation import validate_equivalent_code
 
 router = APIRouter()
 
@@ -17,6 +19,7 @@ async def list_cycles(
     db: AsyncSession = Depends(deps.get_db),
     _current_participant=Depends(deps.get_current_participant),
 ):
+    validate_equivalent_code(equivalent)
     service = ClearingService(db)
     cycles = await service.find_cycles(equivalent, max_depth=max_depth)
     return {"cycles": cycles}
@@ -27,7 +30,11 @@ async def auto_clear(
     equivalent: str = Query(..., description="Equivalent code"),
     db: AsyncSession = Depends(deps.get_db),
     _current_participant=Depends(deps.get_current_participant),
+    redis_client=Depends(deps.get_redis_client),
 ):
+    validate_equivalent_code(equivalent)
     service = ClearingService(db)
-    cleared = await service.auto_clear(equivalent)
+    lock_key = f"dlock:clearing:{equivalent}"
+    async with redis_distributed_lock(redis_client, lock_key, ttl_seconds=30, wait_timeout_seconds=2.0):
+        cleared = await service.auto_clear(equivalent)
     return {"equivalent": equivalent, "cleared_cycles": cleared}

@@ -13,7 +13,7 @@
 4. [Linie zaufania](#4-linie-zaufania)  
 5. [Płatności](#5-płatności)  
 6. [Bilans](#6-bilans)  
-7. [WebSocket API](#7-websocket-api)  
+7. [Kliring](#7-kliring)  
 8. [Kody błędów](#8-kody-błędów)
 
 ---
@@ -36,18 +36,13 @@ Development: http://localhost:8000/api/v1
 
 ### 1.3. Standardowa odpowiedź
 
-**Sukces:**
-```json
-{
-  "success": true,
-  "data": { ... }
-}
-```
+Kanoniczny kontrakt API definiuje `api/openapi.yaml`.
 
-**Błąd:**
+W v0.1 odpowiedzi sukcesu to zazwyczaj **plain JSON** (bez envelope `{success,data}`).
+
+**Błąd (wspólny format):**
 ```json
 {
-  "success": false,
   "error": {
     "code": "E001",
     "message": "Human readable message",
@@ -58,16 +53,14 @@ Development: http://localhost:8000/api/v1
 
 ### 1.4. Paginacja
 
-```json
-{
-  "data": [...],
-  "pagination": {
-    "total": 150,
-    "page": 1,
-    "per_page": 20,
-    "pages": 8
-  }
-}
+W v0.1 paginacja odbywa się przez parametry query `page` i `per_page`.
+
+Kształt odpowiedzi list zależy od endpointu (patrz OpenAPI). Na przykład endpointy list
+zwracają obiekt w rodzaju `{ "items": [...] }`.
+
+**Parametry query:**
+- `page` (default: 1)
+- `per_page` (default: 20, max: 200)
 ```
 
 **Parametry query:**
@@ -396,6 +389,7 @@ Authorization: Bearer {token}
 ```http
 POST /payments
 Authorization: Bearer {token}
+Idempotency-Key: {key}   # optional
 Content-Type: application/json
 
 {
@@ -410,6 +404,8 @@ Content-Type: application/json
   "signature": "base64_signature"
 }
 ```
+
+**Idempotency-Key (opcjonalnie):** ponowienie tego samego żądania z tym samym kluczem zwraca ten sam wynik. Ponowne użycie klucza z innym payload zwraca `409 Conflict`.
 
 **Response (success):**
 ```json
@@ -542,97 +538,42 @@ Authorization: Bearer {token}
 
 ---
 
-## 7. WebSocket API
+## 7. Kliring
 
-### 7.1. Połączenie
+Kanoniczny kontrakt definiuje `api/openapi.yaml`.
 
-```text
-wss://hub.example.com/api/v1/ws?token={access_token}
-```
+### 7.1. Lista cykli długów (dla ekwiwalentu)
 
-### 7.2. Format wiadomości
-
-```json
-{
-  "type": "event_type",
-  "payload": { ... },
-  "timestamp": "2025-11-29T12:00:00Z"
-}
-```
-
-### 7.3. Zdarzenia z serwera
-
-#### Nowa płatność przychodząca
-
-```json
-{
-  "type": "payment.received",
-  "payload": {
-    "tx_id": "uuid",
-    "from": "sender_pid",
-    "from_name": "Alice",
-    "amount": "100.00",
-    "equivalent": "UAH",
-    "description": "Za usługi"
-  }
-}
-```
-
-#### Zmiana linii zaufania
-
-```json
-{
-  "type": "trustline.updated",
-  "payload": {
-    "id": "uuid",
-    "from": "bob_pid",
-    "limit": "1500.00",
-    "previous_limit": "1000.00"
-  }
-}
-```
-
-#### Wykonany kliring
-
-```json
-{
-  "type": "clearing.completed",
-  "payload": {
-    "tx_id": "uuid",
-    "cycle": ["my_pid", "bob_pid", "charlie_pid", "my_pid"],
-    "amount": "50.00",
-    "equivalent": "UAH",
-    "my_debt_reduced": "50.00"
-  }
-}
-```
-
-### 7.4. Komendy klienta
-
-#### Ping
-
-```json
-{
-  "type": "ping"
-}
+```http
+GET /clearing/cycles?equivalent=UAH&max_depth=6
+Authorization: Bearer {access_token}
 ```
 
 **Odpowiedź:**
 ```json
 {
-  "type": "pong",
-  "timestamp": "2025-11-29T12:00:00Z"
+  "cycles": [
+    [
+      {"debt_id": "uuid", "debtor": "A", "creditor": "B", "amount": "10.00"},
+      {"debt_id": "uuid", "debtor": "B", "creditor": "C", "amount": "10.00"},
+      {"debt_id": "uuid", "debtor": "C", "creditor": "A", "amount": "10.00"}
+    ]
+  ]
 }
 ```
 
-#### Subskrypcja zdarzeń
+### 7.2. Auto-kliring cykli (dla ekwiwalentu)
 
+```http
+POST /clearing/auto?equivalent=UAH
+Authorization: Bearer {access_token}
+```
+
+**Odpowiedź:**
 ```json
 {
-  "type": "subscribe",
-  "payload": {
-    "events": ["payment.received", "trustline.updated"]
-  }
+  "equivalent": "UAH",
+  "cleared_cycles": 2
 }
 ```
 
@@ -663,7 +604,6 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 
 ```json
 {
-  "success": false,
   "error": {
     "code": "E003",
     "message": "Trust line limit exceeded",
@@ -684,7 +624,7 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 Pełna specyfikacja OpenAPI 3.0 jest dostępna pod adresami:
 
 - JSON: `/api/v1/openapi.json`  
-- YAML: `/api/v1/openapi.yaml`  
+- YAML (w repozytorium): `api/openapi.yaml`  
 - Swagger UI: `/api/v1/docs`  
 - ReDoc: `/api/v1/redoc`
 

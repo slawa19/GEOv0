@@ -13,7 +13,7 @@
 4. [Trust Lines](#4-trust-lines)
 5. [Payments](#5-payments)
 6. [Balance](#6-balance)
-7. [WebSocket API](#7-websocket-api)
+7. [Clearing](#7-clearing)
 8. [Error Codes](#8-error-codes)
 
 ---
@@ -36,18 +36,13 @@ Development: http://localhost:8000/api/v1
 
 ### 1.3. Standard Response
 
-**Success:**
-```json
-{
-  "success": true,
-  "data": { ... }
-}
-```
+The canonical API contract is defined by `api/openapi.yaml`.
 
-**Error:**
+In v0.1, successful responses are typically **plain JSON** (no `{success,data}` envelope).
+
+**Error (common format):**
 ```json
 {
-  "success": false,
   "error": {
     "code": "E001",
     "message": "Human readable message",
@@ -58,16 +53,14 @@ Development: http://localhost:8000/api/v1
 
 ### 1.4. Pagination
 
-```json
-{
-  "data": [...],
-  "pagination": {
-    "total": 150,
-    "page": 1,
-    "per_page": 20,
-    "pages": 8
-  }
-}
+In v0.1 pagination is done via query parameters `page` and `per_page`.
+
+The shape of successful list responses depends on the endpoint (see OpenAPI). For example,
+list endpoints return an object like `{ "items": [...] }`.
+
+**Query parameters:**
+- `page` (default: 1)
+- `per_page` (default: 20, max: 200)
 ```
 
 **Query parameters:**
@@ -393,6 +386,7 @@ Authorization: Bearer {token}
 ```http
 POST /payments
 Authorization: Bearer {token}
+Idempotency-Key: {key}   # optional
 Content-Type: application/json
 
 {
@@ -407,6 +401,8 @@ Content-Type: application/json
   "signature": "base64_signature"
 }
 ```
+
+**Idempotency-Key (optional):** retrying the same request with the same key returns the same result. Re-using the key with a different payload returns `409 Conflict`.
 
 **Response (success):**
 ```json
@@ -538,97 +534,42 @@ Authorization: Bearer {token}
 
 ---
 
-## 7. WebSocket API
+## 7. Clearing
 
-### 7.1. Connection
+The canonical contract is defined in `api/openapi.yaml`.
 
-```
-wss://hub.example.com/api/v1/ws?token={access_token}
-```
+### 7.1. List debt cycles (by equivalent)
 
-### 7.2. Message format
-
-```json
-{
-  "type": "event_type",
-  "payload": { ... },
-  "timestamp": "2025-11-29T12:00:00Z"
-}
-```
-
-### 7.3. Server events
-
-#### New incoming payment
-
-```json
-{
-  "type": "payment.received",
-  "payload": {
-    "tx_id": "uuid",
-    "from": "sender_pid",
-    "from_name": "Alice",
-    "amount": "100.00",
-    "equivalent": "UAH",
-    "description": "For services"
-  }
-}
-```
-
-#### Trust line change
-
-```json
-{
-  "type": "trustline.updated",
-  "payload": {
-    "id": "uuid",
-    "from": "bob_pid",
-    "limit": "1500.00",
-    "previous_limit": "1000.00"
-  }
-}
-```
-
-#### Clearing completed
-
-```json
-{
-  "type": "clearing.completed",
-  "payload": {
-    "tx_id": "uuid",
-    "cycle": ["my_pid", "bob_pid", "charlie_pid", "my_pid"],
-    "amount": "50.00",
-    "equivalent": "UAH",
-    "my_debt_reduced": "50.00"
-  }
-}
-```
-
-### 7.4. Client commands
-
-#### Ping
-
-```json
-{
-  "type": "ping"
-}
+```http
+GET /clearing/cycles?equivalent=UAH&max_depth=6
+Authorization: Bearer {access_token}
 ```
 
 **Response:**
 ```json
 {
-  "type": "pong",
-  "timestamp": "2025-11-29T12:00:00Z"
+  "cycles": [
+    [
+      {"debt_id": "uuid", "debtor": "A", "creditor": "B", "amount": "10.00"},
+      {"debt_id": "uuid", "debtor": "B", "creditor": "C", "amount": "10.00"},
+      {"debt_id": "uuid", "debtor": "C", "creditor": "A", "amount": "10.00"}
+    ]
+  ]
 }
 ```
 
-#### Subscribe to events
+### 7.2. Auto-clear cycles (by equivalent)
 
+```http
+POST /clearing/auto?equivalent=UAH
+Authorization: Bearer {access_token}
+```
+
+**Response:**
 ```json
 {
-  "type": "subscribe",
-  "payload": {
-    "events": ["payment.received", "trustline.updated"]
-  }
+  "equivalent": "UAH",
+  "cleared_cycles": 2
 }
 ```
 
@@ -659,7 +600,6 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 
 ```json
 {
-  "success": false,
   "error": {
     "code": "E003",
     "message": "Trust line limit exceeded",
@@ -679,7 +619,7 @@ wss://hub.example.com/api/v1/ws?token={access_token}
 
 Full OpenAPI 3.0 specification available:
 - JSON: `/api/v1/openapi.json`
-- YAML: `/api/v1/openapi.yaml`
+- YAML (in repository): `api/openapi.yaml`
 - Swagger UI: `/api/v1/docs`
 - ReDoc: `/api/v1/redoc`
 

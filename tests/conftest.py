@@ -1,9 +1,10 @@
+import asyncio
+from typing import AsyncGenerator
+
 import pytest
 import pytest_asyncio
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from httpx import AsyncClient
-import asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from app.main import app
 from app.config import settings
 from app.db.base import Base
@@ -11,6 +12,7 @@ from app.api.deps import get_db
 from app.core.auth.crypto import generate_keypair
 import uuid
 from sqlalchemy import text
+from fastapi.testclient import TestClient
 
 # --- Database Fixtures ---
 
@@ -20,6 +22,10 @@ from sqlalchemy import text
 # IMPORTANT: For real production tests, use a separate TEST_DATABASE_URL.
 TEST_DATABASE_URL = settings.DATABASE_URL
 
+# Test suite runs many HTTP calls quickly; disable best-effort rate limiting
+# to avoid cross-test interference and flaky 429s.
+settings.RATE_LIMIT_ENABLED = False
+
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestingSessionLocal = async_sessionmaker(
     bind=engine,
@@ -28,25 +34,19 @@ TestingSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for each test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def init_db():
+@pytest.fixture(scope="session", autouse=True)
+def init_db():
     """Initialize the database (create tables) once for the session."""
-    async with engine.begin() as conn:
-        if engine.url.get_backend_name() in {"postgresql", "postgres"}:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    # Optional: cleanup after session
-    # async with engine.begin() as conn:
-    #     await conn.run_sync(Base.metadata.drop_all)
+
+    async def _init() -> None:
+        async with engine.begin() as conn:
+            if engine.url.get_backend_name() in {"postgresql", "postgres"}:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_init())
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -69,11 +69,54 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        yield ac
-    
-    app.dependency_overrides.clear()
+
+    await app.router.startup()
+    try:
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            yield ac
+    finally:
+        await app.router.shutdown()
+        app.dependency_overrides.clear()
+
+
+# --- Sync E2E Example Fixtures ---
+
+@pytest.fixture
+def http_client():
+    """Synchronous client for placeholder e2e example tests."""
+    with TestClient(app) as tc:
+        yield tc
+
+
+@pytest.fixture
+def reset_state():
+    """Placeholder reset hook for example tests.
+
+    The real e2e suite will likely reset DB/queues; for now it's a no-op to keep
+    the example tests runnable.
+    """
+    yield
+
+
+@pytest.fixture
+def collect_artifacts(tmp_path):
+    """Placeholder artifact collector for example tests."""
+    def _collect(name: str, payload: object | None = None) -> None:
+        return None
+
+    return _collect
+
+
+@pytest.fixture
+def alice_keys():
+    public_key, private_key = generate_keypair()
+    return private_key, public_key, "alice"
+
+
+@pytest.fixture
+def bob_keys():
+    public_key, private_key = generate_keypair()
+    return private_key, public_key, "bob"
 
 # --- Auth Helpers ---
 

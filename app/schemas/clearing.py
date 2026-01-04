@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
 
 from pydantic import BaseModel
 
 
 class ClearingCycleEdge(BaseModel):
-    debt_id: UUID
-    debtor: UUID
-    creditor: UUID
-    amount: Decimal
+    debt_id: str
+    debtor: str
+    creditor: str
+    amount: str
 
 
 class ClearingCyclesResponse(BaseModel):

@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import List, Optional
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
+from app.utils.exceptions import BadRequestException, NotFoundException, ForbiddenException, ConflictException
 
 from app.db.models.trustline import TrustLine
 from app.db.models.participant import Participant
@@ -11,38 +11,37 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.debt import Debt
 from app.schemas.trustline import TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
+from app.utils.validation import validate_equivalent_code, validate_trustline_policy
 
 class TrustLineService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
     async def create(self, from_participant_id: UUID, data: TrustLineCreateRequest) -> TrustLine:
+        if data.limit < 0:
+            raise BadRequestException("Limit must be >= 0")
+
+        validate_equivalent_code(data.equivalent)
+        if data.policy is not None:
+            validate_trustline_policy(data.policy)
+
         # Check existence of 'to' participant (by PID)
         stmt = select(Participant).where(Participant.pid == data.to)
         result = await self.session.execute(stmt)
         to_participant = result.scalar_one_or_none()
         if not to_participant:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Recipient participant not found"
-            )
+            raise NotFoundException("Recipient participant not found")
 
         # Check if self-trust
         if from_participant_id == to_participant.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot create trustline to self",
-            )
+            raise BadRequestException("Cannot create trustline to self")
 
         # Check equivalent
         stmt = select(Equivalent).where(Equivalent.code == data.equivalent)
         result = await self.session.execute(stmt)
         equivalent = result.scalar_one_or_none()
         if not equivalent:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Equivalent '{data.equivalent}' not found"
-            )
+            raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
         # Check for duplicate active trustline
         stmt = select(TrustLine).where(
@@ -56,10 +55,7 @@ class TrustLineService:
         result = await self.session.execute(stmt)
         existing_trustline = result.scalar_one_or_none()
         if existing_trustline:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Active trustline already exists"
-            )
+            raise ConflictException("Active trustline already exists")
 
         # Create TrustLine
         trustline = TrustLine(
@@ -105,15 +101,18 @@ class TrustLineService:
         trustline = result.scalar_one_or_none()
 
         if not trustline:
-            raise HTTPException(status_code=404, detail="Trustline not found")
+            raise NotFoundException("Trustline not found")
 
         if trustline.from_participant_id != user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to update this trustline")
+            raise ForbiddenException("Not authorized to update this trustline")
 
         if data.limit is not None:
+            if data.limit < 0:
+                raise BadRequestException("Limit must be >= 0")
             trustline.limit = data.limit
         
         if data.policy is not None:
+            validate_trustline_policy(data.policy)
             # Merge or replace policy? Usually merge or replace. Assuming replace for now or merge top level.
             # Schema says optional dict. Let's update existing dict.
             current_policy = dict(trustline.policy) if trustline.policy else {}
@@ -130,27 +129,50 @@ class TrustLineService:
         trustline = result.scalar_one_or_none()
 
         if not trustline:
-            raise HTTPException(status_code=404, detail="Trustline not found")
+            raise NotFoundException("Trustline not found")
 
         if trustline.from_participant_id != user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to close this trustline")
+            raise ForbiddenException("Not authorized to close this trustline")
 
         # Check debt
         used = await self._get_used_amount(trustline)
-        if used > 0:
-            raise HTTPException(status_code=400, detail="Cannot close trustline with non-zero debt usage")
+        reverse_used = await self._get_reverse_used_amount(trustline)
+        if used > 0 or reverse_used > 0:
+            raise BadRequestException("Cannot close trustline with non-zero debt")
 
         trustline.status = 'closed'
         await self.session.commit()
 
-    async def get_by_participant(self, participant_id: UUID, direction: str = "outgoing") -> List[TrustLine]:
-        # direction: 'outgoing' (I trust someone) or 'incoming' (someone trusts me)
+    async def get_by_participant(
+        self,
+        participant_id: UUID,
+        *,
+        direction: str = "all",
+        equivalent: str | None = None,
+    ) -> List[TrustLine]:
+        # direction: 'outgoing' (I trust someone) | 'incoming' (someone trusts me) | 'all'
         query = select(TrustLine).where(TrustLine.status == 'active')
-        
+
         if direction == "outgoing":
             query = query.where(TrustLine.from_participant_id == participant_id)
         elif direction == "incoming":
             query = query.where(TrustLine.to_participant_id == participant_id)
+        else:
+            query = query.where(
+                or_(
+                    TrustLine.from_participant_id == participant_id,
+                    TrustLine.to_participant_id == participant_id,
+                )
+            )
+
+        if equivalent:
+            validate_equivalent_code(equivalent)
+            eq = (
+                await self.session.execute(select(Equivalent).where(Equivalent.code == equivalent))
+            ).scalar_one_or_none()
+            if not eq:
+                raise NotFoundException(f"Equivalent '{equivalent}' not found")
+            query = query.where(TrustLine.equivalent_id == eq.id)
         
         result = await self.session.execute(query)
         trustlines = result.scalars().all()
@@ -165,7 +187,7 @@ class TrustLineService:
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
         if not trustline:
-            raise HTTPException(status_code=404, detail="Trustline not found")
+            raise NotFoundException("Trustline not found")
         return await self._hydrate_trustline(trustline)
 
     async def _hydrate_trustline(self, trustline: TrustLine) -> TrustLine:
@@ -212,6 +234,19 @@ class TrustLineService:
                 Debt.debtor_id == trustline.to_participant_id,
                 Debt.creditor_id == trustline.from_participant_id,
                 Debt.equivalent_id == trustline.equivalent_id
+            )
+        )
+        result = await self.session.execute(stmt)
+        amount = result.scalar_one_or_none()
+        return amount if amount is not None else Decimal('0')
+
+    async def _get_reverse_used_amount(self, trustline: TrustLine) -> Decimal:
+        # Reverse debt: debtor is 'from' and creditor is 'to'
+        stmt = select(Debt.amount).where(
+            and_(
+                Debt.debtor_id == trustline.from_participant_id,
+                Debt.creditor_id == trustline.to_participant_id,
+                Debt.equivalent_id == trustline.equivalent_id,
             )
         )
         result = await self.session.execute(stmt)

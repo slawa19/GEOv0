@@ -1,30 +1,58 @@
 import logging
+import heapq
+import time
 from decimal import Decimal
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Iterable
 from uuid import UUID
 
-from sqlalchemy import select, and_
+from app.utils.observability import log_duration
+
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.trustline import TrustLine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
+from app.db.models.prepare_lock import PrepareLock
 from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath, Bottleneck
+from app.config import settings
+from app.utils.metrics import ROUTING_FAILURES_TOTAL
+from app.utils.validation import validate_equivalent_code
 
 logger = logging.getLogger(__name__)
 
 class PaymentRouter:
+    _graph_cache: Dict[str, Tuple[float, Dict[str, Dict[str, Decimal]], Dict[str, Dict[str, bool]], Dict[UUID, str], Dict[str, UUID]]] = {}
+
     def __init__(self, session: AsyncSession):
         self.session = session
         # Graph structure: { from_pid: { to_pid: capacity } }
         self.graph: Dict[str, Dict[str, Decimal]] = {}
+        # Edge flags: { from_pid: { to_pid: can_be_intermediate } }
+        self.edge_can_be_intermediate: Dict[str, Dict[str, bool]] = {}
         self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
         self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
 
     async def build_graph(self, equivalent_code: str):
-        """
-        Loads all trustlines and debts for the given equivalent and builds the capacity graph.
-        """
+        """Loads all trustlines and debts for the given equivalent and builds the capacity graph."""
+        validate_equivalent_code(equivalent_code)
+        with log_duration(logger, "router.build_graph", equivalent=equivalent_code):
+            ttl = int(getattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0) or 0)
+            if ttl > 0:
+                cached = self._graph_cache.get(equivalent_code)
+                if cached is not None:
+                    cached_at, graph, edge_policy, pids, uuids = cached
+                    if (time.time() - cached_at) <= ttl:
+                        # Shallow copies are enough because nested values are Decimals/bools.
+                        self.graph = {u: dict(v) for u, v in graph.items()}
+                        self.edge_can_be_intermediate = {u: dict(v) for u, v in edge_policy.items()}
+                        self.pids = dict(pids)
+                        self.uuids = dict(uuids)
+                        return
+
+            await self._build_graph_impl(equivalent_code)
+
+    async def _build_graph_impl(self, equivalent_code: str) -> None:
         # 1. Get Equivalent ID
         stmt = select(Equivalent).where(Equivalent.code == equivalent_code)
         result = await self.session.execute(stmt)
@@ -49,6 +77,11 @@ class PaymentRouter:
         stmt = select(Debt).where(Debt.equivalent_id == equivalent.id)
         result = await self.session.execute(stmt)
         debts = result.scalars().all()
+
+        # 3b. Load all active PrepareLocks (to account for reserved capacity)
+        lock_stmt = select(PrepareLock).where(PrepareLock.expires_at > func.now())
+        lock_result = await self.session.execute(lock_stmt)
+        active_locks = lock_result.scalars().all()
         
         # Helper to map UUID -> PID
         # We can't easily join efficiently without loading participants.
@@ -67,6 +100,16 @@ class PaymentRouter:
             all_participant_ids.add(d.debtor_id)
             all_participant_ids.add(d.creditor_id)
 
+        # Locks might include participants not present in current trustlines/debts lists.
+        for lock in active_locks:
+            all_participant_ids.add(lock.participant_id)
+            for flow in (lock.effects or {}).get('flows', []):
+                try:
+                    all_participant_ids.add(UUID(flow['from']))
+                    all_participant_ids.add(UUID(flow['to']))
+                except Exception:
+                    continue
+
         if not all_participant_ids:
             self.graph = {}
             return
@@ -81,13 +124,36 @@ class PaymentRouter:
 
         # Initialize graph
         self.graph = {pid: {} for pid in self.pids.values()}
+        self.edge_can_be_intermediate = {pid: {} for pid in self.pids.values()}
 
         # 4. Process Debts into a lookup: (debtor_id, creditor_id) -> amount
         debt_map = {} # (debtor_uuid, creditor_uuid) -> amount
         for d in debts:
             debt_map[(d.debtor_id, d.creditor_id)] = d.amount
 
-        # 5. Build edges
+        # 5. Build reserved capacity map from active locks: (from_pid, to_pid) -> reserved_amount
+        reserved_map: Dict[Tuple[str, str], Decimal] = {}
+        for lock in active_locks:
+            for flow in (lock.effects or {}).get('flows', []):
+                try:
+                    eq_id = UUID(flow['equivalent'])
+                    if eq_id != equivalent.id:
+                        continue
+                    from_id = UUID(flow['from'])
+                    to_id = UUID(flow['to'])
+                    amt = Decimal(str(flow['amount']))
+                except Exception:
+                    continue
+
+                from_pid = self.pids.get(from_id)
+                to_pid = self.pids.get(to_id)
+                if not from_pid or not to_pid:
+                    continue
+
+                key = (from_pid, to_pid)
+                reserved_map[key] = reserved_map.get(key, Decimal('0')) + amt
+
+        # 6. Build edges
         # Payment flow direction is Sender -> Receiver.
         # A payment S -> R increases S's debt to R.
         # Therefore, the credit limit that enables S -> R is the TrustLine R -> S
@@ -103,6 +169,15 @@ class PaymentRouter:
                 continue
 
             limit = tl.limit
+            can_be_intermediate = True
+            if tl.policy is not None:
+                can_be_intermediate = bool(tl.policy.get('can_be_intermediate', True))
+                # Best-effort: if max_hop_usage is explicitly 0, treat as forbid intermediate usage.
+                try:
+                    if int(tl.policy.get('max_hop_usage', 1)) == 0:
+                        can_be_intermediate = False
+                except Exception:
+                    pass
 
             # Debt(debtor -> creditor)
             debt_debtor_owes_creditor = debt_map.get((debtor_id, creditor_id), Decimal('0'))
@@ -112,8 +187,26 @@ class PaymentRouter:
             # - can create more debt up to (limit - current_debt)
             # - can also offset reverse debt (creditor owes debtor)
             cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor
+
+            # Subtract reserved capacity due to other prepared transactions.
+            cap -= reserved_map.get((debtor_pid, creditor_pid), Decimal('0'))
             if cap > 0:
                 self._add_capacity(debtor_pid, creditor_pid, cap)
+                self._set_edge_policy(debtor_pid, creditor_pid, can_be_intermediate)
+
+        # Debt-only capacity is already included via the trustline-based formula:
+        # cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor.
+        # If limit=0 and creditor owes debtor, debt_creditor_owes_debtor still provides positive capacity.
+
+        ttl = int(getattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0) or 0)
+        if ttl > 0:
+            self._graph_cache[equivalent_code] = (
+                time.time(),
+                {u: dict(v) for u, v in self.graph.items()},
+                {u: dict(v) for u, v in self.edge_can_be_intermediate.items()},
+                dict(self.pids),
+                dict(self.uuids),
+            )
 
     def _add_capacity(self, u: str, v: str, amount: Decimal):
         if u not in self.graph:
@@ -121,54 +214,242 @@ class PaymentRouter:
         current = self.graph[u].get(v, Decimal('0'))
         self.graph[u][v] = current + amount
 
-    def find_paths(self, from_pid: str, to_pid: str, amount: Decimal, max_hops: int = 6) -> List[List[str]]:
-        """
-        Find paths from source to target with sufficient capacity.
-        Uses BFS to find shortest path by hops.
-        Returns list of paths (list of nodes).
-        For MVP, finding just one shortest path is often enough, but let's try to support multi-path conceptually.
-        Actually, standard payments usually use one path. 
-        Max-flow splits across paths.
-        
-        Here we implement simple BFS for the shortest path with capacity >= amount.
-        """
-        if from_pid not in self.graph or to_pid not in self.graph:
-            return []
+    def _set_edge_policy(self, u: str, v: str, can_be_intermediate: bool) -> None:
+        if u not in self.edge_can_be_intermediate:
+            self.edge_can_be_intermediate[u] = {}
+        self.edge_can_be_intermediate[u][v] = can_be_intermediate
 
-        queue = [(from_pid, [from_pid])] # (current_node, path)
-        visited = {from_pid} # Visited set to avoid cycles. 
-        # Note: BFS finds shortest path in unweighted graph (hops).
-        
-        # Limitation: This BFS stops at first match.
-        # If we want k-shortest paths, it's more complex.
-        # For MVP "check_capacity", one valid path is enough.
-        
+    def _edge_allows_intermediate(self, u: str, v: str) -> bool:
+        return self.edge_can_be_intermediate.get(u, {}).get(v, True)
+
+    def _bfs_single_path(
+        self,
+        from_pid: str,
+        to_pid: str,
+        amount: Decimal,
+        *,
+        max_hops: int,
+        forbidden_edges: Set[Tuple[str, str]] | None = None,
+        forbidden_nodes: Set[str] | None = None,
+        graph_override: Dict[str, Dict[str, Decimal]] | None = None,
+    ) -> Optional[List[str]]:
+        graph = graph_override or self.graph
+
+        if from_pid not in graph or to_pid not in graph:
+            return None
+
+        forbidden_edges = forbidden_edges or set()
+        forbidden_nodes = forbidden_nodes or set()
+
+        if from_pid in forbidden_nodes or to_pid in forbidden_nodes:
+            return None
+
+        queue: List[Tuple[str, List[str]]] = [(from_pid, [from_pid])]
+
         while queue:
             current, path = queue.pop(0)
-            
             if current == to_pid:
-                return [path]
-            
-            if len(path) > max_hops:
+                return path
+
+            if (len(path) - 1) >= max_hops:
                 continue
-                
-            neighbors = self.graph.get(current, {})
-            for neighbor, capacity in neighbors.items():
-                if neighbor not in visited and capacity >= amount:
-                    visited.add(neighbor) # Mark visited when enqueuing for BFS
-                    queue.append((neighbor, path + [neighbor]))
-                    
-        return []
+
+            for neighbor, capacity in graph.get(current, {}).items():
+                if (current, neighbor) in forbidden_edges:
+                    continue
+                if neighbor in forbidden_nodes:
+                    continue
+                if capacity <= 0:
+                    continue
+                if capacity < amount:
+                    continue
+                if neighbor in path:
+                    continue
+
+                # Enforce can_be_intermediate on the edge when neighbor is used as intermediate.
+                if neighbor not in {from_pid, to_pid}:
+                    if not self._edge_allows_intermediate(current, neighbor):
+                        continue
+
+                queue.append((neighbor, path + [neighbor]))
+
+        return None
+
+    def _path_bottleneck(self, path: List[str], *, graph: Dict[str, Dict[str, Decimal]]) -> Decimal:
+        b = Decimal('Infinity')
+        for u, v in zip(path[:-1], path[1:]):
+            b = min(b, graph.get(u, {}).get(v, Decimal('0')))
+        return b
+
+    def find_flow_routes(
+        self,
+        from_pid: str,
+        to_pid: str,
+        amount: Decimal,
+        *,
+        max_hops: int = 6,
+        max_paths: int = 3,
+    ) -> List[Tuple[List[str], Decimal]]:
+        """Find up to max_paths routes that sum to amount.
+
+        MVP multipath: iterative augmentation on a residual copy of the capacity graph.
+        - Respects edge can_be_intermediate constraints.
+        - Enforces max_hops.
+        """
+        if amount <= 0 or max_paths <= 0:
+            return []
+
+        timeout_ms = int(getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 50) or 50)
+        deadline = time.perf_counter() + (max(1, timeout_ms) / 1000.0)
+
+        # Working copy; subtract allocations to avoid over-committing shared edges.
+        residual: Dict[str, Dict[str, Decimal]] = {u: d.copy() for u, d in self.graph.items()}
+
+        remaining = amount
+        routes: List[Tuple[List[str], Decimal]] = []
+
+        while remaining > 0 and len(routes) < max_paths:
+            if time.perf_counter() >= deadline:
+                try:
+                    ROUTING_FAILURES_TOTAL.labels(reason="timeout").inc()
+                except Exception:
+                    pass
+                logger.info(
+                    "event=routing.timeout from_pid=%s to_pid=%s equivalent_timeout_ms=%s",
+                    from_pid,
+                    to_pid,
+                    timeout_ms,
+                )
+                return []
+
+            path = self._bfs_single_path(
+                from_pid,
+                to_pid,
+                Decimal('0'),
+                max_hops=max_hops,
+                graph_override=residual,
+            )
+            if not path:
+                break
+
+            bottleneck = self._path_bottleneck(path, graph=residual)
+            if bottleneck <= 0:
+                break
+
+            alloc = min(remaining, bottleneck)
+            if alloc <= 0:
+                break
+
+            # Update residual capacities along the path.
+            for u, v in zip(path[:-1], path[1:]):
+                new_cap = residual.get(u, {}).get(v, Decimal('0')) - alloc
+                if new_cap <= 0:
+                    residual.get(u, {}).pop(v, None)
+                else:
+                    residual[u][v] = new_cap
+
+            routes.append((path, alloc))
+            remaining -= alloc
+
+        if remaining > 0:
+            return []
+        return routes
+
+    def find_paths(
+        self,
+        from_pid: str,
+        to_pid: str,
+        amount: Decimal,
+        max_hops: int = 6,
+        k: int = 3,
+    ) -> List[List[str]]:
+        """Find up to k shortest (by hops) simple paths with capacity >= amount.
+
+        Implements Yen's algorithm for k-shortest simple paths, using BFS as the
+        shortest-path oracle (unweighted edges => shortest by hop count).
+
+        Tie-break: among equal hop-count candidates, prefer higher bottleneck.
+        """
+
+        if k <= 0:
+            return []
+
+        first = self._bfs_single_path(from_pid, to_pid, amount, max_hops=max_hops)
+        if not first:
+            return []
+
+        def _path_bottleneck_for_sort(path: List[str]) -> Decimal:
+            return self._path_bottleneck(path, graph=self.graph)
+
+        shortest_paths: List[List[str]] = [first]
+        # Min-heap of candidates: (hop_len, -bottleneck, path_tuple)
+        candidate_heap: List[Tuple[int, Decimal, Tuple[str, ...]]] = []
+        candidate_set: Set[Tuple[str, ...]] = set()
+
+        for _ in range(1, k):
+            prev = shortest_paths[-1]
+
+            for j in range(len(prev) - 1):
+                root_path = prev[: j + 1]
+                spur_node = prev[j]
+
+                # Forbid edges that would recreate any previously accepted path
+                # that shares the same root.
+                forbidden_edges: Set[Tuple[str, str]] = set()
+                for p in shortest_paths:
+                    if len(p) > j and p[: j + 1] == root_path:
+                        forbidden_edges.add((p[j], p[j + 1]))
+
+                # Forbid nodes in root_path except spur_node to enforce simple paths.
+                forbidden_nodes: Set[str] = set(root_path[:-1])
+
+                spur_path = self._bfs_single_path(
+                    spur_node,
+                    to_pid,
+                    amount,
+                    max_hops=max_hops - j,
+                    forbidden_edges=forbidden_edges,
+                    forbidden_nodes=forbidden_nodes,
+                )
+                if not spur_path:
+                    continue
+
+                candidate = root_path[:-1] + spur_path
+                candidate_t = tuple(candidate)
+                if candidate_t in candidate_set:
+                    continue
+                if candidate in shortest_paths:
+                    continue
+
+                hop_len = len(candidate)
+                bn = _path_bottleneck_for_sort(candidate)
+                heapq.heappush(candidate_heap, (hop_len, -bn, candidate_t))
+                candidate_set.add(candidate_t)
+
+            if not candidate_heap:
+                break
+
+            hop_len, neg_bn, best = heapq.heappop(candidate_heap)
+            candidate_set.discard(best)
+            shortest_paths.append(list(best))
+
+        return shortest_paths
 
     def check_capacity(self, from_pid: str, to_pid: str, amount: Decimal) -> CapacityResponse:
-        paths = self.find_paths(from_pid, to_pid, amount)
-        can_pay = len(paths) > 0
+        routes = self.find_flow_routes(
+            from_pid,
+            to_pid,
+            amount,
+            max_hops=settings.ROUTING_MAX_HOPS,
+            max_paths=settings.ROUTING_MAX_PATHS,
+        )
+        can_pay = len(routes) > 0
         
         return CapacityResponse(
             can_pay=can_pay,
-            max_amount=str(amount) if can_pay else "0", # This logic is slightly circular, max_amount logic needs real max flow
-            routes_count=len(paths),
-            estimated_hops=len(paths[0]) - 1 if paths else None
+            max_amount=str(amount) if can_pay else "0", # Circular in MVP; use /max-flow for estimate
+            routes_count=len(routes),
+            estimated_hops=(len(routes[0][0]) - 1) if routes else None,
         )
     
     def calculate_max_flow(self, from_pid: str, to_pid: str) -> MaxFlowResponse:
@@ -193,7 +474,7 @@ class PaymentRouter:
                     path_found = (path, flow)
                     break
                 
-                if len(path) > 7: # Limit hops for performance
+                if len(path) > settings.MAX_FLOW_MAX_HOPS: # Limit hops for performance
                     continue
 
                 for v, cap in residual_graph.get(u, {}).items():

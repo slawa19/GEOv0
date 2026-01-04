@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +24,7 @@ async def get_balance(
 @router.get("/balance/debts", response_model=DebtsDetails)
 async def get_debts(
     equivalent: str = Query(..., description="Equivalent code"),
-    direction: str = Query('all', enum=['outgoing', 'incoming', 'all']),
+    direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),
     current_participant: Participant = Depends(get_current_participant),
     db: AsyncSession = Depends(get_db)
 ):

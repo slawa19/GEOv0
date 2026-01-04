@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 class ParticipantBase(BaseModel):
-    display_name: str
+    display_name: str = Field(..., min_length=1, max_length=255)
     type: str = Field(..., pattern="^(person|organization|hub)$")
     public_key: str
 
@@ -19,8 +20,7 @@ class Participant(ParticipantBase):
     updated_at: datetime
     profile: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ParticipantsList(BaseModel):
     items: List[Participant]

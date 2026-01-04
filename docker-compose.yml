@@ -37,6 +37,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://geo:geo@db:5432/geov0
       REDIS_URL: redis://redis:6379/0
+      REDIS_ENABLED: "true"
       JWT_SECRET: change-me-in-production
       JWT_ALGORITHM: HS256
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 15

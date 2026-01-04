@@ -35,6 +35,16 @@ class ConflictException(GeoException):
     def __init__(self, message: str, code: str = "CONFLICT", details: Optional[Dict[str, Any]] = None):
         super().__init__(message, code, details, status_code=409)
 
+
+class TooManyRequestsException(GeoException):
+    def __init__(
+        self,
+        message: str = "Too many requests",
+        code: str = "TOO_MANY_REQUESTS",
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(message, code, details, status_code=429)
+
 class CryptoException(GeoException):
     """Exceptions related to cryptographic operations"""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):

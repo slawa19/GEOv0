@@ -1,4 +1,4 @@
-from sqlalchemy import DateTime, JSON, String, Text, func
+from sqlalchemy import DateTime, Integer, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
@@ -8,5 +8,6 @@ class Config(Base):
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[dict] = mapped_column(JSON, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     updated_by: Mapped[str | None] = mapped_column(String(64))

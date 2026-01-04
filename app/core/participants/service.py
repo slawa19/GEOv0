@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.db.models.participant import Participant
 from app.schemas.participant import ParticipantCreateRequest
@@ -21,11 +22,18 @@ class ParticipantService:
         except Exception:
             raise BadRequestException("Invalid public key")
 
-        # 2. Check if participant already exists
-        result = await self.db.execute(select(Participant).where(Participant.pid == pid))
+        # 2. Check if participant already exists (by derived PID or by public_key)
+        result = await self.db.execute(
+            select(Participant).where(
+                or_(
+                    Participant.pid == pid,
+                    Participant.public_key == participant_in.public_key,
+                )
+            )
+        )
         existing = result.scalar_one_or_none()
         if existing:
-            raise ConflictException(f"Participant with PID {pid} already exists")
+            raise ConflictException("Participant already exists")
 
         # 3. Verify signature (proof-of-possession + binding of key to identity fields)
         # Canonical message is part of the API contract for MVP.
@@ -48,7 +56,12 @@ class ParticipantService:
             verification_level=0
         )
         self.db.add(participant)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            # Covers race conditions against unique constraints (pid/public_key).
+            await self.db.rollback()
+            raise ConflictException("Participant already exists")
         await self.db.refresh(participant)
         return participant
 

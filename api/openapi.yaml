@@ -180,6 +180,23 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /trustlines/{id}:
+    get:
+      tags: [TrustLines]
+      summary: Get trustline
+      parameters:
+        - $ref: '#/components/parameters/TrustLineIdPath'
+      responses:
+        '200':
+          description: Trustline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustLine'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
     patch:
       tags: [TrustLines]
       summary: Update trustline
@@ -344,6 +361,14 @@ paths:
     post:
       tags: [Payments]
       summary: Create payment
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+          description: Optional idempotency key. Re-using the same key returns the same result; re-using with a different request returns 409.
       requestBody:
         required: true
         content:
@@ -357,6 +382,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaymentResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '400':
@@ -504,6 +531,12 @@ components:
   responses:
     BadRequest:
       description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: Conflict
       content:
         application/json:
           schema:

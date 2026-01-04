@@ -8,7 +8,7 @@ class AuditLog(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     timestamp: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id'), index=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='SET NULL'), index=True)
     actor_role: Mapped[str | None] = mapped_column(String(50))
     action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     object_type: Mapped[str | None] = mapped_column(String(50)) # Index handled via composite

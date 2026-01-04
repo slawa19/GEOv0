@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.participant import Participant
 from app.core.auth.crypto import verify_signature
-from app.utils.security import create_access_token, create_refresh_token
+from app.utils.security import decode_token, create_access_token, create_refresh_token, revoke_jti
 from app.utils.exceptions import BadRequestException, UnauthorizedException, NotFoundException
 from app.config import settings
 
@@ -15,6 +15,10 @@ class AuthService:
         self.db = db
 
     async def create_challenge(self, pid: str) -> AuthChallenge:
+        # Best-effort cleanup of expired challenges to avoid unbounded growth.
+        now = datetime.now(timezone.utc)
+        await self.db.execute(delete(AuthChallenge).where(AuthChallenge.expires_at < now))
+
         # Check if participant exists
         stmt = select(Participant).where(Participant.pid == pid)
         result = await self.db.execute(stmt)
@@ -26,7 +30,7 @@ class AuthService:
         # Generate random challenge
         challenge_str = str(uuid.uuid4())
         
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.AUTH_CHALLENGE_EXPIRE_SECONDS)
+        expires_at = now + timedelta(seconds=settings.AUTH_CHALLENGE_EXPIRE_SECONDS)
         
         auth_challenge = AuthChallenge(
             pid=pid,
@@ -40,12 +44,16 @@ class AuthService:
         return auth_challenge
 
     async def login(self, pid: str, challenge: str, signature: str) -> dict:
+        # Best-effort cleanup of expired challenges.
+        now = datetime.now(timezone.utc)
+        await self.db.execute(delete(AuthChallenge).where(AuthChallenge.expires_at < now))
+
         # 1. Find valid challenge
         stmt = select(AuthChallenge).where(
             AuthChallenge.pid == pid,
             AuthChallenge.challenge == challenge,
             AuthChallenge.used == False,
-            AuthChallenge.expires_at > datetime.now(timezone.utc)
+            AuthChallenge.expires_at > now
         )
         result = await self.db.execute(stmt)
         auth_challenge = result.scalar_one_or_none()
@@ -82,3 +90,14 @@ class AuthService:
             "refresh_token": refresh_token,
             "token_type": "Bearer"
         }
+
+    async def revoke_refresh_token(self, refresh_token: str) -> None:
+        payload = await decode_token(refresh_token, expected_type="refresh")
+        if not payload:
+            raise BadRequestException("Invalid refresh token")
+
+        jti = payload.get("jti")
+        if not isinstance(jti, str) or not jti:
+            raise BadRequestException("Refresh token missing jti")
+
+        await revoke_jti(jti, exp=payload.get("exp"))

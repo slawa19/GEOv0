@@ -11,3 +11,8 @@ class ErrorEnvelope(BaseModel):
 
 class SignedRequest(BaseModel):
     signature: str = Field(..., description="base64 signature")
+
+
+class PaginationParams(BaseModel):
+    page: int = Field(1, ge=1, description="1-based page number")
+    per_page: int = Field(20, ge=1, le=200, description="Items per page")

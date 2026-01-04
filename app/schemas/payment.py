@@ -31,13 +31,32 @@ class PaymentCreateRequest(BaseModel):
     to: str
     equivalent: str
     amount: str
-    # Optional fields for future use or validation
-    # signature: Optional[str] = None
+    description: Optional[str] = None
+    constraints: Optional[Dict[str, Any]] = None
+    signature: str
+
+
+class PaymentRoute(BaseModel):
+    path: List[str]
+    amount: str
+
+
+class PaymentError(BaseModel):
+    code: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
 
 class PaymentResult(BaseModel):
     tx_id: str
     status: str
-    path: List[str]
+    from_: str = Field(..., alias="from")
+    to: str
+    equivalent: str
+    amount: str
+    routes: Optional[List[PaymentRoute]] = None
+    error: Optional[PaymentError] = None
+    created_at: datetime
+    committed_at: Optional[datetime] = None
 
 class PaymentDetail(BaseModel):
     tx_id: str
@@ -48,4 +67,4 @@ class PaymentDetail(BaseModel):
     error: Optional[Dict[str, Any]] = None
 
 class PaymentsList(BaseModel):
-    items: List[PaymentDetail]
+    items: List[PaymentResult]

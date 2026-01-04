@@ -1163,11 +1163,11 @@ _Объекты проверки:_
 | API-H9 | CONFIRMED | Rate limiting отсутствует; добавить middleware/Redis-backed limiter. |
 | API-M1 | NOT CONFIRMED | Prefix у balance функционально соответствует OpenAPI (путь `/balance`). |
 | API-M2 | NOT CONFIRMED | Prefix у clearing функционально соответствует OpenAPI (путь `/clearing/...`). |
-| API-M3 | CONFIRMED | default `direction` в trustlines = `outgoing`, по OpenAPI = `all`; изменить default. |
+| API-M3 | NOT CONFIRMED | default `direction` = `all` (соответствует OpenAPI). |
 | API-M4 | NOT CONFIRMED | `tokenUrl` соответствует реальному маршруту `/api/v1/auth/login`. |
-| API-M5 | PARTIAL | `amount > 0` проверяется в service/endpoints, но схема допускает любые строки; усилить валидацию Pydantic. |
-| API-M6 | PARTIAL | DB constraint есть (`limit >= 0`), но желательно валидировать на входе и нормализовать ошибки. |
-| API-M7 | CONFIRMED | `public_key` не уникален (DB), API не проверяет; добавить уникальность/проверку. |
+| API-M5 | DONE | Валидация `amount` (формат Decimal + `> 0`) выполняется в endpoint/service с 400-ошибкой. |
+| API-M6 | DONE | Валидация `limit >= 0` есть на входе + DB CHECK. |
+| API-M7 | DONE | Добавлены уникальность и обработка конфликтов при регистрации участника. |
 | API-M8 | NOT CONFIRMED | Версионирование в URL есть: `/api/v1`.
 | API-L1 | CONFIRMED | Ошибки payments часто слишком общие; стандартизировать `error.code` + детали. |
 | API-L2 | CONFIRMED | В trustlines не документированы query-параметры/enum на уровне FastAPI (не критично, но влияет на docs). |
@@ -1192,13 +1192,13 @@ _Объекты проверки:_
 | CORE-H6 | PARTIAL | `auto_clear` не бесконечен (есть safety break), но возможна деградация при повторных конфликтах. |
 | CORE-H7 | CONFIRMED | `TrustLineService.close()` проверяет только один direction usage; при bidirectional debt возможна неконсистентность. |
 | CORE-H8 | CONFIRMED | Формулы/направления capacity в router vs balance расходятся; согласовать модель «какая TL задаёт capacity». |
-| CORE-M1 | CONFIRMED | Нет retry logic при deadlock/serialization failures; добавить retry с backoff. |
+| CORE-M1 | NOT CONFIRMED | Retry/backoff для deadlock/serialization failure реализован в `PaymentEngine`. |
 | CORE-M2 | NOT CONFIRMED | В routing есть `max_hops` (по умолчанию 6). |
-| CORE-M3 | CONFIRMED | Идемпотентность платежей отсутствует (нет idempotency_key, commit не idempotent); добавить. |
+| CORE-M3 | DONE | Реализован `Idempotency-Key`: повтор с тем же ключом возвращает тот же результат; reuse с другим payload -> 409. |
 | CORE-M4 | NOT CONFIRMED | У циклов есть `max_depth` (ограничение размера цикла); дополнительный лимит опционален. |
 | CORE-M5 | NOT CONFIRMED | Soft delete trustlines реализован через `status='closed'`; если нужен иной паттерн — уточнить требования. |
-| CORE-M6 | CONFIRMED | Кэширование графа отсутствует; при росте данных будет дорогая `build_graph` на запрос. |
-| CORE-M7 | CONFIRMED | Нет blacklist/ревокации токенов; по протоколу/безопасности желательно добавить. |
+| CORE-M6 | DONE | Добавлен TTL-кэш графа маршрутизации (feature-flag `ROUTING_GRAPH_CACHE_TTL_SECONDS`). |
+| CORE-M7 | DONE | Реализована revocation (blacklist) по `jti` с опциональным Redis и in-memory fallback. |
 | CORE-L1 | CONFIRMED | Нет structured logging (корреляция tx_id/request_id); добавить формат JSON и поля контекста. |
 | CORE-L2 | CONFIRMED | Нет метрик производительности; добавить хотя бы latency/histograms по роутам. |
 | CORE-L3 | CONFIRMED | Есть magic numbers (TTL, hop limits, safety break); вынести в конфиг. |
@@ -1229,18 +1229,18 @@ _Объекты проверки:_
 | DB-M1 | NOT CONFIRMED | `display_name` ограничен `String(255)`.
 | DB-M2 | NOT CONFIRMED | Для trustline limit есть DB `CHECK("limit" >= 0)`; формулировку (>0) уточнить. |
 | DB-M3 | NOT CONFIRMED | Для debt amount есть `CHECK(amount >= 0)`.
-| DB-M4 | CONFIRMED | Нет constraint на формат `equivalents.code` (A-Z0-9_ и т.п.); добавить CHECK/валидацию. |
-| DB-M5 | CONFIRMED | Нет `idempotency_key` у transactions; добавить для безопасных повторов. |
+| DB-M4 | DONE | Добавлена валидация формата `equivalent` (API) + Postgres CHECK на `equivalents.code`. |
+| DB-M5 | DONE | `transactions.idempotency_key` + уникальность (initiator,type,key) и использование в платежах. |
 | DB-M6 | CONFIRMED | Нет партиционирования audit_log; опционально при росте данных. |
 | DB-M7 | CONFIRMED | Config в БД без версионирования/аудита изменений; добавить версии или audit trail. |
-| DB-M8 | CONFIRMED | Нет job для cleanup expired challenges; добавить периодическую очистку. |
+| DB-M8 | DONE | Добавлена best-effort очистка истёкших challenges при `challenge/login`. |
 | DB-M9 | CONFIRMED | Нет `lock_type` enum у prepare_locks; полезно для расширения и типизации резервов. |
 | DB-M10 | CONFIRMED | Integrity checkpoints не создаются автоматически; добавить scheduled job/trigger. |
 | DB-M11 | PARTIAL | `updated_at` auto есть во многих моделях, но не везде/не единообразно; унифицировать базовый mixin. |
-| DB-M12 | PARTIAL | Health endpoint есть, но нет DB health (ping) и мониторинга пула; добавить /health/db или probe. |
+| DB-M12 | DONE | Добавлен `/health/db` (SELECT 1) + 503 при ошибке. |
 | DB-M13 | CONFIRMED | Нет rollback/миграционных тестов; добавить хотя бы smoke миграции в CI. |
 | DB-M14 | CONFIRMED | Soft delete pattern не унифицирован (кроме trustline status); определить единый подход. |
-| DB-M15 | CONFIRMED | `policy` JSON без schema validation; валидировать на входе или типизировать. |
+| DB-M15 | DONE | Добавлена валидация trustline policy (ключи/типы/неотрицательные лимиты). |
 | DB-M16 | CONFIRMED | `payload/signatures/effects` как JSON без типизации; добавить схемы/версионирование payload. |
 | DB-M17 | CONFIRMED | Нет history/versioning debts; для аудита/споров может понадобиться ledger/audit trail. |
 | DB-M18 | NOT CONFIRMED | `Equivalent.is_active` присутствует.
