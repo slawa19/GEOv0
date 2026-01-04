@@ -1,37 +1,47 @@
 [
   {
-    "from": "PID_ALICE",
-    "to": "PID_BOB",
+    "from": "PID_ALICE_a1b2c3d4e5f6",
+    "to": "PID_BOB_b2c3d4e5f6a1",
     "equivalent": "UAH",
     "limit": "1000.00",
-    "policy": {}
+    "policy": {"auto_clearing": true, "can_be_intermediate": true}
   },
   {
-    "from": "PID_BOB",
-    "to": "PID_CAROL",
+    "from": "PID_BOB_b2c3d4e5f6a1",
+    "to": "PID_CAROL_c3d4e5f6a1b2",
     "equivalent": "UAH",
     "limit": "800.00",
-    "policy": {}
+    "policy": {"auto_clearing": true, "can_be_intermediate": true}
   },
   {
-    "from": "PID_CAROL",
-    "to": "PID_DAVE",
+    "from": "PID_CAROL_c3d4e5f6a1b2",
+    "to": "PID_DAVE_d4e5f6a1b2c3",
     "equivalent": "UAH",
     "limit": "600.00",
-    "policy": {}
+    "policy": {"auto_clearing": true, "can_be_intermediate": true}
   },
   {
-    "from": "PID_ALICE",
-    "to": "PID_CAROL",
+    "from": "PID_ALICE_a1b2c3d4e5f6",
+    "to": "PID_CAROL_c3d4e5f6a1b2",
     "equivalent": "UAH",
     "limit": "400.00",
-    "policy": {}
+    "policy": {"auto_clearing": true, "can_be_intermediate": true},
+    "_comment": "Alternative path for multipath tests"
   },
   {
-    "from": "PID_BOB",
-    "to": "PID_DAVE",
+    "from": "PID_BOB_b2c3d4e5f6a1",
+    "to": "PID_DAVE_d4e5f6a1b2c3",
     "equivalent": "UAH",
     "limit": "500.00",
-    "policy": {}
+    "policy": {"auto_clearing": true, "can_be_intermediate": true},
+    "_comment": "Alternative path for multipath tests"
+  },
+  {
+    "from": "PID_CAROL_c3d4e5f6a1b2",
+    "to": "PID_ALICE_a1b2c3d4e5f6",
+    "equivalent": "UAH",
+    "limit": "300.00",
+    "policy": {"auto_clearing": true, "can_be_intermediate": true},
+    "_comment": "Creates triangle A->B->C->A for clearing tests (TS-17)"
   }
 ]

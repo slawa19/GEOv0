@@ -2,6 +2,7 @@
 
 _Дата: 2026-01-04_
 _Основан на: code-review-report-v0.1.md с верификацией_
+_Спецификация: remediation-spec-v0.1.md_
 
 ## Несогласия с верификацией
 
@@ -10,6 +11,8 @@ _Основан на: code-review-report-v0.1.md с верификацией_
 ---
 
 ## Phase 1 Patch-Set (13 PR)
+
+Этот patch-set является **планом реализации** требований из [plans/remediation-spec-v0.1.md](plans/remediation-spec-v0.1.md) (источник истины по целям/совместимости с протоколом и критериям приёмки).
 
 ### Приоритет: CRITICAL
 
