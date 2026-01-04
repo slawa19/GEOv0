@@ -34,7 +34,8 @@ This repository contains the **specification and architecture of GEO v0.1**, plu
 - [Project Status & Roadmap](#project-status--roadmap)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
-  - [Running a Future GEO Hub](#running-a-future-geo-hub)
+  - [Running the Hub](#running-the-hub)
+  - [Testing & Development](#testing--development)
 - [Documentation](#documentation)
   - [English](#english)
   - [Russian](#russian)
@@ -86,6 +87,8 @@ For a narrative introduction, see:
 
 - People, organizations, cooperatives, hubs.
 - Identified by **PID** (`Participant ID`), derived from a public key (Ed25519).
+  - In the current implementation, PID is **base64url(public_key_bytes)** with **no padding** (`=` removed).
+  - This makes PID safe to use inside URLs (path/query params).
 
 ### Equivalents
 
@@ -161,34 +164,14 @@ Clearing cycles:
 ```text
 GEOv0-PROJECT/
 ├── README.md                 # This file (English GitHub README)
+├── app/                      # Backend application code (FastAPI)
+├── docker/                   # Docker configuration
+├── tests/                    # Tests
+├── requirements.txt          # Python dependencies
 └── docs/
     ├── en/                   # Main English docs
-    │   ├── 00-overview.md
-    │   ├── 01-concepts.md
-    │   ├── 02-protocol-spec.md
-    │   ├── 03-architecture.md
-    │   ├── 04-api-reference.md
-    │   ├── 05-deployment.md
-    │   ├── 06-contributing.md
-    │   └── concept/          # Deep-dive conceptual documents
     ├── ru/                   # Russian docs (source/original context)
-    │   ├── 00-overview.md
-    │   ├── 01-concepts.md
-    │   ├── 02-protocol-spec.md
-    │   ├── 03-architecture.md
-    │   ├── 04-api-reference.md
-    │   ├── 05-deployment.md
-    │   ├── 06-contributing.md
-    │   └── concept/
     └── pl/                   # Polish translations
-        ├── 00-overview.md
-        ├── 01-concepts.md
-        ├── 02-protocol-spec.md
-        ├── 03-architecture.md
-        ├── 04-api-reference.md
-        ├── 05-deployment.md
-        ├── 06-contributing.md
-        └── concept/
 ```
 
 Key conceptual files (English):
@@ -203,99 +186,83 @@ Key conceptual files (English):
 
 ## Project Status & Roadmap
 
-**Current status:** documentation‑first, protocol and architecture defined, **implementation in planning**.
+**Current status:** MVP Backend Implementation (v0.1-alpha).
 
 What exists now:
 
-- Conceptual and formal docs for:
-  - GEO v0.1 protocol (Participants, TrustLines, Debts, Transactions, state machines)
-  - Community‑hub architecture (backend, clients, data model)
-  - Technology stack recommendations (Python/FastAPI/PostgreSQL/Redis + Flutter client)
-  - Behavior simulator / visualizer design
-  - Target community & marketing strategy
-- Multilingual documentation: EN, RU, PL
-
-What does **not** exist yet in this repo:
-
-- Production‑ready backend implementation of a GEO hub
-- Production‑ready web/mobile clients
+- **MVP Backend**: Python/FastAPI implementation of the GEO v0.1 protocol.
+  - Participants & Auth (Ed25519 challenge-response)
+  - TrustLines CRUD
+  - Payments (Pathfinding & 2PC execution)
+  - Clearing (Cycle detection & execution)
+  - Balance & Limits checks
+- **Documentation**: Comprehensive conceptual and technical docs.
+- **Tests**: Integration scenarios covering key flows.
 
 High‑level roadmap (subject to change):
 
 1. **Phase 0 — Documentation consolidation** (✓)
-   - Align EN/RU/PL docs
-   - Fix terminology and conceptual gaps
-
-2. **Phase 1 — MVP backend (community hub)**
-   - Implement GEO v0.1 protocol in Python + FastAPI
-   - Data layer: PostgreSQL + Redis
-   - Basic routing (BFS) + 2PC payments + 3–4 node clearing cycles
-   - Minimal admin UI (server‑rendered HTML)
-
+2. **Phase 1 — MVP backend (community hub)** (✓ - Basic implementation complete)
+   - [x] Protocol Core
+   - [x] Database Schema
+   - [x] API
+   - [x] Basic Clearing
 3. **Phase 2 — Client applications**
    - Flutter‑based client for end‑users (mobile/desktop/web)
-   - Flows: registration, trust lines, payments, basic analytics
-
+   - Admin UI
 4. **Phase 3 — Behavior simulator**
-   - Separate app to simulate user behavior and visualize the trust/debt graph
    - Stress‑testing protocol and implementation
-
 5. **Phase 4 — Multi‑hub and inter‑community exchange**
-   - TrustLines between hubs
-   - Hub‑to‑hub payments and clearing using the same protocol
-
-If you are interested in helping with implementation, see [Contributing](#contributing).
 
 ---
 
 ## Getting Started
 
-At the moment this repository is **documentation‑only**. There is no ready‑made “run GEO hub now” command yet.
-
-This section describes how things *will* look once the reference implementation is added, so that we have a clear target and GitHub landing page.
-
 ### Prerequisites
 
-Planned reference stack (see `docs/en/concept/08-technology-stack-requirements.md`):
+- **Docker** & **Docker Compose**
+- OR Python 3.11+ and PostgreSQL locally
 
-- **Backend**
-  - Python 3.11+
-  - FastAPI
-  - SQLAlchemy 2.x + Alembic
-  - PostgreSQL
-  - Redis
-- **Client**
-  - Flutter (Dart) for mobile/desktop/web
-- **Dev tooling**
-  - Docker / docker‑compose
-  - pytest
+### Running the Hub
 
-### Running a Future GEO Hub
-
-> ⚠️ **Not implemented yet.**  
-> This is the intended usage pattern once the reference implementation lands.
+The easiest way to run the GEO Hub is using Docker Compose:
 
 ```bash
 # 1. Clone the repo
 git clone https://github.com/slawa19/GEOv0.git
 cd GEOv0-PROJECT
 
-# 2. Start backend + DB via Docker (future)
-docker compose up geo-hub
+# 2. Start services (DB, Redis, API)
+docker-compose up -d --build
 
-# 3. Open admin UI in browser (future)
-open http://localhost:8000
+# 3. Apply migrations
+docker-compose exec api alembic upgrade head
 
-# 4. Run behavior simulator (future)
-cd simulator
-npm install
-npm start
+# 4. Seed initial data (optional)
+docker-compose exec api python scripts/seed_db.py
+
+# 5. API is now available at http://localhost:8000
+# Docs: http://localhost:8000/docs
 ```
 
-Once we have an initial codebase, this section will be updated with real commands and configuration instructions. For now, please refer to:
+### Testing & Development
 
-- `docs/en/05-deployment.md` — deployment design
-- `docs/en/04-api-reference.md` — planned API surface
+To run tests locally:
+
+```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest
+```
+
+The integration tests (`tests/integration/test_scenarios.py`) cover:
+- Registration & Authentication
+- TrustLine management
+- Direct Payments
+- Multi-hop Payments
+- Debt Clearing Cycles
 
 ---
 
@@ -334,22 +301,14 @@ Conceptual deep dives (`docs/en/concept/`):
 - `docs/ru/00-overview.md`
 - `docs/ru/01-concepts.md`
 - …
-- `docs/ru/concept/` — original long‑form materials, including:
-  - main context,
-  - detailed analysis of the original GEO Protocol,
-  - architecture evolution notes,
-  - extensive Q&A and dialogue with Dima Chizhevsky.
+- `docs/ru/concept/` — original long‑form materials.
 
 ### Polish
 
 - `docs/pl/00-overview.md`
 - `docs/pl/01-concepts.md`
 - …
-- `docs/pl/concept/` — full translations of all major conceptual documents, including:
-  - `00-glowny-kontekst-koncepcja-i-ramowe-wymagania.md`
-  - `01-dyskusja-i-odpowiedzi-na-pytania.md`
-  - protocol/architecture/stack/simulator/marketing strategy
-  - two public articles about fixing money without a revolution
+- `docs/pl/concept/` — full translations of all major conceptual documents.
 
 ---
 
@@ -365,10 +324,6 @@ See:
 
 High‑level areas where help is needed:
 
-- **Backend implementation**
-  - GEO v0.1 protocol (Participants, TrustLines, Debts, Transactions)
-  - Payment engine (routing + 2PC)
-  - Clearing engine (cycle search + execution)
 - **Client implementation**
   - Flutter client for end‑users
   - Simple admin UI (web)
@@ -425,7 +380,7 @@ Current maintainer of this repository:
 Feedback, questions, or proposals for pilots (in EN/RU/PL):
 
 - Please open a GitHub issue in this repo, or
-- Reach out via the contact channels mentioned in `docs/ru/00-overview.md` / `docs/en/00-overview.md` (to be expanded as the project formalizes).
+- Reach out via the contact channels mentioned in `docs/ru/00-overview.md` / `docs/en/00-overview.md`.
 
 If you are a:
 

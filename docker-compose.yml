@@ -1,10 +1,54 @@
 services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: geov0-qdrant
+  db:
+    image: postgres:16-alpine
+    container_name: geov0-db
+    environment:
+      POSTGRES_USER: geo
+      POSTGRES_PASSWORD: geo
+      POSTGRES_DB: geov0
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "5432:5432"
     volumes:
-      - ./.qdrant/storage:/qdrant/storage
-    restart: unless-stopped
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geo -d geov0"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: geov0-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: geov0-app
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://geo:geo@db:5432/geov0
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: change-me-in-production
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 15
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: 7
+      LOG_LEVEL: INFO
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./seeds:/app/seeds:ro
+
+volumes:
+  postgres_data:

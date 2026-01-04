@@ -5,13 +5,14 @@ info:
   description: |
     OpenAPI spec for GEO Hub (MVP v0.1). Derived from docs/ru/04-api-reference.md.
 servers:
-  - url: /
+  - url: /api/v1
 tags:
   - name: Auth
   - name: Participants
   - name: TrustLines
   - name: Payments
   - name: Balance
+  - name: Clearing
 security:
   - BearerAuth: []
 
@@ -209,21 +210,72 @@ paths:
       summary: Close trustline
       parameters:
         - $ref: '#/components/parameters/TrustLineIdPath'
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SignedRequest'
       responses:
-        '204':
-          description: Deleted
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /clearing/cycles:
+    get:
+      tags: [Clearing]
+      summary: List debt cycles for an equivalent
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: max_depth
+          required: false
+          schema:
+            type: integer
+            minimum: 3
+            maximum: 10
+            default: 6
+      responses:
+        '200':
+          description: Cycles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearingCyclesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /clearing/auto:
+    post:
+      tags: [Clearing]
+      summary: Auto-clear cycles for an equivalent
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Clearing result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearingAutoResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /payments/capacity:
     get:
@@ -645,7 +697,7 @@ components:
 
     TrustLineCreateRequest:
       type: object
-      required: [to, equivalent, limit, signature]
+      required: [to, equivalent, limit]
       properties:
         to:
           type: string
@@ -656,8 +708,6 @@ components:
         policy:
           type: object
           additionalProperties: true
-        signature:
-          type: string
 
     TrustLineUpdateRequest:
       type: object
@@ -667,8 +717,39 @@ components:
         policy:
           type: object
           additionalProperties: true
-        signature:
+
+    ClearingCycleEdge:
+      type: object
+      required: [debt_id, debtor, creditor, amount]
+      properties:
+        debt_id:
           type: string
+        debtor:
+          type: string
+        creditor:
+          type: string
+        amount:
+          type: string
+
+    ClearingCyclesResponse:
+      type: object
+      required: [cycles]
+      properties:
+        cycles:
+          type: array
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/ClearingCycleEdge'
+
+    ClearingAutoResponse:
+      type: object
+      required: [equivalent, cleared_cycles]
+      properties:
+        equivalent:
+          type: string
+        cleared_cycles:
+          type: integer
 
     CapacityResponse:
       type: object

@@ -21,6 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # UUID generation helper used by gen_random_uuid()
+    op.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')
     # === EQUIVALENTS (Эквиваленты) ===
     op.create_table(
         'equivalents',
@@ -153,11 +155,11 @@ def upgrade() -> None:
     op.create_index('idx_debts_creditor', 'debts', ['creditor_id'])
     op.create_index('idx_debts_equivalent', 'debts', ['equivalent_id'])
     
-    # Check constraint для amount > 0
+    # Check constraint для amount >= 0 (0 is used as a baseline row)
     op.execute("""
         ALTER TABLE debts 
         ADD CONSTRAINT chk_debt_amount_positive 
-        CHECK (amount > 0)
+        CHECK (amount >= 0)
     """)
 
     # === TRANSACTIONS (Транзакции) ===
