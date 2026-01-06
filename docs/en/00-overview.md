@@ -187,6 +187,10 @@ At the same time:
 | [03-architecture.md](03-architecture.md)   | System Architecture           |
 | [04-api-reference.md](04-api-reference.md) | API Reference                 |
 | [05-deployment.md](05-deployment.md)       | Deployment                    |
+| [config-reference.md](config-reference.md) | Configuration Registry (defaults, ranges, runtime vs restart) |
+| [admin-console-minimal-spec.md](admin-console-minimal-spec.md) | Minimal Admin Console Spec (config/flags/operator actions/audit) |
+| [archive/07-clarifications-and-gaps.md](archive/07-clarifications-and-gaps.md) | Clarifications and Gaps (archive; history of questions/gaps) |
+| [09-decisions-and-defaults.md](09-decisions-and-defaults.md) | Key Decisions and MVP Defaults |
 | [06-contributing.md](06-contributing.md)   | Contributing                  |
 
 ---

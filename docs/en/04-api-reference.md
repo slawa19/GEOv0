@@ -61,11 +61,6 @@ list endpoints return an object like `{ "items": [...] }`.
 **Query parameters:**
 - `page` (default: 1)
 - `per_page` (default: 20, max: 200)
-```
-
-**Query parameters:**
-- `page` (default: 1)
-- `per_page` (default: 20, max: 100)
 
 ---
 
@@ -87,10 +82,18 @@ Content-Type: application/json
 **Response:**
 ```json
 {
-  "challenge": "random_string_32_chars",
+  "challenge": "base64url_string",
   "expires_at": "2025-11-29T12:05:00Z"
 }
 ```
+
+**Normative requirements for `challenge`:**
+- Length: 32 bytes (256 bits) *before* encoding
+- Generation: cryptographically secure CSPRNG
+- TTL: 300 seconds (5 minutes)
+- Encoding: base64url without padding (`=`), ASCII
+- Storage: server stores challenge until `expires_at` and invalidates after successful `POST /auth/login`
+- Idempotency: repeated `POST /auth/challenge` for the same `pid` *may* return the same challenge until TTL expires (behavior must be stable and documented)
 
 #### Step 2: Sign and send
 

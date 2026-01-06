@@ -187,6 +187,10 @@ Przy tym:
 | [03-architecture.md](03-architecture.md) | Architektura systemu |
 | [04-api-reference.md](04-api-reference.md) | Dokumentacja API |
 | [05-deployment.md](05-deployment.md) | Wdrożenie |
+| [config-reference.md](config-reference.md) | Rejestr konfiguracji (domyślne, zakresy, runtime vs restart) |
+| [admin-console-minimal-spec.md](admin-console-minimal-spec.md) | Minimalna specyfikacja konsoli administratora (konfiguracja/flagi/działania operatora/audyt) |
+| [archive/07-clarifications-and-gaps.md](archive/07-clarifications-and-gaps.md) | Wyjaśnienia i braki (archiwum; historia pytań/braków) |
+| [09-decisions-and-defaults.md](09-decisions-and-defaults.md) | Kluczowe decyzje i domyślne ustawienia MVP |
 | [06-contributing.md](06-contributing.md) | Udział w rozwoju |
 
 ---

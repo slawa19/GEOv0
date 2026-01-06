@@ -102,6 +102,8 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 
 **Podpisywana wiadomość:** kanoniczny JSON payload bez pola `signatures`.
 
+Algorytm kanonizacji JSON (normatywny) opisany w Załączniku A (patrz [`docs/pl/02-protocol-spec.md`](docs/pl/02-protocol-spec.md:2093)).
+
 ---
 
 ## 3. Model danych
@@ -153,6 +155,8 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 
 - `code` — unikalny, 1–16 znaków, A-Z0-9\_
 - `precision` — liczba miejsc po przecinku (0–8)
+- `metadata.type` — jedna z wartości `fiat | time | commodity | custom`
+- `metadata.iso_code` — opcjonalnie; dozwolone tylko przy `metadata.type == fiat` i musi być w formacie `^[A-Z]{3}$` (np. `UAH`)
 
 ### 3.3. TrustLine (Linia zaufania)
 
@@ -187,7 +191,7 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 |------|------|-----------|
 | `auto_clearing` | Automatyczna zgoda na kliring | `true` |
 | `can_be_intermediate` | Można używać jako pośrednika | `true` |
-| `daily_limit` | Limit obrotu na dobę | `null` (brak limitu) |
+| `daily_limit` | Limit obrotu dziennego (**w MVP nie wymuszane; tylko informacyjne**) | `null` (brak limitu) |
 | `blocked_participants` | Zakaz tras przez wskazanych | `[]` |
 
 ### 3.4. Debt (Dług)

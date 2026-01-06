@@ -61,12 +61,6 @@ zwracają obiekt w rodzaju `{ "items": [...] }`.
 **Parametry query:**
 - `page` (default: 1)
 - `per_page` (default: 20, max: 200)
-```
-
-**Parametry query:**
-
-- `page` (domyślnie: 1)  
-- `per_page` (domyślnie: 20, max: 100)
 
 ---
 
@@ -88,10 +82,18 @@ Content-Type: application/json
 **Response:**
 ```json
 {
-  "challenge": "random_string_32_chars",
+  "challenge": "base64url_string",
   "expires_at": "2025-11-29T12:05:00Z"
 }
 ```
+
+**Normatywne wymagania dla `challenge`:**
+- Długość: 32 bajty (256 bitów) *przed* kodowaniem
+- Generowanie: kryptograficznie bezpieczny CSPRNG
+- TTL: 300 sekund (5 minut)
+- Kodowanie: base64url bez paddingu (`=`), ASCII
+- Przechowywanie: serwer przechowuje challenge do `expires_at` i unieważnia po udanym `POST /auth/login`
+- Idempotentność: powtarzalne `POST /auth/challenge` dla tego samego `pid` *może* zwracać ten sam challenge do wygaśnięcia TTL (zachowanie musi być stabilne i udokumentowane)
 
 #### Krok 2: Podpisanie i wysłanie
 
@@ -356,6 +358,8 @@ Content-Type: application/json
   },
   "signature": "base64_signature"
 }
+
+Uwaga (MVP): `policy.daily_limit` jest akceptowane i zapisywane jako część policy, ale **nie jest egzekwowane** w krytycznej ścieżce płatności (tylko informacyjnie).
 ```
 
 ### 4.5. Zamknięcie linii
@@ -392,7 +396,48 @@ Authorization: Bearer {token}
 }
 ```
 
-### 5.2. Utworzenie płatności
+### 5.2. Obliczenie maksimum (max-flow)
+
+Przeznaczenie: uzyskanie oszacowania **maksymalnej możliwej kwoty** płatności od bieżącego użytkownika do `to` w podanym `equivalent` oraz informacji diagnostycznych (struktura ścieżek i wąskie gardła). Używane do podpowiedzi UI oraz do testowania wydajności algorytmów routingu.
+
+```http
+GET /payments/max-flow?to={pid}&equivalent={code}
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "max_amount": "1500.00",
+  "paths": [
+    {
+      "path": ["my_pid", "p2", "p3", "recipient_pid"],
+      "capacity": "700.00"
+    },
+    {
+      "path": ["my_pid", "p4", "recipient_pid"],
+      "capacity": "800.00"
+    }
+  ],
+  "bottlenecks": [
+    {
+      "from": "my_pid",
+      "to": "p2",
+      "limit": "1000.00",
+      "used": "400.00",
+      "available": "600.00"
+    }
+  ],
+  "algorithm": "limited_multipath",
+  "computed_at": "2025-11-29T12:00:00Z"
+}
+```
+
+**Uwagi:**
+- Domyślna implementacja powinna być zgodna z trybem routingu określonym w konfiguracji (patrz [`docs/pl/config-reference.md`](docs/pl/config-reference.md:1)).
+- Jeśli włączony jest eksperymentalny tryb **full multipath**, odpowiedź może zawierać więcej ścieżek i dodatkowe pola diagnostyczne, ale kontrakt (obecność `max_amount`) jest zachowany.
+
+### 5.3. Utworzenie płatności
 
 ```http
 POST /payments
@@ -451,7 +496,7 @@ Content-Type: application/json
 }
 ```
 
-### 5.3. Historia płatności
+### 5.4. Historia płatności
 
 ```http
 GET /payments?direction=all&equivalent=UAH&status=COMMITTED
@@ -466,7 +511,7 @@ Authorization: Bearer {token}
 - `from_date`, `to_date` — zakres dat  
 - `page`, `per_page`
 
-### 5.4. Szczegóły płatności
+### 5.5. Szczegóły płatności
 
 ```http
 GET /payments/{tx_id}
@@ -476,6 +521,25 @@ Authorization: Bearer {token}
 ---
 
 ## 6. Bilans
+
+### 6.0. Ekwiwalenty (katalog)
+
+Przeznaczenie: pobranie read-only listy ekwalentów znanych danemu Hub. Używane do autouzupełniania i walidacji w aplikacjach klienckich.
+
+```http
+GET /equivalents
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "items": [
+    {"code": "UAH", "description": "Ukrainian Hryvnia", "precision": 2},
+    {"code": "HOUR", "description": "Hour", "precision": 2}
+  ]
+}
+```
 
 ### 6.1. Bilans ogólny
 

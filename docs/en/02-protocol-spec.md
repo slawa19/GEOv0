@@ -114,6 +114,8 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 
 **Signed message:** canonical JSON payload without the `signatures` field.
 
+Canonical JSON algorithm (normative) is described in Appendix A (see [`docs/en/02-protocol-spec.md`](docs/en/02-protocol-spec.md) section on Canonical JSON).
+
 ---
 
 ## 3. Data Model
@@ -163,8 +165,10 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 
 **Rules:**
 
-- `code` — unique, 1–16 characters, `A-Z0-9_`  
-- `precision` — number of decimal places (0–8)  
+- `code` — unique, 1–16 characters, `A-Z0-9_`
+- `precision` — number of decimal places (0–8)
+- `metadata.type` — one of `fiat | time | commodity | custom`
+- `metadata.iso_code` — optional; allowed only when `metadata.type == fiat` and must be in format `^[A-Z]{3}$` (e.g., `UAH`)
 
 ### 3.3. TrustLine
 
@@ -199,7 +203,7 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 |------------------------|----------------------------------------------|---------|
 | `auto_clearing`        | Automatic consent to clearing                | `true`  |
 | `can_be_intermediate`  | Allow use as an intermediate route           | `true`  |
-| `daily_limit`          | Daily turnover limit                         | `null`  |
+| `daily_limit`          | Daily turnover limit (**not enforced in MVP; informational only**) | `null` (no limit) |
 | `blocked_participants` | Disallow routes through specified participants| `[]`   |
 
 ### 3.4. Debt
@@ -720,6 +724,40 @@ class MultiPathPaymentCoordinator:
         # Ignore errors — ABORT is idempotent
         await asyncio.gather(*abort_tasks, return_exceptions=True)
 ```
+
+**Multi-path State Diagram:**
+
+```text
+                    ┌─────────────────┐
+                    │      NEW        │
+                    └────────┬────────┘
+                             │
+                             ▼
+              ┌──────────────────────────────┐
+              │   PREPARE_ALL_IN_PROGRESS    │
+              │  (all routes in parallel)    │
+              └──────────────┬───────────────┘
+                             │
+              ┌──────────────┴───────────────┐
+              │                              │
+              ▼                              ▼
+       ┌────────────┐                 ┌────────────┐
+       │ All OK     │                 │ Any FAIL   │
+       └─────┬──────┘                 └─────┬──────┘
+             │                              │
+             ▼                              ▼
+      ┌────────────┐                 ┌────────────┐
+      │ COMMIT_ALL │                 │ ABORT_ALL  │
+      │ (all routes) │                 │ (all routes) │
+      └─────┬──────┘                 └─────┬──────┘
+            │                              │
+            ▼                              ▼
+      ┌────────────┐                 ┌────────────┐
+      │ COMMITTED  │                 │  ABORTED   │
+      └────────────┘                 └────────────┘
+```
+
+Note (Hub v0.1 implementation): intermediate `PREPARE_IN_PROGRESS` state is not persisted in DB. After successful `prepare_routes(...)` transaction moves to `PREPARED`, then `COMMIT` executes.
 
 **Atomicity Invariant:**
 
