@@ -22,7 +22,17 @@ from app.utils.validation import validate_equivalent_code
 logger = logging.getLogger(__name__)
 
 class PaymentRouter:
-    _graph_cache: Dict[str, Tuple[float, Dict[str, Dict[str, Decimal]], Dict[str, Dict[str, bool]], Dict[UUID, str], Dict[str, UUID]]] = {}
+    _graph_cache: Dict[
+        str,
+        Tuple[
+            float,
+            Dict[str, Dict[str, Decimal]],
+            Dict[str, Dict[str, bool]],
+            Dict[str, Dict[str, Set[str]]],
+            Dict[UUID, str],
+            Dict[str, UUID],
+        ],
+    ] = {}
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -30,6 +40,8 @@ class PaymentRouter:
         self.graph: Dict[str, Dict[str, Decimal]] = {}
         # Edge flags: { from_pid: { to_pid: can_be_intermediate } }
         self.edge_can_be_intermediate: Dict[str, Dict[str, bool]] = {}
+        # Edge policy: { from_pid: { to_pid: set(blocked_pid) } }
+        self.edge_blocked_participants: Dict[str, Dict[str, Set[str]]] = {}
         self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
         self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
 
@@ -41,11 +53,19 @@ class PaymentRouter:
             if ttl > 0:
                 cached = self._graph_cache.get(equivalent_code)
                 if cached is not None:
-                    cached_at, graph, edge_policy, pids, uuids = cached
+                    # Backward-compatible cache unpacking.
+                    if len(cached) == 5:
+                        cached_at, graph, edge_policy, pids, uuids = cached  # type: ignore[misc]
+                        edge_blocked = {}
+                    else:
+                        cached_at, graph, edge_policy, edge_blocked, pids, uuids = cached
                     if (time.time() - cached_at) <= ttl:
                         # Shallow copies are enough because nested values are Decimals/bools.
                         self.graph = {u: dict(v) for u, v in graph.items()}
                         self.edge_can_be_intermediate = {u: dict(v) for u, v in edge_policy.items()}
+                        self.edge_blocked_participants = {
+                            u: {v: set(s) for v, s in m.items()} for u, m in (edge_blocked or {}).items()
+                        }
                         self.pids = dict(pids)
                         self.uuids = dict(uuids)
                         return
@@ -125,6 +145,7 @@ class PaymentRouter:
         # Initialize graph
         self.graph = {pid: {} for pid in self.pids.values()}
         self.edge_can_be_intermediate = {pid: {} for pid in self.pids.values()}
+        self.edge_blocked_participants = {pid: {} for pid in self.pids.values()}
 
         # 4. Process Debts into a lookup: (debtor_id, creditor_id) -> amount
         debt_map = {} # (debtor_uuid, creditor_uuid) -> amount
@@ -170,6 +191,7 @@ class PaymentRouter:
 
             limit = tl.limit
             can_be_intermediate = True
+            blocked_participants: Set[str] = set()
             if tl.policy is not None:
                 can_be_intermediate = bool(tl.policy.get('can_be_intermediate', True))
                 # Best-effort: if max_hop_usage is explicitly 0, treat as forbid intermediate usage.
@@ -178,6 +200,13 @@ class PaymentRouter:
                         can_be_intermediate = False
                 except Exception:
                     pass
+
+                try:
+                    bp = tl.policy.get("blocked_participants", None)
+                    if isinstance(bp, list):
+                        blocked_participants = {str(x) for x in bp if isinstance(x, str) and x}
+                except Exception:
+                    blocked_participants = set()
 
             # Debt(debtor -> creditor)
             debt_debtor_owes_creditor = debt_map.get((debtor_id, creditor_id), Decimal('0'))
@@ -193,6 +222,7 @@ class PaymentRouter:
             if cap > 0:
                 self._add_capacity(debtor_pid, creditor_pid, cap)
                 self._set_edge_policy(debtor_pid, creditor_pid, can_be_intermediate)
+                self._set_edge_blocked_participants(debtor_pid, creditor_pid, blocked_participants)
 
         # Debt-only capacity is already included via the trustline-based formula:
         # cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor.
@@ -204,6 +234,7 @@ class PaymentRouter:
                 time.time(),
                 {u: dict(v) for u, v in self.graph.items()},
                 {u: dict(v) for u, v in self.edge_can_be_intermediate.items()},
+                {u: {v: set(s) for v, s in m.items()} for u, m in self.edge_blocked_participants.items()},
                 dict(self.pids),
                 dict(self.uuids),
             )
@@ -219,8 +250,16 @@ class PaymentRouter:
             self.edge_can_be_intermediate[u] = {}
         self.edge_can_be_intermediate[u][v] = can_be_intermediate
 
+    def _set_edge_blocked_participants(self, u: str, v: str, blocked: Set[str]) -> None:
+        if u not in self.edge_blocked_participants:
+            self.edge_blocked_participants[u] = {}
+        self.edge_blocked_participants[u][v] = set(blocked or set())
+
     def _edge_allows_intermediate(self, u: str, v: str) -> bool:
         return self.edge_can_be_intermediate.get(u, {}).get(v, True)
+
+    def _edge_blocked(self, u: str, v: str) -> Set[str]:
+        return self.edge_blocked_participants.get(u, {}).get(v, set())
 
     def _bfs_single_path(
         self,
@@ -239,15 +278,16 @@ class PaymentRouter:
             return None
 
         forbidden_edges = forbidden_edges or set()
-        forbidden_nodes = forbidden_nodes or set()
+        static_forbidden_nodes = forbidden_nodes or set()
 
-        if from_pid in forbidden_nodes or to_pid in forbidden_nodes:
+        if from_pid in static_forbidden_nodes or to_pid in static_forbidden_nodes:
             return None
 
-        queue: List[Tuple[str, List[str]]] = [(from_pid, [from_pid])]
+        # Track cumulative blocked_participants from policies along the current path.
+        queue: List[Tuple[str, List[str], Set[str]]] = [(from_pid, [from_pid], set())]
 
         while queue:
-            current, path = queue.pop(0)
+            current, path, blocked_so_far = queue.pop(0)
             if current == to_pid:
                 return path
 
@@ -257,7 +297,7 @@ class PaymentRouter:
             for neighbor, capacity in graph.get(current, {}).items():
                 if (current, neighbor) in forbidden_edges:
                     continue
-                if neighbor in forbidden_nodes:
+                if neighbor in static_forbidden_nodes:
                     continue
                 if capacity <= 0:
                     continue
@@ -266,12 +306,33 @@ class PaymentRouter:
                 if neighbor in path:
                     continue
 
+                # Enforce blocked_participants from earlier edges: forbid using such nodes as intermediates.
+                if neighbor not in {from_pid, to_pid} and neighbor in blocked_so_far:
+                    continue
+
+                edge_blocked = self._edge_blocked(current, neighbor)
+                if edge_blocked:
+                    # Block using forbidden PIDs as intermediate nodes (endpoints allowed).
+                    if neighbor not in {from_pid, to_pid} and neighbor in edge_blocked:
+                        continue
+
+                    # Also forbid adding this edge if it blocks any already-used intermediate node.
+                    if len(path) > 2:
+                        intermediates = set(path[1:-1])
+                        if intermediates & edge_blocked:
+                            continue
+
                 # Enforce can_be_intermediate on the edge when neighbor is used as intermediate.
                 if neighbor not in {from_pid, to_pid}:
                     if not self._edge_allows_intermediate(current, neighbor):
                         continue
 
-                queue.append((neighbor, path + [neighbor]))
+                next_blocked = blocked_so_far
+                if edge_blocked:
+                    next_blocked = set(blocked_so_far)
+                    next_blocked.update(edge_blocked)
+
+                queue.append((neighbor, path + [neighbor], next_blocked))
 
         return None
 

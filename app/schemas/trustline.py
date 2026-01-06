@@ -27,10 +27,16 @@ class TrustLineCreateRequest(BaseModel):
     equivalent: str
     limit: Decimal
     policy: Optional[Dict[str, Any]] = None
+    signature: str
 
 class TrustLineUpdateRequest(BaseModel):
     limit: Optional[Decimal] = None
     policy: Optional[Dict[str, Any]] = None
+    signature: str
+
+
+class TrustLineCloseRequest(BaseModel):
+    signature: str
 
 class TrustLinesList(BaseModel):
     items: List[TrustLine]

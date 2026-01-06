@@ -662,7 +662,8 @@ WHERE resolved = false;
 
 ```text
 Auth:
-  POST   /api/v1/auth/register          # Register
+    POST   /api/v1/participants           # Register participant
+    POST   /api/v1/auth/challenge         # Start challenge-response
   POST   /api/v1/auth/login             # Login (challenge-response)
   POST   /api/v1/auth/refresh           # Refresh token
 
@@ -670,7 +671,7 @@ Participants:
   GET    /api/v1/participants/me        # Current participant
   PATCH  /api/v1/participants/me        # Update profile
   GET    /api/v1/participants/{pid}     # Participant profile
-  GET    /api/v1/participants/search    # Search participants
+    GET    /api/v1/participants           # Search participants
 
 TrustLines:
   POST   /api/v1/trustlines             # Create trust line

@@ -11,6 +11,7 @@ from app.config import settings
 from app.core.payments.engine import PaymentEngine
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
+from app.utils.metrics import RECOVERY_EVENTS_TOTAL
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +26,62 @@ _ACTIVE_TX_STATES: set[str] = {
 
 
 async def cleanup_expired_prepare_locks(session: AsyncSession) -> int:
-    result = await session.execute(
-        delete(PrepareLock).where(PrepareLock.expires_at <= func.now())
-    )
+    try:
+        # Best-effort metrics (avoid new metric names if registry isn't available).
+        RECOVERY_EVENTS_TOTAL.labels(event="cleanup_expired_prepare_locks", result="start").inc()
+    except Exception:
+        pass
+
+    # Count first to avoid relying on DBAPI rowcount semantics.
+    expired_count = (
+        await session.execute(
+            select(func.count()).select_from(PrepareLock).where(PrepareLock.expires_at <= func.now())
+        )
+    ).scalar_one()
+
+    if not expired_count:
+        try:
+            RECOVERY_EVENTS_TOTAL.labels(event="cleanup_expired_prepare_locks", result="noop").inc()
+        except Exception:
+            pass
+        return 0
+
+    # Abort related transactions first to ensure we don't leave "active" tx without locks.
+    tx_ids = (
+        await session.execute(
+            select(PrepareLock.tx_id)
+            .where(PrepareLock.expires_at <= func.now())
+            .distinct()
+        )
+    ).scalars().all()
+
+    engine = PaymentEngine(session)
+    for tx_id in tx_ids:
+        try:
+            await engine.abort(tx_id, reason="Prepare lock expired")
+        except Exception:
+            logger.exception("recovery.abort_expired_prepare_lock_tx_failed tx_id=%s", tx_id)
+
+    # Best-effort cleanup for any remaining expired rows (e.g., if abort failed part-way).
+    await session.execute(delete(PrepareLock).where(PrepareLock.expires_at <= func.now()))
     await session.commit()
-    return int(getattr(result, "rowcount", 0) or 0)
+
+    try:
+        RECOVERY_EVENTS_TOTAL.labels(event="cleanup_expired_prepare_locks", result="success").inc()
+    except Exception:
+        pass
+
+    return int(expired_count)
 
 
 async def abort_stale_payment_transactions(session: AsyncSession) -> int:
     timeout_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+
+    try:
+        RECOVERY_EVENTS_TOTAL.labels(event="abort_stale_payment_transactions", result="start").inc()
+    except Exception:
+        pass
 
     tx_ids = (
         await session.execute(
@@ -49,6 +96,10 @@ async def abort_stale_payment_transactions(session: AsyncSession) -> int:
     ).scalars().all()
 
     if not tx_ids:
+        try:
+            RECOVERY_EVENTS_TOTAL.labels(event="abort_stale_payment_transactions", result="noop").inc()
+        except Exception:
+            pass
         return 0
 
     engine = PaymentEngine(session)
@@ -59,6 +110,11 @@ async def abort_stale_payment_transactions(session: AsyncSession) -> int:
             aborted += 1
         except Exception:
             logger.exception("recovery.abort_failed tx_id=%s", tx_id)
+
+    try:
+        RECOVERY_EVENTS_TOTAL.labels(event="abort_stale_payment_transactions", result="success").inc()
+    except Exception:
+        pass
 
     return aborted
 

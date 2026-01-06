@@ -493,12 +493,10 @@ class IntegrityViolation:
 class IntegrityCheckpoint:
     """Контрольная точка состояния"""
     id: UUID
-    equivalent: str
+    equivalent_id: UUID
     checksum: str
-    timestamp: datetime
-    total_debt: Decimal
-    participant_count: int
-    debt_count: int
+    invariants_status: dict[str, Any]
+    created_at: datetime
 ```
 
 ### 2.4. Схема данных MVP
@@ -569,15 +567,19 @@ CREATE INDEX idx_debts_creditor ON debts(creditor_id);
 CREATE TABLE transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tx_id VARCHAR(64) UNIQUE NOT NULL,
+    idempotency_key VARCHAR(128),
     type VARCHAR(50) NOT NULL,
     initiator_id UUID REFERENCES participants(id),
     payload JSONB NOT NULL,
     signatures JSONB DEFAULT '[]',
     state VARCHAR(30) NOT NULL,
-    error_info JSONB,
+    error JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Allowed states (as implemented in Hub v0.1 DB constraint):
+-- NEW, ROUTED, PREPARE_IN_PROGRESS, PREPARED, COMMITTED, ABORTED, PROPOSED, WAITING, REJECTED
 
 CREATE INDEX idx_transactions_tx_id ON transactions(tx_id);
 CREATE INDEX idx_transactions_state ON transactions(state);
@@ -623,15 +625,14 @@ WHERE verification_passed = false;
 -- Integrity Checkpoints (контрольные точки состояния)
 CREATE TABLE integrity_checkpoints (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    equivalent_code VARCHAR(16) NOT NULL,
+    equivalent_id UUID NOT NULL REFERENCES equivalents(id),
     checksum VARCHAR(64) NOT NULL,
-    total_debt DECIMAL(20, 8) NOT NULL,
-    participant_count INTEGER NOT NULL,
-    debt_count INTEGER NOT NULL,
+    invariants_status JSONB NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_checkpoints_equivalent ON integrity_checkpoints(equivalent_code, created_at DESC);
+CREATE INDEX idx_integrity_checkpoints_equivalent ON integrity_checkpoints(equivalent_id);
+CREATE INDEX idx_integrity_checkpoints_created_at ON integrity_checkpoints(created_at);
 
 -- Integrity Violations (зафиксированные нарушения)
 CREATE TABLE integrity_violations (
@@ -654,7 +655,8 @@ WHERE resolved = false;
 
 ```
 Auth:
-  POST   /api/v1/auth/register          # Регистрация
+    POST   /api/v1/participants           # Регистрация участника
+    POST   /api/v1/auth/challenge         # Старт challenge-response
   POST   /api/v1/auth/login             # Логин (challenge-response)
   POST   /api/v1/auth/refresh           # Обновление токена
 
@@ -662,7 +664,7 @@ Participants:
   GET    /api/v1/participants/me        # Текущий участник
   PATCH  /api/v1/participants/me        # Обновление профиля
   GET    /api/v1/participants/{pid}     # Профиль участника
-  GET    /api/v1/participants/search    # Поиск участников
+    GET    /api/v1/participants           # Поиск участников
 
 TrustLines:
   POST   /api/v1/trustlines             # Создать линию
@@ -684,6 +686,16 @@ Balance:
 
 WebSocket:
   WS     /api/v1/ws                     # Real-time уведомления
+
+Примечание про «асинхронность» и оффлайн:
+- В Hub v0.1 WebSocket используется для best-effort уведомлений (возможны пропуски/дубликаты); после переподключения клиент сверяет состояние через REST.
+- Оффлайн клиента (UX) не требует протокольных состояний согласования. Протокольные состояния `PROPOSED/WAITING/REJECTED` и сетевые ACK-фазы относятся к расширенному (распределённому) режиму и зарезервированы.
+
+Integrity:
+    GET    /api/v1/integrity/status               # Статус/настройки
+    GET    /api/v1/integrity/checksum/{equivalent}  # Последний checksum по эквиваленту
+    POST   /api/v1/integrity/verify               # Запуск проверок инвариантов + запись в audit log
+    GET    /api/v1/integrity/audit-log            # Просмотр audit log
 ```
 
 ---

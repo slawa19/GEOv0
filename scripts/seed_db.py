@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db.session import get_db_session
 from app.db.models import Equivalent, Participant, TrustLine
+from app.utils.validation import validate_equivalent_code, validate_equivalent_metadata
 
 async def seed_data():
     """
@@ -31,6 +32,13 @@ async def seed_data():
                     equivalents_data = json.load(f)
                     
                 for eq_data in equivalents_data:
+                    validate_equivalent_code(eq_data.get('code'))
+
+                    if 'metadata' in eq_data and 'metadata_' not in eq_data:
+                        eq_data['metadata_'] = eq_data.pop('metadata')
+
+                    eq_data['metadata_'] = validate_equivalent_metadata(eq_data.get('metadata_'))
+
                     # Проверяем существование
                     stmt = select(Equivalent).where(Equivalent.code == eq_data['code'])
                     result = await session.execute(stmt)

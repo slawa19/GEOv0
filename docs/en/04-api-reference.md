@@ -76,7 +76,12 @@ list endpoints return an object like `{ "items": [...] }`.
 #### Step 1: Get challenge
 
 ```http
-GET /auth/challenge?pid={pid}
+POST /auth/challenge
+Content-Type: application/json
+
+{
+  "pid": "5HueCGU8rMjxEXxiPuD5BDku..."
+}
 ```
 
 **Response:**
@@ -121,19 +126,22 @@ Content-Type: application/json
 ### 2.2. Registration
 
 ```http
-POST /auth/register
+POST /participants
 Content-Type: application/json
 
 {
   "public_key": "base64_encoded_32_bytes",
   "display_name": "Alice",
+  "type": "person",
   "profile": {
-    "type": "person",
     "description": "Developer"
   },
-  "signature": "base64_encoded_registration_proof"
+  "signature": "base64_encoded_ed25519_signature"
 }
 ```
+
+Registration signature is computed over the **canonical JSON** of the payload **without** the `signature` field.
+The exact signed fields are defined in the canonical API contract (`api/openapi.yaml`).
 
 **Response:**
 ```json
@@ -585,16 +593,12 @@ Authorization: Bearer {access_token}
 | `E002` | 400 | Insufficient capacity for payment |
 | `E003` | 400 | Trust line limit exceeded |
 | `E004` | 400 | Trust line not active |
-| `E005` | 401 | Invalid signature |
+| `E005` | 400 | Invalid signature |
 | `E006` | 403 | Insufficient permissions |
-| `E007` | 408 | Operation timeout |
+| `E007` | 504 | Operation timeout |
 | `E008` | 409 | State conflict |
-| `E009` | 422 | Invalid data |
+| `E009` | 400 | Invalid data |
 | `E010` | 500 | Internal error |
-| `E011` | 404 | Participant not found |
-| `E012` | 404 | Trust line not found |
-| `E013` | 400 | Debt not cleared (when closing line) |
-| `E014` | 429 | Too many requests |
 
 ### 8.2. Error example
 

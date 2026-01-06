@@ -8,7 +8,11 @@ from nacl.signing import SigningKey
 from sqlalchemy import select
 
 from app.db.models.equivalent import Equivalent
-from tests.integration.test_scenarios import register_and_login, _sign_payment_request
+from tests.integration.test_scenarios import (
+    register_and_login,
+    _sign_payment_request,
+    _sign_trustline_create_request,
+)
 
 
 async def _seed_equivalent(db_session, code: str):
@@ -30,17 +34,40 @@ async def test_list_payments_filters(client: AsyncClient, db_session):
     alice = await register_and_login(client, "Alice_List")
     bob = await register_and_login(client, "Bob_List")
 
+    alice_tl_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    bob_tl_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+
     # Allow Alice -> Bob payments (Bob trusts Alice)
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": alice["pid"], "equivalent": "USD", "limit": "100.00"},
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=bob_tl_signing_key,
+                to_pid=alice["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
         headers=bob["headers"],
     )
     assert resp.status_code == 201
 
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": alice["pid"], "equivalent": "EUR", "limit": "100.00"},
+        json={
+            "to": alice["pid"],
+            "equivalent": "EUR",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=bob_tl_signing_key,
+                to_pid=alice["pid"],
+                equivalent="EUR",
+                limit="100.00",
+            ),
+        },
         headers=bob["headers"],
     )
     assert resp.status_code == 201
@@ -48,7 +75,17 @@ async def test_list_payments_filters(client: AsyncClient, db_session):
     # Allow Bob -> Alice payments (Alice trusts Bob)
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": bob["pid"], "equivalent": "USD", "limit": "100.00"},
+        json={
+            "to": bob["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=alice_tl_signing_key,
+                to_pid=bob["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
         headers=alice["headers"],
     )
     assert resp.status_code == 201

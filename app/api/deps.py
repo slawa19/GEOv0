@@ -2,7 +2,9 @@ import asyncio
 import time
 from typing import AsyncGenerator
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request, status
+from app.utils.exceptions import TooManyRequestsException, UnauthorizedException
+from app.utils.exceptions import ForbiddenException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -97,9 +99,6 @@ async def get_current_participant(
         raise UnauthorizedException("Participant not found")
     
     if participant.status != 'active':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Participant account is not active"
-        )
+        raise ForbiddenException("Participant account is not active")
         
     return participant

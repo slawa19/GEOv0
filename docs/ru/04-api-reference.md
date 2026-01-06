@@ -129,19 +129,22 @@ Content-Type: application/json
 ### 2.2. Регистрация
 
 ```http
-POST /auth/register
+POST /participants
 Content-Type: application/json
 
 {
   "public_key": "base64_encoded_32_bytes",
   "display_name": "Alice",
+  "type": "person",
   "profile": {
-    "type": "person",
     "description": "Developer"
   },
-  "signature": "base64_encoded_registration_proof"
+  "signature": "base64_encoded_ed25519_signature"
 }
 ```
+
+Подпись регистрации считается по **canonical JSON** payload **без** поля `signature`.
+Точный состав подписываемых полей определён в `api/openapi.yaml`.
 
 **Response:**
 ```json
@@ -353,6 +356,8 @@ Content-Type: application/json
   },
   "signature": "base64_signature"
 }
+
+Примечание (MVP): `policy.daily_limit` принимается и сохраняется как часть policy, но **не enforced** в платёжном критическом пути (informational only).
 ```
 
 ### 4.5. Закрыть линию
@@ -656,16 +661,12 @@ Authorization: Bearer {access_token}
 | `E002` | 400 | Недостаточная ёмкость для платежа |
 | `E003` | 400 | Превышен лимит линии доверия |
 | `E004` | 400 | Линия доверия не активна |
-| `E005` | 401 | Неверная подпись |
+| `E005` | 400 | Неверная подпись |
 | `E006` | 403 | Недостаточно прав |
-| `E007` | 408 | Таймаут операции |
+| `E007` | 504 | Таймаут операции |
 | `E008` | 409 | Конфликт состояний |
-| `E009` | 422 | Некорректные данные |
+| `E009` | 400 | Некорректные данные |
 | `E010` | 500 | Внутренняя ошибка |
-| `E011` | 404 | Участник не найден |
-| `E012` | 404 | Линия доверия не найдена |
-| `E013` | 400 | Долг не погашен (при закрытии линии) |
-| `E014` | 429 | Слишком много запросов |
 
 ### 8.2. Пример ошибки
 

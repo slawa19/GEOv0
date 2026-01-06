@@ -3,6 +3,7 @@ from httpx import AsyncClient
 import base64
 import json
 from app.core.auth.crypto import generate_keypair
+from app.core.auth.canonical import canonical_json
 from nacl.signing import SigningKey
 
 
@@ -20,19 +21,68 @@ def _sign_payment_request(
         "to": to_pid,
         "equivalent": equivalent,
         "amount": amount,
-        "description": description,
-        "constraints": constraints,
     }
-    message = (
-        f"geo:payment:request:{from_pid}:" + json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    ).encode("utf-8")
+    if description is not None:
+        payload["description"] = description
+    if constraints is not None:
+        payload["constraints"] = constraints
+
+    message = canonical_json(payload)
+    return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
+
+
+def _sign_trustline_create_request(
+    *,
+    signing_key: SigningKey,
+    to_pid: str,
+    equivalent: str,
+    limit: str,
+    policy: dict | None = None,
+) -> str:
+    payload: dict = {"to": to_pid, "equivalent": equivalent, "limit": limit}
+    if policy is not None:
+        payload["policy"] = policy
+    message = canonical_json(payload)
+    return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
+
+
+def _sign_trustline_update_request(
+    *,
+    signing_key: SigningKey,
+    trustline_id: str,
+    limit: str | None = None,
+    policy: dict | None = None,
+) -> str:
+    payload: dict = {"id": str(trustline_id)}
+    if limit is not None:
+        payload["limit"] = limit
+    if policy is not None:
+        payload["policy"] = policy
+    message = canonical_json(payload)
+    return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
+
+
+def _sign_trustline_close_request(
+    *,
+    signing_key: SigningKey,
+    trustline_id: str,
+) -> str:
+    payload: dict = {"id": str(trustline_id)}
+    message = canonical_json(payload)
     return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
 
 async def register_and_login(client: AsyncClient, name: str) -> dict:
     pub, priv = generate_keypair()
 
     signing_key = SigningKey(base64.b64decode(priv))
-    reg_message = f"geo:participant:create:{name}:person:{pub}".encode("utf-8")
+    reg_message = canonical_json(
+        {
+            "display_name": name,
+            "type": "person",
+            "public_key": pub,
+            "profile": {},
+        }
+    )
     reg_sig_b64 = base64.b64encode(signing_key.sign(reg_message).signature).decode("utf-8")
 
     reg_data = {
@@ -81,7 +131,14 @@ async def test_register_and_auth(client: AsyncClient):
     pub, priv = generate_keypair()
 
     signing_key = SigningKey(base64.b64decode(priv))
-    reg_message = f"geo:participant:create:Auth Tester:person:{pub}".encode("utf-8")
+    reg_message = canonical_json(
+        {
+            "display_name": "Auth Tester",
+            "type": "person",
+            "public_key": pub,
+            "profile": {},
+        }
+    )
     reg_sig = base64.b64encode(signing_key.sign(reg_message).signature).decode("utf-8")
 
     reg_response = await client.post(
@@ -148,7 +205,18 @@ async def test_trustlines_crud(client: AsyncClient, db_session):
     bob = await register_and_login(client, "Bob_TL")
     
     # 2. Create TrustLine (Alice trusts Bob)
-    tl_data = {"to": bob["pid"], "equivalent": "USD", "limit": "100.00"}
+    alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    tl_data = {
+        "to": bob["pid"],
+        "equivalent": "USD",
+        "limit": "100.00",
+        "signature": _sign_trustline_create_request(
+            signing_key=alice_signing_key,
+            to_pid=bob["pid"],
+            equivalent="USD",
+            limit="100.00",
+        ),
+    }
 
     resp = await client.post("/api/v1/trustlines", json=tl_data, headers=alice["headers"])
     assert resp.status_code == 201
@@ -168,13 +236,30 @@ async def test_trustlines_crud(client: AsyncClient, db_session):
     assert found
     
     # 4. Update
-    update_data = {"limit": "200.00"}
+    update_data = {
+        "limit": "200.00",
+        "signature": _sign_trustline_update_request(
+            signing_key=alice_signing_key,
+            trustline_id=tl_id,
+            limit="200.00",
+        ),
+    }
     resp = await client.patch(f"/api/v1/trustlines/{tl_id}", json=update_data, headers=alice["headers"])
     assert resp.status_code == 200
     assert float(resp.json()["limit"]) == 200.0
     
     # 5. Close
-    resp = await client.delete(f"/api/v1/trustlines/{tl_id}", headers=alice["headers"])
+    resp = await client.request(
+        "DELETE",
+        f"/api/v1/trustlines/{tl_id}",
+        headers=alice["headers"],
+        json={
+            "signature": _sign_trustline_close_request(
+                signing_key=alice_signing_key,
+                trustline_id=tl_id,
+            )
+        },
+    )
     assert resp.status_code == 200
     
     # No GET-by-id endpoint in MVP; closing success is sufficient
@@ -205,7 +290,18 @@ async def test_direct_payment(client: AsyncClient, db_session):
     bob = await register_and_login(client, "Bob_Pay")
     
     # Bob trusts Alice for 100 USD (required for Alice -> Bob payment)
-    tl_data = {"to": alice["pid"], "equivalent": "USD", "limit": "100.00"}
+    bob_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+    tl_data = {
+        "to": alice["pid"],
+        "equivalent": "USD",
+        "limit": "100.00",
+        "signature": _sign_trustline_create_request(
+            signing_key=bob_signing_key,
+            to_pid=alice["pid"],
+            equivalent="USD",
+            limit="100.00",
+        ),
+    }
     resp = await client.post("/api/v1/trustlines", json=tl_data, headers=bob["headers"])
     assert resp.status_code == 201
     
@@ -281,8 +377,38 @@ async def test_multihop_payment(client: AsyncClient, db_session):
     carol = await register_and_login(client, "Carol_Hop")
     
     # B trusts A; C trusts B
-    await client.post("/api/v1/trustlines", headers=bob["headers"], json={"to": alice["pid"], "equivalent": "USD", "limit": "100.00"})
-    await client.post("/api/v1/trustlines", headers=carol["headers"], json={"to": bob["pid"], "equivalent": "USD", "limit": "100.00"})
+    bob_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+    carol_signing_key = SigningKey(base64.b64decode(carol["priv"]))
+    await client.post(
+        "/api/v1/trustlines",
+        headers=bob["headers"],
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=bob_signing_key,
+                to_pid=alice["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
+    )
+    await client.post(
+        "/api/v1/trustlines",
+        headers=carol["headers"],
+        json={
+            "to": bob["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=carol_signing_key,
+                to_pid=bob["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
+    )
     
     # A pays C
     alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
@@ -331,26 +457,70 @@ async def test_multipath_payment(client: AsyncClient, db_session):
 
     # Trustlines enabling payments along edges:
     # For X -> Y, need trustline Y trusts X (Y -> X)
+    b_signing_key = SigningKey(base64.b64decode(b["priv"]))
+    c_signing_key = SigningKey(base64.b64decode(c["priv"]))
+    d_signing_key = SigningKey(base64.b64decode(d["priv"]))
+
     await client.post(
         "/api/v1/trustlines",
         headers=b["headers"],
-        json={"to": a["pid"], "equivalent": "USD", "limit": "30.00"},
+        json={
+            "to": a["pid"],
+            "equivalent": "USD",
+            "limit": "30.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=b_signing_key,
+                to_pid=a["pid"],
+                equivalent="USD",
+                limit="30.00",
+            ),
+        },
     )
     await client.post(
         "/api/v1/trustlines",
         headers=d["headers"],
-        json={"to": b["pid"], "equivalent": "USD", "limit": "30.00"},
+        json={
+            "to": b["pid"],
+            "equivalent": "USD",
+            "limit": "30.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=d_signing_key,
+                to_pid=b["pid"],
+                equivalent="USD",
+                limit="30.00",
+            ),
+        },
     )
 
     await client.post(
         "/api/v1/trustlines",
         headers=c["headers"],
-        json={"to": a["pid"], "equivalent": "USD", "limit": "30.00"},
+        json={
+            "to": a["pid"],
+            "equivalent": "USD",
+            "limit": "30.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=c_signing_key,
+                to_pid=a["pid"],
+                equivalent="USD",
+                limit="30.00",
+            ),
+        },
     )
     await client.post(
         "/api/v1/trustlines",
         headers=d["headers"],
-        json={"to": c["pid"], "equivalent": "USD", "limit": "30.00"},
+        json={
+            "to": c["pid"],
+            "equivalent": "USD",
+            "limit": "30.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=d_signing_key,
+                to_pid=c["pid"],
+                equivalent="USD",
+                limit="30.00",
+            ),
+        },
     )
 
     # Payment should succeed via multipath.
@@ -403,9 +573,54 @@ async def test_clearing(client: AsyncClient, db_session):
     
     # Setup Ring Trust
     # Ring trust: B trusts A; C trusts B; A trusts C
-    await client.post("/api/v1/trustlines", headers=bob["headers"], json={"to": alice["pid"], "equivalent": "USD", "limit": "100.00"})
-    await client.post("/api/v1/trustlines", headers=carol["headers"], json={"to": bob["pid"], "equivalent": "USD", "limit": "100.00"})
-    await client.post("/api/v1/trustlines", headers=alice["headers"], json={"to": carol["pid"], "equivalent": "USD", "limit": "100.00"})
+    alice_tl_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    bob_tl_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+    carol_tl_signing_key = SigningKey(base64.b64decode(carol["priv"]))
+    await client.post(
+        "/api/v1/trustlines",
+        headers=bob["headers"],
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=bob_tl_signing_key,
+                to_pid=alice["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
+    )
+    await client.post(
+        "/api/v1/trustlines",
+        headers=carol["headers"],
+        json={
+            "to": bob["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=carol_tl_signing_key,
+                to_pid=bob["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
+    )
+    await client.post(
+        "/api/v1/trustlines",
+        headers=alice["headers"],
+        json={
+            "to": carol["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=alice_tl_signing_key,
+                to_pid=carol["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
+    )
     
     # Create Cycle of Debts
     # A pays B 10

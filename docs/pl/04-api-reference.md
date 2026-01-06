@@ -77,7 +77,12 @@ zwracają obiekt w rodzaju `{ "items": [...] }`.
 #### Krok 1: Pobranie challenge
 
 ```http
-GET /auth/challenge?pid={pid}
+POST /auth/challenge
+Content-Type: application/json
+
+{
+  "pid": "5HueCGU8rMjxEXxiPuD5BDku..."
+}
 ```
 
 **Response:**
@@ -122,19 +127,22 @@ Content-Type: application/json
 ### 2.2. Rejestracja
 
 ```http
-POST /auth/register
+POST /participants
 Content-Type: application/json
 
 {
   "public_key": "base64_encoded_32_bytes",
   "display_name": "Alice",
+  "type": "person",
   "profile": {
-    "type": "person",
     "description": "Developer"
   },
-  "signature": "base64_encoded_registration_proof"
+  "signature": "base64_encoded_ed25519_signature"
 }
 ```
+
+Podpis rejestracji jest liczony po **canonical JSON** payload **bez** pola `signature`.
+Dokładny zestaw pól jest zdefiniowany w kontrakcie (`api/openapi.yaml`).
 
 **Response:**
 ```json
@@ -589,16 +597,12 @@ Authorization: Bearer {access_token}
 | `E002`| 400  | Niewystarczająca pojemność płatności  |
 | `E003`| 400  | Przekroczony limit linii zaufania     |
 | `E004`| 400  | Linia zaufania nieaktywna             |
-| `E005`| 401  | Nieprawidłowy podpis                  |
+| `E005`| 400  | Nieprawidłowy podpis                  |
 | `E006`| 403  | Brak uprawnień                        |
-| `E007`| 408  | Timeout operacji                      |
+| `E007`| 504  | Timeout operacji                      |
 | `E008`| 409  | Konflikt stanów                       |
-| `E009`| 422  | Nieprawidłowe dane                    |
+| `E009`| 400  | Nieprawidłowe dane                    |
 | `E010`| 500  | Błąd wewnętrzny                       |
-| `E011`| 404  | Uczestnik nie znaleziony              |
-| `E012`| 404  | Linia zaufania nie znaleziona         |
-| `E013`| 400  | Dług niespłacony (przy zamknięciu linii) |
-| `E014`| 429  | Zbyt wiele żądań                      |
 
 ### 8.2. Przykład błędu
 

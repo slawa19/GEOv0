@@ -1,11 +1,12 @@
 import logging
 import asyncio
+import hashlib
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Dict, Tuple
 from uuid import UUID
 
-from sqlalchemy import select, and_, delete, update, func
+from sqlalchemy import select, and_, delete, update, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import DBAPIError
@@ -15,8 +16,12 @@ from app.db.models.debt import Debt
 from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
-from app.utils.exceptions import GeoException, ConflictException
+from app.db.models.equivalent import Equivalent
+from app.db.models.audit_log import IntegrityAuditLog
+from app.utils.exceptions import GeoException, ConflictException, RoutingException
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,52 @@ class PaymentEngine:
 
         self._retry_attempts = getattr(settings, "DB_RETRY_ATTEMPTS", 3)
         self._retry_base_delay_s = getattr(settings, "DB_RETRY_BASE_DELAY_SECONDS", 0.05)
+
+    def _is_postgres(self) -> bool:
+        bind = getattr(self.session, "bind", None)
+        dialect = getattr(getattr(bind, "dialect", None), "name", None)
+        return dialect in {"postgresql", "postgres"}
+
+    @staticmethod
+    def _segment_lock_key(*, equivalent_id: UUID, from_participant_id: UUID, to_participant_id: UUID) -> int:
+        """Compute a stable BIGINT advisory lock key for a segment.
+
+        Key material: equivalent UUID + from UUID + to UUID (bytes), hashed via SHA-256.
+        Uses first 8 bytes as signed big-endian int (Postgres BIGINT).
+        """
+        digest = hashlib.sha256(
+            equivalent_id.bytes + from_participant_id.bytes + to_participant_id.bytes
+        ).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+    async def _acquire_segment_advisory_locks(
+        self,
+        *,
+        equivalent_id: UUID,
+        routes: List[Tuple[List[str], Decimal]],
+        participant_map: dict[str, UUID],
+    ) -> None:
+        if not self._is_postgres():
+            return
+
+        keys: set[int] = set()
+        for path, _route_amount in routes:
+            for i in range(len(path) - 1):
+                sender_id = participant_map[path[i]]
+                receiver_id = participant_map[path[i + 1]]
+                keys.add(
+                    self._segment_lock_key(
+                        equivalent_id=equivalent_id,
+                        from_participant_id=sender_id,
+                        to_participant_id=receiver_id,
+                    )
+                )
+
+        for key in sorted(keys):
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": key},
+            )
 
     def _is_retryable_db_error(self, exc: BaseException) -> bool:
         if not isinstance(exc, DBAPIError):
@@ -278,9 +329,17 @@ class PaymentEngine:
             available_capacity = limit - amount_s_owes_r + amount_r_owes_s
             
             if available_capacity < (amount + reserved_usage):
-                raise GeoException(
+                raise RoutingException(
                     f"Insufficient capacity between {sender_pid} and {receiver_pid}. "
-                    f"Available: {available_capacity}, Needed: {amount}, Reserved: {reserved_usage}"
+                    f"Available: {available_capacity}, Needed: {amount}, Reserved: {reserved_usage}",
+                    insufficient_capacity=True,
+                    details={
+                        "available": str(available_capacity),
+                        "needed": str(amount),
+                        "reserved": str(reserved_usage),
+                        "from": sender_pid,
+                        "to": receiver_pid,
+                    },
                 )
 
             # Create Lock for this participant (Sender)? 
@@ -381,6 +440,14 @@ class PaymentEngine:
 
         participant_map = {pid: p.id for pid, p in participants.items()}
 
+        # FIX-016: serialize prepare on segments to prevent oversubscription races.
+        # Advisory locks are Postgres-only; other backends run best-effort.
+        await self._acquire_segment_advisory_locks(
+            equivalent_id=equivalent_id,
+            routes=routes,
+            participant_map=participant_map,
+        )
+
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.lock_ttl_seconds)
 
         # PrepareLock has UNIQUE(tx_id, participant_id), so we must aggregate multiple segment flows
@@ -469,9 +536,17 @@ class PaymentEngine:
 
                 available_capacity = limit - amount_s_owes_r + amount_r_owes_s
                 if available_capacity < (route_amount + reserved_usage):
-                    raise GeoException(
+                    raise RoutingException(
                         f"Insufficient capacity between {sender_pid} and {receiver_pid}. "
-                        f"Available: {available_capacity}, Needed: {route_amount}, Reserved: {reserved_usage}"
+                        f"Available: {available_capacity}, Needed: {route_amount}, Reserved: {reserved_usage}",
+                        insufficient_capacity=True,
+                        details={
+                            "available": str(available_capacity),
+                            "needed": str(route_amount),
+                            "reserved": str(reserved_usage),
+                            "from": sender_pid,
+                            "to": receiver_pid,
+                        },
                     )
 
                 flow = {
@@ -538,6 +613,24 @@ class PaymentEngine:
         if not locks:
             raise GeoException(f"No locks found for transaction {tx_id}")
 
+        # FIX-014: capture integrity checksums before applying flows.
+        checkpoints_before: dict[UUID, object] = {}
+        try:
+            affected_eq_ids = {
+                UUID(flow["equivalent"]) for lock in locks for flow in (lock.effects or {}).get("flows", [])
+                if isinstance(flow, dict) and "equivalent" in flow
+            }
+            for eq_id in affected_eq_ids:
+                try:
+                    checkpoints_before[eq_id] = await compute_integrity_checkpoint_for_equivalent(
+                        self.session,
+                        equivalent_id=eq_id,
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            checkpoints_before = {}
+
         # 1a. TTL validation: any expired lock aborts the transaction.
         expired_lock = (
             await self.session.execute(
@@ -551,6 +644,7 @@ class PaymentEngine:
             raise ConflictException(f"Transaction {tx_id} expired before commit")
 
         # 2. Process each lock (segment)
+        affected_pairs_by_equivalent: dict[UUID, set[tuple[UUID, UUID]]] = {}
         for lock in locks:
             flows = lock.effects.get('flows', [])
             for flow in flows:
@@ -558,8 +652,85 @@ class PaymentEngine:
                 to_id = UUID(flow['to'])
                 amount = Decimal(flow['amount'])
                 equivalent_id = UUID(flow['equivalent'])
+
+                pairs = affected_pairs_by_equivalent.setdefault(equivalent_id, set())
+                pairs.add((from_id, to_id))
+                pairs.add((to_id, from_id))
                 
                 await self._apply_flow(from_id, to_id, amount, equivalent_id)
+
+            await self.session.flush()
+
+        # 2a. Invariants: trust limits + zero-sum smoke-check
+        from app.core.invariants import InvariantChecker
+        from app.utils.exceptions import IntegrityViolationException
+
+        checker = InvariantChecker(self.session)
+        try:
+            for eq_id, pairs in affected_pairs_by_equivalent.items():
+                await checker.check_trust_limits(equivalent_id=eq_id, participant_pairs=list(pairs))
+                await checker.check_zero_sum(equivalent_id=eq_id)
+                await checker.check_debt_symmetry(equivalent_id=eq_id)
+        except IntegrityViolationException as exc:
+            await self.session.rollback()
+            await self.abort(tx_id, reason=f"Invariant violation: {exc.code}")
+            raise
+
+        # FIX-014: write integrity audit trail per equivalent (best-effort).
+        try:
+            payload = tx.payload or {}
+            participant_pids: set[str] = set()
+            for key in ("from", "to"):
+                value = payload.get(key)
+                if isinstance(value, str) and value:
+                    participant_pids.add(value)
+
+            routes = payload.get("routes")
+            if isinstance(routes, list):
+                for route in routes:
+                    if not isinstance(route, dict):
+                        continue
+                    path = route.get("path")
+                    if isinstance(path, list):
+                        for pid in path:
+                            if isinstance(pid, str) and pid:
+                                participant_pids.add(pid)
+
+            for eq_id in affected_pairs_by_equivalent.keys():
+                try:
+                    eq_code = (
+                        await self.session.execute(select(Equivalent.code).where(Equivalent.id == eq_id))
+                    ).scalar_one_or_none()
+                    eq_code_str = str(eq_code or eq_id)
+
+                    cp_before = checkpoints_before.get(eq_id)
+                    before_sum = getattr(cp_before, "checksum", "") or ""
+
+                    cp_after = await compute_integrity_checkpoint_for_equivalent(
+                        self.session,
+                        equivalent_id=eq_id,
+                    )
+                    after_sum = getattr(cp_after, "checksum", before_sum) or before_sum
+                    invariants_status = getattr(cp_after, "invariants_status", {}) or {}
+                    passed = bool(invariants_status.get("passed", True))
+
+                    self.session.add(
+                        IntegrityAuditLog(
+                            operation_type="PAYMENT",
+                            tx_id=tx_id,
+                            equivalent_code=eq_code_str,
+                            state_checksum_before=before_sum,
+                            state_checksum_after=after_sum,
+                            affected_participants={"participants": sorted(participant_pids)},
+                            invariants_checked=invariants_status.get("checks") or invariants_status,
+                            verification_passed=passed,
+                            error_details=None if passed else invariants_status,
+                        )
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
         # 3. Delete Locks
         delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
@@ -593,14 +764,11 @@ class PaymentEngine:
             reduction = min(remaining_amount, debt_r_s.amount)
             debt_r_s.amount -= reduction
             remaining_amount -= reduction
-            self.session.add(debt_r_s)
-            
+
             if debt_r_s.amount == 0:
-                 # Optional: Delete debt row if 0?
-                 # Keep it for history or delete? 
-                 # Usually keep, or delete to save space. 
-                 # Let's keep for MVP.
-                 pass
+                await self.session.delete(debt_r_s)
+            else:
+                self.session.add(debt_r_s)
 
         if remaining_amount > 0:
             # 2. Increase Sender's debt to Receiver (Debt: debtor=from, creditor=to)
@@ -616,6 +784,29 @@ class PaymentEngine:
             
             debt_s_r.amount += remaining_amount
             self.session.add(debt_s_r)
+
+        # Enforce debt symmetry by netting mutual debts, if any.
+        debt_forward = await self._get_debt(from_id, to_id, equivalent_id)
+        debt_reverse = await self._get_debt(to_id, from_id, equivalent_id)
+        if (
+            debt_forward
+            and debt_reverse
+            and debt_forward.amount > 0
+            and debt_reverse.amount > 0
+        ):
+            net = min(debt_forward.amount, debt_reverse.amount)
+            debt_forward.amount -= net
+            debt_reverse.amount -= net
+
+            if debt_forward.amount == 0:
+                await self.session.delete(debt_forward)
+            else:
+                self.session.add(debt_forward)
+
+            if debt_reverse.amount == 0:
+                await self.session.delete(debt_reverse)
+            else:
+                self.session.add(debt_reverse)
 
     async def _get_debt(self, debtor_id: UUID, creditor_id: UUID, equivalent_id: UUID) -> Debt | None:
         stmt = select(Debt).where(

@@ -61,6 +61,29 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange refresh token for a new token pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
   /participants:
     get:
       tags: [Participants]
@@ -227,6 +250,12 @@ paths:
       summary: Close trustline
       parameters:
         - $ref: '#/components/parameters/TrustLineIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrustLineCloseRequest'
       responses:
         '200':
           description: Closed
@@ -409,6 +438,7 @@ paths:
             type: string
             enum: [COMMITTED, ABORTED, all]
             default: all
+          description: Final payment outcome filter. This API exposes only final statuses (`COMMITTED` or `ABORTED`).
         - in: query
           name: from_date
           schema:
@@ -505,6 +535,92 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /integrity/status:
+    get:
+      tags: [Integrity]
+      summary: Get integrity status
+      responses:
+        '200':
+          description: Current integrity status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrityStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /integrity/checksum/{equivalent}:
+    get:
+      tags: [Integrity]
+      summary: Get latest integrity checksum for equivalent
+      parameters:
+        - in: path
+          name: equivalent
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+      responses:
+        '200':
+          description: Latest integrity checkpoint checksum
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrityChecksumResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /integrity/verify:
+    post:
+      tags: [Integrity]
+      summary: Run invariant verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntegrityVerifyRequest'
+      responses:
+        '200':
+          description: Verification results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrityVerifyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /integrity/audit-log:
+    get:
+      tags: [Integrity]
+      summary: List integrity verification audit log entries
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      responses:
+        '200':
+          description: Audit log items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrityAuditLogResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 components:
   securitySchemes:
     BearerAuth:
@@ -555,6 +671,10 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
 
   schemas:
+    EquivalentCode:
+      type: string
+      pattern: '^[A-Z0-9_]{1,16}$'
+      description: Equivalent code (1-16 chars; A-Z, 0-9, underscore)
     ErrorEnvelope:
       type: object
       required: [error]
@@ -604,6 +724,13 @@ components:
         challenge:
           type: string
         signature:
+          type: string
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
           type: string
 
     TokenPair:
@@ -671,6 +798,9 @@ components:
           additionalProperties: true
         signature:
           type: string
+          description: |
+            base64 Ed25519 signature of canonical JSON of this request body **excluding** `signature`.
+            Signed payload keys: `display_name`, `type`, `public_key`, and optional `profile` if provided.
 
     ParticipantsList:
       type: object
@@ -696,8 +826,7 @@ components:
           type: string
           description: PID of trustee (potential debtor)
         equivalent:
-          type: string
-          description: Equivalent code (e.g. UAH, HOUR)
+          $ref: '#/components/schemas/EquivalentCode'
         limit:
           type: string
           description: Maximum debt allowed (decimal string)
@@ -710,7 +839,12 @@ components:
         policy:
           type: object
           additionalProperties: true
-          description: TrustLine policy settings
+          description: |
+            TrustLine policy settings.
+
+            Allowed keys (MVP): `auto_clearing`, `can_be_intermediate`, `max_hop_usage`, `daily_limit`, `blocked_participants`.
+
+            Note: `daily_limit` is **informational only** and is **not enforced in MVP**.
         status:
           type: string
           enum: [active, frozen, closed]
@@ -730,26 +864,59 @@ components:
 
     TrustLineCreateRequest:
       type: object
-      required: [to, equivalent, limit]
+      required: [to, equivalent, limit, signature]
       properties:
         to:
           type: string
         equivalent:
-          type: string
+          $ref: '#/components/schemas/EquivalentCode'
         limit:
           type: string
         policy:
           type: object
           additionalProperties: true
+          description: |
+            Optional TrustLine policy.
+
+            Allowed keys (MVP): `auto_clearing`, `can_be_intermediate`, `max_hop_usage`, `daily_limit`, `blocked_participants`.
+
+            Note: `daily_limit` is **informational only** and is **not enforced in MVP**.
+        signature:
+          type: string
+          description: |
+            base64 Ed25519 signature of canonical JSON of this request body **excluding** `signature`.
+            Signed payload keys: `to`, `equivalent`, `limit`, and optional `policy` if provided.
 
     TrustLineUpdateRequest:
       type: object
+      required: [signature]
       properties:
         limit:
           type: string
         policy:
           type: object
           additionalProperties: true
+          description: |
+            Optional TrustLine policy update.
+
+            Allowed keys (MVP): `auto_clearing`, `can_be_intermediate`, `max_hop_usage`, `daily_limit`, `blocked_participants`.
+
+            Note: `daily_limit` is **informational only** and is **not enforced in MVP**.
+        signature:
+          type: string
+          description: |
+            base64 Ed25519 signature of canonical JSON of this request body **excluding** `signature`.
+            Signed payload keys: `id` (path param), optional `limit` if provided, optional `policy` if provided.
+
+    TrustLineCloseRequest:
+      type: object
+      required: [signature]
+      properties:
+        signature:
+          type: string
+          description: |
+            base64 Ed25519 signature of canonical JSON payload **excluding** `signature`.
+            Signed payload keys: `id` (path param).
 
     ClearingCycleEdge:
       type: object
@@ -780,7 +947,7 @@ components:
       required: [equivalent, cleared_cycles]
       properties:
         equivalent:
-          type: string
+          $ref: '#/components/schemas/EquivalentCode'
         cleared_cycles:
           type: integer
 
@@ -850,7 +1017,7 @@ components:
         to:
           type: string
         equivalent:
-          type: string
+          $ref: '#/components/schemas/EquivalentCode'
         amount:
           type: string
         description:
@@ -860,6 +1027,9 @@ components:
           additionalProperties: true
         signature:
           type: string
+          description: |
+            base64 Ed25519 signature of canonical JSON of this request body **excluding** `signature`.
+            Signed payload keys: `to`, `equivalent`, `amount`, optional `description`, optional `constraints`.
 
     PaymentRoute:
       type: object
@@ -893,12 +1063,13 @@ components:
         status:
           type: string
           enum: [COMMITTED, ABORTED]
+          description: Final payment outcome. Internal transaction states are not exposed via the Payments API.
         from:
           type: string
         to:
           type: string
         equivalent:
-          type: string
+          $ref: '#/components/schemas/EquivalentCode'
         amount:
           type: string
         routes:
@@ -928,7 +1099,7 @@ components:
       required: [code, total_debt, total_credit, net_balance, available_to_spend, available_to_receive]
       properties:
         code:
-          type: string
+          $ref: '#/components/schemas/EquivalentCode'
         total_debt:
           type: string
         total_credit:
@@ -964,9 +1135,136 @@ components:
               creditor_name:
                 type: string
               equivalent:
-                type: string
+                $ref: '#/components/schemas/EquivalentCode'
               amount:
                 type: string
+
+    InvariantResult:
+      type: object
+      required: [passed]
+      properties:
+        passed:
+          type: boolean
+        value:
+          type: string
+          nullable: true
+        violations:
+          type: integer
+          nullable: true
+        details:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    EquivalentIntegrityStatus:
+      type: object
+      required: [status, checksum, invariants]
+      properties:
+        status:
+          type: string
+          enum: [healthy, warning, critical]
+        checksum:
+          type: string
+        last_verified:
+          type: string
+          format: date-time
+          nullable: true
+        invariants:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/InvariantResult'
+
+    IntegrityStatusResponse:
+      type: object
+      required: [status, last_check, equivalents, alerts]
+      properties:
+        status:
+          type: string
+          enum: [healthy, warning, critical]
+        last_check:
+          type: string
+          format: date-time
+        equivalents:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/EquivalentIntegrityStatus'
+        alerts:
+          type: array
+          items:
+            type: string
+
+    IntegrityChecksumResponse:
+      type: object
+      required: [equivalent, checksum, created_at, invariants_status]
+      properties:
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        checksum:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        invariants_status:
+          type: object
+          additionalProperties: true
+
+    IntegrityVerifyRequest:
+      type: object
+      properties:
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+      additionalProperties: false
+
+    IntegrityVerifyResponse:
+      type: object
+      required: [status, checked_at, equivalents, alerts]
+      properties:
+        status:
+          type: string
+          enum: [healthy, warning, critical]
+        checked_at:
+          type: string
+          format: date-time
+        equivalents:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/EquivalentIntegrityStatus'
+        alerts:
+          type: array
+          items:
+            type: string
+
+    IntegrityAuditLogItem:
+      type: object
+      required: [timestamp, action]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        actor_id:
+          type: string
+          nullable: true
+        action:
+          type: string
+        object_type:
+          type: string
+          nullable: true
+        object_id:
+          type: string
+          nullable: true
+        after_state:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    IntegrityAuditLogResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrityAuditLogItem'
         incoming:
           type: array
           items:
@@ -978,6 +1276,6 @@ components:
               debtor_name:
                 type: string
               equivalent:
-                type: string
+                $ref: '#/components/schemas/EquivalentCode'
               amount:
                 type: string

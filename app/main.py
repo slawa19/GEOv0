@@ -1,16 +1,21 @@
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 import asyncio
+import logging
 import time
-from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 
-from app.config import settings
 from app.api.router import api_router
-from app.utils.exceptions import GeoException
+from app.config import settings
 from app.db.session import engine
+from app.utils.exceptions import GeoException
+
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -44,19 +49,49 @@ async def lifespan(app: FastAPI):
             )
             app.state._bg_tasks.append(task)
         except Exception:
-            # Avoid blocking service start if optional background task wiring fails.
             pass
 
     if getattr(settings, "INTEGRITY_CHECKPOINT_ENABLED", True):
+
         async def _integrity_loop():
             from app.core.integrity import compute_and_store_integrity_checkpoints
             from app.db.session import AsyncSessionLocal
+            from app.utils.distributed_lock import redis_distributed_lock
+            from app.utils.exceptions import ConflictException
+            from app.utils.metrics import RECOVERY_EVENTS_TOTAL
 
             interval = int(getattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 300) or 300)
-            # Run once at startup.
+            lock_ttl_seconds = int(getattr(settings, "INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS", 0) or 0)
+            if lock_ttl_seconds <= 0:
+                lock_ttl_seconds = max(30, interval)
+
+            def _emit(result: str) -> None:
+                try:
+                    RECOVERY_EVENTS_TOTAL.labels(event="integrity_checkpoints", result=result).inc()
+                except Exception:
+                    pass
+
+            async def _run_once(*, reason: str) -> None:
+                _emit(f"{reason}_start")
+                redis_client = getattr(app.state, "redis", None)
+                try:
+                    async with redis_distributed_lock(
+                        redis_client,
+                        "geo:integrity:checkpoints",
+                        ttl_seconds=lock_ttl_seconds,
+                        wait_timeout_seconds=0.0,
+                    ):
+                        async with AsyncSessionLocal() as session:
+                            await compute_and_store_integrity_checkpoints(session)
+                    _emit(f"{reason}_success")
+                except ConflictException:
+                    _emit(f"{reason}_skipped_locked")
+                except Exception:
+                    logger.exception("integrity.checkpoints_failed reason=%s", reason)
+                    _emit(f"{reason}_error")
+
             try:
-                async with AsyncSessionLocal() as session:
-                    await compute_and_store_integrity_checkpoints(session)
+                await _run_once(reason="startup")
             except Exception:
                 pass
 
@@ -68,8 +103,7 @@ async def lifespan(app: FastAPI):
                     pass
 
                 try:
-                    async with AsyncSessionLocal() as session:
-                        await compute_and_store_integrity_checkpoints(session)
+                    await _run_once(reason="periodic")
                 except Exception:
                     pass
 
@@ -92,7 +126,6 @@ async def lifespan(app: FastAPI):
             finally:
                 app.state.redis = None
 
-        # Stop background tasks.
         try:
             app.state._bg_stop_event.set()
         except Exception:
@@ -103,6 +136,7 @@ async def lifespan(app: FastAPI):
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
         app.state._bg_tasks = []
+
 
 app = FastAPI(title="GEO Hub Backend", debug=settings.DEBUG, lifespan=lifespan)
 
@@ -142,28 +176,28 @@ async def metrics_middleware(request: Request, call_next):
         HTTP_REQUESTS_TOTAL.labels(method=method, path=path_label, status=status).inc()
         HTTP_REQUEST_DURATION_SECONDS.labels(method=method, path=path_label).observe(elapsed_s)
     except Exception:
-        # Best-effort: never break requests due to metrics.
         pass
 
     return response
 
+
 @app.exception_handler(GeoException)
 async def geo_exception_handler(request: Request, exc: GeoException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}},
-    )
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
 
 app.include_router(api_router, prefix="/api/v1")
 
 
 if getattr(settings, "METRICS_ENABLED", True):
+
     @app.get("/metrics")
     async def metrics():
         from app.utils.metrics import render_metrics
 
         payload, content_type = render_metrics()
         return Response(content=payload, media_type=content_type)
+
 
 @app.get("/health")
 async def health_check():

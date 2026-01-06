@@ -3,10 +3,19 @@ import base64
 import pytest
 from nacl.signing import SigningKey
 
+from app.core.auth.canonical import canonical_json
+
 
 @pytest.mark.asyncio
 async def test_refresh_token_rejected_for_protected_endpoints(client, test_user_keys):
-    message = f"geo:participant:create:Test User:person:{test_user_keys['public']}".encode("utf-8")
+    message = canonical_json(
+        {
+            "display_name": "Test User",
+            "type": "person",
+            "public_key": test_user_keys["public"],
+            "profile": {},
+        }
+    )
     signing_key_bytes = base64.b64decode(test_user_keys["private"])
     signing_key = SigningKey(signing_key_bytes)
     signature_b64 = base64.b64encode(signing_key.sign(message).signature).decode("utf-8")

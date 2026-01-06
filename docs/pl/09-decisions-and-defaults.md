@@ -60,6 +60,37 @@ Podsumowanie kluczowych decyzji architektonicznych i zalecanych wartości domyś
 | **Audyt** | Obowiązkowy audit-log dla wszystkich akcji |
 | **Role** | admin, operator, auditor |
 
+### 1.7. Maszyna stanów transakcji (internal)
+
+Model w bazie przechowuje wewnętrzne wartości `Transaction.state` dla niezawodności operacyjnej (recovery, idempotency, księgowanie 2PC/blokad). Te stany **nie są tym samym** co publiczny „status wyniku” płatności.
+
+**Dozwolone stany wewnętrzne (ograniczenie DB):** `NEW`, `ROUTED`, `PREPARE_IN_PROGRESS`, `PREPARED`, `COMMITTED`, `ABORTED`, `PROPOSED`, `WAITING`, `REJECTED`.
+
+**PAYMENT (przepływ typu 2PC, implementacja MVP):**
+
+| Stan | Znaczenie (MVP) |
+|------|------------------|
+| `NEW` | Rekord transakcji utworzony; routing policzony i zapisany w `payload` |
+| `PREPARED` | Blokady segmentów utworzone (faza 1) |
+| `COMMITTED` | Długi zaktualizowane i blokady usunięte (faza 2) |
+| `ABORTED` | Błąd terminalny; blokady usunięte (best-effort) i zapisany `error` |
+
+Uwagi:
+- `ROUTED` i `PREPARE_IN_PROGRESS` są zarezerwowane jako stany internal, ale obecny MVP payment engine ich nie ustawia.
+- `REJECTED` jest zarezerwowany jako stan terminalny dla przyszłych jawnych odrzuceń; w MVP traktowany jako terminalny.
+
+**CLEARING (MVP):**
+
+| Stan | Znaczenie (MVP) |
+|------|------------------|
+| `NEW` | Utworzono transakcję clearingu |
+| `COMMITTED` | Clearing zastosowany pomyślnie |
+| `ABORTED` | Błąd terminalny |
+
+**Recovery (MVP):** transakcje utknięte w „aktywnych” stanach internal dłużej niż dozwolony budżet czasu są abortowane, a powiązane blokady czyszczone.
+
+**Publiczny status płatności:** `PaymentResult.status` jest wynikiem finalnym i zwraca tylko `COMMITTED` lub `ABORTED`.
+
 ---
 
 ## 2. Wartości domyślne i limity

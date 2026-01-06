@@ -48,8 +48,18 @@ class Settings(BaseSettings):
     # Payment Routing (MVP limits)
     ROUTING_MAX_HOPS: int = 6
     ROUTING_MAX_PATHS: int = 3
-    ROUTING_PATH_FINDING_TIMEOUT_MS: int = 50
+    # Spec-aligned timeouts
+    ROUTING_PATH_FINDING_TIMEOUT_MS: int = 500
     ROUTING_GRAPH_CACHE_TTL_SECONDS: int = 0
+
+    # Payment execution timeouts (spec section 6.9)
+    PREPARE_TIMEOUT_SECONDS: int = 3
+    COMMIT_TIMEOUT_SECONDS: int = 5
+    PAYMENT_TOTAL_TIMEOUT_SECONDS: int = 10
+
+    # Commit retry configuration (used where applicable)
+    COMMIT_RETRY_ATTEMPTS: int = 3
+    COMMIT_RETRY_DELAY_SECONDS: float = 0.5
 
     # Max-flow diagnostics (MVP limits)
     MAX_FLOW_MAX_HOPS: int = 7
@@ -68,6 +78,9 @@ class Settings(BaseSettings):
     # Integrity checkpoints
     INTEGRITY_CHECKPOINT_ENABLED: bool = True
     INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 300
+    # Optional: used to serialize integrity checkpoint runs across replicas (Redis lock TTL).
+    # 0 = auto (defaults to max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)).
+    INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS: int = 0
 
 
 settings = Settings()

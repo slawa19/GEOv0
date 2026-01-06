@@ -9,7 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from app.db.models.participant import Participant
 from app.schemas.participant import ParticipantCreateRequest
 from app.core.auth.crypto import get_pid_from_public_key, verify_signature
-from app.utils.exceptions import ConflictException, NotFoundException, BadRequestException
+from app.core.auth.canonical import canonical_json
+from app.utils.exceptions import ConflictException, NotFoundException, BadRequestException, InvalidSignatureException
 
 class ParticipantService:
     def __init__(self, db: AsyncSession):
@@ -36,14 +37,19 @@ class ParticipantService:
             raise ConflictException("Participant already exists")
 
         # 3. Verify signature (proof-of-possession + binding of key to identity fields)
-        # Canonical message is part of the API contract for MVP.
-        message = f"geo:participant:create:{participant_in.display_name}:{participant_in.type}:{participant_in.public_key}".encode(
-            "utf-8"
-        )
+        payload: dict = {
+            "display_name": participant_in.display_name,
+            "type": participant_in.type,
+            "public_key": participant_in.public_key,
+        }
+        if participant_in.profile is not None:
+            payload["profile"] = participant_in.profile
+
+        message = canonical_json(payload)
         try:
             verify_signature(participant_in.public_key, message, participant_in.signature)
         except Exception:
-            raise BadRequestException("Invalid signature")
+            raise InvalidSignatureException("Invalid signature")
 
         # 4. Create participant
         participant = Participant(

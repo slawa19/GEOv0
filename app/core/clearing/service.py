@@ -3,7 +3,7 @@ import uuid
 from decimal import Decimal
 from typing import List, Dict, Optional, Set, Tuple
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -12,14 +12,215 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
+from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.exceptions import GeoException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
+from app.core.invariants import InvariantChecker
+from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 
 logger = logging.getLogger(__name__)
 
 class ClearingService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def find_triangles_sql(self, equivalent_id: uuid.UUID) -> List[List[Dict]]:
+        """Find 3-node debt cycles using a SQL JOIN."""
+
+        dialect = None
+        try:
+            dialect = self.session.get_bind().dialect.name
+        except Exception:
+            dialect = None
+
+        least_expr = "LEAST(d1.amount, d2.amount, d3.amount)"
+        if dialect == "sqlite":
+            # SQLite supports scalar min(x, y, z) as a LEAST replacement.
+            least_expr = "min(d1.amount, d2.amount, d3.amount)"
+
+        query = text(
+            f"""
+            SELECT DISTINCT
+                d1.id as debt1_id,
+                d1.debtor_id as a,
+                d1.creditor_id as b,
+                d1.amount as amount1,
+                d2.id as debt2_id,
+                d2.creditor_id as c,
+                d2.amount as amount2,
+                d3.id as debt3_id,
+                d3.amount as amount3,
+                {least_expr} as clear_amount
+            FROM debts d1
+            JOIN debts d2 ON d1.creditor_id = d2.debtor_id
+                         AND d1.equivalent_id = d2.equivalent_id
+            JOIN debts d3 ON d2.creditor_id = d3.debtor_id
+                         AND d3.creditor_id = d1.debtor_id
+                         AND d2.equivalent_id = d3.equivalent_id
+            WHERE d1.equivalent_id = :equivalent_id
+              AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0
+              AND {least_expr} > :min_amount
+            ORDER BY clear_amount DESC
+            LIMIT 100
+            """
+        )
+
+        result = await self.session.execute(
+            query,
+            {
+                "equivalent_id": equivalent_id,
+                "min_amount": Decimal("0.01"),
+            },
+        )
+
+        cycles: List[List[Dict]] = []
+        for row in result:
+            cycles.append(
+                [
+                    {
+                        "debt_id": str(row.debt1_id),
+                        "debtor": str(row.a),
+                        "creditor": str(row.b),
+                        "amount": str(row.amount1),
+                    },
+                    {
+                        "debt_id": str(row.debt2_id),
+                        "debtor": str(row.b),
+                        "creditor": str(row.c),
+                        "amount": str(row.amount2),
+                    },
+                    {
+                        "debt_id": str(row.debt3_id),
+                        "debtor": str(row.c),
+                        "creditor": str(row.a),
+                        "amount": str(row.amount3),
+                    },
+                ]
+            )
+
+        return cycles
+
+    async def find_quadrangles_sql(self, equivalent_id: uuid.UUID) -> List[List[Dict]]:
+        """Find 4-node debt cycles using a SQL JOIN."""
+
+        dialect = None
+        try:
+            dialect = self.session.get_bind().dialect.name
+        except Exception:
+            dialect = None
+
+        least_expr = "LEAST(d1.amount, d2.amount, d3.amount, d4.amount)"
+        if dialect == "sqlite":
+            least_expr = "min(d1.amount, d2.amount, d3.amount, d4.amount)"
+
+        query = text(
+            f"""
+            SELECT DISTINCT
+                d1.id as debt1_id, d1.debtor_id as a, d1.creditor_id as b, d1.amount as amt1,
+                d2.id as debt2_id, d2.creditor_id as c, d2.amount as amt2,
+                d3.id as debt3_id, d3.creditor_id as d, d3.amount as amt3,
+                d4.id as debt4_id, d4.amount as amt4,
+                {least_expr} as clear_amount
+            FROM debts d1
+            JOIN debts d2 ON d1.creditor_id = d2.debtor_id AND d1.equivalent_id = d2.equivalent_id
+            JOIN debts d3 ON d2.creditor_id = d3.debtor_id AND d2.equivalent_id = d3.equivalent_id
+            JOIN debts d4 ON d3.creditor_id = d4.debtor_id AND d4.creditor_id = d1.debtor_id
+                         AND d3.equivalent_id = d4.equivalent_id
+            WHERE d1.equivalent_id = :equivalent_id
+              AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0 AND d4.amount > 0
+              AND d1.debtor_id != d2.creditor_id
+              AND d1.debtor_id != d3.creditor_id
+              AND {least_expr} > :min_amount
+            ORDER BY clear_amount DESC
+            LIMIT 50
+            """
+        )
+
+        result = await self.session.execute(
+            query,
+            {
+                "equivalent_id": equivalent_id,
+                "min_amount": Decimal("0.01"),
+            },
+        )
+
+        cycles: List[List[Dict]] = []
+        for row in result:
+            cycles.append(
+                [
+                    {
+                        "debt_id": str(row.debt1_id),
+                        "debtor": str(row.a),
+                        "creditor": str(row.b),
+                        "amount": str(row.amt1),
+                    },
+                    {
+                        "debt_id": str(row.debt2_id),
+                        "debtor": str(row.b),
+                        "creditor": str(row.c),
+                        "amount": str(row.amt2),
+                    },
+                    {
+                        "debt_id": str(row.debt3_id),
+                        "debtor": str(row.c),
+                        "creditor": str(row.d),
+                        "amount": str(row.amt3),
+                    },
+                    {
+                        "debt_id": str(row.debt4_id),
+                        "debtor": str(row.d),
+                        "creditor": str(row.a),
+                        "amount": str(row.amt4),
+                    },
+                ]
+            )
+
+        return cycles
+
+    async def _cycle_respects_auto_clearing(self, debts: List[Debt]) -> bool:
+        """Return True if every cycle edge has consent for auto clearing.
+
+        For each debt edge debtor->creditor, the controlling trustline is creditor->debtor
+        (i.e. the creditor's line of trust/limit towards the debtor).
+        """
+        if not debts:
+            return False
+
+        equivalent_id = debts[0].equivalent_id
+        required_pairs: set[tuple[uuid.UUID, uuid.UUID]] = {
+            (d.creditor_id, d.debtor_id) for d in debts
+        }
+
+        from_ids = {p[0] for p in required_pairs}
+        to_ids = {p[1] for p in required_pairs}
+
+        trustlines = (
+            await self.session.execute(
+                select(TrustLine).where(
+                    and_(
+                        TrustLine.equivalent_id == equivalent_id,
+                        TrustLine.status == "active",
+                        TrustLine.from_participant_id.in_(list(from_ids)),
+                        TrustLine.to_participant_id.in_(list(to_ids)),
+                    )
+                )
+            )
+        ).scalars().all()
+
+        tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], TrustLine] = {
+            (tl.from_participant_id, tl.to_participant_id): tl for tl in trustlines
+        }
+
+        for from_id, to_id in required_pairs:
+            tl = tl_by_pair.get((from_id, to_id))
+            if tl is None:
+                return False
+            policy = tl.policy or {}
+            if not bool(policy.get("auto_clearing", True)):
+                return False
+
+        return True
 
     async def _locked_pairs_for_equivalent(self, equivalent_id: uuid.UUID) -> Set[frozenset[uuid.UUID]]:
         """Return participant pairs that must not be touched by clearing.
@@ -69,6 +270,67 @@ class ClearingService:
             except Exception:
                 pass
             raise GeoException(f"Equivalent {equivalent_code} not found")
+
+        # FIX-012: Prefer SQL JOIN based search for short cycles (3–4) when running with a real AsyncSession.
+        use_sql = isinstance(self.session, AsyncSession)
+        if use_sql and max_depth >= 3:
+            locked_pairs = await self._locked_pairs_for_equivalent(equivalent.id)
+            cycles: List[List[Dict]] = []
+            try:
+                cycles = await self.find_triangles_sql(equivalent.id)
+                if max_depth >= 4 and not cycles:
+                    cycles = await self.find_quadrangles_sql(equivalent.id)
+            except Exception:
+                cycles = []
+
+            if cycles and locked_pairs:
+                filtered: List[List[Dict]] = []
+                for cycle in cycles:
+                    skip = False
+                    for edge in cycle:
+                        try:
+                            debtor_id = uuid.UUID(str(edge.get("debtor")))
+                            creditor_id = uuid.UUID(str(edge.get("creditor")))
+                        except Exception:
+                            continue
+                        if frozenset({debtor_id, creditor_id}) in locked_pairs:
+                            skip = True
+                            break
+                    if not skip:
+                        filtered.append(cycle)
+                cycles = filtered
+
+            if cycles:
+                # Replace UUIDs with PIDs for consistency with existing output.
+                participant_ids: Set[uuid.UUID] = set()
+                for cycle in cycles:
+                    for edge in cycle:
+                        try:
+                            participant_ids.add(uuid.UUID(str(edge["debtor"])))
+                            participant_ids.add(uuid.UUID(str(edge["creditor"])))
+                        except Exception:
+                            pass
+
+                pid_by_id: Dict[uuid.UUID, str] = {}
+                if participant_ids:
+                    participants = (
+                        await self.session.execute(
+                            select(Participant).where(Participant.id.in_(list(participant_ids)))
+                        )
+                    ).scalars().all()
+                    pid_by_id = {p.id: p.pid for p in participants}
+
+                for cycle in cycles:
+                    for edge in cycle:
+                        try:
+                            debtor_uuid = uuid.UUID(str(edge["debtor"]))
+                            creditor_uuid = uuid.UUID(str(edge["creditor"]))
+                            edge["debtor"] = str(pid_by_id.get(debtor_uuid, debtor_uuid))
+                            edge["creditor"] = str(pid_by_id.get(creditor_uuid, creditor_uuid))
+                        except Exception:
+                            pass
+
+                return cycles
 
         # 1. Load Graph
         # Node: Participant ID
@@ -264,6 +526,72 @@ class ClearingService:
                     except Exception:
                         pass
                     return False
+
+        # FIX-017: enforce auto_clearing policy on every edge in the cycle.
+        if not await self._cycle_respects_auto_clearing(debts):
+            logger.info("event=clearing.skip_policy cycle_len=%s", len(cycle))
+            try:
+                CLEARING_EVENTS_TOTAL.labels(event="execute", result="skip_policy").inc()
+            except Exception:
+                pass
+            return False
+
+        # FIX-011: capture net positions BEFORE clearing (clearing neutrality invariant).
+        checker = InvariantChecker(self.session)
+        participant_ids: Set[uuid.UUID] = set()
+        for d in debts:
+            participant_ids.add(d.debtor_id)
+            participant_ids.add(d.creditor_id)
+
+        # FIX-025: enrich CLEARING transaction payload for traceability.
+        equivalent = (
+            await self.session.execute(
+                select(Equivalent).where(Equivalent.id == debts[0].equivalent_id)
+            )
+        ).scalar_one_or_none()
+
+        pid_by_id: Dict[uuid.UUID, str] = {}
+        if participant_ids:
+            participants = (
+                await self.session.execute(
+                    select(Participant).where(Participant.id.in_(list(participant_ids)))
+                )
+            ).scalars().all()
+            pid_by_id = {p.id: p.pid for p in participants}
+
+        debts_by_id: Dict[uuid.UUID, Debt] = {d.id: d for d in debts}
+        edges_payload: List[Dict[str, str]] = []
+        for edge in cycle:
+            try:
+                edge_debt_id = uuid.UUID(str(edge.get("debt_id")))
+            except Exception:
+                continue
+
+            debt = debts_by_id.get(edge_debt_id)
+            if debt is None:
+                continue
+
+            edges_payload.append(
+                {
+                    "debt_id": str(debt.id),
+                    "debtor": str(pid_by_id.get(debt.debtor_id, debt.debtor_id)),
+                    "creditor": str(pid_by_id.get(debt.creditor_id, debt.creditor_id)),
+                    "amount": str(clear_amount),
+                }
+            )
+
+        positions_before: Dict[uuid.UUID, Decimal] = {}
+        for pid in participant_ids:
+            positions_before[pid] = await checker._calculate_net_position(pid, debts[0].equivalent_id)
+
+        checkpoint_before = None
+        try:
+            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=debts[0].equivalent_id,
+            )
+        except Exception:
+            checkpoint_before = None
         
         # 2. Create Transaction (CLEARING)
         # We need an initiator? System or one of participants.
@@ -279,8 +607,13 @@ class ClearingService:
             type='CLEARING',
             initiator_id=initiator_id,
             payload={
+                # Backward-compatible fields.
                 'cycle': [str(e['debt_id']) for e in cycle],
-                'amount': str(clear_amount)
+                'amount': str(clear_amount),
+
+                # Enriched fields for audit/debugging.
+                'equivalent': str(equivalent.code if equivalent else debts[0].equivalent_id),
+                'edges': edges_payload,
             },
             state='NEW'
         )
@@ -297,7 +630,54 @@ class ClearingService:
                     raise GeoException(f"Debt {debt.id} amount changed during clearing")
 
                 debt.amount -= clear_amount
-                self.session.add(debt)
+                if debt.amount == 0:
+                    await self.session.delete(debt)
+                else:
+                    self.session.add(debt)
+
+            await self.session.flush()
+
+            checkpoint_after = None
+            try:
+                checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+                    self.session,
+                    equivalent_id=debts[0].equivalent_id,
+                )
+            except Exception:
+                checkpoint_after = None
+
+            try:
+                before_sum = checkpoint_before.checksum if checkpoint_before else ""
+                after_sum = checkpoint_after.checksum if checkpoint_after else before_sum
+                invariants_status = (checkpoint_after.invariants_status or {}) if checkpoint_after else {}
+                passed = bool(invariants_status.get("passed", True))
+
+                self.session.add(
+                    IntegrityAuditLog(
+                        operation_type="CLEARING",
+                        tx_id=tx_id_str,
+                        equivalent_code=str(equivalent.code if equivalent else debts[0].equivalent_id),
+                        state_checksum_before=before_sum,
+                        state_checksum_after=after_sum,
+                        affected_participants={
+                            "participants": [str(pid_by_id.get(p, p)) for p in participant_ids],
+                            "edges": edges_payload,
+                        },
+                        invariants_checked=invariants_status.get("checks") or invariants_status,
+                        verification_passed=passed,
+                        error_details=None if passed else invariants_status,
+                    )
+                )
+            except Exception:
+                # Best-effort; clearing must not fail due to audit logging.
+                pass
+
+            # Verify neutrality AFTER applying changes (must be within the same DB transaction).
+            await checker.verify_clearing_neutrality(
+                list(participant_ids),
+                debts[0].equivalent_id,
+                positions_before,
+            )
                 
             # 4. Commit
             new_tx.state = 'COMMITTED'

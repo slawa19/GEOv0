@@ -60,6 +60,37 @@ Summary of key architectural decisions and recommended defaults for MVP.
 | **Audit** | Mandatory audit-log for all actions |
 | **Roles** | admin, operator, auditor |
 
+### 1.7. Transaction State Machine (internal)
+
+The database model stores internal `Transaction.state` values for operational safety (recovery, idempotency, 2PC bookkeeping). These states are **not** the same as the public payment “result status”.
+
+**Allowed internal states (DB constraint):** `NEW`, `ROUTED`, `PREPARE_IN_PROGRESS`, `PREPARED`, `COMMITTED`, `ABORTED`, `PROPOSED`, `WAITING`, `REJECTED`.
+
+**PAYMENT (2PC-style, MVP implementation):**
+
+| State | Meaning (MVP) |
+|------|----------------|
+| `NEW` | Transaction record created, routing computed and persisted in `payload` |
+| `PREPARED` | Segment locks created successfully (phase 1 done) |
+| `COMMITTED` | Debts updated and locks removed (phase 2 done) |
+| `ABORTED` | Terminal failure; locks removed (best-effort) and `error` stored |
+
+Notes:
+- `ROUTED` and `PREPARE_IN_PROGRESS` exist as reserved/internal states but are not currently emitted by the MVP payment engine.
+- `REJECTED` exists as a reserved terminal state for future “explicit reject” flows; MVP treats it as terminal.
+
+**CLEARING (MVP):**
+
+| State | Meaning (MVP) |
+|------|----------------|
+| `NEW` | Clearing transaction created |
+| `COMMITTED` | Clearing applied successfully |
+| `ABORTED` | Terminal failure |
+
+**Recovery behavior (MVP):** transactions stuck in “active” internal states past the configured time budget are aborted and any associated locks are cleaned up.
+
+**Public payment API status:** `PaymentResult.status` is a final outcome and only returns `COMMITTED` or `ABORTED`.
+
 ---
 
 ## 2. Defaults and Limits

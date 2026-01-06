@@ -2,6 +2,7 @@ import json
 import uuid
 import hashlib
 import logging
+import asyncio
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from typing import List, Optional, Literal
@@ -17,7 +18,16 @@ from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.schemas.payment import PaymentCreateRequest, PaymentResult, PaymentRoute, PaymentError
 from app.core.auth.crypto import verify_signature
-from app.utils.exceptions import NotFoundException, BadRequestException, GeoException, ConflictException
+from app.core.auth.canonical import canonical_json
+from app.utils.exceptions import (
+    NotFoundException,
+    BadRequestException,
+    GeoException,
+    ConflictException,
+    InvalidSignatureException,
+    RoutingException,
+    TimeoutException,
+)
 from app.utils.validation import validate_equivalent_code, validate_idempotency_key
 
 logger = logging.getLogger(__name__)
@@ -76,19 +86,17 @@ class PaymentService:
         normalized_idempotency_key = None
         if idempotency_key is not None:
             normalized_idempotency_key = validate_idempotency_key(idempotency_key)
-            request_fingerprint = hashlib.sha256(
-                json.dumps(
-                    {
-                        "to": request.to,
-                        "equivalent": request.equivalent,
-                        "amount": request.amount,
-                        "description": request.description,
-                        "constraints": request.constraints,
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
+            fp_payload: dict = {
+                "to": request.to,
+                "equivalent": request.equivalent,
+                "amount": request.amount,
+            }
+            if request.description is not None:
+                fp_payload["description"] = request.description
+            if request.constraints is not None:
+                fp_payload["constraints"] = request.constraints
+
+            request_fingerprint = hashlib.sha256(canonical_json(fp_payload)).hexdigest()
 
             existing_tx = (
                 await self.session.execute(
@@ -140,7 +148,7 @@ class PaymentService:
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
             except Exception:
                 pass
-            raise BadRequestException("Missing signature")
+            raise InvalidSignatureException("Missing signature")
 
         receiver = (await self.session.execute(select(Participant).where(Participant.pid == request.to))).scalar_one_or_none()
         if not receiver:
@@ -173,17 +181,17 @@ class PaymentService:
 
         # Signature validation (proof-of-possession + binding of request fields).
         # Canonical message is part of the API contract for MVP.
-        payload = {
+        payload: dict = {
             "to": request.to,
             "equivalent": request.equivalent,
             "amount": request.amount,
-            "description": request.description,
-            "constraints": request.constraints,
         }
-        message = (
-            f"geo:payment:request:{sender.pid}:"
-            + json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        ).encode("utf-8")
+        if request.description is not None:
+            payload["description"] = request.description
+        if request.constraints is not None:
+            payload["constraints"] = request.constraints
+
+        message = canonical_json(payload)
         try:
             verify_signature(sender.public_key, message, request.signature)
         except Exception:
@@ -193,94 +201,122 @@ class PaymentService:
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="invalid_signature").inc()
             except Exception:
                 pass
-            raise BadRequestException("Invalid signature")
+            raise InvalidSignatureException("Invalid signature")
 
         # 2. Routing
-        # Build graph for this equivalent.
-        await self.router.build_graph(equivalent.code)
-
-        routes_found = self.router.find_flow_routes(
-            sender.pid,
-            receiver.pid,
-            amount,
-            max_hops=settings.ROUTING_MAX_HOPS,
-            max_paths=settings.ROUTING_MAX_PATHS,
-        )
-        if not routes_found:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL, ROUTING_FAILURES_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="routing_failed").inc()
-                ROUTING_FAILURES_TOTAL.labels(reason="insufficient_capacity").inc()
-            except Exception:
-                pass
-            raise BadRequestException("No route found with sufficient capacity")
-
-        routes_payload = [
-            {"path": path, "amount": str(route_amount)}
-            for path, route_amount in routes_found
-        ]
-        
-        # 3. Create Transaction
         tx_uuid = uuid.uuid4()
-        # Ensure tx_id is unique string.
         tx_id_str = str(tx_uuid)
-        
-        new_tx = Transaction(
-            id=tx_uuid,
-            tx_id=tx_id_str,
-            idempotency_key=normalized_idempotency_key,
-            type='PAYMENT',
-            initiator_id=sender.id,
-            payload={
-                'from': sender.pid,
-                'to': receiver.pid,
-                'amount': str(amount),
-                'equivalent': equivalent.code,
-                'routes': routes_payload,
-                'idempotency': {
-                    'key': normalized_idempotency_key,
-                    'fingerprint': request_fingerprint,
-                } if normalized_idempotency_key is not None and request_fingerprint is not None else None,
-            },
-            state='NEW'
-        )
-        self.session.add(new_tx)
-        await self.session.commit()
-        
-        # 4. Engine Prepare
+        tx_persisted = False
+
+        routing_timeout_s = float(getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 500) or 500) / 1000.0
+        prepare_timeout_s = float(getattr(settings, "PREPARE_TIMEOUT_SECONDS", 3) or 3)
+        commit_timeout_s = float(getattr(settings, "COMMIT_TIMEOUT_SECONDS", 5) or 5)
+        total_timeout_s = float(getattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 10) or 10)
+
         try:
-            if len(routes_found) == 1:
-                await self.engine.prepare(tx_id_str, routes_found[0][0], amount, equivalent.id)
-            else:
-                await self.engine.prepare_routes(tx_id_str, routes_found, equivalent.id)
-        except Exception as e:
-            logger.info("event=payment.prepare_failed tx_id=%s error=%s", tx_id_str, str(e))
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+            async with asyncio.timeout(total_timeout_s):
+                # Build routing graph + compute routes under spec-aligned timeout budget.
+                await asyncio.wait_for(self.router.build_graph(equivalent.code), timeout=routing_timeout_s)
 
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="error").inc()
-            except Exception:
-                pass
-            # Abort is idempotent and also cleans up any partial locks.
-            await self.engine.abort(tx_id_str, reason=f"Prepare failed: {str(e)}")
-            raise BadRequestException(f"Payment preparation failed: {str(e)}")
+                routes_found = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.router.find_flow_routes,
+                        sender.pid,
+                        receiver.pid,
+                        amount,
+                        max_hops=settings.ROUTING_MAX_HOPS,
+                        max_paths=settings.ROUTING_MAX_PATHS,
+                    ),
+                    timeout=routing_timeout_s,
+                )
 
-        # 5. Engine Commit
-        # In MVP we commit immediately. In real system, we might wait for receiver ACK.
-        try:
-            await self.engine.commit(tx_id_str)
-        except Exception as e:
-            logger.info("event=payment.commit_failed tx_id=%s error=%s", tx_id_str, str(e))
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+                if not routes_found:
+                    try:
+                        from app.utils.metrics import PAYMENT_EVENTS_TOTAL, ROUTING_FAILURES_TOTAL
 
-                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="error").inc()
-            except Exception:
-                pass
-            # Abort is idempotent; if commit failed before applying changes, this releases locks.
-            await self.engine.abort(tx_id_str, reason=f"Commit failed: {str(e)}")
-            raise GeoException(f"Payment commit failed: {str(e)}")
+                        PAYMENT_EVENTS_TOTAL.labels(event="create", result="routing_failed").inc()
+                        ROUTING_FAILURES_TOTAL.labels(reason="insufficient_capacity").inc()
+                    except Exception:
+                        pass
+                    raise RoutingException("No route found with sufficient capacity", insufficient_capacity=True)
+
+                routes_payload = [
+                    {"path": path, "amount": str(route_amount)}
+                    for path, route_amount in routes_found
+                ]
+
+                # 3. Create Transaction
+                new_tx = Transaction(
+                    id=tx_uuid,
+                    tx_id=tx_id_str,
+                    idempotency_key=normalized_idempotency_key,
+                    type='PAYMENT',
+                    initiator_id=sender.id,
+                    payload={
+                        'from': sender.pid,
+                        'to': receiver.pid,
+                        'amount': str(amount),
+                        'equivalent': equivalent.code,
+                        'routes': routes_payload,
+                        'idempotency': {
+                            'key': normalized_idempotency_key,
+                            'fingerprint': request_fingerprint,
+                        } if normalized_idempotency_key is not None and request_fingerprint is not None else None,
+                    },
+                    state='NEW'
+                )
+                self.session.add(new_tx)
+                await self.session.commit()
+                tx_persisted = True
+
+                # 4. Engine Prepare
+                try:
+                    if len(routes_found) == 1:
+                        await asyncio.wait_for(
+                            self.engine.prepare(tx_id_str, routes_found[0][0], amount, equivalent.id),
+                            timeout=prepare_timeout_s,
+                        )
+                    else:
+                        await asyncio.wait_for(
+                            self.engine.prepare_routes(tx_id_str, routes_found, equivalent.id),
+                            timeout=prepare_timeout_s,
+                        )
+                except asyncio.TimeoutError:
+                    raise
+                except Exception as e:
+                    logger.info("event=payment.prepare_failed tx_id=%s error=%s", tx_id_str, str(e))
+                    try:
+                        from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                        PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="error").inc()
+                    except Exception:
+                        pass
+                    # Abort is idempotent and also cleans up any partial locks.
+                    await self.engine.abort(tx_id_str, reason=f"Prepare failed: {str(e)}")
+                    raise BadRequestException(f"Payment preparation failed: {str(e)}")
+
+                # 5. Engine Commit
+                # In MVP we commit immediately. In real system, we might wait for receiver ACK.
+                try:
+                    await asyncio.wait_for(self.engine.commit(tx_id_str), timeout=commit_timeout_s)
+                except asyncio.TimeoutError:
+                    raise
+                except Exception as e:
+                    logger.info("event=payment.commit_failed tx_id=%s error=%s", tx_id_str, str(e))
+                    try:
+                        from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                        PAYMENT_EVENTS_TOTAL.labels(event="commit", result="error").inc()
+                    except Exception:
+                        pass
+                    # Abort is idempotent; if commit failed before applying changes, this releases locks.
+                    await self.engine.abort(tx_id_str, reason=f"Commit failed: {str(e)}")
+                    raise GeoException(f"Payment commit failed: {str(e)}")
+        except asyncio.TimeoutError:
+            if tx_persisted:
+                # Ensure abort isn't cancelled due to the timeout cancellation context.
+                await asyncio.shield(self.engine.abort(tx_id_str, reason="Payment timeout"))
+            raise TimeoutException("Payment timed out")
 
         # Refresh tx to get server timestamps (created_at/updated_at)
         tx = await self.session.get(Transaction, tx_uuid)

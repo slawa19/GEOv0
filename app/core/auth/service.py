@@ -101,3 +101,33 @@ class AuthService:
             raise BadRequestException("Refresh token missing jti")
 
         await revoke_jti(jti, exp=payload.get("exp"))
+
+    async def refresh_tokens(self, refresh_token: str) -> dict:
+        payload = await decode_token(refresh_token, expected_type="refresh")
+        if not payload:
+            raise UnauthorizedException("Invalid refresh token")
+
+        jti = payload.get("jti")
+        if not isinstance(jti, str) or not jti:
+            raise UnauthorizedException("Invalid refresh token")
+
+        pid = payload.get("sub")
+        if not isinstance(pid, str) or not pid:
+            raise UnauthorizedException("Invalid refresh token")
+
+        stmt = select(Participant).where(Participant.pid == pid)
+        result = await self.db.execute(stmt)
+        participant = result.scalar_one_or_none()
+        if not participant:
+            raise UnauthorizedException("Invalid refresh token")
+
+        await revoke_jti(jti, exp=payload.get("exp"))
+
+        access_token = create_access_token(subject=pid)
+        new_refresh_token = create_refresh_token(subject=pid)
+
+        return {
+            "access_token": access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "Bearer",
+        }

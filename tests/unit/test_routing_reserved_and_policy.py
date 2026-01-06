@@ -206,3 +206,47 @@ def test_find_paths_blocks_intermediate_when_policy_false():
     # Allow intermediates on A->B, now the path should exist.
     router.edge_can_be_intermediate["A"]["B"] = True
     assert router.find_paths("A", "C", Decimal("1"), max_hops=6, k=3) == [["A", "B", "C"]]
+
+
+def test_find_paths_blocks_blocked_participants_as_intermediate_node():
+    # Graph: A -> B -> C. If policy on edge A->B blocks B, then B cannot be used as intermediate.
+    router = PaymentRouter(None)
+    router.graph = {
+        "A": {"B": Decimal("10")},
+        "B": {"C": Decimal("10")},
+        "C": {},
+    }
+    router.edge_can_be_intermediate = {
+        "A": {"B": True},
+        "B": {"C": True},
+        "C": {},
+    }
+    router.edge_blocked_participants = {
+        "A": {"B": {"B"}},
+        "B": {"C": set()},
+        "C": {},
+    }
+
+    assert router.find_paths("A", "C", Decimal("1"), max_hops=6, k=3) == []
+
+
+def test_find_paths_allows_blocked_participants_as_destination():
+    # blocked_participants forbids intermediate nodes only; destination is allowed.
+    router = PaymentRouter(None)
+    router.graph = {
+        "A": {"B": Decimal("10")},
+        "B": {"C": Decimal("10")},
+        "C": {},
+    }
+    router.edge_can_be_intermediate = {
+        "A": {"B": True},
+        "B": {"C": True},
+        "C": {},
+    }
+    router.edge_blocked_participants = {
+        "A": {"B": {"C"}},
+        "B": {"C": {"C"}},
+        "C": {},
+    }
+
+    assert router.find_paths("A", "C", Decimal("1"), max_hops=6, k=3) == [["A", "B", "C"]]

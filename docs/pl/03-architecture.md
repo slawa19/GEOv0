@@ -654,7 +654,8 @@ WHERE resolved = false;
 
 ```
 Auth:
-  POST   /api/v1/auth/register          # Rejestracja
+    POST   /api/v1/participants           # Rejestracja uczestnika
+    POST   /api/v1/auth/challenge         # Start challenge-response
   POST   /api/v1/auth/login             # Logowanie (challenge-response)
   POST   /api/v1/auth/refresh           # Odświeżenie tokenu
 
@@ -662,7 +663,7 @@ Participants:
   GET    /api/v1/participants/me        # Bieżący uczestnik
   PATCH  /api/v1/participants/me        # Aktualizacja profilu
   GET    /api/v1/participants/{pid}     # Profil uczestnika
-  GET    /api/v1/participants/search    # Wyszukiwanie uczestników
+    GET    /api/v1/participants           # Wyszukiwanie uczestników
 
 TrustLines:
   POST   /api/v1/trustlines             # Utworzenie linii

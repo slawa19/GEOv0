@@ -3,23 +3,21 @@ from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from app.main import app
-from app.config import settings
-from app.db.base import Base
-from app.api.deps import get_db
-from app.core.auth.crypto import generate_keypair
-import uuid
-from sqlalchemy import text
 from fastapi.testclient import TestClient
+from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.api.deps import get_db
+from app.config import settings
+from app.core.auth.canonical import canonical_json
+from app.core.auth.crypto import generate_keypair
+from app.db.base import Base
+from app.main import app
 
 # --- Database Fixtures ---
 
-# Create a separate database for tests if needed, or use the existing one with transaction rollbacks.
-# For simplicity in this environment, we'll use the same DB URL but with transaction wrapping
-# or a separate test DB URL if configured.
-# IMPORTANT: For real production tests, use a separate TEST_DATABASE_URL.
+# IMPORTANT: for real production tests, use a separate TEST_DATABASE_URL.
 TEST_DATABASE_URL = settings.DATABASE_URL
 
 # Test suite runs many HTTP calls quickly; disable best-effort rate limiting
@@ -36,7 +34,7 @@ TestingSessionLocal = async_sessionmaker(
 
 
 @pytest.fixture(scope="session", autouse=True)
-def init_db():
+def init_db() -> None:
     """Initialize the database (create tables) once for the session."""
 
     async def _init() -> None:
@@ -48,38 +46,43 @@ def init_db():
 
     asyncio.run(_init())
 
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _dispose_engine_at_end() -> AsyncGenerator[None, None]:
+    yield
+    await engine.dispose()
+
+
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Fixture that returns a SQLAlchemy session with a SAVEPOINT.
-    This allows each test to run in a transaction that is rolled back at the end.
-    """
+    """SQLAlchemy session with a per-test transaction that is rolled back."""
+
     async with engine.connect() as connection:
         transaction = await connection.begin()
         async with TestingSessionLocal(bind=connection) as session:
             yield session
         await transaction.rollback()
 
+
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    """
-    Fixture that returns an httpx AsyncClient with the app dependency override.
-    """
+    """httpx AsyncClient bound to the FastAPI app with a DB override."""
+
     async def override_get_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-
-    await app.router.startup()
     try:
-        async with AsyncClient(app=app, base_url="http://test") as ac:
-            yield ac
+        # Properly manage Starlette/FastAPI lifespan to avoid leaking AnyIO resources.
+        async with app.router.lifespan_context(app):
+            async with AsyncClient(app=app, base_url="http://test") as ac:
+                yield ac
     finally:
-        await app.router.shutdown()
         app.dependency_overrides.clear()
 
 
 # --- Sync E2E Example Fixtures ---
+
 
 @pytest.fixture
 def http_client():
@@ -90,17 +93,14 @@ def http_client():
 
 @pytest.fixture
 def reset_state():
-    """Placeholder reset hook for example tests.
-
-    The real e2e suite will likely reset DB/queues; for now it's a no-op to keep
-    the example tests runnable.
-    """
+    """Placeholder reset hook for example tests."""
     yield
 
 
 @pytest.fixture
 def collect_artifacts(tmp_path):
     """Placeholder artifact collector for example tests."""
+
     def _collect(name: str, payload: object | None = None) -> None:
         return None
 
@@ -136,7 +136,14 @@ async def auth_headers(client: AsyncClient, test_user_keys):
 
     # 1. Register
     user_pid = None
-    message = f"geo:participant:create:Test User:person:{test_user_keys['public']}".encode("utf-8")
+    message = canonical_json(
+        {
+            "display_name": "Test User",
+            "type": "person",
+            "public_key": test_user_keys["public"],
+            "profile": {},
+        }
+    )
     signing_key_bytes = base64.b64decode(test_user_keys["private"])
     signing_key = SigningKey(signing_key_bytes)
     signature_b64 = base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
@@ -177,3 +184,59 @@ async def auth_headers(client: AsyncClient, test_user_keys):
     tokens = response.json()
 
     return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+
+@pytest_asyncio.fixture
+async def auth_user(client: AsyncClient):
+    """Registers + logs in a user, returning headers and key material.
+
+    This is used by tests that need to produce Ed25519 signatures for API requests.
+    """
+    import base64
+    from nacl.signing import SigningKey
+
+    public_key, private_key = generate_keypair()
+
+    message = canonical_json(
+        {
+            "display_name": "Test User",
+            "type": "person",
+            "public_key": public_key,
+            "profile": {},
+        }
+    )
+    signing_key = SigningKey(base64.b64decode(private_key))
+    signature_b64 = base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
+
+    user_data = {
+        "display_name": "Test User",
+        "type": "person",
+        "public_key": public_key,
+        "signature": signature_b64,
+        "profile": {},
+    }
+
+    response = await client.post("/api/v1/participants", json=user_data)
+    assert response.status_code == 201
+    user_pid = response.json()["pid"]
+
+    response = await client.post("/api/v1/auth/challenge", json={"pid": user_pid})
+    assert response.status_code == 200
+    challenge_str = response.json()["challenge"]
+
+    login_signature_b64 = base64.b64encode(signing_key.sign(challenge_str.encode("utf-8")).signature).decode(
+        "utf-8"
+    )
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"pid": user_pid, "challenge": challenge_str, "signature": login_signature_b64},
+    )
+    assert response.status_code == 200
+    tokens = response.json()
+
+    return {
+        "pid": user_pid,
+        "public_key": public_key,
+        "private_key": private_key,
+        "headers": {"Authorization": f"Bearer {tokens['access_token']}"},
+    }

@@ -183,7 +183,7 @@ geo://v1/pay?to={PID}&equivalent={CODE?}&amount={AMOUNT?}&memo={TEXT?}&hub={HUB_
 - `POST /auth/login` (подпись challenge) → `{access_token, refresh_token, expires_in, participant}`
 
 **Регистрация участника (первый запуск):**
-- `POST /auth/register` → `{pid, display_name, status, created_at}`
+- `POST /participants` → `{pid, display_name, status, created_at}`
 
 **Обновление токена:**
 - `POST /auth/refresh` → `{access_token, refresh_token, expires_in}`

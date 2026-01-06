@@ -6,7 +6,11 @@ from nacl.signing import SigningKey
 from sqlalchemy import select
 
 from app.db.models.equivalent import Equivalent
-from tests.integration.test_scenarios import register_and_login, _sign_payment_request
+from tests.integration.test_scenarios import (
+    register_and_login,
+    _sign_payment_request,
+    _sign_trustline_create_request,
+)
 
 
 async def _seed_equivalent(db_session, code: str):
@@ -28,9 +32,20 @@ async def test_create_payment_rejects_invalid_amount(client: AsyncClient, db_ses
     bob = await register_and_login(client, "Bob_InvalidAmount")
 
     # Bob must trust Alice for Alice -> Bob payments.
+    bob_signing_key = SigningKey(base64.b64decode(bob["priv"]))
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": alice["pid"], "equivalent": "USD", "limit": "100.00"},
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=bob_signing_key,
+                to_pid=alice["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
         headers=bob["headers"],
     )
     assert resp.status_code == 201

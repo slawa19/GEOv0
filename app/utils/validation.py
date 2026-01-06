@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.utils.exceptions import BadRequestException
+from app.schemas.equivalent import normalize_equivalent_metadata
 
 
 _EQUIVALENT_CODE_RE = re.compile(r"^[A-Z0-9_]{1,16}$")
@@ -11,6 +12,20 @@ _EQUIVALENT_CODE_RE = re.compile(r"^[A-Z0-9_]{1,16}$")
 def validate_equivalent_code(code: str) -> None:
     if not isinstance(code, str) or not code or not _EQUIVALENT_CODE_RE.fullmatch(code):
         raise BadRequestException("Invalid equivalent code")
+
+
+def validate_equivalent_metadata(metadata: Any) -> dict | None:
+    """Validate and normalize Equivalent.metadata.
+
+    - metadata.type must be one of: fiat, time, commodity, custom
+    - iso_code is optional; if provided it must be 3 uppercase letters and only for type=fiat
+
+    Returns normalized dict (or None).
+    """
+    try:
+        return normalize_equivalent_metadata(metadata)
+    except Exception as exc:
+        raise BadRequestException(f"Invalid equivalent metadata: {exc}")
 
 
 def validate_idempotency_key(key: str) -> str:

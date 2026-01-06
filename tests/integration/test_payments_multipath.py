@@ -4,7 +4,11 @@ import pytest
 from httpx import AsyncClient
 from nacl.signing import SigningKey
 
-from tests.integration.test_scenarios import register_and_login, _sign_payment_request
+from tests.integration.test_scenarios import (
+    register_and_login,
+    _sign_payment_request,
+    _sign_trustline_create_request,
+)
 
 
 @pytest.mark.asyncio
@@ -26,19 +30,43 @@ async def test_payment_multipath_split_two_routes(client: AsyncClient, db_sessio
     carol = await register_and_login(client, "Carol_MP")
     dave = await register_and_login(client, "Dave_MP")
 
+    bob_tl_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+    carol_tl_signing_key = SigningKey(base64.b64decode(carol["priv"]))
+    dave_tl_signing_key = SigningKey(base64.b64decode(dave["priv"]))
+
     # Create two disjoint 2-hop routes Alice -> Bob -> Dave and Alice -> Carol -> Dave.
     # For payment X -> Y to have capacity, Y must trust X (trustline Y -> X).
     # Route 1 capacities: A->B (B->A limit 6), B->D (D->B limit 6)
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": alice["pid"], "equivalent": "USD", "limit": "6.00"},
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "limit": "6.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=bob_tl_signing_key,
+                to_pid=alice["pid"],
+                equivalent="USD",
+                limit="6.00",
+            ),
+        },
         headers=bob["headers"],
     )
     assert resp.status_code == 201
 
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": bob["pid"], "equivalent": "USD", "limit": "6.00"},
+        json={
+            "to": bob["pid"],
+            "equivalent": "USD",
+            "limit": "6.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=dave_tl_signing_key,
+                to_pid=bob["pid"],
+                equivalent="USD",
+                limit="6.00",
+            ),
+        },
         headers=dave["headers"],
     )
     assert resp.status_code == 201
@@ -46,14 +74,34 @@ async def test_payment_multipath_split_two_routes(client: AsyncClient, db_sessio
     # Route 2 capacities: A->C (C->A limit 5), C->D (D->C limit 5)
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": alice["pid"], "equivalent": "USD", "limit": "5.00"},
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "limit": "5.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=carol_tl_signing_key,
+                to_pid=alice["pid"],
+                equivalent="USD",
+                limit="5.00",
+            ),
+        },
         headers=carol["headers"],
     )
     assert resp.status_code == 201
 
     resp = await client.post(
         "/api/v1/trustlines",
-        json={"to": carol["pid"], "equivalent": "USD", "limit": "5.00"},
+        json={
+            "to": carol["pid"],
+            "equivalent": "USD",
+            "limit": "5.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=dave_tl_signing_key,
+                to_pid=carol["pid"],
+                equivalent="USD",
+                limit="5.00",
+            ),
+        },
         headers=dave["headers"],
     )
     assert resp.status_code == 201

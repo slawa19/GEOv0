@@ -1,4 +1,7 @@
 import base64
+import hashlib
+
+import base58
 from nacl.signing import VerifyKey, SigningKey
 from nacl.exceptions import BadSignatureError
 from nacl.encoding import Base64Encoder
@@ -33,14 +36,15 @@ def generate_keypair() -> tuple[str, str]:
 
 def get_pid_from_public_key(public_key_b64: str) -> str:
     """
-    Derive PID from public key.
-    For MVP, PID is derived from the public key but made URL-safe.
-    We use base64url without padding so it can safely appear in paths/query params.
+    Derive PID from public key according to protocol spec.
+
+    PID = base58(sha256(public_key_raw_bytes))
     """
     # Validate it's a valid key
     try:
         VerifyKey(public_key_b64, encoder=Base64Encoder)
         raw = base64.b64decode(public_key_b64)
-        return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+        key_hash = hashlib.sha256(raw).digest()
+        return base58.b58encode(key_hash).decode("utf-8")
     except Exception as e:
         raise CryptoException(f"Invalid public key: {str(e)}")

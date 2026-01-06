@@ -87,8 +87,13 @@ For a narrative introduction, see:
 
 - People, organizations, cooperatives, hubs.
 - Identified by **PID** (`Participant ID`), derived from a public key (Ed25519).
-  - In the current implementation, PID is **base64url(public_key_bytes)** with **no padding** (`=` removed).
-  - This makes PID safe to use inside URLs (path/query params).
+  - PID follows the protocol spec: **`PID = base58(sha256(public_key_bytes))`**.
+  - This yields a ~44-character Base58 string that is URL-safe.
+
+Implementation notes:
+
+- Auth supports refresh token rotation via `POST /api/v1/auth/refresh`.
+- Operation signatures (registration/payment) are verified over **canonical JSON** payloads (see `api/openapi.yaml`).
 
 ### Equivalents
 

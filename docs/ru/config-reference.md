@@ -270,19 +270,28 @@
 
 ## 2.8. `integrity.*` (restart required)
 
-### `integrity.check_interval_seconds`
-- Назначение: периодическая проверка инвариантов/целостности (если включено).
-- Значения: `0..86400` (0 = выключено)
+В текущей реализации backend (см. `app/config.py`, `app/main.py`) используется набор настроек `INTEGRITY_CHECKPOINT_*`.
+
+### `INTEGRITY_CHECKPOINT_ENABLED`
+- Назначение: включает фоновую задачу, которая периодически создаёт checkpoints в таблице `integrity_checkpoints`.
+- Значения: `true|false`
+- Дефолт: `true`
+- Применение: restart required
+- Риски: выключение → пропадает регулярный "сигнал" о проблемах целостности.
+
+### `INTEGRITY_CHECKPOINT_INTERVAL_SECONDS`
+- Назначение: интервал периодического вычисления и записи integrity-checkpoints.
+- Значения: `1..86400`
 - Дефолт: `300`
-- Применение: runtime или restart (в зависимости от реализации планировщика)
+- Применение: restart required
 - Риски: слишком часто → нагрузка на БД; слишком редко → позднее выявление проблем.
 
-### `integrity.checkpoint_interval_seconds`
-- Назначение: период создания checkpoint/снимков состояния (если поддерживается).
-- Значения: `0..86400` (0 = выключено)
-- Дефолт: `3600`
-- Применение: runtime или restart
-- Риски: нагрузка на storage; требует политики retention.
+### `INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`
+- Назначение: TTL для distributed lock в Redis, чтобы **не запускать расчёт checkpoints параллельно** на нескольких репликах.
+- Значения: `0..86400` (0 = auto: `max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)`)
+- Дефолт: `0`
+- Применение: restart required
+- Риски: слишком маленький TTL → возможны перекрытия при долгом расчёте; слишком большой → долгий "залипший" lock при падении воркера.
 
 ---
 

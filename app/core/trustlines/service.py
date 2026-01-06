@@ -3,15 +3,25 @@ from decimal import Decimal
 from typing import List, Optional
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.utils.exceptions import BadRequestException, NotFoundException, ForbiddenException, ConflictException
+from app.utils.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    ForbiddenException,
+    ConflictException,
+    InvalidSignatureException,
+)
+from app.core.auth.canonical import canonical_json
+from app.core.auth.crypto import verify_signature
 
 from app.db.models.trustline import TrustLine
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.db.models.debt import Debt
-from app.schemas.trustline import TrustLineCreateRequest, TrustLineUpdateRequest
+from app.db.models.audit_log import IntegrityAuditLog
+from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import validate_equivalent_code, validate_trustline_policy
+from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 
 class TrustLineService:
     def __init__(self, session: AsyncSession):
@@ -20,6 +30,27 @@ class TrustLineService:
     async def create(self, from_participant_id: UUID, data: TrustLineCreateRequest) -> TrustLine:
         if data.limit < 0:
             raise BadRequestException("Limit must be >= 0")
+
+        if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+            raise InvalidSignatureException("Missing signature")
+
+        from_participant = await self.session.get(Participant, from_participant_id)
+        if not from_participant:
+            raise NotFoundException("Sender not found")
+
+        # Signature validation (proof-of-possession + binding of request fields).
+        signed_payload: dict = {
+            "to": data.to,
+            "equivalent": data.equivalent,
+            "limit": str(data.limit),
+        }
+        if data.policy is not None:
+            signed_payload["policy"] = data.policy
+
+        try:
+            verify_signature(from_participant.public_key, canonical_json(signed_payload), data.signature)
+        except Exception:
+            raise InvalidSignatureException("Invalid signature")
 
         validate_equivalent_code(data.equivalent)
         if data.policy is not None:
@@ -42,6 +73,15 @@ class TrustLineService:
         equivalent = result.scalar_one_or_none()
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
+
+        checkpoint_before = None
+        try:
+            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=equivalent.id,
+            )
+        except Exception:
+            checkpoint_before = None
 
         # Check for duplicate active trustline
         stmt = select(TrustLine).where(
@@ -88,7 +128,38 @@ class TrustLineService:
                 amount=Decimal('0')
             )
             self.session.add(debt)
-        
+
+        await self.session.flush()
+
+        try:
+            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=equivalent.id,
+            )
+            invariants_status = checkpoint_after.invariants_status or {}
+            passed = bool(invariants_status.get("passed", True))
+            before_sum = checkpoint_before.checksum if checkpoint_before else ""
+            after_sum = checkpoint_after.checksum or before_sum
+
+            self.session.add(
+                IntegrityAuditLog(
+                    operation_type="TRUST_LINE_CREATE",
+                    tx_id=None,
+                    equivalent_code=equivalent.code,
+                    state_checksum_before=before_sum,
+                    state_checksum_after=after_sum,
+                    affected_participants={
+                        "from": from_participant.pid,
+                        "to": to_participant.pid,
+                    },
+                    invariants_checked=invariants_status.get("checks") or invariants_status,
+                    verification_passed=passed,
+                    error_details=None if passed else invariants_status,
+                )
+            )
+        except Exception:
+            pass
+
         await self.session.commit()
         await self.session.refresh(trustline)
         
@@ -106,6 +177,33 @@ class TrustLineService:
         if trustline.from_participant_id != user_id:
             raise ForbiddenException("Not authorized to update this trustline")
 
+        if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+            raise InvalidSignatureException("Missing signature")
+
+        user = await self.session.get(Participant, user_id)
+        if not user:
+            raise NotFoundException("Sender not found")
+
+        signed_payload: dict = {"id": str(trustline_id)}
+        if data.limit is not None:
+            signed_payload["limit"] = str(data.limit)
+        if data.policy is not None:
+            signed_payload["policy"] = data.policy
+
+        try:
+            verify_signature(user.public_key, canonical_json(signed_payload), data.signature)
+        except Exception:
+            raise InvalidSignatureException("Invalid signature")
+
+        checkpoint_before = None
+        try:
+            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=trustline.equivalent_id,
+            )
+        except Exception:
+            checkpoint_before = None
+
         if data.limit is not None:
             if data.limit < 0:
                 raise BadRequestException("Limit must be >= 0")
@@ -119,11 +217,54 @@ class TrustLineService:
             current_policy.update(data.policy)
             trustline.policy = current_policy
 
+        await self.session.flush()
+
+        try:
+            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=trustline.equivalent_id,
+            )
+            invariants_status = checkpoint_after.invariants_status or {}
+            passed = bool(invariants_status.get("passed", True))
+            before_sum = checkpoint_before.checksum if checkpoint_before else ""
+            after_sum = checkpoint_after.checksum or before_sum
+
+            # Resolve PIDs for readability.
+            from_pid = (
+                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.from_participant_id))
+            ).scalar_one_or_none()
+            to_pid = (
+                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.to_participant_id))
+            ).scalar_one_or_none()
+            eq_code = (
+                await self.session.execute(select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id))
+            ).scalar_one_or_none()
+
+            self.session.add(
+                IntegrityAuditLog(
+                    operation_type="TRUST_LINE_UPDATE",
+                    tx_id=None,
+                    equivalent_code=str(eq_code or trustline.equivalent_id),
+                    state_checksum_before=before_sum,
+                    state_checksum_after=after_sum,
+                    affected_participants={
+                        "from": str(from_pid or trustline.from_participant_id),
+                        "to": str(to_pid or trustline.to_participant_id),
+                        "trustline_id": str(trustline_id),
+                    },
+                    invariants_checked=invariants_status.get("checks") or invariants_status,
+                    verification_passed=passed,
+                    error_details=None if passed else invariants_status,
+                )
+            )
+        except Exception:
+            pass
+
         await self.session.commit()
         await self.session.refresh(trustline)
         return await self._hydrate_trustline(trustline)
 
-    async def close(self, trustline_id: UUID, user_id: UUID) -> None:
+    async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> None:
         stmt = select(TrustLine).where(TrustLine.id == trustline_id)
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
@@ -134,13 +275,78 @@ class TrustLineService:
         if trustline.from_participant_id != user_id:
             raise ForbiddenException("Not authorized to close this trustline")
 
+        if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+            raise InvalidSignatureException("Missing signature")
+
+        user = await self.session.get(Participant, user_id)
+        if not user:
+            raise NotFoundException("Sender not found")
+
+        signed_payload: dict = {"id": str(trustline_id)}
+        try:
+            verify_signature(user.public_key, canonical_json(signed_payload), data.signature)
+        except Exception:
+            raise InvalidSignatureException("Invalid signature")
+
         # Check debt
         used = await self._get_used_amount(trustline)
         reverse_used = await self._get_reverse_used_amount(trustline)
         if used > 0 or reverse_used > 0:
             raise BadRequestException("Cannot close trustline with non-zero debt")
 
+        checkpoint_before = None
+        try:
+            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=trustline.equivalent_id,
+            )
+        except Exception:
+            checkpoint_before = None
+
         trustline.status = 'closed'
+
+        await self.session.flush()
+
+        try:
+            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=trustline.equivalent_id,
+            )
+            invariants_status = checkpoint_after.invariants_status or {}
+            passed = bool(invariants_status.get("passed", True))
+            before_sum = checkpoint_before.checksum if checkpoint_before else ""
+            after_sum = checkpoint_after.checksum or before_sum
+
+            from_pid = (
+                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.from_participant_id))
+            ).scalar_one_or_none()
+            to_pid = (
+                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.to_participant_id))
+            ).scalar_one_or_none()
+            eq_code = (
+                await self.session.execute(select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id))
+            ).scalar_one_or_none()
+
+            self.session.add(
+                IntegrityAuditLog(
+                    operation_type="TRUST_LINE_CLOSE",
+                    tx_id=None,
+                    equivalent_code=str(eq_code or trustline.equivalent_id),
+                    state_checksum_before=before_sum,
+                    state_checksum_after=after_sum,
+                    affected_participants={
+                        "from": str(from_pid or trustline.from_participant_id),
+                        "to": str(to_pid or trustline.to_participant_id),
+                        "trustline_id": str(trustline_id),
+                    },
+                    invariants_checked=invariants_status.get("checks") or invariants_status,
+                    verification_passed=passed,
+                    error_details=None if passed else invariants_status,
+                )
+            )
+        except Exception:
+            pass
+
         await self.session.commit()
 
     async def get_by_participant(

@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Optional, Literal
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from fastapi import Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from app.schemas.payment import (
     PaymentCreateRequest, PaymentResult, PaymentsList
 )
 from app.db.models.participant import Participant
+from app.utils.exceptions import BadRequestException
 
 router = APIRouter()
 
@@ -35,10 +36,10 @@ async def check_capacity(
     try:
         amount_decimal = Decimal(amount)
     except (InvalidOperation, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid amount format")
+        raise BadRequestException("Invalid amount format")
 
     if amount_decimal <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
+        raise BadRequestException("Amount must be positive")
 
     return payment_router.check_capacity(current_participant.pid, to, amount_decimal)
 

@@ -35,5 +35,12 @@ CLEARING_EVENTS_TOTAL = Counter(
 )
 
 
+RECOVERY_EVENTS_TOTAL = Counter(
+    "geo_recovery_events_total",
+    "Recovery/maintenance events",
+    ["event", "result"],
+)
+
+
 def render_metrics() -> tuple[bytes, str]:
     return generate_latest(), CONTENT_TYPE_LATEST
