@@ -56,3 +56,13 @@ async def test_integrity_checksum_returns_404_until_checkpoint_exists(client: As
     payload = resp.json()
     assert payload["equivalent"] == "USD"
     assert isinstance(payload.get("checksum"), str) and len(payload["checksum"]) == 64
+
+    invariants_status = payload.get("invariants_status")
+    assert isinstance(invariants_status, dict)
+
+    checks = invariants_status.get("checks")
+    assert isinstance(checks, dict)
+    assert set(checks.keys()) == {"zero_sum", "trust_limits", "debt_symmetry"}
+    assert checks["zero_sum"]["passed"] is True
+    assert checks["trust_limits"]["passed"] is True
+    assert checks["debt_symmetry"]["passed"] is True

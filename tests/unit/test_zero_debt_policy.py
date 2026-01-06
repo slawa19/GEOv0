@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
+from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
@@ -60,6 +61,20 @@ async def test_clearing_deletes_zero_debts(db_session):
     for edge in tx.payload["edges"]:
         assert set(edge.keys()) == {"debt_id", "debtor", "creditor", "amount"}
         assert edge["amount"] == "10"
+
+    audit = (
+        await db_session.execute(
+            select(IntegrityAuditLog).where(IntegrityAuditLog.operation_type == "CLEARING")
+        )
+    ).scalars().one()
+
+    assert audit.tx_id == tx.tx_id
+    assert audit.equivalent_code == eq.code
+    assert isinstance(audit.affected_participants, dict)
+    assert isinstance(audit.affected_participants.get("participants"), list)
+    assert set(audit.affected_participants["participants"]) == {a.pid, b.pid, c.pid}
+    assert isinstance(audit.affected_participants.get("edges"), list)
+    assert len(audit.affected_participants["edges"]) == 3
 
     remaining = (
         await db_session.execute(
