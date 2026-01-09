@@ -1,4 +1,5 @@
 from typing import Optional
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,11 +20,15 @@ async def list_participants(
     q: Optional[str] = None,
     type: Optional[str] = None,
     limit: int = Query(20, ge=1, le=200),
+    page: Optional[int] = Query(None, ge=1),
+    per_page: Optional[int] = Query(None, ge=1, le=200),
     db: AsyncSession = Depends(deps.get_db),
     current_participant: Participant = Depends(deps.get_current_participant),
 ):
     service = ParticipantService(db)
-    items = await service.list_participants(query=q, type_filter=type, limit=limit)
+    effective_limit = per_page or limit
+    offset = ((page or 1) - 1) * effective_limit if page is not None or per_page is not None else 0
+    items = await service.list_participants(query=q, type_filter=type, limit=effective_limit, offset=offset)
     return ParticipantsList(items=items)
 
 
@@ -32,11 +37,15 @@ async def search_participants(
     q: Optional[str] = None,
     type: Optional[str] = None,
     limit: int = Query(20, ge=1, le=200),
+    page: Optional[int] = Query(None, ge=1),
+    per_page: Optional[int] = Query(None, ge=1, le=200),
     db: AsyncSession = Depends(deps.get_db),
     current_participant: Participant = Depends(deps.get_current_participant),
 ):
     service = ParticipantService(db)
-    items = await service.list_participants(query=q, type_filter=type, limit=limit)
+    effective_limit = per_page or limit
+    offset = ((page or 1) - 1) * effective_limit if page is not None or per_page is not None else 0
+    items = await service.list_participants(query=q, type_filter=type, limit=effective_limit, offset=offset)
     return ParticipantsList(items=items)
 
 @router.post("", response_model=Participant, status_code=status.HTTP_201_CREATED)

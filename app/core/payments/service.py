@@ -225,7 +225,11 @@ class PaymentService:
                         receiver.pid,
                         amount,
                         max_hops=settings.ROUTING_MAX_HOPS,
-                        max_paths=settings.ROUTING_MAX_PATHS,
+                        max_paths=(
+                            settings.ROUTING_MAX_PATHS
+                            if bool(getattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", True))
+                            else 1
+                        ),
                     ),
                     timeout=routing_timeout_s,
                 )

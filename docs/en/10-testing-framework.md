@@ -16,6 +16,56 @@ Related documents:
 
 ---
 
+## 0. Local test execution (how to run)
+
+This repo uses a Python virtual environment (`.venv`) and dependencies from [`requirements.txt`](../../requirements.txt) and [`requirements-dev.txt`](../../requirements-dev.txt).
+On Windows, **do not rely on `pytest` being on PATH**: use `python -m pytest` to ensure the correct interpreter is used.
+
+### 0.1. Windows PowerShell
+
+```powershell
+py -m venv .venv
+& .\.venv\Scripts\Activate.ps1
+
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+
+# Run all tests (includes OpenAPI contract test)
+python -m pytest -q
+
+# Run only the OpenAPI contract test
+python -m pytest -q tests/contract/test_openapi_contract.py
+```
+
+### 0.2. Windows CMD
+
+```bat
+py -m venv .venv
+call .\.venv\Scripts\activate.bat
+
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+### 0.3. Troubleshooting
+
+- `ModuleNotFoundError: No module named 'pytest_asyncio'` → install dev deps into the active interpreter:
+  - `python -m pip install -r requirements-dev.txt`
+  - verify with: `python -m pip show pytest-asyncio`
+- `ensurepip ... returned non-zero exit status 1` during `py -m venv .venv`:
+  - remove the venv and retry: `rmdir /s /q .venv` (CMD) or `Remove-Item -Recurse -Force .venv` (PowerShell)
+  - repair base Python’s pip bundle: `py -m ensurepip --upgrade`
+  - workaround: `py -m pip install virtualenv` then `py -m virtualenv .venv`
+- `OSError: [Errno 28] No space left on device` during installs:
+  - check where `%TEMP%` points; redirect temp to a drive with free space:
+    - CMD: `set TEMP=D:\Temp` and `set TMP=D:\Temp`
+    - PowerShell: `$env:TEMP='D:\Temp'; $env:TMP='D:\Temp'`
+- To confirm which interpreter is used:
+  - `python -c "import sys; print(sys.executable)"`
+
+---
+
 ## 1. Canonical API Contract (source of truth)
 
 ### 1.1. Canon
@@ -24,34 +74,18 @@ Canonical API contract = [`docs/en/04-api-reference.md`](docs/en/04-api-referenc
 ### 1.2. Base URL
 Base URL = `/api/v1` (see [`docs/en/04-api-reference.md`](docs/en/04-api-reference.md)).
 
-### 1.3. Response Format (envelope)
-All REST endpoints (public and test-only) return envelope:
+### 1.3. Response Format (v0.1)
 
-**Success:**
+In v0.1, successful responses are typically **plain JSON** (no `{success,data}` envelope).
+List endpoints usually return an object like `{ "items": [...] }`.
+
+**Error (common format):**
 ```json
 {
-  "success": true,
-  "data": { }
-}
-```
-
-**Success (paginated):**
-```json
-{
-  "success": true,
-  "data": [],
-  "pagination": { "total": 0, "page": 1, "per_page": 20, "pages": 0 }
-}
-```
-
-**Error:**
-```json
-{
-  "success": false,
   "error": {
     "code": "E002",
     "message": "Insufficient capacity",
-    "details": { }
+    "details": {}
   }
 }
 ```

@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import AsyncGenerator
 
-from fastapi import Depends, Request, status
+from fastapi import Depends, Header, Request, status
 from app.utils.exceptions import TooManyRequestsException, UnauthorizedException
 from app.utils.exceptions import ForbiddenException
 from fastapi.security import OAuth2PasswordBearer
@@ -102,3 +102,10 @@ async def get_current_participant(
         raise ForbiddenException("Participant account is not active")
         
     return participant
+
+
+async def require_admin(
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> None:
+    if not x_admin_token or x_admin_token != settings.ADMIN_TOKEN:
+        raise ForbiddenException("Admin token required")

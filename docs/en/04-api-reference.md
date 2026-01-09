@@ -64,11 +64,14 @@ list endpoints return an object like `{ "items": [...] }`.
 
 ### 1.5. Health endpoints
 
-Health endpoints are served at the app root (not under `/api/v1`) and are intended for readiness/liveness checks.
+Health endpoints are served at the app root and are also available under `/api/v1/*` as aliases (for clients that use the API base URL).
 
 - `GET /healthz` → `{ "status": "ok" }`
 - `GET /health` → `{ "status": "ok" }`
 - `GET /health/db` → DB connectivity check
+- `GET /api/v1/healthz` → `{ "status": "ok" }`
+- `GET /api/v1/health` → `{ "status": "ok" }`
+- `GET /api/v1/health/db` → DB connectivity check
 
 ---
 
@@ -119,6 +122,8 @@ Content-Type: application/json
   }
 }
 ```
+
+`device_info` is optional and is recorded into `audit_log` on successful login (best-effort).
 
 **Response:**
 ```json

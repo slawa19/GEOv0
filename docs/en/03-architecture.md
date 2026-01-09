@@ -1509,18 +1509,16 @@ last_checkpoint_age_seconds = Gauge(
 ```python
 @app.get("/health")
 async def health_check():
-    checks = {
-        "database": await check_database(),
-        "redis": await check_redis(),
-        "disk_space": check_disk_space(),
-    }
-    status = "healthy" if all(checks.values()) else "unhealthy"
-    return {"status": status, "checks": checks}
+    return {"status": "ok"}
 
-@app.get("/ready")
-async def readiness_check():
-    """Readiness probe."""
-    return {"ready": True}
+@app.get("/healthz")
+async def healthz_check():
+    return {"status": "ok"}
+
+@app.get("/health/db")
+async def health_db_check():
+    """DB connectivity check."""
+    return {"status": "ok"}
 ```
 
 ### 9.3. Logging

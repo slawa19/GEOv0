@@ -75,6 +75,16 @@ class Settings(BaseSettings):
     # Observability
     METRICS_ENABLED: bool = True
 
+    # Admin API (minimal MVP)
+    # NOTE: Shared secret to unblock Admin UI integration in MVP.
+    # Replace with proper role-based auth in production.
+    ADMIN_TOKEN: str = "dev-admin-token-change-me"
+
+    # Feature flags (runtime mutable via /admin/feature-flags)
+    FEATURE_FLAGS_MULTIPATH_ENABLED: bool = True
+    FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: bool = False
+    CLEARING_ENABLED: bool = True
+
     # Integrity checkpoints
     INTEGRITY_CHECKPOINT_ENABLED: bool = True
     INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 300

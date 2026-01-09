@@ -174,7 +174,8 @@ Store object in IndexedDB (logical example):
 
 ## 7. API Mapping (Screen → Endpoint → Fields → Cache)
 
-Note: OpenAPI defines envelope `{success,data}`. Client must have unified `unwrap()` to extract `data`.
+Note: v0.1 endpoints return successful responses as plain JSON (no `{success,data}` envelope).
+Errors use a common envelope shape: `{ "error": {"code": "...", "message": "...", "details": {...}} }`.
 
 ### 7.1. Auth / Hub
 
@@ -229,7 +230,8 @@ Create:
 ### 7.5. Trust / ContactDetails / TrustlineEdit
 
 Contacts/Participants:
-- `GET /participants/search?q={...}&page={...}&per_page={...}`
+- `GET /participants/search?q={...}&type={...}&page={...}&per_page={...}` (pagination)
+- `GET /participants/search?q={...}&type={...}&limit={...}` (simple limit)
 - `GET /participants/{pid}`
 
 Trustlines:

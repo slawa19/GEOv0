@@ -179,7 +179,7 @@ class ParticipantService:
         limit: int = 20, 
         offset: int = 0
     ) -> List[Participant]:
-        stmt = select(Participant)
+        stmt = select(Participant).order_by(Participant.id.asc())
         
         if query:
             stmt = stmt.where(or_(

@@ -64,11 +64,14 @@ Development: http://localhost:8000/api/v1
 
 ### 1.5. Health endpoints
 
-Эндпоинты здоровья доступны на корне приложения (не под `/api/v1`) и предназначены для liveness/readiness проверок.
+Эндпоинты здоровья доступны на корне приложения и также доступны под `/api/v1/*` в виде алиасов (для клиентов, которые используют API base URL).
 
 - `GET /healthz` → `{ "status": "ok" }`
 - `GET /health` → `{ "status": "ok" }`
 - `GET /health/db` → проверка доступности БД
+- `GET /api/v1/healthz` → `{ "status": "ok" }`
+- `GET /api/v1/health` → `{ "status": "ok" }`
+- `GET /api/v1/health/db` → проверка доступности БД
 
 ---
 
@@ -119,6 +122,8 @@ Content-Type: application/json
   }
 }
 ```
+
+`device_info` опционален и фиксируется в `audit_log` при успешном login (best-effort).
 
 **Response:**
 ```json

@@ -102,7 +102,7 @@ Formats:
 - View event details (before/after).
 
 ### 3.9. Health and Metrics (read-only)
-- Health endpoints (aggregation): `/health`, `/ready` and key dependencies (DB/Redis).
+- Health endpoints (aggregation): `/health`, `/healthz` and key dependency check `/health/db`.
 - Link to `/metrics` (if enabled) and brief KPIs: latency p95/p99, error rate.
 
 ---
@@ -177,6 +177,8 @@ UI can be SSR and not require public admin API, but for testing convenience it's
 - `GET /admin/audit-log`
 
 All mutating endpoints must write to audit-log.
+
+MVP auth note: this repo guards admin endpoints with `X-Admin-Token` (shared secret).
 
 ---
 

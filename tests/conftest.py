@@ -58,11 +58,21 @@ def init_db() -> None:
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """SQLAlchemy session with a per-test transaction that is rolled back."""
 
-    async with engine.connect() as connection:
-        transaction = await connection.begin()
-        async with TestingSessionLocal(bind=connection) as session:
-            yield session
-        await transaction.rollback()
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            async with TestingSessionLocal(bind=connection) as session:
+                yield session
+            await transaction.rollback()
+    finally:
+        # Ensure aiosqlite background threads are stopped before pytest closes the event loop.
+        await engine.dispose()
+        try:
+            from app.db.session import engine as app_engine
+
+            await app_engine.dispose()
+        except Exception:
+            pass
 
 
 @pytest_asyncio.fixture

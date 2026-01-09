@@ -4,9 +4,12 @@
 **Версия:** 1.0  
 **Статус:** Финальный  
 
+> Примечание (актуальность): этот файл — снимок аудита на дату. Часть пунктов с тех пор исправлена.
+> Актуальные статусы и верификация: `plans/codebase-audit-issues-2026-01-09.md`.
+
 ---
 
-## 📊 СВОДКА
+## 📊 СВОДКА 
 
 | Категория | Количество |
 |-----------|------------|
@@ -20,7 +23,6 @@
 
 ## 🚨 КРИТИЧЕСКИЕ ПРОБЛЕМЫ
 
-### CRIT-001: Отсутствует `GET /participants/me`
 
 | Поле | Значение |
 |------|----------|
@@ -43,10 +45,9 @@ async def get_current_participant_profile(
     service = ParticipantService(db)
     stats = await service.get_participant_stats(current_participant.id)
     return ParticipantWithStats.from_participant(current_participant, stats)
-```
+<!-- end -->
 
 ---
-
 ### CRIT-002: Отсутствует `PATCH /participants/me`
 
 | Поле | Значение |
@@ -87,7 +88,6 @@ async def update_current_participant(
 ```yaml
   /participants/me:
     get:
-      tags: [Participants]
       summary: Get current participant profile with stats
       responses:
         '200':
@@ -102,7 +102,6 @@ async def update_current_participant(
       requestBody:
         required: true
         content:
-          application/json:
             schema:
               $ref: '#/components/schemas/ParticipantUpdateRequest'
       responses:
@@ -113,36 +112,16 @@ async def update_current_participant(
 ---
 
 ### CRIT-004: TokenPair не содержит `expires_in` и `participant`
-
 | Поле | Значение |
 |------|----------|
 | **Файл** | `app/schemas/auth.py:19-24` |
-| **Описание** | Login/Refresh response не соответствует docs: отсутствуют `expires_in` и `participant`, а также request не поддерживает `device_info` |
-| **Ожидаемое (docs)** | `{ access_token, refresh_token, expires_in: 3600, participant: {...} }` (+ `device_info` в `POST /auth/login`) |
-| **Фактическое** | `{ access_token, refresh_token, token_type }` и `device_info` отсутствует в `LoginRequest` |
+| **Описание** | Login/Refresh response не соответствует docs: отсутствуют `expires_in` и `participant` |
+| **Фактическое** | Историческое: ранее не хватало полей в TokenPair и не принимался `device_info`.
 | **Документация** | `docs/en/04-api-reference.md:108-120` |
 | **Блокирует** | PWA Client: корректное обновление токенов, отображение профиля после логина |
 
 **Рекомендация:**
-```python
-# app/schemas/auth.py
-class TokenPair(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "Bearer"
-    expires_in: int = 3600  # ДОБАВИТЬ
-    participant: Optional[ParticipantPublic] = None  # ДОБАВИТЬ
-```
-
 ---
-
-## ⚠️ ПРОБЛЕМЫ СРЕДНЕЙ ВАЖНОСТИ
-
-### MED-001: Challenge не соответствует спецификации (32 bytes)
-
-| Поле | Значение |
-|------|----------|
-| **Файл** | `app/core/auth/service.py:31` |
 | **Строка** | `challenge_str = str(uuid.uuid4())` |
 | **Описание** | Challenge генерируется как UUID (36 chars), а не 32 bytes CSPRNG |
 | **Ожидаемое (spec)** | 32 bytes (256 bits), base64url encoded без padding |
@@ -160,14 +139,14 @@ challenge_str = base64.urlsafe_b64encode(challenge_bytes).decode('utf-8').rstrip
 
 ---
 
-### MED-002: LoginRequest не содержит `device_info`
+### MED-002: `device_info` в LoginRequest (историческое замечание)
 
 | Поле | Значение |
 |------|----------|
 | **Файл** | `app/schemas/auth.py:12-16` |
-| **Описание** | Опциональное поле device_info отсутствует |
+| **Описание** | Историческое: ранее опциональное поле `device_info` отсутствовало |
 | **Ожидаемое (docs)** | `device_info: { platform, app_version }` |
-| **Фактическое** | Поле отсутствует |
+| **Фактическое** | Сейчас поле присутствует; дополнительно `device_info` фиксируется в `audit_log` при успешном login (best-effort) |
 | **Документация** | `docs/en/04-api-reference.md:92-105` |
 
 **Рекомендация:**
@@ -365,7 +344,7 @@ estimated_hops: int  # Убрать Optional
 | Поле | Значение |
 |------|----------|
 | **Файл** | `app/core/trustlines/service.py:79-84` |
-| **Описание** | `checkpoint_before` вычисляется но не используется |
+| **Описание** | `checkpoint_before` используется для `state_checksum_before` в `IntegrityAuditLog` (audit trail) |
 
 ---
 
@@ -488,6 +467,22 @@ estimated_hops: int  # Убрать Optional
 ## ✅ Todo (в работу)
 
 _Статус на 2026-01-09 (после внедрения фиксов в текущей ветке): все пункты этого Todo закрыты, contract test green, `pytest` проходит._
+
+### Как проверить локально (Windows)
+
+Важно: запуск тестов требует dev-зависимостей из `requirements-dev.txt` (в т.ч. `pytest-asyncio`).
+Если запускать тесты системным Python без установки dev-зависимостей, возможны ошибки вида `ModuleNotFoundError: No module named 'pytest_asyncio'`.
+
+- PowerShell:
+  - `py -m venv .venv`
+  - `& .\\.venv\\Scripts\\Activate.ps1`
+  - `python -m pip install -r requirements-dev.txt`
+  - `python -m pytest -q`
+- CMD:
+  - `py -m venv .venv`
+  - `call .\\.venv\\Scripts\\activate.bat`
+  - `python -m pip install -r requirements-dev.txt`
+  - `python -m pytest -q`
 
 - [x] Fix OpenAPI: `DebtsDetails.incoming` (перенос + required)
 - [x] Добавить `GET /participants/me` (профиль + stats)

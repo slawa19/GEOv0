@@ -102,7 +102,7 @@ Formaty:
 - Podgląd szczegółów zdarzenia (przed/po).
 
 ### 3.9. Health i metryki (tylko odczyt)
-- Endpointy health (agregacja): `/health`, `/ready` i kluczowe zależności (DB/Redis).
+- Endpointy health (agregacja): `/health`, `/healthz` oraz sprawdzenie kluczowej zależności `/health/db`.
 - Link do `/metrics` (jeśli włączone) i krótkie KPI: latencja p95/p99, error rate.
 
 ---

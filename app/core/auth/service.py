@@ -45,7 +45,7 @@ class AuthService:
         await self.db.refresh(auth_challenge)
         return auth_challenge
 
-    async def login(self, pid: str, challenge: str, signature: str) -> dict:
+    async def login(self, pid: str, challenge: str, signature: str, device_info: dict | None = None) -> dict:
         # Best-effort cleanup of expired challenges.
         now = datetime.now(timezone.utc)
         await self.db.execute(delete(AuthChallenge).where(AuthChallenge.expires_at < now))

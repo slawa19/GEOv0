@@ -14,10 +14,467 @@ tags:
   - name: Balance
   - name: Clearing
   - name: Equivalents
+  - name: Health
+  - name: Admin
 security:
   - BearerAuth: []
 
 paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check (alias)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+
+  /health/db:
+    get:
+      tags: [Health]
+      summary: Database health check
+      security: []
+      responses:
+        '200':
+          description: DB OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+        '503':
+          description: DB unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [error]
+                  details:
+                    type: string
+
+  /admin/config:
+    get:
+      tags: [Admin]
+      summary: Get runtime config (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Config items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminConfigResponse'
+        '403':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Admin]
+      summary: Patch runtime config subset (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminConfigPatchRequest'
+      responses:
+        '200':
+          description: Updated keys
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminConfigPatchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /admin/feature-flags:
+    get:
+      tags: [Admin]
+      summary: Get feature flags (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Flags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFeatureFlags'
+    patch:
+      tags: [Admin]
+      summary: Patch feature flags (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminFeatureFlagsPatchRequest'
+      responses:
+        '200':
+          description: Flags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFeatureFlags'
+
+  /admin/participants:
+    get:
+      tags: [Admin]
+      summary: List participants (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      responses:
+        '200':
+          description: Participants list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /admin/participants/{pid}/freeze:
+    post:
+      tags: [Admin]
+      summary: Freeze participant (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminParticipantActionRequest'
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/participants/{pid}/unfreeze:
+    post:
+      tags: [Admin]
+      summary: Unfreeze participant (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminParticipantActionRequest'
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/participants/{pid}/ban:
+    post:
+      tags: [Admin]
+      summary: Ban participant (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminParticipantActionRequest'
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/participants/{pid}/unban:
+    post:
+      tags: [Admin]
+      summary: Unban participant (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PidPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminParticipantActionRequest'
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/audit-log:
+    get:
+      tags: [Admin]
+      summary: List audit log (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: object_type
+          schema:
+            type: string
+        - in: query
+          name: object_id
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Audit log items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuditLogResponse'
+
+  /admin/equivalents:
+    get:
+      tags: [Admin]
+      summary: List equivalents (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Equivalents list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquivalentsList'
+    post:
+      tags: [Admin]
+      summary: Create equivalent (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminEquivalentCreateRequest'
+      responses:
+        '200':
+          description: Equivalent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Equivalent'
+
+  /admin/equivalents/{code}:
+    patch:
+      tags: [Admin]
+      summary: Patch equivalent (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: code
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminEquivalentUpdateRequest'
+      responses:
+        '200':
+          description: Equivalent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Equivalent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/migrations:
+    get:
+      tags: [Admin]
+      summary: Migrations status (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Migration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMigrationsStatus'
+
   /equivalents:
     get:
       tags: [Equivalents]
@@ -123,6 +580,19 @@ paths:
             maximum: 200
             default: 20
           description: Max results
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+          description: Page number (optional; used with per_page)
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+          description: Items per page (optional; used with page)
       responses:
         '200':
           description: Participants list
@@ -177,6 +647,19 @@ paths:
             maximum: 200
             default: 20
           description: Max results
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+          description: Page number (optional; used with per_page)
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+          description: Items per page (optional; used with page)
       responses:
         '200':
           description: Participants list
@@ -830,6 +1313,188 @@ components:
             details:
               type: object
               additionalProperties: true
+
+    AdminConfigItem:
+      type: object
+      required: [key, value, mutable]
+      properties:
+        key:
+          type: string
+        value:
+          description: Any JSON value
+        mutable:
+          type: boolean
+
+    AdminConfigResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminConfigItem'
+
+    AdminConfigPatchRequest:
+      type: object
+      required: [updates]
+      properties:
+        updates:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+          nullable: true
+
+    AdminConfigPatchResponse:
+      type: object
+      required: [updated]
+      properties:
+        updated:
+          type: array
+          items:
+            type: string
+
+    AdminFeatureFlags:
+      type: object
+      required: [multipath_enabled, full_multipath_enabled, clearing_enabled]
+      properties:
+        multipath_enabled:
+          type: boolean
+        full_multipath_enabled:
+          type: boolean
+        clearing_enabled:
+          type: boolean
+
+    AdminFeatureFlagsPatchRequest:
+      allOf:
+        - $ref: '#/components/schemas/AdminFeatureFlags'
+        - type: object
+          properties:
+            reason:
+              type: string
+              nullable: true
+
+    AdminParticipantActionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    AdminAuditLogItem:
+      type: object
+      required: [id, timestamp, action]
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actor_id:
+          type: string
+          nullable: true
+        actor_role:
+          type: string
+          nullable: true
+        action:
+          type: string
+        object_type:
+          type: string
+          nullable: true
+        object_id:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        before_state:
+          type: object
+          nullable: true
+          additionalProperties: true
+        after_state:
+          type: object
+          nullable: true
+          additionalProperties: true
+        request_id:
+          type: string
+          nullable: true
+        ip_address:
+          type: string
+          nullable: true
+        user_agent:
+          type: string
+          nullable: true
+
+    AdminAuditLogResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditLogItem'
+
+    AdminMigrationsStatus:
+      type: object
+      required: [is_up_to_date]
+      properties:
+        current_revision:
+          type: string
+          nullable: true
+        head_revision:
+          type: string
+          nullable: true
+        is_up_to_date:
+          type: boolean
+
+    AdminEquivalentCreateRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          $ref: '#/components/schemas/EquivalentCode'
+        symbol:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        precision:
+          type: integer
+          default: 2
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        is_active:
+          type: boolean
+          default: true
+        reason:
+          type: string
+          nullable: true
+
+    AdminEquivalentUpdateRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        precision:
+          type: integer
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        is_active:
+          type: boolean
+          nullable: true
+        reason:
+          type: string
+          nullable: true
 
     SignedRequest:
       type: object

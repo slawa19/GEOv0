@@ -96,7 +96,7 @@
 - Просмотр деталей события (до/после).
 
 ### 3.9. Health и метрики (read-only)
-- Health endpoints (агрегация): `/health`, `/ready` и ключевые зависимости (DB/Redis).
+- Health endpoints (агрегация): `/health`, `/healthz` и проверка ключевой зависимости `/health/db`.
 - Ссылка на `/metrics` (если включены) и короткие KPI: latency p95/p99, error rate.
 
 ### 3.10. Визуализация графа (Network Graph)

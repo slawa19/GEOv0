@@ -16,6 +16,58 @@ Powiązane dokumenty:
 
 ---
 
+## 0. Jak uruchomić testy lokalnie (venv + komendy)
+
+Projekt używa wirtualnego środowiska Python (`.venv`) i zależności z [`requirements.txt`](../../requirements.txt) oraz [`requirements-dev.txt`](../../requirements-dev.txt).
+Na Windows **nie polegaj na `pytest` w PATH**: użyj `python -m pytest`, aby uruchomić testy na właściwym interpreterze.
+
+### 0.1. Windows PowerShell
+
+```powershell
+py -m venv .venv
+& .\.venv\Scripts\Activate.ps1
+
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+
+# Wszystkie testy (w tym OpenAPI contract test)
+python -m pytest -q
+
+# Tylko OpenAPI contract test
+python -m pytest -q tests/contract/test_openapi_contract.py
+```
+
+### 0.2. Windows CMD
+
+```bat
+py -m venv .venv
+call .\.venv\Scripts\activate.bat
+
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+### 0.3. Rozwiązywanie problemów
+
+- `ModuleNotFoundError: No module named 'pytest_asyncio'` → dev-zależności nie są zainstalowane w aktywnym interpreterze:
+  - `python -m pip install -r requirements-dev.txt`
+  - weryfikacja: `python -m pip show pytest-asyncio`
+- `ensurepip ... returned non-zero exit status 1` podczas `py -m venv .venv`:
+  - usuń venv i spróbuj ponownie: `rmdir /s /q .venv` (CMD) lub `Remove-Item -Recurse -Force .venv` (PowerShell)
+  - napraw pip w bazowym Pythonie: `py -m ensurepip --upgrade`
+  - obejście: `py -m pip install virtualenv`, potem `py -m virtualenv .venv`
+- `OSError: [Errno 28] No space left on device` podczas instalacji:
+  - sprawdź, gdzie wskazuje `%TEMP%`; tymczasowo ustaw temp na dysk z wolnym miejscem:
+    - CMD: `set TEMP=D:\Temp` i `set TMP=D:\Temp`
+    - PowerShell: `$env:TEMP='D:\Temp'; $env:TMP='D:\Temp'`
+- Sprawdź używany interpreter:
+  - `python -c "import sys; print(sys.executable)"`
+
+---
+
+---
+
 ## 1. Kanoniczny kontrakt API (źródło prawdy)
 
 ### 1.1. Kanon
@@ -24,34 +76,18 @@ Kanoniczny kontrakt API = [`docs/pl/04-api-reference.md`](docs/pl/04-api-referen
 ### 1.2. Bazowy URL
 Bazowy URL = `/api/v1` (patrz [`docs/pl/04-api-reference.md`](docs/pl/04-api-reference.md)).
 
-### 1.3. Format odpowiedzi (koperta)
-Wszystkie endpointy REST (publiczne i testowe) zwracają kopertę:
+### 1.3. Format odpowiedzi (v0.1)
 
-**Sukces:**
+W v0.1 odpowiedzi sukcesu to zazwyczaj **plain JSON** (bez koperty `{success,data}`).
+Endpointy list zazwyczaj zwracają obiekt w rodzaju `{ "items": [...] }`.
+
+**Błąd (wspólny format):**
 ```json
 {
-  "success": true,
-  "data": { }
-}
-```
-
-**Sukces (paginowany):**
-```json
-{
-  "success": true,
-  "data": [],
-  "pagination": { "total": 0, "page": 1, "per_page": 20, "pages": 0 }
-}
-```
-
-**Błąd:**
-```json
-{
-  "success": false,
   "error": {
     "code": "E002",
     "message": "Insufficient capacity",
-    "details": { }
+    "details": {}
   }
 }
 ```

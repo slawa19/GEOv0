@@ -5,8 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.clearing.service import ClearingService
+from app.config import settings
 from app.schemas.clearing import ClearingAutoResponse, ClearingCyclesResponse
 from app.utils.distributed_lock import redis_distributed_lock
+from app.utils.exceptions import BadRequestException
 from app.utils.validation import validate_equivalent_code
 
 router = APIRouter()
@@ -32,6 +34,8 @@ async def auto_clear(
     _current_participant=Depends(deps.get_current_participant),
     redis_client=Depends(deps.get_redis_client),
 ):
+    if not bool(getattr(settings, "CLEARING_ENABLED", True)):
+        raise BadRequestException("Clearing is disabled")
     validate_equivalent_code(equivalent)
     service = ClearingService(db)
     lock_key = f"dlock:clearing:{equivalent}"

@@ -203,7 +203,9 @@ UI:
 ### 5.2. API client
 - Base URL: `/api/v1`.
 - Authorization: `Bearer`.
-- Unified envelope processing `{success,data}` and errors `{success:false,error:{code,message,details}}`.
+- Admin endpoints in this repo are guarded by `X-Admin-Token` (shared secret) for MVP.
+- Success responses are plain JSON (no `{success,data}` envelope).
+- Errors use a common envelope shape: `{error:{code,message,details}}`.
 
 ### 5.3. Session and Token Storage (Normative)
 - Admin console must work over TLS only.
@@ -293,4 +295,4 @@ Minimal texts:
 
 ## 8. Generation Prompts (AI)
 
-> "Create Vue 3 component for GEO Hub Admin on Element Plus (script setup). Component: [Screen Name]. Implement loading/empty/error, data extraction from envelope {success,data}, 401/403 handling. Endpoint(s): [list]."
+> "Create Vue 3 component for GEO Hub Admin on Element Plus (script setup). Component: [Screen Name]. Implement loading/empty/error, 401/403 handling, and parse success responses as plain JSON (no {success,data} envelope). Endpoint(s): [list]."

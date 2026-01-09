@@ -60,6 +60,17 @@ async def test_health_endpoints(client: AsyncClient):
 
     resp = await client.get("/healthz")
     assert resp.status_code == 200
+
+    # /api/v1 health aliases exist for clients that use the API base URL.
+    resp = await client.get("/api/v1/health")
+    assert resp.status_code == 200
+
+    resp = await client.get("/api/v1/healthz")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+    resp = await client.get("/api/v1/health/db")
+    assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
 

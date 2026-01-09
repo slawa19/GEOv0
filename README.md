@@ -250,17 +250,61 @@ docker-compose exec api python scripts/seed_db.py
 # Docs: http://localhost:8000/docs
 ```
 
+Health endpoints (also available as `/api/v1/*` aliases):
+
+- `GET /health` and `GET /healthz` → `{ "status": "ok" }`
+- `GET /health/db` → DB connectivity check (`{ "status": "ok" }` or HTTP 503)
+
 ### Testing & Development
 
-To run tests locally:
+To run tests locally (recommended on Windows):
 
-```bash
-# Install dev dependencies
-pip install -r requirements-dev.txt
+**PowerShell:**
+```powershell
+# 1) Create venv (once)
+py -m venv .venv
 
-# Run tests
-pytest
+# 2) Activate venv
+& .\.venv\Scripts\Activate.ps1
+
+# 3) Install runtime + dev dependencies
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+
+# 4) Run all tests (includes OpenAPI contract test)
+python -m pytest -q
+
+# Optional: run only OpenAPI contract test
+python -m pytest -q tests/contract/test_openapi_contract.py
 ```
+
+**Windows CMD:**
+```bat
+REM If you tried before, start clean:
+REM rmdir /s /q .venv
+
+py -m venv .venv
+call .\.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+**Windows CMD (safe one-liner, avoids full `%TEMP%` drives):**
+```bat
+mkdir D:\Temp 2>nul && set TEMP=D:\Temp && set TMP=D:\Temp && py -m venv .venv && call .\.venv\Scripts\activate.bat && python -m pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt && python -m pytest -q
+```
+
+Troubleshooting:
+- If `pytest` is not found in PATH, use `python -m pytest` (it always uses the active interpreter).
+- If you see `ModuleNotFoundError: No module named 'pytest_asyncio'`, it means dev dependencies were not installed into the interpreter you are running. Re-run `python -m pip install -r requirements-dev.txt` after activating `.venv`.
+- If venv creation fails with `ensurepip ... returned non-zero exit status 1`:
+  - delete the venv and retry: `rmdir /s /q .venv` (CMD) or `Remove-Item -Recurse -Force .venv` (PowerShell)
+  - ensure your base Python has bundled pip: `py -m ensurepip --upgrade`
+  - workaround: `py -m pip install virtualenv` then `py -m virtualenv .venv`
+- If installs fail with `No space left on device`, check where `%TEMP%` points. You can temporarily redirect temp to a drive with space:
+  - CMD: `set TEMP=D:\Temp` and `set TMP=D:\Temp`
+  - PowerShell: `$env:TEMP='D:\Temp'; $env:TMP='D:\Temp'`
 
 The integration tests (`tests/integration/test_scenarios.py`) cover:
 - Registration & Authentication
@@ -268,6 +312,29 @@ The integration tests (`tests/integration/test_scenarios.py`) cover:
 - Direct Payments
 - Multi-hop Payments
 - Debt Clearing Cycles
+
+---
+
+## Admin API (MVP)
+
+This repo includes a minimal Admin API under the normal API base path:
+
+- Base URL: `http://localhost:8000/api/v1`
+- Admin prefix: `/admin/*`
+
+**Auth (MVP):** admin endpoints are guarded by a shared secret header:
+
+- Header: `X-Admin-Token: <token>`
+- Config: `ADMIN_TOKEN` (env var) or default `dev-admin-token-change-me`
+
+Examples:
+
+```bash
+curl -H "X-Admin-Token: dev-admin-token-change-me" http://localhost:8000/api/v1/admin/config
+curl -H "X-Admin-Token: dev-admin-token-change-me" http://localhost:8000/api/v1/admin/feature-flags
+```
+
+For the canonical contract, see `api/openapi.yaml`.
 
 ---
 

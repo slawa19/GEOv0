@@ -372,15 +372,20 @@ class GraphCache:
 ```python
 @app.get("/health")
 async def health():
-    return {
-        "status": "healthy",
-        "db": await check_db(),
-        "redis": await check_redis(),
-        "version": "0.1.0"
-    }
+   return {"status": "ok"}
+
+@app.get("/healthz")
+async def healthz():
+   return {"status": "ok"}
+
+@app.get("/health/db")
+async def health_db():
+   # DB connectivity check (returns HTTP 503 on failure)
+   return {"status": "ok"}
 
 @app.get("/metrics")
 async def metrics():
+   # Optional (if enabled)
     return {
         "participants_count": await count_participants(),
         "active_payments": await count_active_payments(),

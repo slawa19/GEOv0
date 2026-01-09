@@ -137,6 +137,13 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(*tasks, return_exceptions=True)
         app.state._bg_tasks = []
 
+        # Ensure DB connections/threads are cleaned up when the app shuts down
+        # (important for pytest TestClient runs on Windows + aiosqlite).
+        try:
+            await engine.dispose()
+        except Exception:
+            pass
+
 
 app = FastAPI(title="GEO Hub Backend", debug=settings.DEBUG, lifespan=lifespan)
 

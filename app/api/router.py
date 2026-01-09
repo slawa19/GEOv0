@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.api import deps
-from app.api.v1 import auth, participants, trustlines, payments, balance, clearing, integrity, equivalents
+from app.api.v1 import auth, participants, trustlines, payments, balance, clearing, integrity, equivalents, health, admin
 
 api_router = APIRouter(dependencies=[Depends(deps.rate_limit)])
 
@@ -13,3 +13,5 @@ api_router.include_router(balance.router, prefix="/balance", tags=["Balance"])
 api_router.include_router(clearing.router, prefix="/clearing", tags=["Clearing"])
 api_router.include_router(integrity.router, prefix="/integrity", tags=["Integrity"])
 api_router.include_router(equivalents.router, prefix="/equivalents", tags=["Equivalents"])
+api_router.include_router(health.router, tags=["Health"])
+api_router.include_router(admin.router, tags=["Admin"])

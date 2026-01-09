@@ -95,7 +95,7 @@ docker compose exec app python -m app.cli init
 
 ```bash
 # Sprawdź API
-curl http://localhost:8000/health
+curl http://localhost:8000/healthz
 
 # Otwórz dokumentację
 open http://localhost:8000/api/v1/docs
@@ -537,13 +537,16 @@ groups:
 ### 6.4. Endpoints health
 
 ```bash
-# Liveness probe (aplikacja działa)
-curl http://localhost:8000/health
-# {"status": "healthy", "checks": {...}}
+# Liveness / readiness probes
+curl http://localhost:8000/healthz
+# {"status": "ok"}
 
-# Readiness probe (gotowość do przyjmowania ruchu)
-curl http://localhost:8000/ready
-# {"ready": true}
+curl http://localhost:8000/health
+# {"status": "ok"}
+
+# Sprawdzenie dostępności bazy danych
+curl http://localhost:8000/health/db
+# {"status": "ok"}  (albo HTTP 503 z {"status": "error", ...})
 ```
 
 ---

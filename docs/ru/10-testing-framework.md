@@ -16,6 +16,56 @@
 
 ---
 
+## 0. Как запустить тесты локально (venv + команды)
+
+Проект использует виртуальное окружение Python (`.venv`) и зависимости из [`requirements.txt`](../../requirements.txt) и [`requirements-dev.txt`](../../requirements-dev.txt).
+На Windows **не полагайтесь на `pytest` в PATH**: используйте `python -m pytest`, чтобы гарантировать запуск под правильным интерпретатором.
+
+### 0.1. Windows PowerShell
+
+```powershell
+py -m venv .venv
+& .\.venv\Scripts\Activate.ps1
+
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+
+# Все тесты (включая OpenAPI contract test)
+python -m pytest -q
+
+# Только OpenAPI contract test
+python -m pytest -q tests/contract/test_openapi_contract.py
+```
+
+### 0.2. Windows CMD
+
+```bat
+py -m venv .venv
+call .\.venv\Scripts\activate.bat
+
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+### 0.3. Типичные проблемы
+
+- `ModuleNotFoundError: No module named 'pytest_asyncio'` → dev-зависимости не установлены в текущий интерпретатор:
+  - `python -m pip install -r requirements-dev.txt`
+  - проверка: `python -m pip show pytest-asyncio`
+- `ensurepip ... returned non-zero exit status 1` при `py -m venv .venv`:
+  - удалите venv и повторите: `rmdir /s /q .venv` (CMD) или `Remove-Item -Recurse -Force .venv` (PowerShell)
+  - восстановите pip в базовом Python: `py -m ensurepip --upgrade`
+  - обходной путь: `py -m pip install virtualenv`, затем `py -m virtualenv .venv`
+- `OSError: [Errno 28] No space left on device` при установке зависимостей:
+  - проверьте, куда указывает `%TEMP%`; временно перенаправьте temp на диск с местом:
+    - CMD: `set TEMP=D:\Temp` и `set TMP=D:\Temp`
+    - PowerShell: `$env:TEMP='D:\Temp'; $env:TMP='D:\Temp'`
+- Проверить используемый интерпретатор:
+  - `python -c "import sys; print(sys.executable)"`
+
+---
+
 ## 1. Канонический контракт API (source of truth)
 
 ### 1.1. Канон
@@ -24,34 +74,18 @@
 ### 1.2. Base URL
 Base URL = `/api/v1` (см. [`docs/ru/04-api-reference.md`](docs/ru/04-api-reference.md:23)).
 
-### 1.3. Формат ответа (envelope)
-Все REST endpoints (публичные и test-only) возвращают envelope:
+### 1.3. Формат ответа (v0.1)
 
-**Успех:**
+В v0.1 успешные ответы обычно возвращаются как **plain JSON** (без envelope `{success,data}`).
+List-эндпоинты, как правило, возвращают объект вида `{ "items": [...] }`.
+
+**Ошибка (единый формат):**
 ```json
 {
-  "success": true,
-  "data": { }
-}
-```
-
-**Успех (пагинация):**
-```json
-{
-  "success": true,
-  "data": [],
-  "pagination": { "total": 0, "page": 1, "per_page": 20, "pages": 0 }
-}
-```
-
-**Ошибка:**
-```json
-{
-  "success": false,
   "error": {
     "code": "E002",
     "message": "Insufficient capacity",
-    "details": { }
+    "details": {}
   }
 }
 ```

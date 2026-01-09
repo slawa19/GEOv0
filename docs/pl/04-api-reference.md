@@ -64,11 +64,14 @@ zwracają obiekt w rodzaju `{ "items": [...] }`.
 
 ### 1.5. Health endpoints
 
-Endpointy zdrowia są dostępne w root aplikacji (nie pod `/api/v1`) i służą do sprawdzeń liveness/readiness.
+Endpointy health są dostępne w root aplikacji i są też dostępne pod `/api/v1/*` jako aliasy (dla klientów, którzy używają API base URL).
 
 - `GET /healthz` → `{ "status": "ok" }`
 - `GET /health` → `{ "status": "ok" }`
 - `GET /health/db` → sprawdzenie dostępności bazy danych
+- `GET /api/v1/healthz` → `{ "status": "ok" }`
+- `GET /api/v1/health` → `{ "status": "ok" }`
+- `GET /api/v1/health/db` → sprawdzenie dostępności bazy danych
 
 ---
 
@@ -119,6 +122,8 @@ Content-Type: application/json
   }
 }
 ```
+
+`device_info` jest opcjonalne i jest zapisywane do `audit_log` przy udanym logowaniu (best-effort).
 
 **Response:**
 ```json
