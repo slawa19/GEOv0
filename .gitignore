@@ -1,6 +1,41 @@
-.qdrant/
+# =========================
+# Local environment config
+# =========================
+.env
+.env.*
+!.env.example
 
+# =========================
+# IDE / editor (local workspace settings)
+# =========================
+.vscode/
+
+# =========================
+# Local DB artifacts
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Local Qdrant data / logs
+# =========================
+.qdrant/
+qdrant/
+qdrant_storage/
+qdrant_data/
+qdrant/**/storage/
+qdrant/**/snapshots/
+qdrant/**/logs/
+qdrant*.log
+qdrant.*.log
+
+# docker compose overrides for local qdrant
+docker-compose.qdrant.yml
+
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *.pyd
