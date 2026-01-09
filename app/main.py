@@ -204,6 +204,11 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get("/healthz")
+async def healthz_check():
+    return {"status": "ok"}
+
+
 @app.get("/health/db")
 async def health_db_check():
     try:

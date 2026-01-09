@@ -1,5 +1,6 @@
 from typing import List, Optional, Any, Dict
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from decimal import Decimal
 
@@ -7,7 +8,7 @@ class CapacityResponse(BaseModel):
     can_pay: bool
     max_amount: str
     routes_count: int
-    estimated_hops: Optional[int] = None
+    estimated_hops: int
 
 class MaxFlowPath(BaseModel):
     path: List[str]
@@ -27,12 +28,20 @@ class MaxFlowResponse(BaseModel):
     algorithm: str
     computed_at: str
 
+class PaymentConstraints(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_hops: Optional[int] = Field(default=None, ge=1, le=10)
+    max_paths: Optional[int] = Field(default=None, ge=1, le=10)
+    timeout_ms: Optional[int] = Field(default=None, ge=1, le=120_000)
+    avoid: Optional[List[str]] = None
+
 class PaymentCreateRequest(BaseModel):
     to: str
     equivalent: str
     amount: str
     description: Optional[str] = None
-    constraints: Optional[Dict[str, Any]] = None
+    constraints: Optional[PaymentConstraints] = None
     signature: str
 
 

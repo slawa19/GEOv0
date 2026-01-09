@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from decimal import Decimal
 from typing import List, Dict, Optional
 
@@ -19,7 +20,7 @@ from app.utils.observability import log_duration
 
 logger = logging.getLogger(__name__)
 
-_summary_cache: dict[uuid.UUID, tuple[float, BalanceSummary]] = {}
+_summary_cache: "OrderedDict[uuid.UUID, tuple[float, BalanceSummary]]" = OrderedDict()
 
 class BalanceService:
     def __init__(self, session: AsyncSession):
@@ -38,6 +39,9 @@ class BalanceService:
         if (time.time() - stored_at) > ttl:
             _summary_cache.pop(participant_id, None)
             return None
+
+        # LRU: mark as recently used.
+        _summary_cache.move_to_end(participant_id, last=True)
         return summary
 
     def _set_cached_summary(self, participant_id: uuid.UUID, summary: BalanceSummary) -> None:
@@ -45,6 +49,12 @@ class BalanceService:
         if ttl <= 0:
             return
         _summary_cache[participant_id] = (time.time(), summary)
+        _summary_cache.move_to_end(participant_id, last=True)
+
+        max_entries = int(getattr(settings, "BALANCE_SUMMARY_CACHE_MAX_ENTRIES", 1024) or 1024)
+        if max_entries > 0:
+            while len(_summary_cache) > max_entries:
+                _summary_cache.popitem(last=False)
 
     async def get_summary(self, participant_id: uuid.UUID) -> BalanceSummary:
         """

@@ -10,7 +10,7 @@ from app.schemas.balance import BalanceSummary, DebtsDetails
 
 router = APIRouter()
 
-@router.get("/balance", response_model=BalanceSummary)
+@router.get("", response_model=BalanceSummary)
 async def get_balance(
     current_participant: Participant = Depends(get_current_participant),
     db: AsyncSession = Depends(get_db)
@@ -21,7 +21,7 @@ async def get_balance(
     service = BalanceService(db)
     return await service.get_summary(current_participant.id)
 
-@router.get("/balance/debts", response_model=DebtsDetails)
+@router.get("/debts", response_model=DebtsDetails)
 async def get_debts(
     equivalent: str = Query(..., description="Equivalent code"),
     direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),

@@ -1,4 +1,5 @@
-import uuid
+import base64
+import secrets
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -27,8 +28,9 @@ class AuthService:
         if not participant:
             raise NotFoundException(f"Participant {pid} not found")
 
-        # Generate random challenge
-        challenge_str = str(uuid.uuid4())
+        # Generate random challenge (32 bytes, base64url without padding)
+        challenge_bytes = secrets.token_bytes(32)
+        challenge_str = base64.urlsafe_b64encode(challenge_bytes).decode("ascii").rstrip("=")
         
         expires_at = now + timedelta(seconds=settings.AUTH_CHALLENGE_EXPIRE_SECONDS)
         
@@ -85,10 +87,18 @@ class AuthService:
         access_token = create_access_token(subject=pid)
         refresh_token = create_refresh_token(subject=pid)
 
+        expires_in = int(settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60
+
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
-            "token_type": "Bearer"
+            "token_type": "Bearer",
+            "expires_in": expires_in,
+            "participant": {
+                "pid": participant.pid,
+                "display_name": participant.display_name,
+                "status": participant.status,
+            },
         }
 
     async def revoke_refresh_token(self, refresh_token: str) -> None:
@@ -126,8 +136,16 @@ class AuthService:
         access_token = create_access_token(subject=pid)
         new_refresh_token = create_refresh_token(subject=pid)
 
+        expires_in = int(settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60
+
         return {
             "access_token": access_token,
             "refresh_token": new_refresh_token,
             "token_type": "Bearer",
+            "expires_in": expires_in,
+            "participant": {
+                "pid": participant.pid,
+                "display_name": participant.display_name,
+                "status": participant.status,
+            },
         }

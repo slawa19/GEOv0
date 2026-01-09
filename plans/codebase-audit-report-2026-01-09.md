@@ -27,7 +27,7 @@
 | **Файл** | `app/api/v1/participants.py` |
 | **Строка** | Отсутствует |
 | **Описание** | Эндпоинт для получения профиля текущего авторизованного участника не реализован |
-| **Ожидаемое (docs)** | `GET /participants/me` → профиль + stats (total_incoming_trust, total_outgoing_trust, net_balance) |
+| **Ожидаемое (docs)** | `GET /participants/me` → профиль + `stats` (total_incoming_trust, total_outgoing_trust, total_debt, total_credit, net_balance) |
 | **Фактическое** | `GET /participants/{pid}` с `pid="me"` вернёт **404 Not Found** |
 | **Документация** | `docs/en/04-api-reference.md:173-207` |
 | **Блокирует** | PWA Client: Dashboard, Settings |
@@ -117,9 +117,9 @@ async def update_current_participant(
 | Поле | Значение |
 |------|----------|
 | **Файл** | `app/schemas/auth.py:19-24` |
-| **Описание** | Login response не содержит expires_in и participant объект |
-| **Ожидаемое (docs)** | `{ access_token, refresh_token, expires_in: 3600, participant: {...} }` |
-| **Фактическое** | `{ access_token, refresh_token, token_type }` |
+| **Описание** | Login/Refresh response не соответствует docs: отсутствуют `expires_in` и `participant`, а также request не поддерживает `device_info` |
+| **Ожидаемое (docs)** | `{ access_token, refresh_token, expires_in: 3600, participant: {...} }` (+ `device_info` в `POST /auth/login`) |
+| **Фактическое** | `{ access_token, refresh_token, token_type }` и `device_info` отсутствует в `LoginRequest` |
 | **Документация** | `docs/en/04-api-reference.md:108-120` |
 | **Блокирует** | PWA Client: корректное обновление токенов, отображение профиля после логина |
 
@@ -237,7 +237,7 @@ async def get_trustlines(
 | **Описание** | В схеме `Optional[int] = None`, в OpenAPI это required |
 | **Фактическое** | `estimated_hops: Optional[int] = None` |
 
-**Рекомендация:** Сделать обязательным:
+**Рекомендация:** Сделать обязательным и всегда возвращать число (например `0`, если маршрут не найден):
 ```python
 estimated_hops: int  # Убрать Optional
 ```
@@ -249,8 +249,8 @@ estimated_hops: int  # Убрать Optional
 | Поле | Значение |
 |------|----------|
 | **Файл** | `app/schemas/balance.py:28-30`, `api/openapi.yaml:1100-1127` |
-| **Описание** | В OpenAPI `required: [outgoing]`, в коде оба поля обязательны |
-| **Рекомендация** | Синхронизировать: либо сделать incoming Optional в коде, либо добавить в required в OpenAPI |
+| **Описание** | В OpenAPI схема `DebtsDetails` некорректна: `incoming` отсутствует в `DebtsDetails.properties` и (ошибочно) определено внутри другого объекта (`IntegrityAuditLogResponse`) |
+| **Рекомендация** | Исправить OpenAPI: перенести `incoming` в `DebtsDetails.properties`, сделать `required: [outgoing, incoming]` (или явно nullable/optional в коде) |
 
 ---
 
@@ -409,7 +409,7 @@ estimated_hops: int  # Убрать Optional
 | **Token Type Enforcement** | ✅ | Access vs Refresh separation |
 | **Rate Limiting** | ✅ | Redis/in-memory |
 | **OpenAPI ↔ Code Sync** | ✅ | Contract test passes |
-| **Tests** | ✅ | 83 tests passing |
+| **Tests** | ✅ | 88 tests passing |
 
 ---
 
@@ -482,3 +482,29 @@ estimated_hops: int  # Убрать Optional
 
 *Отчёт сгенерирован: 2026-01-09*  
 *Версия кодовой базы: commit на момент аудита*
+
+---
+
+## ✅ Todo (в работу)
+
+_Статус на 2026-01-09 (после внедрения фиксов в текущей ветке): все пункты этого Todo закрыты, contract test green, `pytest` проходит._
+
+- [x] Fix OpenAPI: `DebtsDetails.incoming` (перенос + required)
+- [x] Добавить `GET /participants/me` (профиль + stats)
+- [x] Добавить `PATCH /participants/me` (изменения + Ed25519 signature)
+- [x] Auth: challenge 32 bytes base64url (без padding)
+- [x] Auth: `device_info` в `LoginRequest`
+- [x] Auth: `TokenPair` → `expires_in`, `participant`
+- [x] TrustLines: `status` filter + pagination + `from_display_name/to_display_name`
+- [x] Participants: alias `GET /participants/search`
+- [x] Participants: `public_stats` в `GET /participants/{pid}`
+- [x] Tests: покрыть `/participants/me`, auth payload, trustlines list
+
+- [x] LOW-001: унифицировать router prefixes (Balance/Clearing)
+- [x] LOW-002: запретить хранение debt amount=0 (удаление + constraint)
+- [x] LOW-003: PaymentConstraints (структурная валидация)
+- [x] LOW-004: Participant.profile → ParticipantProfile (структура + backward compatible)
+- [x] LOW-005: убрать дублирующую валидацию limit (schema-only)
+- [x] LOW-006: payments list performance — Postgres expression indexes (payload->>'from'/'to'/'equivalent')
+- [x] LOW-007: balance summary cache — bounded LRU
+- [x] LOW-008: убрать мёртвую/дублирующую логику вокруг checkpoint_before/limit validation

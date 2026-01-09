@@ -510,7 +510,7 @@ class PaymentRouter:
             can_pay=can_pay,
             max_amount=str(amount) if can_pay else "0", # Circular in MVP; use /max-flow for estimate
             routes_count=len(routes),
-            estimated_hops=(len(routes[0][0]) - 1) if routes else None,
+            estimated_hops=(len(routes[0][0]) - 1) if routes else 0,
         )
     
     def calculate_max_flow(self, from_pid: str, to_pid: str) -> MaxFlowResponse:

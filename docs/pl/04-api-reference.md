@@ -1,7 +1,7 @@
 # GEO Hub: Dokumentacja API
 
 **Wersja:** 0.1  
-**Data:** Listopad 2025
+**Data:** Styczeń 2026
 
 ---
 
@@ -61,6 +61,14 @@ zwracają obiekt w rodzaju `{ "items": [...] }`.
 **Parametry query:**
 - `page` (default: 1)
 - `per_page` (default: 20, max: 200)
+
+### 1.5. Health endpoints
+
+Endpointy zdrowia są dostępne w root aplikacji (nie pod `/api/v1`) i służą do sprawdzeń liveness/readiness.
+
+- `GET /healthz` → `{ "status": "ok" }`
+- `GET /health` → `{ "status": "ok" }`
+- `GET /health/db` → sprawdzenie dostępności bazy danych
 
 ---
 
@@ -222,6 +230,13 @@ Content-Type: application/json
   "signature": "base64_signature_of_changes"
 }
 ```
+
+**`profile` (zalecane klucze):**
+- `type` — typ uczestnika (np. `person`, `organization`, `hub`)
+- `description` — dowolny opis
+- `contacts` — obiekt z kontaktami (np. `{ "email": "...", "telegram": "..." }`)
+
+Dodatkowe klucze mogą występować.
 
 ### 3.3. Pobranie uczestnika po PID
 
@@ -434,8 +449,8 @@ Authorization: Bearer {token}
 ```
 
 **Uwagi:**
-- Domyślna implementacja powinna być zgodna z trybem routingu określonym w konfiguracji (patrz [`docs/pl/config-reference.md`](docs/pl/config-reference.md:1)).
-- Jeśli włączony jest eksperymentalny tryb **full multipath**, odpowiedź może zawierać więcej ścieżek i dodatkowe pola diagnostyczne, ale kontrakt (obecność `max_amount`) jest zachowany.
+- Domyślna implementacja powinna być zgodna z trybem routingu skonfigurowanym na Hub.
+- Jeśli włączony jest eksperymentalny tryb **full multipath**, odpowiedź może zawierać więcej ścieżek i dodatkowe pola diagnostyczne; kontrakt (obecność `max_amount`) jest zachowany.
 
 ### 5.3. Utworzenie płatności
 
@@ -452,11 +467,19 @@ Content-Type: application/json
   "description": "Za usługi",
   "constraints": {
     "max_hops": 4,
+    "max_paths": 3,
+    "avoid": ["pid_to_avoid"],
     "timeout_ms": 5000
   },
   "signature": "base64_signature"
 }
 ```
+
+**`constraints` (opcjonalnie):**
+- `max_hops` — limit liczby hops w ścieżce
+- `max_paths` — limit liczby alternatywnych ścieżek
+- `timeout_ms` — budżet czasu na routing/wykonanie
+- `avoid` — lista PID, których należy unikać przy budowie tras
 
 **Idempotency-Key (opcjonalnie):** ponowienie tego samego żądania z tym samym kluczem zwraca ten sam wynik. Ponowne użycie klucza z innym payload zwraca `409 Conflict`.
 
@@ -535,8 +558,16 @@ Authorization: Bearer {token}
 ```json
 {
   "items": [
-    {"code": "UAH", "description": "Ukrainian Hryvnia", "precision": 2},
-    {"code": "HOUR", "description": "Hour", "precision": 2}
+    {
+      "code": "UAH",
+      "symbol": "₴",
+      "description": "Ukrainian hryvnia",
+      "precision": 2,
+      "metadata": {"country": "UA"},
+      "is_active": true,
+      "created_at": "2025-11-29T12:00:00Z",
+      "updated_at": "2025-11-29T12:00:00Z"
+    }
   ]
 }
 ```

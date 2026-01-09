@@ -12,7 +12,7 @@ from app.utils.validation import validate_equivalent_code
 router = APIRouter()
 
 
-@router.get("/clearing/cycles", response_model=ClearingCyclesResponse)
+@router.get("/cycles", response_model=ClearingCyclesResponse)
 async def list_cycles(
     equivalent: str = Query(..., description="Equivalent code"),
     max_depth: int = Query(6, ge=3, le=10),
@@ -25,7 +25,7 @@ async def list_cycles(
     return {"cycles": cycles}
 
 
-@router.post("/clearing/auto", response_model=ClearingAutoResponse)
+@router.post("/auto", response_model=ClearingAutoResponse)
 async def auto_clear(
     equivalent: str = Query(..., description="Equivalent code"),
     db: AsyncSession = Depends(deps.get_db),

@@ -1,7 +1,7 @@
 # GEO Hub: API Reference
 
 **Version:** 0.1  
-**Date:** November 2025
+**Date:** January 2026
 
 ---
 
@@ -61,6 +61,14 @@ list endpoints return an object like `{ "items": [...] }`.
 **Query parameters:**
 - `page` (default: 1)
 - `per_page` (default: 20, max: 200)
+
+### 1.5. Health endpoints
+
+Health endpoints are served at the app root (not under `/api/v1`) and are intended for readiness/liveness checks.
+
+- `GET /healthz` → `{ "status": "ok" }`
+- `GET /health` → `{ "status": "ok" }`
+- `GET /health/db` → DB connectivity check
 
 ---
 
@@ -223,6 +231,13 @@ Content-Type: application/json
 }
 ```
 
+**`profile` object (recommended keys):**
+- `type` — participant type (e.g. `person`, `organization`, `hub`)
+- `description` — free-form short description
+- `contacts` — object with contact fields (e.g. `{ "email": "...", "telegram": "..." }`)
+
+Additional keys may be present.
+
 ### 3.3. Get participant by PID
 
 ```http
@@ -318,11 +333,12 @@ Authorization: Bearer {token}
 **Response:**
 ```json
 {
-  "data": [
+  "items": [
     {
       "id": "uuid",
       "from": "my_pid",
       "to": "bob_pid",
+      "from_display_name": "Alice",
       "to_display_name": "Bob",
       "equivalent": "UAH",
       "limit": "1000.00",
@@ -330,8 +346,7 @@ Authorization: Bearer {token}
       "available": "700.00",
       "status": "active"
     }
-  ],
-  "pagination": {...}
+  ]
 }
 ```
 
@@ -392,7 +407,48 @@ Authorization: Bearer {token}
 }
 ```
 
-### 5.2. Create payment
+### 5.2. Max-flow (diagnostics)
+
+Purpose: estimate the **maximum possible amount** payable from the current participant to `to` in a given `equivalent`, plus diagnostic info (paths and bottlenecks). Useful for UI hints and routing performance testing.
+
+```http
+GET /payments/max-flow?to={pid}&equivalent={code}
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "max_amount": "1500.00",
+  "paths": [
+    {
+      "path": ["my_pid", "p2", "p3", "recipient_pid"],
+      "capacity": "700.00"
+    },
+    {
+      "path": ["my_pid", "p4", "recipient_pid"],
+      "capacity": "800.00"
+    }
+  ],
+  "bottlenecks": [
+    {
+      "from": "my_pid",
+      "to": "p2",
+      "limit": "1000.00",
+      "used": "400.00",
+      "available": "600.00"
+    }
+  ],
+  "algorithm": "limited_multipath",
+  "computed_at": "2025-11-29T12:00:00Z"
+}
+```
+
+**Notes:**
+- The default implementation should follow the routing mode configured on the Hub.
+- If an experimental **full multipath** mode is enabled, the response may include more paths and additional diagnostic fields; the contract (presence of `max_amount`) is preserved.
+
+### 5.3. Create payment
 
 ```http
 POST /payments
@@ -407,11 +463,19 @@ Content-Type: application/json
   "description": "For services",
   "constraints": {
     "max_hops": 4,
+    "max_paths": 3,
+    "avoid": ["pid_to_avoid"],
     "timeout_ms": 5000
   },
   "signature": "base64_signature"
 }
 ```
+
+**`constraints` (optional):**
+- `max_hops` — integer limit for hops in a route
+- `max_paths` — integer limit for alternative paths exploration
+- `timeout_ms` — time budget for routing/execution
+- `avoid` — array of participant PIDs to avoid in routes
 
 **Idempotency-Key (optional):** retrying the same request with the same key returns the same result. Re-using the key with a different payload returns `409 Conflict`.
 
@@ -451,7 +515,7 @@ Content-Type: application/json
 }
 ```
 
-### 5.3. Payment history
+### 5.4. Payment history
 
 ```http
 GET /payments?direction=all&equivalent=UAH&status=COMMITTED
@@ -465,7 +529,7 @@ Authorization: Bearer {token}
 - `from_date`, `to_date` — date range
 - `page`, `per_page`
 
-### 5.4. Payment details
+### 5.5. Payment details
 
 ```http
 GET /payments/{tx_id}
@@ -475,6 +539,31 @@ Authorization: Bearer {token}
 ---
 
 ## 6. Balance
+
+### 6.0. List equivalents
+
+```http
+GET /equivalents
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "code": "UAH",
+      "symbol": "₴",
+      "description": "Ukrainian hryvnia",
+      "precision": 2,
+      "metadata": {"country": "UA"},
+      "is_active": true,
+      "created_at": "2025-11-29T12:00:00Z",
+      "updated_at": "2025-11-29T12:00:00Z"
+    }
+  ]
+}
+```
 
 ### 6.1. Overall balance
 

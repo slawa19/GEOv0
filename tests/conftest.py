@@ -1,11 +1,10 @@
-import asyncio
 from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.deps import get_db
@@ -35,22 +34,24 @@ TestingSessionLocal = async_sessionmaker(
 
 @pytest.fixture(scope="session", autouse=True)
 def init_db() -> None:
-    """Initialize the database (create tables) once for the session."""
+    """Initialize the database schema once per test session.
 
-    async def _init() -> None:
-        async with engine.begin() as conn:
-            if engine.url.get_backend_name() in {"postgresql", "postgres"}:
-                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
+    This avoids session-scoped async fixtures (which require overriding pytest-asyncio's
+    `event_loop` fixture) and prevents pytest-asyncio deprecation warnings.
+    """
 
-    asyncio.run(_init())
+    if engine.url.drivername != "sqlite+aiosqlite":
+        raise RuntimeError(
+            "Test suite expects sqlite+aiosqlite DATABASE_URL by default. "
+            f"Got: {engine.url.drivername}."
+        )
 
-
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def _dispose_engine_at_end() -> AsyncGenerator[None, None]:
-    yield
-    await engine.dispose()
+    sync_engine = create_engine(engine.url.set(drivername="sqlite+pysqlite"), echo=False)
+    try:
+        Base.metadata.drop_all(bind=sync_engine)
+        Base.metadata.create_all(bind=sync_engine)
+    finally:
+        sync_engine.dispose()
 
 
 @pytest_asyncio.fixture

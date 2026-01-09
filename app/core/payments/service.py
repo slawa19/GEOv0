@@ -94,7 +94,7 @@ class PaymentService:
             if request.description is not None:
                 fp_payload["description"] = request.description
             if request.constraints is not None:
-                fp_payload["constraints"] = request.constraints
+                fp_payload["constraints"] = request.constraints.model_dump(exclude_unset=True)
 
             request_fingerprint = hashlib.sha256(canonical_json(fp_payload)).hexdigest()
 
@@ -189,7 +189,7 @@ class PaymentService:
         if request.description is not None:
             payload["description"] = request.description
         if request.constraints is not None:
-            payload["constraints"] = request.constraints
+            payload["constraints"] = request.constraints.model_dump(exclude_unset=True)
 
         message = canonical_json(payload)
         try:

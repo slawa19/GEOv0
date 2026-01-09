@@ -163,6 +163,13 @@ async def test_clearing_neutrality_passes_for_cycle_clearing(db_session):
     d_ab.amount -= Decimal("10")
     d_bc.amount -= Decimal("10")
     d_ca.amount -= Decimal("10")
+
+    if d_ab.amount == 0:
+        await db_session.delete(d_ab)
+    if d_bc.amount == 0:
+        await db_session.delete(d_bc)
+    if d_ca.amount == 0:
+        await db_session.delete(d_ca)
     await db_session.flush()
 
     assert await checker.verify_clearing_neutrality(participants, eq.id, positions_before) is True
@@ -190,6 +197,9 @@ async def test_clearing_neutrality_violation_detected(db_session):
 
     # Break neutrality: modify only one edge.
     d_ab.amount -= Decimal("10")
+
+    if d_ab.amount == 0:
+        await db_session.delete(d_ab)
     await db_session.flush()
 
     with pytest.raises(IntegrityViolationException) as exc_info:

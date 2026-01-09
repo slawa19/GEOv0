@@ -23,8 +23,6 @@ async def create_trustline(
     current_participant: Participant = Depends(deps.get_current_participant),
     db: AsyncSession = Depends(deps.get_db)
 ):
-    if data.limit < 0:
-        raise BadRequestException("Limit must be >= 0")
     service = TrustLineService(db)
     return await service.create(current_participant.id, data)
 
@@ -32,11 +30,22 @@ async def create_trustline(
 async def get_trustlines(
     direction: Literal['outgoing', 'incoming', 'all'] = Query('all'),
     equivalent: Optional[str] = Query(None),
+    status: Optional[Literal['active', 'frozen', 'closed']] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=200),
     current_participant: Participant = Depends(deps.get_current_participant),
     db: AsyncSession = Depends(deps.get_db)
 ):
     service = TrustLineService(db)
-    items = await service.get_by_participant(current_participant.id, direction=direction, equivalent=equivalent)
+    offset = (page - 1) * per_page
+    items = await service.get_by_participant(
+        current_participant.id,
+        direction=direction,
+        equivalent=equivalent,
+        status=status,
+        limit=per_page,
+        offset=offset,
+    )
     return TrustLinesList(items=items)
 
 
@@ -64,8 +73,6 @@ async def update_trustline(
     current_participant: Participant = Depends(deps.get_current_participant),
     db: AsyncSession = Depends(deps.get_db)
 ):
-    if data.limit is not None and data.limit < 0:
-        raise BadRequestException("Limit must be >= 0")
     service = TrustLineService(db)
     return await service.update(id, current_participant.id, data)
 

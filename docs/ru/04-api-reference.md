@@ -1,7 +1,7 @@
 # GEO Hub: API Reference
 
 **Версия:** 0.1  
-**Дата:** Ноябрь 2025
+**Дата:** Январь 2026
 
 ---
 
@@ -61,6 +61,14 @@ Development: http://localhost:8000/api/v1
 **Query параметры:**
 - `page` (default: 1)
 - `per_page` (default: 20, max: 200)
+
+### 1.5. Health endpoints
+
+Эндпоинты здоровья доступны на корне приложения (не под `/api/v1`) и предназначены для liveness/readiness проверок.
+
+- `GET /healthz` → `{ "status": "ok" }`
+- `GET /health` → `{ "status": "ok" }`
+- `GET /health/db` → проверка доступности БД
 
 ---
 
@@ -222,6 +230,13 @@ Content-Type: application/json
   "signature": "base64_signature_of_changes"
 }
 ```
+
+**`profile` (рекомендуемые ключи):**
+- `type` — тип участника (например, `person`, `organization`, `hub`)
+- `description` — свободный текст-описание
+- `contacts` — объект с контактами (например, `{ "email": "...", "telegram": "..." }`)
+
+Дополнительные ключи могут присутствовать.
 
 ### 3.3. Получить участника по PID
 
@@ -434,7 +449,7 @@ Authorization: Bearer {token}
 ```
 
 **Примечания:**
-- Реализация по умолчанию должна соответствовать режиму маршрутизации, заданному конфигом (см. [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)).
+- Реализация по умолчанию должна соответствовать режиму маршрутизации, заданному на Hub.
 - Если включён экспериментальный режим **full multipath**, ответ может содержать больше путей и дополнительные поля диагностики, но контракт (наличие `max_amount`) сохраняется.
 
 ### 5.3. Создать платёж
@@ -452,11 +467,19 @@ Content-Type: application/json
   "description": "За услуги",
   "constraints": {
     "max_hops": 4,
+    "max_paths": 3,
+    "avoid": ["pid_to_avoid"],
     "timeout_ms": 5000
   },
   "signature": "base64_signature"
 }
 ```
+
+**`constraints` (опционально):**
+- `max_hops` — ограничение на число hops в маршруте
+- `max_paths` — ограничение на количество альтернативных путей
+- `timeout_ms` — бюджет времени на маршрутизацию/выполнение
+- `avoid` — список PID, которых следует избегать при построении маршрутов
 
 **Idempotency-Key (опционально):** если повторить запрос с тем же ключом, сервер вернёт тот же результат. Если ключ повторно используется с другим payload — вернётся `409 Conflict`.
 
@@ -496,7 +519,7 @@ Content-Type: application/json
 }
 ```
 
-### 5.3. История платежей
+### 5.4. История платежей
 
 ```http
 GET /payments?direction=all&equivalent=UAH&status=COMMITTED
@@ -510,7 +533,7 @@ Authorization: Bearer {token}
 - `from_date`, `to_date` — диапазон дат
 - `page`, `per_page`
 
-### 5.4. Детали платежа
+### 5.5. Детали платежа
 
 ```http
 GET /payments/{tx_id}
@@ -534,8 +557,16 @@ Authorization: Bearer {token}
 ```json
 {
   "items": [
-    {"code": "UAH", "description": "Ukrainian Hryvnia", "precision": 2},
-    {"code": "HOUR", "description": "Hour", "precision": 2}
+    {
+      "code": "UAH",
+      "symbol": "₴",
+      "description": "Ukrainian hryvnia",
+      "precision": 2,
+      "metadata": {"country": "UA"},
+      "is_active": true,
+      "created_at": "2025-11-29T12:00:00Z",
+      "updated_at": "2025-11-29T12:00:00Z"
+    }
   ]
 }
 ```
@@ -609,7 +640,6 @@ Authorization: Bearer {token}
 
 ---
 
-    "from_name": "Alice",
 ## 7. Клиринг
 
 Канонический контракт — в [api/openapi.yaml](../../api/openapi.yaml).

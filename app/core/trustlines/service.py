@@ -28,9 +28,6 @@ class TrustLineService:
         self.session = session
 
     async def create(self, from_participant_id: UUID, data: TrustLineCreateRequest) -> TrustLine:
-        if data.limit < 0:
-            raise BadRequestException("Limit must be >= 0")
-
         if not isinstance(getattr(data, "signature", None), str) or not data.signature:
             raise InvalidSignatureException("Missing signature")
 
@@ -108,27 +105,6 @@ class TrustLineService:
         )
         self.session.add(trustline)
 
-        # Ensure Debt record exists (debtor = to, creditor = from)
-        # TrustLine A -> B means B can borrow from A. So B is debtor, A is creditor.
-        stmt = select(Debt).where(
-            and_(
-                Debt.debtor_id == to_participant.id,
-                Debt.creditor_id == from_participant_id,
-                Debt.equivalent_id == equivalent.id
-            )
-        )
-        result = await self.session.execute(stmt)
-        debt = result.scalar_one_or_none()
-
-        if not debt:
-            debt = Debt(
-                debtor_id=to_participant.id,
-                creditor_id=from_participant_id,
-                equivalent_id=equivalent.id,
-                amount=Decimal('0')
-            )
-            self.session.add(debt)
-
         await self.session.flush()
 
         try:
@@ -205,8 +181,6 @@ class TrustLineService:
             checkpoint_before = None
 
         if data.limit is not None:
-            if data.limit < 0:
-                raise BadRequestException("Limit must be >= 0")
             trustline.limit = data.limit
         
         if data.policy is not None:
@@ -355,9 +329,15 @@ class TrustLineService:
         *,
         direction: str = "all",
         equivalent: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> List[TrustLine]:
         # direction: 'outgoing' (I trust someone) | 'incoming' (someone trusts me) | 'all'
-        query = select(TrustLine).where(TrustLine.status == 'active')
+        if status is None:
+            query = select(TrustLine).where(TrustLine.status == 'active')
+        else:
+            query = select(TrustLine).where(TrustLine.status == status)
 
         if direction == "outgoing":
             query = query.where(TrustLine.from_participant_id == participant_id)
@@ -379,6 +359,13 @@ class TrustLineService:
             if not eq:
                 raise NotFoundException(f"Equivalent '{equivalent}' not found")
             query = query.where(TrustLine.equivalent_id == eq.id)
+
+        query = query.order_by(TrustLine.created_at.desc())
+
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
         
         result = await self.session.execute(query)
         trustlines = result.scalars().all()
@@ -428,6 +415,8 @@ class TrustLineService:
         trustline.equivalent_code = trustline.equivalent.code
         trustline.from_pid = trustline.from_participant.pid
         trustline.to_pid = trustline.to_participant.pid
+        trustline.from_display_name = trustline.from_participant.display_name
+        trustline.to_display_name = trustline.to_participant.display_name
         trustline.used = used
         trustline.available = trustline.limit - used
         
