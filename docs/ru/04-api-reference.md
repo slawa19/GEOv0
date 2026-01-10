@@ -725,10 +725,10 @@ Authorization: Bearer {access_token}
 ## OpenAPI Specification
 
 Полная OpenAPI 3.0 спецификация доступна:
-- JSON: `/api/v1/openapi.json`
+- JSON: `/openapi.json`
 - YAML (в репозитории): `api/openapi.yaml`
-- Swagger UI: `/api/v1/docs`
-- ReDoc: `/api/v1/redoc`
+- Swagger UI: `/docs`
+- ReDoc: `/redoc`
 
 ---
 

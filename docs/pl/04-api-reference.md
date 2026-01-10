@@ -727,10 +727,10 @@ Authorization: Bearer {access_token}
 
 Pełna specyfikacja OpenAPI 3.0 jest dostępna pod adresami:
 
-- JSON: `/api/v1/openapi.json`  
-- YAML (w repozytorium): `api/openapi.yaml`  
-- Swagger UI: `/api/v1/docs`  
-- ReDoc: `/api/v1/redoc`
+- JSON: `/openapi.json`
+- YAML (w repozytorium): `api/openapi.yaml`
+- Swagger UI: `/docs`
+- ReDoc: `/redoc`
 
 ---
 

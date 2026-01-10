@@ -242,7 +242,7 @@ CLEANUP_EXPIRED_LOCKS_SECONDS=60
 # .env
 DATABASE_URL=postgresql+asyncpg://geo_hub:password@localhost:5432/geo_hub
 REDIS_URL=redis://localhost:6379/0
-SECRET_KEY=change-this-to-a-very-long-random-string-at-least-32-chars
+JWT_SECRET=change-this-to-a-very-long-random-string-at-least-32-chars
 
 DEBUG=false
 LOG_LEVEL=INFO
@@ -439,7 +439,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
-      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -629,7 +629,7 @@ pg_restore --target-time="2025-11-29 12:00:00" ...
 docker compose pull
 
 # Apply migrations (in separate container)
-docker compose run --rm app alembic upgrade head
+docker compose run --rm app alembic -c migrations/alembic.ini upgrade head
 
 # Restart with zero downtime
 docker compose up -d --no-deps --scale app=4 app
@@ -649,7 +649,7 @@ source venv/bin/activate
 pip install -e ".[dev]"
 
 # 3. Apply migrations
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 
 # 4. Restart
 sudo systemctl restart geo-hub

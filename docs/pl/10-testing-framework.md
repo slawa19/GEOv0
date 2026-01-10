@@ -93,8 +93,8 @@ Endpointy list zazwyczaj zwracają obiekt w rodzaju `{ "items": [...] }`.
 ```
 
 ### 1.4. Swagger UI / ReDoc
-- `/api/v1/docs`, `/api/v1/redoc`
-- OpenAPI YAML: [`api/openapi.yaml`](api/openapi.yaml)
+- `/docs`, `/redoc`
+- OpenAPI YAML: [`api/openapi.yaml`](api/openapi.yaml:1)
 
 ---
 

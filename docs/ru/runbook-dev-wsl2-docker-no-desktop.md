@@ -118,7 +118,11 @@ systemd=true
 - `app` (FastAPI) порт 8000
 
 2) Применить миграции (важно):
-- `docker compose exec app alembic upgrade head`
+
+По умолчанию миграции запускаются автоматически при старте контейнера `app` (см. `docker/docker-entrypoint.sh`).
+Если нужно прогнать вручную:
+
+- `docker compose exec app alembic -c migrations/alembic.ini upgrade head`
 
 3) (Опционально) залить начальные данные:
 - `docker compose exec app python scripts/seed_db.py`
@@ -230,8 +234,8 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 1) Поднять всё:
 - `docker compose up -d --build`
 
-2) Миграции:
-- `docker compose exec app alembic upgrade head`
+2) Миграции (обычно не нужно, потому что есть авто-миграции в entrypoint):
+- `docker compose exec app alembic -c migrations/alembic.ini upgrade head`
 
 3) Проверка:
 - http://localhost:8000/health

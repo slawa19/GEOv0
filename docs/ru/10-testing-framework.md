@@ -93,7 +93,7 @@ List-эндпоинты, как правило, возвращают объек�
 См. [`docs/ru/04-api-reference.md`](docs/ru/04-api-reference.md:37).
 
 ### 1.4. Swagger UI / ReDoc
-- `/api/v1/docs`, `/api/v1/redoc` — см. [`docs/ru/04-api-reference.md`](docs/ru/04-api-reference.md:782)
+- `/docs`, `/redoc` — см. [`docs/ru/04-api-reference.md`](docs/ru/04-api-reference.md:782)
 - OpenAPI YAML: [`api/openapi.yaml`](api/openapi.yaml:1)
 
 ---

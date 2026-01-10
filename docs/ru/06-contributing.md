@@ -63,8 +63,8 @@ pre-commit install
 # Запустить БД и Redis
 docker compose up -d postgres redis
 
-# Применить миграции
-alembic upgrade head
+# Применить миграции (через конфиг из репозитория)
+alembic -c migrations/alembic.ini upgrade head
 
 # Запустить приложение
 uvicorn app.main:app --reload
@@ -80,8 +80,8 @@ pytest
 ruff check .
 mypy app/
 
-# Открыть документацию
-open http://localhost:8000/api/v1/docs
+# Открыть документацию (Swagger UI)
+open http://localhost:8000/docs
 ```
 
 ---
@@ -194,16 +194,16 @@ DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload
 
 ```bash
 # Создать новую миграцию
-alembic revision --autogenerate -m "Add column X to table Y"
+alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
 
 # Применить миграции
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 
 # Откатить последнюю миграцию
-alembic downgrade -1
+alembic -c migrations/alembic.ini downgrade -1
 
 # Просмотреть историю
-alembic history
+alembic -c migrations/alembic.ini history
 ```
 
 ---

@@ -54,25 +54,26 @@
 ### 2.1. Клонирование репозитория
 
 ```bash
-git clone https://github.com/geo-protocol/geo-hub.git
-cd geo-hub
+git clone https://github.com/slawa19/GEOv0.git
+cd GEOv0-PROJECT
 ```
 
 ### 2.2. Настройка окружения
 
-```bash
-# Копировать пример конфигурации
-cp .env.example .env
+` .env.example` в репозитории дан как справочник (см. также `app/config.py`).
 
-# Отредактировать (минимум: SECRET_KEY)
-nano .env
-```
+Для Docker Compose копировать `.env` не обязательно: дефолтные значения (DB/Redis URL, JWT настройки и т.п.)
+уже заданы в `docker-compose.yml`. `.env` нужен только если вы хотите переопределить секреты/порты/флаги.
 
 ### 2.3. Запуск
 
 ```bash
-# Запустить все сервисы
-docker compose up -d
+# Запустить все сервисы (DB, Redis, API)
+docker compose up -d --build
+
+# Если localhost:8000 занят другим сервисом (часто в Windows+WSL2),
+# выберите другой host-port (порт внутри контейнера остаётся 8000):
+# GEO_API_PORT=18000 docker compose up -d --build
 
 # Проверить статус
 docker compose ps
@@ -83,23 +84,32 @@ docker compose logs -f app
 
 ### 2.4. Инициализация базы данных
 
-```bash
-# Применить миграции
-docker compose exec app alembic upgrade head
+Миграции выполняются автоматически при старте контейнера (см. `docker/docker-entrypoint.sh`).
 
-# Создать начальные данные (эквиваленты, админ)
-docker compose exec app python -m app.cli init
+Если нужно запустить миграции вручную:
+
+```bash
+docker compose exec app alembic -c migrations/alembic.ini upgrade head
+```
+
+(Опционально) загрузить демо-данные из `seeds/`:
+
+```bash
+docker compose exec app python scripts/seed_db.py
 ```
 
 ### 2.5. Проверка
 
 ```bash
 # Проверить API
-curl http://localhost:8000/healthz
+curl http://localhost:8000/health
+curl http://localhost:8000/health/db
 
-# Открыть документацию
-open http://localhost:8000/api/v1/docs
+# Swagger UI
+# http://localhost:8000/docs
 ```
+
+Если запускали с `GEO_API_PORT=18000`, замените `8000` на `18000`.
 
 ### 2.6. Остановка
 
@@ -156,16 +166,16 @@ pip install -e ".[dev]"
 ### 3.4. Применить миграции
 
 ```bash
-# Установить переменные окружения
-export DATABASE_URL="postgresql+asyncpg://geo_hub:password@localhost/geo_hub"
+# Пример переменных окружения
+export DATABASE_URL="postgresql+asyncpg://geo:geo@localhost:5432/geov0"
 export REDIS_URL="redis://localhost:6379/0"
-export SECRET_KEY="your-secret-key-min-32-chars"
+export JWT_SECRET="change-me-in-production"
 
 # Миграции
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 
-# Инициализация
-python -m app.cli init
+# Опционально: сиды
+python scripts/seed_db.py
 ```
 
 ### 3.5. Запуск приложения
@@ -198,63 +208,44 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ### 4.1. Переменные окружения
 
 ```bash
-# === Обязательные ===
+# === Обязательные (для manual run) ===
 
-# База данных PostgreSQL
 DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
-
-# Redis
 REDIS_URL=redis://localhost:6379/0
-
-# Секретный ключ для JWT (минимум 32 символа)
-SECRET_KEY=your-very-long-secret-key-at-least-32-characters
+JWT_SECRET=change-me-in-production
 
 # === Опциональные ===
 
-# Режим отладки (не использовать в production!)
 DEBUG=false
-
-# Уровень логирования
 LOG_LEVEL=INFO
 
-# CORS (разрешённые origins)
-CORS_ORIGINS=["http://localhost:3000"]
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# JWT настройки
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-REFRESH_TOKEN_EXPIRE_DAYS=7
+REDIS_ENABLED=true
 
-# Лимиты
-# Примечание: для MVP каноничные протокольные/продуктовые параметры задаются в YAML
-# (см. [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)).
-# Переменные окружения ниже приведены как пример деплоя/совместимости.
-MAX_PAYMENT_HOPS=6                 # (если поддерживается) alias для `routing.max_path_length`
-PAYMENT_TIMEOUT_SECONDS=30         # общий timeout операции (если поддерживается)
-
-# Rate limiting
-RATE_LIMIT_PER_MINUTE=100
-
-# Фоновые задачи
-CLEARING_INTERVAL_SECONDS=300
-CLEANUP_EXPIRED_LOCKS_SECONDS=60
+# Admin API (MVP)
+ADMIN_TOKEN=dev-admin-token-change-me
 ```
 
 ### 4.2. Пример .env файла
 
 ```bash
-# .env
-DATABASE_URL=postgresql+asyncpg://geo_hub:password@localhost:5432/geo_hub
+# .env (пример)
+DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0
 REDIS_URL=redis://localhost:6379/0
-SECRET_KEY=change-this-to-a-very-long-random-string-at-least-32-chars
+JWT_SECRET=change-me-in-production
 
 DEBUG=false
 LOG_LEVEL=INFO
 
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-REFRESH_TOKEN_EXPIRE_DAYS=7
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
-MAX_PAYMENT_HOPS=6                 # (если поддерживается) alias для `routing.max_path_length`
-CLEARING_INTERVAL_SECONDS=300
+REDIS_ENABLED=true
+ADMIN_TOKEN=dev-admin-token-change-me
 ```
 
 ### 4.3. Конфигурация логирования
@@ -442,7 +433,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
-      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -632,7 +623,7 @@ pg_restore --target-time="2025-11-29 12:00:00" ...
 docker compose pull
 
 # Применить миграции (в отдельном контейнере)
-docker compose run --rm app alembic upgrade head
+docker compose run --rm app alembic -c migrations/alembic.ini upgrade head
 
 # Перезапустить с zero downtime
 docker compose up -d --no-deps --scale app=4 app
@@ -652,7 +643,7 @@ source venv/bin/activate
 pip install -e ".[dev]"
 
 # 3. Применить миграции
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 
 # 4. Перезапустить
 sudo systemctl restart geo-hub

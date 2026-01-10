@@ -719,10 +719,10 @@ Authorization: Bearer {access_token}
 ## OpenAPI Specification
 
 Full OpenAPI 3.0 specification available:
-- JSON: `/api/v1/openapi.json`
+- JSON: `/openapi.json`
 - YAML (in repository): `api/openapi.yaml`
-- Swagger UI: `/api/v1/docs`
-- ReDoc: `/api/v1/redoc`
+- Swagger UI: `/docs`
+- ReDoc: `/redoc`
 
 ---
 
