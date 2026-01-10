@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: geo
       POSTGRES_DB: geov0
     ports:
-      - "5432:5432"
+      - "${GEO_DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
     image: redis:7-alpine
     container_name: geov0-redis
     ports:
-      - "6379:6379"
+      - "${GEO_REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -33,7 +33,7 @@ services:
       dockerfile: docker/Dockerfile
     container_name: geov0-app
     ports:
-      - "8000:8000"
+      - "${GEO_API_PORT:-8000}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://geo:geo@db:5432/geov0
       REDIS_URL: redis://redis:6379/0

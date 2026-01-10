@@ -76,7 +76,16 @@ docker compose up -d db
 
 If Docker is not available, start a local Postgres service (or use a remote Postgres) and adjust the connection string below.
 
-2) Point tests at a dedicated test database and allow schema reset:
+2) Ensure a dedicated test database exists (recommended):
+
+```powershell
+# Creates `geov0_test` inside the docker-compose Postgres container (safe to run multiple times).
+docker exec geov0-db createdb -U geo geov0_test 2>$null
+```
+
+If you are using a non-docker Postgres instance, create a separate database manually (e.g. `geov0_test`) and use it in `TEST_DATABASE_URL`.
+
+3) Point tests at a dedicated test database and allow schema reset:
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0"
@@ -85,8 +94,23 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 python -m pytest -q
 ```
 
+Recommended for this repository:
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+
+# Run only TS-23 (Postgres-only)
+python -m pytest -q tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+```
+
 Safety note: when `TEST_DATABASE_URL` is non-SQLite, the test harness will DROP/CREATE schema.
 It refuses to do this unless `GEO_TEST_ALLOW_DB_RESET=1`.
+
+VS Code tasks:
+- `Postgres: ensure running (docker compose)`
+- `Postgres: ensure geov0_test exists (docker)`
+- `Pytest: TS-23 (Postgres)`
 
 ---
 

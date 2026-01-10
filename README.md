@@ -225,7 +225,8 @@ High‑level roadmap (subject to change):
 
 ### Prerequisites
 
-- **Docker** & **Docker Compose**
+- **Docker** & **Docker Compose** (Docker Desktop, or Docker Engine inside WSL2)
+  - WSL2 no-Docker-Desktop runbook (RU): `docs/ru/runbook-dev-wsl2-docker-no-desktop.md`
 - OR Python 3.11+ and PostgreSQL locally
 
 ### Running the Hub
@@ -238,16 +239,24 @@ git clone https://github.com/slawa19/GEOv0.git
 cd GEOv0-PROJECT
 
 # 2. Start services (DB, Redis, API)
-docker-compose up -d --build
+#
+# If localhost:8000 is already used by another service, pick a different host port:
+#   GEO_API_PORT=18000 docker compose up -d --build
+#
+docker compose up -d --build
 
-# 3. Apply migrations
-docker-compose exec api alembic upgrade head
+# 3. Migrations
+# Migrations are executed automatically on container start (see docker/docker-entrypoint.sh).
+# If you want to run them manually:
+docker compose exec app alembic -c migrations/alembic.ini upgrade head
 
 # 4. Seed initial data (optional)
-docker-compose exec api python scripts/seed_db.py
+docker compose exec app python scripts/seed_db.py
 
-# 5. API is now available at http://localhost:8000
-# Docs: http://localhost:8000/docs
+# 5. API is now available at:
+# - default: http://localhost:8000
+# - with GEO_API_PORT override: http://localhost:18000
+# Docs: /docs
 ```
 
 Health endpoints (also available as `/api/v1/*` aliases):
@@ -312,6 +321,28 @@ The integration tests (`tests/integration/test_scenarios.py`) cover:
 - Direct Payments
 - Multi-hop Payments
 - Debt Clearing Cycles
+
+Postgres-backed tests (recommended for TS-23 concurrency semantics):
+
+**Why:** SQLite cannot validate real locking/isolation behavior. TS-23 is designed to run on Postgres.
+
+**PowerShell (Windows + Docker Compose):**
+```powershell
+# 1) Start Postgres
+docker compose up -d db
+
+# 2) Create a dedicated test database inside the container (one-time)
+docker exec geov0-db createdb -U geo geov0_test 2>$null
+
+# 3) Run the Postgres-only concurrency test
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"  # required: test harness will DROP/CREATE schema
+
+python -m pytest -q tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+```
+
+Safety note: when `TEST_DATABASE_URL` is non-SQLite, the test harness resets schema.
+Always use a dedicated test database (like `geov0_test`).
 
 ---
 

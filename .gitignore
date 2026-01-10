@@ -46,7 +46,27 @@ venv/
 
 # Test / tooling
 .pytest_cache/
+.pytest-tmp/
 .ruff_cache/
 .mypy_cache/
+.tox/
+.nox/
+.hypothesis/
 .coverage
 htmlcov/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Local / temp
+.venv_wsl/
+.cache/
+*.log
+*.tmp
+
+# Project-private working docs
+plans/
+docs/plans/

@@ -1,7 +1,7 @@
 """debts amount > 0 (remove baseline rows)
 
 Revision ID: 010_debts_amount_gt_zero
-Revises: 009_integrity_audit_log
+Revises: 009
 Create Date: 2026-01-09
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "010_debts_amount_gt_zero"
-down_revision = "009_integrity_audit_log"
+down_revision = "009"
 branch_labels = None
 depends_on = None
 

@@ -54,25 +54,26 @@
 ### 2.1. Repository cloning
 
 ```bash
-git clone https://github.com/geo-protocol/geo-hub.git
-cd geo-hub
+git clone https://github.com/slawa19/GEOv0.git
+cd GEOv0-PROJECT
 ```
 
 ### 2.2. Environment setup
 
-```bash
-# Copy example configuration
-cp .env.example .env
+This repository provides `.env.example` for reference (see also `app/config.py`).
 
-# Edit (minimum: SECRET_KEY)
-nano .env
-```
+For Docker Compose, most defaults are already set in `docker-compose.yml` (including DB/Redis URLs),
+so copying `.env` is optional unless you want to override secrets or ports.
 
 ### 2.3. Launch
 
 ```bash
-# Start all services
-docker compose up -d
+# Start all services (DB, Redis, API)
+docker compose up -d --build
+
+# If localhost:8000 is already used by another service on your machine,
+# pick a different host port (container port stays 8000):
+# GEO_API_PORT=18000 docker compose up -d --build
 
 # Check status
 docker compose ps
@@ -83,23 +84,33 @@ docker compose logs -f app
 
 ### 2.4. Database initialization
 
-```bash
-# Apply migrations
-docker compose exec app alembic upgrade head
+Migrations are executed automatically on container start (see `docker/docker-entrypoint.sh`).
 
-# Create initial data (equivalents, admin)
-docker compose exec app python -m app.cli init
+If you want to run them manually:
+
+```bash
+docker compose exec app alembic -c migrations/alembic.ini upgrade head
+```
+
+(Optional) Seed demo data from `seeds/`:
+
+```bash
+docker compose exec app python scripts/seed_db.py
 ```
 
 ### 2.5. Verification
 
 ```bash
 # Check API
-curl http://localhost:8000/healthz
+curl http://localhost:8000/health
+curl http://localhost:8000/health/db
 
 # Open documentation
-open http://localhost:8000/api/v1/docs
+# Swagger UI:
+# http://localhost:8000/docs
 ```
+
+If you started with `GEO_API_PORT=18000`, replace `8000` with `18000`.
 
 ### 2.6. Stop
 
@@ -156,16 +167,16 @@ pip install -e ".[dev]"
 ### 3.4. Apply migrations
 
 ```bash
-# Set environment variables
-export DATABASE_URL="postgresql+asyncpg://geo_hub:password@localhost/geo_hub"
+# Set environment variables (examples)
+export DATABASE_URL="postgresql+asyncpg://geo:geo@localhost:5432/geov0"
 export REDIS_URL="redis://localhost:6379/0"
-export SECRET_KEY="your-secret-key-min-32-chars"
+export JWT_SECRET="change-me-in-production"
 
 # Migrations
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 
-# Initialization
-python -m app.cli init
+# Optional seed
+python scripts/seed_db.py
 ```
 
 ### 3.5. Launch application
@@ -185,7 +196,7 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ### 4.1. Environment variables
 
 ```bash
-# === Required ===
+# === Required (for local/manual run) ===
 
 # PostgreSQL database
 DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
@@ -193,23 +204,24 @@ DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
 # Redis
 REDIS_URL=redis://localhost:6379/0
 
-# Secret key for JWT (minimum 32 characters)
-SECRET_KEY=your-very-long-secret-key-at-least-32-characters
+# JWT secret
+JWT_SECRET=change-me-in-production
 
 # === Optional ===
 
-# Debug mode (do not use in production!)
 DEBUG=false
-
-# Log level
 LOG_LEVEL=INFO
 
-# CORS (allowed origins)
-CORS_ORIGINS=["http://localhost:3000"]
-
 # JWT settings
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-REFRESH_TOKEN_EXPIRE_DAYS=7
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# Feature flags / runtime toggles
+REDIS_ENABLED=true
+
+# Admin API (MVP)
+ADMIN_TOKEN=dev-admin-token-change-me
 
 # Limits
 MAX_PAYMENT_HOPS=6
