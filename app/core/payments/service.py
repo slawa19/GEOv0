@@ -338,6 +338,24 @@ class PaymentService:
             PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
         except Exception:
             pass
+
+        # Best-effort real-time event for receivers.
+        try:
+            from app.utils.event_bus import event_bus
+
+            event_bus.publish(
+                recipient_pid=receiver.pid,
+                event="payment.received",
+                payload={
+                    "tx_id": tx_id_str,
+                    "from": sender.pid,
+                    "to": receiver.pid,
+                    "equivalent": equivalent.code,
+                    "amount": str(amount),
+                },
+            )
+        except Exception:
+            pass
         return PaymentResult(
             tx_id=tx_id_str,
             status="COMMITTED",

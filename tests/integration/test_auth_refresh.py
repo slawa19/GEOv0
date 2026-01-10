@@ -1,11 +1,15 @@
 import base64
+from datetime import datetime, timedelta, timezone
+import uuid
 
 import pytest
 from httpx import AsyncClient
 from nacl.signing import SigningKey
+import jwt
 
 from app.core.auth.crypto import generate_keypair
 from app.core.auth.canonical import canonical_json
+from app.config import settings
 
 
 async def _register_and_login_return_tokens(client: AsyncClient, name: str) -> dict:
@@ -76,3 +80,38 @@ async def test_auth_refresh_rejects_access_token(client: AsyncClient):
     # Passing access token where refresh is expected must fail.
     resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["access_token"]})
     assert resp.status_code == 401, resp.text
+
+
+@pytest.mark.asyncio
+async def test_access_token_expiry_returns_401_and_refresh_recovers(client: AsyncClient):
+    session = await _register_and_login_return_tokens(client, "Expiry Tester")
+    pid = session["pid"]
+    tokens = session["tokens"]
+
+    expired_access = jwt.encode(
+        {
+            "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+            "sub": pid,
+            "type": "access",
+            "jti": uuid.uuid4().hex,
+        },
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+    resp = await client.get(
+        "/api/v1/participants/me",
+        headers={"Authorization": f"Bearer {expired_access}"},
+    )
+    assert resp.status_code == 401, resp.text
+
+    # Refresh should mint a new access token that works.
+    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert resp.status_code == 200, resp.text
+    new_tokens = resp.json()
+
+    resp = await client.get(
+        "/api/v1/participants/me",
+        headers={"Authorization": f"Bearer {new_tokens['access_token']}"},
+    )
+    assert resp.status_code == 200, resp.text

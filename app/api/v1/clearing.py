@@ -30,6 +30,7 @@ async def list_cycles(
 @router.post("/auto", response_model=ClearingAutoResponse)
 async def auto_clear(
     equivalent: str = Query(..., description="Equivalent code"),
+    max_depth: int = Query(6, ge=3, le=10),
     db: AsyncSession = Depends(deps.get_db),
     _current_participant=Depends(deps.get_current_participant),
     redis_client=Depends(deps.get_redis_client),
@@ -40,5 +41,5 @@ async def auto_clear(
     service = ClearingService(db)
     lock_key = f"dlock:clearing:{equivalent}"
     async with redis_distributed_lock(redis_client, lock_key, ttl_seconds=30, wait_timeout_seconds=2.0):
-        cleared = await service.auto_clear(equivalent)
+        cleared = await service.auto_clear(equivalent, max_depth=max_depth)
     return {"equivalent": equivalent, "cleared_cycles": cleared}

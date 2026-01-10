@@ -64,6 +64,30 @@ python -m pytest -q
 - To confirm which interpreter is used:
   - `python -c "import sys; print(sys.executable)"`
 
+### 0.4. Postgres-backed test run (for concurrency scenarios)
+
+Some scenarios (notably TS-23) require a real Postgres database to validate concurrency/locking semantics.
+
+1) Start Postgres (docker-compose example; any Postgres instance works):
+
+```powershell
+docker compose up -d db
+```
+
+If Docker is not available, start a local Postgres service (or use a remote Postgres) and adjust the connection string below.
+
+2) Point tests at a dedicated test database and allow schema reset:
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+
+python -m pytest -q
+```
+
+Safety note: when `TEST_DATABASE_URL` is non-SQLite, the test harness will DROP/CREATE schema.
+It refuses to do this unless `GEO_TEST_ALLOW_DB_RESET=1`.
+
 ---
 
 ## 1. Canonical API Contract (source of truth)

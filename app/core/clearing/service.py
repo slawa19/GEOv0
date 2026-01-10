@@ -381,7 +381,9 @@ class ClearingService:
         # Simple DFS with path tracking.
         
         def dfs(start_node: uuid.UUID, current_node: uuid.UUID, path: List[Debt], visited_in_path: Set[uuid.UUID]):
-            if len(path) > max_depth:
+            # `max_depth` is the maximum number of edges in the resulting cycle.
+            # If we already have `max_depth` edges in the path, we can't extend it.
+            if len(path) >= max_depth:
                 return
 
             if current_node not in adjacency:
@@ -701,14 +703,14 @@ class ClearingService:
             # Log failed tx?
             return False
 
-    async def auto_clear(self, equivalent_code: str) -> int:
+    async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
         """
         Run clearing loop.
         Returns number of cleared cycles.
         """
         count = 0
         while True:
-            cycles = await self.find_cycles(equivalent_code)
+            cycles = await self.find_cycles(equivalent_code, max_depth=max_depth)
             if not cycles:
                 break
 

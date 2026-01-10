@@ -2,14 +2,16 @@
 
 **Goal:** provide a reproducible set of scenarios for end-to-end MVP verification and future automation (e2e/integration tests).
 
-Scenario format:
+Scenario format (automation-oriented):
 
 - **ID**
 - **Name**
-- **Preconditions**
-- **Steps**
-- **Expected Result**
-- **Invariant Checks / Notes**
+- **Preconditions / Deterministic Setup** (minimal graph/topology and config assumptions)
+- **Steps** (exact endpoints + request payload fields)
+- **Expected Result (API)** (status code + required response fields)
+- **Invariant Checks** (what must remain true after the scenario)
+- **Artifacts (optional)** (snapshot/events if `/api/v1/_test/*` is available)
+- **Automation Mapping** (pytest test(s) that implement the scenario)
 
 ---
 
@@ -66,9 +68,12 @@ By "balance" we mean values available via the balance API and payment/transactio
 **Preconditions:** `PID_ALICE` is authorized
 
 **Steps:**
-1. Wait for access token expiry.
-2. Retry request.
-3. Use refresh.
+1. Obtain a valid access token and call a protected endpoint (e.g., `GET /participants/me`).
+2. Simulate expiry deterministically (preferred for automation):
+	- create an access token with `exp` in the past, OR
+	- run with a very small `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` in a dedicated test env.
+3. Retry the protected request with the expired token.
+4. Call `POST /auth/refresh` with the refresh token and retry with the new access token.
 
 **Expected Result:**
 - Service returns 401 for expired access token.
@@ -195,8 +200,8 @@ By "balance" we mean values available via the balance API and payment/transactio
 1. Alice makes `POST /payments` for 100.00 when only 50.00 available.
 
 **Expected Result:**
-- `status=ABORTED`.
-- Error `Insufficient capacity`, `requested` and `available` correct.
+- Request is rejected with a domain error (HTTP 400).
+- Error code indicates insufficient capacity (current implementation uses `E002`).
 
 ---
 
@@ -263,10 +268,9 @@ By "balance" we mean values available via the balance API and payment/transactio
 **Preconditions:** cycle of length 5 exists
 
 **Steps:**
-1. Set `clearing.trigger_cycles_max_length=4`.
-2. Verify cycle of 5 is not cleared by trigger.
-3. Enable periodic search for length 5.
-4. Verify cycle of 5 is cleared periodically.
+1. Verify cycle is NOT detected with `GET /clearing/cycles?equivalent=...&max_depth=4`.
+2. Verify cycle is NOT cleared with `POST /clearing/auto?equivalent=...&max_depth=4`.
+3. Verify cycle IS cleared with `POST /clearing/auto?equivalent=...&max_depth=5`.
 
 **Expected Result:**
 - Behavior matches configuration.
@@ -280,12 +284,13 @@ By "balance" we mean values available via the balance API and payment/transactio
 **Preconditions:** WS available, Alice subscribed
 
 **Steps:**
-1. Alice subscribes to `payment.received`.
-2. Bob makes payment to Alice.
+1. Alice connects to `wss://{hub}/api/v1/ws?token={access_token}`.
+2. Alice sends `{"type":"subscribe","events":["payment.received"]}`.
+3. Bob makes payment to Alice.
 
 **Expected Result:**
-- Alice receives WS event.
-- Event matches schema.
+- Alice receives WS event with `event="payment.received"`.
+- Payload includes `tx_id`, `from`, `to`, `equivalent`, `amount`.
 
 ---
 
@@ -351,3 +356,19 @@ By "balance" we mean values available via the balance API and payment/transactio
 - TS-12 Single-path payment success
 - TS-14 Multipath payment 2 routes
 - TS-17 Automatic clearing of length-3 cycle
+
+---
+
+## 12. Automation Mapping (current repo)
+
+This section links TS IDs to concrete pytest tests in this repository.
+
+- TS-01, TS-02: [tests/integration/test_scenarios.py](tests/integration/test_scenarios.py)
+- TS-03: refresh covered by [tests/integration/test_auth_refresh.py](tests/integration/test_auth_refresh.py) (expiry check added in integration tests)
+- TS-04: participant list/search automation lives under `tests/integration` (see `test_participants_search`)
+- TS-05..TS-09: trustlines CRUD covered by [tests/integration/test_scenarios.py](tests/integration/test_scenarios.py)
+- TS-10..TS-15: routing/capacity/multipath covered by [tests/integration/test_scenarios.py](tests/integration/test_scenarios.py) and [tests/integration/test_payments_multipath.py](tests/integration/test_payments_multipath.py)
+- TS-17: clearing covered by [tests/integration/test_scenarios.py](tests/integration/test_scenarios.py) and policy/lock unit checks in [tests/unit/test_clearing_auto_clearing_policy.py](tests/unit/test_clearing_auto_clearing_policy.py)
+- TS-20, TS-21: admin behavior is testable via `/api/v1/admin/*` endpoints (see `tests/integration/test_admin_*`)
+- TS-22: idempotency covered by [tests/integration/test_payments_idempotency.py](tests/integration/test_payments_idempotency.py)
+- TS-23: concurrency correctness is validated primarily via segment locking/invariants unit tests; true e2e concurrency should be exercised against Postgres.

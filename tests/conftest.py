@@ -1,11 +1,14 @@
 from typing import AsyncGenerator
+import os
+import asyncio
 
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.api.deps import get_db
 from app.config import settings
@@ -16,63 +19,125 @@ from app.main import app
 
 # --- Database Fixtures ---
 
-# IMPORTANT: for real production tests, use a separate TEST_DATABASE_URL.
-TEST_DATABASE_URL = settings.DATABASE_URL
+# IMPORTANT: always point this to a dedicated test DB.
+# For non-SQLite backends this test suite will DROP/CREATE schema when explicitly allowed.
+# Defaulting to settings.DATABASE_URL is unsafe because it may point at a developer DB.
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "sqlite+aiosqlite:///./.pytest_geov0.db",
+)
 
-# Test suite runs many HTTP calls quickly; disable best-effort rate limiting
-# to avoid cross-test interference and flaky 429s.
+# Tests should not start background jobs or best-effort throttling.
 settings.RATE_LIMIT_ENABLED = False
+settings.RECOVERY_ENABLED = False
+settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+_is_sqlite = TEST_DATABASE_URL.startswith("sqlite")
+if _is_sqlite:
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        poolclass=NullPool,
+    )
+else:
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+    )
 TestingSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autoflush=False,
+    join_transaction_mode="create_savepoint",
 )
+
+_schema_ready = False
+_schema_lock = asyncio.Lock()
+
+
+async def _ensure_schema_initialized() -> None:
+    global _schema_ready
+    if _schema_ready:
+        return
+
+    async with _schema_lock:
+        if _schema_ready:
+            return
+
+        driver = engine.url.drivername
+        if driver != "sqlite+aiosqlite":
+            if os.environ.get("GEO_TEST_ALLOW_DB_RESET") != "1":
+                raise RuntimeError(
+                    "Refusing to reset a non-SQLite database for tests. "
+                    "Set GEO_TEST_ALLOW_DB_RESET=1 and ensure TEST_DATABASE_URL points to a dedicated test DB. "
+                    f"Got driver: {driver}."
+                )
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+
+        _schema_ready = True
 
 
 @pytest.fixture(scope="session", autouse=True)
 def init_db() -> None:
-    """Initialize the database schema once per test session.
+    """Guardrail fixture.
 
-    This avoids session-scoped async fixtures (which require overriding pytest-asyncio's
-    `event_loop` fixture) and prevents pytest-asyncio deprecation warnings.
+    Schema initialization is performed lazily in the first `db_session` to keep
+    the suite async-fixture-scope-free.
     """
+    return None
 
-    if engine.url.drivername != "sqlite+aiosqlite":
-        raise RuntimeError(
-            "Test suite expects sqlite+aiosqlite DATABASE_URL by default. "
-            f"Got: {engine.url.drivername}."
-        )
 
-    sync_engine = create_engine(engine.url.set(drivername="sqlite+pysqlite"), echo=False)
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _dispose_engines_at_end() -> AsyncGenerator[None, None]:
+    """Dispose async engines once per test session."""
+
+    yield
+
+    await engine.dispose()
     try:
-        Base.metadata.drop_all(bind=sync_engine)
-        Base.metadata.create_all(bind=sync_engine)
-    finally:
-        sync_engine.dispose()
+        from app.db.session import engine as app_engine
+
+        await app_engine.dispose()
+    except Exception:
+        pass
 
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """SQLAlchemy session with a per-test transaction that is rolled back."""
 
-    try:
-        async with engine.connect() as connection:
-            transaction = await connection.begin()
-            async with TestingSessionLocal(bind=connection) as session:
-                yield session
-            await transaction.rollback()
-    finally:
-        # Ensure aiosqlite background threads are stopped before pytest closes the event loop.
-        await engine.dispose()
-        try:
-            from app.db.session import engine as app_engine
+    await _ensure_schema_initialized()
 
-            await app_engine.dispose()
-        except Exception:
-            pass
+    if _is_sqlite:
+        # SQLite has flaky transactional isolation under rapid commit-heavy tests.
+        # For stability we hard-reset DB state per test.
+        # Truncating tables is much faster than drop/create for the whole schema.
+        async with engine.begin() as conn:
+            for table in reversed(Base.metadata.sorted_tables):
+                await conn.execute(table.delete())
+
+        async with TestingSessionLocal() as session:
+            yield session
+        return
+
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        async with TestingSessionLocal(bind=connection) as session:
+            # Use SAVEPOINTs so application code can call session.commit() without
+            # breaking test isolation.
+            await session.begin_nested()
+
+            @event.listens_for(session.sync_session, "after_transaction_end")
+            def _restart_savepoint(sess, trans):
+                if trans.nested and trans._parent and not trans._parent.nested:
+                    sess.begin_nested()
+
+            yield session
+        await transaction.rollback()
 
 
 @pytest_asyncio.fixture
@@ -84,10 +149,10 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides[get_db] = override_get_db
     try:
-        # Properly manage Starlette/FastAPI lifespan to avoid leaking AnyIO resources.
-        async with app.router.lifespan_context(app):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
-                yield ac
+        # Intentionally do NOT run FastAPI lifespan in tests: it starts background jobs
+        # (recovery/integrity) that can interfere with DB isolation.
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            yield ac
     finally:
         app.dependency_overrides.clear()
 
