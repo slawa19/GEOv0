@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import desc, select
@@ -26,6 +26,8 @@ from app.schemas.admin import (
 )
 from app.schemas.equivalents import Equivalent as EquivalentSchema
 from app.schemas.equivalents import EquivalentsList
+from app.schemas.trustline import TrustLinesList
+from app.core.trustlines.service import TrustLineService
 from app.utils.exceptions import BadRequestException, NotFoundException
 
 
@@ -425,3 +427,26 @@ async def migrations_status() -> AdminMigrationsStatus:
         )
     except Exception:
         return AdminMigrationsStatus(current_revision=None, head_revision=None, is_up_to_date=False)
+
+
+@router.get("/trustlines", response_model=TrustLinesList)
+async def admin_list_trustlines(
+    equivalent: str | None = None,
+    creditor: str | None = Query(None, description="Creditor PID (trustline 'from')"),
+    debtor: str | None = Query(None, description="Debtor PID (trustline 'to')"),
+    status: Literal["active", "frozen", "closed"] | None = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(deps.get_db),
+) -> TrustLinesList:
+    service = TrustLineService(db)
+    offset = (page - 1) * per_page
+    items = await service.list_all(
+        equivalent=equivalent,
+        creditor_pid=creditor,
+        debtor_pid=debtor,
+        status=status,
+        limit=per_page,
+        offset=offset,
+    )
+    return TrustLinesList(items=items)

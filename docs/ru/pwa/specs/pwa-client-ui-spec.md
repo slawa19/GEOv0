@@ -92,6 +92,7 @@
 ### 4.1. Принципы
 - Локально хранится только то, что нужно для UX (кэш + зашифрованный секрет).
 - Приватный ключ и seed никогда не отправляются в сеть.
+- Денежные значения в API приходят как **decimal string** (например, `"10.5"`). UI **не должен** использовать float для сравнений/агрегаций; использовать decimal-safe подход.
 
 ### 4.2. Хранилища
 - **IndexedDB** (нормативно):
@@ -214,6 +215,10 @@ geo://v1/pay?to={PID}&equivalent={CODE?}&amount={AMOUNT?}&memo={TEXT?}&hub={HUB_
 Кэш:
 - страницы activity кэшировать (read-only), TTL 5–10 минут.
 
+MVP дополнение: **лёгкая аналитика активности** (без server-side агрегаций).
+- Источник: тот же `GET /payments` с фильтрами `from_date/to_date`, `equivalent`, `direction`, `status`.
+- UI показывает сводку по текущей выборке: `count committed/aborted` и `total committed amount` (агрегация на клиенте, decimal-safe).
+
 ### 7.4. ScanQR / PaymentCompose / PaymentConfirm
 
 Preflight (проверка возможности):
@@ -238,6 +243,22 @@ Trustlines:
 - `PATCH /trustlines/{id}`
 - `DELETE /trustlines/{id}`
 
+#### 7.5.1. Ego-view trust network (1-hop) (MVP)
+
+Цель: дать пользователю быстрый «эго-вид» сети доверия на 1 хоп без полноценного графа.
+
+Источники:
+- `GET /participants/me` → определить `my_pid`.
+- `GET /trustlines?direction=all` → получить trustlines.
+
+Гидратация имён (нормативно):
+- Если у trustline нет `from_display_name/to_display_name` для нужного плеча → дернуть `GET /participants/{pid}`.
+- Кешировать `pid -> display_name` (memory и/или IndexedDB) с TTL.
+- Ограничить параллельные запросы на гидратацию (например, 4–8 одновременно), чтобы избежать N+1 лавины.
+
+UI (минимум):
+- Список 1-hop связей: counterparty PID+name, equivalent, direction (incoming/outgoing относительно пользователя), limit/used/available, status.
+
 ### 7.6. Settings
 
 Профиль:
@@ -246,8 +267,19 @@ Trustlines:
 
 ### 7.7. WebSocket (реальное время)
 
+Статус: **опционально для MVP**.
+
 Подключение:
 - `wss://{hub_base_url}/api/v1/ws?token={access_token}`
+
+Ограничения (важно для UI/ожиданий):
+- Уведомления **best-effort**: возможны пропуски/дубликаты (at-most-once).
+- Текущая реализация рассчитана на MVP/тесты и не гарантирует доставку при нескольких воркерах/инстансах (без общей шины сообщений).
+
+MVP fallback (нормативно):
+- Если WS недоступен/нестабилен, UI работает полностью через REST.
+- Dashboard/Activity: polling каждые 30–60 сек + pull-to-refresh.
+- После любого reconnect: сверить состояние через `GET /payments` и `GET /trustlines`.
 
 Подписка на события (минимальный набор):
 - `payment.received` — входящий платёж
@@ -258,10 +290,9 @@ Heartbeat:
 - Клиент отправляет `ping` каждые 30 секунд при отсутствии исходящего трафика.
 - Если 90 секунд нет входящих сообщений — считать соединение разорванным.
 
-Reconnect стратегия (нормативно, согласовано с `04-api-reference.md` §7.6):
+Reconnect стратегия (нормативно):
 - Переподключаться с exponential backoff: 1s, 2s, 5s, 10s, 30s.
 - После переподключения: заново `subscribe`, сверить состояние через REST.
-- Готовность к дубликатам и пропускам событий (at-most-once доставка).
 
 ---
 

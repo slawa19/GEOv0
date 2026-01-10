@@ -73,6 +73,23 @@ Endpointy health są dostępne w root aplikacji i są też dostępne pod `/api/v
 - `GET /api/v1/health` → `{ "status": "ok" }`
 - `GET /api/v1/health/db` → sprawdzenie dostępności bazy danych
 
+### 1.6. Korelacja żądań (`X-Request-ID`)
+
+Serwer wspiera korelację żądań przez nagłówek `X-Request-ID`:
+
+- jeśli klient wysyła `X-Request-ID`, serwer go **odsyła** (echo).
+- jeśli brak, serwer **generuje** nowy identyfikator i zwraca go.
+
+Nagłówek odpowiedzi `X-Request-ID` jest zawsze obecny i pozwala powiązać błędy po stronie klienta z logami/audytami po stronie serwera.
+
+### 1.7. Endpoint metryk (`/metrics`)
+
+Metryki Prometheus są dostępne w root aplikacji:
+
+- `GET /metrics` (format tekstowy)
+
+Uwaga: `/metrics` **nie** jest pod `/api/v1`.
+
 ---
 
 ## 2. Autentykacja
@@ -639,10 +656,7 @@ Authorization: Bearer {token}
 
 ### 6.3. Historia zmian bilansu
 
-```http
-GET /balance/history?equivalent=UAH&from_date=2025-11-01
-Authorization: Bearer {token}
-```
+W MVP v0.1 nie ma osobnego endpointu `GET /balance/history`. Historię/aktywność pobieraj przez `GET /payments` z filtrami `equivalent`, `from_date`, `to_date`, `direction`.
 
 ---
 
@@ -691,17 +705,19 @@ Authorization: Bearer {access_token}
 
 ### 8.1. Tabela kodów
 
+Kody HTTP mogą się różnić zależnie od kontekstu; tabela poniżej pokazuje typowe mapowanie używane przez backend.
+
 | Kod   | HTTP | Opis                                  |
 |-------|------|----------------------------------------|
-| `E001`| 404  | Trasa nie znaleziona                  |
+| `E001`| 400/404  | Trasa nie znaleziona / Not found    |
 | `E002`| 400  | Niewystarczająca pojemność płatności  |
 | `E003`| 400  | Przekroczony limit linii zaufania     |
 | `E004`| 400  | Linia zaufania nieaktywna             |
 | `E005`| 400  | Nieprawidłowy podpis                  |
-| `E006`| 403  | Brak uprawnień                        |
+| `E006`| 401/403  | Brak autoryzacji / Brak uprawnień |
 | `E007`| 504  | Timeout operacji                      |
 | `E008`| 409  | Konflikt stanów                       |
-| `E009`| 400  | Nieprawidłowe dane                    |
+| `E009`| 400/429  | Błąd walidacji / Za dużo żądań    |
 | `E010`| 500  | Błąd wewnętrzny                       |
 
 ### 8.2. Przykład błędu

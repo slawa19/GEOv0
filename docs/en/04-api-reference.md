@@ -73,6 +73,23 @@ Health endpoints are served at the app root and are also available under `/api/v
 - `GET /api/v1/health` → `{ "status": "ok" }`
 - `GET /api/v1/health/db` → DB connectivity check
 
+### 1.6. Request correlation (`X-Request-ID`)
+
+The server supports request correlation via the `X-Request-ID` header:
+
+- If the client sends `X-Request-ID`, the server **echoes** it back.
+- If missing, the server **generates** a new request id and returns it.
+
+The response header `X-Request-ID` is always present and can be used to correlate client errors with server logs/audit entries.
+
+### 1.7. Metrics endpoint (`/metrics`)
+
+Prometheus metrics are exposed at the app root:
+
+- `GET /metrics` (text format)
+
+Note: `/metrics` is **not** under `/api/v1`.
+
 ---
 
 ## 2. Authentication
@@ -632,10 +649,7 @@ Authorization: Bearer {token}
 
 ### 6.3. Balance change history
 
-```http
-GET /balance/history?equivalent=UAH&from_date=2025-11-01
-Authorization: Bearer {token}
-```
+MVP v0.1 does **not** expose a dedicated `GET /balance/history` endpoint. Use `GET /payments` with `equivalent`, `from_date`, `to_date`, and `direction` filters for history/activity.
 
 ---
 
@@ -684,17 +698,19 @@ Authorization: Bearer {access_token}
 
 ### 8.1. Error code table
 
+HTTP status codes may vary by context; the table below shows the typical mapping used by the backend.
+
 | Code | HTTP | Description |
 |------|------|-------------|
-| `E001` | 404 | Route not found |
+| `E001` | 400/404 | Route not found / Not found |
 | `E002` | 400 | Insufficient capacity for payment |
 | `E003` | 400 | Trust line limit exceeded |
 | `E004` | 400 | Trust line not active |
 | `E005` | 400 | Invalid signature |
-| `E006` | 403 | Insufficient permissions |
+| `E006` | 401/403 | Unauthorized / Insufficient permissions |
 | `E007` | 504 | Operation timeout |
 | `E008` | 409 | State conflict |
-| `E009` | 400 | Invalid data |
+| `E009` | 400/429 | Validation error / Too many requests |
 | `E010` | 500 | Internal error |
 
 ### 8.2. Error example

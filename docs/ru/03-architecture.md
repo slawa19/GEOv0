@@ -109,7 +109,7 @@
 - **Full multipath** (опционально; экспериментальный режим для бенчмарков, включается только через `feature_flags.full_multipath_enabled`, см. [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:1) и [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1))
 - Автоматический клиринг: **триггерный** поиск циклов 3–4 (по умолчанию) + **периодический** поиск 5–6 (опционально; параметры в [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1))
 - REST API + WebSocket уведомления
-- Базовая админка (операторские функции и доступ к конфигу/feature flags — см. [`docs/ru/admin-console-minimal-spec.md`](docs/ru/admin-console-minimal-spec.md:1))
+- Базовая админка (операторские функции и доступ к конфигу/feature flags — см. [`docs/ru/admin/specs/admin-console-minimal-spec.md`](docs/ru/admin/specs/admin-console-minimal-spec.md:1))
 - Web-клиент **PWA** (primary клиент для MVP)
 
 **Не включено (отложено):**
@@ -682,7 +682,7 @@ Payments:
 Balance:
   GET    /api/v1/balance                # Общий баланс
   GET    /api/v1/balance/debts          # Долги (входящие/исходящие)
-  GET    /api/v1/balance/history        # История изменений
+
 
 WebSocket:
   WS     /api/v1/ws                     # Real-time уведомления
@@ -1516,19 +1516,41 @@ class ZeroKnowledgeBalanceProof:
 
 ```python
 # Prometheus metrics
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
-# Счётчики
-payments_total = Counter('geo_payments_total', 'Total payments', ['status'])
-clearings_total = Counter('geo_clearings_total', 'Total clearings', ['status'])
+# HTTP-метрики (безопасно инкрементировать всегда)
+http_requests_total = Counter(
+    "geo_http_requests_total",
+    "Total HTTP requests",
+    ["method", "path", "status"],
+)
+http_request_duration_seconds = Histogram(
+    "geo_http_request_duration_seconds",
+    "HTTP request duration (seconds)",
+    ["method", "path"],
+)
 
-# Гистограммы
-payment_duration = Histogram('geo_payment_duration_seconds', 'Payment processing time')
-routing_duration = Histogram('geo_routing_duration_seconds', 'Path finding time')
-
-# Gauges
-active_participants = Gauge('geo_active_participants', 'Active participants count')
-total_debt = Gauge('geo_total_debt', 'Total debt in system', ['equivalent'])
+# Бизнес-метрики (best-effort: метрики не должны ломать запросы)
+routing_failures_total = Counter(
+    "geo_routing_failures_total",
+    "Routing failures",
+    ["reason"],
+)
+payment_events_total = Counter(
+    "geo_payment_events_total",
+    "Payment events",
+    ["event", "result"],
+)
+clearing_events_total = Counter(
+    "geo_clearing_events_total",
+    "Clearing events",
+    ["event", "result"],
+)
+recovery_events_total = Counter(
+    "geo_recovery_events_total",
+    "Recovery/maintenance events",
+    ["event", "result"],
+)
 
 # === Метрики целостности системы ===
 

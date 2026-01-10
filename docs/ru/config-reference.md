@@ -5,7 +5,7 @@
 Связанные документы:
 - Спецификация протокола (в т.ч. multipath/full multipath): [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:1)
 - Развёртывание и общая схема конфигурации (env + YAML): [`docs/ru/05-deployment.md`](docs/ru/05-deployment.md:1)
-- Минимальная админка для управления параметрами: [`docs/ru/admin-console-minimal-spec.md`](docs/ru/admin-console-minimal-spec.md:1)
+- Минимальная админка для управления параметрами: [`docs/ru/admin/specs/admin-console-minimal-spec.md`](docs/ru/admin/specs/admin-console-minimal-spec.md:1)
 
 ---
 
@@ -393,7 +393,7 @@ observability:
 
 ## 4. Какие параметры должны быть доступны в админке
 
-См. минимальную спецификацию админки: [`docs/ru/admin-console-minimal-spec.md`](docs/ru/admin-console-minimal-spec.md:1).
+См. минимальную спецификацию админки: [`docs/ru/admin/specs/admin-console-minimal-spec.md`](docs/ru/admin/specs/admin-console-minimal-spec.md:1).
 
 ### 4.1. Runtime editable (через админку)
 - `feature_flags.*`

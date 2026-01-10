@@ -6,9 +6,9 @@
 - иметь аудит действий оператора.
 
 Связанные документы:
-- Реестр параметров и пометки runtime vs restart/migration: [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)
-- Места в протоколе, где важны настройки multipath/clearing: [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:1)
-- Развёртывание (в т.ч. схема конфигурации): [`docs/ru/05-deployment.md`](docs/ru/05-deployment.md:1)
+- Реестр параметров и пометки runtime vs restart/migration: [`docs/ru/config-reference.md`](../../config-reference.md:1)
+- Места в протоколе, где важны настройки multipath/clearing: [`docs/ru/02-protocol-spec.md`](../../02-protocol-spec.md:1)
+- Развёртывание (в т.ч. схема конфигурации): [`docs/ru/05-deployment.md`](../../05-deployment.md:1)
 
 ---
 
@@ -19,19 +19,18 @@
 Для MVP выбран **Вариант B: SPA (Single Page Application)**.
 - **Стек:** Python (FastAPI) + Vue.js 3 (Composition API) + Tailwind CSS (опционально).
 - **Библиотека компонентов:** Element Plus (рекомендуется для админок).
-- **Визуализация графов:** v-network-graph или D3.js.
 
-Такой подход позволит создать отзывчивый интерфейс для мониторинга транзакций и визуализации сети доверия.
+В MVP фокус на операционные таблицы/диагностику (polling + ручное обновление). Полноценная визуализация графа — Phase 2.
 
 ---
 
 ## 2. Аутентификация/авторизация (минимум)
 
-### 2.1. Роли (минимальный набор)
+### 2.1. MVP аутентификация
 
-- `admin` — полный доступ к админке.
-- `operator` — ограниченный доступ: участники (freeze/ban), просмотр транзакций/клиринга, просмотр конфигурации, включение/выключение feature flags.
-- `auditor` — только чтение: аудит-лог, транзакции, health/метрики, конфиг (read-only).
+Для MVP используется простой механизм: **`X-Admin-Token`** для `/admin/*` endpoints.
+
+Примечание: роли (`admin/operator/auditor`) и RBAC можно добавить позже (Phase 2), но они не требуются для запуска пилота.
 
 ### 2.2. Требования безопасности
 
@@ -53,7 +52,7 @@
 
 Экран должен поддерживать:
 - просмотр текущих значений;
-- подсказку: описание/диапазон/дефолт (можно грузить из [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1) как статический справочник или встроить минимально в backend);
+- подсказку: описание/диапазон/дефолт (можно грузить из [`docs/ru/config-reference.md`](../../config-reference.md:1) как статический справочник или встроить минимально в backend);
 - изменение только runtime-параметров (см. раздел 4).
 
 Форматы:
@@ -99,11 +98,16 @@
 - Health endpoints (агрегация): `/health`, `/healthz` и проверка ключевой зависимости `/health/db`.
 - Ссылка на `/metrics` (если включены) и короткие KPI: latency p95/p99, error rate.
 
-### 3.10. Визуализация графа (Network Graph)
-- Интерактивная карта узлов (участников) и ребер (линий доверия).
-- Фильтрация по эквиваленту.
-- Подсветка "узких мест" (где лимит почти исчерпан).
-- Поиск узла по PID.
+### 3.10. Trustlines (таблица) — состояние сети (read-only)
+
+Цель: дать оператору обзор «состояния сети» без отдельного analytics pipeline.
+
+Функции:
+- таблица trustlines по системе с фильтрами (эквивалент, участник-источник/назначение, статус);
+- подсветка «узких мест»: `available/limit` ниже порога;
+- drill-down по ребру: лимит/использовано/доступно, участники, политика.
+
+Примечание: для MVP достаточно таблицы. Полноценный Network Graph — Phase 2.
 
 ### 3.11. Панель целостности (Integrity Dashboard)
 - Статус проверки инвариантов (Zero-Sum check по эквивалентам).
@@ -116,15 +120,13 @@
 - Действие: "Force Abort" (принудительная отмена) для разблокировки лимитов.
 
 ### 3.13. Аналитика ликвидности
-- Графики объема долгов по времени.
-- Эффективность клиринга: сколько долгов списано за период.
-- Топ-10 участников по объему предоставленного/полученного доверия.
+В MVP убирается (Phase 2/3): требует агрегаций/таймсерий и отдельного API.
 
 ---
 
 ## 4. Что обязательно read-only vs что можно менять
 
-Каноничные пометки — в [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1). Для MVP фиксируем минимум:
+Каноничные пометки — в [`docs/ru/config-reference.md`](../../config-reference.md:1). Для MVP фиксируем минимум:
 
 ### 4.1. Runtime mutable (через админку)
 Разрешено менять:
@@ -186,14 +188,10 @@ UI может быть SSR и не требовать публичных admin A
 - `GET /admin/equivalents`
 - `POST /admin/equivalents`
 - `PATCH /admin/equivalents/{code}`
-- `GET /admin/transactions`
-- `GET /admin/transactions/{tx_id}`
-- `GET /admin/clearing`
+- `GET /admin/trustlines` (табличный обзор сети, фильтры)
 - `GET /admin/audit-log`
-- `GET /admin/analytics/graph` (данные для визуализации сети)
-- `GET /admin/analytics/stats` (метрики клиринга и ликвидности)
-- `GET /admin/integrity/status` (результаты проверок)
-- `POST /admin/integrity/check` (запуск проверки)
+- `GET /integrity/status` (статус/настройки инвариантов)
+- `POST /integrity/verify` (запуск проверки)
 - `POST /admin/transactions/{tx_id}/abort` (принудительная отмена)
 
 Все mutating endpoints обязаны писать audit-log.

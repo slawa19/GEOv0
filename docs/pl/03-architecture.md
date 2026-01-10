@@ -681,7 +681,7 @@ Payments:
 Balance:
   GET    /api/v1/balance                # Bilans ogólny
   GET    /api/v1/balance/debts          # Długi (przychodzące/wychodzące)
-  GET    /api/v1/balance/history        # Historia zmian
+
 
 WebSocket:
   WS     /api/v1/ws                     # Powiadomienia w czasie rzeczywistym
@@ -1300,19 +1300,41 @@ W przyszłych wersjach planowana jest:
 ### 9.1. Metryki
 
 ```python
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
-# Liczniki
-payments_total = Counter('geo_payments_total', 'Total payments', ['status'])
-clearings_total = Counter('geo_clearings_total', 'Total clearings', ['status'])
+# Metryki HTTP (zawsze bezpieczne do emitowania)
+http_requests_total = Counter(
+    "geo_http_requests_total",
+    "Total HTTP requests",
+    ["method", "path", "status"],
+)
+http_request_duration_seconds = Histogram(
+    "geo_http_request_duration_seconds",
+    "HTTP request duration (seconds)",
+    ["method", "path"],
+)
 
-# Histogramy
-payment_duration = Histogram('geo_payment_duration_seconds', 'Payment processing time')
-routing_duration = Histogram('geo_routing_duration_seconds', 'Path finding time')
-
-# Gauges
-active_participants = Gauge('geo_active_participants', 'Active participants count')
-total_debt = Gauge('geo_total_debt', 'Total debt in system', ['equivalent'])
+# Liczniki zdarzeń biznesowych (best-effort; nie mogą psuć requestów)
+routing_failures_total = Counter(
+    "geo_routing_failures_total",
+    "Routing failures",
+    ["reason"],
+)
+payment_events_total = Counter(
+    "geo_payment_events_total",
+    "Payment events",
+    ["event", "result"],
+)
+clearing_events_total = Counter(
+    "geo_clearing_events_total",
+    "Clearing events",
+    ["event", "result"],
+)
+recovery_events_total = Counter(
+    "geo_recovery_events_total",
+    "Recovery/maintenance events",
+    ["event", "result"],
+)
 
 # Metryki integralności
 integrity_checks_total = Counter(

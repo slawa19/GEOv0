@@ -47,6 +47,8 @@
   - PostgreSQL 15+
   - Redis 7+
 
+Windows note: for a detailed Windows 11 + WSL2 setup **without Docker Desktop**, see: `docs/en/runbook-dev-wsl2-docker-no-desktop.md`.
+
 ---
 
 ## 2. Quick Start (Docker)
@@ -504,15 +506,22 @@ scrape_configs:
 
 ### 6.2. Grafana dashboard
 
-Import dashboard from `/monitoring/grafana/dashboard.json`:
+Dashboard JSON is not shipped in this repository. Create a dashboard using the metrics exposed at `GET /metrics`.
 
-- Payments per minute
-- Payment latency (p50, p95, p99)
-- Clearing operations
-- Active participants
-- Error rate
-- Database connections
-- Redis memory
+Suggested panels (PromQL examples):
+
+- HTTP requests per second: `sum(rate(geo_http_requests_total[5m]))`
+- 5xx error rate: `sum(rate(geo_http_requests_total{status=~"5.."}[5m])) / sum(rate(geo_http_requests_total[5m]))`
+- Payment endpoints latency p95: `histogram_quantile(0.95, sum by (le) (rate(geo_http_request_duration_seconds_bucket{path=~"/api/v1/payments.*"}[5m])))`
+- Payment events: `sum(rate(geo_payment_events_total[5m])) by (event, result)`
+- Clearing events: `sum(rate(geo_clearing_events_total[5m])) by (event, result)`
+
+- HTTP requests per minute
+- HTTP latency (p50, p95, p99)
+- Payment events (by type/result)
+- Clearing events (by type/result)
+- Routing failures (by reason)
+- Error rate (5xx ratio)
 
 ### 6.3. Alerting rules
 
@@ -522,7 +531,7 @@ groups:
   - name: geo-hub
     rules:
       - alert: HighErrorRate
-        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.01
+        expr: sum(rate(geo_http_requests_total{status=~"5.."}[5m])) / sum(rate(geo_http_requests_total[5m])) > 0.01
         for: 5m
         labels:
           severity: critical
@@ -530,7 +539,7 @@ groups:
           summary: "High error rate detected"
 
       - alert: PaymentLatencyHigh
-        expr: histogram_quantile(0.99, rate(geo_payment_duration_seconds_bucket[5m])) > 5
+        expr: histogram_quantile(0.99, sum by (le) (rate(geo_http_request_duration_seconds_bucket{path=~"/api/v1/payments.*"}[5m]))) > 5
         for: 5m
         labels:
           severity: warning

@@ -117,7 +117,7 @@
   - [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)
 
 - Управление параметрами из минимальной админки:
-  - [`docs/ru/admin-console-minimal-spec.md`](docs/ru/admin-console-minimal-spec.md:1) включает `feature_flags.full_multipath_enabled` и `routing.*` как runtime‑mutable и подчёркивает важность `routing.max_paths_per_payment`.
+  - [`docs/ru/admin/specs/admin-console-minimal-spec.md`](docs/ru/admin/specs/admin-console-minimal-spec.md:1) включает `feature_flags.full_multipath_enabled` и `routing.*` как runtime‑mutable и подчёркивает важность `routing.max_paths_per_payment`.
 
 ---
 
@@ -138,7 +138,7 @@
 - [`docs/ru/08-test-scenarios.md`](docs/ru/08-test-scenarios.md:1)
 - [`docs/ru/09-decisions-and-defaults.md`](docs/ru/09-decisions-and-defaults.md:1)
 - [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)
-- [`docs/ru/admin-console-minimal-spec.md`](docs/ru/admin-console-minimal-spec.md:1)
+- [`docs/ru/admin/specs/admin-console-minimal-spec.md`](docs/ru/admin/specs/admin-console-minimal-spec.md:1)
 - [`docs/ru/10-documentation-review-report.md`](docs/ru/10-documentation-review-report.md:1)
 - [`api/openapi.yaml`](api/openapi.yaml:1)
 - [`seeds/equivalents.json`](seeds/equivalents.json:1)

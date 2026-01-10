@@ -47,6 +47,8 @@
   - PostgreSQL 15+
   - Redis 7+
 
+Uwaga dla Windows: szczegółowa instrukcja dla Windows 11 + WSL2 **bez Docker Desktop** jest tutaj: `docs/pl/runbook-dev-wsl2-docker-no-desktop.md`.
+
 ---
 
 ## 2. Szybki start (Docker)
@@ -485,15 +487,22 @@ scrape_configs:
 
 ### 6.2. Dashboard Grafana
 
-Importuj dashboard z `/monitoring/grafana/dashboard.json`:
+JSON dashboardu nie jest dostarczany w tym repozytorium. Zbuduj dashboard na podstawie metryk z `GET /metrics`.
 
-- Payments per minute  
-- Payment latency (p50, p95, p99)  
-- Clearing operations  
-- Active participants  
-- Error rate  
-- Database connections  
-- Redis memory  
+Sugerowane panele (przykłady PromQL):
+
+- HTTP RPS: `sum(rate(geo_http_requests_total[5m]))`
+- Udział 5xx: `sum(rate(geo_http_requests_total{status=~"5.."}[5m])) / sum(rate(geo_http_requests_total[5m]))`
+- Latencja p95 dla payments: `histogram_quantile(0.95, sum by (le) (rate(geo_http_request_duration_seconds_bucket{path=~"/api/v1/payments.*"}[5m])))`
+- Payment events: `sum(rate(geo_payment_events_total[5m])) by (event, result)`
+- Clearing events: `sum(rate(geo_clearing_events_total[5m])) by (event, result)`
+
+- Żądania HTTP na minutę  
+- Latencja HTTP (p50, p95, p99)  
+- Payment events (wg typu/wyniku)  
+- Clearing events (wg typu/wyniku)  
+- Routing failures (wg przyczyny)  
+- Udział błędów (5xx)  
 
 ### 6.3. Reguły alertów
 
@@ -503,7 +512,7 @@ groups:
   - name: geo-hub
     rules:
       - alert: HighErrorRate
-        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.01
+        expr: sum(rate(geo_http_requests_total{status=~"5.."}[5m])) / sum(rate(geo_http_requests_total[5m])) > 0.01
         for: 5m
         labels:
           severity: critical
@@ -511,7 +520,7 @@ groups:
           summary: "High error rate detected"
 
       - alert: PaymentLatencyHigh
-        expr: histogram_quantile(0.99, rate(geo_payment_duration_seconds_bucket[5m])) > 5
+        expr: histogram_quantile(0.99, sum by (le) (rate(geo_http_request_duration_seconds_bucket{path=~"/api/v1/payments.*"}[5m]))) > 5
         for: 5m
         labels:
           severity: warning

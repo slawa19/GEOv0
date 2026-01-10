@@ -191,7 +191,7 @@ Hub — это **координатор и индексатор**, а не ба�
 | [04-api-reference.md](04-api-reference.md) | Справочник API |
 | [05-deployment.md](05-deployment.md) | Развёртывание |
 | [config-reference.md](config-reference.md) | Реестр параметров конфигурации (дефолты, диапазоны, runtime vs restart) |
-| [admin-console-minimal-spec.md](admin-console-minimal-spec.md) | Минимальная спецификация админки (конфиг/флаги/операторские действия/аудит) |
+| [admin/specs/admin-console-minimal-spec.md](admin/specs/admin-console-minimal-spec.md) | Минимальная спецификация админки (конфиг/флаги/операторские действия/аудит) |
 | [archive/07-clarifications-and-gaps.md](archive/07-clarifications-and-gaps.md) | Уточнения и пробелы (архив; история вопросов/пробелов) |
 | [09-decisions-and-defaults.md](09-decisions-and-defaults.md) | Ключевые решения и дефолты MVP |
 | [06-contributing.md](06-contributing.md) | Участие в разработке |

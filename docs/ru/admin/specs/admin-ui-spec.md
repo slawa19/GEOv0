@@ -5,7 +5,7 @@
 **Стек (рекомендация):** Vue.js 3 (Vite), Element Plus, Pinia.  
 
 Документ согласован с:
-- `docs/ru/admin-console-minimal-spec.md`
+- `docs/ru/admin/specs/admin-console-minimal-spec.md`
 - `docs/ru/04-api-reference.md`
 - `api/openapi.yaml`
 
@@ -14,7 +14,7 @@
 ## 1. Цели и границы (Scope)
 
 ### 1.1. Цели (MVP)
-- Наблюдаемость сети доверия (граф + базовая аналитика).
+- Наблюдаемость сети доверия (таблица trustlines + базовая диагностика).
 - Управление инцидентами (зависшие транзакции → force abort).
 - Управление runtime-конфигом и feature flags.
 - Управление участниками (freeze/unfreeze, при наличии — ban/unban).
@@ -49,17 +49,21 @@
 
 Минимальный состав экранов (соответствует `admin-console-minimal-spec.md`):
 - `Dashboard`
-- `Network Graph`
 - `Integrity`
 - `Incidents`
+- `Trustlines`
 - `Participants`
 - `Config`
 - `Feature Flags`
 - `Audit Log`
-- `Events` (timeline)
 
 Опционально (если включено в Hub):
 - `Equivalents` (управление справочником)
+
+Phase 2:
+- `Network Graph`
+- `Events` (timeline)
+- `Liquidity analytics`
 - `Transactions` / `Clearing` (глобальные списки)
 
 ### 3.3. Header
@@ -83,7 +87,18 @@
 Состояния:
 - Loading / Error / Empty (если метрики недоступны).
 
+MVP дополнение: **Network Health виджеты** (быстрый статус ключевых зависимостей).
+- Источники:
+	- `GET /health` (доступность API)
+	- `GET /health/db` (доступность БД)
+	- `GET /admin/migrations` (статус миграций; требует `X-Admin-Token`)
+	- `GET /admin/audit-log?page=1&per_page=20` (последняя активность; требует `X-Admin-Token`)
+- Обновление: автообновление каждые 10–30 секунд + кнопка `Refresh`.
+- Ошибки: виджеты деградируют независимо (ошибка в audit-log не ломает health).
+
 ### 4.2. Network Graph
+
+Статус: **Phase 2**.
 
 Цель: визуализация сети доверия.
 
@@ -146,6 +161,8 @@ UI:
 
 ### 4.9. Events (timeline)
 
+Статус: **Phase 2** (в MVP убирается: отдельного endpoint нет, базовый аудит закрывается `/admin/audit-log`).
+
 UI:
 - Фильтры: `event_type`, `actor_pid`, `tx_id`, `run_id`, `scenario_id`, диапазон дат.
 - Таблица/таймлайн.
@@ -191,6 +208,36 @@ UI:
 	- summary (KPI)
 	- series (тайм-серия)
 
+### 4.14. Trustlines (Network overview) (MVP)
+
+Цель: операторский обзор «состояния сети» без отдельного analytics pipeline.
+
+Источник данных:
+- `GET /admin/trustlines` (заголовок `X-Admin-Token`).
+- Query filters:
+  - `equivalent`, `creditor` (trustline `from`), `debtor` (trustline `to`), `status`.
+- Pagination: `page/per_page`.
+
+Таблица (минимум колонок):
+- `equivalent`
+- creditor: `from` + `from_display_name` (если есть)
+- debtor: `to` + `to_display_name` (если есть)
+- `limit`, `used`, `available`
+- `status`, `created_at`
+
+Подсветка «узких мест» (нормативно):
+- Правило: `available/limit < threshold`.
+- `threshold` задаётся в UI (default 0.10).
+- Числа приходят как decimal string; UI **не должен** использовать float для порогов/отношений.
+- Если `limit == 0` или значение невалидно → подсветку не применять.
+
+Drill-down ребра:
+- По клику по строке открыть панель/модалку с `limit/used/available`, участниками, `policy` (как JSON-view).
+
+Состояния:
+- `403` → токен отсутствует/неверный (UI предлагает ввести/обновить токен).
+- Empty → «No trustlines match filters».
+
 ---
 
 ## 5. Глобальное состояние и клиент API
@@ -202,7 +249,8 @@ UI:
 
 ### 5.2. API client
 - Base URL: `/api/v1`.
-- Authorization: `Bearer`.
+- Для `/admin/*` endpoints: заголовок `X-Admin-Token`.
+- Для `/integrity/*` endpoints: `Authorization: Bearer`.
 - Единая обработка envelope `{success,data}` и ошибок `{success:false,error:{code,message,details}}`.
 
 ### 5.3. Сессия и хранение токенов (нормативно)
@@ -246,16 +294,16 @@ UI правила:
 
 ### 6.4. Audit Log / Events
 - `GET /admin/audit-log` (paginated)
-- `GET /admin/events` (paginated)
+ 
 
 Поля (ориентиры для отображения, согласованы с `api/openapi.yaml`):
 - AuditLogEntry: `id`, `timestamp`, `actor_id`, `actor_role`, `action`, `object_type`, `object_id`, `reason`, `before_state`, `after_state`, `request_id`, `ip_address`.
 - DomainEvent: `event_id`, `event_type`, `timestamp`, `actor_pid`, `tx_id`, `run_id`, `scenario_id`, `payload`.
 
 ### 6.5. Graph / Integrity / Incidents
-- `GET /admin/analytics/graph?equivalent={code}`
-- `GET /admin/integrity/status`
-- `POST /admin/integrity/check`
+- `GET /admin/trustlines?equivalent={code}&creditor={pid}&debtor={pid}&status={active|frozen|closed}`
+- `GET /integrity/status`
+- `POST /integrity/verify`
 - `POST /admin/transactions/{tx_id}/abort` (body: `{reason}`)
 
 UI правила:

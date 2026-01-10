@@ -1,6 +1,6 @@
 from uuid import UUID
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Literal
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.utils.exceptions import (
@@ -382,6 +382,60 @@ class TrustLineService:
         if not trustline:
             raise NotFoundException("Trustline not found")
         return await self._hydrate_trustline(trustline)
+
+    async def list_all(
+        self,
+        *,
+        equivalent: str | None = None,
+        creditor_pid: str | None = None,
+        debtor_pid: str | None = None,
+        status: Literal["active", "frozen", "closed"] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[TrustLine]:
+        query = select(TrustLine)
+
+        if status:
+            query = query.where(TrustLine.status == status)
+
+        if creditor_pid:
+            creditor_id = (
+                await self.session.execute(
+                    select(Participant.id).where(Participant.pid == creditor_pid)
+                )
+            ).scalar_one_or_none()
+            if creditor_id is None:
+                return []
+            query = query.where(TrustLine.from_participant_id == creditor_id)
+
+        if debtor_pid:
+            debtor_id = (
+                await self.session.execute(
+                    select(Participant.id).where(Participant.pid == debtor_pid)
+                )
+            ).scalar_one_or_none()
+            if debtor_id is None:
+                return []
+            query = query.where(TrustLine.to_participant_id == debtor_id)
+
+        if equivalent:
+            eq = (
+                await self.session.execute(select(Equivalent).where(Equivalent.code == equivalent))
+            ).scalar_one_or_none()
+            if eq is None:
+                return []
+            query = query.where(TrustLine.equivalent_id == eq.id)
+
+        query = query.order_by(TrustLine.created_at.desc())
+
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+
+        result = await self.session.execute(query)
+        trustlines = result.scalars().all()
+        return [await self._hydrate_trustline(tl) for tl in trustlines]
 
     async def _hydrate_trustline(self, trustline: TrustLine) -> TrustLine:
         state = sa_inspect(trustline)
