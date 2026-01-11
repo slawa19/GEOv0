@@ -1,8 +1,4 @@
 [
-  {"code":"UAH","precision":2,"description":"Ukrainian Hryvnia","is_active":true},
-  {"code":"EUR","precision":2,"description":"Euro","is_active":true},
-  {"code":"HOUR","precision":2,"description":"Community time credit (hours)","is_active":true}
-][
   {
     "code": "UAH",
     "precision": 2,
@@ -20,79 +16,5 @@
     "precision": 2,
     "description": "Community time credit (hours)",
     "is_active": true
-  }
-]
-[
-  {
-    "code": "UAH",
-    "precision": 2,
-    "description": "Ukrainian Hryvnia",
-    "is_active": true
-  },
-  {
-    "code": "HOUR",
-    "precision": 1,
-    "description": "Time-based unit (1 hour of work)",
-    "is_active": true
-  },
-  {
-    "code": "KWH",
-    "precision": 2,
-    "description": "Kilowatt-hour (energy unit)",
-    "is_active": true
-  },
-  {
-    "code": "USD",
-    "precision": 2,
-    "description": "US Dollar",
-    "is_active": true
-  },
-  {
-    "code": "EUR",
-    "precision": 2,
-    "description": "Euro",
-    "is_active": true
-  },
-  {
-    "code": "POINT",
-    "precision": 0,
-    "description": "Community points",
-    "is_active": true
-  },
-  {
-    "code": "TOK",
-    "precision": 6,
-    "description": "Test token (6 decimals)",
-    "is_active": true
-  },
-  {
-    "code": "GAS",
-    "precision": 3,
-    "description": "Fuel coupon",
-    "is_active": true
-  },
-  {
-    "code": "MEAL",
-    "precision": 0,
-    "description": "Meal voucher",
-    "is_active": true
-  },
-  {
-    "code": "CO2",
-    "precision": 3,
-    "description": "CO2 offset unit",
-    "is_active": false
-  },
-  {
-    "code": "MIN",
-    "precision": 0,
-    "description": "Minutes (time)",
-    "is_active": false
-  },
-  {
-    "code": "SAT",
-    "precision": 0,
-    "description": "Satoshi (display-only)",
-    "is_active": false
   }
 ]
