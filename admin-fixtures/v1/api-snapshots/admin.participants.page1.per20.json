@@ -1,0 +1,130 @@
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "pid": "PID_ALICE_a1b2c3d4e5f6",
+        "display_name": "Alice (Test)",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_BOB_b2c3d4e5f6a1",
+        "display_name": "Bob (Test)",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_CAROL_c3d4e5f6a1b2",
+        "display_name": "Carol (Test)",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_DAVE_d4e5f6a1b2c3",
+        "display_name": "Dave (Test)",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_HUB_ADMIN_hub0admin1",
+        "display_name": "Hub Admin (Test)",
+        "type": "organization",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0001_9e3779b1",
+        "display_name": "Org 0001",
+        "type": "organization",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0002_3c6ef362",
+        "display_name": "User 0002",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0003_daa66d13",
+        "display_name": "Org 0003",
+        "type": "organization",
+        "status": "frozen"
+      },
+      {
+        "pid": "PID_U0004_78dde6c4",
+        "display_name": "User 0004",
+        "type": "person",
+        "status": "banned"
+      },
+      {
+        "pid": "PID_U0005_17156075",
+        "display_name": "Org 0005",
+        "type": "organization",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0006_b54cda26",
+        "display_name": "User 0006",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0007_538453d7",
+        "display_name": "Org 0007",
+        "type": "organization",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0008_f1bbcd88",
+        "display_name": "User 0008",
+        "type": "person",
+        "status": "frozen"
+      },
+      {
+        "pid": "PID_U0009_8ff34739",
+        "display_name": "Org 0009",
+        "type": "organization",
+        "status": "banned"
+      },
+      {
+        "pid": "PID_U0010_2e2ac0ea",
+        "display_name": "User 0010",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0011_cc623a9b",
+        "display_name": "Org 0011",
+        "type": "organization",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0012_6a99b44c",
+        "display_name": "User 0012",
+        "type": "person",
+        "status": "active"
+      },
+      {
+        "pid": "PID_U0013_08d12dfd",
+        "display_name": "Org 0013",
+        "type": "organization",
+        "status": "frozen"
+      },
+      {
+        "pid": "PID_U0014_a708a7ae",
+        "display_name": "User 0014",
+        "type": "person",
+        "status": "banned"
+      },
+      {
+        "pid": "PID_U0015_4540215f",
+        "display_name": "Org 0015",
+        "type": "organization",
+        "status": "active"
+      }
+    ],
+    "page": 1,
+    "per_page": 20,
+    "total": 60
+  }
+}

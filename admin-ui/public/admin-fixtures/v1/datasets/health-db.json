@@ -1,0 +1,9 @@
+{
+  "status": "ok",
+  "db": {
+    "dialect": "postgresql",
+    "reachable": true,
+    "latency_ms": 12
+  },
+  "timestamp": "2026-01-11T00:00:00Z"
+}

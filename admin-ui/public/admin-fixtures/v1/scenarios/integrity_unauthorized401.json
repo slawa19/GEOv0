@@ -1,0 +1,8 @@
+{
+  "name": "integrity_unauthorized401",
+  "description": "All /integrity/* endpoints return 401 (e.g., expired Bearer token).",
+  "latency_ms": {"min": 30, "max": 120},
+  "overrides": {
+    "/api/v1/integrity/*": {"mode": "error", "status": 401, "code": "UNAUTHORIZED", "message": "Session expired"}
+  }
+}

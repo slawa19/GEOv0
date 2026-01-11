@@ -1,0 +1,28 @@
+{
+  "checks": [
+    {
+      "name": "zero_sum_by_equivalent",
+      "status": "ok",
+      "last_check": "2026-01-10T23:42:00Z",
+      "details": {
+        "checked_equivalents": 5
+      }
+    },
+    {
+      "name": "limits_consistency",
+      "status": "warning",
+      "last_check": "2026-01-10T23:27:00Z",
+      "details": {
+        "warnings": 2
+      }
+    },
+    {
+      "name": "orphan_participants",
+      "status": "ok",
+      "last_check": "2026-01-10T23:15:00Z",
+      "details": {
+        "count": 0
+      }
+    }
+  ]
+}

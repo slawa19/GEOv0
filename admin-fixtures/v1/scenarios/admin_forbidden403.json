@@ -1,0 +1,8 @@
+{
+  "name": "admin_forbidden403",
+  "description": "All /admin/* endpoints return 403 (e.g., missing X-Admin-Token).",
+  "latency_ms": {"min": 30, "max": 120},
+  "overrides": {
+    "/api/v1/admin/*": {"mode": "error", "status": 403, "code": "FORBIDDEN", "message": "Insufficient permissions"}
+  }
+}

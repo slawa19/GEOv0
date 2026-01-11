@@ -1,0 +1,45 @@
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import { assertSuccess } from '../api/envelope'
+import { mockApi } from '../api/mockApi'
+
+export const useConfigStore = defineStore('config', () => {
+  const loading = ref(false)
+  const saving = ref(false)
+  const error = ref<string | null>(null)
+
+  const config = ref<Record<string, unknown>>({})
+
+  async function load() {
+    loading.value = true
+    error.value = null
+    try {
+      config.value = assertSuccess(await mockApi.getConfig())
+    } catch (e: any) {
+      error.value = e?.message || 'Failed to load config'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function patch(patchObj: Record<string, unknown>) {
+    saving.value = true
+    error.value = null
+    try {
+      assertSuccess(await mockApi.patchConfig(patchObj))
+      config.value = { ...config.value, ...patchObj }
+    } catch (e: any) {
+      error.value = e?.message || 'Failed to save config'
+      throw e
+    } finally {
+      saving.value = false
+    }
+  }
+
+  const featureFlags = computed(() => ({
+    multipath_enabled: Boolean(config.value['feature_flags.multipath_enabled']),
+    full_multipath_enabled: Boolean(config.value['feature_flags.full_multipath_enabled']),
+  }))
+
+  return { loading, saving, error, config, featureFlags, load, patch }
+})

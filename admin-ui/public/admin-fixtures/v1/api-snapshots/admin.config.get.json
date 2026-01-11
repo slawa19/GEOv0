@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "data": {
+    "feature_flags.multipath_enabled": true,
+    "feature_flags.full_multipath_enabled": false,
+    "clearing.enabled": true,
+    "routing.max_paths_per_payment": 6,
+    "routing.multipath_mode": "auto",
+    "clearing.trigger_cycles_max_length": 6,
+    "limits.default_trustline_limit": "1000.00",
+    "observability.log_level": "INFO"
+  }
+}

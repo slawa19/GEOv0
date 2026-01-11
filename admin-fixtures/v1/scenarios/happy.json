@@ -1,0 +1,6 @@
+{
+  "name": "happy",
+  "description": "All endpoints return success; minimal latency.",
+  "latency_ms": {"min": 30, "max": 120},
+  "overrides": {}
+}

@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "generated_at": "2026-01-11T00:00:00Z",
+  "counts": {
+    "participants": 60,
+    "equivalents": 12,
+    "trustlines": 140,
+    "audit_log": 180,
+    "incidents": 25
+  },
+  "notes": [
+    "All amounts are decimal strings.",
+    "Timestamps are fixed relative to 2026-01-11Z."
+  ]
+}

@@ -1,0 +1,373 @@
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "audit_0001",
+        "timestamp": "2026-01-11T00:00:00Z",
+        "actor_id": "admin:root",
+        "actor_role": "admin",
+        "action": "CONFIG_PATCH",
+        "object_type": "config",
+        "object_id": "routing.max_paths_per_payment",
+        "reason": null,
+        "before_state": {
+          "routing.max_paths_per_payment": 4
+        },
+        "after_state": {
+          "routing.max_paths_per_payment": 6
+        },
+        "request_id": "req_00000000",
+        "ip_address": "10.0.1.10"
+      },
+      {
+        "id": "audit_0002",
+        "timestamp": "2026-01-10T23:53:00Z",
+        "actor_id": "operator:ops-1",
+        "actor_role": "operator",
+        "action": "FEATURE_FLAG_SET",
+        "object_type": "feature_flag",
+        "object_id": "feature_flags.multipath_enabled",
+        "reason": null,
+        "before_state": {
+          "multipath_enabled": true
+        },
+        "after_state": {
+          "multipath_enabled": false
+        },
+        "request_id": "req_00099991",
+        "ip_address": "10.0.2.11"
+      },
+      {
+        "id": "audit_0003",
+        "timestamp": "2026-01-10T23:46:00Z",
+        "actor_id": "auditor:audit-1",
+        "actor_role": "auditor",
+        "action": "PARTICIPANT_FREEZE",
+        "object_type": "participant",
+        "object_id": "PID_U0003_daa66d13",
+        "reason": "операционное обслуживание",
+        "before_state": {
+          "status": "active"
+        },
+        "after_state": {
+          "status": "frozen"
+        },
+        "request_id": "req_00199982",
+        "ip_address": "10.0.3.12"
+      },
+      {
+        "id": "audit_0004",
+        "timestamp": "2026-01-10T23:39:00Z",
+        "actor_id": "admin:root",
+        "actor_role": "admin",
+        "action": "PARTICIPANT_UNFREEZE",
+        "object_type": "participant",
+        "object_id": "PID_U0004_78dde6c4",
+        "reason": "восстановление",
+        "before_state": {
+          "status": "frozen"
+        },
+        "after_state": {
+          "status": "active"
+        },
+        "request_id": "req_00299973",
+        "ip_address": "10.0.4.13"
+      },
+      {
+        "id": "audit_0005",
+        "timestamp": "2026-01-10T23:32:00Z",
+        "actor_id": "operator:ops-1",
+        "actor_role": "operator",
+        "action": "EQUIVALENT_UPSERT",
+        "object_type": "equivalent",
+        "object_id": "CO2",
+        "reason": null,
+        "before_state": {
+          "is_active": true
+        },
+        "after_state": {
+          "is_active": true,
+          "description": "updated"
+        },
+        "request_id": "req_00399964",
+        "ip_address": "10.0.5.14"
+      },
+      {
+        "id": "audit_0006",
+        "timestamp": "2026-01-10T23:25:00Z",
+        "actor_id": "auditor:audit-1",
+        "actor_role": "auditor",
+        "action": "TX_ABORT",
+        "object_type": "transaction",
+        "object_id": "TX_00523645",
+        "reason": "stuck tx unblock",
+        "before_state": {
+          "state": "PREPARE_IN_PROGRESS"
+        },
+        "after_state": {
+          "state": "ABORTED"
+        },
+        "request_id": "req_00499955",
+        "ip_address": "10.0.6.15"
+      },
+      {
+        "id": "audit_0007",
+        "timestamp": "2026-01-10T23:18:00Z",
+        "actor_id": "admin:root",
+        "actor_role": "admin",
+        "action": "CONFIG_PATCH",
+        "object_type": "config",
+        "object_id": "routing.max_paths_per_payment",
+        "reason": null,
+        "before_state": {
+          "routing.max_paths_per_payment": 4
+        },
+        "after_state": {
+          "routing.max_paths_per_payment": 6
+        },
+        "request_id": "req_00599946",
+        "ip_address": "10.0.7.16"
+      },
+      {
+        "id": "audit_0008",
+        "timestamp": "2026-01-10T23:11:00Z",
+        "actor_id": "operator:ops-1",
+        "actor_role": "operator",
+        "action": "FEATURE_FLAG_SET",
+        "object_type": "feature_flag",
+        "object_id": "feature_flags.multipath_enabled",
+        "reason": null,
+        "before_state": {
+          "multipath_enabled": true
+        },
+        "after_state": {
+          "multipath_enabled": false
+        },
+        "request_id": "req_00699937",
+        "ip_address": "10.0.8.17"
+      },
+      {
+        "id": "audit_0009",
+        "timestamp": "2026-01-10T23:04:00Z",
+        "actor_id": "auditor:audit-1",
+        "actor_role": "auditor",
+        "action": "PARTICIPANT_FREEZE",
+        "object_type": "participant",
+        "object_id": "PID_U0009_8ff34739",
+        "reason": "операционное обслуживание",
+        "before_state": {
+          "status": "active"
+        },
+        "after_state": {
+          "status": "frozen"
+        },
+        "request_id": "req_00799928",
+        "ip_address": "10.0.9.18"
+      },
+      {
+        "id": "audit_0010",
+        "timestamp": "2026-01-10T22:57:00Z",
+        "actor_id": "admin:root",
+        "actor_role": "admin",
+        "action": "PARTICIPANT_UNFREEZE",
+        "object_type": "participant",
+        "object_id": "PID_U0010_2e2ac0ea",
+        "reason": "восстановление",
+        "before_state": {
+          "status": "frozen"
+        },
+        "after_state": {
+          "status": "active"
+        },
+        "request_id": "req_00899919",
+        "ip_address": "10.0.10.19"
+      },
+      {
+        "id": "audit_0011",
+        "timestamp": "2026-01-10T22:50:00Z",
+        "actor_id": "operator:ops-1",
+        "actor_role": "operator",
+        "action": "EQUIVALENT_UPSERT",
+        "object_type": "equivalent",
+        "object_id": "UAH",
+        "reason": null,
+        "before_state": {
+          "is_active": true
+        },
+        "after_state": {
+          "is_active": true,
+          "description": "updated"
+        },
+        "request_id": "req_00999910",
+        "ip_address": "10.0.11.20"
+      },
+      {
+        "id": "audit_0012",
+        "timestamp": "2026-01-10T22:43:00Z",
+        "actor_id": "auditor:audit-1",
+        "actor_role": "auditor",
+        "action": "TX_ABORT",
+        "object_type": "transaction",
+        "object_id": "TX_01152019",
+        "reason": "stuck tx unblock",
+        "before_state": {
+          "state": "PREPARE_IN_PROGRESS"
+        },
+        "after_state": {
+          "state": "ABORTED"
+        },
+        "request_id": "req_01099901",
+        "ip_address": "10.0.12.21"
+      },
+      {
+        "id": "audit_0013",
+        "timestamp": "2026-01-10T22:36:00Z",
+        "actor_id": "admin:root",
+        "actor_role": "admin",
+        "action": "CONFIG_PATCH",
+        "object_type": "config",
+        "object_id": "routing.max_paths_per_payment",
+        "reason": null,
+        "before_state": {
+          "routing.max_paths_per_payment": 4
+        },
+        "after_state": {
+          "routing.max_paths_per_payment": 6
+        },
+        "request_id": "req_01199892",
+        "ip_address": "10.0.13.22"
+      },
+      {
+        "id": "audit_0014",
+        "timestamp": "2026-01-10T22:29:00Z",
+        "actor_id": "operator:ops-1",
+        "actor_role": "operator",
+        "action": "FEATURE_FLAG_SET",
+        "object_type": "feature_flag",
+        "object_id": "feature_flags.multipath_enabled",
+        "reason": null,
+        "before_state": {
+          "multipath_enabled": true
+        },
+        "after_state": {
+          "multipath_enabled": false
+        },
+        "request_id": "req_01299883",
+        "ip_address": "10.0.14.23"
+      },
+      {
+        "id": "audit_0015",
+        "timestamp": "2026-01-10T22:22:00Z",
+        "actor_id": "auditor:audit-1",
+        "actor_role": "auditor",
+        "action": "PARTICIPANT_FREEZE",
+        "object_type": "participant",
+        "object_id": "PID_U0015_4540215f",
+        "reason": "операционное обслуживание",
+        "before_state": {
+          "status": "active"
+        },
+        "after_state": {
+          "status": "frozen"
+        },
+        "request_id": "req_01399874",
+        "ip_address": "10.0.15.24"
+      },
+      {
+        "id": "audit_0016",
+        "timestamp": "2026-01-10T22:15:00Z",
+        "actor_id": "admin:root",
+        "actor_role": "admin",
+        "action": "PARTICIPANT_UNFREEZE",
+        "object_type": "participant",
+        "object_id": "PID_U0016_e3779b10",
+        "reason": "восстановление",
+        "before_state": {
+          "status": "frozen"
+        },
+        "after_state": {
+          "status": "active"
+        },
+        "request_id": "req_01499865",
+        "ip_address": "10.0.16.25"
+      },
+      {
+        "id": "audit_0017",
+        "timestamp": "2026-01-10T22:08:00Z",
+        "actor_id": "operator:ops-1",
+        "actor_role": "operator",
+        "action": "EQUIVALENT_UPSERT",
+        "object_type": "equivalent",
+        "object_id": "USD",
+        "reason": null,
+        "before_state": {
+          "is_active": true
+        },
+        "after_state": {
+          "is_active": true,
+          "description": "updated"
+        },
+        "request_id": "req_01599856",
+        "ip_address": "10.0.17.26"
+      },
+      {
+        "id": "audit_0018",
+        "timestamp": "2026-01-10T22:01:00Z",
+        "actor_id": "auditor:audit-1",
+        "actor_role": "auditor",
+        "action": "TX_ABORT",
+        "object_type": "transaction",
+        "object_id": "TX_01780393",
+        "reason": "stuck tx unblock",
+        "before_state": {
+          "state": "PREPARE_IN_PROGRESS"
+        },
+        "after_state": {
+          "state": "ABORTED"
+        },
+        "request_id": "req_01699847",
+        "ip_address": "10.0.18.27"
+      },
+      {
+        "id": "audit_0019",
+        "timestamp": "2026-01-10T21:54:00Z",
+        "actor_id": "admin:root",
+        "actor_role": "admin",
+        "action": "CONFIG_PATCH",
+        "object_type": "config",
+        "object_id": "routing.max_paths_per_payment",
+        "reason": null,
+        "before_state": {
+          "routing.max_paths_per_payment": 4
+        },
+        "after_state": {
+          "routing.max_paths_per_payment": 6
+        },
+        "request_id": "req_01799838",
+        "ip_address": "10.0.19.28"
+      },
+      {
+        "id": "audit_0020",
+        "timestamp": "2026-01-10T21:47:00Z",
+        "actor_id": "operator:ops-1",
+        "actor_role": "operator",
+        "action": "FEATURE_FLAG_SET",
+        "object_type": "feature_flag",
+        "object_id": "feature_flags.multipath_enabled",
+        "reason": null,
+        "before_state": {
+          "multipath_enabled": true
+        },
+        "after_state": {
+          "multipath_enabled": false
+        },
+        "request_id": "req_01899829",
+        "ip_address": "10.0.20.29"
+      }
+    ],
+    "page": 1,
+    "per_page": 20,
+    "total": 180
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "error500",
+  "description": "Selected endpoints return 500 to test widget/page degradation.",
+  "latency_ms": {"min": 30, "max": 120},
+  "overrides": {
+    "/api/v1/admin/audit-log": {"mode": "error", "status": 500, "code": "INTERNAL_ERROR"},
+    "/api/v1/health/db": {"mode": "error", "status": 500, "code": "INTERNAL_ERROR"}
+  }
+}

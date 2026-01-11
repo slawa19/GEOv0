@@ -1,0 +1,2242 @@
+[
+  {
+    "equivalent": "UAH",
+    "from": "PID_ALICE_a1b2c3d4e5f6",
+    "to": "PID_U0009_8ff34739",
+    "from_display_name": "Alice (Test)",
+    "to_display_name": "Org 0009",
+    "limit": "0.00",
+    "used": "0.00",
+    "available": "0.00",
+    "status": "frozen",
+    "created_at": "2026-01-11T00:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0016_e3779b10",
+    "from_display_name": "Org 0003",
+    "to_display_name": "User 0016",
+    "limit": "150.0",
+    "used": "10.0",
+    "available": "140.0",
+    "status": "active",
+    "created_at": "2026-01-09T23:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0010_2e2ac0ea",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "User 0010",
+    "to_display_name": "Org 0023",
+    "limit": "200.00",
+    "used": "20.00",
+    "available": "180.00",
+    "status": "active",
+    "created_at": "2026-01-08T23:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0017_81af14c1",
+    "to": "PID_U0030_8a8042be",
+    "from_display_name": "Org 0017",
+    "to_display_name": "User 0030",
+    "limit": "250.00",
+    "used": "33.33",
+    "available": "216.66",
+    "status": "active",
+    "created_at": "2026-01-07T23:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "User 0024",
+    "to_display_name": "Org 0037",
+    "limit": "300.00",
+    "used": "50.00",
+    "available": "250.00",
+    "status": "active",
+    "created_at": "2026-01-06T22:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "Org 0031",
+    "to_display_name": "User 0044",
+    "limit": "350",
+    "used": "70",
+    "available": "280",
+    "status": "active",
+    "created_at": "2026-01-05T22:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0038_7c3c1046",
+    "to": "PID_U0051_850d3e43",
+    "from_display_name": "User 0038",
+    "to_display_name": "Org 0051",
+    "limit": "400.000000",
+    "used": "93.333333",
+    "available": "306.666666",
+    "status": "active",
+    "created_at": "2026-01-04T22:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0045_cfc0641d",
+    "to": "PID_CAROL_c3d4e5f6a1b2",
+    "from_display_name": "Org 0045",
+    "to_display_name": "Carol (Test)",
+    "limit": "450.000",
+    "used": "120.000",
+    "available": "330.000",
+    "status": "active",
+    "created_at": "2026-01-03T22:01:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0052_2344b7f4",
+    "to": "PID_U0005_17156075",
+    "from_display_name": "User 0052",
+    "to_display_name": "Org 0005",
+    "limit": "500",
+    "used": "150",
+    "available": "350",
+    "status": "active",
+    "created_at": "2026-01-02T21:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_DAVE_d4e5f6a1b2c3",
+    "to": "PID_U0012_6a99b44c",
+    "from_display_name": "Dave (Test)",
+    "to_display_name": "User 0012",
+    "limit": "550.00",
+    "used": "183.33",
+    "available": "366.66",
+    "status": "active",
+    "created_at": "2026-01-01T21:27:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0006_b54cda26",
+    "to": "PID_U0019_be1e0823",
+    "from_display_name": "User 0006",
+    "to_display_name": "Org 0019",
+    "limit": "600.0",
+    "used": "220.0",
+    "available": "380.0",
+    "status": "active",
+    "created_at": "2025-12-31T21:10:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0013_08d12dfd",
+    "to": "PID_U0026_11a25bfa",
+    "from_display_name": "Org 0013",
+    "to_display_name": "User 0026",
+    "limit": "650.00",
+    "used": "260.00",
+    "available": "390.00",
+    "status": "frozen",
+    "created_at": "2025-12-30T20:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0020_5c5581d4",
+    "to": "PID_U0033_6526afd1",
+    "from_display_name": "User 0020",
+    "to_display_name": "Org 0033",
+    "limit": "700.00",
+    "used": "644.00",
+    "available": "56.00",
+    "status": "active",
+    "created_at": "2025-12-29T20:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0027_afd9d5ab",
+    "to": "PID_U0040_b8ab03a8",
+    "from_display_name": "Org 0027",
+    "to_display_name": "User 0040",
+    "limit": "750.00",
+    "used": "350.00",
+    "available": "400.00",
+    "status": "active",
+    "created_at": "2025-12-28T20:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0034_035e2982",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "User 0034",
+    "to_display_name": "Org 0047",
+    "limit": "800",
+    "used": "400",
+    "available": "400",
+    "status": "active",
+    "created_at": "2025-12-27T20:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0041_56e27d59",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "Org 0041",
+    "to_display_name": "User 0054",
+    "limit": "850.000000",
+    "used": "453.333333",
+    "available": "396.666666",
+    "status": "active",
+    "created_at": "2025-12-26T19:45:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0048_aa66d130",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "User 0048",
+    "to_display_name": "Org 0001",
+    "limit": "900.000",
+    "used": "510.000",
+    "available": "390.000",
+    "status": "active",
+    "created_at": "2025-12-25T19:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0055_fdeb2507",
+    "to": "PID_U0008_f1bbcd88",
+    "from_display_name": "Org 0055",
+    "to_display_name": "User 0008",
+    "limit": "950",
+    "used": "570",
+    "available": "380",
+    "status": "active",
+    "created_at": "2025-12-24T19:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0015_4540215f",
+    "from_display_name": "User 0002",
+    "to_display_name": "Org 0015",
+    "limit": "1000.00",
+    "used": "633.33",
+    "available": "366.66",
+    "status": "active",
+    "created_at": "2025-12-23T18:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0009_8ff34739",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "Org 0009",
+    "to_display_name": "User 0022",
+    "limit": "1050.0",
+    "used": "700.0",
+    "available": "350.0",
+    "status": "active",
+    "created_at": "2025-12-22T18:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0016_e3779b10",
+    "to": "PID_U0029_ec48c90d",
+    "from_display_name": "User 0016",
+    "to_display_name": "Org 0029",
+    "limit": "100.00",
+    "used": "70.00",
+    "available": "30.00",
+    "status": "active",
+    "created_at": "2025-12-21T18:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0023_36fbeee7",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Org 0023",
+    "to_display_name": "User 0036",
+    "limit": "150.00",
+    "used": "110.00",
+    "available": "40.00",
+    "status": "active",
+    "created_at": "2025-12-20T18:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0030_8a8042be",
+    "to": "PID_U0043_935170bb",
+    "from_display_name": "User 0030",
+    "to_display_name": "Org 0043",
+    "limit": "200.00",
+    "used": "153.33",
+    "available": "46.66",
+    "status": "frozen",
+    "created_at": "2025-12-19T17:46:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0037_de049695",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "Org 0037",
+    "to_display_name": "User 0050",
+    "limit": "250",
+    "used": "8",
+    "available": "241",
+    "status": "active",
+    "created_at": "2025-12-18T17:29:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0044_3188ea6c",
+    "to": "PID_BOB_b2c3d4e5f6a1",
+    "from_display_name": "User 0044",
+    "to_display_name": "Bob (Test)",
+    "limit": "300.000000",
+    "used": "276.000000",
+    "available": "24.000000",
+    "status": "active",
+    "created_at": "2025-12-17T17:12:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0051_850d3e43",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Org 0051",
+    "to_display_name": "User 0004",
+    "limit": "350.000",
+    "used": "35.000",
+    "available": "315.000",
+    "status": "active",
+    "created_at": "2025-12-16T16:55:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_CAROL_c3d4e5f6a1b2",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "Carol (Test)",
+    "to_display_name": "Org 0011",
+    "limit": "400",
+    "used": "53",
+    "available": "346",
+    "status": "active",
+    "created_at": "2025-12-15T16:38:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0018_1fe68e72",
+    "from_display_name": "Org 0005",
+    "to_display_name": "User 0018",
+    "limit": "450.00",
+    "used": "75.00",
+    "available": "375.00",
+    "status": "active",
+    "created_at": "2025-12-14T16:21:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0012_6a99b44c",
+    "to": "PID_U0025_736ae249",
+    "from_display_name": "User 0012",
+    "to_display_name": "Org 0025",
+    "limit": "500.0",
+    "used": "100.0",
+    "available": "400.0",
+    "status": "active",
+    "created_at": "2025-12-13T16:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0019_be1e0823",
+    "to": "PID_U0032_c6ef3620",
+    "from_display_name": "Org 0019",
+    "to_display_name": "User 0032",
+    "limit": "550.00",
+    "used": "128.33",
+    "available": "421.66",
+    "status": "closed",
+    "created_at": "2025-12-12T15:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "User 0026",
+    "to_display_name": "Org 0039",
+    "limit": "600.00",
+    "used": "160.00",
+    "available": "440.00",
+    "status": "active",
+    "created_at": "2025-12-11T15:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "Org 0033",
+    "to_display_name": "User 0046",
+    "limit": "650.00",
+    "used": "195.00",
+    "available": "455.00",
+    "status": "active",
+    "created_at": "2025-12-10T15:13:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0040_b8ab03a8",
+    "to": "PID_U0053_c17c31a5",
+    "from_display_name": "User 0040",
+    "to_display_name": "Org 0053",
+    "limit": "700",
+    "used": "233",
+    "available": "466",
+    "status": "active",
+    "created_at": "2025-12-09T14:56:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0047_0c2f577f",
+    "to": "PID_HUB_ADMIN_hub0admin1",
+    "from_display_name": "Org 0047",
+    "to_display_name": "Hub Admin (Test)",
+    "limit": "750.000000",
+    "used": "275.000000",
+    "available": "475.000000",
+    "status": "frozen",
+    "created_at": "2025-12-08T14:39:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0054_5fb3ab56",
+    "to": "PID_U0007_538453d7",
+    "from_display_name": "User 0054",
+    "to_display_name": "Org 0007",
+    "limit": "800.000",
+    "used": "320.000",
+    "available": "480.000",
+    "status": "active",
+    "created_at": "2025-12-07T14:22:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0014_a708a7ae",
+    "from_display_name": "Org 0001",
+    "to_display_name": "User 0014",
+    "limit": "850",
+    "used": "368",
+    "available": "481",
+    "status": "active",
+    "created_at": "2025-12-06T14:05:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0008_f1bbcd88",
+    "to": "PID_U0021_fa8cfb85",
+    "from_display_name": "User 0008",
+    "to_display_name": "Org 0021",
+    "limit": "900.00",
+    "used": "828.00",
+    "available": "72.00",
+    "status": "active",
+    "created_at": "2025-12-05T13:48:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0015_4540215f",
+    "to": "PID_U0028_4e114f5c",
+    "from_display_name": "Org 0015",
+    "to_display_name": "User 0028",
+    "limit": "0.0",
+    "used": "0.0",
+    "available": "0.0",
+    "status": "active",
+    "created_at": "2025-12-04T13:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0022_98c47536",
+    "to": "PID_U0035_a195a333",
+    "from_display_name": "User 0022",
+    "to_display_name": "Org 0035",
+    "limit": "1000.00",
+    "used": "533.33",
+    "available": "466.66",
+    "status": "active",
+    "created_at": "2025-12-03T13:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0042_f519f70a",
+    "from_display_name": "Org 0029",
+    "to_display_name": "User 0042",
+    "limit": "1050.00",
+    "used": "595.00",
+    "available": "455.00",
+    "status": "active",
+    "created_at": "2025-12-02T12:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0036_3fcd1ce4",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "User 0036",
+    "to_display_name": "Org 0049",
+    "limit": "100.00",
+    "used": "60.00",
+    "available": "40.00",
+    "status": "active",
+    "created_at": "2025-12-01T12:40:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0043_935170bb",
+    "to": "PID_ALICE_a1b2c3d4e5f6",
+    "from_display_name": "Org 0043",
+    "to_display_name": "Alice (Test)",
+    "limit": "150",
+    "used": "95",
+    "available": "55",
+    "status": "active",
+    "created_at": "2025-11-30T12:23:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0050_e6d5c492",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "User 0050",
+    "to_display_name": "Org 0003",
+    "limit": "200.000000",
+    "used": "133.333333",
+    "available": "66.666666",
+    "status": "active",
+    "created_at": "2025-11-29T12:06:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_BOB_b2c3d4e5f6a1",
+    "to": "PID_U0010_2e2ac0ea",
+    "from_display_name": "Bob (Test)",
+    "to_display_name": "User 0010",
+    "limit": "250.000",
+    "used": "175.000",
+    "available": "75.000",
+    "status": "active",
+    "created_at": "2025-11-28T11:49:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0004_78dde6c4",
+    "to": "PID_U0017_81af14c1",
+    "from_display_name": "User 0004",
+    "to_display_name": "Org 0017",
+    "limit": "300",
+    "used": "220",
+    "available": "80",
+    "status": "frozen",
+    "created_at": "2025-11-27T11:32:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0011_cc623a9b",
+    "to": "PID_U0024_d5336898",
+    "from_display_name": "Org 0011",
+    "to_display_name": "User 0024",
+    "limit": "350.00",
+    "used": "268.33",
+    "available": "81.66",
+    "status": "active",
+    "created_at": "2025-11-26T11:15:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0018_1fe68e72",
+    "to": "PID_U0031_28b7bc6f",
+    "from_display_name": "User 0018",
+    "to_display_name": "Org 0031",
+    "limit": "400.0",
+    "used": "13.3",
+    "available": "386.6",
+    "status": "active",
+    "created_at": "2025-11-25T10:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0038_7c3c1046",
+    "from_display_name": "Org 0025",
+    "to_display_name": "User 0038",
+    "limit": "450.00",
+    "used": "30.00",
+    "available": "420.00",
+    "status": "active",
+    "created_at": "2025-11-24T10:41:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0045_cfc0641d",
+    "from_display_name": "User 0032",
+    "to_display_name": "Org 0045",
+    "limit": "500.00",
+    "used": "460.00",
+    "available": "40.00",
+    "status": "active",
+    "created_at": "2025-11-23T10:24:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0039_1a7389f7",
+    "to": "PID_U0052_2344b7f4",
+    "from_display_name": "Org 0039",
+    "to_display_name": "User 0052",
+    "limit": "550.00",
+    "used": "73.33",
+    "available": "476.66",
+    "status": "active",
+    "created_at": "2025-11-22T10:07:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0046_6df7ddce",
+    "to": "PID_DAVE_d4e5f6a1b2c3",
+    "from_display_name": "User 0046",
+    "to_display_name": "Dave (Test)",
+    "limit": "600",
+    "used": "100",
+    "available": "500",
+    "status": "active",
+    "created_at": "2025-11-21T09:50:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Org 0053",
+    "to_display_name": "User 0006",
+    "limit": "650.000000",
+    "used": "130.000000",
+    "available": "520.000000",
+    "status": "active",
+    "created_at": "2025-11-20T09:33:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_HUB_ADMIN_hub0admin1",
+    "to": "PID_U0013_08d12dfd",
+    "from_display_name": "Hub Admin (Test)",
+    "to_display_name": "Org 0013",
+    "limit": "700.000",
+    "used": "163.333",
+    "available": "536.666",
+    "status": "active",
+    "created_at": "2025-11-19T09:16:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0020_5c5581d4",
+    "from_display_name": "Org 0007",
+    "to_display_name": "User 0020",
+    "limit": "750",
+    "used": "200",
+    "available": "550",
+    "status": "active",
+    "created_at": "2025-11-18T08:59:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0014_a708a7ae",
+    "to": "PID_U0027_afd9d5ab",
+    "from_display_name": "User 0014",
+    "to_display_name": "Org 0027",
+    "limit": "800.00",
+    "used": "240.00",
+    "available": "560.00",
+    "status": "active",
+    "created_at": "2025-11-17T08:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0021_fa8cfb85",
+    "to": "PID_U0034_035e2982",
+    "from_display_name": "Org 0021",
+    "to_display_name": "User 0034",
+    "limit": "850.0",
+    "used": "283.3",
+    "available": "566.6",
+    "status": "frozen",
+    "created_at": "2025-11-16T08:25:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0028_4e114f5c",
+    "to": "PID_U0041_56e27d59",
+    "from_display_name": "User 0028",
+    "to_display_name": "Org 0041",
+    "limit": "900.00",
+    "used": "330.00",
+    "available": "570.00",
+    "status": "active",
+    "created_at": "2025-11-15T08:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0035_a195a333",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "Org 0035",
+    "to_display_name": "User 0048",
+    "limit": "950.00",
+    "used": "380.00",
+    "available": "570.00",
+    "status": "active",
+    "created_at": "2025-11-14T07:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0042_f519f70a",
+    "to": "PID_U0055_fdeb2507",
+    "from_display_name": "User 0042",
+    "to_display_name": "Org 0055",
+    "limit": "1000.00",
+    "used": "433.33",
+    "available": "566.66",
+    "status": "closed",
+    "created_at": "2025-11-13T07:34:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0049_489e4ae1",
+    "to": "PID_U0002_3c6ef362",
+    "from_display_name": "Org 0049",
+    "to_display_name": "User 0002",
+    "limit": "1050",
+    "used": "490",
+    "available": "560",
+    "status": "active",
+    "created_at": "2025-11-12T07:17:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_ALICE_a1b2c3d4e5f6",
+    "to": "PID_U0009_8ff34739",
+    "from_display_name": "Alice (Test)",
+    "to_display_name": "Org 0009",
+    "limit": "100.000000",
+    "used": "92.000000",
+    "available": "8.000000",
+    "status": "active",
+    "created_at": "2025-11-11T07:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0016_e3779b10",
+    "from_display_name": "Org 0003",
+    "to_display_name": "User 0016",
+    "limit": "150.000",
+    "used": "80.000",
+    "available": "70.000",
+    "status": "active",
+    "created_at": "2025-11-10T06:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0010_2e2ac0ea",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "User 0010",
+    "to_display_name": "Org 0023",
+    "limit": "200",
+    "used": "113",
+    "available": "86",
+    "status": "active",
+    "created_at": "2025-11-09T06:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0017_81af14c1",
+    "to": "PID_U0030_8a8042be",
+    "from_display_name": "Org 0017",
+    "to_display_name": "User 0030",
+    "limit": "250.00",
+    "used": "150.00",
+    "available": "100.00",
+    "status": "active",
+    "created_at": "2025-11-08T06:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "User 0024",
+    "to_display_name": "Org 0037",
+    "limit": "300.0",
+    "used": "190.0",
+    "available": "110.0",
+    "status": "active",
+    "created_at": "2025-11-07T05:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "Org 0031",
+    "to_display_name": "User 0044",
+    "limit": "350.00",
+    "used": "233.33",
+    "available": "116.66",
+    "status": "active",
+    "created_at": "2025-11-06T05:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0038_7c3c1046",
+    "to": "PID_U0051_850d3e43",
+    "from_display_name": "User 0038",
+    "to_display_name": "Org 0051",
+    "limit": "400.00",
+    "used": "280.00",
+    "available": "120.00",
+    "status": "frozen",
+    "created_at": "2025-11-05T05:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0045_cfc0641d",
+    "to": "PID_CAROL_c3d4e5f6a1b2",
+    "from_display_name": "Org 0045",
+    "to_display_name": "Carol (Test)",
+    "limit": "450.00",
+    "used": "330.00",
+    "available": "120.00",
+    "status": "active",
+    "created_at": "2025-11-04T05:01:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0052_2344b7f4",
+    "to": "PID_U0005_17156075",
+    "from_display_name": "User 0052",
+    "to_display_name": "Org 0005",
+    "limit": "500",
+    "used": "383",
+    "available": "116",
+    "status": "active",
+    "created_at": "2025-11-03T04:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_DAVE_d4e5f6a1b2c3",
+    "to": "PID_U0012_6a99b44c",
+    "from_display_name": "Dave (Test)",
+    "to_display_name": "User 0012",
+    "limit": "550.000000",
+    "used": "18.333333",
+    "available": "531.666666",
+    "status": "active",
+    "created_at": "2025-11-02T04:27:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0006_b54cda26",
+    "to": "PID_U0019_be1e0823",
+    "from_display_name": "User 0006",
+    "to_display_name": "Org 0019",
+    "limit": "600.000",
+    "used": "40.000",
+    "available": "560.000",
+    "status": "active",
+    "created_at": "2025-11-01T04:10:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0013_08d12dfd",
+    "to": "PID_U0026_11a25bfa",
+    "from_display_name": "Org 0013",
+    "to_display_name": "User 0026",
+    "limit": "650",
+    "used": "65",
+    "available": "585",
+    "status": "active",
+    "created_at": "2025-10-31T03:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0020_5c5581d4",
+    "to": "PID_U0033_6526afd1",
+    "from_display_name": "User 0020",
+    "to_display_name": "Org 0033",
+    "limit": "700.00",
+    "used": "644.00",
+    "available": "56.00",
+    "status": "active",
+    "created_at": "2025-10-30T03:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0027_afd9d5ab",
+    "to": "PID_U0040_b8ab03a8",
+    "from_display_name": "Org 0027",
+    "to_display_name": "User 0040",
+    "limit": "750.0",
+    "used": "125.0",
+    "available": "625.0",
+    "status": "active",
+    "created_at": "2025-10-29T03:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0034_035e2982",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "User 0034",
+    "to_display_name": "Org 0047",
+    "limit": "0.00",
+    "used": "0.00",
+    "available": "0.00",
+    "status": "active",
+    "created_at": "2025-10-28T03:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0041_56e27d59",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "Org 0041",
+    "to_display_name": "User 0054",
+    "limit": "850.00",
+    "used": "198.33",
+    "available": "651.66",
+    "status": "active",
+    "created_at": "2025-10-27T02:45:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0048_aa66d130",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "User 0048",
+    "to_display_name": "Org 0001",
+    "limit": "900.00",
+    "used": "240.00",
+    "available": "660.00",
+    "status": "active",
+    "created_at": "2025-10-26T02:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0055_fdeb2507",
+    "to": "PID_U0008_f1bbcd88",
+    "from_display_name": "Org 0055",
+    "to_display_name": "User 0008",
+    "limit": "950",
+    "used": "285",
+    "available": "665",
+    "status": "frozen",
+    "created_at": "2025-10-25T02:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0015_4540215f",
+    "from_display_name": "User 0002",
+    "to_display_name": "Org 0015",
+    "limit": "1000.000000",
+    "used": "333.333333",
+    "available": "666.666666",
+    "status": "active",
+    "created_at": "2025-10-24T01:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0009_8ff34739",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "Org 0009",
+    "to_display_name": "User 0022",
+    "limit": "1050.000",
+    "used": "385.000",
+    "available": "665.000",
+    "status": "active",
+    "created_at": "2025-10-23T01:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0016_e3779b10",
+    "to": "PID_U0029_ec48c90d",
+    "from_display_name": "User 0016",
+    "to_display_name": "Org 0029",
+    "limit": "100",
+    "used": "40",
+    "available": "60",
+    "status": "active",
+    "created_at": "2025-10-22T01:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0023_36fbeee7",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Org 0023",
+    "to_display_name": "User 0036",
+    "limit": "150.00",
+    "used": "65.00",
+    "available": "85.00",
+    "status": "active",
+    "created_at": "2025-10-21T01:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0030_8a8042be",
+    "to": "PID_U0043_935170bb",
+    "from_display_name": "User 0030",
+    "to_display_name": "Org 0043",
+    "limit": "200.0",
+    "used": "93.3",
+    "available": "106.6",
+    "status": "active",
+    "created_at": "2025-10-20T00:46:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0037_de049695",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "Org 0037",
+    "to_display_name": "User 0050",
+    "limit": "250.00",
+    "used": "125.00",
+    "available": "125.00",
+    "status": "active",
+    "created_at": "2025-10-19T00:29:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0044_3188ea6c",
+    "to": "PID_BOB_b2c3d4e5f6a1",
+    "from_display_name": "User 0044",
+    "to_display_name": "Bob (Test)",
+    "limit": "300.00",
+    "used": "276.00",
+    "available": "24.00",
+    "status": "active",
+    "created_at": "2025-10-18T00:12:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0051_850d3e43",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Org 0051",
+    "to_display_name": "User 0004",
+    "limit": "350.00",
+    "used": "198.33",
+    "available": "151.66",
+    "status": "active",
+    "created_at": "2025-10-16T23:55:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_CAROL_c3d4e5f6a1b2",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "Carol (Test)",
+    "to_display_name": "Org 0011",
+    "limit": "400",
+    "used": "240",
+    "available": "160",
+    "status": "active",
+    "created_at": "2025-10-15T23:38:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0018_1fe68e72",
+    "from_display_name": "Org 0005",
+    "to_display_name": "User 0018",
+    "limit": "450.000000",
+    "used": "285.000000",
+    "available": "165.000000",
+    "status": "closed",
+    "created_at": "2025-10-14T23:21:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0012_6a99b44c",
+    "to": "PID_U0025_736ae249",
+    "from_display_name": "User 0012",
+    "to_display_name": "Org 0025",
+    "limit": "500.000",
+    "used": "333.333",
+    "available": "166.666",
+    "status": "frozen",
+    "created_at": "2025-10-13T23:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0019_be1e0823",
+    "to": "PID_U0032_c6ef3620",
+    "from_display_name": "Org 0019",
+    "to_display_name": "User 0032",
+    "limit": "550",
+    "used": "385",
+    "available": "165",
+    "status": "active",
+    "created_at": "2025-10-12T22:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "User 0026",
+    "to_display_name": "Org 0039",
+    "limit": "600.00",
+    "used": "440.00",
+    "available": "160.00",
+    "status": "active",
+    "created_at": "2026-01-09T22:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "Org 0033",
+    "to_display_name": "User 0046",
+    "limit": "650.0",
+    "used": "498.3",
+    "available": "151.6",
+    "status": "active",
+    "created_at": "2026-01-08T22:13:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0040_b8ab03a8",
+    "to": "PID_U0053_c17c31a5",
+    "from_display_name": "User 0040",
+    "to_display_name": "Org 0053",
+    "limit": "700.00",
+    "used": "23.33",
+    "available": "676.66",
+    "status": "active",
+    "created_at": "2026-01-07T21:56:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0047_0c2f577f",
+    "to": "PID_HUB_ADMIN_hub0admin1",
+    "from_display_name": "Org 0047",
+    "to_display_name": "Hub Admin (Test)",
+    "limit": "750.00",
+    "used": "50.00",
+    "available": "700.00",
+    "status": "active",
+    "created_at": "2026-01-06T21:39:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0054_5fb3ab56",
+    "to": "PID_U0007_538453d7",
+    "from_display_name": "User 0054",
+    "to_display_name": "Org 0007",
+    "limit": "800.00",
+    "used": "80.00",
+    "available": "720.00",
+    "status": "active",
+    "created_at": "2026-01-05T21:22:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0014_a708a7ae",
+    "from_display_name": "Org 0001",
+    "to_display_name": "User 0014",
+    "limit": "850",
+    "used": "113",
+    "available": "736",
+    "status": "active",
+    "created_at": "2026-01-04T21:05:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0008_f1bbcd88",
+    "to": "PID_U0021_fa8cfb85",
+    "from_display_name": "User 0008",
+    "to_display_name": "Org 0021",
+    "limit": "900.000000",
+    "used": "828.000000",
+    "available": "72.000000",
+    "status": "active",
+    "created_at": "2026-01-03T20:48:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0015_4540215f",
+    "to": "PID_U0028_4e114f5c",
+    "from_display_name": "Org 0015",
+    "to_display_name": "User 0028",
+    "limit": "950.000",
+    "used": "190.000",
+    "available": "760.000",
+    "status": "active",
+    "created_at": "2026-01-02T20:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0022_98c47536",
+    "to": "PID_U0035_a195a333",
+    "from_display_name": "User 0022",
+    "to_display_name": "Org 0035",
+    "limit": "1000",
+    "used": "233",
+    "available": "766",
+    "status": "active",
+    "created_at": "2026-01-01T20:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0042_f519f70a",
+    "from_display_name": "Org 0029",
+    "to_display_name": "User 0042",
+    "limit": "1050.00",
+    "used": "280.00",
+    "available": "770.00",
+    "status": "frozen",
+    "created_at": "2025-12-31T19:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0036_3fcd1ce4",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "User 0036",
+    "to_display_name": "Org 0049",
+    "limit": "100.0",
+    "used": "30.0",
+    "available": "70.0",
+    "status": "active",
+    "created_at": "2025-12-30T19:40:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0043_935170bb",
+    "to": "PID_ALICE_a1b2c3d4e5f6",
+    "from_display_name": "Org 0043",
+    "to_display_name": "Alice (Test)",
+    "limit": "150.00",
+    "used": "50.00",
+    "available": "100.00",
+    "status": "active",
+    "created_at": "2025-12-29T19:23:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0050_e6d5c492",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "User 0050",
+    "to_display_name": "Org 0003",
+    "limit": "200.00",
+    "used": "73.33",
+    "available": "126.66",
+    "status": "active",
+    "created_at": "2025-12-28T19:06:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_BOB_b2c3d4e5f6a1",
+    "to": "PID_U0010_2e2ac0ea",
+    "from_display_name": "Bob (Test)",
+    "to_display_name": "User 0010",
+    "limit": "250.00",
+    "used": "100.00",
+    "available": "150.00",
+    "status": "active",
+    "created_at": "2025-12-27T18:49:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0004_78dde6c4",
+    "to": "PID_U0017_81af14c1",
+    "from_display_name": "User 0004",
+    "to_display_name": "Org 0017",
+    "limit": "300",
+    "used": "130",
+    "available": "170",
+    "status": "active",
+    "created_at": "2025-12-26T18:32:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0011_cc623a9b",
+    "to": "PID_U0024_d5336898",
+    "from_display_name": "Org 0011",
+    "to_display_name": "User 0024",
+    "limit": "350.000000",
+    "used": "163.333333",
+    "available": "186.666666",
+    "status": "active",
+    "created_at": "2025-12-25T18:15:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0018_1fe68e72",
+    "to": "PID_U0031_28b7bc6f",
+    "from_display_name": "User 0018",
+    "to_display_name": "Org 0031",
+    "limit": "400.000",
+    "used": "200.000",
+    "available": "200.000",
+    "status": "active",
+    "created_at": "2025-12-24T17:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0038_7c3c1046",
+    "from_display_name": "Org 0025",
+    "to_display_name": "User 0038",
+    "limit": "450",
+    "used": "240",
+    "available": "210",
+    "status": "active",
+    "created_at": "2025-12-23T17:41:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0045_cfc0641d",
+    "from_display_name": "User 0032",
+    "to_display_name": "Org 0045",
+    "limit": "500.00",
+    "used": "460.00",
+    "available": "40.00",
+    "status": "active",
+    "created_at": "2025-12-22T17:24:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0039_1a7389f7",
+    "to": "PID_U0052_2344b7f4",
+    "from_display_name": "Org 0039",
+    "to_display_name": "User 0052",
+    "limit": "550.0",
+    "used": "330.0",
+    "available": "220.0",
+    "status": "active",
+    "created_at": "2025-12-21T17:07:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0046_6df7ddce",
+    "to": "PID_DAVE_d4e5f6a1b2c3",
+    "from_display_name": "User 0046",
+    "to_display_name": "Dave (Test)",
+    "limit": "600.00",
+    "used": "380.00",
+    "available": "220.00",
+    "status": "frozen",
+    "created_at": "2025-12-20T16:50:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Org 0053",
+    "to_display_name": "User 0006",
+    "limit": "0.00",
+    "used": "0.00",
+    "available": "0.00",
+    "status": "active",
+    "created_at": "2025-12-19T16:33:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_HUB_ADMIN_hub0admin1",
+    "to": "PID_U0013_08d12dfd",
+    "from_display_name": "Hub Admin (Test)",
+    "to_display_name": "Org 0013",
+    "limit": "700.00",
+    "used": "490.00",
+    "available": "210.00",
+    "status": "active",
+    "created_at": "2025-12-18T16:16:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0020_5c5581d4",
+    "from_display_name": "Org 0007",
+    "to_display_name": "User 0020",
+    "limit": "750",
+    "used": "550",
+    "available": "200",
+    "status": "active",
+    "created_at": "2025-12-17T15:59:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0014_a708a7ae",
+    "to": "PID_U0027_afd9d5ab",
+    "from_display_name": "User 0014",
+    "to_display_name": "Org 0027",
+    "limit": "800.000000",
+    "used": "613.333333",
+    "available": "186.666666",
+    "status": "active",
+    "created_at": "2025-12-16T15:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0021_fa8cfb85",
+    "to": "PID_U0034_035e2982",
+    "from_display_name": "Org 0021",
+    "to_display_name": "User 0034",
+    "limit": "850.000",
+    "used": "28.333",
+    "available": "821.666",
+    "status": "active",
+    "created_at": "2025-12-15T15:25:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0028_4e114f5c",
+    "to": "PID_U0041_56e27d59",
+    "from_display_name": "User 0028",
+    "to_display_name": "Org 0041",
+    "limit": "900",
+    "used": "60",
+    "available": "840",
+    "status": "closed",
+    "created_at": "2025-12-14T15:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0035_a195a333",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "Org 0035",
+    "to_display_name": "User 0048",
+    "limit": "950.00",
+    "used": "95.00",
+    "available": "855.00",
+    "status": "active",
+    "created_at": "2025-12-13T14:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0042_f519f70a",
+    "to": "PID_U0055_fdeb2507",
+    "from_display_name": "User 0042",
+    "to_display_name": "Org 0055",
+    "limit": "1000.0",
+    "used": "133.3",
+    "available": "866.6",
+    "status": "active",
+    "created_at": "2025-12-12T14:34:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0049_489e4ae1",
+    "to": "PID_U0002_3c6ef362",
+    "from_display_name": "Org 0049",
+    "to_display_name": "User 0002",
+    "limit": "1050.00",
+    "used": "175.00",
+    "available": "875.00",
+    "status": "active",
+    "created_at": "2025-12-11T14:17:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_ALICE_a1b2c3d4e5f6",
+    "to": "PID_U0009_8ff34739",
+    "from_display_name": "Alice (Test)",
+    "to_display_name": "Org 0009",
+    "limit": "100.00",
+    "used": "92.00",
+    "available": "8.00",
+    "status": "active",
+    "created_at": "2025-12-10T14:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0016_e3779b10",
+    "from_display_name": "Org 0003",
+    "to_display_name": "User 0016",
+    "limit": "150.00",
+    "used": "35.00",
+    "available": "115.00",
+    "status": "frozen",
+    "created_at": "2025-12-09T13:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0010_2e2ac0ea",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "User 0010",
+    "to_display_name": "Org 0023",
+    "limit": "200",
+    "used": "53",
+    "available": "146",
+    "status": "active",
+    "created_at": "2025-12-08T13:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0017_81af14c1",
+    "to": "PID_U0030_8a8042be",
+    "from_display_name": "Org 0017",
+    "to_display_name": "User 0030",
+    "limit": "250.000000",
+    "used": "75.000000",
+    "available": "175.000000",
+    "status": "active",
+    "created_at": "2025-12-07T13:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "User 0024",
+    "to_display_name": "Org 0037",
+    "limit": "300.000",
+    "used": "99.999",
+    "available": "200.000",
+    "status": "active",
+    "created_at": "2025-12-06T12:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "Org 0031",
+    "to_display_name": "User 0044",
+    "limit": "350",
+    "used": "128",
+    "available": "221",
+    "status": "active",
+    "created_at": "2025-12-05T12:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0038_7c3c1046",
+    "to": "PID_U0051_850d3e43",
+    "from_display_name": "User 0038",
+    "to_display_name": "Org 0051",
+    "limit": "400.00",
+    "used": "160.00",
+    "available": "240.00",
+    "status": "active",
+    "created_at": "2025-12-04T12:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0045_cfc0641d",
+    "to": "PID_CAROL_c3d4e5f6a1b2",
+    "from_display_name": "Org 0045",
+    "to_display_name": "Carol (Test)",
+    "limit": "450.0",
+    "used": "195.0",
+    "available": "255.0",
+    "status": "active",
+    "created_at": "2025-12-03T12:01:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0052_2344b7f4",
+    "to": "PID_U0005_17156075",
+    "from_display_name": "User 0052",
+    "to_display_name": "Org 0005",
+    "limit": "500.00",
+    "used": "233.33",
+    "available": "266.66",
+    "status": "active",
+    "created_at": "2025-12-02T11:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_DAVE_d4e5f6a1b2c3",
+    "to": "PID_U0012_6a99b44c",
+    "from_display_name": "Dave (Test)",
+    "to_display_name": "User 0012",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
+    "status": "active",
+    "created_at": "2025-12-01T11:27:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0006_b54cda26",
+    "to": "PID_U0019_be1e0823",
+    "from_display_name": "User 0006",
+    "to_display_name": "Org 0019",
+    "limit": "600.00",
+    "used": "320.00",
+    "available": "280.00",
+    "status": "active",
+    "created_at": "2025-11-30T11:10:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "POINT",
+    "from": "PID_U0013_08d12dfd",
+    "to": "PID_U0026_11a25bfa",
+    "from_display_name": "Org 0013",
+    "to_display_name": "User 0026",
+    "limit": "650",
+    "used": "368",
+    "available": "281",
+    "status": "active",
+    "created_at": "2025-11-29T10:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "TOK",
+    "from": "PID_U0020_5c5581d4",
+    "to": "PID_U0033_6526afd1",
+    "from_display_name": "User 0020",
+    "to_display_name": "Org 0033",
+    "limit": "700.000000",
+    "used": "644.000000",
+    "available": "56.000000",
+    "status": "frozen",
+    "created_at": "2025-11-28T10:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "GAS",
+    "from": "PID_U0027_afd9d5ab",
+    "to": "PID_U0040_b8ab03a8",
+    "from_display_name": "Org 0027",
+    "to_display_name": "User 0040",
+    "limit": "750.000",
+    "used": "475.000",
+    "available": "275.000",
+    "status": "active",
+    "created_at": "2025-11-27T10:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "MEAL",
+    "from": "PID_U0034_035e2982",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "User 0034",
+    "to_display_name": "Org 0047",
+    "limit": "800",
+    "used": "533",
+    "available": "266",
+    "status": "active",
+    "created_at": "2025-11-26T10:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0041_56e27d59",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "Org 0041",
+    "to_display_name": "User 0054",
+    "limit": "850.00",
+    "used": "595.00",
+    "available": "255.00",
+    "status": "active",
+    "created_at": "2025-11-25T09:45:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0048_aa66d130",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "User 0048",
+    "to_display_name": "Org 0001",
+    "limit": "900.0",
+    "used": "660.0",
+    "available": "240.0",
+    "status": "active",
+    "created_at": "2025-11-24T09:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "KWH",
+    "from": "PID_U0055_fdeb2507",
+    "to": "PID_U0008_f1bbcd88",
+    "from_display_name": "Org 0055",
+    "to_display_name": "User 0008",
+    "limit": "950.00",
+    "used": "728.33",
+    "available": "221.66",
+    "status": "active",
+    "created_at": "2025-11-23T09:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "USD",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0015_4540215f",
+    "from_display_name": "User 0002",
+    "to_display_name": "Org 0015",
+    "limit": "1000.00",
+    "used": "33.33",
+    "available": "966.66",
+    "status": "active",
+    "created_at": "2025-11-22T08:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0009_8ff34739",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "Org 0009",
+    "to_display_name": "User 0022",
+    "limit": "1050.00",
+    "used": "70.00",
+    "available": "980.00",
+    "status": "active",
+    "created_at": "2025-11-21T08:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  }
+]

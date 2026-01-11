@@ -1,0 +1,190 @@
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "tx_id": "TX_STUCK_0001",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0001_9e3779b1",
+        "equivalent": "UAH",
+        "age_seconds": 0,
+        "created_at": "2026-01-11T00:00:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0002",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0002_3c6ef362",
+        "equivalent": "USD",
+        "age_seconds": 4140,
+        "created_at": "2026-01-10T22:51:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0003",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0003_daa66d13",
+        "equivalent": "POINT",
+        "age_seconds": 8280,
+        "created_at": "2026-01-10T21:42:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0004",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0004_78dde6c4",
+        "equivalent": "TOK",
+        "age_seconds": 12420,
+        "created_at": "2026-01-10T20:33:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0005",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0005_17156075",
+        "equivalent": "UAH",
+        "age_seconds": 16560,
+        "created_at": "2026-01-10T19:24:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0006",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0006_b54cda26",
+        "equivalent": "USD",
+        "age_seconds": 20700,
+        "created_at": "2026-01-10T18:15:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0007",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0007_538453d7",
+        "equivalent": "POINT",
+        "age_seconds": 24840,
+        "created_at": "2026-01-10T17:06:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0008",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0008_f1bbcd88",
+        "equivalent": "TOK",
+        "age_seconds": 28980,
+        "created_at": "2026-01-10T15:57:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0009",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0009_8ff34739",
+        "equivalent": "UAH",
+        "age_seconds": 33120,
+        "created_at": "2026-01-10T14:48:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0010",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0010_2e2ac0ea",
+        "equivalent": "USD",
+        "age_seconds": 37260,
+        "created_at": "2026-01-10T13:39:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0011",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0011_cc623a9b",
+        "equivalent": "POINT",
+        "age_seconds": 41400,
+        "created_at": "2026-01-10T12:30:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0012",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0012_6a99b44c",
+        "equivalent": "TOK",
+        "age_seconds": 45540,
+        "created_at": "2026-01-10T11:21:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0013",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0013_08d12dfd",
+        "equivalent": "UAH",
+        "age_seconds": 49680,
+        "created_at": "2026-01-10T10:12:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0014",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0014_a708a7ae",
+        "equivalent": "USD",
+        "age_seconds": 53820,
+        "created_at": "2026-01-10T09:03:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0015",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0015_4540215f",
+        "equivalent": "POINT",
+        "age_seconds": 57960,
+        "created_at": "2026-01-10T07:54:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0016",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0016_e3779b10",
+        "equivalent": "TOK",
+        "age_seconds": 62100,
+        "created_at": "2026-01-10T06:45:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0017",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0017_81af14c1",
+        "equivalent": "UAH",
+        "age_seconds": 66240,
+        "created_at": "2026-01-10T05:36:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0018",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0018_1fe68e72",
+        "equivalent": "USD",
+        "age_seconds": 70380,
+        "created_at": "2026-01-10T04:27:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0019",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0019_be1e0823",
+        "equivalent": "POINT",
+        "age_seconds": 74520,
+        "created_at": "2026-01-10T03:18:00Z",
+        "sla_seconds": 1800
+      },
+      {
+        "tx_id": "TX_STUCK_0020",
+        "state": "PREPARE_IN_PROGRESS",
+        "initiator_pid": "PID_U0020_5c5581d4",
+        "equivalent": "TOK",
+        "age_seconds": 78660,
+        "created_at": "2026-01-10T02:09:00Z",
+        "sla_seconds": 1800
+      }
+    ],
+    "page": 1,
+    "per_page": 20,
+    "total": 25
+  }
+}

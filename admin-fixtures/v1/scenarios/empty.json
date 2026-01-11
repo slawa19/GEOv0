@@ -1,0 +1,11 @@
+{
+  "name": "empty",
+  "description": "List endpoints return empty items and total=0; health/config remain available.",
+  "latency_ms": {"min": 30, "max": 120},
+  "overrides": {
+    "/api/v1/admin/participants": {"mode": "empty"},
+    "/api/v1/admin/trustlines": {"mode": "empty"},
+    "/api/v1/admin/audit-log": {"mode": "empty"},
+    "/api/v1/admin/incidents": {"mode": "empty"}
+  }
+}

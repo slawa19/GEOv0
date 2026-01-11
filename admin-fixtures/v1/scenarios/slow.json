@@ -1,0 +1,6 @@
+{
+  "name": "slow",
+  "description": "Artificial latency on all requests.",
+  "latency_ms": {"min": 800, "max": 1500},
+  "overrides": {}
+}
