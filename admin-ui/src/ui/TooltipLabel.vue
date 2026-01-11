@@ -66,13 +66,13 @@ function linkToWithScenario(link: TooltipLink) {
 }
 .tl__icon {
   display: inline-flex;
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 16px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 12px;
   color: var(--el-text-color-regular);
   background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color);

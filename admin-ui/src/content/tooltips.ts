@@ -44,6 +44,8 @@ export type TooltipKey =
   | 'graph.hideIsolates'
   | 'graph.search'
   | 'graph.zoom'
+  | 'graph.actions'
+  | 'graph.spacing'
   | 'graph.legend'
   | 'audit.timestamp'
   | 'audit.actor'
@@ -259,12 +261,34 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
     body: ['When enabled, shows only participants that appear in trustlines after filtering.'],
   },
   'graph.search': {
-    title: 'Search PID',
-    body: ['Centers on a PID if it exists in the current graph.', 'Tip: use it together with “Fit neighborhood” to inspect local structure.'],
+    title: 'Search',
+    body: [
+      'Search by PID or participant name (partial match).',
+      'Pick a suggestion to set the focus node used by Find and Fit component.',
+      'If multiple matches exist, Find fits and highlights a subset; refine the query to narrow it down.',
+    ],
   },
   'graph.zoom': {
     title: 'Zoom helpers',
-    body: ['Fit: zoom to full graph.', 'Neighborhood: zoom to 1-hop around PID (search or selected).', 'Component: zoom to the whole connected component of PID.'],
+    body: [
+      'Use the slider or mouse wheel to zoom in/out.',
+      'Edge thickness and label size are adjusted with zoom for readability.',
+    ],
+  },
+
+  'graph.actions': {
+    title: 'Graph actions',
+    body: [
+      'Find: centers on the focused participant (picked from search) or the last clicked node.',
+      'Fit: fits the whole graph into the viewport.',
+      'Fit component: fits the connected component of the focused/selected node.',
+      'Re-layout: runs the selected layout algorithm again (use after changing filters/spacing).',
+    ],
+  },
+
+  'graph.spacing': {
+    title: 'Layout spacing',
+    body: ['Controls how spread-out the force layout is.', 'Higher values reduce clutter but take longer to settle.'],
   },
   'graph.legend': {
     title: 'Legend',

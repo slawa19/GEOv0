@@ -1,76 +1,31 @@
 {
   "items": [
     {
-      "tx_id": "TX_STUCK_COOP_0001",
+      "tx_id": "TX_STUCK_SEED_0001",
       "state": "PREPARE_IN_PROGRESS",
-      "initiator_pid": "PID_U0009_8ff34739",
+      "initiator_pid": "PID_U0001_9e3779b1",
       "equivalent": "UAH",
       "age_seconds": 5400,
       "created_at": "2026-01-10T21:10:00Z",
       "sla_seconds": 1800
     },
     {
-      "tx_id": "TX_STUCK_COOP_0002",
+      "tx_id": "TX_STUCK_SEED_0002",
       "state": "COMMIT_IN_PROGRESS",
-      "initiator_pid": "PID_U0016_e3779b10",
-      "equivalent": "UAH",
+      "initiator_pid": "PID_U0006_b54cda26",
+      "equivalent": "HOUR",
       "age_seconds": 2100,
       "created_at": "2026-01-10T23:30:00Z",
       "sla_seconds": 1800
     },
     {
-      "tx_id": "TX_STUCK_COOP_0003",
+      "tx_id": "TX_STUCK_SEED_0003",
       "state": "PREPARE_IN_PROGRESS",
-      "initiator_pid": "PID_U0006_b54cda26",
-      "equivalent": "HOUR",
-      "age_seconds": 1200,
-      "created_at": "2026-01-11T07:40:00Z",
-      "sla_seconds": 1800
-    },
-    {
-      "tx_id": "TX_STUCK_COOP_0004",
-      "state": "PREPARE_IN_PROGRESS",
-      "initiator_pid": "PID_U0023_36fbeee7",
-      "equivalent": "UAH",
-      "age_seconds": 9300,
-      "created_at": "2026-01-10T18:05:00Z",
-      "sla_seconds": 3600
-    },
-    {
-      "tx_id": "TX_STUCK_COOP_0005",
-      "state": "COMMIT_IN_PROGRESS",
-      "initiator_pid": "PID_U0037_de049695",
+      "initiator_pid": "PID_U0053_c17c31a5",
       "equivalent": "EUR",
       "age_seconds": 4100,
       "created_at": "2026-01-10T20:55:00Z",
       "sla_seconds": 2400
-    },
-    {
-      "tx_id": "TX_STUCK_COOP_0006",
-      "state": "PREPARE_IN_PROGRESS",
-      "initiator_pid": "PID_U0041_56e27d59",
-      "equivalent": "UAH",
-      "age_seconds": 2600,
-      "created_at": "2026-01-10T22:40:00Z",
-      "sla_seconds": 3600
-    },
-    {
-      "tx_id": "TX_STUCK_COOP_0007",
-      "state": "PREPARE_IN_PROGRESS",
-      "initiator_pid": "PID_U0027_afd9d5ab",
-      "equivalent": "HOUR",
-      "age_seconds": 6700,
-      "created_at": "2026-01-10T19:25:00Z",
-      "sla_seconds": 2400
-    },
-    {
-      "tx_id": "TX_STUCK_COOP_0008",
-      "state": "COMMIT_IN_PROGRESS",
-      "initiator_pid": "PID_U0032_c6ef3620",
-      "equivalent": "UAH",
-      "age_seconds": 1800,
-      "created_at": "2026-01-11T06:15:00Z",
-      "sla_seconds": 1800
     }
   ]
 }

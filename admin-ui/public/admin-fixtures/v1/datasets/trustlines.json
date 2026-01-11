@@ -3,413 +3,77 @@
     "equivalent": "UAH",
     "from": "PID_U0001_9e3779b1",
     "to": "PID_U0002_3c6ef362",
-    "from_display_name": "Oliver Bennett",
-    "to_display_name": "Amelia Carter",
-    "limit": "1200.00",
-    "used": "180.00",
-    "available": "1020.00",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "GreenField Warehouse",
+    "limit": "1000.00",
+    "used": "100.00",
+    "available": "900.00",
     "status": "active",
-    "created_at": "2025-10-21T12:10:00Z",
+    "created_at": "2026-01-09T23:49:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
     "from": "PID_U0002_3c6ef362",
     "to": "PID_U0001_9e3779b1",
-    "from_display_name": "Amelia Carter",
-    "to_display_name": "Oliver Bennett",
-    "limit": "800.00",
-    "used": "0.00",
-    "available": "800.00",
+    "from_display_name": "GreenField Warehouse",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "127.50",
+    "available": "722.50",
     "status": "active",
-    "created_at": "2025-10-24T18:05:00Z",
+    "created_at": "2026-01-08T23:38:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0002_3c6ef362",
+    "from": "PID_U0001_9e3779b1",
     "to": "PID_U0003_daa66d13",
-    "from_display_name": "Amelia Carter",
-    "to_display_name": "Noah Thompson",
-    "limit": "600.00",
-    "used": "90.00",
-    "available": "510.00",
-    "status": "active",
-    "created_at": "2025-09-14T09:20:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0003_daa66d13",
-    "to": "PID_U0002_3c6ef362",
-    "from_display_name": "Noah Thompson",
-    "to_display_name": "Amelia Carter",
-    "limit": "700.00",
-    "used": "120.00",
-    "available": "580.00",
-    "status": "active",
-    "created_at": "2025-11-02T16:40:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0003_daa66d13",
-    "to": "PID_U0004_78dde6c4",
-    "from_display_name": "Noah Thompson",
-    "to_display_name": "Sophia Reed",
-    "limit": "900.00",
-    "used": "310.00",
-    "available": "590.00",
-    "status": "active",
-    "created_at": "2025-08-19T08:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0004_78dde6c4",
-    "to": "PID_U0003_daa66d13",
-    "from_display_name": "Sophia Reed",
-    "to_display_name": "Noah Thompson",
-    "limit": "400.00",
-    "used": "0.00",
-    "available": "400.00",
-    "status": "active",
-    "created_at": "2025-10-02T13:15:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0004_78dde6c4",
-    "to": "PID_U0005_17156075",
-    "from_display_name": "Sophia Reed",
-    "to_display_name": "Liam Walker",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "GreenField Procurement Desk",
     "limit": "1000.00",
-    "used": "250.00",
-    "available": "750.00",
-    "status": "active",
-    "created_at": "2025-09-28T20:10:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0005_17156075",
-    "to": "PID_U0004_78dde6c4",
-    "from_display_name": "Liam Walker",
-    "to_display_name": "Sophia Reed",
-    "limit": "600.00",
-    "used": "40.00",
-    "available": "560.00",
-    "status": "active",
-    "created_at": "2025-12-03T14:05:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0005_17156075",
-    "to": "PID_U0006_b54cda26",
-    "from_display_name": "Liam Walker",
-    "to_display_name": "Emma Johnson",
-    "limit": "6.00",
-    "used": "1.50",
-    "available": "4.50",
-    "status": "active",
-    "created_at": "2025-11-18T17:45:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0006_b54cda26",
-    "to": "PID_U0005_17156075",
-    "from_display_name": "Emma Johnson",
-    "to_display_name": "Liam Walker",
-    "limit": "4.00",
-    "used": "0.00",
-    "available": "4.00",
-    "status": "active",
-    "created_at": "2025-11-20T08:05:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0006_b54cda26",
-    "to": "PID_U0007_538453d7",
-    "from_display_name": "Emma Johnson",
-    "to_display_name": "Mason Clarke",
-    "limit": "700.00",
-    "used": "210.00",
-    "available": "490.00",
-    "status": "active",
-    "created_at": "2025-08-07T11:10:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0007_538453d7",
-    "to": "PID_U0006_b54cda26",
-    "from_display_name": "Mason Clarke",
-    "to_display_name": "Emma Johnson",
-    "limit": "500.00",
-    "used": "0.00",
-    "available": "500.00",
-    "status": "active",
-    "created_at": "2025-08-08T19:20:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0007_538453d7",
-    "to": "PID_U0008_f1bbcd88",
-    "from_display_name": "Mason Clarke",
-    "to_display_name": "Ava Parker",
-    "limit": "300.00",
-    "used": "50.00",
-    "available": "250.00",
-    "status": "active",
-    "created_at": "2025-07-22T10:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0008_f1bbcd88",
-    "to": "PID_U0007_538453d7",
-    "from_display_name": "Ava Parker",
-    "to_display_name": "Mason Clarke",
-    "limit": "200.00",
-    "used": "0.00",
-    "available": "200.00",
-    "status": "frozen",
-    "created_at": "2025-12-28T12:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0008_f1bbcd88",
-    "to": "PID_U0009_8ff34739",
-    "from_display_name": "Ava Parker",
-    "to_display_name": "Isabella Nguyen",
-    "limit": "450.00",
-    "used": "90.00",
-    "available": "360.00",
-    "status": "active",
-    "created_at": "2025-09-01T09:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0009_8ff34739",
-    "to": "PID_U0002_3c6ef362",
-    "from_display_name": "Isabella Nguyen",
-    "to_display_name": "Amelia Carter",
-    "limit": "600.00",
-    "used": "420.00",
-    "available": "180.00",
-    "status": "active",
-    "created_at": "2025-06-15T13:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": true
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0009_8ff34739",
-    "to": "PID_U0006_b54cda26",
-    "from_display_name": "Isabella Nguyen",
-    "to_display_name": "Emma Johnson",
-    "limit": "800.00",
-    "used": "720.00",
-    "available": "80.00",
-    "status": "active",
-    "created_at": "2025-06-20T09:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": true
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0009_8ff34739",
-    "to": "PID_U0011_cc623a9b",
-    "from_display_name": "Isabella Nguyen",
-    "to_display_name": "Mia Collins",
-    "limit": "500.00",
-    "used": "60.00",
-    "available": "440.00",
-    "status": "active",
-    "created_at": "2025-07-02T12:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": true
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0010_2e2ac0ea",
-    "to": "PID_U0011_cc623a9b",
-    "from_display_name": "Ethan Brooks",
-    "to_display_name": "Mia Collins",
-    "limit": "900.00",
-    "used": "0.00",
-    "available": "900.00",
-    "status": "active",
-    "created_at": "2025-10-12T19:30:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0011_cc623a9b",
-    "to": "PID_U0010_2e2ac0ea",
-    "from_display_name": "Mia Collins",
-    "to_display_name": "Ethan Brooks",
-    "limit": "500.00",
-    "used": "110.00",
-    "available": "390.00",
-    "status": "active",
-    "created_at": "2025-10-18T08:15:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0011_cc623a9b",
-    "to": "PID_U0012_6a99b44c",
-    "from_display_name": "Mia Collins",
-    "to_display_name": "Lucas Hernandez",
-    "limit": "8.00",
-    "used": "2.00",
-    "available": "6.00",
-    "status": "active",
-    "created_at": "2025-11-08T17:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0012_6a99b44c",
-    "to": "PID_U0011_cc623a9b",
-    "from_display_name": "Lucas Hernandez",
-    "to_display_name": "Mia Collins",
-    "limit": "6.00",
-    "used": "0.00",
-    "available": "6.00",
-    "status": "active",
-    "created_at": "2025-11-09T08:10:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "EUR",
-    "from": "PID_U0015_4540215f",
-    "to": "PID_U0006_b54cda26",
-    "from_display_name": "Harper Lewis",
-    "to_display_name": "Emma Johnson",
-    "limit": "120.00",
-    "used": "25.00",
-    "available": "95.00",
-    "status": "active",
-    "created_at": "2025-12-14T16:30:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0013_08d12dfd",
-    "to": "PID_U0014_a708a7ae",
-    "from_display_name": "Charlotte Evans",
-    "to_display_name": "James Wright",
-    "limit": "1100.00",
-    "used": "300.00",
+    "used": "200.00",
     "available": "800.00",
     "status": "active",
-    "created_at": "2025-09-07T11:00:00Z",
+    "created_at": "2026-01-07T23:27:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0014_a708a7ae",
-    "to": "PID_U0013_08d12dfd",
-    "from_display_name": "James Wright",
-    "to_display_name": "Charlotte Evans",
-    "limit": "700.00",
-    "used": "0.00",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "212.50",
+    "available": "637.50",
+    "status": "active",
+    "created_at": "2026-01-06T23:16:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "1000.00",
+    "used": "300.00",
     "available": "700.00",
     "status": "active",
-    "created_at": "2025-09-10T20:20:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0014_a708a7ae",
-    "to": "PID_U0015_4540215f",
-    "from_display_name": "James Wright",
-    "to_display_name": "Harper Lewis",
-    "limit": "500.00",
-    "used": "75.00",
-    "available": "425.00",
-    "status": "active",
-    "created_at": "2025-10-14T18:00:00Z",
+    "created_at": "2026-01-05T23:05:00Z",
     "policy": {
       "auto_clearing": false,
       "can_be_intermediate": false
@@ -417,31 +81,15 @@
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0015_4540215f",
-    "to": "PID_U0014_a708a7ae",
-    "from_display_name": "Harper Lewis",
-    "to_display_name": "James Wright",
-    "limit": "650.00",
-    "used": "200.00",
-    "available": "450.00",
+    "from": "PID_U0004_78dde6c4",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Riverside Market Hall",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "297.50",
+    "available": "552.50",
     "status": "active",
-    "created_at": "2025-10-20T09:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0016_e3779b10",
-    "to": "PID_U0017_81af14c1",
-    "from_display_name": "Benjamin Scott",
-    "to_display_name": "Evelyn Adams",
-    "limit": "900.00",
-    "used": "360.00",
-    "available": "540.00",
-    "status": "active",
-    "created_at": "2025-07-29T12:00:00Z",
+    "created_at": "2026-01-04T22:54:00Z",
     "policy": {
       "auto_clearing": true,
       "can_be_intermediate": true
@@ -449,127 +97,31 @@
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0016_e3779b10",
-    "to": "PID_U0019_be1e0823",
-    "from_display_name": "Benjamin Scott",
-    "to_display_name": "Abigail Turner",
-    "limit": "700.00",
-    "used": "140.00",
-    "available": "560.00",
-    "status": "active",
-    "created_at": "2025-08-03T10:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": true
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0017_81af14c1",
-    "to": "PID_U0018_1fe68e72",
-    "from_display_name": "Evelyn Adams",
-    "to_display_name": "Henry Baker",
-    "limit": "600.00",
-    "used": "0.00",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0005_17156075",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Village Transport Co-op",
+    "limit": "1000.00",
+    "used": "400.00",
     "available": "600.00",
     "status": "active",
-    "created_at": "2025-09-22T07:35:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0018_1fe68e72",
-    "to": "PID_U0017_81af14c1",
-    "from_display_name": "Henry Baker",
-    "to_display_name": "Evelyn Adams",
-    "limit": "300.00",
-    "used": "50.00",
-    "available": "250.00",
-    "status": "active",
-    "created_at": "2025-09-25T12:40:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0018_1fe68e72",
-    "to": "PID_U0020_5c5581d4",
-    "from_display_name": "Henry Baker",
-    "to_display_name": "Daniel Phillips",
-    "limit": "10.00",
-    "used": "3.00",
-    "available": "7.00",
-    "status": "active",
-    "created_at": "2025-10-05T18:00:00Z",
+    "created_at": "2026-01-03T22:43:00Z",
     "policy": {
       "auto_clearing": false,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0020_5c5581d4",
-    "to": "PID_U0021_fa8cfb85",
-    "from_display_name": "Daniel Phillips",
-    "to_display_name": "Ella Campbell",
-    "limit": "800.00",
-    "used": "240.00",
-    "available": "560.00",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "382.50",
+    "available": "467.50",
     "status": "active",
-    "created_at": "2025-07-11T15:10:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0021_fa8cfb85",
-    "to": "PID_U0022_98c47536",
-    "from_display_name": "Ella Campbell",
-    "to_display_name": "Matthew Mitchell",
-    "limit": "450.00",
-    "used": "60.00",
-    "available": "390.00",
-    "status": "active",
-    "created_at": "2025-08-17T09:45:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0022_98c47536",
-    "to": "PID_U0023_36fbeee7",
-    "from_display_name": "Matthew Mitchell",
-    "to_display_name": "Grace Roberts",
-    "limit": "300.00",
-    "used": "150.00",
-    "available": "150.00",
-    "status": "active",
-    "created_at": "2025-11-30T10:20:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0023_36fbeee7",
-    "to": "PID_U0013_08d12dfd",
-    "from_display_name": "Grace Roberts",
-    "to_display_name": "Charlotte Evans",
-    "limit": "700.00",
-    "used": "560.00",
-    "available": "140.00",
-    "status": "active",
-    "created_at": "2025-06-26T11:00:00Z",
+    "created_at": "2026-01-02T22:32:00Z",
     "policy": {
       "auto_clearing": true,
       "can_be_intermediate": true
@@ -577,223 +129,111 @@
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0024_d5336898",
-    "to": "PID_U0013_08d12dfd",
-    "from_display_name": "Joseph Perez",
-    "to_display_name": "Charlotte Evans",
-    "limit": "500.00",
-    "used": "100.00",
-    "available": "400.00",
-    "status": "closed",
-    "created_at": "2025-05-12T12:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0025_736ae249",
-    "to": "PID_U0026_11a25bfa",
-    "from_display_name": "Lily Foster",
-    "to_display_name": "Samuel Gray",
-    "limit": "900.00",
-    "used": "180.00",
-    "available": "720.00",
-    "status": "active",
-    "created_at": "2025-09-05T08:30:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0026_11a25bfa",
-    "to": "PID_U0025_736ae249",
-    "from_display_name": "Samuel Gray",
-    "to_display_name": "Lily Foster",
-    "limit": "650.00",
-    "used": "0.00",
-    "available": "650.00",
-    "status": "active",
-    "created_at": "2025-09-10T19:30:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0026_11a25bfa",
-    "to": "PID_U0027_afd9d5ab",
-    "from_display_name": "Samuel Gray",
-    "to_display_name": "Zoe Howard",
-    "limit": "6.00",
-    "used": "2.50",
-    "available": "3.50",
-    "status": "active",
-    "created_at": "2025-10-09T18:10:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0027_afd9d5ab",
-    "to": "PID_U0028_4e114f5c",
-    "from_display_name": "Zoe Howard",
-    "to_display_name": "David Murphy",
-    "limit": "700.00",
-    "used": "230.00",
-    "available": "470.00",
-    "status": "active",
-    "created_at": "2025-08-24T14:10:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0028_4e114f5c",
-    "to": "PID_U0029_ec48c90d",
-    "from_display_name": "David Murphy",
-    "to_display_name": "Chloe Rivera",
-    "limit": "500.00",
-    "used": "120.00",
-    "available": "380.00",
-    "status": "active",
-    "created_at": "2025-08-31T10:25:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0029_ec48c90d",
-    "to": "PID_U0030_8a8042be",
-    "from_display_name": "Chloe Rivera",
-    "to_display_name": "Andrew Cooper",
-    "limit": "350.00",
-    "used": "20.00",
-    "available": "330.00",
-    "status": "active",
-    "created_at": "2025-10-27T09:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "EUR",
-    "from": "PID_U0030_8a8042be",
-    "to": "PID_U0031_28b7bc6f",
-    "from_display_name": "Andrew Cooper",
-    "to_display_name": "Natalie Ward",
-    "limit": "200.00",
-    "used": "0.00",
-    "available": "200.00",
-    "status": "active",
-    "created_at": "2025-12-07T11:30:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0031_28b7bc6f",
-    "to": "PID_U0032_c6ef3620",
-    "from_display_name": "Natalie Ward",
-    "to_display_name": "Ryan Peterson",
-    "limit": "650.00",
-    "used": "150.00",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "1000.00",
+    "used": "500.00",
     "available": "500.00",
     "status": "active",
-    "created_at": "2025-09-16T12:00:00Z",
+    "created_at": "2026-01-01T22:21:00Z",
     "policy": {
       "auto_clearing": false,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0032_c6ef3620",
-    "to": "PID_U0033_6526afd1",
-    "from_display_name": "Ryan Peterson",
-    "to_display_name": "Hannah Flores",
-    "limit": "900.00",
-    "used": "360.00",
-    "available": "540.00",
+    "from": "PID_U0006_b54cda26",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "SunnyHarvest Bakery",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "467.50",
+    "available": "382.50",
     "status": "active",
-    "created_at": "2025-09-19T08:40:00Z",
+    "created_at": "2025-12-31T22:10:00Z",
     "policy": {
       "auto_clearing": true,
       "can_be_intermediate": false
     }
   },
   {
-    "equivalent": "HOUR",
-    "from": "PID_U0033_6526afd1",
-    "to": "PID_U0034_035e2982",
-    "from_display_name": "Hannah Flores",
-    "to_display_name": "Jonathan Simmons",
-    "limit": "5.00",
-    "used": "1.00",
-    "available": "4.00",
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0007_538453d7",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "MeadowDairy Collective",
+    "limit": "1000.00",
+    "used": "600.00",
+    "available": "400.00",
     "status": "active",
-    "created_at": "2025-11-11T17:20:00Z",
+    "created_at": "2025-12-30T21:59:00Z",
     "policy": {
       "auto_clearing": false,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0034_035e2982",
-    "to": "PID_U0035_a195a333",
-    "from_display_name": "Jonathan Simmons",
-    "to_display_name": "Victoria Price",
-    "limit": "450.00",
-    "used": "90.00",
-    "available": "360.00",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "MeadowDairy Collective",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "552.50",
+    "available": "297.50",
     "status": "active",
-    "created_at": "2025-10-03T10:10:00Z",
+    "created_at": "2025-12-29T21:48:00Z",
     "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
+      "auto_clearing": true,
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0035_a195a333",
+    "from": "PID_U0001_9e3779b1",
     "to": "PID_U0036_3fcd1ce4",
-    "from_display_name": "Victoria Price",
-    "to_display_name": "Christopher Bennett",
-    "limit": "800.00",
-    "used": "120.00",
-    "available": "680.00",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "1000.00",
+    "used": "700.00",
+    "available": "300.00",
     "status": "active",
-    "created_at": "2025-08-15T09:10:00Z",
+    "created_at": "2025-12-28T21:37:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
     "from": "PID_U0036_3fcd1ce4",
-    "to": "PID_U0037_de049695",
-    "from_display_name": "Christopher Bennett",
-    "to_display_name": "Sophia Kim",
-    "limit": "350.00",
-    "used": "0.00",
-    "available": "350.00",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Riverside Grocery",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "637.50",
+    "available": "212.50",
     "status": "active",
-    "created_at": "2025-09-21T08:00:00Z",
+    "created_at": "2025-12-27T21:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "1000.00",
+    "used": "800.00",
+    "available": "200.00",
+    "status": "active",
+    "created_at": "2025-12-26T21:15:00Z",
     "policy": {
       "auto_clearing": false,
       "can_be_intermediate": false
@@ -802,14 +242,1710 @@
   {
     "equivalent": "UAH",
     "from": "PID_U0037_de049695",
-    "to": "PID_U0031_28b7bc6f",
-    "from_display_name": "Sophia Kim",
-    "to_display_name": "Natalie Ward",
-    "limit": "600.00",
-    "used": "510.00",
-    "available": "90.00",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Village Butcher Shop",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "722.50",
+    "available": "127.50",
     "status": "active",
-    "created_at": "2025-07-14T13:00:00Z",
+    "created_at": "2025-12-25T21:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0038_7c3c1046",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Morning Coffee Corner",
+    "limit": "1000.00",
+    "used": "50.00",
+    "available": "950.00",
+    "status": "active",
+    "created_at": "2025-12-24T20:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0038_7c3c1046",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Morning Coffee Corner",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "85.00",
+    "available": "765.00",
+    "status": "active",
+    "created_at": "2025-12-23T20:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Family Canteen",
+    "limit": "1000.00",
+    "used": "150.00",
+    "available": "850.00",
+    "status": "active",
+    "created_at": "2025-12-22T20:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0039_1a7389f7",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Family Canteen",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "170.00",
+    "available": "680.00",
+    "status": "active",
+    "created_at": "2025-12-21T20:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0040_b8ab03a8",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Farmers’ Corner Shop",
+    "limit": "1000.00",
+    "used": "250.00",
+    "available": "750.00",
+    "status": "active",
+    "created_at": "2025-12-20T20:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0040_b8ab03a8",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Farmers’ Corner Shop",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "255.00",
+    "available": "595.00",
+    "status": "active",
+    "created_at": "2025-12-19T19:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0041_56e27d59",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "HomeGoods Mini-Mart",
+    "limit": "1000.00",
+    "used": "350.00",
+    "available": "650.00",
+    "status": "active",
+    "created_at": "2025-12-18T19:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0041_56e27d59",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "HomeGoods Mini-Mart",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "340.00",
+    "available": "510.00",
+    "status": "active",
+    "created_at": "2025-12-17T19:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0042_f519f70a",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Pharmacy & Health Kiosk",
+    "limit": "1000.00",
+    "used": "450.00",
+    "available": "550.00",
+    "status": "active",
+    "created_at": "2025-12-16T19:25:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0042_f519f70a",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Pharmacy & Health Kiosk",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "425.00",
+    "available": "425.00",
+    "status": "frozen",
+    "created_at": "2025-12-15T19:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0043_935170bb",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "School Cafeteria",
+    "limit": "1000.00",
+    "used": "550.00",
+    "available": "450.00",
+    "status": "active",
+    "created_at": "2025-12-14T19:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0043_935170bb",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "School Cafeteria",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "510.00",
+    "available": "340.00",
+    "status": "active",
+    "created_at": "2025-12-13T18:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Weekend Street Food Stall",
+    "limit": "1000.00",
+    "used": "650.00",
+    "available": "350.00",
+    "status": "active",
+    "created_at": "2025-12-12T18:41:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0044_3188ea6c",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Weekend Street Food Stall",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "595.00",
+    "available": "255.00",
+    "status": "active",
+    "created_at": "2025-12-11T18:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0045_cfc0641d",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Cooperative Storefront",
+    "limit": "1000.00",
+    "used": "750.00",
+    "available": "250.00",
+    "status": "active",
+    "created_at": "2025-12-10T18:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0045_cfc0641d",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Cooperative Storefront",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "850.00",
+    "used": "680.00",
+    "available": "170.00",
+    "status": "active",
+    "created_at": "2025-12-09T18:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0011_cc623a9b",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Anton Petrenko (Grain Farmer)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "722.50",
+    "available": "127.50",
+    "status": "active",
+    "created_at": "2025-12-08T17:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Anton Petrenko (Grain Farmer)",
+    "limit": "700.00",
+    "used": "35.00",
+    "available": "665.00",
+    "status": "active",
+    "created_at": "2025-12-07T17:46:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0011_cc623a9b",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Anton Petrenko (Grain Farmer)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2025-12-06T17:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0011_cc623a9b",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Anton Petrenko (Grain Farmer)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "550.00",
+    "used": "82.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-12-05T17:24:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Anton Petrenko (Grain Farmer)",
+    "limit": "400.00",
+    "used": "80.00",
+    "available": "320.00",
+    "status": "active",
+    "created_at": "2025-12-04T17:13:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0012_6a99b44c",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Maria Shevchenko (Vegetable Farmer)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "212.50",
+    "available": "637.50",
+    "status": "active",
+    "created_at": "2025-12-03T17:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0012_6a99b44c",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Maria Shevchenko (Vegetable Farmer)",
+    "limit": "700.00",
+    "used": "210.00",
+    "available": "490.00",
+    "status": "active",
+    "created_at": "2025-12-02T16:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0012_6a99b44c",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Maria Shevchenko (Vegetable Farmer)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "192.50",
+    "available": "357.50",
+    "status": "active",
+    "created_at": "2025-12-01T16:40:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0013_08d12dfd",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Oksana Hrytsenko (Berry Farm)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "340.00",
+    "available": "510.00",
+    "status": "active",
+    "created_at": "2025-11-30T16:29:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0013_08d12dfd",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Oksana Hrytsenko (Berry Farm)",
+    "limit": "700.00",
+    "used": "315.00",
+    "available": "385.00",
+    "status": "active",
+    "created_at": "2025-11-29T16:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0013_08d12dfd",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Oksana Hrytsenko (Berry Farm)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
+    "status": "active",
+    "created_at": "2025-11-28T16:07:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0014_a708a7ae",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Dmytro Kovalenko (Honey & Apiary)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "467.50",
+    "available": "382.50",
+    "status": "active",
+    "created_at": "2025-11-27T15:56:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0014_a708a7ae",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Dmytro Kovalenko (Honey & Apiary)",
+    "limit": "700.00",
+    "used": "420.00",
+    "available": "280.00",
+    "status": "active",
+    "created_at": "2025-11-26T15:45:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0014_a708a7ae",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Dmytro Kovalenko (Honey & Apiary)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
+    "status": "active",
+    "created_at": "2025-11-25T15:34:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0015_4540215f",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Iryna Bondar (Eggs & Poultry)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "595.00",
+    "available": "255.00",
+    "status": "active",
+    "created_at": "2025-11-24T15:23:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0015_4540215f",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Iryna Bondar (Eggs & Poultry)",
+    "limit": "700.00",
+    "used": "525.00",
+    "available": "175.00",
+    "status": "active",
+    "created_at": "2025-11-23T15:12:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0015_4540215f",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Iryna Bondar (Eggs & Poultry)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-11-22T15:01:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0016_e3779b10",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Serhii Melnyk (Goat Cheese)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "722.50",
+    "available": "127.50",
+    "status": "active",
+    "created_at": "2025-11-21T14:50:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0016_e3779b10",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Serhii Melnyk (Goat Cheese)",
+    "limit": "700.00",
+    "used": "35.00",
+    "available": "665.00",
+    "status": "active",
+    "created_at": "2025-11-20T14:39:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0016_e3779b10",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Serhii Melnyk (Goat Cheese)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2025-11-19T14:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0017_81af14c1",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Yulia Tkachenko (Herbal Tea)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "127.50",
+    "available": "722.50",
+    "status": "active",
+    "created_at": "2025-11-18T14:17:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0017_81af14c1",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Yulia Tkachenko (Herbal Tea)",
+    "limit": "700.00",
+    "used": "140.00",
+    "available": "560.00",
+    "status": "active",
+    "created_at": "2025-11-17T14:06:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0017_81af14c1",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Yulia Tkachenko (Herbal Tea)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
+    "status": "active",
+    "created_at": "2025-11-16T13:55:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0018_1fe68e72",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "255.00",
+    "available": "595.00",
+    "status": "active",
+    "created_at": "2025-11-15T13:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0018_1fe68e72",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "limit": "700.00",
+    "used": "245.00",
+    "available": "455.00",
+    "status": "active",
+    "created_at": "2025-11-14T13:33:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0018_1fe68e72",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
+    "status": "active",
+    "created_at": "2025-11-13T13:22:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0018_1fe68e72",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "550.00",
+    "used": "247.50",
+    "available": "302.50",
+    "status": "active",
+    "created_at": "2025-11-12T13:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0018_1fe68e72",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "limit": "400.00",
+    "used": "200.00",
+    "available": "200.00",
+    "status": "active",
+    "created_at": "2025-11-11T13:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0019_be1e0823",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Kateryna Marchenko (Flour Milling)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "467.50",
+    "available": "382.50",
+    "status": "active",
+    "created_at": "2025-11-10T12:49:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0019_be1e0823",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Kateryna Marchenko (Flour Milling)",
+    "limit": "700.00",
+    "used": "420.00",
+    "available": "280.00",
+    "status": "active",
+    "created_at": "2025-11-09T12:38:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0019_be1e0823",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Kateryna Marchenko (Flour Milling)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
+    "status": "active",
+    "created_at": "2025-11-08T12:27:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0020_5c5581d4",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Oleh Savchenko (Meat Processing)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "595.00",
+    "available": "255.00",
+    "status": "active",
+    "created_at": "2025-11-07T12:16:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0020_5c5581d4",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Oleh Savchenko (Meat Processing)",
+    "limit": "700.00",
+    "used": "525.00",
+    "available": "175.00",
+    "status": "active",
+    "created_at": "2025-11-06T12:05:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0020_5c5581d4",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Oleh Savchenko (Meat Processing)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-11-05T11:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0021_fa8cfb85",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Nina Romanenko (Canning & Pickles)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "722.50",
+    "available": "127.50",
+    "status": "active",
+    "created_at": "2025-11-04T11:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0021_fa8cfb85",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Nina Romanenko (Canning & Pickles)",
+    "limit": "700.00",
+    "used": "35.00",
+    "available": "665.00",
+    "status": "active",
+    "created_at": "2025-11-03T11:32:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0021_fa8cfb85",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Nina Romanenko (Canning & Pickles)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2025-11-02T11:21:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0022_98c47536",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Taras Klymenko (Carpentry)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "127.50",
+    "available": "722.50",
+    "status": "active",
+    "created_at": "2025-11-01T11:10:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Taras Klymenko (Carpentry)",
+    "limit": "700.00",
+    "used": "140.00",
+    "available": "560.00",
+    "status": "active",
+    "created_at": "2025-10-31T10:59:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0022_98c47536",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Taras Klymenko (Carpentry)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
+    "status": "active",
+    "created_at": "2025-10-30T10:48:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0023_36fbeee7",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Alina Moroz (Sewing & Alterations)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "255.00",
+    "available": "595.00",
+    "status": "active",
+    "created_at": "2025-10-29T10:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Alina Moroz (Sewing & Alterations)",
+    "limit": "700.00",
+    "used": "245.00",
+    "available": "455.00",
+    "status": "active",
+    "created_at": "2025-10-28T10:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0023_36fbeee7",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Alina Moroz (Sewing & Alterations)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
+    "status": "active",
+    "created_at": "2025-10-27T10:15:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Bohdan Kravets (Shoemaker)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "382.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-10-26T10:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0024_d5336898",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Bohdan Kravets (Shoemaker)",
+    "limit": "700.00",
+    "used": "350.00",
+    "available": "350.00",
+    "status": "active",
+    "created_at": "2025-10-25T09:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Bohdan Kravets (Shoemaker)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2025-10-24T09:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Svitlana Poliakova (Pottery)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "510.00",
+    "available": "340.00",
+    "status": "active",
+    "created_at": "2025-10-23T09:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0025_736ae249",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Svitlana Poliakova (Pottery)",
+    "limit": "700.00",
+    "used": "455.00",
+    "available": "245.00",
+    "status": "active",
+    "created_at": "2025-10-22T09:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Svitlana Poliakova (Pottery)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
+    "status": "active",
+    "created_at": "2025-10-21T09:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Svitlana Poliakova (Pottery)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "550.00",
+    "used": "412.50",
+    "available": "137.50",
+    "status": "active",
+    "created_at": "2025-10-20T08:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0025_736ae249",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Svitlana Poliakova (Pottery)",
+    "limit": "400.00",
+    "used": "320.00",
+    "available": "80.00",
+    "status": "active",
+    "created_at": "2025-10-19T08:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Denys Lysenko (Welding)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "722.50",
+    "available": "127.50",
+    "status": "active",
+    "created_at": "2025-10-18T08:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0026_11a25bfa",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Denys Lysenko (Welding)",
+    "limit": "700.00",
+    "used": "35.00",
+    "available": "665.00",
+    "status": "active",
+    "created_at": "2025-10-17T08:25:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Denys Lysenko (Welding)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2025-10-16T08:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0027_afd9d5ab",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Hanna Sydorenko (Tailor Workshop)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "127.50",
+    "available": "722.50",
+    "status": "active",
+    "created_at": "2025-10-15T08:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0027_afd9d5ab",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Hanna Sydorenko (Tailor Workshop)",
+    "limit": "700.00",
+    "used": "140.00",
+    "available": "560.00",
+    "status": "active",
+    "created_at": "2025-10-14T07:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0027_afd9d5ab",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Hanna Sydorenko (Tailor Workshop)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
+    "status": "active",
+    "created_at": "2025-10-13T07:41:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0028_4e114f5c",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Roman Zadorozhnyi (Firewood & Timber)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "255.00",
+    "available": "595.00",
+    "status": "active",
+    "created_at": "2026-01-10T07:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0028_4e114f5c",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Roman Zadorozhnyi (Firewood & Timber)",
+    "limit": "700.00",
+    "used": "245.00",
+    "available": "455.00",
+    "status": "active",
+    "created_at": "2026-01-09T07:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0028_4e114f5c",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Roman Zadorozhnyi (Firewood & Timber)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
+    "status": "active",
+    "created_at": "2026-01-08T07:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Pavlo Rudenko (Farm Equipment Rental)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "382.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2026-01-07T06:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0029_ec48c90d",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Pavlo Rudenko (Farm Equipment Rental)",
+    "limit": "700.00",
+    "used": "350.00",
+    "available": "350.00",
+    "status": "active",
+    "created_at": "2026-01-06T06:46:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Pavlo Rudenko (Farm Equipment Rental)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2026-01-05T06:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0030_8a8042be",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Olena Fedorova (Seedlings & Plants)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "510.00",
+    "available": "340.00",
+    "status": "active",
+    "created_at": "2026-01-04T06:24:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0030_8a8042be",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Olena Fedorova (Seedlings & Plants)",
+    "limit": "700.00",
+    "used": "455.00",
+    "available": "245.00",
+    "status": "active",
+    "created_at": "2026-01-03T06:13:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0030_8a8042be",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Olena Fedorova (Seedlings & Plants)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
+    "status": "active",
+    "created_at": "2026-01-02T06:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Maksym Horbach (Compost & Soil)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "637.50",
+    "available": "212.50",
+    "status": "active",
+    "created_at": "2026-01-01T05:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0031_28b7bc6f",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Maksym Horbach (Compost & Soil)",
+    "limit": "700.00",
+    "used": "560.00",
+    "available": "140.00",
+    "status": "active",
+    "created_at": "2025-12-31T05:40:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Maksym Horbach (Compost & Soil)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "467.50",
+    "available": "82.50",
+    "status": "active",
+    "created_at": "2025-12-30T05:29:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "42.50",
+    "available": "807.50",
+    "status": "active",
+    "created_at": "2025-12-29T05:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0032_c6ef3620",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "limit": "700.00",
+    "used": "70.00",
+    "available": "630.00",
+    "status": "active",
+    "created_at": "2025-12-28T05:07:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "82.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-12-27T04:56:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "550.00",
+    "used": "110.00",
+    "available": "440.00",
+    "status": "active",
+    "created_at": "2025-12-26T04:45:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0032_c6ef3620",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "limit": "400.00",
+    "used": "100.00",
+    "available": "300.00",
+    "status": "active",
+    "created_at": "2025-12-25T04:34:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Andrii Boiko (Fishing & Smoked Fish)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "255.00",
+    "available": "595.00",
+    "status": "active",
+    "created_at": "2025-12-24T04:23:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0033_6526afd1",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Andrii Boiko (Fishing & Smoked Fish)",
+    "limit": "700.00",
+    "used": "245.00",
+    "available": "455.00",
+    "status": "active",
+    "created_at": "2025-12-23T04:12:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Andrii Boiko (Fishing & Smoked Fish)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
+    "status": "active",
+    "created_at": "2025-12-22T04:01:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0034_035e2982",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Larysa Ivashchenko (Handmade Soap)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "382.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-12-21T03:50:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0034_035e2982",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Larysa Ivashchenko (Handmade Soap)",
+    "limit": "700.00",
+    "used": "350.00",
+    "available": "350.00",
+    "status": "active",
+    "created_at": "2025-12-20T03:39:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0034_035e2982",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Larysa Ivashchenko (Handmade Soap)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2025-12-19T03:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0035_a195a333",
+    "to": "PID_U0003_daa66d13",
+    "from_display_name": "Ihor Chernenko (Metal Parts)",
+    "to_display_name": "GreenField Procurement Desk",
+    "limit": "850.00",
+    "used": "510.00",
+    "available": "340.00",
+    "status": "active",
+    "created_at": "2025-12-18T03:17:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0035_a195a333",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Ihor Chernenko (Metal Parts)",
+    "limit": "700.00",
+    "used": "455.00",
+    "available": "245.00",
+    "status": "active",
+    "created_at": "2025-12-17T03:06:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0035_a195a333",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Ihor Chernenko (Metal Parts)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
+    "status": "active",
+    "created_at": "2025-12-16T02:55:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0036_3fcd1ce4",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "Riverside Grocery",
+    "to_display_name": "Anton Petrenko (Grain Farmer)",
+    "limit": "700.00",
+    "used": "525.00",
+    "available": "175.00",
+    "status": "active",
+    "created_at": "2025-12-15T02:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0011_cc623a9b",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Anton Petrenko (Grain Farmer)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-12-14T02:33:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0037_de049695",
+    "to": "PID_U0014_a708a7ae",
+    "from_display_name": "Village Butcher Shop",
+    "to_display_name": "Dmytro Kovalenko (Honey & Apiary)",
+    "limit": "700.00",
+    "used": "595.00",
+    "available": "105.00",
+    "status": "active",
+    "created_at": "2025-12-13T02:22:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0014_a708a7ae",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Dmytro Kovalenko (Honey & Apiary)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "27.50",
+    "available": "522.50",
+    "status": "active",
+    "created_at": "2025-12-12T02:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0038_7c3c1046",
+    "to": "PID_U0017_81af14c1",
+    "from_display_name": "Morning Coffee Corner",
+    "to_display_name": "Yulia Tkachenko (Herbal Tea)",
+    "limit": "700.00",
+    "used": "70.00",
+    "available": "630.00",
+    "status": "active",
+    "created_at": "2025-12-11T02:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0017_81af14c1",
+    "to": "PID_U0038_7c3c1046",
+    "from_display_name": "Yulia Tkachenko (Herbal Tea)",
+    "to_display_name": "Morning Coffee Corner",
+    "limit": "550.00",
+    "used": "82.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-12-10T01:49:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0039_1a7389f7",
+    "to": "PID_U0020_5c5581d4",
+    "from_display_name": "Family Canteen",
+    "to_display_name": "Oleh Savchenko (Meat Processing)",
+    "limit": "700.00",
+    "used": "140.00",
+    "available": "560.00",
+    "status": "active",
+    "created_at": "2025-12-09T01:38:00Z",
     "policy": {
       "auto_clearing": true,
       "can_be_intermediate": true
@@ -818,142 +1954,46 @@
   {
     "equivalent": "UAH",
     "from": "PID_U0020_5c5581d4",
-    "to": "PID_U0032_c6ef3620",
-    "from_display_name": "Daniel Phillips",
-    "to_display_name": "Ryan Peterson",
-    "limit": "400.00",
-    "used": "60.00",
-    "available": "340.00",
-    "status": "active",
-    "created_at": "2025-11-03T10:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0041_56e27d59",
-    "to": "PID_U0027_afd9d5ab",
-    "from_display_name": "Stella Hughes",
-    "to_display_name": "Zoe Howard",
-    "limit": "350.00",
-    "used": "0.00",
-    "available": "350.00",
-    "status": "active",
-    "created_at": "2025-10-22T09:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0018_1fe68e72",
-    "to": "PID_U0048_aa66d130",
-    "from_display_name": "Henry Baker",
-    "to_display_name": "Anthony Powell",
-    "limit": "3.00",
-    "used": "0.00",
-    "available": "3.00",
-    "status": "closed",
-    "created_at": "2025-04-09T12:00:00Z",
-    "policy": {
-      "auto_clearing": false,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0038_7c3c1046",
     "to": "PID_U0039_1a7389f7",
-    "from_display_name": "Jack Rogers",
-    "to_display_name": "Audrey Patterson",
-    "limit": "700.00",
-    "used": "70.00",
-    "available": "630.00",
+    "from_display_name": "Oleh Savchenko (Meat Processing)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
     "status": "active",
-    "created_at": "2025-09-02T08:00:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0039_1a7389f7",
-    "to": "PID_U0038_7c3c1046",
-    "from_display_name": "Audrey Patterson",
-    "to_display_name": "Jack Rogers",
-    "limit": "450.00",
-    "used": "0.00",
-    "available": "450.00",
-    "status": "active",
-    "created_at": "2025-09-04T18:10:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "HOUR",
-    "from": "PID_U0039_1a7389f7",
-    "to": "PID_U0041_56e27d59",
-    "from_display_name": "Audrey Patterson",
-    "to_display_name": "Stella Hughes",
-    "limit": "4.00",
-    "used": "1.00",
-    "available": "3.00",
-    "status": "active",
-    "created_at": "2025-12-01T12:00:00Z",
+    "created_at": "2025-12-08T01:27:00Z",
     "policy": {
       "auto_clearing": false,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
     "from": "PID_U0040_b8ab03a8",
-    "to": "PID_U0041_56e27d59",
-    "from_display_name": "Gabriel Long",
-    "to_display_name": "Stella Hughes",
-    "limit": "800.00",
-    "used": "260.00",
-    "available": "540.00",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "Farmers’ Corner Shop",
+    "to_display_name": "Alina Moroz (Sewing & Alterations)",
+    "limit": "700.00",
+    "used": "210.00",
+    "available": "490.00",
     "status": "active",
-    "created_at": "2025-07-30T09:35:00Z",
+    "created_at": "2025-12-07T01:16:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0041_56e27d59",
-    "to": "PID_U0042_f519f70a",
-    "from_display_name": "Stella Hughes",
-    "to_display_name": "Caleb Barnes",
-    "limit": "600.00",
-    "used": "60.00",
-    "available": "540.00",
+    "from": "PID_U0023_36fbeee7",
+    "to": "PID_U0040_b8ab03a8",
+    "from_display_name": "Alina Moroz (Sewing & Alterations)",
+    "to_display_name": "Farmers’ Corner Shop",
+    "limit": "550.00",
+    "used": "192.50",
+    "available": "357.50",
     "status": "active",
-    "created_at": "2025-10-29T16:20:00Z",
-    "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
-    }
-  },
-  {
-    "equivalent": "UAH",
-    "from": "PID_U0042_f519f70a",
-    "to": "PID_U0043_935170bb",
-    "from_display_name": "Caleb Barnes",
-    "to_display_name": "Paisley Ross",
-    "limit": "450.00",
-    "used": "0.00",
-    "available": "450.00",
-    "status": "active",
-    "created_at": "2025-10-30T09:00:00Z",
+    "created_at": "2025-12-06T01:05:00Z",
     "policy": {
       "auto_clearing": false,
       "can_be_intermediate": false
@@ -961,15 +2001,79 @@
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0043_935170bb",
-    "to": "PID_U0044_3188ea6c",
-    "from_display_name": "Paisley Ross",
-    "to_display_name": "Isaiah Henderson",
-    "limit": "600.00",
-    "used": "200.00",
-    "available": "400.00",
+    "from": "PID_U0041_56e27d59",
+    "to": "PID_U0026_11a25bfa",
+    "from_display_name": "HomeGoods Mini-Mart",
+    "to_display_name": "Denys Lysenko (Welding)",
+    "limit": "700.00",
+    "used": "280.00",
+    "available": "420.00",
     "status": "active",
-    "created_at": "2025-08-01T14:00:00Z",
+    "created_at": "2025-12-05T00:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0041_56e27d59",
+    "from_display_name": "Denys Lysenko (Welding)",
+    "to_display_name": "HomeGoods Mini-Mart",
+    "limit": "550.00",
+    "used": "247.50",
+    "available": "302.50",
+    "status": "active",
+    "created_at": "2025-12-04T00:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0042_f519f70a",
+    "to": "PID_U0029_ec48c90d",
+    "from_display_name": "Pharmacy & Health Kiosk",
+    "to_display_name": "Pavlo Rudenko (Farm Equipment Rental)",
+    "limit": "700.00",
+    "used": "350.00",
+    "available": "350.00",
+    "status": "frozen",
+    "created_at": "2025-12-03T00:32:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0042_f519f70a",
+    "from_display_name": "Pavlo Rudenko (Farm Equipment Rental)",
+    "to_display_name": "Pharmacy & Health Kiosk",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2025-12-02T00:21:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0043_935170bb",
+    "to": "PID_U0032_c6ef3620",
+    "from_display_name": "School Cafeteria",
+    "to_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "limit": "700.00",
+    "used": "420.00",
+    "available": "280.00",
+    "status": "active",
+    "created_at": "2025-12-01T00:10:00Z",
     "policy": {
       "auto_clearing": true,
       "can_be_intermediate": false
@@ -977,15 +2081,239 @@
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0044_3188ea6c",
-    "to": "PID_U0045_cfc0641d",
-    "from_display_name": "Isaiah Henderson",
-    "to_display_name": "Lucy Coleman",
-    "limit": "350.00",
-    "used": "80.00",
-    "available": "270.00",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0043_935170bb",
+    "from_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "to_display_name": "School Cafeteria",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
     "status": "active",
-    "created_at": "2025-10-11T11:00:00Z",
+    "created_at": "2025-11-29T23:59:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0044_3188ea6c",
+    "to": "PID_U0035_a195a333",
+    "from_display_name": "Weekend Street Food Stall",
+    "to_display_name": "Ihor Chernenko (Metal Parts)",
+    "limit": "700.00",
+    "used": "490.00",
+    "available": "210.00",
+    "status": "active",
+    "created_at": "2025-11-28T23:48:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0035_a195a333",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "Ihor Chernenko (Metal Parts)",
+    "to_display_name": "Weekend Street Food Stall",
+    "limit": "550.00",
+    "used": "412.50",
+    "available": "137.50",
+    "status": "active",
+    "created_at": "2025-11-27T23:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0045_cfc0641d",
+    "to": "PID_U0013_08d12dfd",
+    "from_display_name": "Cooperative Storefront",
+    "to_display_name": "Oksana Hrytsenko (Berry Farm)",
+    "limit": "700.00",
+    "used": "560.00",
+    "available": "140.00",
+    "status": "active",
+    "created_at": "2025-11-26T23:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0013_08d12dfd",
+    "to": "PID_U0045_cfc0641d",
+    "from_display_name": "Oksana Hrytsenko (Berry Farm)",
+    "to_display_name": "Cooperative Storefront",
+    "limit": "550.00",
+    "used": "467.50",
+    "available": "82.50",
+    "status": "active",
+    "created_at": "2025-11-25T23:15:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0061_b337ff2d",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Adams Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "27.50",
+    "available": "522.50",
+    "status": "active",
+    "created_at": "2025-11-24T23:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0061_b337ff2d",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Adams Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "400.00",
+    "used": "40.00",
+    "available": "360.00",
+    "status": "active",
+    "created_at": "2025-11-23T22:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0061_b337ff2d",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "The Adams Family (Household)",
+    "to_display_name": "Alex Turner (General Builder)",
+    "limit": "4.00",
+    "used": "0.60",
+    "available": "3.40",
+    "status": "active",
+    "created_at": "2025-11-22T22:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0046_6df7ddce",
+    "to": "PID_U0061_b337ff2d",
+    "from_display_name": "Alex Turner (General Builder)",
+    "to_display_name": "The Adams Family (Household)",
+    "limit": "5.00",
+    "used": "1.00",
+    "available": "4.00",
+    "status": "active",
+    "created_at": "2025-11-21T22:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0062_516f78de",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Baker Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
+    "status": "active",
+    "created_at": "2025-11-20T22:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0062_516f78de",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Baker Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "400.00",
+    "used": "120.00",
+    "available": "280.00",
+    "status": "active",
+    "created_at": "2025-11-19T22:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0062_516f78de",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "The Baker Family (Household)",
+    "to_display_name": "Ethan Brooks (Electrician)",
+    "limit": "4.00",
+    "used": "1.40",
+    "available": "2.60",
+    "status": "active",
+    "created_at": "2025-11-18T21:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0047_0c2f577f",
+    "to": "PID_U0062_516f78de",
+    "from_display_name": "Ethan Brooks (Electrician)",
+    "to_display_name": "The Baker Family (Household)",
+    "limit": "5.00",
+    "used": "2.00",
+    "available": "3.00",
+    "status": "active",
+    "created_at": "2025-11-17T21:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0063_efa6f28f",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Carter Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "550.00",
+    "used": "247.50",
+    "available": "302.50",
+    "status": "active",
+    "created_at": "2025-11-16T21:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0063_efa6f28f",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Carter Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "400.00",
+    "used": "200.00",
+    "available": "200.00",
+    "status": "active",
+    "created_at": "2025-11-15T21:25:00Z",
     "policy": {
       "auto_clearing": false,
       "can_be_intermediate": false
@@ -993,15 +2321,1967 @@
   },
   {
     "equivalent": "HOUR",
-    "from": "PID_U0045_cfc0641d",
-    "to": "PID_U0046_6df7ddce",
-    "from_display_name": "Lucy Coleman",
-    "to_display_name": "Nathan Jenkins",
-    "limit": "7.00",
-    "used": "1.50",
-    "available": "5.50",
+    "from": "PID_U0063_efa6f28f",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "The Carter Family (Household)",
+    "to_display_name": "Liam Carter (Plumber)",
+    "limit": "4.00",
+    "used": "2.20",
+    "available": "1.80",
     "status": "active",
-    "created_at": "2025-11-25T10:00:00Z",
+    "created_at": "2025-11-14T21:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0048_aa66d130",
+    "to": "PID_U0063_efa6f28f",
+    "from_display_name": "Liam Carter (Plumber)",
+    "to_display_name": "The Carter Family (Household)",
+    "limit": "5.00",
+    "used": "3.00",
+    "available": "2.00",
+    "status": "active",
+    "created_at": "2025-11-13T21:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0064_8dde6c40",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Davis Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
+    "status": "active",
+    "created_at": "2025-11-12T20:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0064_8dde6c40",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "The Davis Family (Household)",
+    "to_display_name": "Noah Bennett (Mechanic)",
+    "limit": "4.00",
+    "used": "3.00",
+    "available": "1.00",
+    "status": "active",
+    "created_at": "2025-11-10T20:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0049_489e4ae1",
+    "to": "PID_U0064_8dde6c40",
+    "from_display_name": "Noah Bennett (Mechanic)",
+    "to_display_name": "The Davis Family (Household)",
+    "limit": "5.00",
+    "used": "4.00",
+    "available": "1.00",
+    "status": "active",
+    "created_at": "2025-11-09T20:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0065_2c15e5f1",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Edwards Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "467.50",
+    "available": "82.50",
+    "status": "active",
+    "created_at": "2025-11-08T20:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0065_2c15e5f1",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Edwards Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "400.00",
+    "used": "20.00",
+    "available": "380.00",
+    "status": "active",
+    "created_at": "2025-11-07T19:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0065_2c15e5f1",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "The Edwards Family (Household)",
+    "to_display_name": "Chloe Evans (Bicycle Repair)",
+    "limit": "4.00",
+    "used": "0.40",
+    "available": "3.60",
+    "status": "active",
+    "created_at": "2025-11-06T19:46:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0050_e6d5c492",
+    "to": "PID_U0065_2c15e5f1",
+    "from_display_name": "Chloe Evans (Bicycle Repair)",
+    "to_display_name": "The Edwards Family (Household)",
+    "limit": "5.00",
+    "used": "0.75",
+    "available": "4.25",
+    "status": "active",
+    "created_at": "2025-11-05T19:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0066_ca4d5fa2",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Foster Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "110.00",
+    "available": "440.00",
+    "status": "active",
+    "created_at": "2025-11-04T19:24:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0066_ca4d5fa2",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Foster Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "400.00",
+    "used": "100.00",
+    "available": "300.00",
+    "status": "active",
+    "created_at": "2025-11-03T19:13:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0066_ca4d5fa2",
+    "to": "PID_U0051_850d3e43",
+    "from_display_name": "The Foster Family (Household)",
+    "to_display_name": "Grace Collins (Accountant)",
+    "limit": "4.00",
+    "used": "1.20",
+    "available": "2.80",
+    "status": "active",
+    "created_at": "2025-11-02T19:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0051_850d3e43",
+    "to": "PID_U0066_ca4d5fa2",
+    "from_display_name": "Grace Collins (Accountant)",
+    "to_display_name": "The Foster Family (Household)",
+    "limit": "5.00",
+    "used": "1.75",
+    "available": "3.25",
+    "status": "active",
+    "created_at": "2025-11-01T18:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0067_6884d953",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Garcia Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
+    "status": "active",
+    "created_at": "2025-10-31T18:40:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0067_6884d953",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Garcia Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "400.00",
+    "used": "180.00",
+    "available": "220.00",
+    "status": "active",
+    "created_at": "2025-10-30T18:29:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0067_6884d953",
+    "to": "PID_U0052_2344b7f4",
+    "from_display_name": "The Garcia Family (Household)",
+    "to_display_name": "Ava Reed (Legal Advisor)",
+    "limit": "4.00",
+    "used": "2.00",
+    "available": "2.00",
+    "status": "active",
+    "created_at": "2025-10-29T18:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0052_2344b7f4",
+    "to": "PID_U0067_6884d953",
+    "from_display_name": "Ava Reed (Legal Advisor)",
+    "to_display_name": "The Garcia Family (Household)",
+    "limit": "5.00",
+    "used": "2.75",
+    "available": "2.25",
+    "status": "active",
+    "created_at": "2025-10-28T18:07:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0068_06bc5304",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Harris Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "550.00",
+    "used": "330.00",
+    "available": "220.00",
+    "status": "active",
+    "created_at": "2025-10-27T17:56:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0068_06bc5304",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Harris Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "400.00",
+    "used": "260.00",
+    "available": "140.00",
+    "status": "active",
+    "created_at": "2025-10-26T17:45:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0068_06bc5304",
+    "to": "PID_U0053_c17c31a5",
+    "from_display_name": "The Harris Family (Household)",
+    "to_display_name": "Mason Wright (IT Support)",
+    "limit": "4.00",
+    "used": "2.80",
+    "available": "1.20",
+    "status": "active",
+    "created_at": "2025-10-25T17:34:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0068_06bc5304",
+    "from_display_name": "Mason Wright (IT Support)",
+    "to_display_name": "The Harris Family (Household)",
+    "limit": "5.00",
+    "used": "3.75",
+    "available": "1.25",
+    "status": "active",
+    "created_at": "2025-10-24T17:23:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0069_a4f3ccb5",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Ivanov Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-10-23T17:12:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0069_a4f3ccb5",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "The Ivanov Family (Household)",
+    "to_display_name": "Ella Morgan (Nurse)",
+    "limit": "4.00",
+    "used": "0.20",
+    "available": "3.80",
+    "status": "active",
+    "created_at": "2025-10-21T16:50:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0054_5fb3ab56",
+    "to": "PID_U0069_a4f3ccb5",
+    "from_display_name": "Ella Morgan (Nurse)",
+    "to_display_name": "The Ivanov Family (Household)",
+    "limit": "5.00",
+    "used": "0.50",
+    "available": "4.50",
+    "status": "active",
+    "created_at": "2025-10-20T16:39:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0070_432b4666",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Johnson Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "82.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-10-19T16:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0070_432b4666",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Johnson Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "400.00",
+    "used": "80.00",
+    "available": "320.00",
+    "status": "active",
+    "created_at": "2025-10-18T16:17:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0070_432b4666",
+    "to": "PID_U0055_fdeb2507",
+    "from_display_name": "The Johnson Family (Household)",
+    "to_display_name": "Lucas Hayes (Tutor)",
+    "limit": "4.00",
+    "used": "1.00",
+    "available": "3.00",
+    "status": "active",
+    "created_at": "2025-10-17T16:06:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0055_fdeb2507",
+    "to": "PID_U0070_432b4666",
+    "from_display_name": "Lucas Hayes (Tutor)",
+    "to_display_name": "The Johnson Family (Household)",
+    "limit": "5.00",
+    "used": "1.50",
+    "available": "3.50",
+    "status": "frozen",
+    "created_at": "2025-10-16T15:55:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0071_e162c017",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The King Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "192.50",
+    "available": "357.50",
+    "status": "active",
+    "created_at": "2025-10-15T15:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0071_e162c017",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The King Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "400.00",
+    "used": "160.00",
+    "available": "240.00",
+    "status": "active",
+    "created_at": "2025-10-14T15:33:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0071_e162c017",
+    "to": "PID_U0056_9c229eb8",
+    "from_display_name": "The King Family (Household)",
+    "to_display_name": "Mia Foster (Childcare)",
+    "limit": "4.00",
+    "used": "1.80",
+    "available": "2.20",
+    "status": "active",
+    "created_at": "2025-10-13T15:22:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0056_9c229eb8",
+    "to": "PID_U0071_e162c017",
+    "from_display_name": "Mia Foster (Childcare)",
+    "to_display_name": "The King Family (Household)",
+    "limit": "5.00",
+    "used": "2.50",
+    "available": "2.50",
+    "status": "active",
+    "created_at": "2025-10-12T15:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0072_7f9a39c8",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Lewis Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2026-01-09T15:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0072_7f9a39c8",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Lewis Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "400.00",
+    "used": "240.00",
+    "available": "160.00",
+    "status": "active",
+    "created_at": "2026-01-08T14:49:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0072_7f9a39c8",
+    "to": "PID_U0057_3a5a1869",
+    "from_display_name": "The Lewis Family (Household)",
+    "to_display_name": "Jack Russell (Courier)",
+    "limit": "4.00",
+    "used": "2.60",
+    "available": "1.40",
+    "status": "active",
+    "created_at": "2026-01-07T14:38:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0057_3a5a1869",
+    "to": "PID_U0072_7f9a39c8",
+    "from_display_name": "Jack Russell (Courier)",
+    "to_display_name": "The Lewis Family (Household)",
+    "limit": "5.00",
+    "used": "3.50",
+    "available": "1.50",
+    "status": "active",
+    "created_at": "2026-01-06T14:27:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0073_1dd1b379",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Miller Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "550.00",
+    "used": "412.50",
+    "available": "137.50",
+    "status": "active",
+    "created_at": "2026-01-05T14:16:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0073_1dd1b379",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Miller Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "400.00",
+    "used": "320.00",
+    "available": "80.00",
+    "status": "active",
+    "created_at": "2026-01-04T14:05:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0073_1dd1b379",
+    "to": "PID_U0058_d891921a",
+    "from_display_name": "The Miller Family (Household)",
+    "to_display_name": "Amelia Scott (Hairdresser)",
+    "limit": "4.00",
+    "used": "3.40",
+    "available": "0.60",
+    "status": "active",
+    "created_at": "2026-01-03T13:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0058_d891921a",
+    "to": "PID_U0073_1dd1b379",
+    "from_display_name": "Amelia Scott (Hairdresser)",
+    "to_display_name": "The Miller Family (Household)",
+    "limit": "5.00",
+    "used": "0.25",
+    "available": "4.75",
+    "status": "active",
+    "created_at": "2026-01-02T13:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0074_bc092d2a",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Nelson Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2026-01-01T13:32:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0074_bc092d2a",
+    "to": "PID_U0059_76c90bcb",
+    "from_display_name": "The Nelson Family (Household)",
+    "to_display_name": "Henry Ward (Photographer)",
+    "limit": "4.00",
+    "used": "0.80",
+    "available": "3.20",
+    "status": "active",
+    "created_at": "2025-12-30T13:10:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0059_76c90bcb",
+    "to": "PID_U0074_bc092d2a",
+    "from_display_name": "Henry Ward (Photographer)",
+    "to_display_name": "The Nelson Family (Household)",
+    "limit": "5.00",
+    "used": "1.25",
+    "available": "3.75",
+    "status": "active",
+    "created_at": "2025-12-29T12:59:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0075_5a40a6db",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Owens Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "165.00",
+    "available": "385.00",
+    "status": "active",
+    "created_at": "2025-12-28T12:48:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0075_5a40a6db",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Owens Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "400.00",
+    "used": "140.00",
+    "available": "260.00",
+    "status": "active",
+    "created_at": "2025-12-27T12:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0075_5a40a6db",
+    "to": "PID_U0060_1500857c",
+    "from_display_name": "The Owens Family (Household)",
+    "to_display_name": "Sophia Kim (Translator)",
+    "limit": "4.00",
+    "used": "1.60",
+    "available": "2.40",
+    "status": "active",
+    "created_at": "2025-12-26T12:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0060_1500857c",
+    "to": "PID_U0075_5a40a6db",
+    "from_display_name": "Sophia Kim (Translator)",
+    "to_display_name": "The Owens Family (Household)",
+    "limit": "5.00",
+    "used": "2.25",
+    "available": "2.75",
+    "status": "active",
+    "created_at": "2025-12-25T12:15:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0076_f878208c",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Parker Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
+    "status": "active",
+    "created_at": "2025-12-24T12:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0076_f878208c",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Parker Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "400.00",
+    "used": "220.00",
+    "available": "180.00",
+    "status": "active",
+    "created_at": "2025-12-23T11:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0076_f878208c",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "The Parker Family (Household)",
+    "to_display_name": "Alex Turner (General Builder)",
+    "limit": "4.00",
+    "used": "2.40",
+    "available": "1.60",
+    "status": "active",
+    "created_at": "2025-12-22T11:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0046_6df7ddce",
+    "to": "PID_U0076_f878208c",
+    "from_display_name": "Alex Turner (General Builder)",
+    "to_display_name": "The Parker Family (Household)",
+    "limit": "5.00",
+    "used": "3.25",
+    "available": "1.75",
+    "status": "active",
+    "created_at": "2025-12-21T11:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0077_96af9a3d",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Quinn Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
+    "status": "frozen",
+    "created_at": "2025-12-20T11:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0077_96af9a3d",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Quinn Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "400.00",
+    "used": "300.00",
+    "available": "100.00",
+    "status": "active",
+    "created_at": "2025-12-19T11:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0077_96af9a3d",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "The Quinn Family (Household)",
+    "to_display_name": "Ethan Brooks (Electrician)",
+    "limit": "4.00",
+    "used": "3.20",
+    "available": "0.80",
+    "status": "frozen",
+    "created_at": "2025-12-18T10:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0047_0c2f577f",
+    "to": "PID_U0077_96af9a3d",
+    "from_display_name": "Ethan Brooks (Electrician)",
+    "to_display_name": "The Quinn Family (Household)",
+    "limit": "5.00",
+    "used": "4.25",
+    "available": "0.75",
+    "status": "active",
+    "created_at": "2025-12-17T10:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0078_34e713ee",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Robinson Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "550.00",
+    "used": "27.50",
+    "available": "522.50",
+    "status": "active",
+    "created_at": "2025-12-16T10:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0078_34e713ee",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Robinson Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "400.00",
+    "used": "40.00",
+    "available": "360.00",
+    "status": "active",
+    "created_at": "2025-12-15T10:25:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0078_34e713ee",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "The Robinson Family (Household)",
+    "to_display_name": "Liam Carter (Plumber)",
+    "limit": "4.00",
+    "used": "0.60",
+    "available": "3.40",
+    "status": "active",
+    "created_at": "2025-12-14T10:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0048_aa66d130",
+    "to": "PID_U0078_34e713ee",
+    "from_display_name": "Liam Carter (Plumber)",
+    "to_display_name": "The Robinson Family (Household)",
+    "limit": "5.00",
+    "used": "1.00",
+    "available": "4.00",
+    "status": "active",
+    "created_at": "2025-12-13T10:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0079_d31e8d9f",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Smith Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
+    "status": "active",
+    "created_at": "2025-12-12T09:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0079_d31e8d9f",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "The Smith Family (Household)",
+    "to_display_name": "Noah Bennett (Mechanic)",
+    "limit": "4.00",
+    "used": "1.40",
+    "available": "2.60",
+    "status": "active",
+    "created_at": "2025-12-10T09:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0049_489e4ae1",
+    "to": "PID_U0079_d31e8d9f",
+    "from_display_name": "Noah Bennett (Mechanic)",
+    "to_display_name": "The Smith Family (Household)",
+    "limit": "5.00",
+    "used": "2.00",
+    "available": "3.00",
+    "status": "active",
+    "created_at": "2025-12-09T09:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0080_71560750",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "The Taylor Family (Household)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "247.50",
+    "available": "302.50",
+    "status": "active",
+    "created_at": "2025-12-08T09:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0080_71560750",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Taylor Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "400.00",
+    "used": "200.00",
+    "available": "200.00",
+    "status": "active",
+    "created_at": "2025-12-07T08:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0080_71560750",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "The Taylor Family (Household)",
+    "to_display_name": "Chloe Evans (Bicycle Repair)",
+    "limit": "4.00",
+    "used": "2.20",
+    "available": "1.80",
+    "status": "active",
+    "created_at": "2025-12-06T08:46:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0050_e6d5c492",
+    "to": "PID_U0080_71560750",
+    "from_display_name": "Chloe Evans (Bicycle Repair)",
+    "to_display_name": "The Taylor Family (Household)",
+    "limit": "5.00",
+    "used": "3.00",
+    "available": "2.00",
+    "status": "active",
+    "created_at": "2025-12-05T08:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0081_0f8d8101",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Walker Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
+    "status": "active",
+    "created_at": "2025-12-04T08:24:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0081_0f8d8101",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "The Walker Family (Household)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "400.00",
+    "used": "280.00",
+    "available": "120.00",
+    "status": "active",
+    "created_at": "2025-12-03T08:13:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0081_0f8d8101",
+    "to": "PID_U0051_850d3e43",
+    "from_display_name": "The Walker Family (Household)",
+    "to_display_name": "Grace Collins (Accountant)",
+    "limit": "4.00",
+    "used": "3.00",
+    "available": "1.00",
+    "status": "active",
+    "created_at": "2025-12-02T08:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0051_850d3e43",
+    "to": "PID_U0081_0f8d8101",
+    "from_display_name": "Grace Collins (Accountant)",
+    "to_display_name": "The Walker Family (Household)",
+    "limit": "5.00",
+    "used": "4.00",
+    "available": "1.00",
+    "status": "active",
+    "created_at": "2025-12-01T07:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0082_adc4fab2",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "The Young Family (Household)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "467.50",
+    "available": "82.50",
+    "status": "active",
+    "created_at": "2025-11-30T07:40:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0082_adc4fab2",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "The Young Family (Household)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "400.00",
+    "used": "20.00",
+    "available": "380.00",
+    "status": "active",
+    "created_at": "2025-11-29T07:29:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0082_adc4fab2",
+    "to": "PID_U0052_2344b7f4",
+    "from_display_name": "The Young Family (Household)",
+    "to_display_name": "Ava Reed (Legal Advisor)",
+    "limit": "4.00",
+    "used": "0.40",
+    "available": "3.60",
+    "status": "active",
+    "created_at": "2025-11-28T07:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0052_2344b7f4",
+    "to": "PID_U0082_adc4fab2",
+    "from_display_name": "Ava Reed (Legal Advisor)",
+    "to_display_name": "The Young Family (Household)",
+    "limit": "5.00",
+    "used": "0.75",
+    "available": "4.25",
+    "status": "active",
+    "created_at": "2025-11-27T07:07:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0083_4bfc7463",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Oliver Price (Odd Jobs)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "550.00",
+    "used": "110.00",
+    "available": "440.00",
+    "status": "active",
+    "created_at": "2025-11-26T06:56:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0083_4bfc7463",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Oliver Price (Odd Jobs)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "400.00",
+    "used": "100.00",
+    "available": "300.00",
+    "status": "active",
+    "created_at": "2025-11-25T06:45:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0083_4bfc7463",
+    "to": "PID_U0053_c17c31a5",
+    "from_display_name": "Oliver Price (Odd Jobs)",
+    "to_display_name": "Mason Wright (IT Support)",
+    "limit": "4.00",
+    "used": "1.20",
+    "available": "2.80",
+    "status": "active",
+    "created_at": "2025-11-24T06:34:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0083_4bfc7463",
+    "from_display_name": "Mason Wright (IT Support)",
+    "to_display_name": "Oliver Price (Odd Jobs)",
+    "limit": "5.00",
+    "used": "1.75",
+    "available": "3.25",
+    "status": "active",
+    "created_at": "2025-11-23T06:23:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0084_ea33ee14",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Emily Price (Home Baking)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
+    "status": "active",
+    "created_at": "2025-11-22T06:12:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0084_ea33ee14",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "Emily Price (Home Baking)",
+    "to_display_name": "Ella Morgan (Nurse)",
+    "limit": "4.00",
+    "used": "2.00",
+    "available": "2.00",
+    "status": "active",
+    "created_at": "2025-11-20T05:50:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0054_5fb3ab56",
+    "to": "PID_U0084_ea33ee14",
+    "from_display_name": "Ella Morgan (Nurse)",
+    "to_display_name": "Emily Price (Home Baking)",
+    "limit": "5.00",
+    "used": "2.75",
+    "available": "2.25",
+    "status": "active",
+    "created_at": "2025-11-19T05:39:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0085_886b67c5",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Daniel Hughes (Garden Help)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "330.00",
+    "available": "220.00",
+    "status": "active",
+    "created_at": "2025-11-18T05:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0085_886b67c5",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Daniel Hughes (Garden Help)",
+    "to_display_name": "Family Canteen",
+    "limit": "400.00",
+    "used": "260.00",
+    "available": "140.00",
+    "status": "active",
+    "created_at": "2025-11-17T05:17:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0085_886b67c5",
+    "to": "PID_U0055_fdeb2507",
+    "from_display_name": "Daniel Hughes (Garden Help)",
+    "to_display_name": "Lucas Hayes (Tutor)",
+    "limit": "4.00",
+    "used": "2.80",
+    "available": "1.20",
+    "status": "active",
+    "created_at": "2025-11-16T05:06:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0055_fdeb2507",
+    "to": "PID_U0085_886b67c5",
+    "from_display_name": "Lucas Hayes (Tutor)",
+    "to_display_name": "Daniel Hughes (Garden Help)",
+    "limit": "5.00",
+    "used": "3.75",
+    "available": "1.25",
+    "status": "frozen",
+    "created_at": "2025-11-15T04:55:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0086_26a2e176",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Lily Hughes (Babysitting)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-11-14T04:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0086_26a2e176",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Lily Hughes (Babysitting)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "400.00",
+    "used": "340.00",
+    "available": "60.00",
+    "status": "active",
+    "created_at": "2025-11-13T04:33:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0086_26a2e176",
+    "to": "PID_U0056_9c229eb8",
+    "from_display_name": "Lily Hughes (Babysitting)",
+    "to_display_name": "Mia Foster (Childcare)",
+    "limit": "4.00",
+    "used": "0.20",
+    "available": "3.80",
+    "status": "active",
+    "created_at": "2025-11-12T04:22:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0056_9c229eb8",
+    "to": "PID_U0086_26a2e176",
+    "from_display_name": "Mia Foster (Childcare)",
+    "to_display_name": "Lily Hughes (Babysitting)",
+    "limit": "5.00",
+    "used": "0.50",
+    "available": "4.50",
+    "status": "active",
+    "created_at": "2025-11-11T04:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0087_c4da5b27",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Benjamin Lee (Repairs)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "82.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-11-10T04:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0087_c4da5b27",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Benjamin Lee (Repairs)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "400.00",
+    "used": "80.00",
+    "available": "320.00",
+    "status": "active",
+    "created_at": "2025-11-09T03:49:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0087_c4da5b27",
+    "to": "PID_U0057_3a5a1869",
+    "from_display_name": "Benjamin Lee (Repairs)",
+    "to_display_name": "Jack Russell (Courier)",
+    "limit": "4.00",
+    "used": "1.00",
+    "available": "3.00",
+    "status": "active",
+    "created_at": "2025-11-08T03:38:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0057_3a5a1869",
+    "to": "PID_U0087_c4da5b27",
+    "from_display_name": "Jack Russell (Courier)",
+    "to_display_name": "Benjamin Lee (Repairs)",
+    "limit": "5.00",
+    "used": "1.50",
+    "available": "3.50",
+    "status": "active",
+    "created_at": "2025-11-07T03:27:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0088_6311d4d8",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Isabella Lee (Sewing Help)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "550.00",
+    "used": "192.50",
+    "available": "357.50",
+    "status": "active",
+    "created_at": "2025-11-06T03:16:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0088_6311d4d8",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Isabella Lee (Sewing Help)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "400.00",
+    "used": "160.00",
+    "available": "240.00",
+    "status": "active",
+    "created_at": "2025-11-05T03:05:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0088_6311d4d8",
+    "to": "PID_U0058_d891921a",
+    "from_display_name": "Isabella Lee (Sewing Help)",
+    "to_display_name": "Amelia Scott (Hairdresser)",
+    "limit": "4.00",
+    "used": "1.80",
+    "available": "2.20",
+    "status": "active",
+    "created_at": "2025-11-04T02:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0058_d891921a",
+    "to": "PID_U0088_6311d4d8",
+    "from_display_name": "Amelia Scott (Hairdresser)",
+    "to_display_name": "Isabella Lee (Sewing Help)",
+    "limit": "5.00",
+    "used": "2.50",
+    "available": "2.50",
+    "status": "active",
+    "created_at": "2025-11-03T02:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0089_01494e89",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "James Hill (Driving Help)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2025-11-02T02:32:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0089_01494e89",
+    "to": "PID_U0059_76c90bcb",
+    "from_display_name": "James Hill (Driving Help)",
+    "to_display_name": "Henry Ward (Photographer)",
+    "limit": "4.00",
+    "used": "2.60",
+    "available": "1.40",
+    "status": "active",
+    "created_at": "2025-10-31T02:10:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0059_76c90bcb",
+    "to": "PID_U0089_01494e89",
+    "from_display_name": "Henry Ward (Photographer)",
+    "to_display_name": "James Hill (Driving Help)",
+    "limit": "5.00",
+    "used": "3.50",
+    "available": "1.50",
+    "status": "active",
+    "created_at": "2025-10-30T01:59:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0090_9f80c83a",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Charlotte Hill (Cooking Help)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "412.50",
+    "available": "137.50",
+    "status": "active",
+    "created_at": "2025-10-29T01:48:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0090_9f80c83a",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Charlotte Hill (Cooking Help)",
+    "to_display_name": "Family Canteen",
+    "limit": "400.00",
+    "used": "320.00",
+    "available": "80.00",
+    "status": "active",
+    "created_at": "2025-10-28T01:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0090_9f80c83a",
+    "to": "PID_U0060_1500857c",
+    "from_display_name": "Charlotte Hill (Cooking Help)",
+    "to_display_name": "Sophia Kim (Translator)",
+    "limit": "4.00",
+    "used": "3.40",
+    "available": "0.60",
+    "status": "active",
+    "created_at": "2025-10-27T01:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0060_1500857c",
+    "to": "PID_U0090_9f80c83a",
+    "from_display_name": "Sophia Kim (Translator)",
+    "to_display_name": "Charlotte Hill (Cooking Help)",
+    "limit": "5.00",
+    "used": "0.25",
+    "available": "4.75",
+    "status": "active",
+    "created_at": "2025-10-26T01:15:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0091_3db841eb",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "William Green (Harvest Help)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2025-10-25T01:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0091_3db841eb",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "William Green (Harvest Help)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "400.00",
+    "used": "60.00",
+    "available": "340.00",
+    "status": "active",
+    "created_at": "2025-10-24T00:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0091_3db841eb",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "William Green (Harvest Help)",
+    "to_display_name": "Alex Turner (General Builder)",
+    "limit": "4.00",
+    "used": "0.80",
+    "available": "3.20",
+    "status": "active",
+    "created_at": "2025-10-23T00:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0046_6df7ddce",
+    "to": "PID_U0091_3db841eb",
+    "from_display_name": "Alex Turner (General Builder)",
+    "to_display_name": "William Green (Harvest Help)",
+    "limit": "5.00",
+    "used": "1.25",
+    "available": "3.75",
+    "status": "active",
+    "created_at": "2025-10-22T00:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0092_dbefbb9c",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Harper Green (Crafts)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "165.00",
+    "available": "385.00",
+    "status": "active",
+    "created_at": "2025-10-21T00:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0092_dbefbb9c",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Harper Green (Crafts)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "400.00",
+    "used": "140.00",
+    "available": "260.00",
+    "status": "active",
+    "created_at": "2025-10-20T00:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0092_dbefbb9c",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "Harper Green (Crafts)",
+    "to_display_name": "Ethan Brooks (Electrician)",
+    "limit": "4.00",
+    "used": "1.60",
+    "available": "2.40",
+    "status": "active",
+    "created_at": "2025-10-18T23:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0047_0c2f577f",
+    "to": "PID_U0092_dbefbb9c",
+    "from_display_name": "Ethan Brooks (Electrician)",
+    "to_display_name": "Harper Green (Crafts)",
+    "limit": "5.00",
+    "used": "2.25",
+    "available": "2.75",
+    "status": "active",
+    "created_at": "2025-10-17T23:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0093_7a27354d",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Michael Wood (Handyman)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
+    "status": "active",
+    "created_at": "2025-10-16T23:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0093_7a27354d",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Michael Wood (Handyman)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "400.00",
+    "used": "220.00",
+    "available": "180.00",
+    "status": "active",
+    "created_at": "2025-10-15T23:25:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0093_7a27354d",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "Michael Wood (Handyman)",
+    "to_display_name": "Liam Carter (Plumber)",
+    "limit": "4.00",
+    "used": "2.40",
+    "available": "1.60",
+    "status": "active",
+    "created_at": "2025-10-14T23:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0048_aa66d130",
+    "to": "PID_U0093_7a27354d",
+    "from_display_name": "Liam Carter (Plumber)",
+    "to_display_name": "Michael Wood (Handyman)",
+    "limit": "5.00",
+    "used": "3.25",
+    "available": "1.75",
+    "status": "active",
+    "created_at": "2025-10-13T23:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0094_185eaefe",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Evelyn Wood (Care Visits)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
+    "status": "active",
+    "created_at": "2025-10-12T22:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0094_185eaefe",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "Evelyn Wood (Care Visits)",
+    "to_display_name": "Noah Bennett (Mechanic)",
+    "limit": "4.00",
+    "used": "3.20",
+    "available": "0.80",
+    "status": "active",
+    "created_at": "2026-01-08T22:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0049_489e4ae1",
+    "to": "PID_U0094_185eaefe",
+    "from_display_name": "Noah Bennett (Mechanic)",
+    "to_display_name": "Evelyn Wood (Care Visits)",
+    "limit": "5.00",
+    "used": "4.25",
+    "available": "0.75",
+    "status": "active",
+    "created_at": "2026-01-07T22:19:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0095_b69628af",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Samuel Clark (Errands)",
+    "to_display_name": "Village Butcher Shop",
+    "limit": "550.00",
+    "used": "27.50",
+    "available": "522.50",
+    "status": "active",
+    "created_at": "2026-01-06T22:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0095_b69628af",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Samuel Clark (Errands)",
+    "to_display_name": "Family Canteen",
+    "limit": "400.00",
+    "used": "40.00",
+    "available": "360.00",
+    "status": "active",
+    "created_at": "2026-01-05T21:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0095_b69628af",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "Samuel Clark (Errands)",
+    "to_display_name": "Chloe Evans (Bicycle Repair)",
+    "limit": "4.00",
+    "used": "0.60",
+    "available": "3.40",
+    "status": "active",
+    "created_at": "2026-01-04T21:46:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0050_e6d5c492",
+    "to": "PID_U0095_b69628af",
+    "from_display_name": "Chloe Evans (Bicycle Repair)",
+    "to_display_name": "Samuel Clark (Errands)",
+    "limit": "5.00",
+    "used": "1.00",
+    "available": "4.00",
+    "status": "active",
+    "created_at": "2026-01-03T21:35:00Z",
     "policy": {
       "auto_clearing": false,
       "can_be_intermediate": false
@@ -1010,14 +4290,78 @@
   {
     "equivalent": "UAH",
     "from": "PID_U0046_6df7ddce",
-    "to": "PID_U0047_0c2f577f",
-    "from_display_name": "Nathan Jenkins",
-    "to_display_name": "Sadie Perry",
-    "limit": "700.00",
-    "used": "250.00",
-    "available": "450.00",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Alex Turner (General Builder)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
     "status": "active",
-    "created_at": "2025-07-21T14:40:00Z",
+    "created_at": "2026-01-02T21:24:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Alex Turner (General Builder)",
+    "limit": "550.00",
+    "used": "165.00",
+    "available": "385.00",
+    "status": "active",
+    "created_at": "2026-01-01T21:13:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0047_0c2f577f",
+    "to": "PID_U0002_3c6ef362",
+    "from_display_name": "Ethan Brooks (Electrician)",
+    "to_display_name": "GreenField Warehouse",
+    "limit": "550.00",
+    "used": "192.50",
+    "available": "357.50",
+    "status": "active",
+    "created_at": "2025-12-31T21:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "GreenField Warehouse",
+    "to_display_name": "Ethan Brooks (Electrician)",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
+    "status": "active",
+    "created_at": "2025-12-30T20:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0048_aa66d130",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Liam Carter (Plumber)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "247.50",
+    "available": "302.50",
+    "status": "active",
+    "created_at": "2025-12-29T20:40:00Z",
     "policy": {
       "auto_clearing": true,
       "can_be_intermediate": false
@@ -1025,15 +4369,79 @@
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0047_0c2f577f",
+    "from": "PID_U0006_b54cda26",
     "to": "PID_U0048_aa66d130",
-    "from_display_name": "Sadie Perry",
-    "to_display_name": "Anthony Powell",
-    "limit": "400.00",
-    "used": "90.00",
-    "available": "310.00",
+    "from_display_name": "SunnyHarvest Bakery",
+    "to_display_name": "Liam Carter (Plumber)",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
     "status": "active",
-    "created_at": "2025-08-06T08:10:00Z",
+    "created_at": "2025-12-28T20:29:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0049_489e4ae1",
+    "to": "PID_U0007_538453d7",
+    "from_display_name": "Noah Bennett (Mechanic)",
+    "to_display_name": "MeadowDairy Collective",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2025-12-27T20:18:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "MeadowDairy Collective",
+    "to_display_name": "Noah Bennett (Mechanic)",
+    "limit": "550.00",
+    "used": "330.00",
+    "available": "220.00",
+    "status": "active",
+    "created_at": "2025-12-26T20:07:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0050_e6d5c492",
+    "to": "PID_U0005_17156075",
+    "from_display_name": "Chloe Evans (Bicycle Repair)",
+    "to_display_name": "Village Transport Co-op",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
+    "status": "active",
+    "created_at": "2025-12-25T19:56:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "Chloe Evans (Bicycle Repair)",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
+    "status": "active",
+    "created_at": "2025-12-24T19:45:00Z",
     "policy": {
       "auto_clearing": false,
       "can_be_intermediate": false
@@ -1041,15 +4449,767 @@
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0048_aa66d130",
-    "to": "PID_U0049_489e4ae1",
-    "from_display_name": "Anthony Powell",
-    "to_display_name": "Claire Russell",
-    "limit": "350.00",
-    "used": "0.00",
-    "available": "350.00",
+    "from": "PID_U0051_850d3e43",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Grace Collins (Accountant)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "550.00",
+    "used": "412.50",
+    "available": "137.50",
+    "status": "active",
+    "created_at": "2025-12-23T19:34:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0051_850d3e43",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Grace Collins (Accountant)",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-12-22T19:23:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0052_2344b7f4",
+    "to": "PID_U0002_3c6ef362",
+    "from_display_name": "Ava Reed (Legal Advisor)",
+    "to_display_name": "GreenField Warehouse",
+    "limit": "550.00",
+    "used": "467.50",
+    "available": "82.50",
+    "status": "active",
+    "created_at": "2025-12-21T19:12:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0052_2344b7f4",
+    "from_display_name": "GreenField Warehouse",
+    "to_display_name": "Ava Reed (Legal Advisor)",
+    "limit": "550.00",
+    "used": "27.50",
+    "available": "522.50",
+    "status": "active",
+    "created_at": "2025-12-20T19:01:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Mason Wright (IT Support)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2025-12-19T18:50:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0006_b54cda26",
+    "to": "PID_U0053_c17c31a5",
+    "from_display_name": "SunnyHarvest Bakery",
+    "to_display_name": "Mason Wright (IT Support)",
+    "limit": "550.00",
+    "used": "82.50",
+    "available": "467.50",
+    "status": "active",
+    "created_at": "2025-12-18T18:39:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Mason Wright (IT Support)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "700.00",
+    "used": "140.00",
+    "available": "560.00",
+    "status": "active",
+    "created_at": "2025-12-17T18:28:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0053_c17c31a5",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Mason Wright (IT Support)",
+    "limit": "550.00",
+    "used": "137.50",
+    "available": "412.50",
+    "status": "active",
+    "created_at": "2025-12-16T18:17:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0054_5fb3ab56",
+    "to": "PID_U0007_538453d7",
+    "from_display_name": "Ella Morgan (Nurse)",
+    "to_display_name": "MeadowDairy Collective",
+    "limit": "550.00",
+    "used": "165.00",
+    "available": "385.00",
+    "status": "active",
+    "created_at": "2025-12-15T18:06:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "MeadowDairy Collective",
+    "to_display_name": "Ella Morgan (Nurse)",
+    "limit": "550.00",
+    "used": "192.50",
+    "available": "357.50",
+    "status": "active",
+    "created_at": "2025-12-14T17:55:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0055_fdeb2507",
+    "to": "PID_U0005_17156075",
+    "from_display_name": "Lucas Hayes (Tutor)",
+    "to_display_name": "Village Transport Co-op",
+    "limit": "550.00",
+    "used": "220.00",
+    "available": "330.00",
     "status": "frozen",
-    "created_at": "2025-12-29T12:00:00Z",
+    "created_at": "2025-12-13T17:44:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0055_fdeb2507",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "Lucas Hayes (Tutor)",
+    "limit": "550.00",
+    "used": "247.50",
+    "available": "302.50",
+    "status": "active",
+    "created_at": "2025-12-12T17:33:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0056_9c229eb8",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Mia Foster (Childcare)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
+    "status": "active",
+    "created_at": "2025-12-11T17:22:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0056_9c229eb8",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Mia Foster (Childcare)",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2025-12-10T17:11:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0057_3a5a1869",
+    "to": "PID_U0002_3c6ef362",
+    "from_display_name": "Jack Russell (Courier)",
+    "to_display_name": "GreenField Warehouse",
+    "limit": "550.00",
+    "used": "330.00",
+    "available": "220.00",
+    "status": "active",
+    "created_at": "2025-12-09T17:00:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0057_3a5a1869",
+    "from_display_name": "GreenField Warehouse",
+    "to_display_name": "Jack Russell (Courier)",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
+    "status": "active",
+    "created_at": "2025-12-08T16:49:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0058_d891921a",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Amelia Scott (Hairdresser)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
+    "status": "active",
+    "created_at": "2025-12-07T16:38:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0006_b54cda26",
+    "to": "PID_U0058_d891921a",
+    "from_display_name": "SunnyHarvest Bakery",
+    "to_display_name": "Amelia Scott (Hairdresser)",
+    "limit": "550.00",
+    "used": "412.50",
+    "available": "137.50",
+    "status": "active",
+    "created_at": "2025-12-06T16:27:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0059_76c90bcb",
+    "to": "PID_U0007_538453d7",
+    "from_display_name": "Henry Ward (Photographer)",
+    "to_display_name": "MeadowDairy Collective",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-12-05T16:16:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0059_76c90bcb",
+    "from_display_name": "MeadowDairy Collective",
+    "to_display_name": "Henry Ward (Photographer)",
+    "limit": "550.00",
+    "used": "467.50",
+    "available": "82.50",
+    "status": "active",
+    "created_at": "2025-12-04T16:05:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0060_1500857c",
+    "to": "PID_U0005_17156075",
+    "from_display_name": "Sophia Kim (Translator)",
+    "to_display_name": "Village Transport Co-op",
+    "limit": "550.00",
+    "used": "27.50",
+    "available": "522.50",
+    "status": "active",
+    "created_at": "2025-12-03T15:54:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0060_1500857c",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "Sophia Kim (Translator)",
+    "limit": "550.00",
+    "used": "55.00",
+    "available": "495.00",
+    "status": "active",
+    "created_at": "2025-12-02T15:43:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0060_1500857c",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Sophia Kim (Translator)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "700.00",
+    "used": "105.00",
+    "available": "595.00",
+    "status": "active",
+    "created_at": "2025-12-01T15:32:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "EUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0060_1500857c",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Sophia Kim (Translator)",
+    "limit": "550.00",
+    "used": "110.00",
+    "available": "440.00",
+    "status": "active",
+    "created_at": "2025-11-30T15:21:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "700.00",
+    "used": "175.00",
+    "available": "525.00",
+    "status": "active",
+    "created_at": "2025-11-29T15:10:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "Riverside Grocery",
+    "limit": "700.00",
+    "used": "210.00",
+    "available": "490.00",
+    "status": "active",
+    "created_at": "2025-11-28T14:59:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "192.50",
+    "available": "357.50",
+    "status": "active",
+    "created_at": "2025-11-27T14:48:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0057_3a5a1869",
+    "to": "PID_U0004_78dde6c4",
+    "from_display_name": "Jack Russell (Courier)",
+    "to_display_name": "Riverside Market Hall",
+    "limit": "700.00",
+    "used": "280.00",
+    "available": "420.00",
+    "status": "active",
+    "created_at": "2025-11-26T14:37:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0057_3a5a1869",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Jack Russell (Courier)",
+    "to_display_name": "Riverside Grocery",
+    "limit": "700.00",
+    "used": "315.00",
+    "available": "385.00",
+    "status": "active",
+    "created_at": "2025-11-25T14:26:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0057_3a5a1869",
+    "to": "PID_U0006_b54cda26",
+    "from_display_name": "Jack Russell (Courier)",
+    "to_display_name": "SunnyHarvest Bakery",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
+    "status": "active",
+    "created_at": "2025-11-24T14:15:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0096_54cda260",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Olivia Bennett (Community Coordinator)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "5.00",
+    "used": "2.75",
+    "available": "2.25",
+    "status": "active",
+    "created_at": "2025-11-23T14:04:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0096_54cda260",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Olivia Bennett (Community Coordinator)",
+    "limit": "5.00",
+    "used": "3.00",
+    "available": "2.00",
+    "status": "active",
+    "created_at": "2025-11-22T13:53:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0096_54cda260",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Olivia Bennett (Community Coordinator)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "400.00",
+    "used": "260.00",
+    "available": "140.00",
+    "status": "active",
+    "created_at": "2025-11-21T13:42:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0097_f3051c11",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Daniel Stone (Trustline Officer)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "5.00",
+    "used": "3.50",
+    "available": "1.50",
+    "status": "active",
+    "created_at": "2025-11-20T13:31:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0097_f3051c11",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Daniel Stone (Trustline Officer)",
+    "limit": "5.00",
+    "used": "3.75",
+    "available": "1.25",
+    "status": "active",
+    "created_at": "2025-11-19T13:20:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0097_f3051c11",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Daniel Stone (Trustline Officer)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "400.00",
+    "used": "320.00",
+    "available": "80.00",
+    "status": "active",
+    "created_at": "2025-11-18T13:09:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0098_913c95c2",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Emma Wright (Dispute Mediator)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "5.00",
+    "used": "4.25",
+    "available": "0.75",
+    "status": "active",
+    "created_at": "2025-11-17T12:58:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0098_913c95c2",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Emma Wright (Dispute Mediator)",
+    "limit": "5.00",
+    "used": "0.25",
+    "available": "4.75",
+    "status": "active",
+    "created_at": "2025-11-16T12:47:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0098_913c95c2",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Emma Wright (Dispute Mediator)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "400.00",
+    "used": "40.00",
+    "available": "360.00",
+    "status": "active",
+    "created_at": "2025-11-15T12:36:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0099_2f740f73",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Ryan Cooper (Operations Lead)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "5.00",
+    "used": "0.75",
+    "available": "4.25",
+    "status": "frozen",
+    "created_at": "2025-11-14T12:25:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0099_2f740f73",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Ryan Cooper (Operations Lead)",
+    "limit": "5.00",
+    "used": "1.00",
+    "available": "4.00",
+    "status": "active",
+    "created_at": "2025-11-13T12:14:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0099_2f740f73",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Ryan Cooper (Operations Lead)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "400.00",
+    "used": "100.00",
+    "available": "300.00",
+    "status": "active",
+    "created_at": "2025-11-12T12:03:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0100_cdab8924",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Sophia Turner (Tech Steward)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "5.00",
+    "used": "1.50",
+    "available": "3.50",
+    "status": "active",
+    "created_at": "2025-11-11T11:52:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "HOUR",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0100_cdab8924",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Sophia Turner (Tech Steward)",
+    "limit": "5.00",
+    "used": "1.75",
+    "available": "3.25",
+    "status": "active",
+    "created_at": "2025-11-10T11:41:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0100_cdab8924",
+    "to": "PID_U0001_9e3779b1",
+    "from_display_name": "Sophia Turner (Tech Steward)",
+    "to_display_name": "GreenField Cooperative (Co-op)",
+    "limit": "400.00",
+    "used": "160.00",
+    "available": "240.00",
+    "status": "active",
+    "created_at": "2025-11-09T11:30:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0006_b54cda26",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "SunnyHarvest Bakery",
+    "to_display_name": "Alex Turner (General Builder)",
+    "limit": "550.00",
+    "used": "275.00",
+    "available": "275.00",
+    "status": "active",
+    "created_at": "2025-11-07T11:08:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0046_6df7ddce",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "Alex Turner (General Builder)",
+    "to_display_name": "Anton Petrenko (Grain Farmer)",
+    "limit": "550.00",
+    "used": "302.50",
+    "available": "247.50",
+    "status": "active",
+    "created_at": "2025-11-06T10:57:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0036_3fcd1ce4",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "Riverside Grocery",
+    "to_display_name": "Noah Bennett (Mechanic)",
+    "limit": "550.00",
+    "used": "357.50",
+    "available": "192.50",
+    "status": "active",
+    "created_at": "2025-11-04T10:35:00Z",
     "policy": {
       "auto_clearing": false,
       "can_be_intermediate": false
@@ -1058,33 +5218,65 @@
   {
     "equivalent": "UAH",
     "from": "PID_U0049_489e4ae1",
-    "to": "PID_U0050_e6d5c492",
-    "from_display_name": "Claire Russell",
-    "to_display_name": "Aaron Griffin",
-    "limit": "700.00",
-    "used": "210.00",
-    "available": "490.00",
+    "to": "PID_U0014_a708a7ae",
+    "from_display_name": "Noah Bennett (Mechanic)",
+    "to_display_name": "Dmytro Kovalenko (Honey & Apiary)",
+    "limit": "550.00",
+    "used": "385.00",
+    "available": "165.00",
     "status": "active",
-    "created_at": "2025-08-18T12:20:00Z",
+    "created_at": "2025-11-03T10:24:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
     "equivalent": "UAH",
-    "from": "PID_U0050_e6d5c492",
-    "to": "PID_U0038_7c3c1046",
-    "from_display_name": "Aaron Griffin",
-    "to_display_name": "Jack Rogers",
-    "limit": "500.00",
-    "used": "0.00",
-    "available": "500.00",
+    "from": "PID_U0018_1fe68e72",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "to_display_name": "Family Canteen",
+    "limit": "550.00",
+    "used": "412.50",
+    "available": "137.50",
     "status": "active",
-    "created_at": "2025-09-29T08:30:00Z",
+    "created_at": "2025-11-02T10:13:00Z",
     "policy": {
       "auto_clearing": false,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0039_1a7389f7",
+    "to": "PID_U0053_c17c31a5",
+    "from_display_name": "Family Canteen",
+    "to_display_name": "Mason Wright (IT Support)",
+    "limit": "550.00",
+    "used": "440.00",
+    "available": "110.00",
+    "status": "active",
+    "created_at": "2025-11-01T10:02:00Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0053_c17c31a5",
+    "to": "PID_U0018_1fe68e72",
+    "from_display_name": "Mason Wright (IT Support)",
+    "to_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "limit": "550.00",
+    "used": "467.50",
+    "available": "82.50",
+    "status": "active",
+    "created_at": "2025-10-31T09:51:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   }
 ]

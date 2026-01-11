@@ -6,6 +6,14 @@ const repoRoot = path.resolve(process.cwd(), '..')
 const canonicalDir = path.join(repoRoot, 'admin-fixtures', 'v1', 'datasets')
 const publicDir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1', 'datasets')
 
+function expectedParticipantsCount() {
+  const raw = process.env.EXPECTED_PARTICIPANTS
+  if (!raw) return 100
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n) || n <= 0) return 100
+  return n
+}
+
 async function readJson(filePath) {
   let text
   try {
@@ -92,7 +100,11 @@ async function validateSide(label, dir) {
   const incidents = await readJson(path.join(dir, 'incidents.json'))
 
   assert(Array.isArray(participants), `${label} participants must be an array`)
-  assert(participants.length === 50, `${label} participants.length must be 50, got ${participants.length}`)
+  const expectedCount = expectedParticipantsCount()
+  assert(
+    participants.length === expectedCount,
+    `${label} participants.length must be ${expectedCount}, got ${participants.length}`,
+  )
 
   const codes = asEquivalentCodes(equivalents)
   assert(!codes.includes(null), `${label} equivalents must be strings or {code: string}`)

@@ -44,6 +44,7 @@ const error = ref<string | null>(null)
 
 const cyRoot = ref<HTMLElement | null>(null)
 let cy: Core | null = null
+let zoomUpdatingFromCy = false
 
 const participants = ref<Participant[]>([])
 const trustlines = ref<Trustline[]>([])
@@ -57,14 +58,72 @@ const threshold = ref<string>('0.10')
 const typeFilter = ref<string[]>(['person', 'business'])
 const minDegree = ref<number>(0)
 
-const showLabels = ref(false)
+type LabelMode = 'off' | 'name' | 'pid' | 'both'
+
+const showLabels = ref(true)
+const labelModeBusiness = ref<LabelMode>('name')
+const labelModePerson = ref<LabelMode>('name')
+const autoLabelsByZoom = ref(true)
+const minZoomLabelsAll = ref(0.85)
+const minZoomLabelsPerson = ref(1.25)
+
 const showIncidents = ref(true)
 const hideIsolates = ref(true)
 const showLegend = ref(true)
 
 const layoutName = ref<'fcose' | 'grid' | 'circle'>('fcose')
+const layoutSpacing = ref<number>(1.6)
 
-const searchPid = ref('')
+const zoom = ref<number>(1)
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n))
+}
+
+function zoomScale(z: number): number {
+  // Smooth curve: zoom 0.25..3 => scale ~0.5..1.7
+  return Math.sqrt(Math.max(0.05, z))
+}
+
+function extractPidFromText(text: string): string | null {
+  const m = String(text || '').match(/PID_[A-Za-z0-9]+_[A-Za-z0-9]+/)
+  return m ? m[0] : null
+}
+
+type LabelPart = 'name' | 'pid'
+
+function labelPartsToMode(parts: LabelPart[]): LabelMode {
+  const s = new Set(parts || [])
+  if (s.size === 0) return 'off'
+  if (s.has('name') && s.has('pid')) return 'both'
+  if (s.has('pid')) return 'pid'
+  return 'name'
+}
+
+function modeToLabelParts(mode: LabelMode): LabelPart[] {
+  if (mode === 'both') return ['name', 'pid']
+  if (mode === 'pid') return ['pid']
+  if (mode === 'name') return ['name']
+  return []
+}
+
+const businessLabelParts = computed<LabelPart[]>({
+  get: () => modeToLabelParts(labelModeBusiness.value),
+  set: (parts) => {
+    labelModeBusiness.value = labelPartsToMode(parts)
+  },
+})
+
+const personLabelParts = computed<LabelPart[]>({
+  get: () => modeToLabelParts(labelModePerson.value),
+  set: (parts) => {
+    labelModePerson.value = labelPartsToMode(parts)
+  },
+})
+type ParticipantSuggestion = { value: string; pid: string }
+
+const searchQuery = ref('')
+const focusPid = ref('')
 
 const drawerOpen = ref(false)
 const selected = ref<SelectedInfo | null>(null)
@@ -121,7 +180,7 @@ function buildElements() {
 
   const allowedTypes = new Set((typeFilter.value || []).map((t) => String(t).toLowerCase()).filter(Boolean))
   const minDeg = Math.max(0, Number(minDegree.value) || 0)
-  const focusPid = String(searchPid.value || '').trim()
+  const focusedPid = String(focusPid.value || '').trim()
 
   const pidSet = new Set<string>()
   for (const t of tls) {
@@ -144,7 +203,7 @@ function buildElements() {
   for (const pid of pidSet) {
     const p = pIndex.get(pid)
     const t = String(p?.type || '').toLowerCase()
-    if (allowedTypes.size && t && !allowedTypes.has(t)) continue
+    if (allowedTypes.size && !allowedTypes.has(t)) continue
     prelim.add(pid)
   }
 
@@ -159,19 +218,20 @@ function buildElements() {
   const finalPids = new Set<string>()
   for (const pid of prelim) {
     const deg = degreeByPid.get(pid) || 0
-    if (minDeg > 0 && deg < minDeg && pid !== focusPid) continue
+    if (minDeg > 0 && deg < minDeg && pid !== focusedPid) continue
     finalPids.add(pid)
   }
 
   const nodes = Array.from(finalPids).map((pid) => {
     const p = pIndex.get(pid)
     const ratio = incidentRatioByPid.value.get(pid)
+    const name = (p?.display_name || '').trim()
     return {
       data: {
         id: pid,
-        label: p?.display_name ? `${p.display_name} (${pid})` : pid,
+        label: '',
         pid,
-        display_name: p?.display_name || '',
+        display_name: name,
         status: (p?.status || '').toLowerCase(),
         type: (p?.type || '').toLowerCase(),
         incident_ratio: typeof ratio === 'number' ? ratio : 0,
@@ -229,12 +289,22 @@ function applyStyle() {
         'background-color': '#409eff',
         label: showLabels.value ? 'data(label)' : '',
         color: '#cfd3dc',
-        'font-size': 10,
+        // Base values; real sizes are adjusted by updateZoomStyles().
+        'font-size': 11,
+        // Allow fonts to become small when zoomed out.
+        'min-zoomed-font-size': 4,
+        'text-outline-width': 2,
+        'text-outline-color': '#111318',
         'text-wrap': 'wrap',
         'text-max-width': '180px',
         'text-background-opacity': 0,
+        'text-halign': 'center',
+        'text-valign': 'bottom',
+        'text-margin-y': 6,
         'border-width': 1,
         'border-color': '#2b2f36',
+        width: 18,
+        height: 18,
       },
     },
     { selector: 'node.p-active', style: { 'background-color': '#67c23a' } },
@@ -243,7 +313,17 @@ function applyStyle() {
     { selector: 'node.p-banned', style: { 'background-color': '#f56c6c' } },
     { selector: 'node.p-deleted', style: { 'background-color': '#909399' } },
 
-    { selector: 'node.type-business', style: { shape: 'round-rectangle', 'border-width': 2, 'border-color': '#409eff' } },
+    { selector: 'node.type-person', style: { shape: 'ellipse', width: 16, height: 16 } },
+    {
+      selector: 'node.type-business',
+      style: {
+        shape: 'round-rectangle',
+        width: 26,
+        height: 22,
+        'border-width': 2,
+        'border-color': '#409eff',
+      },
+    },
 
     {
       selector: 'node.has-incident',
@@ -264,11 +344,13 @@ function applyStyle() {
     {
       selector: 'edge',
       style: {
+        // Base values; real widths are adjusted by updateZoomStyles().
         width: 2,
         'curve-style': 'bezier',
         'line-color': '#606266',
         'target-arrow-shape': 'triangle',
         'target-arrow-color': '#606266',
+        'arrow-scale': 0.9,
         opacity: 0.85,
       },
     },
@@ -276,7 +358,7 @@ function applyStyle() {
     { selector: 'edge.tl-frozen', style: { 'line-color': '#909399', 'target-arrow-color': '#909399', opacity: 0.65 } },
     { selector: 'edge.tl-closed', style: { 'line-color': '#a3a6ad', 'target-arrow-color': '#a3a6ad', opacity: 0.45 } },
 
-    { selector: 'edge.bottleneck', style: { 'line-color': '#f56c6c', 'target-arrow-color': '#f56c6c', width: 4, opacity: 1 } },
+    { selector: 'edge.bottleneck', style: { 'line-color': '#f56c6c', 'target-arrow-color': '#f56c6c', width: 4, 'arrow-scale': 1.05, opacity: 1 } },
 
     {
       selector: 'edge.incident',
@@ -285,12 +367,53 @@ function applyStyle() {
       },
     },
   ])
+
+  updateZoomStyles()
+}
+
+function updateZoomStyles() {
+  if (!cy) return
+  const z = cy.zoom()
+
+  // Cytoscape scales stroke/labels by zoom; to avoid "fat" edges/text when zoomed in,
+  // scale style values inversely with zoom.
+  const inv = 1 / Math.max(0.15, z)
+  const s = zoomScale(inv)
+
+  const nodeFont = clamp(11 * inv, 3.2, 12)
+  const outlineW = clamp(2 * s, 0.6, 2.4)
+  const marginY = clamp(6 * inv, 1, 8)
+
+  const edgeW = clamp(1.8 * inv, 0.35, 2.2)
+  const edgeWBottleneck = clamp(3.6 * inv, 0.8, 4)
+  const arrowScale = clamp(0.9 * s, 0.35, 1.1)
+  const arrowScaleBottleneck = clamp(1.05 * s, 0.45, 1.25)
+
+  cy.style()
+    .selector('node')
+    .style({
+      'font-size': nodeFont,
+      'text-outline-width': outlineW,
+      'text-margin-y': marginY,
+    })
+    .selector('edge')
+    .style({
+      width: edgeW,
+      'arrow-scale': arrowScale,
+    })
+    .selector('edge.bottleneck')
+    .style({
+      width: edgeWBottleneck,
+      'arrow-scale': arrowScaleBottleneck,
+    })
+    .update()
 }
 
 function runLayout() {
   if (!cy) return
 
   const name = layoutName.value
+  const spacing = Math.max(1, Math.min(3, Number(layoutSpacing.value) || 1))
   const layout =
     name === 'grid'
       ? cy.layout({ name: 'grid', padding: 30 })
@@ -300,12 +423,40 @@ function runLayout() {
             name: 'fcose',
             animate: true,
             randomize: true,
-            padding: 30,
-            quality: 'default',
-            nodeSeparation: 50,
+            padding: 40,
+            quality: spacing >= 1.4 ? 'proof' : 'default',
+            nodeSeparation: Math.round(70 * spacing),
+            idealEdgeLength: Math.round(80 * spacing),
+            nodeRepulsion: Math.round(4500 * spacing * spacing),
+            gravity: 0.25,
+            avoidOverlap: true,
+            packComponents: true,
           } as any)
 
   layout.run()
+}
+
+let layoutRunId = 0
+
+function runLayoutAndMaybeFit({ fitOnStop }: { fitOnStop: boolean }) {
+  if (!cy) return
+  layoutRunId += 1
+  const runId = layoutRunId
+
+  if (fitOnStop) {
+    cy.one('layoutstop', () => {
+      if (!cy) return
+      if (runId !== layoutRunId) return
+      cy.fit(cy.elements(), 10)
+      zoomUpdatingFromCy = true
+      zoom.value = cy.zoom()
+      zoomUpdatingFromCy = false
+      updateZoomStyles()
+      updateLabelsForZoom()
+    })
+  }
+
+  runLayout()
 }
 
 function rebuildGraph({ fit }: { fit: boolean }) {
@@ -316,8 +467,131 @@ function rebuildGraph({ fit }: { fit: boolean }) {
   cy.add(edges)
 
   applyStyle()
-  runLayout()
-  if (fit) cy.fit(undefined, 30)
+  updateZoomStyles()
+  updateLabelsForZoom()
+  updateSearchHighlights()
+  runLayoutAndMaybeFit({ fitOnStop: fit })
+}
+
+function labelFor(mode: LabelMode, displayName: string, pid: string): string {
+  if (mode === 'off') return ''
+  if (mode === 'pid') return pid
+  if (mode === 'name') return displayName || pid
+  return displayName ? `${displayName}\n${pid}` : pid
+}
+
+function updateLabelsForZoom() {
+  if (!cy) return
+
+  if (!showLabels.value) {
+    cy.nodes().forEach((n) => {
+      n.data('label', '')
+    })
+    return
+  }
+
+  const z = cy.zoom()
+  cy.nodes().forEach((n) => {
+    const pid = String(n.data('pid') || n.id())
+    const displayName = String(n.data('display_name') || '')
+    const t = String(n.data('type') || '').toLowerCase()
+
+    let mode: LabelMode = t === 'business' ? labelModeBusiness.value : labelModePerson.value
+
+    if (autoLabelsByZoom.value) {
+      if (z < minZoomLabelsAll.value) {
+        mode = 'off'
+      } else if (t === 'person' && z < minZoomLabelsPerson.value) {
+        mode = 'off'
+      } else if (z < 1.5 && mode === 'both') {
+        mode = 'name'
+      }
+    }
+
+    n.data('label', labelFor(mode, displayName, pid))
+  })
+}
+
+function visibleParticipantSuggestions(): ParticipantSuggestion[] {
+  const out: ParticipantSuggestion[] = []
+  if (!cy) {
+    for (const p of participants.value || []) {
+      if (!p?.pid) continue
+      const name = String(p.display_name || '').trim()
+      out.push({ value: name ? `${name} — ${p.pid}` : p.pid, pid: p.pid })
+    }
+    return out
+  }
+
+  cy.nodes().forEach((n) => {
+    const pid = String(n.data('pid') || n.id())
+    const name = String(n.data('display_name') || '').trim()
+    out.push({ value: name ? `${name} — ${pid}` : pid, pid })
+  })
+
+  return out
+}
+
+function querySearchParticipants(query: string, cb: (results: ParticipantSuggestion[]) => void) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) {
+    cb(visibleParticipantSuggestions().slice(0, 20))
+    return
+  }
+
+  const results = visibleParticipantSuggestions()
+    .filter((s) => s.value.toLowerCase().includes(q) || s.pid.toLowerCase().includes(q))
+    .slice(0, 20)
+
+  cb(results)
+}
+
+function onSearchSelect(s: ParticipantSuggestion) {
+  focusPid.value = s.pid
+}
+
+function matchedVisiblePids(query: string): string[] {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return []
+
+  const pidHint = extractPidFromText(query)
+  if (pidHint) return [pidHint]
+
+  const matches: string[] = []
+
+  if (cy) {
+    cy.nodes().forEach((n) => {
+      const pid = String(n.data('pid') || n.id())
+      const name = String(n.data('display_name') || '')
+      const combined = `${name} ${pid}`.toLowerCase()
+      if (combined.includes(q)) matches.push(pid)
+    })
+    return matches
+  }
+
+  for (const p of participants.value || []) {
+    const pid = String(p?.pid || '')
+    const name = String(p?.display_name || '')
+    if (!pid) continue
+    const combined = `${name} ${pid}`.toLowerCase()
+    if (combined.includes(q)) matches.push(pid)
+  }
+
+  return matches
+}
+
+function updateSearchHighlights() {
+  if (!cy) return
+  cy.nodes('.search-hit').removeClass('search-hit')
+
+  const q = String(searchQuery.value || '').trim()
+  if (!q) return
+
+  const matches = matchedVisiblePids(q)
+  // Cap highlighting to avoid turning the whole graph orange.
+  for (const pid of matches.slice(0, 40)) {
+    cy.getElementById(pid).addClass('search-hit')
+  }
 }
 
 function attachHandlers() {
@@ -362,23 +636,105 @@ function attachHandlers() {
 
 function fit() {
   if (!cy) return
-  cy.fit(undefined, 30)
+  cy.fit(cy.elements(), 10)
+  zoomUpdatingFromCy = true
+  zoom.value = cy.zoom()
+  zoomUpdatingFromCy = false
+  updateZoomStyles()
+  updateLabelsForZoom()
 }
 
 function focusSearch() {
   if (!cy) return
-  const pid = String(searchPid.value || '').trim()
-  if (!pid) return
 
-  const n = cy.getElementById(pid)
-  if (!n || n.empty()) {
-    ElMessage.warning(`PID not found: ${pid}`)
+  const q = String(searchQuery.value || '').trim()
+  const pidInQuery = extractPidFromText(q)
+
+  // If query is empty, fall back to focused/selected node.
+  if (!q) {
+    const pid = getZoomPid()
+    if (!pid) {
+      ElMessage.info('Type PID/name, select a suggestion, or click a node')
+      return
+    }
+    const n = cy.getElementById(pid)
+    if (!n || n.empty()) {
+      ElMessage.warning(`Not found in current graph: ${pid}`)
+      return
+    }
+    cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
+    n.addClass('search-hit')
+    setTimeout(() => n.removeClass('search-hit'), 900)
     return
   }
 
-  cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
-  n.addClass('search-hit')
-  setTimeout(() => n.removeClass('search-hit'), 900)
+  // Prefer an explicit selection (autocomplete).
+  if (focusPid.value) {
+    const n = cy.getElementById(focusPid.value)
+    if (!n || n.empty()) {
+      ElMessage.warning(`Not found in current graph: ${focusPid.value}`)
+      return
+    }
+    cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
+    n.addClass('search-hit')
+    setTimeout(() => n.removeClass('search-hit'), 900)
+    return
+  }
+
+  // PID embedded in "Name — PID" value.
+  if (pidInQuery) {
+    const n = cy.getElementById(pidInQuery)
+    if (n && !n.empty()) {
+      cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
+      n.addClass('search-hit')
+      setTimeout(() => n.removeClass('search-hit'), 900)
+      return
+    }
+  }
+
+  // Exact PID match.
+  const exact = cy.getElementById(q)
+  if (exact && !exact.empty()) {
+    cy.animate({ center: { eles: exact }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
+    exact.addClass('search-hit')
+    setTimeout(() => exact.removeClass('search-hit'), 900)
+    return
+  }
+
+  // Partial match by PID or display_name.
+  const matches = matchedVisiblePids(q)
+  if (matches.length === 0) {
+    const fallbackPid = selected.value && selected.value.kind === 'node' ? selected.value.pid : ''
+    if (fallbackPid) {
+      const n = cy.getElementById(fallbackPid)
+      if (n && !n.empty()) {
+        cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
+        n.addClass('search-hit')
+        setTimeout(() => n.removeClass('search-hit'), 900)
+        ElMessage.info('Query did not match; centered on the selected node.')
+        return
+      }
+    }
+    ElMessage.warning(`No matches: ${q}`)
+    return
+  }
+
+  if (matches.length === 1) {
+    const pid = matches[0]
+    if (!pid) return
+    const n = cy.getElementById(pid)
+    cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
+    n.addClass('search-hit')
+    setTimeout(() => n.removeClass('search-hit'), 900)
+    return
+  }
+
+  let eles = cy.collection()
+  for (const pid of matches.slice(0, 40)) {
+    eles = eles.union(cy.getElementById(pid))
+  }
+  cy.animate({ fit: { eles, padding: 80 } }, { duration: 300 })
+  ElMessage.info(`${matches.length} matches (showing first ${Math.min(40, matches.length)}). Refine query.`)
 }
 
 async function loadData() {
@@ -417,8 +773,23 @@ onMounted(async () => {
     wheelSensitivity: 0.15,
   })
 
+  cy.on('zoom', () => {
+    if (!cy) return
+    zoomUpdatingFromCy = true
+    zoom.value = cy.zoom()
+    zoomUpdatingFromCy = false
+
+    // Keep styling/labels responsive to mouse wheel / pinch zoom.
+    updateZoomStyles()
+    updateLabelsForZoom()
+  })
+
   attachHandlers()
   rebuildGraph({ fit: true })
+
+  zoomUpdatingFromCy = true
+  zoom.value = cy.zoom()
+  zoomUpdatingFromCy = false
 })
 
 onBeforeUnmount(() => {
@@ -428,7 +799,7 @@ onBeforeUnmount(() => {
   }
 })
 
-watch([eq, statusFilter, threshold, showLabels, showIncidents, hideIsolates], () => {
+watch([eq, statusFilter, threshold, showIncidents, hideIsolates], () => {
   if (!cy) return
   rebuildGraph({ fit: false })
 })
@@ -438,7 +809,33 @@ watch([typeFilter, minDegree], () => {
   rebuildGraph({ fit: false })
 })
 
+watch([showLabels, labelModeBusiness, labelModePerson, autoLabelsByZoom, minZoomLabelsAll, minZoomLabelsPerson], () => {
+  if (!cy) return
+  applyStyle()
+  updateLabelsForZoom()
+})
+
+watch(searchQuery, () => {
+  if (!cy) return
+  // If user edits the query manually, clear explicit selection.
+  focusPid.value = ''
+  updateSearchHighlights()
+})
+
+watch(zoom, (z) => {
+  if (!cy) return
+  if (zoomUpdatingFromCy) return
+  applyZoom(z)
+  updateZoomStyles()
+  updateLabelsForZoom()
+})
+
 watch(layoutName, () => {
+  if (!cy) return
+  runLayout()
+})
+
+watch(layoutSpacing, () => {
   if (!cy) return
   runLayout()
 })
@@ -447,11 +844,6 @@ const statuses = [
   { label: 'active', value: 'active' },
   { label: 'frozen', value: 'frozen' },
   { label: 'closed', value: 'closed' },
-]
-
-const typeOptions = [
-  { label: 'person', value: 'person' },
-  { label: 'business', value: 'business' },
 ]
 
 const layoutOptions = [
@@ -467,35 +859,25 @@ const stats = computed(() => {
 })
 
 function getZoomPid(): string | null {
-  const pid = String(searchPid.value || '').trim()
+  const pid = String(focusPid.value || '').trim()
   if (pid) return pid
   if (selected.value && selected.value.kind === 'node') return selected.value.pid
   return null
 }
 
-function fitNeighborhood() {
-  if (!cy) return
-  const pid = getZoomPid()
-  if (!pid) {
-    ElMessage.info('Set Search PID (or click a node)')
-    return
-  }
+const canFind = computed(() => {
+  const q = String(searchQuery.value || '').trim()
+  if (q) return true
+  return Boolean(getZoomPid())
+})
 
-  const n = cy.getElementById(pid)
-  if (!n || n.empty()) {
-    ElMessage.warning(`PID not found: ${pid}`)
-    return
-  }
-
-  const eles = (n as any).closedNeighborhood ? (n as any).closedNeighborhood() : n.neighborhood().union(n)
-  cy.animate({ fit: { eles, padding: 60 } }, { duration: 300 })
-}
+const canFitComponent = computed(() => Boolean(getZoomPid()))
 
 function fitComponent() {
   if (!cy) return
   const pid = getZoomPid()
   if (!pid) {
-    ElMessage.info('Set Search PID (or click a node)')
+    ElMessage.info('Select a participant (or click a node)')
     return
   }
 
@@ -525,6 +907,20 @@ function fitComponent() {
   }
 
   cy.animate({ fit: { eles: comp, padding: 60 } }, { duration: 300 })
+
+  zoomUpdatingFromCy = true
+  zoom.value = cy.zoom()
+  zoomUpdatingFromCy = false
+
+  updateZoomStyles()
+  updateLabelsForZoom()
+}
+
+function applyZoom(level: number) {
+  if (!cy) return
+  const z = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), level))
+  const center = { x: cy.width() / 2, y: cy.height() / 2 }
+  cy.zoom({ level: z, renderedPosition: center })
 }
 </script>
 
@@ -543,52 +939,134 @@ function fitComponent() {
 
     <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
 
-    <div class="controls">
-      <TooltipLabel label="eq" tooltip-key="graph.eq" />
-      <el-select v-model="eq" size="small" style="width: 160px">
-        <el-option v-for="c in availableEquivalents" :key="c" :label="c" :value="c" />
-      </el-select>
+    <div class="toolbar">
+      <div class="toolbar__group">
+        <div class="toolbar__title">Filters</div>
+        <div class="toolbar__items">
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Equivalent" tooltip-key="graph.eq" />
+            <el-select v-model="eq" size="small" style="width: 180px">
+              <el-option v-for="c in availableEquivalents" :key="c" :label="c" :value="c" />
+            </el-select>
+          </div>
 
-      <TooltipLabel label="status" tooltip-key="graph.status" />
-      <el-select v-model="statusFilter" multiple collapse-tags collapse-tags-tooltip size="small" style="width: 220px">
-        <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
-      </el-select>
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Status" tooltip-key="graph.status" />
+            <el-select v-model="statusFilter" multiple collapse-tags collapse-tags-tooltip size="small" style="width: 240px">
+              <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
+            </el-select>
+          </div>
 
-      <TooltipLabel label="threshold" tooltip-key="graph.threshold" />
-      <el-input v-model="threshold" size="small" style="width: 120px" placeholder="0.10" />
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Bottleneck" tooltip-key="graph.threshold" />
+            <el-input v-model="threshold" size="small" style="width: 140px" placeholder="0.10" />
+          </div>
 
-      <TooltipLabel label="layout" tooltip-key="graph.layout" />
-      <el-select v-model="layoutName" size="small" style="width: 150px">
-        <el-option v-for="o in layoutOptions" :key="o.value" :label="o.label" :value="o.value" />
-      </el-select>
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Type" tooltip-key="graph.type" />
+            <el-checkbox-group v-model="typeFilter" size="small">
+              <el-checkbox-button label="person">person</el-checkbox-button>
+              <el-checkbox-button label="business">business</el-checkbox-button>
+            </el-checkbox-group>
+          </div>
 
-      <TooltipLabel label="type" tooltip-key="graph.type" />
-      <el-select v-model="typeFilter" multiple collapse-tags collapse-tags-tooltip size="small" style="width: 210px">
-        <el-option v-for="t in typeOptions" :key="t.value" :label="t.label" :value="t.value" />
-      </el-select>
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Min degree" tooltip-key="graph.minDegree" />
+            <el-input-number v-model="minDegree" size="small" :min="0" :max="20" controls-position="right" style="width: 160px" />
+          </div>
+        </div>
+      </div>
 
-      <TooltipLabel label="min degree" tooltip-key="graph.minDegree" />
-      <el-input-number v-model="minDegree" size="small" :min="0" :max="20" controls-position="right" style="width: 140px" />
+      <div class="toolbar__group">
+        <div class="toolbar__title">Display</div>
+        <div class="toolbar__items toolbar__items--grid">
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Layout" tooltip-key="graph.layout" />
+            <el-select v-model="layoutName" size="small" style="width: 180px">
+              <el-option v-for="o in layoutOptions" :key="o.value" :label="o.label" :value="o.value" />
+            </el-select>
+          </div>
 
-      <TooltipLabel label="Labels" tooltip-key="graph.labels" />
-      <el-switch v-model="showLabels" size="small" />
-      <TooltipLabel label="Incidents" tooltip-key="graph.incidents" />
-      <el-switch v-model="showIncidents" size="small" />
-      <TooltipLabel label="Hide isolates" tooltip-key="graph.hideIsolates" />
-      <el-switch v-model="hideIsolates" size="small" />
-      <TooltipLabel label="Legend" tooltip-key="graph.legend" />
-      <el-switch v-model="showLegend" size="small" />
+          <div class="ctl ctl--toggle">
+            <TooltipLabel class="ctl__label" label="Labels" tooltip-key="graph.labels" />
+            <el-switch v-model="showLabels" size="small" />
+          </div>
 
-      <div class="spacer" />
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Business labels" tooltip-key="graph.labels" />
+            <el-checkbox-group v-model="businessLabelParts" size="small">
+              <el-checkbox-button label="name">name</el-checkbox-button>
+              <el-checkbox-button label="pid">pid</el-checkbox-button>
+            </el-checkbox-group>
+          </div>
 
-      <TooltipLabel label="Search PID" tooltip-key="graph.search" />
-      <el-input v-model="searchPid" size="small" style="width: 260px" placeholder="PID_U0006_b54cda26" @keyup.enter="focusSearch" />
-      <el-button size="small" @click="focusSearch">Find</el-button>
-      <TooltipLabel label="Zoom" tooltip-key="graph.zoom" />
-      <el-button size="small" @click="fit">Fit</el-button>
-      <el-button size="small" @click="fitNeighborhood">Fit neighborhood</el-button>
-      <el-button size="small" @click="fitComponent">Fit component</el-button>
-      <el-button size="small" @click="runLayout">Re-layout</el-button>
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Person labels" tooltip-key="graph.labels" />
+            <el-checkbox-group v-model="personLabelParts" size="small">
+              <el-checkbox-button label="name">name</el-checkbox-button>
+              <el-checkbox-button label="pid">pid</el-checkbox-button>
+            </el-checkbox-group>
+          </div>
+
+          <div class="ctl ctl--toggle">
+            <TooltipLabel class="ctl__label" label="Auto labels" tooltip-key="graph.labels" />
+            <el-switch v-model="autoLabelsByZoom" size="small" />
+          </div>
+
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Layout spacing" tooltip-key="graph.spacing" />
+            <el-slider v-model="layoutSpacing" :min="1" :max="3" :step="0.1" style="width: 220px" />
+          </div>
+
+          <div class="ctl ctl--toggle">
+            <TooltipLabel class="ctl__label" label="Incidents" tooltip-key="graph.incidents" />
+            <el-switch v-model="showIncidents" size="small" />
+          </div>
+
+          <div class="ctl ctl--toggle">
+            <TooltipLabel class="ctl__label" label="Hide isolates" tooltip-key="graph.hideIsolates" />
+            <el-switch v-model="hideIsolates" size="small" />
+          </div>
+
+          <div class="ctl ctl--toggle">
+            <TooltipLabel class="ctl__label" label="Legend" tooltip-key="graph.legend" />
+            <el-switch v-model="showLegend" size="small" />
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar__group toolbar__group--wide">
+        <div class="toolbar__title">Navigate</div>
+        <div class="toolbar__items">
+          <div class="ctl ctl--wide">
+            <TooltipLabel class="ctl__label" label="Search (PID or name)" tooltip-key="graph.search" />
+            <el-autocomplete
+              v-model="searchQuery"
+              :fetch-suggestions="querySearchParticipants"
+              placeholder="Type PID or name…"
+              size="small"
+              clearable
+              @select="onSearchSelect"
+              @keyup.enter="focusSearch"
+            />
+          </div>
+
+          <div class="ctl ctl--buttons">
+            <TooltipLabel class="ctl__label" label="Actions" tooltip-key="graph.actions" />
+            <div class="btnrow">
+              <el-button size="small" :disabled="!canFind" @click="focusSearch">Find</el-button>
+              <el-button size="small" @click="fit">Fit</el-button>
+              <el-button size="small" :disabled="!canFitComponent" @click="fitComponent">Fit component</el-button>
+              <el-button size="small" @click="runLayout">Re-layout</el-button>
+            </div>
+          </div>
+
+          <div class="ctl">
+            <TooltipLabel class="ctl__label" label="Zoom" tooltip-key="graph.zoom" />
+            <el-slider v-model="zoom" :min="0.1" :max="3" :step="0.05" style="width: 240px" />
+          </div>
+        </div>
+      </div>
     </div>
 
     <el-skeleton v-if="loading" animated :rows="6" />
@@ -673,16 +1151,76 @@ function fitComponent() {
   align-items: center;
 }
 
-.controls {
+.toolbar {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
 
-.spacer {
-  flex: 1;
+.toolbar__group {
+  flex: 1 1 360px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.toolbar__group--wide {
+  flex: 2 1 520px;
+}
+
+.toolbar__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 8px;
+  letter-spacing: 0.2px;
+}
+
+.toolbar__items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.toolbar__items--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.ctl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ctl__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+
+.ctl--toggle {
+  min-width: 110px;
+}
+
+.ctl--wide {
+  min-width: 300px;
+  flex: 1 1 340px;
+}
+
+.ctl--buttons {
+  align-self: flex-end;
+}
+
+.btnrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .cy-wrap {
