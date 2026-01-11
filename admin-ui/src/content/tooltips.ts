@@ -22,6 +22,7 @@ export type TooltipKey =
   | 'incidents.eq'
   | 'incidents.age'
   | 'incidents.sla'
+  | 'page.auditLog'
   | 'audit.timestamp'
   | 'audit.actor'
   | 'audit.role'
@@ -147,6 +148,16 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
   'incidents.sla': {
     title: 'sla',
     body: ['Allowed time budget (seconds).', 'age > sla → over-SLA.'],
+  },
+
+  'page.auditLog': {
+    title: 'Audit Log',
+    body: [
+      'Log of all administrative actions on system objects.',
+      'Records: create/update/delete of participants, trustlines, equivalents, config.',
+      'Each entry includes: who (actor), what (action), target (object), when (timestamp), and why (reason).',
+      'Use search/filter to find changes related to specific objects.',
+    ],
   },
 
   'audit.timestamp': {

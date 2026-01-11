@@ -56,6 +56,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../pages/EquivalentsPage.vue'),
     meta: { title: 'Equivalents' },
   },
+  {
+    path: '/graph',
+    name: 'Graph',
+    component: () => import('../pages/GraphPage.vue'),
+    meta: { title: 'Network Graph' },
+  },
 ]
 
 export const router = createRouter({

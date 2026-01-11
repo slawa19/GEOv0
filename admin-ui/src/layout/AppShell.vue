@@ -65,6 +65,7 @@ function navigate(path: string) {
         <el-menu-item index="/integrity" @click="navigate('/integrity')">Integrity</el-menu-item>
         <el-menu-item index="/incidents" @click="navigate('/incidents')">Incidents</el-menu-item>
         <el-menu-item index="/trustlines" @click="navigate('/trustlines')">Trustlines</el-menu-item>
+        <el-menu-item index="/graph" @click="navigate('/graph')">Network Graph</el-menu-item>
         <el-menu-item index="/participants" @click="navigate('/participants')">Participants</el-menu-item>
         <el-menu-item index="/config" @click="navigate('/config')">Config</el-menu-item>
         <el-menu-item index="/feature-flags" @click="navigate('/feature-flags')">Feature Flags</el-menu-item>

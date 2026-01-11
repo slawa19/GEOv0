@@ -1,6 +1,6 @@
 # GEO Hub Admin Console — Детальная UI-спецификация (Blueprint)
 
-**Версия:** 0.2  
+**Версия:** 0.3  
 **Статус:** Blueprint для реализации без «додумывания»  
 **Стек (рекомендация):** Vue.js 3 (Vite), Element Plus, Pinia.  
 
@@ -52,6 +52,7 @@
 - `Integrity`
 - `Incidents`
 - `Trustlines`
+- `Network Graph` (реализовано в прототипе)
 - `Participants`
 - `Config`
 - `Feature Flags`
@@ -61,7 +62,6 @@
 - `Equivalents` (управление справочником)
 
 Phase 2:
-- `Network Graph`
 - `Events` (timeline)
 - `Liquidity analytics`
 - `Transactions` / `Clearing` (глобальные списки)
@@ -98,15 +98,65 @@ MVP дополнение: **Network Health виджеты** (быстрый ст
 
 ### 4.2. Network Graph
 
-Статус: **Phase 2**.
+Статус: **Реализовано в прототипе (fixture-based)**.
 
-Цель: визуализация сети доверия.
+Цель: визуализация сети доверия на клиенте **без изменений бэкенда** (данные берутся из фикстур).
 
-Функции:
-- Zoom/Pan.
-- Поиск узла по PID.
-- Tooltip по ребру: `limit`, `debt/used`, `available` (если доступны в данных).
-- Фильтр по эквиваленту.
+Роут и навигация:
+- Route: `/graph`
+- Sidebar: `Network Graph`
+
+Техническая реализация:
+- Рендер: Cytoscape.js + layout-плагин `fcose`.
+- Источник данных (фикстуры):
+	- `admin-fixtures/v1/datasets/participants.json`
+	- `admin-fixtures/v1/datasets/trustlines.json`
+	- `admin-fixtures/v1/datasets/incidents.json`
+	- `admin-fixtures/v1/datasets/equivalents.json`
+- Загрузка: модуль `admin-ui/src/api/fixtures.ts` (кэширует `fetch` по относительному пути).
+
+Модель графа:
+- Узлы (nodes): участники, `id = pid`.
+- Рёбра (edges): trustlines `from -> to`.
+- Данные ребра: `equivalent`, `status`, `limit`, `used`, `available`, `created_at`.
+
+UI (MVP) — что должно быть на странице:
+- Панель управления (фильтры/переключатели):
+	- `Equivalent`:
+		- `ALL` (все)
+		- конкретный код (из `equivalents.json` и/или из trustlines)
+	- `Status` (multi-select): `active`, `frozen`, `closed`
+	- `Threshold` (строка/число, по умолчанию `0.10`): используется для подсветки bottleneck
+	- `Layout`: `fcose (force)`, `grid`, `circle`
+	- Toggle: `Labels` (показывать/скрывать подписи)
+	- Toggle: `Incidents` (включить/выключить наложение инцидентов)
+	- Toggle: `Hide isolates` (скрыть узлы без рёбер после фильтрации)
+	- `Search PID` + `Find` (фокус на узел)
+	- Кнопки: `Fit` (вписать граф), `Re-layout` (перезапуск layout)
+
+Стили и подсветки (MVP):
+- Цвет рёбер по статусу trustline:
+	- `active` — синий
+	- `frozen` — серый
+	- `closed` — светло-серый
+- Bottleneck:
+	- условие: `available/limit < threshold` (только для `active`)
+	- стиль: красное ребро, увеличенная толщина
+- Incidents overlay:
+	- источник: `incidents.json`
+	- узел-инициатор (`initiator_pid`) подсвечивается (border)
+	- рёбра, исходящие от инициатора, выделяются пунктиром
+
+Интерактив (MVP):
+- Zoom/Pan — средствами Cytoscape.
+- Клик по узлу: открывает `Drawer` с деталями (PID, display_name, status/type если есть, degree in/out).
+- Клик по ребру: открывает `Drawer` с деталями trustline (equivalent/from/to/status/limit/used/available/created_at).
+
+Расширения (для последующей модификации):
+- Добавить tooltip на hover по ребру (без внешних зависимостей можно реализовать через overlay div).
+- Добавить режимы представления (вкладки): `Overview`, `Equivalent Lens`, `Incidents Overlay`.
+- Добавить визуальную «тепловую карту» по SLA: `age_seconds/sla_seconds` (градиент/интенсивность).
+- Добавить экспорт PNG и сохранение пресетов фильтров в `localStorage`.
 
 ### 4.3. Integrity Dashboard
 
@@ -177,6 +227,17 @@ UI:
 	- Create
 	- Edit
 	- Activate/Deactivate
+	- Delete (только "safe delete" — см. ниже)
+
+Доп. UX (реализовано в прототипе):
+- Ленивый бейдж "Used by X TL / Y Inc" (подгружается при hover и кэшируется).
+
+Safe delete (нормативно):
+- Удаление разрешено только если:
+	- equivalent неактивен (`is_active = false`)
+	- equivalent нигде не используется (usage counts == 0)
+- UI обязан запросить `reason`.
+- Если equivalent используется → backend должен вернуть `409 Conflict` с деталями usage.
 
 Требования:
 - Любые изменения должны попадать в audit-log.
@@ -311,10 +372,15 @@ UI правила:
 - Integrity check: действие должно требовать подтверждения.
 - Abort: `reason` обязателен; после abort UI должен предложить перейти в Events и проверить связанный `tx_id`.
 
-### 6.6. Equivalents (optional / Phase 2)
+### 6.6. Equivalents
 - `GET /admin/equivalents` (query: `include_inactive`)
 - `POST /admin/equivalents` (body: AdminEquivalentUpsert)
 - `PATCH /admin/equivalents/{code}` (body: AdminEquivalentUpsert)
+- `GET /admin/equivalents/{code}/usage` → `{ code, trustlines, debts, integrity_checkpoints }`
+- `DELETE /admin/equivalents/{code}` (body: `{ reason }`) → `{ deleted: true }`
+
+Ошибки (нормативно):
+- `409 Conflict` — equivalent in-use или попытка удаления активного эквивалента.
 
 ### 6.7. Transactions / Clearing (optional / Phase 2)
 - `GET /admin/transactions` (paginated)
