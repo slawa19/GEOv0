@@ -1,4 +1,28 @@
 [
+  {"code":"UAH","precision":2,"description":"Ukrainian Hryvnia","is_active":true},
+  {"code":"EUR","precision":2,"description":"Euro","is_active":true},
+  {"code":"HOUR","precision":2,"description":"Community time credit (hours)","is_active":true}
+][
+  {
+    "code": "UAH",
+    "precision": 2,
+    "description": "Ukrainian Hryvnia",
+    "is_active": true
+  },
+  {
+    "code": "EUR",
+    "precision": 2,
+    "description": "Euro",
+    "is_active": true
+  },
+  {
+    "code": "HOUR",
+    "precision": 2,
+    "description": "Community time credit (hours)",
+    "is_active": true
+  }
+]
+[
   {
     "code": "UAH",
     "precision": 2,

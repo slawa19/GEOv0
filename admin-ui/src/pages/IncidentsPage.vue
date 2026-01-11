@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import { formatIsoInTimeZone } from '../utils/datetime'
+import { useConfigStore } from '../stores/config'
 
 type Incident = {
   tx_id: string
@@ -25,9 +27,29 @@ const total = ref(0)
 const items = ref<Incident[]>([])
 
 const router = useRouter()
+const route = useRoute()
 const lastAbortTxId = ref<string | null>(null)
 
 const abortingTxId = ref<string | null>(null)
+
+const drawerOpen = ref(false)
+const selected = ref<Incident | null>(null)
+
+const configStore = useConfigStore()
+const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
+
+function fmtTs(iso: string | undefined): string {
+  if (!iso) return '—'
+  return formatIsoInTimeZone(iso, timeZone.value)
+}
+
+function fmtAge(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  return `${h}h ${m}m`
+}
 
 async function load() {
   loading.value = true
@@ -72,6 +94,7 @@ async function forceAbort(row: Incident) {
     assertSuccess(await mockApi.abortTx(row.tx_id, reason))
     ElMessage.success(`Aborted ${row.tx_id}`)
     lastAbortTxId.value = row.tx_id
+    drawerOpen.value = false
   } catch (e: any) {
     ElMessage.error(e?.message || 'Abort failed')
   } finally {
@@ -79,8 +102,21 @@ async function forceAbort(row: Incident) {
   }
 }
 
+function openRow(row: Incident) {
+  selected.value = row
+  drawerOpen.value = true
+}
+
 function goAudit(txId: string) {
-  void router.push({ path: '/audit-log', query: { q: txId } })
+  void router.push({ path: '/audit-log', query: { ...route.query, q: txId } })
+}
+
+function goParticipant(pid: string) {
+  void router.push({ path: '/participants', query: { ...route.query, q: pid } })
+}
+
+function goEquivalent(eq: string) {
+  void router.push({ path: '/equivalents', query: { ...route.query, q: eq } })
 }
 
 onMounted(() => void load())
@@ -97,7 +133,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
   <el-card>
     <template #header>
       <div class="hdr">
-        <div>Incidents</div>
+        <TooltipLabel label="Incidents" tooltip-key="nav.incidents" />
         <el-tag type="warning">over SLA: {{ overSlaCount }}</el-tag>
       </div>
     </template>
@@ -122,12 +158,15 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
     <el-empty v-else-if="items.length === 0" description="No incidents" />
 
     <div v-else>
-      <el-table :data="items" size="small">
+      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table">
         <el-table-column prop="tx_id" min-width="220">
           <template #header><TooltipLabel label="tx_id" tooltip-key="incidents.txId" /></template>
         </el-table-column>
         <el-table-column prop="state" width="200">
           <template #header><TooltipLabel label="state" tooltip-key="incidents.state" /></template>
+          <template #default="scope">
+            <el-tag type="warning" size="small">{{ scope.row.state }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="initiator_pid" min-width="220">
           <template #header><TooltipLabel label="initiator" tooltip-key="incidents.initiator" /></template>
@@ -138,11 +177,12 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         <el-table-column prop="age_seconds" width="120">
           <template #header><TooltipLabel label="age" tooltip-key="incidents.age" /></template>
           <template #default="scope">
-            <span :class="{ bad: isOverSla(scope.row) }">{{ scope.row.age_seconds }}s</span>
+            <span :class="{ bad: isOverSla(scope.row) }">{{ fmtAge(scope.row.age_seconds) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="sla_seconds" width="120">
           <template #header><TooltipLabel label="sla" tooltip-key="incidents.sla" /></template>
+          <template #default="scope">{{ fmtAge(scope.row.sla_seconds) }}</template>
         </el-table-column>
         <el-table-column label="actions" width="160">
           <template #default="scope">
@@ -150,7 +190,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
               size="small"
               type="danger"
               :loading="abortingTxId === scope.row.tx_id"
-              @click="forceAbort(scope.row)"
+              @click.stop="forceAbort(scope.row)"
             >
               Force abort
             </el-button>
@@ -171,6 +211,58 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       </div>
     </div>
   </el-card>
+
+  <el-drawer v-model="drawerOpen" title="Incident details" size="45%">
+    <div v-if="selected">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="Transaction ID">{{ selected.tx_id }}</el-descriptions-item>
+        <el-descriptions-item label="State">
+          <el-tag type="warning" size="small">{{ selected.state }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="Initiator PID">
+          <el-link type="primary" @click="goParticipant(selected.initiator_pid)">
+            {{ selected.initiator_pid }}
+          </el-link>
+        </el-descriptions-item>
+        <el-descriptions-item label="Equivalent">
+          <el-link type="primary" @click="goEquivalent(selected.equivalent)">
+            {{ selected.equivalent }}
+          </el-link>
+        </el-descriptions-item>
+        <el-descriptions-item label="Age">
+          <span :class="{ bad: isOverSla(selected) }">{{ fmtAge(selected.age_seconds) }}</span>
+          <span v-if="isOverSla(selected)" class="sla-warn"> (over SLA!)</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="SLA">{{ fmtAge(selected.sla_seconds) }}</el-descriptions-item>
+        <el-descriptions-item v-if="selected.created_at" label="Created At">
+          {{ fmtTs(selected.created_at) }}
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <el-divider>Related data</el-divider>
+
+      <div class="drawer-actions">
+        <el-button type="primary" size="small" @click="goParticipant(selected.initiator_pid)">
+          View initiator participant
+        </el-button>
+        <el-button size="small" @click="goAudit(selected.tx_id)">
+          View audit log
+        </el-button>
+      </div>
+
+      <el-divider>Actions</el-divider>
+
+      <div class="drawer-actions">
+        <el-button
+          type="danger"
+          :loading="abortingTxId === selected.tx_id"
+          @click="forceAbort(selected)"
+        >
+          Force abort transaction
+        </el-button>
+      </div>
+    </div>
+  </el-drawer>
 </template>
 
 <style scoped>
@@ -201,5 +293,17 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
 .bad {
   color: var(--el-color-danger);
   font-weight: 700;
+}
+.sla-warn {
+  color: var(--el-color-danger);
+  font-size: 12px;
+}
+.clickable-table :deep(tr) {
+  cursor: pointer;
+}
+.drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 </style>

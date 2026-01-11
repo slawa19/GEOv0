@@ -266,7 +266,7 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
     <el-card>
       <template #header>
         <div class="hdr">
-          <div>Recent audit log</div>
+          <TooltipLabel label="Recent audit log" tooltip-key="dashboard.recentAudit" />
           <el-button size="small" @click="go('/audit-log')">View all</el-button>
         </div>
       </template>

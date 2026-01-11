@@ -1,9 +1,20 @@
 export type TooltipKey =
+  | 'nav.dashboard'
+  | 'nav.integrity'
+  | 'nav.incidents'
+  | 'nav.trustlines'
+  | 'nav.graph'
+  | 'nav.participants'
+  | 'nav.config'
+  | 'nav.featureFlags'
+  | 'nav.auditLog'
+  | 'nav.equivalents'
   | 'dashboard.api'
   | 'dashboard.db'
   | 'dashboard.migrations'
   | 'dashboard.bottlenecks'
   | 'dashboard.incidentsOverSla'
+  | 'dashboard.recentAudit'
   | 'participants.pid'
   | 'participants.displayName'
   | 'participants.type'
@@ -22,7 +33,18 @@ export type TooltipKey =
   | 'incidents.eq'
   | 'incidents.age'
   | 'incidents.sla'
-  | 'page.auditLog'
+  | 'graph.eq'
+  | 'graph.status'
+  | 'graph.threshold'
+  | 'graph.layout'
+  | 'graph.type'
+  | 'graph.minDegree'
+  | 'graph.labels'
+  | 'graph.incidents'
+  | 'graph.hideIsolates'
+  | 'graph.search'
+  | 'graph.zoom'
+  | 'graph.legend'
   | 'audit.timestamp'
   | 'audit.actor'
   | 'audit.role'
@@ -44,6 +66,48 @@ export type TooltipContent = {
 
 // Keep content short and review-friendly.
 export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
+  // Navigation section tooltips
+  'nav.dashboard': {
+    title: 'Dashboard',
+    body: ['System health overview: API, DB, migrations status.', 'Shows trustline bottlenecks and incidents over SLA.'],
+  },
+  'nav.integrity': {
+    title: 'Integrity',
+    body: ['Data integrity checks: zero-sum balances, limits consistency.', 'Automated validation of network invariants.'],
+  },
+  'nav.incidents': {
+    title: 'Incidents',
+    body: ['Stuck transactions requiring manual intervention.', 'Sorted by age; admin can force-abort.'],
+  },
+  'nav.trustlines': {
+    title: 'Trustlines',
+    body: ['Credit lines between network participants.', 'Filter by equivalent, creditor, debtor, status.'],
+  },
+  'nav.graph': {
+    title: 'Network Graph',
+    body: ['Visual representation of the trust network.', 'Interactive graph with filtering and zoom.'],
+  },
+  'nav.participants': {
+    title: 'Participants',
+    body: ['Manage network participants.', 'View details, freeze/unfreeze accounts.'],
+  },
+  'nav.config': {
+    title: 'Config',
+    body: ['System configuration: limits, routing, policies.', 'Some keys require service restart.'],
+  },
+  'nav.featureFlags': {
+    title: 'Feature Flags',
+    body: ['Runtime feature toggles.', 'Enable/disable experimental features.'],
+  },
+  'nav.auditLog': {
+    title: 'Audit Log',
+    body: ['Administrative actions log.', 'Who, what, when, and why for all changes.'],
+  },
+  'nav.equivalents': {
+    title: 'Equivalents',
+    body: ['Currency/unit catalog (UAH, USD, POINT).', 'Precision and description for each.'],
+  },
+
   'dashboard.api': {
     title: 'API',
     body: ['Basic service health from /api/v1/health.', 'Used to validate that the backend is reachable.'],
@@ -65,6 +129,11 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
     title: 'Incidents over SLA',
     body: ['Transactions stuck beyond their SLA.', 'age_seconds > sla_seconds → over-SLA.'],
     links: [{ label: 'Open Incidents', to: { path: '/incidents' } }],
+  },
+  'dashboard.recentAudit': {
+    title: 'Recent audit log',
+    body: ['Latest 10 administrative actions.', 'Shows who did what and when.'],
+    links: [{ label: 'Open Audit Log', to: { path: '/audit-log' } }],
   },
 
   'participants.pid': {
@@ -150,14 +219,56 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
     body: ['Allowed time budget (seconds).', 'age > sla → over-SLA.'],
   },
 
-  'page.auditLog': {
-    title: 'Audit Log',
-    body: [
-      'Log of all administrative actions on system objects.',
-      'Records: create/update/delete of participants, trustlines, equivalents, config.',
-      'Each entry includes: who (actor), what (action), target (object), when (timestamp), and why (reason).',
-      'Use search/filter to find changes related to specific objects.',
-    ],
+  'graph.eq': {
+    title: 'Equivalent filter',
+    body: ['Filters edges by equivalent code.', 'ALL shows all equivalents present in fixtures.'],
+    links: [{ label: 'Open Equivalents', to: { path: '/equivalents' } }],
+  },
+  'graph.status': {
+    title: 'Status filter',
+    body: ['Filters edges by trustline status.'],
+    links: [{ label: 'Open Trustlines', to: { path: '/trustlines' } }],
+  },
+  'graph.threshold': {
+    title: 'Bottleneck threshold',
+    body: ['A trustline is a bottleneck when available / limit is below this value.', 'Uses decimal-safe math (no floats).'],
+  },
+  'graph.layout': {
+    title: 'Layout',
+    body: ['Controls how the graph is arranged.', 'fcose is good for clustered networks; grid/circle are deterministic.'],
+  },
+  'graph.type': {
+    title: 'Participant type',
+    body: ['Filters nodes by participant type (e.g., person vs business).', 'Edges are shown only when both endpoints are kept.'],
+  },
+  'graph.minDegree': {
+    title: 'Minimum degree',
+    body: ['Hides low-connected nodes to reduce noise.', 'Degree is computed after current filters are applied.'],
+  },
+  'graph.labels': {
+    title: 'Labels',
+    body: ['Shows display name + PID on nodes.', 'Disable for performance on large graphs.'],
+  },
+  'graph.incidents': {
+    title: 'Incidents',
+    body: ['Highlights nodes/edges related to incident initiators.', 'Dashed edges indicate the initiator side.'],
+    links: [{ label: 'Open Incidents', to: { path: '/incidents' } }],
+  },
+  'graph.hideIsolates': {
+    title: 'Hide isolates',
+    body: ['When enabled, shows only participants that appear in trustlines after filtering.'],
+  },
+  'graph.search': {
+    title: 'Search PID',
+    body: ['Centers on a PID if it exists in the current graph.', 'Tip: use it together with “Fit neighborhood” to inspect local structure.'],
+  },
+  'graph.zoom': {
+    title: 'Zoom helpers',
+    body: ['Fit: zoom to full graph.', 'Neighborhood: zoom to 1-hop around PID (search or selected).', 'Component: zoom to the whole connected component of PID.'],
+  },
+  'graph.legend': {
+    title: 'Legend',
+    body: ['Explains node/edge colors and styles used in this visualization.'],
   },
 
   'audit.timestamp': {

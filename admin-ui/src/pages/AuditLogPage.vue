@@ -100,7 +100,7 @@ watch(q, () => {
   <el-card>
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Audit Log" tooltip-key="page.auditLog" />
+        <TooltipLabel label="Audit Log" tooltip-key="nav.auditLog" />
         <el-input v-model="q" size="small" clearable placeholder="Filter (id/actor/action/object/reason)" style="width: 320px" />
       </div>
     </template>

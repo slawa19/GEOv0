@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
 import { useAuthStore } from '../stores/auth'
+import TooltipLabel from '../ui/TooltipLabel.vue'
 
 type RowKind = 'boolean' | 'number' | 'string' | 'json'
 type Row = { key: string; kind: RowKind; value: unknown }
@@ -152,7 +153,7 @@ watch(
   <el-card>
     <template #header>
       <div class="hdr">
-        <div>Config</div>
+        <TooltipLabel label="Config" tooltip-key="nav.config" />
         <div class="hdr__actions">
           <el-input
             v-model="filterKey"

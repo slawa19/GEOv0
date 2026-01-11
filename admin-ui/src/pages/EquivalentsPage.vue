@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
 import { useAuthStore } from '../stores/auth'
+import TooltipLabel from '../ui/TooltipLabel.vue'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 type UsageCounts = { trustlines: number; incidents: number }
@@ -196,7 +197,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
   <el-card>
     <template #header>
       <div class="hdr">
-        <div>Equivalents</div>
+        <TooltipLabel label="Equivalents" tooltip-key="nav.equivalents" />
         <div class="hdr__actions">
           <el-button :disabled="authStore.isReadOnly" type="primary" @click="openCreate">Create</el-button>
           <el-switch v-model="includeInactive" active-text="Include inactive" />

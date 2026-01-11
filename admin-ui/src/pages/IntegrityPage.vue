@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
+import TooltipLabel from '../ui/TooltipLabel.vue'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -56,7 +57,7 @@ onMounted(() => void load())
   <el-card>
     <template #header>
       <div class="hdr">
-        <div>Integrity</div>
+        <TooltipLabel label="Integrity" tooltip-key="nav.integrity" />
         <el-button :loading="verifyLoading" type="primary" @click="verify">Verify</el-button>
       </div>
     </template>

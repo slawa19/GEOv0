@@ -275,14 +275,17 @@ export const mockApi = {
     page?: number
     per_page?: number
     status?: string
+    type?: string
     q?: string
   }): Promise<ApiEnvelope<Paginated<Participant>>> {
     return withScenario('/api/v1/admin/participants', async () => {
       const all = await getParticipantsDataset()
       const q = (params.q || '').trim().toLowerCase()
       const status = (params.status || '').trim().toLowerCase()
+      const type = (params.type || '').trim().toLowerCase()
       const filtered = all.filter((p) => {
         if (status && p.status.toLowerCase() !== status) return false
+        if (type && p.type.toLowerCase() !== type) return false
         if (q && !(p.pid.toLowerCase().includes(q) || p.display_name.toLowerCase().includes(q))) return false
         return true
       })

@@ -4,6 +4,31 @@ import { useRoute, useRouter } from 'vue-router'
 import { useHealthStore } from '../stores/health'
 import { useAuthStore } from '../stores/auth'
 import { useConfigStore } from '../stores/config'
+import { TOOLTIPS, type TooltipKey } from '../content/tooltips'
+
+type NavItem = {
+  path: string
+  label: string
+  tooltipKey: TooltipKey
+}
+
+const navItems: NavItem[] = [
+  { path: '/dashboard', label: 'Dashboard', tooltipKey: 'nav.dashboard' },
+  { path: '/integrity', label: 'Integrity', tooltipKey: 'nav.integrity' },
+  { path: '/incidents', label: 'Incidents', tooltipKey: 'nav.incidents' },
+  { path: '/trustlines', label: 'Trustlines', tooltipKey: 'nav.trustlines' },
+  { path: '/graph', label: 'Network Graph', tooltipKey: 'nav.graph' },
+  { path: '/participants', label: 'Participants', tooltipKey: 'nav.participants' },
+  { path: '/config', label: 'Config', tooltipKey: 'nav.config' },
+  { path: '/feature-flags', label: 'Feature Flags', tooltipKey: 'nav.featureFlags' },
+  { path: '/audit-log', label: 'Audit Log', tooltipKey: 'nav.auditLog' },
+  { path: '/equivalents', label: 'Equivalents', tooltipKey: 'nav.equivalents' },
+]
+
+function getTooltipContent(key: TooltipKey): string {
+  const t = TOOLTIPS[key]
+  return t.body.join(' ')
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -61,16 +86,18 @@ function navigate(path: string) {
       </div>
 
       <el-menu :default-active="activePath" router class="menu">
-        <el-menu-item index="/dashboard" @click="navigate('/dashboard')">Dashboard</el-menu-item>
-        <el-menu-item index="/integrity" @click="navigate('/integrity')">Integrity</el-menu-item>
-        <el-menu-item index="/incidents" @click="navigate('/incidents')">Incidents</el-menu-item>
-        <el-menu-item index="/trustlines" @click="navigate('/trustlines')">Trustlines</el-menu-item>
-        <el-menu-item index="/graph" @click="navigate('/graph')">Network Graph</el-menu-item>
-        <el-menu-item index="/participants" @click="navigate('/participants')">Participants</el-menu-item>
-        <el-menu-item index="/config" @click="navigate('/config')">Config</el-menu-item>
-        <el-menu-item index="/feature-flags" @click="navigate('/feature-flags')">Feature Flags</el-menu-item>
-        <el-menu-item index="/audit-log" @click="navigate('/audit-log')">Audit Log</el-menu-item>
-        <el-menu-item index="/equivalents" @click="navigate('/equivalents')">Equivalents</el-menu-item>
+        <el-tooltip
+          v-for="item in navItems"
+          :key="item.path"
+          :content="getTooltipContent(item.tooltipKey)"
+          placement="right"
+          :show-after="400"
+          effect="dark"
+        >
+          <el-menu-item :index="item.path" @click="navigate(item.path)">
+            {{ item.label }}
+          </el-menu-item>
+        </el-tooltip>
       </el-menu>
     </el-aside>
 

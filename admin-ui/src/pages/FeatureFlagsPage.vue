@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
+import TooltipLabel from '../ui/TooltipLabel.vue'
 
 type FlagRow = { key: string; value: boolean; original: boolean }
 
@@ -68,7 +69,7 @@ onMounted(() => void load())
   <el-card>
     <template #header>
       <div class="hdr">
-        <div>Feature Flags</div>
+        <TooltipLabel label="Feature Flags" tooltip-key="nav.featureFlags" />
         <el-tag type="info">dirty: {{ dirtyCount }}</el-tag>
       </div>
     </template>

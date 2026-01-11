@@ -6,6 +6,7 @@ import fcose from 'cytoscape-fcose'
 
 import { loadFixtureJson } from '../api/fixtures'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
+import TooltipLabel from '../ui/TooltipLabel.vue'
 
 cytoscape.use(fcose)
 
@@ -53,9 +54,13 @@ const eq = ref<string>('ALL')
 const statusFilter = ref<string[]>(['active', 'frozen', 'closed'])
 const threshold = ref<string>('0.10')
 
+const typeFilter = ref<string[]>(['person', 'business'])
+const minDegree = ref<number>(0)
+
 const showLabels = ref(false)
 const showIncidents = ref(true)
 const hideIsolates = ref(true)
+const showLegend = ref(true)
 
 const layoutName = ref<'fcose' | 'grid' | 'circle'>('fcose')
 
@@ -114,6 +119,10 @@ const incidentRatioByPid = computed(() => {
 function buildElements() {
   const tls = filteredTrustlines.value
 
+  const allowedTypes = new Set((typeFilter.value || []).map((t) => String(t).toLowerCase()).filter(Boolean))
+  const minDeg = Math.max(0, Number(minDegree.value) || 0)
+  const focusPid = String(searchPid.value || '').trim()
+
   const pidSet = new Set<string>()
   for (const t of tls) {
     pidSet.add(t.from)
@@ -131,7 +140,30 @@ function buildElements() {
     if (p?.pid) pIndex.set(p.pid, p)
   }
 
-  const nodes = Array.from(pidSet).map((pid) => {
+  const prelim = new Set<string>()
+  for (const pid of pidSet) {
+    const p = pIndex.get(pid)
+    const t = String(p?.type || '').toLowerCase()
+    if (allowedTypes.size && t && !allowedTypes.has(t)) continue
+    prelim.add(pid)
+  }
+
+  const filteredEdges = tls.filter((t) => prelim.has(t.from) && prelim.has(t.to))
+
+  const degreeByPid = new Map<string, number>()
+  for (const t of filteredEdges) {
+    degreeByPid.set(t.from, (degreeByPid.get(t.from) || 0) + 1)
+    degreeByPid.set(t.to, (degreeByPid.get(t.to) || 0) + 1)
+  }
+
+  const finalPids = new Set<string>()
+  for (const pid of prelim) {
+    const deg = degreeByPid.get(pid) || 0
+    if (minDeg > 0 && deg < minDeg && pid !== focusPid) continue
+    finalPids.add(pid)
+  }
+
+  const nodes = Array.from(finalPids).map((pid) => {
     const p = pIndex.get(pid)
     const ratio = incidentRatioByPid.value.get(pid)
     return {
@@ -146,6 +178,7 @@ function buildElements() {
       },
       classes: [
         (p?.status || '').toLowerCase() ? `p-${(p?.status || '').toLowerCase()}` : '',
+        (p?.type || '').toLowerCase() ? `type-${(p?.type || '').toLowerCase()}` : '',
         showIncidents.value && (incidentRatioByPid.value.get(pid) || 0) > 0 ? 'has-incident' : '',
       ]
         .filter(Boolean)
@@ -153,7 +186,9 @@ function buildElements() {
     }
   })
 
-  const edges = tls.map((t, idx) => {
+  const edges = filteredEdges
+    .filter((t) => finalPids.has(t.from) && finalPids.has(t.to))
+    .map((t, idx) => {
     const bottleneck = t.status === 'active' && isBottleneck(t)
     const id = `tl_${idx}_${t.from}_${t.to}_${normEq(t.equivalent)}`
     const classes = [
@@ -203,8 +238,12 @@ function applyStyle() {
       },
     },
     { selector: 'node.p-active', style: { 'background-color': '#67c23a' } },
+    { selector: 'node.p-frozen', style: { 'background-color': '#e6a23c' } },
     { selector: 'node.p-suspended', style: { 'background-color': '#e6a23c' } },
+    { selector: 'node.p-banned', style: { 'background-color': '#f56c6c' } },
     { selector: 'node.p-deleted', style: { 'background-color': '#909399' } },
+
+    { selector: 'node.type-business', style: { shape: 'round-rectangle', 'border-width': 2, 'border-color': '#409eff' } },
 
     {
       selector: 'node.has-incident',
@@ -394,6 +433,11 @@ watch([eq, statusFilter, threshold, showLabels, showIncidents, hideIsolates], ()
   rebuildGraph({ fit: false })
 })
 
+watch([typeFilter, minDegree], () => {
+  if (!cy) return
+  rebuildGraph({ fit: false })
+})
+
 watch(layoutName, () => {
   if (!cy) return
   runLayout()
@@ -405,6 +449,11 @@ const statuses = [
   { label: 'closed', value: 'closed' },
 ]
 
+const typeOptions = [
+  { label: 'person', value: 'person' },
+  { label: 'business', value: 'business' },
+]
+
 const layoutOptions = [
   { label: 'fcose (force)', value: 'fcose' },
   { label: 'grid', value: 'grid' },
@@ -412,22 +461,78 @@ const layoutOptions = [
 ]
 
 const stats = computed(() => {
-  const tls = filteredTrustlines.value
-  const n = new Set<string>()
-  for (const t of tls) {
-    n.add(t.from)
-    n.add(t.to)
-  }
-  const bottlenecks = tls.filter((t) => t.status === 'active' && isBottleneck(t)).length
-  return { nodes: n.size, edges: tls.length, bottlenecks }
+  const { nodes, edges } = buildElements()
+  const bottlenecks = edges.filter((e) => e.data?.bottleneck === 1).length
+  return { nodes: nodes.length, edges: edges.length, bottlenecks }
 })
+
+function getZoomPid(): string | null {
+  const pid = String(searchPid.value || '').trim()
+  if (pid) return pid
+  if (selected.value && selected.value.kind === 'node') return selected.value.pid
+  return null
+}
+
+function fitNeighborhood() {
+  if (!cy) return
+  const pid = getZoomPid()
+  if (!pid) {
+    ElMessage.info('Set Search PID (or click a node)')
+    return
+  }
+
+  const n = cy.getElementById(pid)
+  if (!n || n.empty()) {
+    ElMessage.warning(`PID not found: ${pid}`)
+    return
+  }
+
+  const eles = (n as any).closedNeighborhood ? (n as any).closedNeighborhood() : n.neighborhood().union(n)
+  cy.animate({ fit: { eles, padding: 60 } }, { duration: 300 })
+}
+
+function fitComponent() {
+  if (!cy) return
+  const pid = getZoomPid()
+  if (!pid) {
+    ElMessage.info('Set Search PID (or click a node)')
+    return
+  }
+
+  const start = cy.getElementById(pid)
+  if (!start || start.empty()) {
+    ElMessage.warning(`PID not found: ${pid}`)
+    return
+  }
+
+  const visited = new Set<string>()
+  const q: NodeSingular[] = [start as unknown as NodeSingular]
+  let comp = cy.collection()
+
+  while (q.length) {
+    const cur = q.pop()!
+    const id = cur.id()
+    if (!id || visited.has(id)) continue
+    visited.add(id)
+    comp = comp.union(cur).union(cur.connectedEdges())
+    cur
+      .connectedEdges()
+      .connectedNodes()
+      .forEach((n: any) => {
+        const nn = n as unknown as NodeSingular
+        if (!visited.has(nn.id())) q.push(nn)
+      })
+  }
+
+  cy.animate({ fit: { eles: comp, padding: 60 } }, { duration: 300 })
+}
 </script>
 
 <template>
   <el-card>
     <template #header>
       <div class="hdr">
-        <div>Network Graph</div>
+        <TooltipLabel label="Network Graph" tooltip-key="nav.graph" />
         <div class="hdr__right">
           <el-tag type="info">nodes: {{ stats.nodes }}</el-tag>
           <el-tag type="info">edges: {{ stats.edges }}</el-tag>
@@ -439,35 +544,83 @@ const stats = computed(() => {
     <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
 
     <div class="controls">
+      <TooltipLabel label="eq" tooltip-key="graph.eq" />
       <el-select v-model="eq" size="small" style="width: 160px">
         <el-option v-for="c in availableEquivalents" :key="c" :label="c" :value="c" />
       </el-select>
 
+      <TooltipLabel label="status" tooltip-key="graph.status" />
       <el-select v-model="statusFilter" multiple collapse-tags collapse-tags-tooltip size="small" style="width: 220px">
         <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
 
+      <TooltipLabel label="threshold" tooltip-key="graph.threshold" />
       <el-input v-model="threshold" size="small" style="width: 120px" placeholder="0.10" />
 
+      <TooltipLabel label="layout" tooltip-key="graph.layout" />
       <el-select v-model="layoutName" size="small" style="width: 150px">
         <el-option v-for="o in layoutOptions" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
 
-      <el-switch v-model="showLabels" size="small" active-text="Labels" />
-      <el-switch v-model="showIncidents" size="small" active-text="Incidents" />
-      <el-switch v-model="hideIsolates" size="small" active-text="Hide isolates" />
+      <TooltipLabel label="type" tooltip-key="graph.type" />
+      <el-select v-model="typeFilter" multiple collapse-tags collapse-tags-tooltip size="small" style="width: 210px">
+        <el-option v-for="t in typeOptions" :key="t.value" :label="t.label" :value="t.value" />
+      </el-select>
+
+      <TooltipLabel label="min degree" tooltip-key="graph.minDegree" />
+      <el-input-number v-model="minDegree" size="small" :min="0" :max="20" controls-position="right" style="width: 140px" />
+
+      <TooltipLabel label="Labels" tooltip-key="graph.labels" />
+      <el-switch v-model="showLabels" size="small" />
+      <TooltipLabel label="Incidents" tooltip-key="graph.incidents" />
+      <el-switch v-model="showIncidents" size="small" />
+      <TooltipLabel label="Hide isolates" tooltip-key="graph.hideIsolates" />
+      <el-switch v-model="hideIsolates" size="small" />
+      <TooltipLabel label="Legend" tooltip-key="graph.legend" />
+      <el-switch v-model="showLegend" size="small" />
 
       <div class="spacer" />
 
-      <el-input v-model="searchPid" size="small" style="width: 260px" placeholder="Search PID" @keyup.enter="focusSearch" />
+      <TooltipLabel label="Search PID" tooltip-key="graph.search" />
+      <el-input v-model="searchPid" size="small" style="width: 260px" placeholder="PID_U0006_b54cda26" @keyup.enter="focusSearch" />
       <el-button size="small" @click="focusSearch">Find</el-button>
+      <TooltipLabel label="Zoom" tooltip-key="graph.zoom" />
       <el-button size="small" @click="fit">Fit</el-button>
+      <el-button size="small" @click="fitNeighborhood">Fit neighborhood</el-button>
+      <el-button size="small" @click="fitComponent">Fit component</el-button>
       <el-button size="small" @click="runLayout">Re-layout</el-button>
     </div>
 
     <el-skeleton v-if="loading" animated :rows="6" />
 
     <div v-else class="cy-wrap">
+      <div v-if="showLegend" class="legend">
+        <div class="legend__title">Legend</div>
+        <div class="legend__row">
+          <span class="swatch swatch--node-active" /> active participant
+        </div>
+        <div class="legend__row">
+          <span class="swatch swatch--node-frozen" /> frozen participant
+        </div>
+        <div class="legend__row">
+          <span class="swatch swatch--node-business" /> business (node shape)
+        </div>
+        <div class="legend__row">
+          <span class="swatch swatch--edge-active" /> active trustline
+        </div>
+        <div class="legend__row">
+          <span class="swatch swatch--edge-frozen" /> frozen trustline
+        </div>
+        <div class="legend__row">
+          <span class="swatch swatch--edge-closed" /> closed trustline
+        </div>
+        <div class="legend__row">
+          <span class="swatch swatch--edge-bottleneck" /> bottleneck (thick)
+        </div>
+        <div class="legend__row">
+          <span class="swatch swatch--edge-incident" /> incident initiator side (dashed)
+        </div>
+      </div>
       <div ref="cyRoot" class="cy" />
     </div>
   </el-card>
@@ -533,8 +686,87 @@ const stats = computed(() => {
 }
 
 .cy-wrap {
+  position: relative;
   height: calc(100vh - 260px);
   min-height: 520px;
+}
+
+.legend {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  background: rgba(17, 19, 23, 0.85);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  min-width: 240px;
+  backdrop-filter: blur(4px);
+}
+
+.legend__title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.legend__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.swatch {
+  display: inline-block;
+  width: 18px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.swatch--node-active {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #67c23a;
+}
+
+.swatch--node-frozen {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #e6a23c;
+}
+
+.swatch--node-business {
+  width: 14px;
+  height: 10px;
+  border-radius: 4px;
+  background: #1f2d3d;
+  border: 2px solid #409eff;
+}
+
+.swatch--edge-active {
+  background: #409eff;
+}
+
+.swatch--edge-frozen {
+  background: #909399;
+}
+
+.swatch--edge-closed {
+  background: #a3a6ad;
+}
+
+.swatch--edge-bottleneck {
+  background: #f56c6c;
+  height: 10px;
+}
+
+.swatch--edge-incident {
+  background: repeating-linear-gradient(90deg, #606266 0 4px, transparent 4px 7px);
 }
 
 .cy {

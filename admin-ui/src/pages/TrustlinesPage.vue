@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
@@ -7,6 +8,9 @@ import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import { useConfigStore } from '../stores/config'
+
+const router = useRouter()
+const route = useRoute()
 
 type Trustline = {
   equivalent: string
@@ -88,6 +92,14 @@ function openRow(row: Trustline) {
   drawerOpen.value = true
 }
 
+function goParticipant(pid: string) {
+  void router.push({ path: '/participants', query: { ...route.query, q: pid } })
+}
+
+function goEquivalent(eq: string) {
+  void router.push({ path: '/equivalents', query: { ...route.query, q: eq } })
+}
+
 onMounted(() => void load())
 watch(page, () => void load())
 watch(perPage, () => {
@@ -111,7 +123,7 @@ const statusOptions = computed(() => [
   <el-card>
     <template #header>
       <div class="hdr">
-        <div>Trustlines</div>
+        <TooltipLabel label="Trustlines" tooltip-key="nav.trustlines" />
         <div class="filters">
           <el-input v-model="equivalent" size="small" placeholder="Equivalent (e.g. UAH)" clearable style="width: 170px" />
           <el-input v-model="creditor" size="small" placeholder="Creditor PID (from)" clearable style="width: 220px" />
@@ -177,21 +189,60 @@ const statusOptions = computed(() => [
     </div>
   </el-card>
 
-  <el-drawer v-model="drawerOpen" title="Trustline details" size="40%">
+  <el-drawer v-model="drawerOpen" title="Trustline details" size="45%">
     <div v-if="selected">
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="equivalent">{{ selected.equivalent }}</el-descriptions-item>
-        <el-descriptions-item label="from">{{ selected.from }}</el-descriptions-item>
-        <el-descriptions-item label="to">{{ selected.to }}</el-descriptions-item>
-        <el-descriptions-item label="limit">{{ money(selected.limit) }}</el-descriptions-item>
-        <el-descriptions-item label="used">{{ money(selected.used) }}</el-descriptions-item>
-        <el-descriptions-item label="available">{{ money(selected.available) }}</el-descriptions-item>
-        <el-descriptions-item label="status">{{ selected.status }}</el-descriptions-item>
-        <el-descriptions-item label="created_at">{{ fmtTs(selected.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="policy">
+        <el-descriptions-item label="Equivalent">
+          <el-link type="primary" @click="goEquivalent(selected.equivalent)">
+            {{ selected.equivalent }}
+          </el-link>
+        </el-descriptions-item>
+        <el-descriptions-item label="From (Creditor)">
+          <el-link type="primary" @click="goParticipant(selected.from)">
+            {{ selected.from }}
+          </el-link>
+          <span v-if="selected.from_display_name" class="display-name">
+            ({{ selected.from_display_name }})
+          </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="To (Debtor)">
+          <el-link type="primary" @click="goParticipant(selected.to)">
+            {{ selected.to }}
+          </el-link>
+          <span v-if="selected.to_display_name" class="display-name">
+            ({{ selected.to_display_name }})
+          </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="Limit">{{ money(selected.limit) }}</el-descriptions-item>
+        <el-descriptions-item label="Used">{{ money(selected.used) }}</el-descriptions-item>
+        <el-descriptions-item label="Available">
+          <span :class="{ bottleneck: isBottleneck(selected) }">{{ money(selected.available) }}</span>
+          <el-tag v-if="isBottleneck(selected)" type="danger" size="small" style="margin-left: 8px">bottleneck</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="Status">
+          <el-tag
+            :type="selected.status === 'active' ? 'success' : selected.status === 'frozen' ? 'warning' : 'info'"
+            size="small"
+          >
+            {{ selected.status }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="Created At">{{ fmtTs(selected.created_at) }}</el-descriptions-item>
+        <el-descriptions-item label="Policy">
           <pre class="json">{{ JSON.stringify(selected.policy, null, 2) }}</pre>
         </el-descriptions-item>
       </el-descriptions>
+
+      <el-divider>Related participants</el-divider>
+
+      <div class="drawer-actions">
+        <el-button type="primary" size="small" @click="goParticipant(selected.from)">
+          View creditor (from)
+        </el-button>
+        <el-button type="primary" size="small" @click="goParticipant(selected.to)">
+          View debtor (to)
+        </el-button>
+      </div>
     </div>
   </el-drawer>
 </template>
@@ -230,5 +281,14 @@ const statusOptions = computed(() => [
 .json {
   margin: 0;
   font-size: 12px;
+}
+.display-name {
+  color: var(--el-text-color-secondary);
+  margin-left: 4px;
+}
+.drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 </style>
