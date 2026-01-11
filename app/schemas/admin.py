@@ -84,3 +84,18 @@ class AdminEquivalentUpdateRequest(BaseModel):
     metadata: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
     reason: Optional[str] = None
+
+
+class AdminEquivalentDeleteRequest(BaseModel):
+    reason: str
+
+
+class AdminEquivalentUsageResponse(BaseModel):
+    code: str
+    trustlines: int
+    debts: int
+    integrity_checkpoints: int
+
+
+class AdminDeleteResponse(BaseModel):
+    deleted: str

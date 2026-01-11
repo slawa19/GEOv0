@@ -7,6 +7,7 @@ import { mockApi } from '../api/mockApi'
 import { useAuthStore } from '../stores/auth'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
+type UsageCounts = { trustlines: number; incidents: number }
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -23,6 +24,30 @@ const editing = ref<Equivalent | null>(null)
 
 const createForm = reactive({ code: '', precision: 2, description: '', is_active: true })
 const editForm = reactive({ precision: 2, description: '' })
+
+const usageByCode = reactive<Record<string, UsageCounts | undefined>>({})
+const usageLoadingByCode = reactive<Record<string, boolean | undefined>>({})
+
+async function warmUsage(code: string) {
+  const key = String(code || '').trim().toUpperCase()
+  if (!key) return
+  if (usageByCode[key]) return
+  if (usageLoadingByCode[key]) return
+
+  usageLoadingByCode[key] = true
+  try {
+    const usage = assertSuccess(await mockApi.getEquivalentUsage(key))
+    usageByCode[key] = { trustlines: usage.trustlines, incidents: usage.incidents }
+  } catch {
+    // best-effort only
+  } finally {
+    usageLoadingByCode[key] = false
+  }
+}
+
+function onCellMouseEnter(row: Equivalent) {
+  void warmUsage(row.code)
+}
 
 async function load() {
   loading.value = true
@@ -113,6 +138,50 @@ async function setActive(row: Equivalent, next: boolean) {
   }
 }
 
+async function deleteEq(row: Equivalent) {
+  let usageLine = ''
+  try {
+    const usage = assertSuccess(await mockApi.getEquivalentUsage(row.code))
+    usageLine = `Used by ${usage.trustlines} trustlines and ${usage.incidents} incidents.`
+  } catch {
+    usageLine = ''
+  }
+
+  let reason: string
+  try {
+    reason = await ElMessageBox.prompt(
+      [usageLine, 'This permanently deletes the equivalent. This cannot be undone.', '', 'Reason (required)']
+        .filter(Boolean)
+        .join('\n'),
+      `Delete ${row.code}`,
+      {
+        confirmButtonText: 'Delete',
+        cancelButtonText: 'Cancel',
+        inputPlaceholder: 'e.g. cleanup unused unit',
+        inputValidator: (v) => (String(v || '').trim().length > 0 ? true : 'reason is required'),
+        type: 'warning',
+      },
+    ).then((r) => r.value)
+  } catch {
+    return
+  }
+
+  try {
+    assertSuccess(await mockApi.deleteEquivalent(row.code, reason))
+    ElMessage.success(`Deleted ${row.code}`)
+    includeInactive.value = true
+    await load()
+  } catch (e: any) {
+    const t = e?.details?.trustlines
+    const i = e?.details?.incidents
+    if (typeof t === 'number' || typeof i === 'number') {
+      ElMessage.error(`${e?.message || 'Delete failed'} (trustlines: ${t ?? 0}, incidents: ${i ?? 0})`)
+    } else {
+      ElMessage.error(e?.message || 'Delete failed')
+    }
+  }
+}
+
 function goAudit(row: Equivalent) {
   void router.push({ path: '/audit-log', query: { code: row.code, q: row.code } })
 }
@@ -142,8 +211,20 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
     <el-empty v-else-if="items.length === 0" description="No equivalents" />
 
     <div v-else>
-      <el-table :data="items" size="small">
-        <el-table-column prop="code" label="code" width="120" />
+      <el-table :data="items" size="small" @cell-mouse-enter="onCellMouseEnter">
+        <el-table-column prop="code" label="code" width="160">
+          <template #default="scope">
+            <div class="code">
+              <div class="code__main">{{ scope.row.code }}</div>
+              <div class="code__sub" v-if="usageByCode[scope.row.code]">
+                Used by {{ usageByCode[scope.row.code]!.trustlines }} TL / {{ usageByCode[scope.row.code]!.incidents }} Inc
+              </div>
+              <div class="code__sub" v-else-if="usageLoadingByCode[scope.row.code]">
+                Loading usage…
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="precision" label="precision" width="120" />
         <el-table-column prop="description" label="description" min-width="320" />
         <el-table-column prop="is_active" label="active" width="120">
@@ -152,7 +233,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             <el-tag v-else type="info">no</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="actions" width="260">
+        <el-table-column label="actions" width="330">
           <template #default="scope">
             <el-button size="small" :disabled="authStore.isReadOnly" @click="openEdit(scope.row)">Edit</el-button>
             <el-button
@@ -172,6 +253,15 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
               @click="setActive(scope.row, true)"
             >
               Activate
+            </el-button>
+            <el-button
+              v-if="!scope.row.is_active"
+              size="small"
+              type="danger"
+              :disabled="authStore.isReadOnly"
+              @click="deleteEq(scope.row)"
+            >
+              Delete
             </el-button>
             <el-button size="small" @click="goAudit(scope.row)">Audit</el-button>
           </template>
@@ -237,5 +327,19 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
   color: var(--el-text-color-secondary);
   font-size: 12px;
   margin-bottom: 10px;
+}
+
+.code {
+  line-height: 1.15;
+}
+
+.code__main {
+  font-weight: 600;
+}
+
+.code__sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
 }
 </style>

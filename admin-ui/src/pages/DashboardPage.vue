@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiException, assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
-import { isRatioBelowThreshold } from '../utils/decimal'
+import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 
 type Trustline = {
@@ -82,6 +82,10 @@ async function loadAudit() {
 
 function isBottleneck(t: Trustline): boolean {
   return isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: threshold.value })
+}
+
+function money(v: string): string {
+  return formatDecimalFixed(v, 2)
 }
 
 async function loadBottlenecks() {
@@ -215,10 +219,12 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
             <el-table-column prop="equivalent" label="eq" width="80" />
             <el-table-column prop="from" label="from" min-width="180" />
             <el-table-column prop="to" label="to" min-width="180" />
-            <el-table-column prop="limit" label="limit" width="110" />
+            <el-table-column prop="limit" label="limit" width="110">
+              <template #default="scope">{{ money(scope.row.limit) }}</template>
+            </el-table-column>
             <el-table-column prop="available" label="avail" width="110">
               <template #default="scope">
-                <span class="bad">{{ scope.row.available }}</span>
+                <span class="bad">{{ money(scope.row.available) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="status" label="status" width="100" />

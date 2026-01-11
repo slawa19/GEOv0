@@ -146,6 +146,30 @@ async function getAuditLogDataset(): Promise<AuditLogEntry[]> {
   return mockAuditLog
 }
 
+function normalizeEqCode(code: string): string {
+  return (code || '').trim().toUpperCase()
+}
+
+async function getTrustlinesDataset(): Promise<Trustline[]> {
+  return await loadJson<Trustline[]>('datasets/trustlines.json')
+}
+
+async function getIncidentsDataset(): Promise<Incident[]> {
+  const ds = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
+  return ds.items
+}
+
+async function getEquivalentUsageCounts(code: string): Promise<{ trustlines: number; incidents: number }> {
+  const key = normalizeEqCode(code)
+  if (!key) return { trustlines: 0, incidents: 0 }
+
+  const [trustlines, incidents] = await Promise.all([getTrustlinesDataset(), getIncidentsDataset()])
+  return {
+    trustlines: trustlines.filter((t) => normalizeEqCode(t.equivalent) === key).length,
+    incidents: incidents.filter((i) => normalizeEqCode(i.equivalent) === key).length,
+  }
+}
+
 async function appendAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp' | 'actor_role'> & { actor_role?: string }) {
   const all = await getAuditLogDataset()
   const full: AuditLogEntry = {
@@ -322,14 +346,14 @@ export const mockApi = {
     return withScenario('/api/v1/admin/trustlines', async () => {
       const all = await loadJson<Trustline[]>('datasets/trustlines.json')
       const eq = (params.equivalent || '').trim().toUpperCase()
-      const creditor = (params.creditor || '').trim()
-      const debtor = (params.debtor || '').trim()
+      const creditor = (params.creditor || '').trim().toLowerCase()
+      const debtor = (params.debtor || '').trim().toLowerCase()
       const status = (params.status || '').trim().toLowerCase()
 
       const filtered = all.filter((t) => {
-        if (eq && t.equivalent !== eq) return false
-        if (creditor && t.from !== creditor) return false
-        if (debtor && t.to !== debtor) return false
+        if (eq && !t.equivalent.toUpperCase().includes(eq)) return false
+        if (creditor && !t.from.toLowerCase().includes(creditor)) return false
+        if (debtor && !t.to.toLowerCase().includes(debtor)) return false
         if (status && t.status.toLowerCase() !== status) return false
         return true
       })
@@ -433,6 +457,51 @@ export const mockApi = {
         after_state: { ...eq },
       })
       return { success: true, data: { updated: eq } }
+    })
+  },
+
+  async getEquivalentUsage(code: string): Promise<ApiEnvelope<{ code: string; trustlines: number; incidents: number }>> {
+    return withScenario('/api/v1/admin/equivalents/usage', async () => {
+      const key = normalizeEqCode(code)
+      if (!key) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'code is required' } }
+      const counts = await getEquivalentUsageCounts(key)
+      return { success: true, data: { code: key, ...counts } }
+    })
+  },
+
+  async deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<{ deleted: string }>> {
+    return withScenario('/api/v1/admin/equivalents/delete', async () => {
+      if (roleFromLocalStorage() === 'auditor') return { success: false, error: { code: 'FORBIDDEN', message: 'read-only' } }
+      if (!String(reason || '').trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
+
+      const key = normalizeEqCode(code)
+      if (!key) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'code is required' } }
+
+      const all = await getEquivalentsDataset()
+      const idx = all.findIndex((e) => e.code === key)
+      if (idx < 0) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
+
+      const before = { ...all[idx] }
+      if (before.is_active) return { success: false, error: { code: 'CONFLICT', message: 'Deactivate before delete' } }
+
+      const usage = await getEquivalentUsageCounts(key)
+      if (usage.trustlines > 0 || usage.incidents > 0) {
+        return { success: false, error: { code: 'CONFLICT', message: 'Equivalent is in use', details: usage } }
+      }
+
+      all.splice(idx, 1)
+
+      await appendAuditLog({
+        actor_id: 'admin-ui',
+        action: 'equivalent.delete',
+        object_type: 'equivalent',
+        object_id: key,
+        reason,
+        before_state: before,
+        after_state: null,
+      })
+
+      return { success: true, data: { deleted: key } }
     })
   },
 

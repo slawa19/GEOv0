@@ -3,16 +3,19 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHealthStore } from '../stores/health'
 import { useAuthStore } from '../stores/auth'
+import { useConfigStore } from '../stores/config'
 
 const route = useRoute()
 const router = useRouter()
 
 const healthStore = useHealthStore()
 const authStore = useAuthStore()
+const configStore = useConfigStore()
 
 onMounted(() => {
   healthStore.startPolling(15000)
   authStore.load()
+  void configStore.load()
 })
 
 const scenario = computed({

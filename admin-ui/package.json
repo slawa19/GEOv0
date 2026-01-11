@@ -3,7 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
+    "preinstall": "node ./scripts/check-node-version.cjs",
     "sync:fixtures": "node scripts/sync-fixtures.mjs",
     "predev": "npm run sync:fixtures",
     "dev": "vite",

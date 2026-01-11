@@ -6,5 +6,6 @@
   "routing.multipath_mode": "auto",
   "clearing.trigger_cycles_max_length": 6,
   "limits.default_trustline_limit": "1000.00",
-  "observability.log_level": "INFO"
+  "observability.log_level": "INFO",
+  "ui.timezone": "UTC"
 }

@@ -4,21 +4,27 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.config import settings
 from app.db.models.audit_log import AuditLog
 from app.db.models.equivalent import Equivalent as EquivalentModel
+from app.db.models.debt import Debt
+from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 from app.schemas.admin import (
     AdminAuditLogResponse,
     AdminConfigPatchRequest,
     AdminConfigPatchResponse,
     AdminConfigResponse,
     AdminEquivalentCreateRequest,
+    AdminEquivalentDeleteRequest,
     AdminEquivalentUpdateRequest,
+    AdminEquivalentUsageResponse,
+    AdminDeleteResponse,
     AdminFeatureFlags,
     AdminFeatureFlagsPatchRequest,
     AdminMigrationsStatus,
@@ -28,7 +34,8 @@ from app.schemas.equivalents import Equivalent as EquivalentSchema
 from app.schemas.equivalents import EquivalentsList
 from app.schemas.trustline import TrustLinesList
 from app.core.trustlines.service import TrustLineService
-from app.utils.exceptions import BadRequestException, NotFoundException
+from app.utils.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.utils.validation import validate_equivalent_code
 
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
@@ -397,6 +404,93 @@ async def admin_update_equivalent(
     )
 
     return EquivalentSchema.model_validate(eq)
+
+
+async def _equivalent_usage_counts(db: AsyncSession, *, equivalent_id) -> dict[str, int]:
+    trustlines = (
+        await db.execute(select(func.count()).select_from(TrustLine).where(TrustLine.equivalent_id == equivalent_id))
+    ).scalar_one()
+    debts = (await db.execute(select(func.count()).select_from(Debt).where(Debt.equivalent_id == equivalent_id))).scalar_one()
+    integrity_checkpoints = (
+        await db.execute(
+            select(func.count())
+            .select_from(IntegrityCheckpoint)
+            .where(IntegrityCheckpoint.equivalent_id == equivalent_id)
+        )
+    ).scalar_one()
+
+    return {
+        "trustlines": int(trustlines or 0),
+        "debts": int(debts or 0),
+        "integrity_checkpoints": int(integrity_checkpoints or 0),
+    }
+
+
+@router.get("/equivalents/{code}/usage", response_model=AdminEquivalentUsageResponse)
+async def admin_equivalent_usage(
+    code: str,
+    db: AsyncSession = Depends(deps.get_db),
+) -> AdminEquivalentUsageResponse:
+    normalized = str(code or "").strip().upper()
+    validate_equivalent_code(normalized)
+
+    eq = (
+        await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized))
+    ).scalar_one_or_none()
+    if eq is None:
+        raise NotFoundException(f"Equivalent {normalized} not found")
+
+    counts = await _equivalent_usage_counts(db, equivalent_id=eq.id)
+    return AdminEquivalentUsageResponse(code=eq.code, **counts)
+
+
+@router.delete("/equivalents/{code}", response_model=AdminDeleteResponse)
+async def admin_delete_equivalent(
+    code: str,
+    body: AdminEquivalentDeleteRequest,
+    request: Request,
+    db: AsyncSession = Depends(deps.get_db),
+) -> AdminDeleteResponse:
+    normalized = str(code or "").strip().upper()
+    validate_equivalent_code(normalized)
+
+    eq = (
+        await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized))
+    ).scalar_one_or_none()
+    if eq is None:
+        raise NotFoundException(f"Equivalent {normalized} not found")
+
+    if eq.is_active:
+        raise ConflictException("Deactivate equivalent before delete")
+
+    counts = await _equivalent_usage_counts(db, equivalent_id=eq.id)
+    if any(v > 0 for v in counts.values()):
+        raise ConflictException("Equivalent is in use", details=counts)
+
+    before = {
+        "code": eq.code,
+        "symbol": eq.symbol,
+        "description": eq.description,
+        "precision": eq.precision,
+        "metadata": eq.metadata_,
+        "is_active": eq.is_active,
+    }
+
+    await db.delete(eq)
+    await db.commit()
+
+    await _audit(
+        db,
+        request=request,
+        action="admin.equivalents.delete",
+        object_type="equivalent",
+        object_id=normalized,
+        reason=body.reason,
+        before_state=before,
+        after_state=None,
+    )
+
+    return AdminDeleteResponse(deleted=normalized)
 
 
 @router.get("/migrations", response_model=AdminMigrationsStatus, dependencies=[])

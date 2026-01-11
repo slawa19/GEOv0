@@ -3,8 +3,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { mockApi } from '../api/mockApi'
-import { isRatioBelowThreshold } from '../utils/decimal'
+import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
+import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import { useConfigStore } from '../stores/config'
 
 type Trustline = {
   equivalent: string
@@ -37,8 +39,19 @@ const items = ref<Trustline[]>([])
 const drawerOpen = ref(false)
 const selected = ref<Trustline | null>(null)
 
+const configStore = useConfigStore()
+const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
+
 function isBottleneck(row: Trustline): boolean {
   return isRatioBelowThreshold({ numerator: row.available, denominator: row.limit, threshold: threshold.value })
+}
+
+function money(v: string): string {
+  return formatDecimalFixed(v, 2)
+}
+
+function fmtTs(iso: string): string {
+  return formatIsoInTimeZone(iso, timeZone.value)
 }
 
 async function load() {
@@ -129,14 +142,16 @@ const statusOptions = computed(() => [
         </el-table-column>
         <el-table-column prop="limit" width="120">
           <template #header><TooltipLabel label="limit" tooltip-key="trustlines.limit" /></template>
+          <template #default="scope">{{ money(scope.row.limit) }}</template>
         </el-table-column>
         <el-table-column prop="used" width="120">
           <template #header><TooltipLabel label="used" tooltip-key="trustlines.used" /></template>
+          <template #default="scope">{{ money(scope.row.used) }}</template>
         </el-table-column>
         <el-table-column prop="available" width="120">
           <template #header><TooltipLabel label="available" tooltip-key="trustlines.available" /></template>
           <template #default="scope">
-            <span :class="{ bottleneck: isBottleneck(scope.row) }">{{ scope.row.available }}</span>
+            <span :class="{ bottleneck: isBottleneck(scope.row) }">{{ money(scope.row.available) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="status" width="110">
@@ -144,6 +159,7 @@ const statusOptions = computed(() => [
         </el-table-column>
         <el-table-column prop="created_at" width="190">
           <template #header><TooltipLabel label="created_at" tooltip-key="trustlines.createdAt" /></template>
+          <template #default="scope">{{ fmtTs(scope.row.created_at) }}</template>
         </el-table-column>
       </el-table>
 
@@ -167,10 +183,11 @@ const statusOptions = computed(() => [
         <el-descriptions-item label="equivalent">{{ selected.equivalent }}</el-descriptions-item>
         <el-descriptions-item label="from">{{ selected.from }}</el-descriptions-item>
         <el-descriptions-item label="to">{{ selected.to }}</el-descriptions-item>
-        <el-descriptions-item label="limit">{{ selected.limit }}</el-descriptions-item>
-        <el-descriptions-item label="used">{{ selected.used }}</el-descriptions-item>
-        <el-descriptions-item label="available">{{ selected.available }}</el-descriptions-item>
+        <el-descriptions-item label="limit">{{ money(selected.limit) }}</el-descriptions-item>
+        <el-descriptions-item label="used">{{ money(selected.used) }}</el-descriptions-item>
+        <el-descriptions-item label="available">{{ money(selected.available) }}</el-descriptions-item>
         <el-descriptions-item label="status">{{ selected.status }}</el-descriptions-item>
+        <el-descriptions-item label="created_at">{{ fmtTs(selected.created_at) }}</el-descriptions-item>
         <el-descriptions-item label="policy">
           <pre class="json">{{ JSON.stringify(selected.policy, null, 2) }}</pre>
         </el-descriptions-item>

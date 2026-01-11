@@ -29,6 +29,46 @@ function align(a: BigDec, b: BigDec): [bigint, bigint, number] {
   return [ai, bi, s]
 }
 
+function formatBigIntFixed(i: bigint, scale: number): string {
+  const neg = i < 0n
+  const abs = neg ? -i : i
+  const s = abs.toString()
+  if (scale <= 0) return (neg ? '-' : '') + s
+
+  const pad = scale + 1
+  const padded = s.length >= pad ? s : '0'.repeat(pad - s.length) + s
+  const head = padded.slice(0, padded.length - scale)
+  const frac = padded.slice(padded.length - scale)
+  return (neg ? '-' : '') + head + '.' + frac
+}
+
+// Formats a decimal string to exactly `digits` fraction digits (default 2).
+// Uses integer math and rounds half-up.
+export function formatDecimalFixed(input: string, digits = 2): string {
+  const dec = parseDecimal(String(input ?? ''))
+  if (!dec) return String(input ?? '')
+
+  const target = Math.max(0, Math.floor(digits))
+  if (dec.scale === target) return formatBigIntFixed(dec.i, target)
+
+  if (dec.scale < target) {
+    const mul = pow10(target - dec.scale)
+    return formatBigIntFixed(dec.i * mul, target)
+  }
+
+  // dec.scale > target: round half-up
+  const diff = dec.scale - target
+  const div = pow10(diff)
+  const neg = dec.i < 0n
+  const abs = neg ? -dec.i : dec.i
+  const q = abs / div
+  const r = abs % div
+  const half = div / 2n
+  const rounded = r >= half ? q + 1n : q
+  const signed = neg ? -rounded : rounded
+  return formatBigIntFixed(signed, target)
+}
+
 export function isRatioBelowThreshold(opts: {
   numerator: string
   denominator: string
