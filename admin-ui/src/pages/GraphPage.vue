@@ -51,6 +51,19 @@ const trustlines = ref<Trustline[]>([])
 const incidents = ref<Incident[]>([])
 const equivalents = ref<Equivalent[]>([])
 
+const seedLabel = computed(() => {
+  const n = (participants.value || []).length
+  const first = String(participants.value?.[0]?.display_name || '').toLowerCase()
+  if (!n) return 'Seed: (not loaded)'
+
+  if (n === 100 && first.includes('greenfield')) return 'Seed: Greenfield (100)'
+  if (n === 50 && first.includes('riverside')) return 'Seed: Riverside (50)'
+
+  // Fallback: still useful when experimenting with custom seeds.
+  const prefix = first ? `, first: ${participants.value?.[0]?.display_name}` : ''
+  return `Seed: ${n} participants${prefix}`
+})
+
 const eq = ref<string>('ALL')
 const statusFilter = ref<string[]>(['active', 'frozen', 'closed'])
 const threshold = ref<string>('0.10')
@@ -69,10 +82,18 @@ const minZoomLabelsPerson = ref(1.25)
 
 const showIncidents = ref(true)
 const hideIsolates = ref(true)
-const showLegend = ref(true)
+const showLegend = ref(false)
 
 const layoutName = ref<'fcose' | 'grid' | 'circle'>('fcose')
-const layoutSpacing = ref<number>(1.6)
+const layoutSpacing = ref<number>(2.2)
+
+const toolbarTab = ref<'filters' | 'display' | 'navigate'>('filters')
+
+const STORAGE_KEYS = {
+  showLegend: 'geo.graph.showLegend',
+  layoutSpacing: 'geo.graph.layoutSpacing',
+  toolbarTab: 'geo.graph.toolbarTab',
+} as const
 
 const zoom = ref<number>(1)
 
@@ -176,38 +197,71 @@ const incidentRatioByPid = computed(() => {
 })
 
 function buildElements() {
-  const tls = filteredTrustlines.value
+  // 1) Start from trustlines filtered by non-type filters (equivalent/status/...).
+  //    IMPORTANT: type filter must NOT affect isolate detection.
+  const edgeCandidates = filteredTrustlines.value
 
   const allowedTypes = new Set((typeFilter.value || []).map((t) => String(t).toLowerCase()).filter(Boolean))
   const minDeg = Math.max(0, Number(minDegree.value) || 0)
   const focusedPid = String(focusPid.value || '').trim()
-
-  const pidSet = new Set<string>()
-  for (const t of tls) {
-    pidSet.add(t.from)
-    pidSet.add(t.to)
-  }
-
-  if (!hideIsolates.value) {
-    for (const p of participants.value || []) {
-      if (p?.pid) pidSet.add(p.pid)
-    }
-  }
 
   const pIndex = new Map<string, Participant>()
   for (const p of participants.value || []) {
     if (p?.pid) pIndex.set(p.pid, p)
   }
 
+  const typeOf = (pid: string): string => String(pIndex.get(pid)?.type || '').toLowerCase()
+  const isTypeAllowed = (pid: string): boolean => {
+    if (!allowedTypes.size) return true
+    const t = typeOf(pid)
+    return Boolean(t) && allowedTypes.has(t)
+  }
+
+  // Type filter applies to nodes and edges.
+  // IMPORTANT (regression guard): do NOT drop trustline edges only because endpoint
+  // types differ. When multiple types are selected (e.g. person+business), cross-type
+  // trustlines are required to keep the graph connected. When a single type is selected,
+  // cross-type edges are naturally filtered out because one endpoint won't be allowed.
+  const isEdgeAllowedByType = (tl: Trustline): boolean => {
+    return isTypeAllowed(tl.from) && isTypeAllowed(tl.to)
+  }
+
+  // 2) Global "has any edge" map: based on candidate trustlines ONLY (no type filter).
+  //    This prevents "pseudo-isolates" when a node has edges, but only to hidden types.
+  const hasAnyEdgeByPid = new Set<string>()
+  for (const t of edgeCandidates) {
+    hasAnyEdgeByPid.add(t.from)
+    hasAnyEdgeByPid.add(t.to)
+  }
+
+  // 3) Visible edges = candidate trustlines filtered by type.
+  const visibleEdges = edgeCandidates.filter(isEdgeAllowedByType)
+
+  // 4) Visible nodes: endpoints of visible edges + (optionally) true isolates.
+  const pidSet = new Set<string>()
+  for (const t of visibleEdges) {
+    pidSet.add(t.from)
+    pidSet.add(t.to)
+  }
+
+  // Add isolates ONLY if they have no trustlines at all (under non-type filters).
+  // Do NOT add nodes that have trustlines but all of them go to hidden types.
+  if (!hideIsolates.value) {
+    for (const p of participants.value || []) {
+      if (!p?.pid) continue
+      if (!isTypeAllowed(p.pid)) continue
+      if (hasAnyEdgeByPid.has(p.pid)) continue
+      pidSet.add(p.pid)
+    }
+  }
+
   const prelim = new Set<string>()
   for (const pid of pidSet) {
-    const p = pIndex.get(pid)
-    const t = String(p?.type || '').toLowerCase()
-    if (allowedTypes.size && !allowedTypes.has(t)) continue
+    if (!isTypeAllowed(pid)) continue
     prelim.add(pid)
   }
 
-  const filteredEdges = tls.filter((t) => prelim.has(t.from) && prelim.has(t.to))
+  const filteredEdges = visibleEdges.filter((t) => prelim.has(t.from) && prelim.has(t.to))
 
   const degreeByPid = new Map<string, number>()
   for (const t of filteredEdges) {
@@ -345,12 +399,12 @@ function applyStyle() {
       selector: 'edge',
       style: {
         // Base values; real widths are adjusted by updateZoomStyles().
-        width: 2,
+        width: 1.4,
         'curve-style': 'bezier',
         'line-color': '#606266',
         'target-arrow-shape': 'triangle',
         'target-arrow-color': '#606266',
-        'arrow-scale': 0.9,
+        'arrow-scale': 0.8,
         opacity: 0.85,
       },
     },
@@ -358,7 +412,7 @@ function applyStyle() {
     { selector: 'edge.tl-frozen', style: { 'line-color': '#909399', 'target-arrow-color': '#909399', opacity: 0.65 } },
     { selector: 'edge.tl-closed', style: { 'line-color': '#a3a6ad', 'target-arrow-color': '#a3a6ad', opacity: 0.45 } },
 
-    { selector: 'edge.bottleneck', style: { 'line-color': '#f56c6c', 'target-arrow-color': '#f56c6c', width: 4, 'arrow-scale': 1.05, opacity: 1 } },
+    { selector: 'edge.bottleneck', style: { 'line-color': '#f56c6c', 'target-arrow-color': '#f56c6c', width: 2.8, 'arrow-scale': 0.95, opacity: 1 } },
 
     {
       selector: 'edge.incident',
@@ -384,10 +438,10 @@ function updateZoomStyles() {
   const outlineW = clamp(2 * s, 0.6, 2.4)
   const marginY = clamp(6 * inv, 1, 8)
 
-  const edgeW = clamp(1.8 * inv, 0.35, 2.2)
-  const edgeWBottleneck = clamp(3.6 * inv, 0.8, 4)
-  const arrowScale = clamp(0.9 * s, 0.35, 1.1)
-  const arrowScaleBottleneck = clamp(1.05 * s, 0.45, 1.25)
+  const edgeW = clamp(1.2 * inv, 0.25, 1.6)
+  const edgeWBottleneck = clamp(2.4 * inv, 0.6, 3)
+  const arrowScale = clamp(0.8 * s, 0.32, 1.0)
+  const arrowScaleBottleneck = clamp(0.95 * s, 0.4, 1.15)
 
   cy.style()
     .selector('node')
@@ -421,15 +475,19 @@ function runLayout() {
         ? cy.layout({ name: 'circle', padding: 30 })
         : cy.layout({
             name: 'fcose',
-            animate: true,
-            randomize: true,
-            padding: 40,
+            animate: false,
+          randomize: true,
+          randomSeed: 42,
+            padding: 60,
             quality: spacing >= 1.4 ? 'proof' : 'default',
-            nodeSeparation: Math.round(70 * spacing),
-            idealEdgeLength: Math.round(80 * spacing),
-            nodeRepulsion: Math.round(4500 * spacing * spacing),
-            gravity: 0.25,
+            nodeSeparation: Math.round(95 * spacing),
+            idealEdgeLength: Math.round(120 * spacing),
+            nodeRepulsion: Math.round(7200 * spacing * spacing),
+            edgeElasticity: 0.35,
+            gravity: 0.18,
+            numIter: spacing >= 1.8 ? 3500 : 2500,
             avoidOverlap: true,
+            nodeDimensionsIncludeLabels: true,
             packComponents: true,
           } as any)
 
@@ -491,6 +549,21 @@ function updateLabelsForZoom() {
   }
 
   const z = cy.zoom()
+  const ext = cy.extent()
+
+  // Dynamic label visibility based on "how crowded" the current viewport is.
+  // This avoids hard-coded zoom thresholds causing labels to disappear even when
+  // only a small subset of nodes is on-screen.
+  let nodesInView = 0
+  cy.nodes().forEach((n) => {
+    if (!n.visible()) return
+    const p = n.position()
+    if (p.x >= ext.x1 && p.x <= ext.x2 && p.y >= ext.y1 && p.y <= ext.y2) nodesInView += 1
+  })
+
+  // Heuristics tuned for ~100 nodes total; for crowded views, keep labels off.
+  const allowBusinessByCount = nodesInView <= 85
+  const allowPersonsByCount = nodesInView <= 55
   cy.nodes().forEach((n) => {
     const pid = String(n.data('pid') || n.id())
     const displayName = String(n.data('display_name') || '')
@@ -499,9 +572,12 @@ function updateLabelsForZoom() {
     let mode: LabelMode = t === 'business' ? labelModeBusiness.value : labelModePerson.value
 
     if (autoLabelsByZoom.value) {
-      if (z < minZoomLabelsAll.value) {
+      const allowBusiness = z >= minZoomLabelsAll.value || allowBusinessByCount
+      const allowPersons = z >= minZoomLabelsPerson.value || allowPersonsByCount
+
+      if (!allowBusiness) {
         mode = 'off'
-      } else if (t === 'person' && z < minZoomLabelsPerson.value) {
+      } else if (t === 'person' && !allowPersons) {
         mode = 'off'
       } else if (z < 1.5 && mode === 'both') {
         mode = 'name'
@@ -762,6 +838,22 @@ async function loadData() {
 }
 
 onMounted(async () => {
+  try {
+    const rawLegend = window.localStorage.getItem(STORAGE_KEYS.showLegend)
+    if (rawLegend !== null) showLegend.value = rawLegend === '1'
+
+    const rawTab = window.localStorage.getItem(STORAGE_KEYS.toolbarTab)
+    if (rawTab === 'filters' || rawTab === 'display' || rawTab === 'navigate') toolbarTab.value = rawTab
+
+    const rawSpacing = window.localStorage.getItem(STORAGE_KEYS.layoutSpacing)
+    if (rawSpacing !== null) {
+      const parsed = Number(rawSpacing)
+      if (Number.isFinite(parsed)) layoutSpacing.value = parsed
+    }
+  } catch {
+    // ignore storage errors (private mode / blocked)
+  }
+
   await loadData()
 
   if (!cyRoot.value) return
@@ -773,13 +865,13 @@ onMounted(async () => {
     wheelSensitivity: 0.15,
   })
 
-  cy.on('zoom', () => {
+  cy.on('viewport', () => {
     if (!cy) return
     zoomUpdatingFromCy = true
     zoom.value = cy.zoom()
     zoomUpdatingFromCy = false
 
-    // Keep styling/labels responsive to mouse wheel / pinch zoom.
+    // Keep styling/labels responsive to mouse wheel / pinch zoom + panning.
     updateZoomStyles()
     updateLabelsForZoom()
   })
@@ -790,6 +882,30 @@ onMounted(async () => {
   zoomUpdatingFromCy = true
   zoom.value = cy.zoom()
   zoomUpdatingFromCy = false
+})
+
+watch(showLegend, (v) => {
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.showLegend, v ? '1' : '0')
+  } catch {
+    // ignore
+  }
+})
+
+watch(layoutSpacing, (v) => {
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.layoutSpacing, String(v))
+  } catch {
+    // ignore
+  }
+})
+
+watch(toolbarTab, (v) => {
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.toolbarTab, v)
+  } catch {
+    // ignore
+  }
 })
 
 onBeforeUnmount(() => {
@@ -871,51 +987,6 @@ const canFind = computed(() => {
   return Boolean(getZoomPid())
 })
 
-const canFitComponent = computed(() => Boolean(getZoomPid()))
-
-function fitComponent() {
-  if (!cy) return
-  const pid = getZoomPid()
-  if (!pid) {
-    ElMessage.info('Select a participant (or click a node)')
-    return
-  }
-
-  const start = cy.getElementById(pid)
-  if (!start || start.empty()) {
-    ElMessage.warning(`PID not found: ${pid}`)
-    return
-  }
-
-  const visited = new Set<string>()
-  const q: NodeSingular[] = [start as unknown as NodeSingular]
-  let comp = cy.collection()
-
-  while (q.length) {
-    const cur = q.pop()!
-    const id = cur.id()
-    if (!id || visited.has(id)) continue
-    visited.add(id)
-    comp = comp.union(cur).union(cur.connectedEdges())
-    cur
-      .connectedEdges()
-      .connectedNodes()
-      .forEach((n: any) => {
-        const nn = n as unknown as NodeSingular
-        if (!visited.has(nn.id())) q.push(nn)
-      })
-  }
-
-  cy.animate({ fit: { eles: comp, padding: 60 } }, { duration: 300 })
-
-  zoomUpdatingFromCy = true
-  zoom.value = cy.zoom()
-  zoomUpdatingFromCy = false
-
-  updateZoomStyles()
-  updateLabelsForZoom()
-}
-
 function applyZoom(level: number) {
   if (!cy) return
   const z = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), level))
@@ -930,6 +1001,7 @@ function applyZoom(level: number) {
       <div class="hdr">
         <TooltipLabel label="Network Graph" tooltip-key="nav.graph" />
         <div class="hdr__right">
+          <el-tag type="info">{{ seedLabel }}</el-tag>
           <el-tag type="info">nodes: {{ stats.nodes }}</el-tag>
           <el-tag type="info">edges: {{ stats.edges }}</el-tag>
           <el-tag v-if="stats.bottlenecks" type="danger">bottlenecks: {{ stats.bottlenecks }}</el-tag>
@@ -940,133 +1012,130 @@ function applyZoom(level: number) {
     <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
 
     <div class="toolbar">
-      <div class="toolbar__group">
-        <div class="toolbar__title">Filters</div>
-        <div class="toolbar__items">
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Equivalent" tooltip-key="graph.eq" />
-            <el-select v-model="eq" size="small" style="width: 180px">
-              <el-option v-for="c in availableEquivalents" :key="c" :label="c" :value="c" />
-            </el-select>
-          </div>
+      <el-tabs v-model="toolbarTab" type="card" class="toolbarTabs">
+        <el-tab-pane label="Filters" name="filters">
+          <div class="paneGrid">
+            <div class="ctl ctl--eq">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Equivalent" tooltip-key="graph.eq" />
+              <el-select v-model="eq" size="small" class="ctl__field">
+                <el-option v-for="c in availableEquivalents" :key="c" :label="c" :value="c" />
+              </el-select>
+            </div>
 
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Status" tooltip-key="graph.status" />
-            <el-select v-model="statusFilter" multiple collapse-tags collapse-tags-tooltip size="small" style="width: 240px">
-              <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
-            </el-select>
-          </div>
+            <div class="ctl ctl--status">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Status" tooltip-key="graph.status" />
+              <el-select v-model="statusFilter" multiple collapse-tags collapse-tags-tooltip size="small" class="ctl__field">
+                <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
+              </el-select>
+            </div>
 
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Bottleneck" tooltip-key="graph.threshold" />
-            <el-input v-model="threshold" size="small" style="width: 140px" placeholder="0.10" />
-          </div>
+            <div class="ctl ctl--threshold">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Bottleneck" tooltip-key="graph.threshold" />
+              <el-input v-model="threshold" size="small" class="ctl__field" placeholder="0.10" />
+            </div>
 
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Type" tooltip-key="graph.type" />
-            <el-checkbox-group v-model="typeFilter" size="small">
-              <el-checkbox-button label="person">person</el-checkbox-button>
-              <el-checkbox-button label="business">business</el-checkbox-button>
-            </el-checkbox-group>
-          </div>
+            <div class="ctl">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Type" tooltip-key="graph.type" />
+              <el-checkbox-group v-model="typeFilter" size="small">
+                <el-checkbox-button label="person">person</el-checkbox-button>
+                <el-checkbox-button label="business">business</el-checkbox-button>
+              </el-checkbox-group>
+            </div>
 
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Min degree" tooltip-key="graph.minDegree" />
-            <el-input-number v-model="minDegree" size="small" :min="0" :max="20" controls-position="right" style="width: 160px" />
-          </div>
-        </div>
-      </div>
-
-      <div class="toolbar__group">
-        <div class="toolbar__title">Display</div>
-        <div class="toolbar__items toolbar__items--grid">
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Layout" tooltip-key="graph.layout" />
-            <el-select v-model="layoutName" size="small" style="width: 180px">
-              <el-option v-for="o in layoutOptions" :key="o.value" :label="o.label" :value="o.value" />
-            </el-select>
-          </div>
-
-          <div class="ctl ctl--toggle">
-            <TooltipLabel class="ctl__label" label="Labels" tooltip-key="graph.labels" />
-            <el-switch v-model="showLabels" size="small" />
-          </div>
-
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Business labels" tooltip-key="graph.labels" />
-            <el-checkbox-group v-model="businessLabelParts" size="small">
-              <el-checkbox-button label="name">name</el-checkbox-button>
-              <el-checkbox-button label="pid">pid</el-checkbox-button>
-            </el-checkbox-group>
-          </div>
-
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Person labels" tooltip-key="graph.labels" />
-            <el-checkbox-group v-model="personLabelParts" size="small">
-              <el-checkbox-button label="name">name</el-checkbox-button>
-              <el-checkbox-button label="pid">pid</el-checkbox-button>
-            </el-checkbox-group>
-          </div>
-
-          <div class="ctl ctl--toggle">
-            <TooltipLabel class="ctl__label" label="Auto labels" tooltip-key="graph.labels" />
-            <el-switch v-model="autoLabelsByZoom" size="small" />
-          </div>
-
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Layout spacing" tooltip-key="graph.spacing" />
-            <el-slider v-model="layoutSpacing" :min="1" :max="3" :step="0.1" style="width: 220px" />
-          </div>
-
-          <div class="ctl ctl--toggle">
-            <TooltipLabel class="ctl__label" label="Incidents" tooltip-key="graph.incidents" />
-            <el-switch v-model="showIncidents" size="small" />
-          </div>
-
-          <div class="ctl ctl--toggle">
-            <TooltipLabel class="ctl__label" label="Hide isolates" tooltip-key="graph.hideIsolates" />
-            <el-switch v-model="hideIsolates" size="small" />
-          </div>
-
-          <div class="ctl ctl--toggle">
-            <TooltipLabel class="ctl__label" label="Legend" tooltip-key="graph.legend" />
-            <el-switch v-model="showLegend" size="small" />
-          </div>
-        </div>
-      </div>
-
-      <div class="toolbar__group toolbar__group--wide">
-        <div class="toolbar__title">Navigate</div>
-        <div class="toolbar__items">
-          <div class="ctl ctl--wide">
-            <TooltipLabel class="ctl__label" label="Search (PID or name)" tooltip-key="graph.search" />
-            <el-autocomplete
-              v-model="searchQuery"
-              :fetch-suggestions="querySearchParticipants"
-              placeholder="Type PID or name…"
-              size="small"
-              clearable
-              @select="onSearchSelect"
-              @keyup.enter="focusSearch"
-            />
-          </div>
-
-          <div class="ctl ctl--buttons">
-            <TooltipLabel class="ctl__label" label="Actions" tooltip-key="graph.actions" />
-            <div class="btnrow">
-              <el-button size="small" :disabled="!canFind" @click="focusSearch">Find</el-button>
-              <el-button size="small" @click="fit">Fit</el-button>
-              <el-button size="small" :disabled="!canFitComponent" @click="fitComponent">Fit component</el-button>
-              <el-button size="small" @click="runLayout">Re-layout</el-button>
+            <div class="ctl ctl--degree">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Min degree" tooltip-key="graph.minDegree" />
+              <el-input-number v-model="minDegree" size="small" :min="0" :max="20" controls-position="right" class="ctl__field" />
             </div>
           </div>
+        </el-tab-pane>
 
-          <div class="ctl">
-            <TooltipLabel class="ctl__label" label="Zoom" tooltip-key="graph.zoom" />
-            <el-slider v-model="zoom" :min="0.1" :max="3" :step="0.05" style="width: 240px" />
+        <el-tab-pane label="Display" name="display">
+          <div class="paneGrid">
+            <div class="ctl ctl--layout">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Layout" tooltip-key="graph.layout" />
+              <el-select v-model="layoutName" size="small" class="ctl__field">
+                <el-option v-for="o in layoutOptions" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </div>
+
+            <div class="ctl">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Layout spacing" tooltip-key="graph.spacing" />
+              <el-slider v-model="layoutSpacing" :min="1" :max="3" :step="0.1" class="sliderField" />
+            </div>
+
+            <div class="ctl">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Business labels" tooltip-key="graph.labels" />
+              <el-checkbox-group v-model="businessLabelParts" size="small">
+                <el-checkbox-button label="name">name</el-checkbox-button>
+                <el-checkbox-button label="pid">pid</el-checkbox-button>
+              </el-checkbox-group>
+            </div>
+
+            <div class="ctl">
+              <TooltipLabel class="toolbarLabel ctl__label" label="Person labels" tooltip-key="graph.labels" />
+              <el-checkbox-group v-model="personLabelParts" size="small">
+                <el-checkbox-button label="name">name</el-checkbox-button>
+                <el-checkbox-button label="pid">pid</el-checkbox-button>
+              </el-checkbox-group>
+            </div>
+
+            <div class="toggleGrid">
+              <div class="toggleLine">
+                <TooltipLabel class="toolbarLabel" label="Labels" tooltip-key="graph.labels" />
+                <el-switch v-model="showLabels" size="small" />
+              </div>
+              <div class="toggleLine">
+                <TooltipLabel class="toolbarLabel" label="Auto labels" tooltip-key="graph.labels" />
+                <el-switch v-model="autoLabelsByZoom" size="small" />
+              </div>
+              <div class="toggleLine">
+                <TooltipLabel class="toolbarLabel" label="Incidents" tooltip-key="graph.incidents" />
+                <el-switch v-model="showIncidents" size="small" />
+              </div>
+              <div class="toggleLine">
+                <TooltipLabel class="toolbarLabel" label="Hide isolates" tooltip-key="graph.hideIsolates" />
+                <el-switch v-model="hideIsolates" size="small" />
+              </div>
+              <div class="toggleLine">
+                <TooltipLabel class="toolbarLabel" label="Legend" tooltip-key="graph.legend" />
+                <el-switch v-model="showLegend" size="small" />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="Navigate" name="navigate">
+          <div class="navPane">
+            <div class="navRow navRow--search">
+              <TooltipLabel class="toolbarLabel navRow__label" label="Search" tooltip-key="graph.search" />
+              <el-autocomplete
+                v-model="searchQuery"
+                :fetch-suggestions="querySearchParticipants"
+                placeholder="Type PID or name…"
+                size="small"
+                clearable
+                class="navRow__field"
+                @select="onSearchSelect"
+                @keyup.enter="focusSearch"
+              />
+            </div>
+
+            <div class="navRow navRow--actions">
+              <TooltipLabel class="toolbarLabel navRow__label" label="Actions" tooltip-key="graph.actions" />
+              <div class="navActions">
+                <el-button size="small" :disabled="!canFind" @click="focusSearch">Find</el-button>
+                <el-button size="small" @click="fit">Fit</el-button>
+                <el-button size="small" @click="runLayout">Re-layout</el-button>
+
+                <div class="zoomrow">
+                  <TooltipLabel class="toolbarLabel zoomrow__label" label="Zoom" tooltip-key="graph.zoom" />
+                  <el-slider v-model="zoom" :min="0.1" :max="3" :step="0.05" class="zoomrow__slider" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <el-skeleton v-if="loading" animated :rows="6" />
@@ -1152,75 +1221,169 @@ function applyZoom(level: number) {
 }
 
 .toolbar {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 
-.toolbar__group {
-  flex: 1 1 360px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--el-fill-color-extra-light);
+
+.toolbarTabs :deep(.el-tabs__header) {
+  margin: 0 0 8px 0;
 }
 
-.toolbar__group--wide {
-  flex: 2 1 520px;
+.toolbarTabs :deep(.el-tabs__content) {
+  padding: 0;
 }
 
-.toolbar__title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  margin-bottom: 8px;
-  letter-spacing: 0.2px;
-}
-
-.toolbar__items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-end;
-}
-
-.toolbar__items--grid {
+.paneGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  align-items: end;
+  gap: 10px 12px;
+  align-items: start;
+}
+
+.paneGrid > .toggleGrid {
+  grid-column: 1 / -1;
 }
 
 .ctl {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
 }
 
-.ctl__label {
+.toolbarLabel {
   font-size: 12px;
   font-weight: 600;
   color: var(--el-text-color-regular);
 }
 
-.ctl--toggle {
-  min-width: 110px;
+.ctl__label {
+  min-height: 18px;
 }
 
-.ctl--wide {
-  min-width: 300px;
-  flex: 1 1 340px;
+.ctl__field {
+  width: 100%;
 }
 
-.ctl--buttons {
-  align-self: flex-end;
+.sliderField {
+  width: 100%;
+  min-width: 220px;
 }
 
-.btnrow {
+.ctl--eq {
+  min-width: 160px;
+}
+
+.ctl--status {
+  min-width: 220px;
+}
+
+.ctl--threshold {
+  min-width: 160px;
+}
+
+.ctl--degree {
+  min-width: 160px;
+}
+
+.ctl--layout {
+  min-width: 200px;
+}
+
+.toggleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.toggleLine {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 2px 6px;
+  min-height: 28px;
+  border-radius: 8px;
+}
+
+.toggleLine:hover {
+  background: var(--el-fill-color-light);
+}
+
+.toggleLine :deep(.el-switch) {
+  flex: 0 0 auto;
+}
+
+.navPane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.navRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.navRow__label {
+  min-width: 76px;
+}
+
+.navRow__field :deep(.el-autocomplete),
+.navRow__field :deep(.el-input),
+.navRow__field :deep(.el-input__wrapper) {
+  width: 100%;
+}
+
+.navActions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+.zoomrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoomrow__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+
+.zoomrow__slider {
+  width: clamp(160px, 18vw, 260px);
+}
+
+@media (max-width: 992px) {
+  .paneGrid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+
+  .sliderField {
+    min-width: 200px;
+  }
+}
+
+@media (max-width: 768px) {
+  .navRow {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .navRow__label {
+    min-width: 0;
+  }
+
+  .zoomrow__slider {
+    width: clamp(180px, 60vw, 320px);
+  }
 }
 
 .cy-wrap {

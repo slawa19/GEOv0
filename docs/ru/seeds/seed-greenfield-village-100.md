@@ -10,6 +10,85 @@ A village-scale cooperative economy with **3–5 strong hubs** (co-op + warehous
 - **Participant types**: `person` and `business` (compatible with current admin-ui filters)
 - The network must naturally form **cycles of 3–6 nodes** (visible clearing effects)
 
+### Trustline direction (important)
+We treat a trustline as a **risk limit**:
+- `from → to` means **from is creditor**, **to is debtor** ("I can let you go negative up to this limit").
+- Actual debts are separate edges in the model (`debt[debtor → creditor, E]`), but on `/graph` we are visualizing **trustlines**.
+
+### Intended economic model (UAH-first)
+- **Retail credits households**: weekly spending is modeled mostly as `retail → household` in `UAH` (buy now / pay later).
+- **Producers credit buyers**: a producer selling goods on deferral is modeled as `producer → (retail | bakery | procurement)` in `UAH`.
+- **Anchors provide liquidity**: co-op / warehouse / procurement act as hubs that connect clusters and may provide limited credit to stabilize flows.
+- **HOUR economy**: service providers commonly credit households as `service → household` in `HOUR` (work now / settle later), with a smaller number of reverse links to keep reciprocity.
+- **People have branching trust**: persons (especially households) also have a small **social trust layer** (microcredit / mutual aid) that creates realistic branching and additional clearing cycles without dominating the economy.
+- **EUR is minimized**: keep only a couple of EUR links (e.g., co-op ↔ IT/translator) to demonstrate multi-equivalent support without dominating the graph.
+
+#### Why person-to-person trustlines exist (and should branch)
+
+If the resident subgraph looks like a single chain, it feels artificial. In a real community, `person` nodes get branching trustlines from:
+
+1) **Direct relationships** (work and small sales): odd jobs, repairs, babysitting, garden help.
+2) **Social microcredit** with **small limits**:
+	- household → household ("neighbor help", "lend until payday")
+	- household ↔ micro-workers (small tabs)
+	- optional household → producer (prepayment / CSA-style support)
+
+Guardrail: these links have **small limits** and often set `can_be_intermediate=false` so they add realism without turning households into the main liquidity providers.
+
+#### Role sketches (sanity rules)
+- **Bakery**: few suppliers, many buyers.
+	- Suppliers (incoming trustlines to bakery): a small set of producers (e.g., grain/flour/eggs/honey) + warehouse.
+	- Buyers (outgoing trustlines from bakery): households + canteen/school + grocery/market.
+	- Rationale: bakery mostly *sells* to many, and only *buys inputs* from a few.
+- **Grocery / retail points**: few suppliers, many household buyers.
+	- Suppliers (incoming to retail): warehouse / co-op storefront / selected producers.
+	- Buyers (outgoing from retail): many households (grocery/market are dominant weekly spend nodes; others are secondary).
+- **Procurement desk**: buyer-of-harvest aggregator.
+	- Main pattern: `producer → procurement` (deferral for the buyer).
+	- Optional: procurement advances a subset of producers (small reverse links).
+- **Market hall** (as a proxy for many stalls): acts like a retail aggregator.
+	- Many `market → household` (weekly spending), and a few supplier links from producers/bakery/dairy.
+
+## Role audit table (from fixtures)
+
+Interpretation reminder: `UAH out` = how many UAH trustlines this node **extends** (acts as creditor); `UAH in` = how many UAH trustlines **others extend to it** (it can be debtor).
+
+### Group-level degree summary (min / avg / max)
+
+| Group | Count | UAH out | UAH in | HOUR out | HOUR in | EUR out | EUR in |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| anchors | 10 | 0 / 8.9 / 19 | 0 / 8.8 / 26 | 0 / 0.5 / 5 | 0 / 0.5 / 5 | 0 / 0.2 / 2 | 0 / 0.2 / 2 |
+| producers | 25 | 1 / 2.36 / 5 | 0 / 1.12 / 3 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| retail | 10 | 1 / 7.6 / 39 | 2 / 4.1 / 12 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| services | 15 | 1 / 1.13 / 3 | 1 / 1 / 1 | 2 / 2.33 / 3 | 0 / 0.47 / 3 | 0 / 0.13 / 1 | 0 / 0.13 / 1 |
+| households | 35 | 0 / 0.46 / 2 | 2 / 2.57 / 4 | 0 / 0.2 / 1 | 1 / 1 / 1 | 0 / 0 / 0 | 0 / 0 / 0 |
+| agents | 5 | 1 / 1 / 1 | 0 / 0 / 0 | 1 / 1 / 1 | 1 / 1 / 1 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+### Key nodes snapshot
+
+| # | Participant | Group | Type | UAH out | UAH in | HOUR out | HOUR in | EUR out | EUR in |
+|---:|---|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | GreenField Cooperative (Co-op) | anchors | business | 19 | 24 | 5 | 5 | 2 | 2 |
+| 2 | GreenField Warehouse | anchors | business | 9 | 4 | 0 | 0 | 0 | 0 |
+| 3 | GreenField Procurement Desk | anchors | business | 11 | 26 | 0 | 0 | 0 | 0 |
+| 4 | Riverside Market Hall | anchors | business | 19 | 13 | 0 | 0 | 0 | 0 |
+| 5 | Village Transport Co-op | anchors | business | 6 | 4 | 0 | 0 | 0 | 0 |
+| 6 | SunnyHarvest Bakery | anchors | business | 13 | 9 | 0 | 0 | 0 | 0 |
+| 7 | MeadowDairy Collective | anchors | business | 12 | 8 | 0 | 0 | 0 | 0 |
+| 36 | Riverside Grocery | retail | business | 39 | 12 | 0 | 0 | 0 | 0 |
+| 37 | Village Butcher Shop | retail | business | 6 | 6 | 0 | 0 | 0 | 0 |
+| 38 | Morning Coffee Corner | retail | business | 5 | 2 | 0 | 0 | 0 | 0 |
+| 39 | Family Canteen | retail | business | 6 | 5 | 0 | 0 | 0 | 0 |
+| 42 | Pharmacy & Health Kiosk | retail | business | 5 | 2 | 0 | 0 | 0 | 0 |
+| 43 | School Cafeteria | retail | business | 5 | 5 | 0 | 0 | 0 | 0 |
+| 45 | Cooperative Storefront | retail | business | 5 | 3 | 0 | 0 | 0 | 0 |
+| 53 | Mason Wright (IT Support) | services | person | 1 | 1 | 2 | 0 | 1 | 1 |
+| 56 | Mia Foster (Childcare) | services | person | 1 | 1 | 2 | 2 | 0 | 0 |
+| 57 | Jack Russell (Courier) | services | person | 3 | 1 | 2 | 0 | 0 | 0 |
+| 61 | The Adams Family (Household) | households | person | 0 | 3 | 1 | 1 | 0 | 0 |
+| 83 | Oliver Price (Odd Jobs) | households | person | 2 | 4 | 0 | 1 | 0 | 0 |
+| 96 | Olivia Bennett (Community Coordinator) | agents | person | 1 | 0 | 1 | 1 | 0 | 0 |
+
 ## Participants (100)
 
 ### 1) Anchors & infrastructure (10, business)

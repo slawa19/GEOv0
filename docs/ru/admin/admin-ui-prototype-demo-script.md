@@ -2,6 +2,80 @@
 
 Цель: быстро пройтись по всем экранам админки‑прототипа, проверить UX/структуру/состояния (loading/empty/error/403/401/slow) и убедиться, что данные берутся из общего fixture‑pack.
 
+---
+
+## Как устроена разработка админки сейчас (fixture-driven prototyping)
+
+В проекте админка разрабатывается в подходе **fixture-driven prototyping** (иногда его же можно назвать *fixture-first UI*):
+
+- UI строится поверх **каноничного набора JSON-фикстур** (fixtures), которые имитируют ответы API.
+- Поведение API (ошибки/пустые списки/задержки/403/401) задаётся **сценариями** (scenario-based mocking).
+
+Это позволяет быстро и воспроизводимо развивать UI **без поднятого backend**, но так, чтобы переключение на реальный API в будущем было минимальным.
+
+### Где лежат данные и что является source of truth
+
+1) **Канонические фикстуры** (source of truth):
+- `admin-fixtures/v1/datasets/*.json`
+- `admin-fixtures/v1/scenarios/*.json`
+
+2) **Публичная копия для SPA** (то, что реально читает браузер в runtime):
+- `admin-ui/public/admin-fixtures/v1/...`
+
+Эта копия **перезаписывается** скриптом синхронизации (см. ниже).
+
+### Как это подключено в админке (Mock API)
+
+- UI-страницы (`admin-ui/src/pages/*.vue`) обращаются к клиенту `mockApi`:
+  - `admin-ui/src/api/mockApi.ts`
+- `mockApi` грузит JSON из `public/admin-fixtures/v1/...` через `fetch`, применяет выбранный сценарий и возвращает ответы в envelope-формате:
+
+Дополнительно:
+- Для части экранов, которые читают фикстуры напрямую (например, `/graph`), используется загрузчик:
+  - `admin-ui/src/api/fixtures.ts`
+
+```json
+{ "success": true, "data": { "...": "..." } }
+```
+
+или
+
+```json
+{ "success": false, "error": { "code": "FORBIDDEN", "message": "..." } }
+```
+
+Сценарий задаётся в URL как `?scenario=...` (и переключается в Header), после чего `mockApi`:
+- может добавлять искусственную latency;
+- может возвращать ошибки для отдельных endpoints через overrides;
+- может возвращать пустые списки для list-эндпоинтов.
+
+Важно: при навигации мы сохраняем `scenario` в query (`...route.query`), чтобы вся админка оставалась в одном режиме.
+
+### Синхронизация и валидация фикстур (dev/build)
+
+Скрипты и команды (выполнять из папки `admin-ui`):
+
+- `npm run sync:fixtures` — копирует `../admin-fixtures/v1` → `public/admin-fixtures/v1`
+- `npm run validate:fixtures` — проверяет, что фикстуры корректны/парсятся и соответствуют ожидаемой структуре
+
+Автоматизация:
+- `npm run dev` запускает `predev` → *sync + validate*.
+- `npm run build` запускает `prebuild` → *clean + sync + validate*.
+
+### Генерация фикстур (Python)
+
+Фикстуры можно:
+- править вручную в `admin-fixtures/v1/...` (быстро для мелких изменений), или
+- генерировать детерминированно Python-скриптами в `admin-fixtures/tools/` (рекомендуемо для больших наборов).
+
+Полезные точки входа:
+- `admin-fixtures/tools/generate_admin_fixtures.py` — базовый детерминированный генератор fixture-pack.
+- `admin-fixtures/tools/generate_seed_greenfield_village_100.py` — генератор основного seed-набора.
+
+См. также:
+- Спека fixture-pack: `docs/ru/admin/specs/admin-ui-prototype-fixtures-spec.md`
+- Подход к seed-документам и генерации: `docs/ru/seeds/README.md`
+
 ## 1) Как запустить
 
 Из папки `admin-ui`:

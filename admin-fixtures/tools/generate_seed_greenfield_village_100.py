@@ -239,10 +239,26 @@ def build_trustlines(participants: list[Participant]) -> list[dict[str, Any]]:
     bakery = pid("SunnyHarvest Bakery")
     dairy = pid("MeadowDairy Collective")
     grocery = pid("Riverside Grocery")
+    butcher = pid("Village Butcher Shop")
+    coffee = pid("Morning Coffee Corner")
     canteen = pid("Family Canteen")
+    school_cafe = pid("School Cafeteria")
+    pharmacy = pid("Pharmacy & Health Kiosk")
+    storefront = pid("Cooperative Storefront")
     it_support = pid("Mason Wright (IT Support)")
     translator = pid("Sophia Kim (Translator)")
     courier = pid("Jack Russell (Courier)")
+
+    # A few named producers for more realistic supplier graphs.
+    grain_farmer = pid("Anton Petrenko (Grain Farmer)")
+    flour_mill = pid("Kateryna Marchenko (Flour Milling)")
+    eggs_poultry = pid("Iryna Bondar (Eggs & Poultry)")
+    honey_apiary = pid("Dmytro Kovalenko (Honey & Apiary)")
+    goat_cheese = pid("Serhii Melnyk (Goat Cheese)")
+    meat_processing = pid("Oleh Savchenko (Meat Processing)")
+    smoked_fish = pid("Andrii Boiko (Fishing & Smoked Fish)")
+    veg_farmer = pid("Maria Shevchenko (Vegetable Farmer)")
+    berry_farm = pid("Oksana Hrytsenko (Berry Farm)")
 
     # Role slices by index in this seed
     producers = [p.pid for p in participants[10:35]]
@@ -298,35 +314,141 @@ def build_trustlines(participants: list[Participant]) -> list[dict[str, Any]]:
         add(coop, node, "UAH", weight=5, n=n); n += 1
         add(node, coop, "UAH", weight=4, n=n); n += 1
 
-    # Producers connect to procurement + bakery + 1 retail outlet
+    # Producers connect to procurement + a few buyers.
+    # Direction: producer -> buyer (seller extends credit / payment deferral).
     for i, pr in enumerate(producers):
         add(pr, procurement, "UAH", weight=4, n=n); n += 1
-        add(procurement, pr, "UAH", weight=3, n=n); n += 1
-        add(pr, bakery if i % 2 == 0 else grocery, "UAH", weight=2, n=n); n += 1
 
-        # Light EUR connections for a subset (export-like)
+        # Some producers also sell directly at the market hall.
+        if i % 3 == 0:
+            add(pr, market, "UAH", weight=2, n=n); n += 1
+
+        # A smaller subset sells to grocery directly.
         if i % 7 == 0:
-            add(pr, coop, "EUR", weight=2, n=n); n += 1
-            add(coop, pr, "EUR", weight=1, n=n); n += 1
+            add(pr, grocery, "UAH", weight=2, n=n); n += 1
 
-    # Retail buys from producers (create cycles)
+        # Occasionally procurement pre-finances producers (advance payments).
+        if i % 3 == 0:
+            add(procurement, pr, "UAH", weight=2, n=n); n += 1
+
+    # Retail buys from producers.
+    # Direction: producer -> retail (seller credit). Occasionally the reverse exists (advance payment).
     for j, shop in enumerate(retail):
         pr = producers[(j * 3) % len(producers)]
-        add(shop, pr, "UAH", weight=3, n=n); n += 1
-        add(pr, shop, "UAH", weight=2, n=n); n += 1
+        add(pr, shop, "UAH", weight=3, n=n); n += 1
+        if j % 4 == 0:
+            add(shop, pr, "UAH", weight=1, n=n); n += 1
 
-    # Households spend weekly at grocery/canteen/market/coffee
-    household_shops = [grocery, canteen, market] + retail[:2]
+    # Anchor suppliers (few suppliers, many buyers)
+    # Bakery suppliers: limited set + warehouse.
+    for supplier in [grain_farmer, flour_mill, eggs_poultry, honey_apiary, warehouse]:
+        add(supplier, bakery, "UAH", weight=4, n=n); n += 1
+
+    # Dairy suppliers: limited set + warehouse.
+    for supplier in [goat_cheese, grain_farmer, berry_farm, warehouse]:
+        add(supplier, dairy, "UAH", weight=3, n=n); n += 1
+
+    # Grocery and butcher: suppliers are few but stable.
+    for supplier in [warehouse, procurement, bakery, dairy, veg_farmer]:
+        add(supplier, grocery, "UAH", weight=3, n=n); n += 1
+    for supplier in [meat_processing, eggs_poultry, smoked_fish, warehouse]:
+        add(supplier, butcher, "UAH", weight=3, n=n); n += 1
+
+    # Canteen / school cafeteria: buy from a few food suppliers.
+    for supplier in [bakery, dairy, grocery]:
+        add(supplier, canteen, "UAH", weight=2, n=n); n += 1
+        add(supplier, school_cafe, "UAH", weight=2, n=n); n += 1
+
+    # Co-op storefront sources inventory from the co-op/warehouse.
+    for supplier in [coop, warehouse]:
+        add(supplier, storefront, "UAH", weight=3, n=n); n += 1
+
+    # Households spend weekly.
+    # Direction: seller -> household (buy now / pay later).
+    # Make grocery/market dominant (many buyers), and distribute the second line across other shops.
+    secondary_shops = [canteen, bakery, dairy, coffee, pharmacy, butcher, storefront, school_cafe]
     for k, hh in enumerate(households):
-        shop_a = household_shops[k % len(household_shops)]
-        shop_b = household_shops[(k + 2) % len(household_shops)]
-        add(hh, shop_a, "UAH", weight=2, n=n); n += 1
-        add(hh, shop_b, "UAH", weight=1, n=n); n += 1
+        # Everyone uses grocery; most also use the market.
+        add(grocery, hh, "UAH", weight=2, n=n); n += 1
+        if k % 2 == 0:
+            add(market, hh, "UAH", weight=1, n=n); n += 1
 
-        # Some households offer HOUR to services (childcare, repairs)
+        shop = secondary_shops[k % len(secondary_shops)]
+        add(shop, hh, "UAH", weight=1, n=n); n += 1
+
+        # HOUR economy: services often work now and settle later.
         svc = services[k % len(services)]
-        add(hh, svc, "HOUR", weight=1, n=n); n += 1
         add(svc, hh, "HOUR", weight=2, n=n); n += 1
+        if k % 5 == 0:
+            add(hh, svc, "HOUR", weight=1, n=n); n += 1
+
+    # Micro-work (odd jobs) creates realistic cycles: household -> producer (UAH)
+    # Direction: worker -> buyer of work (work now / pay later).
+    micro_workers = households[22:]
+    for i, hw in enumerate(micro_workers):
+        add(hw, producers[(i * 2) % len(producers)], "UAH", weight=1, n=n); n += 1
+
+    # Social layer: person-to-person branching (small limits)
+    # Goal: avoid the "chain of residents" effect; add realistic neighborhood microcredit + prepayment links.
+    # Keep these small and often non-intermediate to avoid distorting the main liquidity picture.
+
+    def add_social(from_pid: str, to_pid: str, eq: str, weight: int, n_local: int) -> None:
+        # Same as add(), but with a stricter policy for intermediate routing.
+        key = (eq, from_pid, to_pid)
+        if key in seen or from_pid == to_pid:
+            return
+        seen.add(key)
+
+        precision = 2
+        limit = _limit_for(eq, weight)
+        used = _used_for(limit, n_local)
+        if used > limit:
+            used = limit
+        available = limit - used
+
+        status = "active"
+        p_from = next(p for p in participants if p.pid == from_pid)
+        if p_from.status == "frozen" and (n_local % 3 != 0):
+            status = "frozen"
+
+        created_at = _iso(BASE_TS - timedelta(days=(n_local % 90), minutes=n_local * 11))
+
+        out.append(
+            {
+                "equivalent": eq,
+                "from": from_pid,
+                "to": to_pid,
+                "from_display_name": pid_to_name.get(from_pid),
+                "to_display_name": pid_to_name.get(to_pid),
+                "limit": _q(limit, precision),
+                "used": _q(used, precision),
+                "available": _q(available, precision),
+                "status": status,
+                "created_at": created_at,
+                "policy": {"auto_clearing": (n_local % 2 == 0), "can_be_intermediate": False},
+            }
+        )
+
+    # Household ↔ household neighbor microcredit (UAH) + a small HOUR mutual-help link.
+    for i, hh in enumerate(households):
+        hh1 = households[(i + 1) % len(households)]
+        hh2 = households[(i + 4) % len(households)]
+        add_social(hh, hh1, "UAH", weight=1, n_local=n); n += 1
+        add_social(hh, hh2, "UAH", weight=1, n_local=n); n += 1
+
+        hh3 = households[(i + 2) % len(households)]
+        add_social(hh, hh3, "HOUR", weight=1, n_local=n); n += 1
+
+    # Prepayment / CSA-style support: a subset of households prepays producers (household -> producer, UAH).
+    # This adds realistic branching and cycles without making households major creditors.
+    for i, hh in enumerate(households[::5]):
+        pr = producers[(i * 3) % len(producers)]
+        add_social(hh, pr, "UAH", weight=1, n_local=n); n += 1
+
+    # Some producers occasionally do direct-sale tabs to households (producer -> household, UAH).
+    for i, hh in enumerate(households[::4]):
+        pr = producers[(i * 5) % len(producers)]
+        add(pr, hh, "UAH", weight=1, n=n); n += 1
 
     # Services link to anchors (maintenance contracts)
     for s, svc in enumerate(services):
@@ -343,7 +465,6 @@ def build_trustlines(participants: list[Participant]) -> list[dict[str, Any]]:
     for i, node in enumerate([transport, courier]):
         add(node, market, "UAH", weight=3, n=n); n += 1
         add(node, grocery, "UAH", weight=3, n=n); n += 1
-        add(node, bakery, "UAH", weight=2, n=n); n += 1
 
     # Agents connect to co-op (governance) with HOUR/UAH
     for a, ag in enumerate(agents):
@@ -351,16 +472,17 @@ def build_trustlines(participants: list[Participant]) -> list[dict[str, Any]]:
         add(coop, ag, "HOUR", weight=2, n=n); n += 1
         add(ag, coop, "UAH", weight=1, n=n); n += 1
 
-    # Ensure a few explicit 3–6 node cycles (UAH)
+    # Ensure a few explicit 3-node cycles (UAH) aligned with the economic model:
+    # supplier(producer) -> buyer(business) -> household -> supplier(producer)
     cycle_nodes = [
-        (producers[0], bakery, services[0], producers[0]),
-        (producers[3], grocery, services[3], producers[3]),
-        (producers[7], canteen, services[7], producers[7]),
+        (flour_mill, bakery, micro_workers[0]),
+        (meat_processing, butcher, micro_workers[4] if len(micro_workers) > 4 else micro_workers[0]),
+        (veg_farmer, market, micro_workers[8] if len(micro_workers) > 8 else micro_workers[0]),
     ]
-    for a, b, c, a2 in cycle_nodes:
-        add(a, b, "UAH", weight=2, n=n); n += 1
-        add(b, c, "UAH", weight=2, n=n); n += 1
-        add(c, a2, "UAH", weight=2, n=n); n += 1
+    for pr, shop, hw in cycle_nodes:
+        add(pr, shop, "UAH", weight=2, n=n); n += 1
+        add(shop, hw, "UAH", weight=2, n=n); n += 1
+        add(hw, pr, "UAH", weight=2, n=n); n += 1
 
     return out
 

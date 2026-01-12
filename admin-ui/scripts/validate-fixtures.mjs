@@ -8,10 +8,15 @@ const publicDir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1', 'da
 
 function expectedParticipantsCount() {
   const raw = process.env.EXPECTED_PARTICIPANTS
-  if (!raw) return 100
+  if (!raw) return null
   const n = Number.parseInt(raw, 10)
-  if (!Number.isFinite(n) || n <= 0) return 100
+  if (!Number.isFinite(n) || n <= 0) return null
   return n
+}
+
+function isAllowedParticipantsCount(n) {
+  // Support multiple demo seeds while keeping a guardrail against obviously broken fixture sets.
+  return n === 50 || n === 100
 }
 
 async function readJson(filePath) {
@@ -101,10 +106,17 @@ async function validateSide(label, dir) {
 
   assert(Array.isArray(participants), `${label} participants must be an array`)
   const expectedCount = expectedParticipantsCount()
-  assert(
-    participants.length === expectedCount,
-    `${label} participants.length must be ${expectedCount}, got ${participants.length}`,
-  )
+  if (typeof expectedCount === 'number') {
+    assert(
+      participants.length === expectedCount,
+      `${label} participants.length must be ${expectedCount}, got ${participants.length}`,
+    )
+  } else {
+    assert(
+      isAllowedParticipantsCount(participants.length),
+      `${label} participants.length must be one of [50, 100] (or set EXPECTED_PARTICIPANTS). Got ${participants.length}`,
+    )
+  }
 
   const codes = asEquivalentCodes(equivalents)
   assert(!codes.includes(null), `${label} equivalents must be strings or {code: string}`)

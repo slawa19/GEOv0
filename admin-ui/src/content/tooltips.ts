@@ -241,7 +241,10 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
   },
   'graph.type': {
     title: 'Participant type',
-    body: ['Filters nodes by participant type (e.g., person vs business).', 'Edges are shown only when both endpoints are kept.'],
+    body: [
+      'Filters nodes by participant type (e.g., person vs business).',
+      'Edges are shown only between same-type participants (cross-type edges are hidden).',
+    ],
   },
   'graph.minDegree': {
     title: 'Minimum degree',
@@ -281,8 +284,8 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
     body: [
       'Find: centers on the focused participant (picked from search) or the last clicked node.',
       'Fit: fits the whole graph into the viewport.',
-      'Fit component: fits the connected component of the focused/selected node.',
       'Re-layout: runs the selected layout algorithm again (use after changing filters/spacing).',
+      'Zoom: use the slider to zoom in/out (also works with mouse wheel).',
     ],
   },
 
