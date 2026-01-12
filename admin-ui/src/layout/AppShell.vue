@@ -53,11 +53,13 @@ const scenario = computed({
 const THEME_KEY = 'admin-ui.theme'
 const dark = ref(true)
 
-onMounted(() => {
+try {
   const saved = (localStorage.getItem(THEME_KEY) || '').toLowerCase()
   // Default dark unless user has explicitly chosen a theme.
   dark.value = saved ? saved === 'dark' : true
-})
+} catch {
+  // ignore
+}
 
 watch(
   dark,

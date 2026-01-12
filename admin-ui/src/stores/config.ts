@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 
 export const useConfigStore = defineStore('config', () => {
   const loading = ref(false)
@@ -14,7 +14,7 @@ export const useConfigStore = defineStore('config', () => {
     loading.value = true
     error.value = null
     try {
-      config.value = assertSuccess(await mockApi.getConfig())
+      config.value = assertSuccess(await api.getConfig())
     } catch (e: any) {
       error.value = e?.message || 'Failed to load config'
     } finally {
@@ -26,7 +26,7 @@ export const useConfigStore = defineStore('config', () => {
     saving.value = true
     error.value = null
     try {
-      assertSuccess(await mockApi.patchConfig(patchObj))
+      assertSuccess(await api.patchConfig(patchObj))
       config.value = { ...config.value, ...patchObj }
     } catch (e: any) {
       error.value = e?.message || 'Failed to save config'
@@ -37,8 +37,12 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   const featureFlags = computed(() => ({
-    multipath_enabled: Boolean(config.value['feature_flags.multipath_enabled']),
-    full_multipath_enabled: Boolean(config.value['feature_flags.full_multipath_enabled']),
+    multipath_enabled: Boolean(
+      config.value['FEATURE_FLAGS_MULTIPATH_ENABLED'] ?? config.value['feature_flags.multipath_enabled'],
+    ),
+    full_multipath_enabled: Boolean(
+      config.value['FEATURE_FLAGS_FULL_MULTIPATH_ENABLED'] ?? config.value['feature_flags.full_multipath_enabled'],
+    ),
   }))
 
   return { loading, saving, error, config, featureFlags, load, patch }

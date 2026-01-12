@@ -3,28 +3,16 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import { useConfigStore } from '../stores/config'
+import { debounce } from '../utils/debounce'
+import type { Trustline } from '../types/domain'
 
 const router = useRouter()
 const route = useRoute()
-
-type Trustline = {
-  equivalent: string
-  from: string
-  to: string
-  from_display_name?: string | null
-  to_display_name?: string | null
-  limit: string
-  used: string
-  available: string
-  status: string
-  created_at: string
-  policy: Record<string, unknown>
-}
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -63,7 +51,7 @@ async function load() {
   error.value = null
   try {
     const data = assertSuccess(
-      await mockApi.listTrustlines({
+      await api.listTrustlines({
         page: page.value,
         per_page: perPage.value,
         equivalent: equivalent.value || undefined,
@@ -106,9 +94,14 @@ watch(perPage, () => {
   page.value = 1
   void load()
 })
-watch([equivalent, creditor, debtor, status, threshold], () => {
+
+const debouncedReload = debounce(() => {
   page.value = 1
   void load()
+}, 250)
+
+watch([equivalent, creditor, debtor, status, threshold], () => {
+  debouncedReload()
 })
 
 const statusOptions = computed(() => [
@@ -143,8 +136,8 @@ const statusOptions = computed(() => [
 
     <div v-else>
       <el-table :data="items" size="small" @row-click="openRow" class="geoTable">
-        <el-table-column prop="equivalent" width="90">
-          <template #header><TooltipLabel label="Eq" tooltip-key="trustlines.eq" /></template>
+        <el-table-column prop="equivalent" width="120">
+          <template #header><TooltipLabel label="Equivalent" tooltip-key="trustlines.eq" /></template>
         </el-table-column>
         <el-table-column prop="from" min-width="210">
           <template #header><TooltipLabel label="From" tooltip-key="trustlines.from" /></template>

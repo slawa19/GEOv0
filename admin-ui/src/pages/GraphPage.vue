@@ -2099,7 +2099,7 @@ function applyZoom(level: number) {
 
           <el-empty v-if="selectedBalanceRows.length === 0" description="No data" />
           <el-table v-else :data="selectedBalanceRows" size="small" class="geoTable">
-            <el-table-column prop="equivalent" label="Eq" width="80" />
+            <el-table-column prop="equivalent" label="Equivalent" width="120" />
             <el-table-column prop="outgoing_limit" label="Out limit" min-width="120">
               <template #default="{ row }">{{ money(row.outgoing_limit) }}</template>
             </el-table-column>

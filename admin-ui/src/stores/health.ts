@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 
 type HealthState = {
   loading: boolean
@@ -25,9 +25,9 @@ export const useHealthStore = defineStore('health', {
       this.loading = true
       this.error = null
       try {
-        this.health = assertSuccess(await mockApi.health())
-        this.healthDb = assertSuccess(await mockApi.healthDb())
-        this.migrations = assertSuccess(await mockApi.migrations())
+        this.health = assertSuccess(await api.health())
+        this.healthDb = assertSuccess(await api.healthDb())
+        this.migrations = assertSuccess(await api.migrations())
       } catch (e: any) {
         this.error = e?.message || 'Failed to load health'
       } finally {

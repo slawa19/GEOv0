@@ -3,30 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiException, assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import TooltipLabel from '../ui/TooltipLabel.vue'
-
-type Trustline = {
-  equivalent: string
-  from: string
-  to: string
-  limit: string
-  available: string
-  used: string
-  status: string
-  created_at: string
-}
-
-type Incident = {
-  tx_id: string
-  state: string
-  initiator_pid: string
-  equivalent: string
-  age_seconds: number
-  sla_seconds: number
-  created_at?: string
-}
+import type { Incident, Trustline } from '../types/domain'
 
 const router = useRouter()
 const route = useRoute()
@@ -56,9 +36,9 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    health.value = assertSuccess(await mockApi.health())
-    healthDb.value = assertSuccess(await mockApi.healthDb())
-    migrations.value = assertSuccess(await mockApi.migrations())
+    health.value = assertSuccess(await api.health())
+    healthDb.value = assertSuccess(await api.healthDb())
+    migrations.value = assertSuccess(await api.migrations())
   } catch (e: any) {
     error.value = e?.message || 'Failed to load'
     ElMessage.error(error.value || 'Failed to load')
@@ -71,7 +51,7 @@ async function loadAudit() {
   auditLoading.value = true
   auditError.value = null
   try {
-    const page = assertSuccess(await mockApi.listAuditLog({ page: 1, per_page: 10 }))
+    const page = assertSuccess(await api.listAuditLog({ page: 1, per_page: 10 }))
     auditItems.value = page.items
   } catch (e: any) {
     auditError.value = e?.message || 'Failed to load audit log'
@@ -92,7 +72,7 @@ async function loadBottlenecks() {
   bottlenecksLoading.value = true
   bottlenecksError.value = null
   try {
-    const page = assertSuccess(await mockApi.listTrustlines({ page: 1, per_page: 250 }))
+    const page = assertSuccess(await api.listTrustlines({ page: 1, per_page: 250 }))
     const all = page.items as Trustline[]
 
     const candidates = all.filter((t) => t.status === 'active' && isBottleneck(t))
@@ -119,7 +99,7 @@ async function loadIncidents() {
   incidentsLoading.value = true
   incidentsError.value = null
   try {
-    const page = assertSuccess(await mockApi.listIncidents({ page: 1, per_page: 200 }))
+    const page = assertSuccess(await api.listIncidents({ page: 1, per_page: 200 }))
     const all = page.items as Incident[]
     const over = all.filter((i) => i.age_seconds > i.sla_seconds)
     over.sort((a, b) => b.age_seconds - a.age_seconds)
@@ -161,9 +141,9 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
           </template>
           <el-skeleton v-if="loading" animated :rows="3" />
           <div v-else>
-            <div><b>Status:</b> {{ statusText }}</div>
-            <div><b>Version:</b> {{ health?.version }}</div>
-            <div><b>Uptime:</b> {{ health?.uptime_seconds }}s</div>
+            <div><span class="geoLabel">Status:</span> {{ statusText }}</div>
+            <div><span class="geoLabel">Version:</span> {{ health?.version }}</div>
+            <div><span class="geoLabel">Uptime:</span> {{ health?.uptime_seconds }}s</div>
           </div>
         </el-card>
       </el-col>
@@ -175,9 +155,9 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
           </template>
           <el-skeleton v-if="loading" animated :rows="3" />
           <div v-else>
-            <div><b>Status:</b> {{ healthDb?.status }}</div>
-            <div><b>Reachable:</b> {{ (healthDb?.db as any)?.reachable }}</div>
-            <div><b>Latency:</b> {{ (healthDb?.db as any)?.latency_ms }}ms</div>
+            <div><span class="geoLabel">Status:</span> {{ healthDb?.status }}</div>
+            <div><span class="geoLabel">Reachable:</span> {{ (healthDb?.db as any)?.reachable }}</div>
+            <div><span class="geoLabel">Latency:</span> {{ (healthDb?.db as any)?.latency_ms }}ms</div>
           </div>
         </el-card>
       </el-col>
@@ -189,9 +169,9 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
           </template>
           <el-skeleton v-if="loading" animated :rows="3" />
           <div v-else>
-            <div><b>Up to date:</b> {{ migrations?.is_up_to_date }}</div>
-            <div><b>Current:</b> {{ migrations?.current }}</div>
-            <div><b>Head:</b> {{ migrations?.head }}</div>
+            <div><span class="geoLabel">Up to date:</span> {{ migrations?.is_up_to_date }}</div>
+            <div><span class="geoLabel">Current:</span> {{ migrations?.current }}</div>
+            <div><span class="geoLabel">Head:</span> {{ migrations?.head }}</div>
           </div>
         </el-card>
       </el-col>

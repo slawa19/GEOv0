@@ -3,11 +3,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import { useAuthStore } from '../stores/auth'
-
-type Participant = { pid: string; display_name: string; type: string; status: string; created_at?: string; meta?: Record<string, unknown> }
+import { debounce } from '../utils/debounce'
+import type { Participant } from '../types/domain'
 
 const router = useRouter()
 const route = useRoute()
@@ -34,7 +34,7 @@ async function load() {
   error.value = null
   try {
     const data = assertSuccess(
-      await mockApi.listParticipants({
+      await api.listParticipants({
         page: page.value,
         per_page: perPage.value,
         status: status.value || undefined,
@@ -76,7 +76,7 @@ async function freeze(row: Participant) {
   const reason = await promptReason(`Freeze ${row.pid}`)
   if (!reason) return
   try {
-    assertSuccess(await mockApi.freezeParticipant(row.pid, reason))
+    assertSuccess(await api.freezeParticipant(row.pid, reason))
     ElMessage.success(`Frozen ${row.pid}`)
     await load()
   } catch (e: any) {
@@ -88,7 +88,7 @@ async function unfreeze(row: Participant) {
   const reason = await promptReason(`Unfreeze ${row.pid}`)
   if (!reason) return
   try {
-    assertSuccess(await mockApi.unfreezeParticipant(row.pid, reason))
+    assertSuccess(await api.unfreezeParticipant(row.pid, reason))
     ElMessage.success(`Unfrozen ${row.pid}`)
     await load()
   } catch (e: any) {
@@ -120,9 +120,14 @@ watch(perPage, () => {
   page.value = 1
   void load()
 })
-watch([q, status, type], () => {
+
+const debouncedReload = debounce(() => {
   page.value = 1
   void load()
+}, 250)
+
+watch([q, status, type], () => {
+  debouncedReload()
 })
 
 const statusOptions = computed(() => [

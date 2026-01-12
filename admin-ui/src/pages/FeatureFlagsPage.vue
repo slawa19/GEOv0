@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 
 type FlagRow = { key: string; value: boolean; original: boolean }
@@ -17,7 +17,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const flags = assertSuccess(await mockApi.getFeatureFlags())
+    const flags = assertSuccess(await api.getFeatureFlags())
     rows.value = Object.entries(flags)
       .filter(([, v]) => typeof v === 'boolean')
       .sort(([a], [b]) => a.localeCompare(b))
@@ -51,7 +51,7 @@ async function persistRow(row: FlagRow) {
 
   savingKey.value = row.key
   try {
-    assertSuccess(await mockApi.patchFeatureFlags({ [row.key]: row.value }))
+    assertSuccess(await api.patchFeatureFlags({ [row.key]: row.value }))
     row.original = row.value
     ElMessage.success('Updated')
   } catch (e: any) {

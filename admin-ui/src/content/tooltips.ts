@@ -156,7 +156,7 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
   },
 
   'trustlines.eq': {
-    title: 'eq',
+    title: 'Equivalent',
     body: ['Equivalent (currency/unit) code, e.g. UAH, USD.'],
     links: [{ label: 'Open Equivalents', to: { path: '/equivalents' } }],
   },
@@ -208,7 +208,7 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
     body: ['PID of the transaction initiator.'],
   },
   'incidents.eq': {
-    title: 'eq',
+    title: 'Equivalent',
     body: ['Equivalent involved in the transaction.'],
     links: [{ label: 'Open Equivalents', to: { path: '/equivalents' } }],
   },

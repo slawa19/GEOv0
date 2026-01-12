@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 
 const loading = ref(false)
@@ -15,7 +15,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    status.value = assertSuccess(await mockApi.integrityStatus())
+    status.value = assertSuccess(await api.integrityStatus())
   } catch (e: any) {
     error.value = e?.message || 'Failed to load integrity status'
   } finally {
@@ -40,7 +40,7 @@ async function verify() {
 
   verifyLoading.value = true
   try {
-    assertSuccess(await mockApi.integrityVerify())
+    assertSuccess(await api.integrityVerify())
     ElMessage.success('Integrity verify started')
     await load()
   } catch (e: any) {
@@ -68,9 +68,9 @@ onMounted(() => void load())
     <div v-else>
       <el-descriptions :column="2" border>
         <el-descriptions-item label="Status">{{ status?.status }}</el-descriptions-item>
-        <el-descriptions-item label="Last Checked At">{{ status?.last_checked_at }}</el-descriptions-item>
-        <el-descriptions-item label="Checks Total">{{ status?.checks_total }}</el-descriptions-item>
-        <el-descriptions-item label="Checks Failed">{{ status?.checks_failed }}</el-descriptions-item>
+        <el-descriptions-item label="Last Check">{{ status?.last_check }}</el-descriptions-item>
+        <el-descriptions-item label="Alerts">{{ (status as any)?.alerts?.length ?? 0 }}</el-descriptions-item>
+        <el-descriptions-item label="Equivalents">{{ Object.keys(((status as any)?.equivalents as any) || {}).length }}</el-descriptions-item>
       </el-descriptions>
 
       <el-divider />

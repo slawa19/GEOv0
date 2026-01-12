@@ -3,23 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
-
-type AuditLogEntry = {
-  id: string
-  timestamp: string
-  actor_id: string
-  actor_role: string
-  action: string
-  object_type: string
-  object_id: string
-  reason?: string | null
-  before_state?: unknown
-  after_state?: unknown
-  request_id?: string
-  ip_address?: string
-}
+import type { AuditLogEntry } from '../types/domain'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -37,12 +23,12 @@ const visibleItems = computed(() => {
   if (!needle) return items.value
   return items.value.filter((e) => {
     return (
-      e.id.toLowerCase().includes(needle) ||
-      e.actor_id.toLowerCase().includes(needle) ||
-      e.actor_role.toLowerCase().includes(needle) ||
-      e.action.toLowerCase().includes(needle) ||
-      e.object_type.toLowerCase().includes(needle) ||
-      e.object_id.toLowerCase().includes(needle) ||
+      String(e.id || '').toLowerCase().includes(needle) ||
+      String(e.actor_id || '').toLowerCase().includes(needle) ||
+      String(e.actor_role || '').toLowerCase().includes(needle) ||
+      String(e.action || '').toLowerCase().includes(needle) ||
+      String(e.object_type || '').toLowerCase().includes(needle) ||
+      String(e.object_id || '').toLowerCase().includes(needle) ||
       String(e.reason || '').toLowerCase().includes(needle)
     )
   })
@@ -55,7 +41,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await mockApi.listAuditLog({ page: page.value, per_page: perPage.value }))
+    const data = assertSuccess(await api.listAuditLog({ page: page.value, per_page: perPage.value }))
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / perPage.value))
     if (page.value > maxPage) {

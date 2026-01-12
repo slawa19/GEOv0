@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 
@@ -69,7 +69,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const cfg = assertSuccess(await mockApi.getConfig())
+    const cfg = assertSuccess(await api.getConfig())
     original.value = { ...cfg }
     rows.value = toRows(cfg)
   } catch (e: any) {
@@ -128,7 +128,7 @@ async function save() {
       }
     }
 
-    assertSuccess(await mockApi.patchConfig(patch))
+    assertSuccess(await api.patchConfig(patch))
     ElMessage.success(`Saved (${keys.length} keys)`)
     await load()
   } catch (e: any) {

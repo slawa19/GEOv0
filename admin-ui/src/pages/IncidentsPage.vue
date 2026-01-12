@@ -3,20 +3,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { useConfigStore } from '../stores/config'
-
-type Incident = {
-  tx_id: string
-  state: string
-  initiator_pid: string
-  equivalent: string
-  age_seconds: number
-  created_at?: string
-  sla_seconds: number
-}
+import type { Incident } from '../types/domain'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -55,7 +46,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await mockApi.listIncidents({ page: page.value, per_page: perPage.value }))
+    const data = assertSuccess(await api.listIncidents({ page: page.value, per_page: perPage.value }))
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / perPage.value))
     if (page.value > maxPage) {
@@ -91,7 +82,7 @@ async function forceAbort(row: Incident) {
 
   abortingTxId.value = row.tx_id
   try {
-    assertSuccess(await mockApi.abortTx(row.tx_id, reason))
+    assertSuccess(await api.abortTx(row.tx_id, reason))
     ElMessage.success(`Aborted ${row.tx_id}`)
     lastAbortTxId.value = row.tx_id
     drawerOpen.value = false
@@ -171,8 +162,8 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         <el-table-column prop="initiator_pid" min-width="220">
           <template #header><TooltipLabel label="Initiator" tooltip-key="incidents.initiator" /></template>
         </el-table-column>
-        <el-table-column prop="equivalent" width="90">
-          <template #header><TooltipLabel label="Eq" tooltip-key="incidents.eq" /></template>
+        <el-table-column prop="equivalent" width="120">
+          <template #header><TooltipLabel label="Equivalent" tooltip-key="incidents.eq" /></template>
         </el-table-column>
         <el-table-column prop="age_seconds" width="120">
           <template #header><TooltipLabel label="Age" tooltip-key="incidents.age" /></template>

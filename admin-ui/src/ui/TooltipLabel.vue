@@ -19,6 +19,12 @@ const structured = computed(() => {
 
 const hasTooltip = computed(() => Boolean(structured.value || props.tooltipText))
 
+const ariaLabel = computed(() => {
+  const title = structured.value?.title
+  if (title) return `Help: ${title}`
+  return `Help for ${props.label}`
+})
+
 function linkToWithScenario(link: TooltipLink) {
   const currentQuery = route.query ?? {}
   const scenario = typeof currentQuery.scenario === 'string' ? currentQuery.scenario : undefined
@@ -33,9 +39,9 @@ function linkToWithScenario(link: TooltipLink) {
 <template>
   <span class="tl">
     <span>{{ label }}</span>
-    <el-popover v-if="hasTooltip" placement="top" trigger="hover" :show-after="250" :width="360">
+    <el-popover v-if="hasTooltip" placement="top" trigger="click" :width="360">
       <template #reference>
-        <span class="tl__icon" aria-label="help">?</span>
+        <button class="tl__icon" type="button" :aria-label="ariaLabel" title="Help">?</button>
       </template>
       <div v-if="structured" class="tl__content">
         <div class="tl__title">{{ structured.title }}</div>
@@ -78,6 +84,12 @@ function linkToWithScenario(link: TooltipLink) {
   border: 1px solid var(--el-border-color);
   cursor: help;
   user-select: none;
+  padding: 0;
+}
+
+.tl__icon:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
 }
 
 .tl__content {

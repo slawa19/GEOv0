@@ -3,12 +3,12 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
-import { mockApi } from '../api/mockApi'
+import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
-type UsageCounts = { trustlines: number; incidents: number }
+type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -37,8 +37,14 @@ async function warmUsage(code: string) {
 
   usageLoadingByCode[key] = true
   try {
-    const usage = assertSuccess(await mockApi.getEquivalentUsage(key))
-    usageByCode[key] = { trustlines: usage.trustlines, incidents: usage.incidents }
+    const usage = assertSuccess(await api.getEquivalentUsage(key))
+    usageByCode[key] = {
+      trustlines: Number((usage as any).trustlines ?? 0),
+      incidents: typeof (usage as any).incidents === 'number' ? Number((usage as any).incidents) : undefined,
+      debts: typeof (usage as any).debts === 'number' ? Number((usage as any).debts) : undefined,
+      integrity_checkpoints:
+        typeof (usage as any).integrity_checkpoints === 'number' ? Number((usage as any).integrity_checkpoints) : undefined,
+    }
   } catch {
     // best-effort only
   } finally {
@@ -54,7 +60,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await mockApi.listEquivalents({ include_inactive: includeInactive.value }))
+    const data = assertSuccess(await api.listEquivalents({ include_inactive: includeInactive.value }))
     items.value = data.items
   } catch (e: any) {
     error.value = e?.message || 'Failed to load equivalents'
@@ -82,7 +88,7 @@ function openEdit(row: Equivalent) {
 async function createEq() {
   try {
     const created = assertSuccess(
-      await mockApi.createEquivalent({
+      await api.createEquivalent({
         code: createForm.code,
         precision: Number(createForm.precision),
         description: createForm.description,
@@ -102,7 +108,7 @@ async function saveEdit() {
   if (!editing.value) return
   try {
     const updated = assertSuccess(
-      await mockApi.updateEquivalent(editing.value.code, {
+      await api.updateEquivalent(editing.value.code, {
         precision: Number(editForm.precision),
         description: editForm.description,
       }),
@@ -130,7 +136,7 @@ async function setActive(row: Equivalent, next: boolean) {
   }
 
   try {
-    assertSuccess(await mockApi.setEquivalentActive(row.code, next, reason))
+    assertSuccess(await api.setEquivalentActive(row.code, next, reason))
     ElMessage.success(next ? `Activated ${row.code}` : `Deactivated ${row.code}`)
     includeInactive.value = true
     await load()
@@ -142,8 +148,17 @@ async function setActive(row: Equivalent, next: boolean) {
 async function deleteEq(row: Equivalent) {
   let usageLine = ''
   try {
-    const usage = assertSuccess(await mockApi.getEquivalentUsage(row.code))
-    usageLine = `Used by ${usage.trustlines} trustlines and ${usage.incidents} incidents.`
+    const usage = assertSuccess(await api.getEquivalentUsage(row.code))
+    const tl = Number((usage as any).trustlines ?? 0)
+    const inc = (usage as any).incidents
+    const debts = (usage as any).debts
+    const ic = (usage as any).integrity_checkpoints
+    const parts: string[] = []
+    parts.push(`${tl} trustlines`)
+    if (typeof inc === 'number') parts.push(`${inc} incidents`)
+    if (typeof debts === 'number') parts.push(`${debts} debts`)
+    if (typeof ic === 'number') parts.push(`${ic} integrity_checkpoints`)
+    usageLine = parts.length ? `Used by ${parts.join(', ')}.` : ''
   } catch {
     usageLine = ''
   }
@@ -168,15 +183,19 @@ async function deleteEq(row: Equivalent) {
   }
 
   try {
-    assertSuccess(await mockApi.deleteEquivalent(row.code, reason))
+    assertSuccess(await api.deleteEquivalent(row.code, reason))
     ElMessage.success(`Deleted ${row.code}`)
     includeInactive.value = true
     await load()
   } catch (e: any) {
     const t = e?.details?.trustlines
     const i = e?.details?.incidents
-    if (typeof t === 'number' || typeof i === 'number') {
-      ElMessage.error(`${e?.message || 'Delete failed'} (trustlines: ${t ?? 0}, incidents: ${i ?? 0})`)
+    const d = e?.details?.debts
+    const ic = e?.details?.integrity_checkpoints
+    if ([t, i, d, ic].some((v) => typeof v === 'number')) {
+      ElMessage.error(
+        `${e?.message || 'Delete failed'} (trustlines: ${t ?? 0}, incidents: ${i ?? 0}, debts: ${d ?? 0}, integrity_checkpoints: ${ic ?? 0})`,
+      )
     } else {
       ElMessage.error(e?.message || 'Delete failed')
     }
@@ -218,7 +237,12 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             <div class="code">
               <div class="code__main">{{ scope.row.code }}</div>
               <div class="code__sub" v-if="usageByCode[scope.row.code]">
-                Used by {{ usageByCode[scope.row.code]!.trustlines }} TL / {{ usageByCode[scope.row.code]!.incidents }} Inc
+                <template v-if="typeof usageByCode[scope.row.code]!.debts === 'number' || typeof usageByCode[scope.row.code]!.integrity_checkpoints === 'number'">
+                  Used by {{ usageByCode[scope.row.code]!.trustlines ?? 0 }} TL / {{ usageByCode[scope.row.code]!.debts ?? 0 }} Debts / {{ usageByCode[scope.row.code]!.integrity_checkpoints ?? 0 }} IC
+                </template>
+                <template v-else>
+                  Used by {{ usageByCode[scope.row.code]!.trustlines ?? 0 }} TL / {{ usageByCode[scope.row.code]!.incidents ?? 0 }} Inc
+                </template>
               </div>
               <div class="code__sub" v-else-if="usageLoadingByCode[scope.row.code]">
                 Loading usage…
