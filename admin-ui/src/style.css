@@ -3,6 +3,54 @@ body {
   height: 100%;
 }
 
+:root {
+  /* GEO Admin UI typography scale (roles)
+     - title (card/section): visually stronger than labels
+     - label: secondary, not equal to headings
+     - value: primary emphasis for numbers
+  */
+  --geo-font-size-title: 13px;
+  --geo-font-size-label: 12px;
+  --geo-font-size-value: 16px;
+  --geo-font-size-sub: 12px;
+
+  --geo-font-weight-title: 600;
+  --geo-font-weight-label: 500;
+  --geo-font-weight-value: 700;
+  --geo-font-weight-table-header: 600;
+}
+
+/* Reusable typography helpers (Admin UI)
+   - Apply via class to avoid surprising global overrides.
+*/
+.geoLabel {
+  font-size: var(--geo-font-size-label);
+  font-weight: var(--geo-font-weight-label);
+  color: var(--el-text-color-secondary);
+}
+
+.geoHint {
+  font-size: var(--geo-font-size-sub);
+  color: var(--el-text-color-secondary);
+}
+
+.geoValue {
+  font-size: var(--geo-font-size-value);
+  font-weight: var(--geo-font-weight-value);
+  color: var(--el-text-color-primary);
+}
+
+.geoCard > .el-card__header {
+  font-size: var(--geo-font-size-title);
+  font-weight: var(--geo-font-weight-title);
+  color: var(--el-text-color-primary);
+}
+
+.geoTable .el-table__header .cell {
+  font-weight: var(--geo-font-weight-table-header);
+  color: var(--el-text-color-primary);
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;

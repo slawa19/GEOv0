@@ -2,14 +2,15 @@
   "version": "v1",
   "generated_at": "2026-01-11T00:00:00Z",
   "counts": {
-    "participants": 60,
-    "equivalents": 12,
-    "trustlines": 140,
-    "audit_log": 180,
-    "incidents": 25
+    "participants": 100,
+    "equivalents": 3,
+    "trustlines": 439,
+    "incidents": 3,
+    "debts": 439
   },
   "notes": [
-    "All amounts are decimal strings.",
-    "Timestamps are fixed relative to 2026-01-11Z."
+    "TrustLine direction is creditor -> debtor (from -> to).",
+    "Debt direction is debtor -> creditor (derived from trustline.used).",
+    "Timestamps are fixed relative to 2026-01-11T00:00:00Z."
   ]
 }

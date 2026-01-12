@@ -34,6 +34,13 @@ So if a household “buys bread on credit from the bakery”, the trustline is:
 
 Include a small number of explicit directed cycles (3–6 nodes) that respect role logic.
 
+For fixtures-first prototyping of clearing and balance analytics, generators should also produce:
+- `admin-fixtures/v1/datasets/debts.json` (derived from trustline `used` values)
+- `admin-fixtures/v1/datasets/clearing-cycles.json` (a small sample of short debt cycles)
+
+And keep metadata in sync:
+- `admin-fixtures/v1/_meta.json`
+
 ## How to run
 
 From repo root:

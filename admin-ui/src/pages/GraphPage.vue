@@ -23,6 +23,29 @@ type Trustline = {
   created_at: string
 }
 
+type Debt = {
+  equivalent: string
+  debtor: string
+  creditor: string
+  amount: string
+}
+
+type ClearingCycles = {
+  equivalents: Record<
+    string,
+    {
+      cycles: Array<
+        Array<{
+          equivalent: string
+          debtor: string
+          creditor: string
+          amount: string
+        }>
+      >
+    }
+  >
+}
+
 type Incident = {
   tx_id: string
   state: string
@@ -31,6 +54,35 @@ type Incident = {
   age_seconds: number
   sla_seconds: number
   created_at?: string
+}
+
+type AuditLogEntry = {
+  id: string
+  timestamp: string
+  actor_id?: string
+  actor_role?: string
+  action: string
+  object_type: string
+  object_id: string
+  reason?: string | null
+  before_state?: unknown
+  after_state?: unknown
+  request_id?: string
+  ip_address?: string
+}
+
+type Transaction = {
+  id?: string
+  tx_id: string
+  idempotency_key?: string | null
+  type: string
+  initiator_pid: string
+  payload: Record<string, unknown>
+  signatures?: unknown[] | null
+  state: string
+  error?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
 }
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
@@ -50,6 +102,32 @@ const participants = ref<Participant[]>([])
 const trustlines = ref<Trustline[]>([])
 const incidents = ref<Incident[]>([])
 const equivalents = ref<Equivalent[]>([])
+const debts = ref<Debt[]>([])
+const clearingCycles = ref<ClearingCycles | null>(null)
+const auditLog = ref<AuditLogEntry[]>([])
+const transactions = ref<Transaction[]>([])
+
+type DrawerTab = 'summary' | 'balance' | 'counterparties' | 'risk' | 'cycles'
+const drawerTab = ref<DrawerTab>('summary')
+const drawerEq = ref<string>('ALL')
+
+type AnalyticsToggles = {
+  showRank: boolean
+  showDistribution: boolean
+  showConcentration: boolean
+  showCapacity: boolean
+  showBottlenecks: boolean
+  showActivity: boolean
+}
+
+const analytics = ref<AnalyticsToggles>({
+  showRank: true,
+  showDistribution: true,
+  showConcentration: true,
+  showCapacity: true,
+  showBottlenecks: true,
+  showActivity: true,
+})
 
 const seedLabel = computed(() => {
   const n = (participants.value || []).length
@@ -93,6 +171,8 @@ const STORAGE_KEYS = {
   showLegend: 'geo.graph.showLegend',
   layoutSpacing: 'geo.graph.layoutSpacing',
   toolbarTab: 'geo.graph.toolbarTab',
+  drawerEq: 'geo.graph.analytics.drawerEq',
+  analyticsToggles: 'geo.graph.analytics.toggles.v1',
 } as const
 
 const zoom = ref<number>(1)
@@ -153,6 +233,52 @@ function money(v: string): string {
   return formatDecimalFixed(v, 2)
 }
 
+function pct(x: number, digits = 0): string {
+  if (!Number.isFinite(x)) return '0%'
+  const p = clamp(x * 100, 0, 100)
+  return `${p.toFixed(digits)}%`
+}
+
+function parseIsoMillis(ts?: string | null): number | null {
+  const s = String(ts || '').trim()
+  if (!s) return null
+  const ms = Date.parse(s)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function decimalToAtoms(input: string, precision: number): bigint {
+  const raw = String(input ?? '').trim()
+  if (!raw) return 0n
+  const m = /^(-)?(\d+)(?:\.(\d+))?$/.exec(raw)
+  if (!m) return 0n
+  const neg = Boolean(m[1])
+  const intPart = m[2] || '0'
+  const fracPart = m[3] || ''
+  const frac = (fracPart + '0'.repeat(precision)).slice(0, precision)
+  const atoms = BigInt((intPart + frac).replace(/^0+(?=\d)/, '') || '0')
+  return neg ? -atoms : atoms
+}
+
+function atomsToDecimal(atoms: bigint, precision: number): string {
+  const neg = atoms < 0n
+  const abs = neg ? -atoms : atoms
+  const s = abs.toString()
+  if (precision <= 0) return (neg ? '-' : '') + s
+  const pad = precision + 1
+  const padded = s.length >= pad ? s : '0'.repeat(pad - s.length) + s
+  const head = padded.slice(0, padded.length - precision)
+  const frac = padded.slice(padded.length - precision)
+  return (neg ? '-' : '') + head + '.' + frac
+}
+
+async function loadOptionalFixtureJson<T>(relPath: string, fallback: T): Promise<T> {
+  try {
+    return await loadFixtureJson<T>(relPath)
+  } catch {
+    return fallback
+  }
+}
+
 function normEq(v: string): string {
   return String(v || '').trim().toUpperCase()
 }
@@ -166,6 +292,497 @@ const availableEquivalents = computed(() => {
   const fromTls = (trustlines.value || []).map((t) => normEq(t.equivalent)).filter(Boolean)
   const all = Array.from(new Set([...fromDs, ...fromTls])).sort()
   return ['ALL', ...all]
+})
+
+const precisionByEq = computed(() => {
+  const m = new Map<string, number>()
+  for (const e of equivalents.value || []) {
+    const code = normEq(e.code)
+    if (!code) continue
+    const p = Number(e.precision)
+    if (Number.isFinite(p)) m.set(code, p)
+  }
+  return m
+})
+
+const analyticsEq = computed(() => {
+  const key = normEq(drawerEq.value)
+  return key === 'ALL' ? null : key
+})
+
+const participantByPid = computed(() => {
+  const m = new Map<string, Participant>()
+  for (const p of participants.value || []) {
+    if (p?.pid) m.set(p.pid, p)
+  }
+  return m
+})
+
+type BalanceRow = {
+  equivalent: string
+  outgoing_limit: string
+  outgoing_used: string
+  incoming_limit: string
+  incoming_used: string
+  total_debt: string
+  total_credit: string
+  net: string
+}
+
+const selectedBalanceRows = computed<BalanceRow[]>(() => {
+  if (!selected.value || selected.value.kind !== 'node') return []
+  const pid = selected.value.pid
+  const precOf = (eqCode: string) => precisionByEq.value.get(eqCode) ?? 2
+
+  const debtAtomsByEq = new Map<string, bigint>()
+  const creditAtomsByEq = new Map<string, bigint>()
+
+  for (const d of debts.value || []) {
+    const eqCode = normEq(d.equivalent)
+    if (!eqCode) continue
+    const p = precOf(eqCode)
+    const amt = decimalToAtoms(d.amount, p)
+    if (d.debtor === pid) debtAtomsByEq.set(eqCode, (debtAtomsByEq.get(eqCode) || 0n) + amt)
+    if (d.creditor === pid) creditAtomsByEq.set(eqCode, (creditAtomsByEq.get(eqCode) || 0n) + amt)
+  }
+
+  const outLimitByEq = new Map<string, bigint>()
+  const outUsedByEq = new Map<string, bigint>()
+  const inLimitByEq = new Map<string, bigint>()
+  const inUsedByEq = new Map<string, bigint>()
+
+  for (const t of trustlines.value || []) {
+    const eqCode = normEq(t.equivalent)
+    if (!eqCode) continue
+    const p = precOf(eqCode)
+    const lim = decimalToAtoms(t.limit, p)
+    const used = decimalToAtoms(t.used, p)
+    if (t.from === pid) {
+      outLimitByEq.set(eqCode, (outLimitByEq.get(eqCode) || 0n) + lim)
+      outUsedByEq.set(eqCode, (outUsedByEq.get(eqCode) || 0n) + used)
+    }
+    if (t.to === pid) {
+      inLimitByEq.set(eqCode, (inLimitByEq.get(eqCode) || 0n) + lim)
+      inUsedByEq.set(eqCode, (inUsedByEq.get(eqCode) || 0n) + used)
+    }
+  }
+
+  const eqs = (availableEquivalents.value || []).filter((x) => x !== 'ALL')
+  const wanted = analyticsEq.value ? [analyticsEq.value] : eqs
+
+  return wanted
+    .map((eqCode) => {
+      const p = precOf(eqCode)
+      const debt = debtAtomsByEq.get(eqCode) || 0n
+      const credit = creditAtomsByEq.get(eqCode) || 0n
+      const net = credit - debt
+      return {
+        equivalent: eqCode,
+        outgoing_limit: atomsToDecimal(outLimitByEq.get(eqCode) || 0n, p),
+        outgoing_used: atomsToDecimal(outUsedByEq.get(eqCode) || 0n, p),
+        incoming_limit: atomsToDecimal(inLimitByEq.get(eqCode) || 0n, p),
+        incoming_used: atomsToDecimal(inUsedByEq.get(eqCode) || 0n, p),
+        total_debt: atomsToDecimal(debt, p),
+        total_credit: atomsToDecimal(credit, p),
+        net: atomsToDecimal(net, p),
+      }
+    })
+    .filter((r) => {
+      // Hide completely empty rows when eq=ALL.
+      if (analyticsEq.value) return true
+      const p = precOf(r.equivalent)
+      return !(
+        decimalToAtoms(r.outgoing_limit, p) === 0n &&
+        decimalToAtoms(r.incoming_limit, p) === 0n &&
+        decimalToAtoms(r.total_debt, p) === 0n &&
+        decimalToAtoms(r.total_credit, p) === 0n
+      )
+    })
+})
+
+// Note: we keep split counterparties (creditors vs debtors) as the primary UI.
+
+type CounterpartySplitRow = {
+  pid: string
+  display_name: string
+  amount: string
+  share: number
+}
+
+const selectedCounterpartySplit = computed(() => {
+  if (!selected.value || selected.value.kind !== 'node') {
+    return {
+      eq: null as string | null,
+      totalDebtAtoms: 0n,
+      totalCreditAtoms: 0n,
+      creditors: [] as CounterpartySplitRow[],
+      debtors: [] as CounterpartySplitRow[],
+    }
+  }
+
+  const eqCode = analyticsEq.value
+  if (!eqCode) {
+    return {
+      eq: null as string | null,
+      totalDebtAtoms: 0n,
+      totalCreditAtoms: 0n,
+      creditors: [] as CounterpartySplitRow[],
+      debtors: [] as CounterpartySplitRow[],
+    }
+  }
+
+  const pid = selected.value.pid
+  const prec = precisionByEq.value.get(eqCode) ?? 2
+
+  const creditors = new Map<string, bigint>() // who pid owes to (pid is debtor)
+  const debtors = new Map<string, bigint>() // who owes pid (pid is creditor)
+
+  let totalDebtAtoms = 0n
+  let totalCreditAtoms = 0n
+
+  for (const d of debts.value || []) {
+    if (normEq(d.equivalent) !== eqCode) continue
+    const amt = decimalToAtoms(d.amount, prec)
+    if (d.debtor === pid) {
+      totalDebtAtoms += amt
+      const other = String(d.creditor || '').trim()
+      if (other) creditors.set(other, (creditors.get(other) || 0n) + amt)
+    } else if (d.creditor === pid) {
+      totalCreditAtoms += amt
+      const other = String(d.debtor || '').trim()
+      if (other) debtors.set(other, (debtors.get(other) || 0n) + amt)
+    }
+  }
+
+  const toRows = (m: Map<string, bigint>, total: bigint): CounterpartySplitRow[] => {
+    const out: CounterpartySplitRow[] = []
+    for (const [otherPid, amt] of m.entries()) {
+      const p = participantByPid.value.get(otherPid)
+      const name = String(p?.display_name || '').trim()
+      const share = total > 0n ? Number(amt) / Number(total) : 0
+      out.push({
+        pid: otherPid,
+        display_name: name || otherPid,
+        amount: atomsToDecimal(amt, prec),
+        share,
+      })
+    }
+    out.sort((a, b) => {
+      const ai = decimalToAtoms(a.amount, prec)
+      const bi = decimalToAtoms(b.amount, prec)
+      if (ai === bi) return a.pid.localeCompare(b.pid)
+      return bi > ai ? 1 : -1
+    })
+    return out
+  }
+
+  return {
+    eq: eqCode,
+    totalDebtAtoms,
+    totalCreditAtoms,
+    creditors: toRows(creditors, totalDebtAtoms),
+    debtors: toRows(debtors, totalCreditAtoms),
+  }
+})
+
+function hhiFromShares(rows: Array<{ share: number }>): number {
+  let hhi = 0
+  for (const r of rows) {
+    const s = Number(r.share) || 0
+    hhi += s * s
+  }
+  return hhi
+}
+
+function hhiLevel(hhi: number): { label: string; type: 'success' | 'warning' | 'danger' } {
+  if (hhi >= 0.25) return { label: 'high', type: 'danger' }
+  if (hhi >= 0.15) return { label: 'medium', type: 'warning' }
+  return { label: 'low', type: 'success' }
+}
+
+const selectedConcentration = computed(() => {
+  const eqCode = selectedCounterpartySplit.value.eq
+  if (!eqCode) {
+    return {
+      eq: null as string | null,
+      outgoing: { top1: 0, top5: 0, hhi: 0, level: hhiLevel(0) },
+      incoming: { top1: 0, top5: 0, hhi: 0, level: hhiLevel(0) },
+    }
+  }
+
+  // outgoing = who you owe to (creditors map)
+  const outRows = selectedCounterpartySplit.value.creditors
+  const inRows = selectedCounterpartySplit.value.debtors
+
+  const outTop1 = outRows[0]?.share || 0
+  const outTop5 = outRows.slice(0, 5).reduce((acc, r) => acc + (r.share || 0), 0)
+  const outHhi = hhiFromShares(outRows)
+
+  const inTop1 = inRows[0]?.share || 0
+  const inTop5 = inRows.slice(0, 5).reduce((acc, r) => acc + (r.share || 0), 0)
+  const inHhi = hhiFromShares(inRows)
+
+  return {
+    eq: eqCode,
+    outgoing: { top1: outTop1, top5: outTop5, hhi: outHhi, level: hhiLevel(outHhi) },
+    incoming: { top1: inTop1, top5: inTop5, hhi: inHhi, level: hhiLevel(inHhi) },
+  }
+})
+
+type NetDist = {
+  eq: string
+  n: number
+  netAtomsByPid: Map<string, bigint>
+  sortedPids: string[]
+  min: bigint
+  max: bigint
+  bins: Array<{ from: bigint; to: bigint; count: number }>
+}
+
+const netDistribution = computed<NetDist | null>(() => {
+  const eqCode = analyticsEq.value
+  if (!eqCode) return null
+
+  const prec = precisionByEq.value.get(eqCode) ?? 2
+  const net = new Map<string, bigint>()
+
+  for (const p of participants.value || []) {
+    if (p?.pid) net.set(p.pid, 0n)
+  }
+
+  for (const d of debts.value || []) {
+    if (normEq(d.equivalent) !== eqCode) continue
+    const amt = decimalToAtoms(d.amount, prec)
+    const debtor = String(d.debtor || '').trim()
+    const creditor = String(d.creditor || '').trim()
+    if (debtor) net.set(debtor, (net.get(debtor) || 0n) - amt)
+    if (creditor) net.set(creditor, (net.get(creditor) || 0n) + amt)
+  }
+
+  const pids = Array.from(net.keys())
+  pids.sort((a, b) => {
+    const av = net.get(a) || 0n
+    const bv = net.get(b) || 0n
+    if (av === bv) return a.localeCompare(b)
+    return bv > av ? 1 : -1
+  })
+
+  let min = 0n
+  let max = 0n
+  for (const v of net.values()) {
+    if (v < min) min = v
+    if (v > max) max = v
+  }
+
+  // Histogram
+  const binsCount = 20
+  const span = max - min
+  const bins: Array<{ from: bigint; to: bigint; count: number }> = []
+  if (span <= 0n) {
+    bins.push({ from: min, to: max, count: pids.length })
+  } else {
+    // integer bucket width (ceil)
+    const w = (span + BigInt(binsCount) - 1n) / BigInt(binsCount)
+    for (let i = 0; i < binsCount; i++) {
+      const from = min + BigInt(i) * w
+      const to = i === binsCount - 1 ? max : from + w
+      bins.push({ from, to, count: 0 })
+    }
+    for (const pid of pids) {
+      const v = net.get(pid) || 0n
+      const idx = w > 0n ? Number((v - min) / w) : 0
+      const safe = clamp(idx, 0, binsCount - 1)
+      const bucket = bins[safe]
+      if (bucket) bucket.count += 1
+    }
+  }
+
+  return { eq: eqCode, n: pids.length, netAtomsByPid: net, sortedPids: pids, min, max, bins }
+})
+
+const selectedRank = computed(() => {
+  if (!selected.value || selected.value.kind !== 'node') return null
+  const dist = netDistribution.value
+  if (!dist) return null
+  const idx = dist.sortedPids.indexOf(selected.value.pid)
+  if (idx < 0) return null
+  const rank = idx + 1
+  const n = dist.n
+  const percentile = n <= 1 ? 1 : (n - rank) / (n - 1) // 1.0 = top
+  return {
+    eq: dist.eq,
+    rank,
+    n,
+    percentile,
+    net: atomsToDecimal(dist.netAtomsByPid.get(selected.value.pid) || 0n, precisionByEq.value.get(dist.eq) ?? 2),
+  }
+})
+
+const selectedCapacity = computed(() => {
+  if (!selected.value || selected.value.kind !== 'node') return null
+  const pid = selected.value.pid
+  const eqCode = analyticsEq.value
+  const precOf = (eqc: string) => precisionByEq.value.get(eqc) ?? 2
+
+  let outLimit = 0n
+  let outUsed = 0n
+  let inLimit = 0n
+  let inUsed = 0n
+
+  const bottlenecks: Array<{ dir: 'out' | 'in'; other: string; t: Trustline }> = []
+
+  for (const t of trustlines.value || []) {
+    const e = normEq(t.equivalent)
+    if (eqCode && e !== eqCode) continue
+    const p = precOf(e)
+    const lim = decimalToAtoms(t.limit, p)
+    const used = decimalToAtoms(t.used, p)
+    if (t.from === pid) {
+      outLimit += lim
+      outUsed += used
+      if (isBottleneck(t)) bottlenecks.push({ dir: 'out', other: t.to, t })
+    } else if (t.to === pid) {
+      inLimit += lim
+      inUsed += used
+      if (isBottleneck(t)) bottlenecks.push({ dir: 'in', other: t.from, t })
+    }
+  }
+
+  const outPct = outLimit > 0n ? Number(outUsed) / Number(outLimit) : 0
+  const inPct = inLimit > 0n ? Number(inUsed) / Number(inLimit) : 0
+
+  return {
+    eq: eqCode,
+    out: { limit: outLimit, used: outUsed, pct: outPct },
+    inc: { limit: inLimit, used: inUsed, pct: inPct },
+    bottlenecks,
+  }
+})
+
+const selectedActivity = computed(() => {
+  if (!selected.value || selected.value.kind !== 'node') return null
+  const pid = selected.value.pid
+  const eqCode = analyticsEq.value
+
+  const tsCandidates: number[] = []
+  for (const t of trustlines.value || []) {
+    const ms = parseIsoMillis(t.created_at)
+    if (ms !== null) tsCandidates.push(ms)
+  }
+  for (const i of incidents.value || []) {
+    const ms = parseIsoMillis(i.created_at)
+    if (ms !== null) tsCandidates.push(ms)
+  }
+  for (const a of auditLog.value || []) {
+    const ms = parseIsoMillis(a.timestamp)
+    if (ms !== null) tsCandidates.push(ms)
+  }
+
+  for (const t of transactions.value || []) {
+    const ms = parseIsoMillis(t.updated_at || t.created_at)
+    if (ms !== null) tsCandidates.push(ms)
+  }
+
+  const now = tsCandidates.length ? Math.max(...tsCandidates) : Date.now()
+  const dayMs = 24 * 60 * 60 * 1000
+
+  const windows = [7, 30, 90]
+  const trustlineCreated: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
+  const trustlineClosed: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
+  const incidentCount: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
+  const participantOps: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
+  const paymentCommitted: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
+  const clearingCommitted: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
+
+  for (const t of trustlines.value || []) {
+    if (eqCode && normEq(t.equivalent) !== eqCode) continue
+    if (t.from !== pid && t.to !== pid) continue
+    const ms = parseIsoMillis(t.created_at)
+    if (ms === null) continue
+    const ageDays = (now - ms) / dayMs
+    for (const w of windows) {
+      if (ageDays <= w) {
+        trustlineCreated[w] = (trustlineCreated[w] ?? 0) + 1
+        if (String(t.status || '').toLowerCase() === 'closed') trustlineClosed[w] = (trustlineClosed[w] ?? 0) + 1
+      }
+    }
+  }
+
+  for (const i of incidents.value || []) {
+    if (eqCode && normEq(i.equivalent) !== eqCode) continue
+    if (i.initiator_pid !== pid) continue
+    const ms = parseIsoMillis(i.created_at)
+    if (ms === null) continue
+    const ageDays = (now - ms) / dayMs
+    for (const w of windows) {
+      if (ageDays <= w) incidentCount[w] = (incidentCount[w] ?? 0) + 1
+    }
+  }
+
+  for (const a of auditLog.value || []) {
+    if (String(a.object_id || '') !== pid) continue
+    const action = String(a.action || '')
+    if (!action.startsWith('PARTICIPANT_')) continue
+    const ms = parseIsoMillis(a.timestamp)
+    if (ms === null) continue
+    const ageDays = (now - ms) / dayMs
+    for (const w of windows) {
+      if (ageDays <= w) participantOps[w] = (participantOps[w] ?? 0) + 1
+    }
+  }
+
+  for (const tx of transactions.value || []) {
+    const type = String(tx.type || '')
+    if (type !== 'PAYMENT' && type !== 'CLEARING') continue
+    if (String(tx.state || '') !== 'COMMITTED') continue
+
+    const payload = (tx.payload || {}) as Record<string, unknown>
+    const payloadEq = typeof payload.equivalent === 'string' ? payload.equivalent : null
+    if (eqCode && payloadEq && normEq(payloadEq) !== eqCode) continue
+
+    let involved = false
+    if (type === 'PAYMENT') {
+      const from = typeof payload.from === 'string' ? payload.from : ''
+      const to = typeof payload.to === 'string' ? payload.to : ''
+      involved = from === pid || to === pid
+    } else {
+      const edges = Array.isArray(payload.edges) ? (payload.edges as any[]) : []
+      involved = edges.some((e) => e && (e.debtor === pid || e.creditor === pid))
+      if (!involved) involved = String(tx.initiator_pid || '') === pid
+    }
+    if (!involved) continue
+
+    const ms = parseIsoMillis(tx.updated_at || tx.created_at)
+    if (ms === null) continue
+    const ageDays = (now - ms) / dayMs
+    for (const w of windows) {
+      if (ageDays <= w) {
+        if (type === 'PAYMENT') paymentCommitted[w] = (paymentCommitted[w] ?? 0) + 1
+        if (type === 'CLEARING') clearingCommitted[w] = (clearingCommitted[w] ?? 0) + 1
+      }
+    }
+  }
+
+  return {
+    windows,
+    trustlineCreated,
+    trustlineClosed,
+    incidentCount,
+    participantOps,
+    paymentCommitted,
+    clearingCommitted,
+    hasTransactions: (transactions.value || []).length > 0,
+  }
+})
+
+const selectedCycles = computed(() => {
+  if (!selected.value || selected.value.kind !== 'node') return []
+  const eqCode = analyticsEq.value
+  if (!eqCode) return []
+  const pid = selected.value.pid
+
+  const cycles = clearingCycles.value?.equivalents?.[eqCode]?.cycles || []
+  return cycles.filter((c) => c.some((e) => e.debtor === pid || e.creditor === pid)).slice(0, 10)
 })
 
 const filteredTrustlines = computed(() => {
@@ -689,6 +1306,7 @@ function attachHandlers() {
       inDegree,
       outDegree,
     }
+    drawerTab.value = 'summary'
     drawerOpen.value = true
   })
 
@@ -817,17 +1435,25 @@ async function loadData() {
   loading.value = true
   error.value = null
   try {
-    const [ps, tls, inc, eqs] = await Promise.all([
+    const [ps, tls, inc, eqs, ds, cc, al, txs] = await Promise.all([
       loadFixtureJson<Participant[]>('datasets/participants.json'),
       loadFixtureJson<Trustline[]>('datasets/trustlines.json'),
       loadFixtureJson<{ items: Incident[] }>('datasets/incidents.json'),
       loadFixtureJson<Equivalent[]>('datasets/equivalents.json'),
+      loadOptionalFixtureJson<Debt[]>('datasets/debts.json', []),
+      loadOptionalFixtureJson<ClearingCycles | null>('datasets/clearing-cycles.json', null),
+      loadOptionalFixtureJson<AuditLogEntry[]>('datasets/audit-log.json', []),
+      loadOptionalFixtureJson<Transaction[]>('datasets/transactions.json', []),
     ])
 
     participants.value = ps
     trustlines.value = tls
     incidents.value = inc.items
     equivalents.value = eqs
+    debts.value = ds
+    clearingCycles.value = cc
+    auditLog.value = al
+    transactions.value = txs
 
     if (!availableEquivalents.value.includes(eq.value)) eq.value = 'ALL'
   } catch (e: any) {
@@ -849,6 +1475,18 @@ onMounted(async () => {
     if (rawSpacing !== null) {
       const parsed = Number(rawSpacing)
       if (Number.isFinite(parsed)) layoutSpacing.value = parsed
+    }
+
+    const rawDrawerEq = window.localStorage.getItem(STORAGE_KEYS.drawerEq)
+    if (rawDrawerEq) drawerEq.value = String(rawDrawerEq)
+
+    const rawToggles = window.localStorage.getItem(STORAGE_KEYS.analyticsToggles)
+    if (rawToggles) {
+      const parsed = JSON.parse(rawToggles) as Partial<AnalyticsToggles>
+      analytics.value = {
+        ...analytics.value,
+        ...parsed,
+      }
     }
   } catch {
     // ignore storage errors (private mode / blocked)
@@ -899,6 +1537,26 @@ watch(layoutSpacing, (v) => {
     // ignore
   }
 })
+
+watch(drawerEq, (v) => {
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.drawerEq, String(v || 'ALL'))
+  } catch {
+    // ignore
+  }
+})
+
+watch(
+  analytics,
+  (v) => {
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.analyticsToggles, JSON.stringify(v))
+    } catch {
+      // ignore
+    }
+  },
+  { deep: true }
+)
 
 watch(toolbarTab, (v) => {
   try {
@@ -1176,27 +1834,593 @@ function applyZoom(level: number) {
     <div v-if="selected && selected.kind === 'node'">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="PID">{{ selected.pid }}</el-descriptions-item>
-        <el-descriptions-item label="display_name">{{ selected.display_name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="status">{{ selected.status || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="type">{{ selected.type || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="degree">{{ selected.degree }}</el-descriptions-item>
-        <el-descriptions-item label="in/out">{{ selected.inDegree }} / {{ selected.outDegree }}</el-descriptions-item>
-        <el-descriptions-item v-if="showIncidents" label="incident_ratio">
+        <el-descriptions-item label="Display name">{{ selected.display_name || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="Status">{{ selected.status || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="Type">{{ selected.type || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="Degree">{{ selected.degree }}</el-descriptions-item>
+        <el-descriptions-item label="In / out">{{ selected.inDegree }} / {{ selected.outDegree }}</el-descriptions-item>
+        <el-descriptions-item v-if="showIncidents" label="Incident ratio">
           {{ (incidentRatioByPid.get(selected.pid) || 0).toFixed(2) }}
         </el-descriptions-item>
       </el-descriptions>
+
+      <el-divider>Analytics (fixtures-first)</el-divider>
+
+      <div class="drawerControls">
+        <div class="drawerControls__row">
+          <div class="ctl">
+            <div class="toolbarLabel">Equivalent</div>
+            <el-select v-model="drawerEq" size="small" filterable class="ctl__field" placeholder="Equivalent">
+              <el-option v-for="o in availableEquivalents" :key="o" :label="o" :value="o" />
+            </el-select>
+          </div>
+          <div class="drawerControls__actions">
+            <el-button size="small" @click="loadData">Refresh</el-button>
+          </div>
+        </div>
+      </div>
+
+      <el-tabs v-model="drawerTab" class="drawerTabs">
+        <el-tab-pane label="Summary" name="summary">
+          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) for full analytics." type="info" show-icon class="mb" />
+
+          <div class="hint">Fixtures-first: derived from trustlines + debts + incidents + audit-log.</div>
+
+          <el-card v-if="analyticsEq" shadow="never" class="mb">
+            <template #header>
+              <TooltipLabel
+                label="Summary widgets"
+                tooltip-text="Show/hide summary cards. These toggles are stored in localStorage for this browser."
+              />
+            </template>
+            <div class="toggleGrid">
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showRank" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel
+                  label="Rank / percentile"
+                  tooltip-text="Your position among all participants by net balance for the selected equivalent."
+                />
+              </div>
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showConcentration" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel
+                  label="Concentration risk"
+                  tooltip-text="How concentrated your debts/credits are across counterparties (top1/top5 shares + HHI)."
+                />
+              </div>
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showCapacity" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel
+                  label="Trustline capacity"
+                  tooltip-text="Aggregate trustline capacity around the participant: used% = total_used / total_limit."
+                />
+              </div>
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showActivity" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel
+                  label="Activity / churn"
+                  tooltip-text="Recent changes around the participant in rolling windows (7/30/90 days)."
+                />
+              </div>
+            </div>
+          </el-card>
+
+          <div v-if="analyticsEq" class="summaryGrid">
+            <el-card shadow="never" class="summaryCard">
+              <template #header>
+                <TooltipLabel
+                  label="Net position"
+                  tooltip-text="Net balance in the selected equivalent: total_credit − total_debt (derived from debts fixture)."
+                />
+              </template>
+              <div v-if="selectedRank" class="kpi">
+                <div class="kpi__value">{{ money(selectedRank.net) }} {{ selectedRank.eq }}</div>
+                <div class="kpi__hint muted">credit − debt</div>
+              </div>
+              <div v-else class="muted">No data</div>
+            </el-card>
+
+            <el-card v-if="analytics.showRank" shadow="never" class="summaryCard">
+              <template #header>
+                <TooltipLabel
+                  label="Rank / percentile"
+                  tooltip-text="Your position among all participants by net balance for the selected equivalent (1 = top net creditor)."
+                />
+              </template>
+              <div v-if="selectedRank" class="kpi">
+                <div class="kpi__value">rank {{ selectedRank.rank }}/{{ selectedRank.n }}</div>
+                <el-progress :percentage="Math.round((selectedRank.percentile || 0) * 100)" :stroke-width="10" :show-text="false" />
+                <div class="kpi__hint muted">Percentile: {{ pct(selectedRank.percentile, 0) }}</div>
+              </div>
+              <div v-else class="muted">No data</div>
+            </el-card>
+
+            <el-card v-if="analytics.showConcentration" shadow="never" class="summaryCard">
+              <template #header>
+                <TooltipLabel
+                  label="Concentration"
+                  tooltip-text="How concentrated your debts/credits are across counterparties (top1/top5 shares + HHI). Higher = more dependence on a few counterparties."
+                />
+              </template>
+              <div v-if="selectedConcentration.eq" class="kpi">
+                <div class="kpi__row">
+                  <span class="muted">Outgoing (you owe)</span>
+                  <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
+                </div>
+                <div class="muted">top1: {{ pct(selectedConcentration.outgoing.top1, 0) }}, top5: {{ pct(selectedConcentration.outgoing.top5, 0) }}, HHI: {{ selectedConcentration.outgoing.hhi.toFixed(2) }}</div>
+                <div class="kpi__row" style="margin-top: 10px">
+                  <span class="muted">Incoming (owed to you)</span>
+                  <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
+                </div>
+                <div class="muted">top1: {{ pct(selectedConcentration.incoming.top1, 0) }}, top5: {{ pct(selectedConcentration.incoming.top5, 0) }}, HHI: {{ selectedConcentration.incoming.hhi.toFixed(2) }}</div>
+              </div>
+              <div v-else class="muted">No data</div>
+            </el-card>
+
+            <el-card v-if="analytics.showCapacity" shadow="never" class="summaryCard">
+              <template #header>
+                <TooltipLabel
+                  label="Capacity"
+                  tooltip-text="Aggregate trustline capacity around the participant: used% = total_used / total_limit (incoming/outgoing)."
+                />
+              </template>
+              <div v-if="selectedCapacity" class="kpi">
+                <div class="kpi__row">
+                  <span class="muted">Outgoing used</span>
+                  <span class="kpi__metric">{{ pct(selectedCapacity.out.pct, 0) }}</span>
+                </div>
+                <el-progress :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
+                <div class="kpi__row" style="margin-top: 10px">
+                  <span class="muted">Incoming used</span>
+                  <span class="kpi__metric">{{ pct(selectedCapacity.inc.pct, 0) }}</span>
+                </div>
+                <el-progress :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
+                <div v-if="analytics.showBottlenecks" class="kpi__hint muted" style="margin-top: 8px">
+                  Bottlenecks: {{ selectedCapacity.bottlenecks.length }} (threshold {{ threshold }})
+                </div>
+              </div>
+              <div v-else class="muted">No data</div>
+            </el-card>
+
+            <el-card v-if="analytics.showActivity" shadow="never" class="summaryCard">
+              <template #header>
+                <TooltipLabel
+                  label="Activity / churn"
+                  tooltip-text="Recent changes around the participant in rolling windows (7/30/90 days), based on fixture timestamps."
+                />
+              </template>
+              <div v-if="selectedActivity" class="muted">
+                <div class="kpi__hint">
+                  <TooltipLabel
+                    label="Trustlines created (7/30/90d)"
+                    tooltip-text="Count of trustlines involving this participant with created_at inside each window."
+                  />
+                  <span class="kpi__metric">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
+                </div>
+                <div class="kpi__hint">
+                  <TooltipLabel
+                    label="Trustlines closed (7/30/90d)"
+                    tooltip-text="Subset of created trustlines in the window that currently have status=closed."
+                  />
+                  <span class="kpi__metric">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
+                </div>
+                <div class="kpi__hint">
+                  <TooltipLabel
+                    label="Incidents (initiator, 7/30/90d)"
+                    tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
+                  />
+                  <span class="kpi__metric">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+                </div>
+                <div class="kpi__hint">
+                  <TooltipLabel
+                    label="Participant ops (audit-log, 7/30/90d)"
+                    tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
+                  />
+                  <span class="kpi__metric">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+                </div>
+              </div>
+              <div v-else class="muted">No data</div>
+            </el-card>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="Balance" name="balance">
+          <div class="hint">Derived from trustlines + debts fixtures (debts are derived from trustline.used).</div>
+
+          <el-alert
+            v-if="!analyticsEq"
+            title="Pick an equivalent (not ALL) to enable analytics cards"
+            description="With ALL selected, the Balance table still works, but Rank/Distribution/Counterparty/Risk visualizations are hidden because they are per-equivalent."
+            type="info"
+            show-icon
+            class="mb"
+          />
+
+          <el-card v-if="analyticsEq" shadow="never" class="mb">
+            <template #header>
+              <TooltipLabel
+                label="Balance widgets"
+                tooltip-text="Show/hide balance visualizations. These toggles are stored in localStorage for this browser."
+              />
+            </template>
+            <div class="toggleGrid">
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showRank" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel
+                  label="Rank / percentile"
+                  tooltip-text="Rank/percentile of net balance across all participants (for selected equivalent)."
+                />
+              </div>
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showDistribution" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel
+                  label="Distribution histogram"
+                  tooltip-text="Tiny histogram of net balance distribution across all participants (selected equivalent)."
+                />
+              </div>
+            </div>
+          </el-card>
+
+          <el-card v-if="analytics.showRank && selectedRank" shadow="never" class="mb">
+            <template #header>
+              <TooltipLabel
+                :label="`Rank / percentile (${selectedRank.eq})`"
+                tooltip-text="Rank is 1..N by net balance; percentile is normalized to 0..100 where 100% is the top net creditor."
+              />
+            </template>
+            <div class="kpi">
+              <div class="kpi__value">rank {{ selectedRank.rank }}/{{ selectedRank.n }}</div>
+              <el-progress :percentage="Math.round((selectedRank.percentile || 0) * 100)" :stroke-width="10" :show-text="false" />
+              <div class="kpi__hint muted">Percentile: {{ pct(selectedRank.percentile, 0) }}</div>
+            </div>
+          </el-card>
+
+          <el-card v-if="analytics.showDistribution && netDistribution" shadow="never" class="mb">
+            <template #header>
+              <TooltipLabel
+                :label="`Distribution (${netDistribution.eq})`"
+                tooltip-text="Histogram of net balances across all participants for the selected equivalent."
+              />
+            </template>
+            <div class="hist">
+              <div
+                v-for="(b, i) in netDistribution.bins"
+                :key="i"
+                class="hist__bar"
+                :style="{ height: ((b.count / Math.max(1, Math.max(...netDistribution.bins.map(x => x.count)))) * 48).toFixed(0) + 'px' }"
+                :title="String(b.count)"
+              />
+            </div>
+            <div class="hist__labels muted">
+              <span>{{ money(atomsToDecimal(netDistribution.min, precisionByEq.get(netDistribution.eq) ?? 2)) }}</span>
+              <span>{{ money(atomsToDecimal(netDistribution.max, precisionByEq.get(netDistribution.eq) ?? 2)) }}</span>
+            </div>
+          </el-card>
+
+          <el-empty v-if="selectedBalanceRows.length === 0" description="No data" />
+          <el-table v-else :data="selectedBalanceRows" size="small" class="geoTable">
+            <el-table-column prop="equivalent" label="Eq" width="80" />
+            <el-table-column prop="outgoing_limit" label="Out limit" min-width="120">
+              <template #default="{ row }">{{ money(row.outgoing_limit) }}</template>
+            </el-table-column>
+            <el-table-column prop="outgoing_used" label="Out used" min-width="120">
+              <template #default="{ row }">{{ money(row.outgoing_used) }}</template>
+            </el-table-column>
+            <el-table-column prop="incoming_limit" label="In limit" min-width="120">
+              <template #default="{ row }">{{ money(row.incoming_limit) }}</template>
+            </el-table-column>
+            <el-table-column prop="incoming_used" label="In used" min-width="120">
+              <template #default="{ row }">{{ money(row.incoming_used) }}</template>
+            </el-table-column>
+            <el-table-column prop="total_debt" label="Debt" min-width="120">
+              <template #default="{ row }">{{ money(row.total_debt) }}</template>
+            </el-table-column>
+            <el-table-column prop="total_credit" label="Credit" min-width="120">
+              <template #default="{ row }">{{ money(row.total_credit) }}</template>
+            </el-table-column>
+            <el-table-column prop="net" label="Net" min-width="120">
+              <template #default="{ row }">{{ money(row.net) }}</template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="Counterparties" name="counterparties">
+          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect counterparties." type="info" show-icon class="mb" />
+
+          <div v-else>
+            <div class="splitGrid">
+            <el-card shadow="never">
+              <template #header>
+                <TooltipLabel
+                  label="Top creditors (you owe)"
+                  tooltip-text="Participants who are creditors of this participant (debts where you are the debtor)."
+                />
+              </template>
+              <el-empty v-if="selectedCounterpartySplit.creditors.length === 0" description="No creditors" />
+              <el-table v-else :data="selectedCounterpartySplit.creditors.slice(0, 10)" size="small" class="geoTable">
+                <el-table-column prop="display_name" label="Participant" min-width="220" />
+                <el-table-column prop="amount" label="Amount" min-width="120">
+                  <template #default="{ row }">{{ money(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column prop="share" label="Share" min-width="140">
+                  <template #default="{ row }">
+                    <div class="shareCell">
+                      <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
+                      <span class="muted">{{ pct(row.share, 0) }}</span>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never">
+              <template #header>
+                <TooltipLabel
+                  label="Top debtors (owed to you)"
+                  tooltip-text="Participants who are debtors to this participant (debts where you are the creditor)."
+                />
+              </template>
+              <el-empty v-if="selectedCounterpartySplit.debtors.length === 0" description="No debtors" />
+              <el-table v-else :data="selectedCounterpartySplit.debtors.slice(0, 10)" size="small" class="geoTable">
+                <el-table-column prop="display_name" label="Participant" min-width="220" />
+                <el-table-column prop="amount" label="Amount" min-width="120">
+                  <template #default="{ row }">{{ money(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column prop="share" label="Share" min-width="140">
+                  <template #default="{ row }">
+                    <div class="shareCell">
+                      <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
+                      <span class="muted">{{ pct(row.share, 0) }}</span>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="Risk" name="risk">
+          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect risk metrics." type="info" show-icon class="mb" />
+
+          <el-card v-if="analyticsEq" shadow="never" class="mb">
+            <template #header>
+              <TooltipLabel
+                label="Risk widgets"
+                tooltip-text="Show/hide risk-related widgets in this tab. These toggles are stored in localStorage for this browser."
+              />
+            </template>
+            <div class="toggleGrid">
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showConcentration" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel label="Concentration risk" tooltip-text="Top1/top5 shares and HHI derived from counterparty debt shares." />
+              </div>
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showCapacity" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel label="Trustline capacity" tooltip-text="Aggregate incoming/outgoing used vs limit and bottleneck detection." />
+              </div>
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showBottlenecks" size="small" :disabled="!analyticsEq || !analytics.showCapacity" />
+                <TooltipLabel label="Bottlenecks" tooltip-text="Show bottleneck count/list inside Trustline capacity (threshold-based)." />
+              </div>
+              <div class="toggleLine">
+                <el-switch v-model="analytics.showActivity" size="small" :disabled="!analyticsEq" />
+                <TooltipLabel label="Activity / churn" tooltip-text="7/30/90-day counts from fixtures timestamps (trustlines/incidents/audit/transactions)." />
+              </div>
+            </div>
+          </el-card>
+
+          <el-card v-if="analyticsEq && analytics.showConcentration" shadow="never" class="mb">
+            <template #header>
+              <TooltipLabel
+                :label="`Concentration (${analyticsEq})`"
+                tooltip-text="Counterparty concentration risk derived from debt shares: top1/top5 and HHI."
+              />
+            </template>
+            <div v-if="selectedConcentration.eq" class="riskGrid">
+              <div class="riskBlock">
+                <div class="riskBlock__hdr">
+                  <TooltipLabel
+                    label="Outgoing concentration"
+                    tooltip-text="How concentrated your outgoing debts are (you owe). Higher = dependence on fewer creditors."
+                  />
+                  <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
+                </div>
+                <div class="muted">
+                  <TooltipLabel label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />:
+                  {{ pct(selectedConcentration.outgoing.top1, 0) }}
+                </div>
+                <div class="muted">
+                  <TooltipLabel label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />:
+                  {{ pct(selectedConcentration.outgoing.top5, 0) }}
+                </div>
+                <div class="muted">
+                  <TooltipLabel
+                    label="HHI"
+                    tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                  />:
+                  {{ selectedConcentration.outgoing.hhi.toFixed(2) }}
+                </div>
+              </div>
+              <div class="riskBlock">
+                <div class="riskBlock__hdr">
+                  <TooltipLabel
+                    label="Incoming concentration"
+                    tooltip-text="How concentrated your incoming credits are (owed to you). Higher = dependence on fewer debtors."
+                  />
+                  <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
+                </div>
+                <div class="muted">
+                  <TooltipLabel label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />:
+                  {{ pct(selectedConcentration.incoming.top1, 0) }}
+                </div>
+                <div class="muted">
+                  <TooltipLabel label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />:
+                  {{ pct(selectedConcentration.incoming.top5, 0) }}
+                </div>
+                <div class="muted">
+                  <TooltipLabel
+                    label="HHI"
+                    tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                  />:
+                  {{ selectedConcentration.incoming.hhi.toFixed(2) }}
+                </div>
+              </div>
+            </div>
+            <div v-else class="muted">No data</div>
+          </el-card>
+
+          <el-card v-if="analyticsEq && analytics.showCapacity && selectedCapacity" shadow="never" class="mb">
+            <template #header>
+              <TooltipLabel
+                label="Trustline capacity"
+                tooltip-text="How much of the participant’s trustline limits are already used. Outgoing = used on lines where participant is creditor; incoming = used on lines where participant is debtor."
+              />
+            </template>
+            <div class="capRow">
+              <div class="capRow__label">
+                <TooltipLabel
+                  label="Outgoing used"
+                  tooltip-text="Used / limit aggregated across all outgoing trustlines (participant is creditor)."
+                />
+              </div>
+              <el-progress :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
+              <div class="capRow__value">{{ pct(selectedCapacity.out.pct, 0) }}</div>
+            </div>
+            <div class="capRow">
+              <div class="capRow__label">
+                <TooltipLabel
+                  label="Incoming used"
+                  tooltip-text="Used / limit aggregated across all incoming trustlines (participant is debtor)."
+                />
+              </div>
+              <el-progress :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
+              <div class="capRow__value">{{ pct(selectedCapacity.inc.pct, 0) }}</div>
+            </div>
+            <div v-if="analytics.showBottlenecks" class="mb" style="margin-top: 10px">
+              <el-tag type="info" size="small">
+                <TooltipLabel
+                  :label="`Bottlenecks: ${selectedCapacity.bottlenecks.length}`"
+                  tooltip-text="Trustlines where available/limit is below the selected threshold."
+                />
+              </el-tag>
+              <span class="muted" style="margin-left: 8px">threshold {{ threshold }}</span>
+            </div>
+            <el-collapse v-if="analytics.showBottlenecks && selectedCapacity.bottlenecks.length" accordion>
+              <el-collapse-item name="bottlenecks">
+                <template #title>
+                  <TooltipLabel
+                    label="Bottlenecks list"
+                    tooltip-text="List of trustlines close to saturation (low available relative to limit)."
+                  />
+                </template>
+                <el-table :data="selectedCapacity.bottlenecks" size="small" class="geoTable">
+                  <el-table-column prop="dir" label="Dir" width="70" />
+                  <el-table-column prop="other" label="Counterparty" min-width="220" />
+                  <el-table-column label="Limit / Used / Avail" min-width="220">
+                    <template #default="{ row }">
+                      {{ money(row.t.limit) }} / {{ money(row.t.used) }} / {{ money(row.t.available) }}
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
+          </el-card>
+
+          <el-card v-if="analyticsEq && analytics.showActivity && selectedActivity" shadow="never">
+            <template #header>
+              <TooltipLabel
+                label="Activity / churn"
+                tooltip-text="Counts by 7/30/90-day windows. Sources: trustlines.created_at, incidents.created_at, audit-log.timestamp, transactions.updated_at."
+              />
+            </template>
+            <div class="kpi__hint muted">
+              <TooltipLabel
+                label="Trustlines created (7/30/90d)"
+                tooltip-text="Count of trustlines involving this participant with created_at inside each window."
+              />
+              <span class="kpi__metric">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
+            </div>
+            <div class="kpi__hint muted">
+              <TooltipLabel
+                label="Trustlines closed (7/30/90d)"
+                tooltip-text="Subset of created trustlines in the window that currently have status=closed."
+              />
+              <span class="kpi__metric">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
+            </div>
+            <div class="kpi__hint muted">
+              <TooltipLabel
+                label="Incidents (initiator, 7/30/90d)"
+                tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
+              />
+              <span class="kpi__metric">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+            </div>
+            <div class="kpi__hint muted">
+              <TooltipLabel
+                label="Participant ops (audit-log, 7/30/90d)"
+                tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
+              />
+              <span class="kpi__metric">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+            </div>
+            <div class="kpi__hint muted">
+              <TooltipLabel
+                label="Payments committed (7/30/90d)"
+                tooltip-text="Count of committed PAYMENT transactions involving this participant (as sender or receiver), by updated_at window."
+              />
+              <span class="kpi__metric">{{ selectedActivity.paymentCommitted[7] }} / {{ selectedActivity.paymentCommitted[30] }} / {{ selectedActivity.paymentCommitted[90] }}</span>
+            </div>
+            <div class="kpi__hint muted">
+              <TooltipLabel
+                label="Clearing committed (7/30/90d)"
+                tooltip-text="Count of committed CLEARING transactions where this participant appears in any cycle edge (or is initiator), by updated_at window."
+              />
+              <span class="kpi__metric">{{ selectedActivity.clearingCommitted[7] }} / {{ selectedActivity.clearingCommitted[30] }} / {{ selectedActivity.clearingCommitted[90] }}</span>
+            </div>
+            <div v-if="!selectedActivity.hasTransactions" class="hint" style="margin-top: 8px">
+              Requires transactions fixtures: missing transactions.json in current seed.
+            </div>
+          </el-card>
+        </el-tab-pane>
+
+        <el-tab-pane label="Cycles" name="cycles">
+          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect clearing cycles." type="info" show-icon class="mb" />
+          <el-empty v-else-if="selectedCycles.length === 0" description="No cycles found in fixtures" />
+          <div v-else class="cycles">
+            <div class="hint">
+              <TooltipLabel
+                label="Clearing cycles"
+                tooltip-text="Each cycle is a directed loop in the debt graph for the selected equivalent. Clearing reduces each edge by the shown amount."
+              />
+            </div>
+            <div v-for="(c, idx) in selectedCycles" :key="idx" class="cycleItem">
+              <div class="cycleTitle">
+                <TooltipLabel
+                  :label="`Cycle #${idx + 1}`"
+                  tooltip-text="A cycle is a set of debts that can be cleared together while preserving net positions (cycle cancelation)."
+                />
+              </div>
+              <div v-for="(e, j) in c" :key="j" class="cycleEdge">
+                <span class="mono">{{ e.debtor }}</span>
+                <span class="muted">→</span>
+                <span class="mono">{{ e.creditor }}</span>
+                <span class="muted">({{ e.equivalent }} {{ money(e.amount) }})</span>
+              </div>
+            </div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <div v-else-if="selected && selected.kind === 'edge'">
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="equivalent">{{ selected.equivalent }}</el-descriptions-item>
-        <el-descriptions-item label="from">{{ selected.from }}</el-descriptions-item>
-        <el-descriptions-item label="to">{{ selected.to }}</el-descriptions-item>
-        <el-descriptions-item label="status">{{ selected.status }}</el-descriptions-item>
-        <el-descriptions-item label="limit">{{ money(selected.limit) }}</el-descriptions-item>
-        <el-descriptions-item label="used">{{ money(selected.used) }}</el-descriptions-item>
-        <el-descriptions-item label="available">{{ money(selected.available) }}</el-descriptions-item>
-        <el-descriptions-item label="created_at">{{ selected.created_at }}</el-descriptions-item>
+        <el-descriptions-item label="Equivalent">{{ selected.equivalent }}</el-descriptions-item>
+        <el-descriptions-item label="From">{{ selected.from }}</el-descriptions-item>
+        <el-descriptions-item label="To">{{ selected.to }}</el-descriptions-item>
+        <el-descriptions-item label="Status">{{ selected.status }}</el-descriptions-item>
+        <el-descriptions-item label="Limit">{{ money(selected.limit) }}</el-descriptions-item>
+        <el-descriptions-item label="Used">{{ money(selected.used) }}</el-descriptions-item>
+        <el-descriptions-item label="Available">{{ money(selected.available) }}</el-descriptions-item>
+        <el-descriptions-item label="Created at">{{ selected.created_at }}</el-descriptions-item>
       </el-descriptions>
     </div>
   </el-drawer>
@@ -1233,6 +2457,211 @@ function applyZoom(level: number) {
   padding: 0;
 }
 
+.drawerControls {
+  margin-bottom: 10px;
+}
+
+.drawerControls__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.drawerControls__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.drawerTabs :deep(.el-tabs__header) {
+  margin: 0 0 8px 0;
+}
+
+.drawerTabs :deep(.el-tabs__content) {
+  padding: 0;
+}
+
+/* Typography roles inside the analytics drawer */
+.drawerTabs :deep(.el-card__header) {
+  font-size: var(--geo-font-size-title);
+  font-weight: var(--geo-font-weight-title);
+  color: var(--el-text-color-primary);
+}
+
+.drawerTabs :deep(.el-table__header .cell) {
+  font-weight: var(--geo-font-weight-table-header);
+  color: var(--el-text-color-primary);
+}
+
+.hint {
+  margin-bottom: 10px;
+  font-size: var(--geo-font-size-label);
+  color: var(--el-text-color-secondary);
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.summaryCard :deep(.el-card__header) {
+  padding: 10px 12px;
+}
+
+.summaryCard :deep(.el-card__body) {
+  padding: 12px;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kpi__value {
+  font-size: var(--geo-font-size-value);
+  font-weight: var(--geo-font-weight-value);
+}
+
+.kpi__hint {
+  font-size: var(--geo-font-size-sub);
+}
+
+.kpi__metric {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.kpi__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.splitGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 980px) {
+  .splitGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.shareCell {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.riskGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 780px) {
+  .riskGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.riskBlock {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.riskBlock__hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.capRow {
+  display: grid;
+  grid-template-columns: 120px 1fr 56px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.capRow__label {
+  font-size: var(--geo-font-size-label);
+  color: var(--el-text-color-secondary);
+}
+
+.capRow__value {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--el-text-color-primary);
+}
+
+.hist {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 54px;
+}
+
+.hist__bar {
+  width: 8px;
+  background: var(--el-color-primary-light-5);
+  border-radius: 3px;
+}
+
+.hist__labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.muted {
+  color: var(--el-text-color-secondary);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.cycles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cycleItem {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.cycleTitle {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.cycleEdge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .paneGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1252,9 +2681,9 @@ function applyZoom(level: number) {
 }
 
 .toolbarLabel {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--el-text-color-regular);
+  font-size: var(--geo-font-size-label);
+  font-weight: var(--geo-font-weight-label);
+  color: var(--el-text-color-secondary);
 }
 
 .ctl__label {

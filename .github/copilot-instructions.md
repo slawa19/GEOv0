@@ -6,6 +6,11 @@
   - `docs/ru/concept/Проект GEO — 7. GEO v0.1 — базовый протокол кредитной сети для локальных сообществ и кластеров.md`
   - `docs/ru/concept/Проект GEO — 6. Архитектура, ревизия v0.1.md`
 
+## Admin UI conventions
+
+- Typography & text styles (must-follow):
+  - `docs/ru/admin/specs/admin-ui-typography.md`
+
 ## Seed communities and fixtures
 
 - Seed authoring guide (principles + workflow):

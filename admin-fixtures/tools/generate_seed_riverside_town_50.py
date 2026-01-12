@@ -34,6 +34,7 @@ from typing import Any, Iterable
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+V1_DIR = BASE_DIR / "v1"
 DATASETS_DIR = BASE_DIR / "v1" / "datasets"
 BASE_TS = datetime(2026, 1, 12, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -486,20 +487,146 @@ def build_incidents(participants: list[Participant]) -> dict[str, Any]:
     }
 
 
+def build_debts_from_trustlines(trustlines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Derive debt edges from trustline `used`.
+
+    Semantics: trustline from->to means creditor->debtor, therefore used represents a debt:
+      debtor = to
+      creditor = from
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for t in trustlines:
+        eq = str(t.get("equivalent") or "")
+        debtor = str(t.get("to") or "")
+        creditor = str(t.get("from") or "")
+        used_raw = str(t.get("used") or "0")
+        try:
+            used = Decimal(used_raw)
+        except Exception:
+            continue
+        if used <= 0:
+            continue
+
+        key = (eq, debtor, creditor)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"equivalent": eq, "debtor": debtor, "creditor": creditor, "amount": used_raw})
+    return out
+
+
+def build_clearing_cycles_from_debts(
+    debts: list[dict[str, Any]],
+    *,
+    max_cycles_per_equivalent: int = 6,
+) -> dict[str, Any]:
+    """Find a few short (3-edge) debt cycles for UI prototyping."""
+    by_eq: dict[str, list[dict[str, Any]]] = {}
+    for d in debts:
+        eq = str(d.get("equivalent") or "")
+        if not eq:
+            continue
+        by_eq.setdefault(eq, []).append(d)
+
+    result: dict[str, Any] = {"equivalents": {}}
+    for eq in sorted(by_eq.keys()):
+        edges = by_eq[eq]
+        adjacency: dict[str, list[tuple[str, str]]] = {}
+        for e in edges:
+            debtor = str(e.get("debtor") or "")
+            creditor = str(e.get("creditor") or "")
+            amount = str(e.get("amount") or "0")
+            if not debtor or not creditor or debtor == creditor:
+                continue
+            adjacency.setdefault(debtor, []).append((creditor, amount))
+
+        for k in list(adjacency.keys()):
+            adjacency[k] = sorted(adjacency[k], key=lambda x: (x[0], x[1]))
+
+        cycles: list[list[dict[str, Any]]] = []
+        seen_cycles: set[tuple[str, str, str]] = set()
+
+        nodes = sorted(adjacency.keys())
+        for a in nodes:
+            if len(cycles) >= max_cycles_per_equivalent:
+                break
+            for b, ab_amt in adjacency.get(a, []):
+                if b == a:
+                    continue
+                for c, bc_amt in adjacency.get(b, []):
+                    if c in (a, b):
+                        continue
+                    ca_edges = adjacency.get(c, [])
+                    ca_amt = None
+                    for nxt, amt in ca_edges:
+                        if nxt == a:
+                            ca_amt = amt
+                            break
+                    if ca_amt is None:
+                        continue
+
+                    tri = tuple(sorted([a, b, c]))
+                    if tri in seen_cycles:
+                        continue
+                    seen_cycles.add(tri)
+
+                    cycles.append(
+                        [
+                            {"debtor": a, "creditor": b, "equivalent": eq, "amount": ab_amt},
+                            {"debtor": b, "creditor": c, "equivalent": eq, "amount": bc_amt},
+                            {"debtor": c, "creditor": a, "equivalent": eq, "amount": ca_amt},
+                        ]
+                    )
+                    if len(cycles) >= max_cycles_per_equivalent:
+                        break
+                if len(cycles) >= max_cycles_per_equivalent:
+                    break
+
+        result["equivalents"][eq] = {"cycles": cycles}
+
+    return result
+
+
+def build_meta(*, participants: list[Participant], trustlines: list[dict[str, Any]], incidents: dict[str, Any], debts: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "version": "v1",
+        "generated_at": _iso(BASE_TS),
+        "counts": {
+            "participants": len(participants),
+            "equivalents": len(EQUIVALENTS),
+            "trustlines": len(trustlines),
+            "incidents": len(list(incidents.get("items") or [])),
+            "debts": len(debts),
+        },
+        "notes": [
+            "TrustLine direction is creditor -> debtor (from -> to).",
+            "Debt direction is debtor -> creditor (derived from trustline.used).",
+            f"Timestamps are fixed relative to {_iso(BASE_TS)}.",
+        ],
+    }
+
+
 def main() -> None:
     participants = build_participants()
     trustlines = build_trustlines(participants)
     incidents = build_incidents(participants)
+    debts = build_debts_from_trustlines(trustlines)
+    clearing_cycles = build_clearing_cycles_from_debts(debts)
 
     _write_json(DATASETS_DIR / "participants.json", [p.__dict__ for p in participants])
     _write_json(DATASETS_DIR / "equivalents.json", EQUIVALENTS)
     _write_json(DATASETS_DIR / "trustlines.json", trustlines)
     _write_json(DATASETS_DIR / "incidents.json", incidents)
+    _write_json(DATASETS_DIR / "debts.json", debts)
+    _write_json(DATASETS_DIR / "clearing-cycles.json", clearing_cycles)
+    _write_json(V1_DIR / "_meta.json", build_meta(participants=participants, trustlines=trustlines, incidents=incidents, debts=debts))
 
     print(f"Wrote participants: {len(participants)}")
     print(f"Wrote trustlines: {len(trustlines)}")
     print("Wrote equivalents: 3")
     print(f"Wrote incidents: {len(incidents.get('items', []))}")
+    print(f"Wrote debts: {len(debts)}")
 
 
 if __name__ == "__main__":

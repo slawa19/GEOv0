@@ -120,7 +120,7 @@ const statusOptions = computed(() => [
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Trustlines" tooltip-key="nav.trustlines" />
@@ -142,41 +142,41 @@ const statusOptions = computed(() => [
     <el-empty v-else-if="items.length === 0" description="No trustlines match filters" />
 
     <div v-else>
-      <el-table :data="items" size="small" @row-click="openRow">
+      <el-table :data="items" size="small" @row-click="openRow" class="geoTable">
         <el-table-column prop="equivalent" width="90">
-          <template #header><TooltipLabel label="eq" tooltip-key="trustlines.eq" /></template>
+          <template #header><TooltipLabel label="Eq" tooltip-key="trustlines.eq" /></template>
         </el-table-column>
         <el-table-column prop="from" min-width="210">
-          <template #header><TooltipLabel label="from" tooltip-key="trustlines.from" /></template>
+          <template #header><TooltipLabel label="From" tooltip-key="trustlines.from" /></template>
         </el-table-column>
         <el-table-column prop="to" min-width="210">
-          <template #header><TooltipLabel label="to" tooltip-key="trustlines.to" /></template>
+          <template #header><TooltipLabel label="To" tooltip-key="trustlines.to" /></template>
         </el-table-column>
         <el-table-column prop="limit" width="120">
-          <template #header><TooltipLabel label="limit" tooltip-key="trustlines.limit" /></template>
+          <template #header><TooltipLabel label="Limit" tooltip-key="trustlines.limit" /></template>
           <template #default="scope">{{ money(scope.row.limit) }}</template>
         </el-table-column>
         <el-table-column prop="used" width="120">
-          <template #header><TooltipLabel label="used" tooltip-key="trustlines.used" /></template>
+          <template #header><TooltipLabel label="Used" tooltip-key="trustlines.used" /></template>
           <template #default="scope">{{ money(scope.row.used) }}</template>
         </el-table-column>
         <el-table-column prop="available" width="120">
-          <template #header><TooltipLabel label="available" tooltip-key="trustlines.available" /></template>
+          <template #header><TooltipLabel label="Available" tooltip-key="trustlines.available" /></template>
           <template #default="scope">
             <span :class="{ bottleneck: isBottleneck(scope.row) }">{{ money(scope.row.available) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="status" width="110">
-          <template #header><TooltipLabel label="status" tooltip-key="trustlines.status" /></template>
+          <template #header><TooltipLabel label="Status" tooltip-key="trustlines.status" /></template>
         </el-table-column>
         <el-table-column prop="created_at" width="190">
-          <template #header><TooltipLabel label="created_at" tooltip-key="trustlines.createdAt" /></template>
+          <template #header><TooltipLabel label="Created at" tooltip-key="trustlines.createdAt" /></template>
           <template #default="scope">{{ fmtTs(scope.row.created_at) }}</template>
         </el-table-column>
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint">Showing {{ items.length }} / {{ perPage }} on this page</div>
+        <div class="pager__hint geoHint">Showing {{ items.length }} / {{ perPage }} on this page</div>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="perPage"
@@ -217,7 +217,7 @@ const statusOptions = computed(() => [
         <el-descriptions-item label="Used">{{ money(selected.used) }}</el-descriptions-item>
         <el-descriptions-item label="Available">
           <span :class="{ bottleneck: isBottleneck(selected) }">{{ money(selected.available) }}</span>
-          <el-tag v-if="isBottleneck(selected)" type="danger" size="small" style="margin-left: 8px">bottleneck</el-tag>
+          <el-tag v-if="isBottleneck(selected)" type="danger" size="small" style="margin-left: 8px">Bottleneck</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="Status">
           <el-tag

@@ -140,7 +140,7 @@ const typeOptions = computed(() => [
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Participants" tooltip-key="nav.participants" />
@@ -162,7 +162,7 @@ const typeOptions = computed(() => [
     <el-empty v-else-if="items.length === 0" description="No participants" />
 
     <div v-else>
-      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table">
+      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
         <el-table-column prop="pid" min-width="240">
           <template #header><TooltipLabel label="PID" tooltip-key="participants.pid" /></template>
         </el-table-column>
@@ -188,7 +188,7 @@ const typeOptions = computed(() => [
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="actions" width="160">
+        <el-table-column label="Actions" width="160">
           <template #default="scope">
             <el-button
               v-if="scope.row.status === 'active'"
@@ -214,7 +214,7 @@ const typeOptions = computed(() => [
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint">Showing {{ items.length }} / {{ perPage }} on this page</div>
+        <div class="pager__hint geoHint">Showing {{ items.length }} / {{ perPage }} on this page</div>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="perPage"

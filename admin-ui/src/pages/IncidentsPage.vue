@@ -130,11 +130,11 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Incidents" tooltip-key="nav.incidents" />
-        <el-tag type="warning">over SLA: {{ overSlaCount }}</el-tag>
+        <el-tag type="warning">Over SLA: {{ overSlaCount }}</el-tag>
       </div>
     </template>
 
@@ -158,33 +158,33 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
     <el-empty v-else-if="items.length === 0" description="No incidents" />
 
     <div v-else>
-      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table">
+      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
         <el-table-column prop="tx_id" min-width="220">
-          <template #header><TooltipLabel label="tx_id" tooltip-key="incidents.txId" /></template>
+          <template #header><TooltipLabel label="Tx ID" tooltip-key="incidents.txId" /></template>
         </el-table-column>
         <el-table-column prop="state" width="200">
-          <template #header><TooltipLabel label="state" tooltip-key="incidents.state" /></template>
+          <template #header><TooltipLabel label="State" tooltip-key="incidents.state" /></template>
           <template #default="scope">
             <el-tag type="warning" size="small">{{ scope.row.state }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="initiator_pid" min-width="220">
-          <template #header><TooltipLabel label="initiator" tooltip-key="incidents.initiator" /></template>
+          <template #header><TooltipLabel label="Initiator" tooltip-key="incidents.initiator" /></template>
         </el-table-column>
         <el-table-column prop="equivalent" width="90">
-          <template #header><TooltipLabel label="eq" tooltip-key="incidents.eq" /></template>
+          <template #header><TooltipLabel label="Eq" tooltip-key="incidents.eq" /></template>
         </el-table-column>
         <el-table-column prop="age_seconds" width="120">
-          <template #header><TooltipLabel label="age" tooltip-key="incidents.age" /></template>
+          <template #header><TooltipLabel label="Age" tooltip-key="incidents.age" /></template>
           <template #default="scope">
             <span :class="{ bad: isOverSla(scope.row) }">{{ fmtAge(scope.row.age_seconds) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="sla_seconds" width="120">
-          <template #header><TooltipLabel label="sla" tooltip-key="incidents.sla" /></template>
+          <template #header><TooltipLabel label="SLA" tooltip-key="incidents.sla" /></template>
           <template #default="scope">{{ fmtAge(scope.row.sla_seconds) }}</template>
         </el-table-column>
-        <el-table-column label="actions" width="160">
+        <el-table-column label="Actions" width="160">
           <template #default="scope">
             <el-button
               size="small"
@@ -199,7 +199,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint">Showing {{ items.length }} / {{ perPage }} on this page</div>
+        <div class="pager__hint geoHint">Showing {{ items.length }} / {{ perPage }} on this page</div>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="perPage"
