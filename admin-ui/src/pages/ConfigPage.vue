@@ -150,7 +150,7 @@ watch(
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Config" tooltip-key="nav.config" />
@@ -159,10 +159,10 @@ watch(
             v-model="filterKey"
             size="small"
             clearable
-            placeholder="Filter by key"
+            placeholder="Filter by Key"
             style="width: 260px"
           />
-          <el-tag type="info">dirty: {{ dirtyKeys.length }}</el-tag>
+          <el-tag type="info">Dirty: {{ dirtyKeys.length }}</el-tag>
           <el-button :disabled="dirtyKeys.length === 0" :loading="saving" type="primary" @click="save">Save</el-button>
         </div>
       </div>
@@ -172,14 +172,14 @@ watch(
     <el-skeleton v-if="loading" animated :rows="10" />
 
     <div v-else>
-      <el-table :data="visibleRows" size="small">
-        <el-table-column prop="key" label="key" min-width="320">
+      <el-table :data="visibleRows" size="small" class="geoTable">
+        <el-table-column prop="key" label="Key" min-width="320">
           <template #default="scope">
             <span :class="{ focus: focusKey && scope.row.key === focusKey }">{{ scope.row.key }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="scope" width="160">
+        <el-table-column label="Scope" width="160">
           <template #default="scope">
             <el-tag v-for="t in scopeForKey(scope.row.key)" :key="t" size="small" :type="t === 'readonly' ? 'info' : t === 'restart' ? 'warning' : 'success'" style="margin-right: 6px">
               {{ t }}
@@ -187,7 +187,7 @@ watch(
           </template>
         </el-table-column>
 
-        <el-table-column label="value" min-width="320">
+        <el-table-column label="Value" min-width="320">
           <template #default="scope">
             <el-switch
               v-if="scope.row.kind === 'boolean'"
@@ -219,7 +219,7 @@ watch(
               :rows="2"
               placeholder="JSON (stringified)"
             />
-            <el-tag v-if="isKeyReadOnly(scope.row.key)" size="small" type="info" style="margin-left: 8px">read-only</el-tag>
+            <el-tag v-if="isKeyReadOnly(scope.row.key)" size="small" type="info" style="margin-left: 8px">Read-only</el-tag>
           </template>
         </el-table-column>
       </el-table>

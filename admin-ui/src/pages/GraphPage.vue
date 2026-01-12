@@ -1654,15 +1654,15 @@ function applyZoom(level: number) {
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Network Graph" tooltip-key="nav.graph" />
         <div class="hdr__right">
           <el-tag type="info">{{ seedLabel }}</el-tag>
-          <el-tag type="info">nodes: {{ stats.nodes }}</el-tag>
-          <el-tag type="info">edges: {{ stats.edges }}</el-tag>
-          <el-tag v-if="stats.bottlenecks" type="danger">bottlenecks: {{ stats.bottlenecks }}</el-tag>
+          <el-tag type="info">Nodes: {{ stats.nodes }}</el-tag>
+          <el-tag type="info">Edges: {{ stats.edges }}</el-tag>
+          <el-tag v-if="stats.bottlenecks" type="danger">Bottlenecks: {{ stats.bottlenecks }}</el-tag>
         </div>
       </div>
     </template>

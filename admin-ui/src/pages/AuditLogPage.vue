@@ -97,11 +97,11 @@ watch(q, () => {
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Audit Log" tooltip-key="nav.auditLog" />
-        <el-input v-model="q" size="small" clearable placeholder="Filter (id/actor/action/object/reason)" style="width: 320px" />
+        <el-input v-model="q" size="small" clearable placeholder="Filter (Id/Actor/Action/Object/Reason)" style="width: 320px" />
       </div>
     </template>
 
@@ -111,27 +111,27 @@ watch(q, () => {
     <el-empty v-else-if="items.length === 0" description="No audit entries" />
 
     <div v-else>
-      <el-table :data="visibleItems" size="small" @row-click="openRow">
+      <el-table :data="visibleItems" size="small" @row-click="openRow" class="clickable-table geoTable">
         <el-table-column prop="timestamp" width="190">
-          <template #header><TooltipLabel label="timestamp" tooltip-key="audit.timestamp" /></template>
+          <template #header><TooltipLabel label="Timestamp" tooltip-key="audit.timestamp" /></template>
         </el-table-column>
         <el-table-column prop="actor_id" width="160">
-          <template #header><TooltipLabel label="actor" tooltip-key="audit.actor" /></template>
+          <template #header><TooltipLabel label="Actor" tooltip-key="audit.actor" /></template>
         </el-table-column>
         <el-table-column prop="actor_role" width="120">
-          <template #header><TooltipLabel label="role" tooltip-key="audit.role" /></template>
+          <template #header><TooltipLabel label="Role" tooltip-key="audit.role" /></template>
         </el-table-column>
         <el-table-column prop="action" min-width="180">
-          <template #header><TooltipLabel label="action" tooltip-key="audit.action" /></template>
+          <template #header><TooltipLabel label="Action" tooltip-key="audit.action" /></template>
         </el-table-column>
         <el-table-column prop="object_type" width="140">
-          <template #header><TooltipLabel label="object" tooltip-key="audit.objectType" /></template>
+          <template #header><TooltipLabel label="Object" tooltip-key="audit.objectType" /></template>
         </el-table-column>
         <el-table-column prop="object_id" min-width="220">
-          <template #header><TooltipLabel label="object_id" tooltip-key="audit.objectId" /></template>
+          <template #header><TooltipLabel label="Object ID" tooltip-key="audit.objectId" /></template>
         </el-table-column>
         <el-table-column prop="reason" min-width="160">
-          <template #header><TooltipLabel label="reason" tooltip-key="audit.reason" /></template>
+          <template #header><TooltipLabel label="Reason" tooltip-key="audit.reason" /></template>
         </el-table-column>
       </el-table>
 
@@ -154,14 +154,14 @@ watch(q, () => {
       <el-tabs>
         <el-tab-pane label="Details">
           <el-descriptions :column="1" border>
-            <el-descriptions-item label="id">{{ selected.id }}</el-descriptions-item>
-            <el-descriptions-item label="timestamp">{{ selected.timestamp }}</el-descriptions-item>
-            <el-descriptions-item label="actor">{{ selected.actor_id }} ({{ selected.actor_role }})</el-descriptions-item>
-            <el-descriptions-item label="action">{{ selected.action }}</el-descriptions-item>
-            <el-descriptions-item label="object">{{ selected.object_type }} / {{ selected.object_id }}</el-descriptions-item>
-            <el-descriptions-item label="reason">{{ selected.reason }}</el-descriptions-item>
-            <el-descriptions-item label="request_id">{{ selected.request_id }}</el-descriptions-item>
-            <el-descriptions-item label="ip_address">{{ selected.ip_address }}</el-descriptions-item>
+            <el-descriptions-item label="ID">{{ selected.id }}</el-descriptions-item>
+            <el-descriptions-item label="Timestamp">{{ selected.timestamp }}</el-descriptions-item>
+            <el-descriptions-item label="Actor">{{ selected.actor_id }} ({{ selected.actor_role }})</el-descriptions-item>
+            <el-descriptions-item label="Action">{{ selected.action }}</el-descriptions-item>
+            <el-descriptions-item label="Object">{{ selected.object_type }} / {{ selected.object_id }}</el-descriptions-item>
+            <el-descriptions-item label="Reason">{{ selected.reason }}</el-descriptions-item>
+            <el-descriptions-item label="Request ID">{{ selected.request_id }}</el-descriptions-item>
+            <el-descriptions-item label="IP Address">{{ selected.ip_address }}</el-descriptions-item>
           </el-descriptions>
         </el-tab-pane>
         <el-tab-pane label="Before">
@@ -178,6 +178,9 @@ watch(q, () => {
 <style scoped>
 .mb {
   margin-bottom: 12px;
+}
+.clickable-table :deep(tr) {
+  cursor: pointer;
 }
 .hdr {
   display: flex;

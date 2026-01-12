@@ -155,7 +155,7 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
 
     <el-row :gutter="12" class="mb">
       <el-col :span="8">
-        <el-card>
+        <el-card class="geoCard">
           <template #header>
             <TooltipLabel label="API" tooltip-key="dashboard.api" />
           </template>
@@ -169,7 +169,7 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
       </el-col>
 
       <el-col :span="8">
-        <el-card>
+        <el-card class="geoCard">
           <template #header>
             <TooltipLabel label="DB" tooltip-key="dashboard.db" />
           </template>
@@ -183,7 +183,7 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
       </el-col>
 
       <el-col :span="8">
-        <el-card>
+        <el-card class="geoCard">
           <template #header>
             <TooltipLabel label="Migrations" tooltip-key="dashboard.migrations" />
           </template>
@@ -199,7 +199,7 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
 
     <el-row :gutter="12" class="mb">
       <el-col :span="12">
-        <el-card>
+        <el-card class="geoCard">
           <template #header>
             <div class="hdr">
               <TooltipLabel label="Trustline bottlenecks" tooltip-key="dashboard.bottlenecks" />
@@ -215,25 +215,25 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
 
           <el-empty v-else-if="bottleneckItems.length === 0" description="No bottlenecks under threshold" />
 
-          <el-table v-else :data="bottleneckItems" size="small" height="360">
-            <el-table-column prop="equivalent" label="eq" width="80" />
-            <el-table-column prop="from" label="from" min-width="180" />
-            <el-table-column prop="to" label="to" min-width="180" />
-            <el-table-column prop="limit" label="limit" width="110">
+          <el-table v-else :data="bottleneckItems" size="small" height="360" class="geoTable">
+            <el-table-column prop="equivalent" label="Equivalent" width="110" />
+            <el-table-column prop="from" label="From" min-width="180" />
+            <el-table-column prop="to" label="To" min-width="180" />
+            <el-table-column prop="limit" label="Limit" width="110">
               <template #default="scope">{{ money(scope.row.limit) }}</template>
             </el-table-column>
-            <el-table-column prop="available" label="avail" width="110">
+            <el-table-column prop="available" label="Available" width="110">
               <template #default="scope">
                 <span class="bad">{{ money(scope.row.available) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="status" label="status" width="100" />
+            <el-table-column prop="status" label="Status" width="100" />
           </el-table>
         </el-card>
       </el-col>
 
       <el-col :span="12">
-        <el-card>
+        <el-card class="geoCard">
           <template #header>
             <div class="hdr">
               <TooltipLabel label="Incidents over SLA" tooltip-key="dashboard.incidentsOverSla" />
@@ -248,25 +248,25 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
 
           <el-empty v-else-if="incidentsOverSla.length === 0" description="No incidents over SLA" />
 
-          <el-table v-else :data="incidentsOverSla" size="small" height="360">
-            <el-table-column prop="tx_id" label="tx_id" min-width="200" />
-            <el-table-column prop="state" label="state" width="180" />
-            <el-table-column prop="equivalent" label="eq" width="70" />
-            <el-table-column prop="age_seconds" label="age" width="110">
+          <el-table v-else :data="incidentsOverSla" size="small" height="360" class="geoTable">
+            <el-table-column prop="tx_id" label="Tx ID" min-width="200" />
+            <el-table-column prop="state" label="State" width="180" />
+            <el-table-column prop="equivalent" label="Equivalent" width="110" />
+            <el-table-column prop="age_seconds" label="Age (s)" width="110">
               <template #default="scope">
                 <span class="bad">{{ scope.row.age_seconds }}s</span>
               </template>
             </el-table-column>
-            <el-table-column prop="sla_seconds" label="sla" width="90" />
+            <el-table-column prop="sla_seconds" label="SLA (s)" width="90" />
           </el-table>
         </el-card>
       </el-col>
     </el-row>
 
-    <el-card>
+    <el-card class="geoCard">
       <template #header>
         <div class="hdr">
-          <TooltipLabel label="Recent audit log" tooltip-key="dashboard.recentAudit" />
+          <TooltipLabel label="Recent Audit Log" tooltip-key="dashboard.recentAudit" />
           <el-button size="small" @click="go('/audit-log')">View all</el-button>
         </div>
       </template>
@@ -274,13 +274,13 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
       <el-alert v-if="auditError" :title="auditError" type="warning" show-icon class="mb" />
       <el-skeleton v-if="auditLoading" animated :rows="6" />
 
-      <el-table v-else :data="auditItems" size="small" height="360">
-        <el-table-column prop="timestamp" label="timestamp" width="190" />
-        <el-table-column prop="actor_id" label="actor" width="160" />
-        <el-table-column prop="actor_role" label="role" width="120" />
-        <el-table-column prop="action" label="action" />
-        <el-table-column prop="object_type" label="object" width="140" />
-        <el-table-column prop="object_id" label="object_id" />
+      <el-table v-else :data="auditItems" size="small" height="360" class="geoTable">
+        <el-table-column prop="timestamp" label="Timestamp" width="190" />
+        <el-table-column prop="actor_id" label="Actor" width="160" />
+        <el-table-column prop="actor_role" label="Role" width="120" />
+        <el-table-column prop="action" label="Action" />
+        <el-table-column prop="object_type" label="Object" width="140" />
+        <el-table-column prop="object_id" label="Object ID" />
       </el-table>
     </el-card>
   </div>

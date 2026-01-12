@@ -326,7 +326,24 @@ def generate_integrity_status() -> dict[str, Any]:
             "details": {"count": 0},
         },
     ]
-    return {"checks": checks}
+
+    last_checked_at = max((c.get("last_check") for c in checks if isinstance(c.get("last_check"), str)), default=_iso(BASE_TS))
+    checks_failed = sum(1 for c in checks if c.get("status") in ("failed", "error", "critical"))
+    checks_warn = any(c.get("status") == "warning" for c in checks)
+
+    overall = "ok"
+    if checks_failed > 0:
+        overall = "failed"
+    elif checks_warn:
+        overall = "warning"
+
+    return {
+        "status": overall,
+        "last_checked_at": last_checked_at,
+        "checks_total": len(checks),
+        "checks_failed": checks_failed,
+        "checks": checks,
+    }
 
 
 def generate_incidents(total: int = 25) -> dict[str, Any]:

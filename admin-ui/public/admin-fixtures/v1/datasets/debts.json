@@ -279,7 +279,7 @@
     "equivalent": "UAH",
     "debtor": "PID_U0003_daa66d13",
     "creditor": "PID_U0018_1fe68e72",
-    "amount": "595.00"
+    "amount": "790.50"
   },
   {
     "equivalent": "UAH",
@@ -555,7 +555,7 @@
     "equivalent": "UAH",
     "debtor": "PID_U0006_b54cda26",
     "creditor": "PID_U0019_be1e0823",
-    "amount": "425.00"
+    "amount": "790.50"
   },
   {
     "equivalent": "UAH",
@@ -831,7 +831,7 @@
     "equivalent": "HOUR",
     "debtor": "PID_U0051_850d3e43",
     "creditor": "PID_U0066_ca4d5fa2",
-    "amount": "1.20"
+    "amount": "3.72"
   },
   {
     "equivalent": "UAH",
@@ -1113,7 +1113,7 @@
     "equivalent": "UAH",
     "debtor": "PID_U0079_d31e8d9f",
     "creditor": "PID_U0007_538453d7",
-    "amount": "40.00"
+    "amount": "372.00"
   },
   {
     "equivalent": "HOUR",
@@ -1395,7 +1395,7 @@
     "equivalent": "UAH",
     "debtor": "PID_U0092_dbefbb9c",
     "creditor": "PID_U0036_3fcd1ce4",
-    "amount": "412.50"
+    "amount": "511.50"
   },
   {
     "equivalent": "UAH",
@@ -2241,7 +2241,7 @@
     "equivalent": "UAH",
     "debtor": "PID_U0069_a4f3ccb5",
     "creditor": "PID_U0021_fa8cfb85",
-    "amount": "60.00"
+    "amount": "372.00"
   },
   {
     "equivalent": "UAH",
@@ -2523,7 +2523,7 @@
     "equivalent": "UAH",
     "debtor": "PID_U0001_9e3779b1",
     "creditor": "PID_U0096_54cda260",
-    "amount": "320.00"
+    "amount": "372.00"
   },
   {
     "equivalent": "HOUR",

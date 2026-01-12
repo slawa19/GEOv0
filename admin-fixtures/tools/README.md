@@ -44,7 +44,26 @@ And keep metadata in sync:
 ## How to run
 
 From repo root:
+
+### Seed generators
+
+These write the canonical seed datasets into `admin-fixtures/v1/datasets/`.
+
+Important:
+- Seed generators **overwrite** the canonical datasets (there is a single `v1` folder).
+- Shared logic lives in `admin-fixtures/tools/seedlib.py`.
+
+Run one of:
 - `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_greenfield_village_100.py`
+- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_riverside_town_50.py`
+
+### Bottlenecks (Dashboard)
+
+Dashboard “Trustline bottlenecks” filters active trustlines by the ratio:
+
+$$\frac{available}{limit} < 0.10$$
+
+Generators should include a handful of such trustlines (with `limit > 0`) so the widget has data.
 
 Then:
 - `cd admin-ui`

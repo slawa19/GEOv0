@@ -1,4 +1,8 @@
 {
+  "status": "warning",
+  "last_checked_at": "2026-01-10T23:42:00Z",
+  "checks_total": 3,
+  "checks_failed": 0,
   "checks": [
     {
       "name": "zero_sum_by_equivalent",

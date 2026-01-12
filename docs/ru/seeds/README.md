@@ -37,7 +37,11 @@ Seed‑документ — это НЕ:
 | Seed | Участников | Основная тема | Equivalents | Что посмотреть в первую очередь | Генератор |
 |------|-----------:|---------------|-------------|----------------------------------|----------|
 | [seed-greenfield-village-100.md](seed-greenfield-village-100.md) | 100 | «Село/громада» (кооператив, склад, закупка, рынок, пекарня, сервисы) | `UAH`, `EUR`, `HOUR` | Разделы про экономическую логику и degree‑summary | `admin-fixtures/tools/generate_seed_greenfield_village_100.py` |
-| [seed-riverside-town-50.md](seed-riverside-town-50.md) | 50 | «Приречный городок» (рыболовство, порт/кооп, рынок, сервисы в `HOUR`) | `UAH`, `EUR`, `HOUR` | Разделы `Economic Logic`, `Clearing Cycles Examples` | (пока нет, seed‑документ как спецификация) |
+| [seed-riverside-town-50.md](seed-riverside-town-50.md) | 50 | «Приречный городок» (рыболовство, порт/кооп, рынок, сервисы в `HOUR`) | `UAH`, `EUR`, `HOUR` | Разделы `Economic Logic`, `Clearing Cycles Examples` | `admin-fixtures/tools/generate_seed_riverside_town_50.py` |
+
+Примечание:
+- Оба генератора пишут в один и тот же canonical путь `admin-fixtures/v1/datasets/` и **перезаписывают** датасеты.
+- Общая логика вынесена в `admin-fixtures/tools/seedlib.py` (утилиты, debts/cycles/meta). Seed‑скрипты — тонкие сценарии.
 
 ## TrustLine Direction Rule
 
@@ -219,6 +223,10 @@ creditor → debtor
 
 1) Возьми за основу существующий генератор:
 - `admin-fixtures/tools/generate_seed_greenfield_village_100.py`
+- `admin-fixtures/tools/generate_seed_riverside_town_50.py`
+
+Оба используют общий модуль:
+- `admin-fixtures/tools/seedlib.py`
 
 2) Создай новый файл вида:
 - `admin-fixtures/tools/generate_seed_<your_seed_name>.py`
@@ -234,6 +242,12 @@ creditor → debtor
 - `admin-fixtures/v1/datasets/participants.json`
 - `admin-fixtures/v1/datasets/equivalents.json`
 - `admin-fixtures/v1/datasets/trustlines.json`
+
+Также рекомендуется (используется в аналитике и ряде страниц):
+- `admin-fixtures/v1/datasets/debts.json` (детерминированно выводится из `trustlines.used`)
+- `admin-fixtures/v1/datasets/clearing-cycles.json`
+- `admin-fixtures/v1/datasets/transactions.json`
+- `admin-fixtures/v1/_meta.json`
 
 Опционально (если UI/сценарии используют):
 - `admin-fixtures/v1/datasets/incidents.json`
@@ -260,6 +274,16 @@ creditor → debtor
 ```bash
 python admin-fixtures/tools/generate_seed_greenfield_village_100.py
 ```
+
+или:
+
+```bash
+python admin-fixtures/tools/generate_seed_riverside_town_50.py
+```
+
+Notes:
+- На Windows лучше запускать из venv (пример): `D:/.../.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_...py`.
+- Генератор перезаписывает canonical датасеты в `admin-fixtures/v1`.
 
 2) Синхронизируй и провалидируй fixtures для UI:
 

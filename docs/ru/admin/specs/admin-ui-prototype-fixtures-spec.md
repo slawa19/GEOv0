@@ -34,6 +34,10 @@
 - `admin-fixtures/v1/scenarios/*.json` — сценарии поведения (ошибки/401/403/empty/slow).
 - `admin-fixtures/v1/api-snapshots/*.json` — примеры готовых ответов (для UI без мок‑сервера), опционально.
 - `admin-fixtures/tools/generate_admin_fixtures.py` — генератор (детерминированный).
+- Seed-генераторы (каноничные датасеты для графа):
+  - `admin-fixtures/tools/generate_seed_greenfield_village_100.py`
+  - `admin-fixtures/tools/generate_seed_riverside_town_50.py`
+  - общий модуль: `admin-fixtures/tools/seedlib.py`
 
 ---
 

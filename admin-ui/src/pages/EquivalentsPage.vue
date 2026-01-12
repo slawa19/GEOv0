@@ -194,14 +194,14 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Equivalents" tooltip-key="nav.equivalents" />
         <div class="hdr__actions">
           <el-button :disabled="authStore.isReadOnly" type="primary" @click="openCreate">Create</el-button>
           <el-switch v-model="includeInactive" active-text="Include inactive" />
-          <el-tag type="info">active: {{ activeCount }}</el-tag>
+          <el-tag type="info">Active: {{ activeCount }}</el-tag>
         </div>
       </div>
     </template>
@@ -212,8 +212,8 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
     <el-empty v-else-if="items.length === 0" description="No equivalents" />
 
     <div v-else>
-      <el-table :data="items" size="small" @cell-mouse-enter="onCellMouseEnter">
-        <el-table-column prop="code" label="code" width="160">
+      <el-table :data="items" size="small" @cell-mouse-enter="onCellMouseEnter" class="geoTable">
+        <el-table-column prop="code" label="Code" width="160">
           <template #default="scope">
             <div class="code">
               <div class="code__main">{{ scope.row.code }}</div>
@@ -226,15 +226,15 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="precision" label="precision" width="120" />
-        <el-table-column prop="description" label="description" min-width="320" />
-        <el-table-column prop="is_active" label="active" width="120">
+        <el-table-column prop="precision" label="Precision" width="120" />
+        <el-table-column prop="description" label="Description" min-width="320" />
+        <el-table-column prop="is_active" label="Active" width="120">
           <template #default="scope">
             <el-tag v-if="scope.row.is_active" type="success">yes</el-tag>
             <el-tag v-else type="info">no</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="actions" width="330">
+        <el-table-column label="Actions" width="330">
           <template #default="scope">
             <el-button size="small" :disabled="authStore.isReadOnly" @click="openEdit(scope.row)">Edit</el-button>
             <el-button
@@ -271,18 +271,18 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
     </div>
   </el-card>
 
-  <el-dialog v-model="createOpen" title="Create equivalent" width="520">
+  <el-dialog v-model="createOpen" title="Create Equivalent" width="520">
     <el-form label-width="120">
-      <el-form-item label="code">
+      <el-form-item label="Code">
         <el-input v-model="createForm.code" placeholder="e.g. UAH" style="width: 200px" />
       </el-form-item>
-      <el-form-item label="precision">
+      <el-form-item label="Precision">
         <el-input-number v-model="createForm.precision" :min="0" :max="18" />
       </el-form-item>
-      <el-form-item label="description">
+      <el-form-item label="Description">
         <el-input v-model="createForm.description" placeholder="Human description" />
       </el-form-item>
-      <el-form-item label="active">
+      <el-form-item label="Active">
         <el-switch v-model="createForm.is_active" />
       </el-form-item>
     </el-form>
@@ -292,13 +292,13 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
     </template>
   </el-dialog>
 
-  <el-dialog v-model="editOpen" title="Edit equivalent" width="520">
+  <el-dialog v-model="editOpen" title="Edit Equivalent" width="520">
     <div v-if="editing" class="muted">Editing: {{ editing.code }}</div>
     <el-form label-width="120">
-      <el-form-item label="precision">
+      <el-form-item label="Precision">
         <el-input-number v-model="editForm.precision" :min="0" :max="18" />
       </el-form-item>
-      <el-form-item label="description">
+      <el-form-item label="Description">
         <el-input v-model="editForm.description" />
       </el-form-item>
     </el-form>

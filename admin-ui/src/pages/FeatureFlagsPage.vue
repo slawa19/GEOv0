@@ -66,11 +66,11 @@ onMounted(() => void load())
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Feature Flags" tooltip-key="nav.featureFlags" />
-        <el-tag type="info">dirty: {{ dirtyCount }}</el-tag>
+        <el-tag type="info">Dirty: {{ dirtyCount }}</el-tag>
       </div>
     </template>
 
@@ -87,18 +87,18 @@ onMounted(() => void load())
     <el-empty v-else-if="rows.length === 0" description="No boolean flags in dataset" />
 
     <div v-else>
-      <el-table :data="rows" size="small">
-        <el-table-column prop="key" label="flag" min-width="320" />
-        <el-table-column label="value" width="180">
+      <el-table :data="rows" size="small" class="geoTable">
+        <el-table-column prop="key" label="Flag" min-width="320" />
+        <el-table-column label="Value" width="180">
           <template #default="scope">
             <el-switch v-model="scope.row.value" @change="persistRow(scope.row)" />
           </template>
         </el-table-column>
-        <el-table-column label="status" width="160">
+        <el-table-column label="Status" width="160">
           <template #default="scope">
-            <el-tag v-if="savingKey === scope.row.key" type="info">saving...</el-tag>
-            <el-tag v-else-if="scope.row.value !== scope.row.original" type="warning">pending</el-tag>
-            <el-tag v-else type="success">synced</el-tag>
+            <el-tag v-if="savingKey === scope.row.key" type="info">Saving…</el-tag>
+            <el-tag v-else-if="scope.row.value !== scope.row.original" type="warning">Pending</el-tag>
+            <el-tag v-else type="success">Synced</el-tag>
           </template>
         </el-table-column>
       </el-table>

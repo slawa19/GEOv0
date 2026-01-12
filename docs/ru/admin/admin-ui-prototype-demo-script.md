@@ -71,6 +71,10 @@
 Полезные точки входа:
 - `admin-fixtures/tools/generate_admin_fixtures.py` — базовый детерминированный генератор fixture-pack.
 - `admin-fixtures/tools/generate_seed_greenfield_village_100.py` — генератор основного seed-набора.
+- `admin-fixtures/tools/generate_seed_riverside_town_50.py` — альтернативный seed-набор (50 участников).
+
+Общее:
+- `admin-fixtures/tools/seedlib.py` — общие утилиты и производные датасеты (debts/cycles/meta) для seed-генераторов.
 
 См. также:
 - Спека fixture-pack: `docs/ru/admin/specs/admin-ui-prototype-fixtures-spec.md`

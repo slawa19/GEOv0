@@ -54,7 +54,7 @@ onMounted(() => void load())
 </script>
 
 <template>
-  <el-card>
+  <el-card class="geoCard">
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Integrity" tooltip-key="nav.integrity" />
@@ -67,15 +67,15 @@ onMounted(() => void load())
 
     <div v-else>
       <el-descriptions :column="2" border>
-        <el-descriptions-item label="status">{{ status?.status }}</el-descriptions-item>
-        <el-descriptions-item label="last_checked_at">{{ status?.last_checked_at }}</el-descriptions-item>
-        <el-descriptions-item label="checks_total">{{ status?.checks_total }}</el-descriptions-item>
-        <el-descriptions-item label="checks_failed">{{ status?.checks_failed }}</el-descriptions-item>
+        <el-descriptions-item label="Status">{{ status?.status }}</el-descriptions-item>
+        <el-descriptions-item label="Last Checked At">{{ status?.last_checked_at }}</el-descriptions-item>
+        <el-descriptions-item label="Checks Total">{{ status?.checks_total }}</el-descriptions-item>
+        <el-descriptions-item label="Checks Failed">{{ status?.checks_failed }}</el-descriptions-item>
       </el-descriptions>
 
       <el-divider />
 
-      <div class="sub">Raw payload</div>
+      <div class="sub">Raw Payload</div>
       <pre class="json">{{ JSON.stringify(status, null, 2) }}</pre>
     </div>
   </el-card>
