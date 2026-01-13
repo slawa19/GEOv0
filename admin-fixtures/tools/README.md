@@ -57,6 +57,15 @@ Run one of:
 - `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_greenfield_village_100.py`
 - `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_riverside_town_50.py`
 
+### Generic generator (auxiliary)
+
+`generate_admin_fixtures.py` generates a deterministic, UI-friendly fixture pack with lots of rows for pagination + common admin pages.
+
+Notes:
+- Defaults are compatible with `admin-ui/scripts/validate-fixtures.mjs` (equivalents must be exactly `UAH/EUR/HOUR`, participants typically 50/100).
+- You can tune sizes via CLI args, e.g.:
+	- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_admin_fixtures.py --participants 100 --trustlines 200 --transactions 400`
+
 ### Bottlenecks (Dashboard)
 
 Dashboard “Trustline bottlenecks” filters active trustlines by the ratio:

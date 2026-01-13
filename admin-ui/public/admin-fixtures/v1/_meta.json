@@ -4,13 +4,16 @@
   "counts": {
     "participants": 100,
     "equivalents": 3,
-    "trustlines": 439,
-    "incidents": 3,
-    "debts": 439
+    "trustlines": 140,
+    "audit_log": 180,
+    "incidents": 25,
+    "debts": 136,
+    "transactions": 240
   },
   "notes": [
+    "All amounts are decimal strings.",
+    "Timestamps are fixed relative to 2026-01-11Z.",
     "TrustLine direction is creditor -> debtor (from -> to).",
-    "Debt direction is debtor -> creditor (derived from trustline.used).",
-    "Timestamps are fixed relative to 2026-01-11T00:00:00Z."
+    "Debt direction is debtor -> creditor (derived from trustline.used)."
   ]
 }

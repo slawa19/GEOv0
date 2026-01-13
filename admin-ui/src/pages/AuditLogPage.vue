@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import { debounce } from '../utils/debounce'
 import type { AuditLogEntry } from '../types/domain'
 
 const loading = ref(false)
@@ -18,22 +19,6 @@ const perPage = ref(20)
 const total = ref(0)
 const items = ref<AuditLogEntry[]>([])
 
-const visibleItems = computed(() => {
-  const needle = String(q.value || '').trim().toLowerCase()
-  if (!needle) return items.value
-  return items.value.filter((e) => {
-    return (
-      String(e.id || '').toLowerCase().includes(needle) ||
-      String(e.actor_id || '').toLowerCase().includes(needle) ||
-      String(e.actor_role || '').toLowerCase().includes(needle) ||
-      String(e.action || '').toLowerCase().includes(needle) ||
-      String(e.object_type || '').toLowerCase().includes(needle) ||
-      String(e.object_id || '').toLowerCase().includes(needle) ||
-      String(e.reason || '').toLowerCase().includes(needle)
-    )
-  })
-})
-
 const drawerOpen = ref(false)
 const selected = ref<AuditLogEntry | null>(null)
 
@@ -41,7 +26,12 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await api.listAuditLog({ page: page.value, per_page: perPage.value }))
+    // NOTE: audit-log search must be server-side. Client-side filtering of a single loaded page is misleading.
+    const data = assertSuccess(await api.listAuditLog({
+      page: page.value,
+      per_page: perPage.value,
+      q: q.value || undefined,
+    }))
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / perPage.value))
     if (page.value > maxPage) {
@@ -69,6 +59,11 @@ watch(perPage, () => {
   void load()
 })
 
+const debouncedReload = debounce(() => {
+  page.value = 1
+  void load()
+}, 250)
+
 watch(
   () => route.query.q,
   (v) => {
@@ -78,7 +73,7 @@ watch(
 )
 
 watch(q, () => {
-  page.value = 1
+  debouncedReload()
 })
 </script>
 
@@ -97,7 +92,7 @@ watch(q, () => {
     <el-empty v-else-if="items.length === 0" description="No audit entries" />
 
     <div v-else>
-      <el-table :data="visibleItems" size="small" @row-click="openRow" class="clickable-table geoTable">
+      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
         <el-table-column prop="timestamp" width="190">
           <template #header><TooltipLabel label="Timestamp" tooltip-key="audit.timestamp" /></template>
         </el-table-column>

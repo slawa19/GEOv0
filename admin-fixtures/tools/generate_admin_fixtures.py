@@ -14,8 +14,8 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import json
-import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
@@ -111,19 +111,25 @@ def generate_participants(total: int = 60) -> list[Participant]:
 
 
 def generate_equivalents() -> list[Equivalent]:
+    # Keep this generator compatible with the repo's fixtures validator by default.
+    # Current guardrail expects exactly UAH/EUR/HOUR.
     return [
         Equivalent("UAH", 2, "Ukrainian Hryvnia", True),
-        Equivalent("HOUR", 1, "Time-based unit (1 hour of work)", True),
-        Equivalent("KWH", 2, "Kilowatt-hour (energy unit)", True),
-        Equivalent("USD", 2, "US Dollar", True),
         Equivalent("EUR", 2, "Euro", True),
+        Equivalent("HOUR", 1, "Time-based unit (1 hour of work)", True),
+    ]
+
+
+def generate_equivalents_extended() -> list[Equivalent]:
+    # Optional extended set for UI prototyping; NOT compatible with the default validator expectations.
+    return [
+        Equivalent("UAH", 2, "Ukrainian Hryvnia", True),
+        Equivalent("EUR", 2, "Euro", True),
+        Equivalent("HOUR", 1, "Time-based unit (1 hour of work)", True),
+        Equivalent("USD", 2, "US Dollar", True),
         Equivalent("POINT", 0, "Community points", True),
         Equivalent("TOK", 6, "Test token (6 decimals)", True),
-        Equivalent("GAS", 3, "Fuel coupon", True),
-        Equivalent("MEAL", 0, "Meal voucher", True),
         Equivalent("CO2", 3, "CO2 offset unit", False),
-        Equivalent("MIN", 0, "Minutes (time)", False),
-        Equivalent("SAT", 0, "Satoshi (display-only)", False),
     ]
 
 
@@ -366,6 +372,149 @@ def generate_incidents(total: int = 25) -> dict[str, Any]:
     return {"items": items, "page": 1, "per_page": total, "total": total}
 
 
+def generate_debts(trustlines: list[Trustline]) -> list[dict[str, Any]]:
+    # Derived deterministically from trustline.used:
+    # trustline from -> to is creditor -> debtor
+    # debt direction is debtor -> creditor
+    out: list[dict[str, Any]] = []
+    for t in trustlines:
+        used = _d(t.used)
+        if used <= 0:
+            continue
+        out.append(
+            {
+                "equivalent": t.equivalent,
+                "debtor": t.to_pid,
+                "creditor": t.from_pid,
+                "amount": t.used,
+            }
+        )
+    return out
+
+
+def generate_clearing_cycles(participants: list[Participant], equivalents: list[Equivalent]) -> dict[str, Any]:
+    # A small sample of short debt cycles for demo.
+    # Format: { equivalents: { [code]: { cycles: Array<Array<Edge>> } } }
+    codes = [e.code for e in equivalents if e.is_active]
+    by_code: dict[str, Any] = {}
+
+    # Pick a stable set of nodes.
+    p = participants
+    if len(p) < 6:
+        return {"equivalents": {}}
+
+    for idx, code in enumerate(codes):
+        a = p[(idx * 3 + 0) % len(p)].pid
+        b = p[(idx * 3 + 1) % len(p)].pid
+        c = p[(idx * 3 + 2) % len(p)].pid
+
+        by_code[code] = {
+            "cycles": [
+                [
+                    {"debtor": a, "creditor": b, "equivalent": code, "amount": "10.00"},
+                    {"debtor": b, "creditor": c, "equivalent": code, "amount": "10.00"},
+                    {"debtor": c, "creditor": a, "equivalent": code, "amount": "10.00"},
+                ]
+            ]
+        }
+
+    return {"equivalents": by_code}
+
+
+def generate_transactions(
+    participants: list[Participant],
+    equivalents: list[Equivalent],
+    trustlines: list[Trustline],
+    total: int = 240,
+) -> list[dict[str, Any]]:
+    # Minimal synthetic transaction-like log for UI prototyping.
+    # Must satisfy admin-ui/scripts/validate-fixtures.mjs.
+    allowed_types = [
+        "TRUST_LINE_CREATE",
+        "TRUST_LINE_UPDATE",
+        "TRUST_LINE_CLOSE",
+        "PAYMENT",
+        "CLEARING",
+        "COMPENSATION",
+        "COMMODITY_REDEMPTION",
+    ]
+    allowed_states = [
+        "NEW",
+        "ROUTED",
+        "PREPARE_IN_PROGRESS",
+        "PREPARED",
+        "COMMITTED",
+        "ABORTED",
+        "PROPOSED",
+        "WAITING",
+        "REJECTED",
+    ]
+
+    eq_codes = [e.code for e in equivalents if e.is_active]
+    pids = [p.pid for p in participants]
+
+    out: list[dict[str, Any]] = []
+    for i in range(total):
+        tx_type = allowed_types[i % len(allowed_types)]
+        state = allowed_states[(i * 7) % len(allowed_states)]
+        initiator_pid = pids[(i * 13) % len(pids)]
+
+        created_at = BASE_TS - timedelta(days=(i % 90), minutes=i * 3)
+        updated_at = created_at + timedelta(minutes=(i % 17))
+
+        # Prefer tying trustline events to existing edges for nicer demo coherence.
+        tl = trustlines[i % len(trustlines)]
+        eq = tl.equivalent if tl.equivalent in eq_codes else eq_codes[i % len(eq_codes)]
+
+        payload: dict[str, Any] = {"equivalent": eq}
+        if tx_type.startswith("TRUST_LINE_"):
+            payload.update(
+                {
+                    "from": tl.from_pid,
+                    "to": tl.to_pid,
+                    "limit": tl.limit,
+                }
+            )
+        else:
+            # Keep it intentionally light: only what UI might show.
+            payload.update(
+                {
+                    "amount": "10.00",
+                    "recipient_pid": pids[(i * 17) % len(pids)],
+                }
+            )
+
+        out.append(
+            {
+                "tx_id": f"TX_{(i * 104729) % 10**8:08d}",
+                "type": tx_type,
+                "state": state,
+                "initiator_pid": initiator_pid,
+                "payload": payload,
+                "created_at": _iso(created_at),
+                "updated_at": _iso(updated_at),
+            }
+        )
+
+    return out
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Deterministic fixtures generator for GEO Hub Admin UI prototype")
+    p.add_argument("--participants", type=int, default=100, help="Participants count (recommended: 50 or 100)")
+    p.add_argument("--trustlines", type=int, default=140, help="Trustlines count")
+    p.add_argument("--audit-log", dest="audit_log", type=int, default=180, help="Audit log entries count")
+    p.add_argument("--incidents", type=int, default=25, help="Incidents count")
+    p.add_argument(
+        "--equivalents",
+        choices=["core", "extended"],
+        default="core",
+        help='Equivalents set: "core" (UAH/EUR/HOUR) or "extended" (for experiments; may break validator)',
+    )
+    p.add_argument("--transactions", type=int, default=240, help="Transactions count (synthetic)")
+    return p.parse_args()
+
+
 def generate_health() -> dict[str, Any]:
     return {
         "status": "ok",
@@ -394,10 +543,18 @@ def generate_migrations() -> dict[str, Any]:
 
 
 def main() -> None:
-    participants = generate_participants(total=60)
-    equivalents = generate_equivalents()
-    trustlines = generate_trustlines(participants, equivalents, total=140)
-    audit_log = generate_audit_log(total=180)
+    args = _parse_args()
+
+    participants_total = max(1, int(args.participants))
+    trustlines_total = max(0, int(args.trustlines))
+    audit_log_total = max(0, int(args.audit_log))
+    incidents_total = max(0, int(args.incidents))
+    transactions_total = max(0, int(args.transactions))
+
+    participants = generate_participants(total=participants_total)
+    equivalents = generate_equivalents() if args.equivalents == "core" else generate_equivalents_extended()
+    trustlines = generate_trustlines(participants, equivalents, total=trustlines_total)
+    audit_log = generate_audit_log(total=audit_log_total)
 
     datasets = {
         "participants": [asdict(p) for p in participants],
@@ -422,11 +579,15 @@ def main() -> None:
         "config": generate_config(),
         "feature_flags": generate_feature_flags(),
         "integrity_status": generate_integrity_status(),
-        "incidents": generate_incidents(total=25),
+        "incidents": generate_incidents(total=incidents_total),
         "health": generate_health(),
         "health_db": generate_health_db(),
         "migrations": generate_migrations(),
     }
+
+    datasets["debts"] = generate_debts(trustlines)
+    datasets["clearing_cycles"] = generate_clearing_cycles(participants, equivalents)
+    datasets["transactions"] = generate_transactions(participants, equivalents, trustlines, total=transactions_total)
 
     _write_json(DATASETS_DIR / "participants.json", datasets["participants"])
     _write_json(DATASETS_DIR / "equivalents.json", datasets["equivalents"])
@@ -439,6 +600,10 @@ def main() -> None:
     _write_json(DATASETS_DIR / "health.json", datasets["health"])
     _write_json(DATASETS_DIR / "health-db.json", datasets["health_db"])
     _write_json(DATASETS_DIR / "migrations.json", datasets["migrations"])
+
+    _write_json(DATASETS_DIR / "debts.json", datasets["debts"])
+    _write_json(DATASETS_DIR / "clearing-cycles.json", datasets["clearing_cycles"])
+    _write_json(DATASETS_DIR / "transactions.json", datasets["transactions"])
 
     # A few precomputed snapshots for quick prototypes.
     trust_items = datasets["trustlines"]
@@ -511,10 +676,14 @@ def main() -> None:
             "trustlines": len(trustlines),
             "audit_log": len(audit_log),
             "incidents": datasets["incidents"]["total"],
+            "debts": len(datasets["debts"]),
+            "transactions": len(datasets["transactions"]),
         },
         "notes": [
             "All amounts are decimal strings.",
             "Timestamps are fixed relative to 2026-01-11Z.",
+            "TrustLine direction is creditor -> debtor (from -> to).",
+            "Debt direction is debtor -> creditor (derived from trustline.used).",
         ],
     }
     _write_json(V1_DIR / "_meta.json", meta)

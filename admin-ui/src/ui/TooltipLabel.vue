@@ -38,7 +38,7 @@ function linkToWithScenario(link: TooltipLink) {
 
 <template>
   <span class="tl">
-    <span>{{ label }}</span>
+    <span class="tl__label">{{ label }}</span>
     <el-popover v-if="hasTooltip" placement="top" trigger="click" :width="360">
       <template #reference>
         <button class="tl__icon" type="button" :aria-label="ariaLabel" title="Help">?</button>
@@ -66,25 +66,27 @@ function linkToWithScenario(link: TooltipLink) {
 
 <style scoped>
 .tl {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline;
 }
+
+.tl__label {
+  min-width: 0;
+}
+
 .tl__icon {
-  display: inline-flex;
-  width: 12px;
-  height: 12px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  font-size: 10px;
-  line-height: 12px;
-  color: var(--el-text-color-regular);
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color);
+  display: inline-block;
+  color: var(--el-text-color-secondary);
+  background: transparent;
+  border: 0;
   cursor: help;
   user-select: none;
   padding: 0;
+  margin-left: 2px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: super;
 }
 
 .tl__icon:focus-visible {

@@ -72,6 +72,10 @@ async function loadBottlenecks() {
   bottlenecksLoading.value = true
   bottlenecksError.value = null
   try {
+    // TODO(backend): this is intentionally naive for mock/fixtures.
+    // In real mode, replace with a thin endpoint like:
+    //   GET /admin/trustlines/bottlenecks?threshold=&limit=
+    // so we don't fetch hundreds of trustlines and sort client-side.
     const page = assertSuccess(await api.listTrustlines({ page: 1, per_page: 250 }))
     const all = page.items as Trustline[]
 

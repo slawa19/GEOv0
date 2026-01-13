@@ -365,10 +365,41 @@ export const mockApi = {
     })
   },
 
-  async listAuditLog(params: { page?: number; per_page?: number }): Promise<ApiEnvelope<Paginated<AuditLogEntry>>> {
+  async listAuditLog(params: {
+    page?: number
+    per_page?: number
+    q?: string
+    action?: string
+    object_type?: string
+    object_id?: string
+  }): Promise<ApiEnvelope<Paginated<AuditLogEntry>>> {
     return withScenario('/api/v1/admin/audit-log', async () => {
       const all = await getAuditLogDataset()
-      return { success: true, data: paginate(all, params.page ?? 1, params.per_page ?? 20) }
+
+      const needle = String(params.q || '').trim().toLowerCase()
+      const action = String(params.action || '').trim().toLowerCase()
+      const objectType = String(params.object_type || '').trim().toLowerCase()
+      const objectId = String(params.object_id || '').trim().toLowerCase()
+
+      const filtered = all.filter((e) => {
+        if (action && String(e.action || '').toLowerCase() !== action) return false
+        if (objectType && String(e.object_type || '').toLowerCase() !== objectType) return false
+        if (objectId && String(e.object_id || '').toLowerCase() !== objectId) return false
+
+        if (!needle) return true
+
+        return (
+          String(e.id || '').toLowerCase().includes(needle) ||
+          String(e.actor_id || '').toLowerCase().includes(needle) ||
+          String(e.actor_role || '').toLowerCase().includes(needle) ||
+          String(e.action || '').toLowerCase().includes(needle) ||
+          String(e.object_type || '').toLowerCase().includes(needle) ||
+          String(e.object_id || '').toLowerCase().includes(needle) ||
+          String(e.reason || '').toLowerCase().includes(needle)
+        )
+      })
+
+      return { success: true, data: paginate(filtered, params.page ?? 1, params.per_page ?? 20) }
     })
   },
 

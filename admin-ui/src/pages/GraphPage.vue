@@ -6,6 +6,7 @@ import fcose from 'cytoscape-fcose'
 
 import { loadFixtureJson } from '../api/fixtures'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
+import { throttle } from '../utils/throttle'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 
 cytoscape.use(fcose)
@@ -703,6 +704,10 @@ const selectedActivity = computed(() => {
     for (const w of windows) {
       if (ageDays <= w) {
         trustlineCreated[w] = (trustlineCreated[w] ?? 0) + 1
+        // NOTE: fixtures-first approximation.
+        // This is NOT a "trustline closed event" counter.
+        // It's: among trustlines created inside the window, how many are currently status=closed.
+        // Do not copy this semantic into the future backend API (use event-based closed_at/audit-log instead).
         if (String(t.status || '').toLowerCase() === 'closed') trustlineClosed[w] = (trustlineClosed[w] ?? 0) + 1
       }
     }
@@ -1573,14 +1578,17 @@ onBeforeUnmount(() => {
   }
 })
 
-watch([eq, statusFilter, threshold, showIncidents, hideIsolates], () => {
+const throttledRebuild = throttle(() => {
   if (!cy) return
   rebuildGraph({ fit: false })
+}, 300)
+
+watch([eq, statusFilter, threshold, showIncidents, hideIsolates], () => {
+  throttledRebuild()
 })
 
 watch([typeFilter, minDegree], () => {
-  if (!cy) return
-  rebuildGraph({ fit: false })
+  throttledRebuild()
 })
 
 watch([showLabels, labelModeBusiness, labelModePerson, autoLabelsByZoom, minZoomLabelsAll, minZoomLabelsPerson], () => {
@@ -1866,6 +1874,8 @@ function applyZoom(level: number) {
 
           <div class="hint">Fixtures-first: derived from trustlines + debts + incidents + audit-log.</div>
 
+          <!-- TODO(ui): toggles blocks are duplicated across Summary/Balance/Risk tabs.
+               Extract a shared WidgetTogglesCard (or a declarative config list) to avoid drift in text/disabled logic. -->
           <el-card v-if="analyticsEq" shadow="never" class="mb">
             <template #header>
               <TooltipLabel
@@ -1944,15 +1954,49 @@ function applyZoom(level: number) {
               </template>
               <div v-if="selectedConcentration.eq" class="kpi">
                 <div class="kpi__row">
-                  <span class="muted">Outgoing (you owe)</span>
+                  <span class="geoLabel">Outgoing (you owe)</span>
                   <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
                 </div>
-                <div class="muted">top1: {{ pct(selectedConcentration.outgoing.top1, 0) }}, top5: {{ pct(selectedConcentration.outgoing.top5, 0) }}, HHI: {{ selectedConcentration.outgoing.hhi.toFixed(2) }}</div>
+                <div class="metricRows">
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="HHI"
+                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                    />
+                    <span class="metricRow__value">{{ selectedConcentration.outgoing.hhi.toFixed(2) }}</span>
+                  </div>
+                </div>
                 <div class="kpi__row" style="margin-top: 10px">
-                  <span class="muted">Incoming (owed to you)</span>
+                  <span class="geoLabel">Incoming (owed to you)</span>
                   <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
                 </div>
-                <div class="muted">top1: {{ pct(selectedConcentration.incoming.top1, 0) }}, top5: {{ pct(selectedConcentration.incoming.top5, 0) }}, HHI: {{ selectedConcentration.incoming.hhi.toFixed(2) }}</div>
+                <div class="metricRows">
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="HHI"
+                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                    />
+                    <span class="metricRow__value">{{ selectedConcentration.incoming.hhi.toFixed(2) }}</span>
+                  </div>
+                </div>
               </div>
               <div v-else class="muted">No data</div>
             </el-card>
@@ -1989,34 +2033,38 @@ function applyZoom(level: number) {
                   tooltip-text="Recent changes around the participant in rolling windows (7/30/90 days), based on fixture timestamps."
                 />
               </template>
-              <div v-if="selectedActivity" class="muted">
-                <div class="kpi__hint">
+              <div v-if="selectedActivity" class="metricRows">
+                <div class="metricRow">
                   <TooltipLabel
+                    class="metricRow__label"
                     label="Trustlines created (7/30/90d)"
                     tooltip-text="Count of trustlines involving this participant with created_at inside each window."
                   />
-                  <span class="kpi__metric">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
+                  <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
                 </div>
-                <div class="kpi__hint">
+                <div class="metricRow">
                   <TooltipLabel
-                    label="Trustlines closed (7/30/90d)"
-                    tooltip-text="Subset of created trustlines in the window that currently have status=closed."
+                    class="metricRow__label"
+                    label="Trustlines closed now (7/30/90d)"
+                    tooltip-text="Not an event counter: among trustlines created inside each window, how many are currently status=closed."
                   />
-                  <span class="kpi__metric">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
+                  <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
                 </div>
-                <div class="kpi__hint">
+                <div class="metricRow">
                   <TooltipLabel
+                    class="metricRow__label"
                     label="Incidents (initiator, 7/30/90d)"
                     tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
                   />
-                  <span class="kpi__metric">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+                  <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
                 </div>
-                <div class="kpi__hint">
+                <div class="metricRow">
                   <TooltipLabel
+                    class="metricRow__label"
                     label="Participant ops (audit-log, 7/30/90d)"
                     tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
                   />
-                  <span class="kpi__metric">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+                  <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
                 </div>
               </div>
               <div v-else class="muted">No data</div>
@@ -2129,53 +2177,53 @@ function applyZoom(level: number) {
 
           <div v-else>
             <div class="splitGrid">
-            <el-card shadow="never">
-              <template #header>
-                <TooltipLabel
-                  label="Top creditors (you owe)"
-                  tooltip-text="Participants who are creditors of this participant (debts where you are the debtor)."
-                />
-              </template>
-              <el-empty v-if="selectedCounterpartySplit.creditors.length === 0" description="No creditors" />
-              <el-table v-else :data="selectedCounterpartySplit.creditors.slice(0, 10)" size="small" class="geoTable">
-                <el-table-column prop="display_name" label="Participant" min-width="220" />
-                <el-table-column prop="amount" label="Amount" min-width="120">
-                  <template #default="{ row }">{{ money(row.amount) }}</template>
-                </el-table-column>
-                <el-table-column prop="share" label="Share" min-width="140">
-                  <template #default="{ row }">
-                    <div class="shareCell">
-                      <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
-                      <span class="muted">{{ pct(row.share, 0) }}</span>
-                    </div>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </el-card>
+              <el-card shadow="never">
+                <template #header>
+                  <TooltipLabel
+                    label="Top creditors (you owe)"
+                    tooltip-text="Participants who are creditors of this participant (debts where you are the debtor)."
+                  />
+                </template>
+                <el-empty v-if="selectedCounterpartySplit.creditors.length === 0" description="No creditors" />
+                <el-table v-else :data="selectedCounterpartySplit.creditors.slice(0, 10)" size="small" class="geoTable">
+                  <el-table-column prop="display_name" label="Participant" min-width="220" />
+                  <el-table-column prop="amount" label="Amount" min-width="120">
+                    <template #default="{ row }">{{ money(row.amount) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="share" label="Share" min-width="140">
+                    <template #default="{ row }">
+                      <div class="shareCell">
+                        <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
+                        <span class="muted">{{ pct(row.share, 0) }}</span>
+                      </div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
 
-            <el-card shadow="never">
-              <template #header>
-                <TooltipLabel
-                  label="Top debtors (owed to you)"
-                  tooltip-text="Participants who are debtors to this participant (debts where you are the creditor)."
-                />
-              </template>
-              <el-empty v-if="selectedCounterpartySplit.debtors.length === 0" description="No debtors" />
-              <el-table v-else :data="selectedCounterpartySplit.debtors.slice(0, 10)" size="small" class="geoTable">
-                <el-table-column prop="display_name" label="Participant" min-width="220" />
-                <el-table-column prop="amount" label="Amount" min-width="120">
-                  <template #default="{ row }">{{ money(row.amount) }}</template>
-                </el-table-column>
-                <el-table-column prop="share" label="Share" min-width="140">
-                  <template #default="{ row }">
-                    <div class="shareCell">
-                      <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
-                      <span class="muted">{{ pct(row.share, 0) }}</span>
-                    </div>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </el-card>
+              <el-card shadow="never">
+                <template #header>
+                  <TooltipLabel
+                    label="Top debtors (owed to you)"
+                    tooltip-text="Participants who are debtors to this participant (debts where you are the creditor)."
+                  />
+                </template>
+                <el-empty v-if="selectedCounterpartySplit.debtors.length === 0" description="No debtors" />
+                <el-table v-else :data="selectedCounterpartySplit.debtors.slice(0, 10)" size="small" class="geoTable">
+                  <el-table-column prop="display_name" label="Participant" min-width="220" />
+                  <el-table-column prop="amount" label="Amount" min-width="120">
+                    <template #default="{ row }">{{ money(row.amount) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="share" label="Share" min-width="140">
+                    <template #default="{ row }">
+                      <div class="shareCell">
+                        <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
+                        <span class="muted">{{ pct(row.share, 0) }}</span>
+                      </div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
             </div>
           </div>
         </el-tab-pane>
@@ -2226,20 +2274,23 @@ function applyZoom(level: number) {
                   />
                   <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
                 </div>
-                <div class="muted">
-                  <TooltipLabel label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />:
-                  {{ pct(selectedConcentration.outgoing.top1, 0) }}
-                </div>
-                <div class="muted">
-                  <TooltipLabel label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />:
-                  {{ pct(selectedConcentration.outgoing.top5, 0) }}
-                </div>
-                <div class="muted">
-                  <TooltipLabel
-                    label="HHI"
-                    tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
-                  />:
-                  {{ selectedConcentration.outgoing.hhi.toFixed(2) }}
+                <div class="metricRows">
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="HHI"
+                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                    />
+                    <span class="metricRow__value">{{ selectedConcentration.outgoing.hhi.toFixed(2) }}</span>
+                  </div>
                 </div>
               </div>
               <div class="riskBlock">
@@ -2250,20 +2301,23 @@ function applyZoom(level: number) {
                   />
                   <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
                 </div>
-                <div class="muted">
-                  <TooltipLabel label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />:
-                  {{ pct(selectedConcentration.incoming.top1, 0) }}
-                </div>
-                <div class="muted">
-                  <TooltipLabel label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />:
-                  {{ pct(selectedConcentration.incoming.top5, 0) }}
-                </div>
-                <div class="muted">
-                  <TooltipLabel
-                    label="HHI"
-                    tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
-                  />:
-                  {{ selectedConcentration.incoming.hhi.toFixed(2) }}
+                <div class="metricRows">
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />
+                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
+                  </div>
+                  <div class="metricRow">
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="HHI"
+                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                    />
+                    <span class="metricRow__value">{{ selectedConcentration.incoming.hhi.toFixed(2) }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2334,51 +2388,65 @@ function applyZoom(level: number) {
                 tooltip-text="Counts by 7/30/90-day windows. Sources: trustlines.created_at, incidents.created_at, audit-log.timestamp, transactions.updated_at."
               />
             </template>
-            <div class="kpi__hint muted">
-              <TooltipLabel
-                label="Trustlines created (7/30/90d)"
-                tooltip-text="Count of trustlines involving this participant with created_at inside each window."
-              />
-              <span class="kpi__metric">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
+            <div class="metricRows">
+              <div class="metricRow">
+                <TooltipLabel
+                  class="metricRow__label"
+                  label="Trustlines created (7/30/90d)"
+                  tooltip-text="Count of trustlines involving this participant with created_at inside each window."
+                />
+                <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
+              </div>
+              <div class="metricRow">
+                <TooltipLabel
+                  class="metricRow__label"
+                  label="Trustlines closed now (7/30/90d)"
+                  tooltip-text="Not an event counter: among trustlines created inside each window, how many are currently status=closed."
+                />
+                <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
+              </div>
+              <div class="metricRow">
+                <TooltipLabel
+                  class="metricRow__label"
+                  label="Incidents (initiator, 7/30/90d)"
+                  tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
+                />
+                <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+              </div>
+              <div class="metricRow">
+                <TooltipLabel
+                  class="metricRow__label"
+                  label="Participant ops (audit-log, 7/30/90d)"
+                  tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
+                />
+                <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+              </div>
+              <div class="metricRow">
+                <TooltipLabel
+                  class="metricRow__label"
+                  label="Payments committed (7/30/90d)"
+                  tooltip-text="Count of committed PAYMENT transactions involving this participant (as sender or receiver), by updated_at window."
+                />
+                <span class="metricRow__value">{{ selectedActivity.paymentCommitted[7] }} / {{ selectedActivity.paymentCommitted[30] }} / {{ selectedActivity.paymentCommitted[90] }}</span>
+              </div>
+              <div class="metricRow">
+                <TooltipLabel
+                  class="metricRow__label"
+                  label="Clearing committed (7/30/90d)"
+                  tooltip-text="Count of committed CLEARING transactions where this participant appears in any cycle edge (or is initiator), by updated_at window."
+                />
+                <span class="metricRow__value">{{ selectedActivity.clearingCommitted[7] }} / {{ selectedActivity.clearingCommitted[30] }} / {{ selectedActivity.clearingCommitted[90] }}</span>
+              </div>
             </div>
-            <div class="kpi__hint muted">
-              <TooltipLabel
-                label="Trustlines closed (7/30/90d)"
-                tooltip-text="Subset of created trustlines in the window that currently have status=closed."
-              />
-              <span class="kpi__metric">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
-            </div>
-            <div class="kpi__hint muted">
-              <TooltipLabel
-                label="Incidents (initiator, 7/30/90d)"
-                tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
-              />
-              <span class="kpi__metric">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
-            </div>
-            <div class="kpi__hint muted">
-              <TooltipLabel
-                label="Participant ops (audit-log, 7/30/90d)"
-                tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
-              />
-              <span class="kpi__metric">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
-            </div>
-            <div class="kpi__hint muted">
-              <TooltipLabel
-                label="Payments committed (7/30/90d)"
-                tooltip-text="Count of committed PAYMENT transactions involving this participant (as sender or receiver), by updated_at window."
-              />
-              <span class="kpi__metric">{{ selectedActivity.paymentCommitted[7] }} / {{ selectedActivity.paymentCommitted[30] }} / {{ selectedActivity.paymentCommitted[90] }}</span>
-            </div>
-            <div class="kpi__hint muted">
-              <TooltipLabel
-                label="Clearing committed (7/30/90d)"
-                tooltip-text="Count of committed CLEARING transactions where this participant appears in any cycle edge (or is initiator), by updated_at window."
-              />
-              <span class="kpi__metric">{{ selectedActivity.clearingCommitted[7] }} / {{ selectedActivity.clearingCommitted[30] }} / {{ selectedActivity.clearingCommitted[90] }}</span>
-            </div>
-            <div v-if="!selectedActivity.hasTransactions" class="hint" style="margin-top: 8px">
-              Requires transactions fixtures: missing transactions.json in current seed.
-            </div>
+            <el-alert
+              v-if="!selectedActivity.hasTransactions"
+              type="warning"
+              show-icon
+              title="Transactions-based activity is unavailable in fixtures"
+              description="Missing datasets/transactions.json in the current seed. In real mode this must come from API."
+              class="mb"
+              style="margin-top: 10px"
+            />
           </el-card>
         </el-tab-pane>
 
@@ -2482,6 +2550,11 @@ function applyZoom(level: number) {
   padding: 0;
 }
 
+.drawerTabs {
+  font-size: var(--geo-font-size-label);
+  line-height: 1.35;
+}
+
 /* Typography roles inside the analytics drawer */
 .drawerTabs :deep(.el-card__header) {
   font-size: var(--geo-font-size-title);
@@ -2530,9 +2603,36 @@ function applyZoom(level: number) {
 }
 
 .kpi__metric {
-  font-size: 13px;
+  font-size: var(--geo-font-size-label);
   font-weight: 600;
   color: var(--el-text-color-primary);
+}
+
+.metricRows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metricRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.metricRow__label {
+  min-width: 0;
+  flex: 1;
+  color: var(--el-text-color-secondary);
+}
+
+.metricRow__value {
+  flex: 0 0 auto;
+  font-size: var(--geo-font-size-label);
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  text-align: right;
 }
 
 .kpi__row {
@@ -2546,12 +2646,6 @@ function applyZoom(level: number) {
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
-}
-
-@media (min-width: 980px) {
-  .splitGrid {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 .shareCell {
@@ -2584,6 +2678,7 @@ function applyZoom(level: number) {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  font-size: var(--geo-font-size-title);
   font-weight: 600;
   margin-bottom: 6px;
 }

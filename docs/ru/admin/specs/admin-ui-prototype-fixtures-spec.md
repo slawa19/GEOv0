@@ -1,7 +1,7 @@
 # GEO Hub Admin Console — Fixture Pack для статического прототипа (Variant B)
 
-**Версия:** 0.1  
-**Дата:** 2026‑01‑11  
+**Версия:** 0.2
+**Дата:** 2026‑01‑13
 **Статус:** рабочая спецификация для прототипирования UI без backend
 
 Связано с:
@@ -31,6 +31,7 @@
   - `config.json`, `feature-flags.json`
   - `participants.json`, `trustlines.json`, `audit-log.json`, `incidents.json`
   - `equivalents.json`, `migrations.json`, `integrity-status.json`
+  - `debts.json`, `clearing-cycles.json`, `transactions.json`
 - `admin-fixtures/v1/scenarios/*.json` — сценарии поведения (ошибки/401/403/empty/slow).
 - `admin-fixtures/v1/api-snapshots/*.json` — примеры готовых ответов (для UI без мок‑сервера), опционально.
 - `admin-fixtures/tools/generate_admin_fixtures.py` — генератор (детерминированный).
@@ -38,6 +39,10 @@
   - `admin-fixtures/tools/generate_seed_greenfield_village_100.py`
   - `admin-fixtures/tools/generate_seed_riverside_town_50.py`
   - общий модуль: `admin-fixtures/tools/seedlib.py`
+
+  Копия для runtime Admin UI (синхронизируется из канона):
+  - `admin-ui/public/admin-fixtures/v1/` — то, что реально грузит `mockApi` в браузере.
+  - sync-скрипт: `admin-ui/scripts/sync-fixtures.mjs` (команда `npm run sync:fixtures`).
 
 ---
 
@@ -123,16 +128,30 @@ UI в прототипе должен работать так же, как с р
 
 Сценарий задаётся в UI через переключатель (например, query `?scenario=happy`) или dev‑настройку.
 
+Примечание: в текущем Admin UI сценарий реально выбирается через query `?scenario=...` (и UI-селектор в шапке в fixtures-first режиме).
+
 ---
 
 ## 8. Состав датасетов (минимум)
 
-Нормативные минимумы (чтобы хватало для UX):
-- `participants`: 60+ (разные статусы: active/frozen/banned).
+Рекомендованные минимумы (чтобы хватало для UX-демо; seed-датасеты могут быть меньше по некоторым сущностям):
+- `participants`: 50 или 100 (поддерживаемые seed-наборы; это проверяет валидатор).
 - `trustlines`: 120+ (3+ equivalents, разные статусы, есть узкие места).
 - `audit-log`: 150+ (разные action/object_type, есть before/after).
-- `incidents`: 25+ зависших tx.
-- `equivalents`: 10+ (часть inactive).
+- `incidents`: желательно 10+ (для демо таблицы/фильтров; в некоторых seed-наборах может быть меньше).
+- `equivalents`: базовый набор фиксирован и валидируется (см. ниже).
+
+Guardrails валидации (фактическая проверка в репозитории):
+- `admin-ui/scripts/validate-fixtures.mjs` сверяет канон и public-copy, проверяет схемы, и ожидает ровно `UAH/EUR/HOUR`.
+- `participants.length` должен быть 50 или 100 (или задаётся `EXPECTED_PARTICIPANTS`).
+
+### 8.1. Инциденты (формат incidents.json)
+
+Чтобы упростить прототипирование, формат `admin-fixtures/v1/datasets/incidents.json` допускает два варианта:
+- массив: `[ { ...incident... }, ... ]`
+- объект: `{ "items": [ { ...incident... }, ... ] }`
+
+Текущий стек (`mockApi` и `validate-fixtures`) поддерживает оба варианта, но канонично рекомендуется `{ items: [...] }`.
 
 ---
 
@@ -154,4 +173,107 @@ UI в прототипе должен работать так же, как с р
 
 Команда (Windows/pwsh):
 - `python admin-fixtures/tools/generate_admin_fixtures.py`
+
+Опционально (для настройки объёмов/экспериментов):
+- `python admin-fixtures/tools/generate_admin_fixtures.py --participants 100 --trustlines 200 --transactions 400`
+- расширенный набор equivalents (может нарушить валидатор по умолчанию):
+  - `python admin-fixtures/tools/generate_admin_fixtures.py --equivalents extended`
+
+---
+
+## 10. Дополнительные датасеты для метрик и аналитики
+
+### 10.1. `debts.json`
+
+**Назначение:** Расчёт баланса/нетто-позиции участников и "top counterparties". Строится из долгов (`debtor→creditor`), а не из trustlines.
+
+**Схема:**
+```json
+[
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_...",
+    "creditor": "PID_...",
+    "amount": "123.45"
+  }
+]
+```
+
+**Источник данных:**
+- Для прототипа производится детерминированно из `trustline.used`:
+  - trustline `from → to` (creditor→debtor)
+  - debt: `debtor=to`, `creditor=from`, `amount=used`
+
+### 10.2. `clearing-cycles.json`
+
+**Назначение:** Вкладка `Cycles (Clearing)` в drawer участника — показывает готовые циклы для взаимозачёта.
+
+**Схема:**
+```json
+{
+  "equivalents": {
+    "UAH": {
+      "cycles": [
+        [
+          { "debtor": "PID_A", "creditor": "PID_B", "equivalent": "UAH", "amount": "10.00" },
+          { "debtor": "PID_B", "creditor": "PID_C", "equivalent": "UAH", "amount": "10.00" },
+          { "debtor": "PID_C", "creditor": "PID_A", "equivalent": "UAH", "amount": "10.00" }
+        ]
+      ]
+    }
+  }
+}
+```
+
+**Важно:**
+- Граф trustlines (creditor→debtor) и граф debts (debtor→creditor) — **разные направления**.
+- В UI важно явно подписывать, что cycles отображают долги.
+
+### 10.3. `transactions.json`
+
+**Назначение:** История платежей для отображения в детальных просмотрах участников и общей таблице.
+
+---
+
+## 11. Метаданные генерации
+
+Файл `admin-fixtures/v1/_meta.json` содержит информацию о последней генерации:
+- `generated_at` — timestamp генерации
+- `counts` — количество записей по каждому датасету
+- `seed_name` — имя использованного seed (например, "greenfield_village_100")
+
+Используется для:
+- быстрой проверки актуальности фикстур;
+- обнаружения расхождений после запуска разных генераторов.
+
+---
+
+## 12. Рабочий цикл разработки
+
+1. **Сгенерировать canonical fixtures:**
+   ```bash
+   python admin-fixtures/tools/generate_seed_greenfield_village_100.py
+   ```
+
+2. **Синхронизировать в admin-ui:**
+   ```bash
+   cd admin-ui
+   npm run sync:fixtures
+   ```
+
+3. **Проверить корректность:**
+   ```bash
+   npm run validate:fixtures
+   ```
+
+Примечание: `npm run dev` и `npm run build` в `admin-ui/` уже включают sync+validate как pre-steps.
+
+4. **Дорабатывать UI**, используя `mockApi` + новые датасеты.
+
+---
+
+## Changelog
+
+- **v0.2 (2026-01-13):** Добавлены секции 10 (debts.json, clearing-cycles.json, transactions.json), 11 (_meta.json), 12 (рабочий цикл).
+- **v0.1 (2026-01-11):** Начальная версия спецификации.
 

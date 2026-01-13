@@ -240,6 +240,7 @@ export const realApi = {
   async listAuditLog(params: {
     page?: number
     per_page?: number
+    q?: string
     action?: string
     object_type?: string
     object_id?: string

@@ -100,7 +100,8 @@ const debouncedReload = debounce(() => {
   void load()
 }, 250)
 
-watch([equivalent, creditor, debtor, status, threshold], () => {
+// NOTE: threshold is a UI-only highlight knob; do not reload the list when it changes.
+watch([equivalent, creditor, debtor, status], () => {
   debouncedReload()
 })
 

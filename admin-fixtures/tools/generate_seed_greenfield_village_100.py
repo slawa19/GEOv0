@@ -15,7 +15,6 @@ No external deps.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
