@@ -65,7 +65,7 @@ def upgrade() -> None:
     op.execute("""
         ALTER TABLE participants 
         ADD CONSTRAINT chk_participant_type 
-        CHECK (type IN ('person', 'organization', 'hub'))
+        CHECK (type IN ('person', 'business', 'hub'))
     """)
     
     # Check constraint для status

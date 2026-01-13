@@ -270,7 +270,7 @@ Main fields:
 - `id`: UUID / hash(pubkey).
 - `public_key`: public key (Ed25519).
 - `display_name`: display name.
-- `profile`: arbitrary metadata (description, contacts, participant type — individual, organization, hub etc.).
+- `profile`: arbitrary metadata (description, contacts, participant type — individual, business, hub etc.).
 - `status`: `active | suspended | left | deleted`.
 - Aggregated indicators (can store in separate tables or as materialized views):
 
@@ -622,7 +622,7 @@ For uniting several hubs into cluster:
 - Add **Community / Hub** entity:
 
   - each hub — participant node at GEO meta-network level;
-  - trust lines open between hubs (at legal entity/organization level).
+  - trust lines open between hubs (at legal entity/business level).
 
 - Introduce protocol:
 

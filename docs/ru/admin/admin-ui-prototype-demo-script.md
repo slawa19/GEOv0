@@ -68,10 +68,11 @@
 - править вручную в `admin-fixtures/v1/...` (быстро для мелких изменений), или
 - генерировать детерминированно Python-скриптами в `admin-fixtures/tools/` (рекомендуемо для больших наборов).
 
-Полезные точки входа:
-- `admin-fixtures/tools/generate_admin_fixtures.py` — базовый детерминированный генератор fixture-pack.
-- `admin-fixtures/tools/generate_seed_greenfield_village_100.py` — генератор основного seed-набора.
-- `admin-fixtures/tools/generate_seed_riverside_town_50.py` — альтернативный seed-набор (50 участников).
+Полезная точка входа (единый генератор):
+
+- `admin-fixtures/tools/generate_fixtures.py` — единый детерминированный генератор каноничных community seeds:
+	- `--seed greenfield-village-100` (100 участников)
+	- `--seed riverside-town-50` (50 участников)
 
 Общее:
 - `admin-fixtures/tools/seedlib.py` — общие утилиты и производные датасеты (debts/cycles/meta) для seed-генераторов.
@@ -79,6 +80,23 @@
 См. также:
 - Спека fixture-pack: `docs/ru/admin/specs/admin-ui-prototype-fixtures-spec.md`
 - Подход к seed-документам и генерации: `docs/ru/seeds/README.md`
+
+#### Guardrails валидатора (важно для демо)
+
+Скрипт `admin-ui/scripts/validate-fixtures.mjs` проверяет ряд ожидаемых ограничений. В частности:
+- equivalents в «каноничном» режиме ожидаются ровно `UAH/EUR/HOUR`;
+- `participants.length` обычно должен быть 50 или 100 (если не задан `EXPECTED_PARTICIPANTS`).
+
+Поэтому seed-генераторы дают валидируемый набор.
+
+#### Примеры команд для генерации
+
+Рекомендуемые команды:
+- `python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100`
+- `python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50`
+
+После любой генерации (или ручной правки канонических JSON):
+- `cd admin-ui; npm run sync:fixtures; npm run validate:fixtures`
 
 ## 1) Как запустить
 

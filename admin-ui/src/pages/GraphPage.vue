@@ -99,6 +99,57 @@ const cyRoot = ref<HTMLElement | null>(null)
 let cy: Core | null = null
 let zoomUpdatingFromCy = false
 
+let lastNodeTapAt = 0
+let lastNodeTapPid = ''
+
+const NODE_DOUBLE_TAP_MS = 700
+
+let pendingNodeTapTimer: number | null = null
+
+function stopPendingNodeTap() {
+  if (pendingNodeTapTimer !== null) {
+    window.clearTimeout(pendingNodeTapTimer)
+    pendingNodeTapTimer = null
+  }
+}
+
+let selectedPulseTimer: number | null = null
+let selectedPulseOn = false
+
+function stopSelectedPulse() {
+  if (selectedPulseTimer !== null) {
+    window.clearInterval(selectedPulseTimer)
+    selectedPulseTimer = null
+  }
+  selectedPulseOn = false
+}
+
+function applySelectedHighlight(pid: string) {
+  if (!cy) return
+  const p = String(pid || '').trim()
+
+  cy.nodes('.selected-node').removeClass('selected-node')
+  cy.nodes('.selected-pulse').removeClass('selected-pulse')
+
+  stopSelectedPulse()
+
+  if (!p) return
+  const n = cy.getElementById(p)
+  if (!n || n.empty()) return
+
+  n.addClass('selected-node')
+
+  // Blink by toggling a secondary class (Cytoscape has no CSS animations).
+  selectedPulseTimer = window.setInterval(() => {
+    if (!cy) return
+    const nn = cy.getElementById(p)
+    if (!nn || nn.empty()) return
+    selectedPulseOn = !selectedPulseOn
+    if (selectedPulseOn) nn.addClass('selected-pulse')
+    else nn.removeClass('selected-pulse')
+  }, 520)
+}
+
 const participants = ref<Participant[]>([])
 const trustlines = ref<Trustline[]>([])
 const incidents = ref<Incident[]>([])
@@ -108,7 +159,7 @@ const clearingCycles = ref<ClearingCycles | null>(null)
 const auditLog = ref<AuditLogEntry[]>([])
 const transactions = ref<Transaction[]>([])
 
-type DrawerTab = 'summary' | 'balance' | 'counterparties' | 'risk' | 'cycles'
+type DrawerTab = 'summary' | 'connections' | 'balance' | 'counterparties' | 'risk' | 'cycles'
 const drawerTab = ref<DrawerTab>('summary')
 const drawerEq = ref<string>('ALL')
 
@@ -227,8 +278,134 @@ type ParticipantSuggestion = { value: string; pid: string }
 const searchQuery = ref('')
 const focusPid = ref('')
 
+const focusMode = ref(false)
+const focusDepth = ref<1 | 2>(1)
+const focusRootPid = ref('')
+
+const activeCycleKey = ref('')
+
+const activeConnectionKey = ref('')
+
 const drawerOpen = ref(false)
 const selected = ref<SelectedInfo | null>(null)
+
+function suggestPidForFocus(): string {
+  if (selected.value && selected.value.kind === 'node') return selected.value.pid
+  const p = String(focusPid.value || '').trim()
+  if (p) return p
+  const fromQuery = extractPidFromText(searchQuery.value)
+  return fromQuery || ''
+}
+
+function setFocusRoot(pid: string) {
+  focusRootPid.value = String(pid || '').trim()
+}
+
+function ensureFocusRootPid() {
+  if (String(focusRootPid.value || '').trim()) return
+  setFocusRoot(suggestPidForFocus())
+}
+
+function useSelectedForFocus() {
+  if (!selected.value || selected.value.kind !== 'node') return
+  setFocusRoot(selected.value.pid)
+  focusMode.value = true
+  ensureFocusRootPid()
+}
+
+function clearFocusMode() {
+  focusMode.value = false
+  setFocusRoot('')
+}
+
+function clearCycleHighlight() {
+  activeCycleKey.value = ''
+  if (!cy) return
+  cy.edges('.cycle-highlight').removeClass('cycle-highlight')
+  cy.nodes('.cycle-node').removeClass('cycle-node')
+}
+
+function clearConnectionHighlight() {
+  activeConnectionKey.value = ''
+  if (!cy) return
+  cy.edges('.connection-highlight').removeClass('connection-highlight')
+  cy.nodes('.connection-node').removeClass('connection-node')
+}
+
+function highlightConnection(fromPid: string, toPid: string, eqCode: string) {
+  if (!cy) return
+  const from = String(fromPid || '').trim()
+  const to = String(toPid || '').trim()
+  const eq = normEq(eqCode)
+  if (!from || !to || !eq) return
+
+  cy.edges().forEach((edge) => {
+    const src = String(edge.data('source') || '')
+    const dst = String(edge.data('target') || '')
+    const eeq = normEq(String(edge.data('equivalent') || ''))
+    if (src === from && dst === to && eeq === eq) edge.addClass('connection-highlight')
+  })
+
+  const a = cy.getElementById(from)
+  const b = cy.getElementById(to)
+  if (a && !a.empty()) a.addClass('connection-node')
+  if (b && !b.empty()) b.addClass('connection-node')
+}
+
+function cycleKey(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>): string {
+  return (cycle || [])
+    .map((e) => `${normEq(e.equivalent)}:${String(e.debtor || '')}->${String(e.creditor || '')}`)
+    .join('|')
+}
+
+function highlightCycle(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) {
+  if (!cy) return
+
+  const touchedPids = new Set<string>()
+  for (const e of cycle || []) {
+    const eqCode = normEq(e.equivalent)
+    const debtor = String(e.debtor || '').trim()
+    const creditor = String(e.creditor || '').trim()
+    if (!debtor || !creditor || !eqCode) continue
+
+    // Note: cycle edges are debt edges (debtor -> creditor).
+    // TrustLine direction in the graph is creditor -> debtor.
+    cy.edges().forEach((edge) => {
+      const src = String(edge.data('source') || '')
+      const dst = String(edge.data('target') || '')
+      const eeq = normEq(String(edge.data('equivalent') || ''))
+      if (src === creditor && dst === debtor && eeq === eqCode) edge.addClass('cycle-highlight')
+    })
+
+    touchedPids.add(debtor)
+    touchedPids.add(creditor)
+  }
+
+  for (const pid of touchedPids) {
+    const n = cy.getElementById(pid)
+    if (n && !n.empty()) n.addClass('cycle-node')
+  }
+}
+
+function toggleCycleHighlight(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) {
+  if (!cy) return
+  const key = cycleKey(cycle)
+  if (!key) return
+
+  if (activeCycleKey.value === key) {
+    clearCycleHighlight()
+    return
+  }
+
+  clearCycleHighlight()
+  activeCycleKey.value = key
+  highlightCycle(cycle)
+}
+
+function isCycleActive(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>): boolean {
+  const key = cycleKey(cycle)
+  return Boolean(key) && activeCycleKey.value === key
+}
 
 function money(v: string): string {
   return formatDecimalFixed(v, 2)
@@ -318,6 +495,130 @@ const participantByPid = computed(() => {
   }
   return m
 })
+
+type ConnectionRow = {
+  direction: 'incoming' | 'outgoing'
+  counterparty_pid: string
+  counterparty_name: string
+  equivalent: string
+  status: string
+  limit: string
+  used: string
+  available: string
+  bottleneck: boolean
+}
+
+function connectionRowsFromCy(pid: string): { incoming: ConnectionRow[]; outgoing: ConnectionRow[] } {
+  const incoming: ConnectionRow[] = []
+  const outgoing: ConnectionRow[] = []
+  if (!cy) return { incoming, outgoing }
+
+  cy.edges().forEach((e) => {
+    const from = String(e.data('source') || '')
+    const to = String(e.data('target') || '')
+    if (from !== pid && to !== pid) return
+
+    const eqCode = normEq(String(e.data('equivalent') || ''))
+    const status = String(e.data('status') || '')
+    const limit = String(e.data('limit') || '')
+    const used = String(e.data('used') || '')
+    const available = String(e.data('available') || '')
+
+    const isOut = from === pid
+    const cp = isOut ? to : from
+    const p = participantByPid.value.get(cp)
+    const name = String(p?.display_name || '').trim()
+    const row: ConnectionRow = {
+      direction: isOut ? 'outgoing' : 'incoming',
+      counterparty_pid: cp,
+      counterparty_name: name,
+      equivalent: eqCode,
+      status,
+      limit,
+      used,
+      available,
+      bottleneck: status === 'active' && isBottleneck({ from, to, equivalent: eqCode, status, limit, used, available, created_at: '' }),
+    }
+
+    if (isOut) outgoing.push(row)
+    else incoming.push(row)
+  })
+
+  const sortKey = (r: ConnectionRow) => `${r.equivalent}|${r.bottleneck ? '0' : '1'}|${r.counterparty_pid}`
+  incoming.sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
+  outgoing.sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
+  return { incoming, outgoing }
+}
+
+const selectedConnectionsIncoming = computed<ConnectionRow[]>(() => {
+  if (!selected.value || selected.value.kind !== 'node') return []
+  return connectionRowsFromCy(selected.value.pid).incoming
+})
+
+const selectedConnectionsOutgoing = computed<ConnectionRow[]>(() => {
+  if (!selected.value || selected.value.kind !== 'node') return []
+  return connectionRowsFromCy(selected.value.pid).outgoing
+})
+
+const connectionsPageSize = ref<number>(25)
+const connectionsIncomingPage = ref<number>(1)
+const connectionsOutgoingPage = ref<number>(1)
+
+function pageSlice<T>(items: T[], page: number, pageSize: number): T[] {
+  const p = Math.max(1, Math.floor(Number(page) || 1))
+  const s = Math.max(1, Math.floor(Number(pageSize) || 25))
+  const start = (p - 1) * s
+  return (items || []).slice(start, start + s)
+}
+
+const selectedConnectionsIncomingPaged = computed(() => pageSlice(selectedConnectionsIncoming.value, connectionsIncomingPage.value, connectionsPageSize.value))
+const selectedConnectionsOutgoingPaged = computed(() => pageSlice(selectedConnectionsOutgoing.value, connectionsOutgoingPage.value, connectionsPageSize.value))
+
+watch(
+  () => (selected.value && selected.value.kind === 'node' ? selected.value.pid : ''),
+  () => {
+    connectionsIncomingPage.value = 1
+    connectionsOutgoingPage.value = 1
+  }
+)
+
+watch(
+  () => selectedConnectionsIncoming.value.length,
+  (n) => {
+    const maxPage = Math.max(1, Math.ceil(n / Math.max(1, connectionsPageSize.value)))
+    if (connectionsIncomingPage.value > maxPage) connectionsIncomingPage.value = 1
+  }
+)
+
+watch(
+  () => selectedConnectionsOutgoing.value.length,
+  (n) => {
+    const maxPage = Math.max(1, Math.ceil(n / Math.max(1, connectionsPageSize.value)))
+    if (connectionsOutgoingPage.value > maxPage) connectionsOutgoingPage.value = 1
+  }
+)
+
+function onConnectionRowClick(row: ConnectionRow) {
+  if (selected.value && selected.value.kind === 'node') {
+    const basePid = selected.value.pid
+    const cp = String(row.counterparty_pid || '').trim()
+    const eqCode = normEq(row.equivalent)
+
+    const fromPid = row.direction === 'outgoing' ? basePid : cp
+    const toPid = row.direction === 'outgoing' ? cp : basePid
+    const key = `${eqCode}|${fromPid}->${toPid}`
+
+    if (activeConnectionKey.value === key) {
+      clearConnectionHighlight()
+    } else {
+      clearConnectionHighlight()
+      activeConnectionKey.value = key
+      highlightConnection(fromPid, toPid, eqCode)
+    }
+  }
+
+  goToPid(row.counterparty_pid)
+}
 
 type BalanceRow = {
   equivalent: string
@@ -824,7 +1125,10 @@ function buildElements() {
   const edgeCandidates = filteredTrustlines.value
 
   const allowedTypes = new Set((typeFilter.value || []).map((t) => String(t).toLowerCase()).filter(Boolean))
-  const minDeg = Math.max(0, Number(minDegree.value) || 0)
+  const focusEnabled = Boolean(focusMode.value)
+  const focusRoot = String(focusRootPid.value || '').trim()
+  const focusD = focusDepth.value
+  const minDeg = focusEnabled ? 0 : Math.max(0, Number(minDegree.value) || 0)
   const focusedPid = String(focusPid.value || '').trim()
 
   const pIndex = new Map<string, Participant>()
@@ -836,7 +1140,9 @@ function buildElements() {
   const isTypeAllowed = (pid: string): boolean => {
     if (!allowedTypes.size) return true
     const t = typeOf(pid)
-    return Boolean(t) && allowedTypes.has(t)
+    if (!t) return false
+    // Keep types strict: person|business|hub
+    return allowedTypes.has(t)
   }
 
   // Type filter applies to nodes and edges.
@@ -860,20 +1166,52 @@ function buildElements() {
   const visibleEdges = edgeCandidates.filter(isEdgeAllowedByType)
 
   // 4) Visible nodes: endpoints of visible edges + (optionally) true isolates.
-  const pidSet = new Set<string>()
+  let pidSet = new Set<string>()
   for (const t of visibleEdges) {
     pidSet.add(t.from)
     pidSet.add(t.to)
   }
 
-  // Add isolates ONLY if they have no trustlines at all (under non-type filters).
-  // Do NOT add nodes that have trustlines but all of them go to hidden types.
-  if (!hideIsolates.value) {
-    for (const p of participants.value || []) {
-      if (!p?.pid) continue
-      if (!isTypeAllowed(p.pid)) continue
-      if (hasAnyEdgeByPid.has(p.pid)) continue
-      pidSet.add(p.pid)
+  // Focus Mode (ego graph): keep a small neighborhood around a root PID.
+  // Depth is computed on the currently visible (type+status+eq filtered) edges.
+  if (focusEnabled && focusRoot) {
+    const adj = new Map<string, Set<string>>()
+    for (const t of visibleEdges) {
+      if (!adj.has(t.from)) adj.set(t.from, new Set())
+      if (!adj.has(t.to)) adj.set(t.to, new Set())
+      adj.get(t.from)!.add(t.to)
+      adj.get(t.to)!.add(t.from)
+    }
+
+    const focusPids = new Set<string>()
+    const q: Array<{ pid: string; depth: number }> = [{ pid: focusRoot, depth: 0 }]
+    focusPids.add(focusRoot)
+
+    while (q.length) {
+      const cur = q.shift()!
+      if (cur.depth >= focusD) continue
+      const nb = adj.get(cur.pid)
+      if (!nb) continue
+      for (const n of nb) {
+        if (focusPids.has(n)) continue
+        focusPids.add(n)
+        q.push({ pid: n, depth: cur.depth + 1 })
+      }
+    }
+
+    // Always keep the root node (even if it has no edges under current filters).
+    if (pIndex.has(focusRoot) && isTypeAllowed(focusRoot)) focusPids.add(focusRoot)
+    pidSet = focusPids
+  } else {
+    // Add isolates ONLY if they have no trustlines at all (under non-type filters).
+    // Do NOT add nodes that have trustlines but all of them go to hidden types.
+    if (!hideIsolates.value) {
+      for (const p of participants.value || []) {
+        if (!p?.pid) continue
+        if (!isTypeAllowed(p.pid)) continue
+        if (hasAnyEdgeByPid.has(p.pid)) continue
+        pidSet.add(p.pid)
+      }
     }
   }
 
@@ -892,9 +1230,10 @@ function buildElements() {
   }
 
   const finalPids = new Set<string>()
+  const pinnedPid = focusEnabled ? focusRoot : focusedPid
   for (const pid of prelim) {
     const deg = degreeByPid.get(pid) || 0
-    if (minDeg > 0 && deg < minDeg && pid !== focusedPid) continue
+    if (minDeg > 0 && deg < minDeg && pid !== pinnedPid) continue
     finalPids.add(pid)
   }
 
@@ -989,6 +1328,17 @@ function applyStyle() {
     { selector: 'node.p-banned', style: { 'background-color': '#f56c6c' } },
     { selector: 'node.p-deleted', style: { 'background-color': '#909399' } },
 
+    // Selection pulse as overlay glow (doesn't conflict with border-color based highlights).
+    // Note: overlay color is keyed by status to feel consistent with the legend.
+    { selector: 'node.selected-node, node.selected-pulse', style: { 'overlay-color': '#409eff' } },
+    { selector: 'node.selected-node.p-active, node.selected-pulse.p-active', style: { 'overlay-color': '#67c23a' } },
+    {
+      selector: 'node.selected-node.p-frozen, node.selected-pulse.p-frozen, node.selected-node.p-suspended, node.selected-pulse.p-suspended',
+      style: { 'overlay-color': '#e6a23c' },
+    },
+    { selector: 'node.selected-node.p-banned, node.selected-pulse.p-banned', style: { 'overlay-color': '#f56c6c' } },
+    { selector: 'node.selected-node.p-deleted, node.selected-pulse.p-deleted', style: { 'overlay-color': '#909399' } },
+
     { selector: 'node.type-person', style: { shape: 'ellipse', width: 16, height: 16 } },
     {
       selector: 'node.type-business',
@@ -996,8 +1346,7 @@ function applyStyle() {
         shape: 'round-rectangle',
         width: 26,
         height: 22,
-        'border-width': 2,
-        'border-color': '#409eff',
+        'border-width': 0,
       },
     },
 
@@ -1042,6 +1391,47 @@ function applyStyle() {
         'line-style': 'dashed',
       },
     },
+
+    {
+      selector: 'edge.cycle-highlight',
+      style: {
+        'line-color': '#e6a23c',
+        'target-arrow-color': '#e6a23c',
+        width: 3.2,
+        opacity: 1,
+        'arrow-scale': 1.05,
+      },
+    },
+    {
+      selector: 'node.cycle-node',
+      style: {
+        'border-width': 4,
+        'border-color': '#e6a23c',
+      },
+    },
+
+    {
+      selector: 'edge.connection-highlight',
+      style: {
+        'line-color': '#67c23a',
+        'target-arrow-color': '#67c23a',
+        width: 3.0,
+        opacity: 1,
+        'arrow-scale': 1.05,
+      },
+    },
+    {
+      selector: 'node.connection-node',
+      style: {
+        'underlay-color': '#67c23a',
+        'underlay-opacity': 0.35,
+        'underlay-padding': 6,
+      },
+    },
+
+    // Selection pulse: overlay opacity/padding only.
+    { selector: 'node.selected-node', style: { 'overlay-opacity': 0.12, 'overlay-padding': 6 } },
+    { selector: 'node.selected-pulse', style: { 'overlay-opacity': 0.22, 'overlay-padding': 12 } },
   ])
 
   updateZoomStyles()
@@ -1062,8 +1452,12 @@ function updateZoomStyles() {
 
   const edgeW = clamp(1.2 * inv, 0.25, 1.6)
   const edgeWBottleneck = clamp(2.4 * inv, 0.6, 3)
+  const edgeWCycle = clamp(3.0 * inv, 0.7, 3.6)
+  const edgeWConnection = clamp(3.0 * inv, 0.7, 3.6)
   const arrowScale = clamp(0.8 * s, 0.32, 1.0)
   const arrowScaleBottleneck = clamp(0.95 * s, 0.4, 1.15)
+  const arrowScaleCycle = clamp(1.05 * s, 0.45, 1.25)
+  const arrowScaleConnection = clamp(1.05 * s, 0.45, 1.25)
 
   cy.style()
     .selector('node')
@@ -1081,6 +1475,16 @@ function updateZoomStyles() {
     .style({
       width: edgeWBottleneck,
       'arrow-scale': arrowScaleBottleneck,
+    })
+    .selector('edge.cycle-highlight')
+    .style({
+      width: edgeWCycle,
+      'arrow-scale': arrowScaleCycle,
+    })
+    .selector('edge.connection-highlight')
+    .style({
+      width: edgeWConnection,
+      'arrow-scale': arrowScaleConnection,
     })
     .update()
 }
@@ -1142,6 +1546,7 @@ function runLayoutAndMaybeFit({ fitOnStop }: { fitOnStop: boolean }) {
 function rebuildGraph({ fit }: { fit: boolean }) {
   if (!cy) return
   const { nodes, edges } = buildElements()
+  clearCycleHighlight()
   cy.elements().remove()
   cy.add(nodes)
   cy.add(edges)
@@ -1191,7 +1596,8 @@ function updateLabelsForZoom() {
     const displayName = String(n.data('display_name') || '')
     const t = String(n.data('type') || '').toLowerCase()
 
-    let mode: LabelMode = t === 'business' ? labelModeBusiness.value : labelModePerson.value
+    const isBusiness = t === 'business'
+    let mode: LabelMode = isBusiness ? labelModeBusiness.value : labelModePerson.value
 
     if (autoLabelsByZoom.value) {
       const allowBusiness = z >= minZoomLabelsAll.value || allowBusinessByCount
@@ -1248,6 +1654,14 @@ function onSearchSelect(s: ParticipantSuggestion) {
   focusPid.value = s.pid
 }
 
+function goToPid(pid: string) {
+  const p = String(pid || '').trim()
+  if (!p) return
+  searchQuery.value = p
+  focusPid.value = p
+  focusSearch()
+}
+
 function matchedVisiblePids(query: string): string[] {
   const q = String(query || '').trim().toLowerCase()
   if (!q) return []
@@ -1298,21 +1712,57 @@ function attachHandlers() {
   cy.on('tap', 'node', (ev) => {
     const n = ev.target as NodeSingular
     const pid = String(n.data('pid') || n.id())
+
+    const displayName = String(n.data('display_name') || '').trim()
     const degree = n.degree(false)
     const inDegree = n.indegree(false)
     const outDegree = n.outdegree(false)
     selected.value = {
       kind: 'node',
       pid,
-      display_name: String(n.data('display_name') || '') || undefined,
+      display_name: displayName || undefined,
       status: String(n.data('status') || '') || undefined,
       type: String(n.data('type') || '') || undefined,
       degree,
       inDegree,
       outDegree,
     }
-    drawerTab.value = 'summary'
-    drawerOpen.value = true
+
+    // UX: clicking a node should prefill search (PID and name), but not necessarily move the camera.
+    // This also enables quick navigation by pressing Enter / clicking Find.
+    searchQuery.value = displayName ? `${displayName} — ${pid}` : pid
+
+    // Double-click opens the details drawer. Single click does not.
+    const now = Date.now()
+    const prevPid = String(lastNodeTapPid || '')
+    const dt = now - (lastNodeTapAt || 0)
+    lastNodeTapAt = now
+    lastNodeTapPid = pid
+
+    const isDouble = prevPid === pid && dt > 0 && dt <= NODE_DOUBLE_TAP_MS
+    if (isDouble) {
+      // Cancel any pending single-click action (prevents re-layout between clicks).
+      stopPendingNodeTap()
+
+      // Center/zoom like Find (also adds a short search-hit highlight).
+      focusPid.value = pid
+      focusSearch()
+
+      drawerTab.value = 'summary'
+      drawerOpen.value = true
+      return
+    }
+
+    // Single-click action is delayed: if the user double-clicks, this never runs.
+    stopPendingNodeTap()
+    pendingNodeTapTimer = window.setTimeout(() => {
+      pendingNodeTapTimer = null
+      // UX: when Focus Mode is enabled, clicking nodes should switch the focus root (stay in focus).
+      // Guard: only if this node is still the selected one.
+      if (focusMode.value && selected.value && selected.value.kind === 'node' && selected.value.pid === pid) {
+        setFocusRoot(pid)
+      }
+    }, NODE_DOUBLE_TAP_MS + 50)
   })
 
   cy.on('tap', 'edge', (ev) => {
@@ -1572,6 +2022,8 @@ watch(toolbarTab, (v) => {
 })
 
 onBeforeUnmount(() => {
+  stopPendingNodeTap()
+  stopSelectedPulse()
   if (cy) {
     cy.destroy()
     cy = null
@@ -1590,6 +2042,22 @@ watch([eq, statusFilter, threshold, showIncidents, hideIsolates], () => {
 watch([typeFilter, minDegree], () => {
   throttledRebuild()
 })
+
+watch([focusMode, focusDepth, focusRootPid], () => {
+  if (!cy) return
+  if (focusMode.value) ensureFocusRootPid()
+  rebuildGraph({ fit: true })
+})
+
+watch(
+  () => (selected.value && selected.value.kind === 'node' ? selected.value.pid : ''),
+  (pid) => {
+    clearCycleHighlight()
+    clearConnectionHighlight()
+    if (!cy) return
+    applySelectedHighlight(pid)
+  }
+)
 
 watch([showLabels, labelModeBusiness, labelModePerson, autoLabelsByZoom, minZoomLabelsAll, minZoomLabelsPerson], () => {
   if (!cy) return
@@ -1797,6 +2265,26 @@ function applyZoom(level: number) {
                   <TooltipLabel class="toolbarLabel zoomrow__label" label="Zoom" tooltip-key="graph.zoom" />
                   <el-slider v-model="zoom" :min="0.1" :max="3" :step="0.05" class="zoomrow__slider" />
                 </div>
+              </div>
+            </div>
+
+            <div class="navRow navRow--focus">
+              <TooltipLabel
+                class="toolbarLabel navRow__label"
+                label="Focus"
+                tooltip-text="Focus Mode shows a small ego-subgraph (depth 1–2) around a participant to reduce noise."
+              />
+              <div class="navFocus">
+                <el-switch v-model="focusMode" size="small" />
+                <el-select v-model="focusDepth" size="small" class="navFocus__depth" :disabled="!focusMode">
+                  <el-option label="Depth 1" :value="1" />
+                  <el-option label="Depth 2" :value="2" />
+                </el-select>
+
+                <el-tag v-if="focusMode && focusRootPid" type="info" class="navFocus__tag">{{ focusRootPid }}</el-tag>
+
+                <el-button size="small" :disabled="!(selected && selected.kind === 'node')" @click="useSelectedForFocus">Use selected</el-button>
+                <el-button size="small" :disabled="!focusMode" @click="clearFocusMode">Clear</el-button>
               </div>
             </div>
           </div>
@@ -2069,6 +2557,91 @@ function applyZoom(level: number) {
               </div>
               <div v-else class="muted">No data</div>
             </el-card>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="Connections" name="connections">
+          <div class="hint">Derived from visible graph edges (incoming/outgoing trustlines).</div>
+
+          <el-empty v-if="selectedConnectionsIncoming.length + selectedConnectionsOutgoing.length === 0" description="No connections in current view" />
+          <div v-else>
+            <el-divider>Incoming (owed to you)</el-divider>
+            <div class="tableTop">
+              <el-pagination
+                v-model:current-page="connectionsIncomingPage"
+                :page-size="connectionsPageSize"
+                :total="selectedConnectionsIncoming.length"
+                small
+                background
+                layout="prev, pager, next, total"
+              />
+            </div>
+            <el-table
+              :data="selectedConnectionsIncomingPaged"
+              size="small"
+              border
+              style="width: 100%"
+              class="mb clickable-table"
+              highlight-current-row
+              @row-click="onConnectionRowClick"
+            >
+              <el-table-column label="Counterparty" min-width="220">
+                <template #default="{ row }">
+                  <span class="mono pidLink">{{ row.counterparty_pid }}</span>
+                  <span v-if="row.counterparty_name" class="muted"> — {{ row.counterparty_name }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="equivalent" label="Eq" width="80" />
+              <el-table-column prop="status" label="Status" width="90" />
+              <el-table-column label="Available" width="120">
+                <template #default="{ row }">{{ money(row.available) }}</template>
+              </el-table-column>
+              <el-table-column label="Used" width="120">
+                <template #default="{ row }">{{ money(row.used) }}</template>
+              </el-table-column>
+              <el-table-column label="Limit" width="120">
+                <template #default="{ row }">{{ money(row.limit) }}</template>
+              </el-table-column>
+            </el-table>
+
+            <el-divider>Outgoing (you owe)</el-divider>
+            <div class="tableTop">
+              <el-pagination
+                v-model:current-page="connectionsOutgoingPage"
+                :page-size="connectionsPageSize"
+                :total="selectedConnectionsOutgoing.length"
+                small
+                background
+                layout="prev, pager, next, total"
+              />
+            </div>
+            <el-table
+              :data="selectedConnectionsOutgoingPaged"
+              size="small"
+              border
+              style="width: 100%"
+              class="clickable-table"
+              highlight-current-row
+              @row-click="onConnectionRowClick"
+            >
+              <el-table-column label="Counterparty" min-width="220">
+                <template #default="{ row }">
+                  <span class="mono pidLink">{{ row.counterparty_pid }}</span>
+                  <span v-if="row.counterparty_name" class="muted"> — {{ row.counterparty_name }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="equivalent" label="Eq" width="80" />
+              <el-table-column prop="status" label="Status" width="90" />
+              <el-table-column label="Available" width="120">
+                <template #default="{ row }">{{ money(row.available) }}</template>
+              </el-table-column>
+              <el-table-column label="Used" width="120">
+                <template #default="{ row }">{{ money(row.used) }}</template>
+              </el-table-column>
+              <el-table-column label="Limit" width="120">
+                <template #default="{ row }">{{ money(row.limit) }}</template>
+              </el-table-column>
+            </el-table>
           </div>
         </el-tab-pane>
 
@@ -2460,7 +3033,13 @@ function applyZoom(level: number) {
                 tooltip-text="Each cycle is a directed loop in the debt graph for the selected equivalent. Clearing reduces each edge by the shown amount."
               />
             </div>
-            <div v-for="(c, idx) in selectedCycles" :key="idx" class="cycleItem">
+            <div
+              v-for="(c, idx) in selectedCycles"
+              :key="idx"
+              class="cycleItem"
+              :class="{ 'cycleItem--active': isCycleActive(c) }"
+              @click="toggleCycleHighlight(c)"
+            >
               <div class="cycleTitle">
                 <TooltipLabel
                   :label="`Cycle #${idx + 1}`"
@@ -2732,6 +3311,24 @@ function applyZoom(level: number) {
   font-size: 12px;
 }
 
+.pidLink {
+  color: var(--el-color-primary);
+}
+
+.clickable-table :deep(tr) {
+  cursor: pointer;
+}
+
+.tableTop {
+  display: flex;
+  justify-content: flex-end;
+  margin: 6px 0 8px;
+}
+
+.navFocus--drawer {
+  padding: 2px 0;
+}
+
 .cycles {
   display: flex;
   flex-direction: column;
@@ -2742,6 +3339,12 @@ function applyZoom(level: number) {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   padding: 10px;
+  cursor: pointer;
+}
+
+.cycleItem--active {
+  border-color: var(--el-color-warning);
+  box-shadow: 0 0 0 1px var(--el-color-warning) inset;
 }
 
 .cycleTitle {
@@ -2867,6 +3470,23 @@ function applyZoom(level: number) {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.navFocus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.navFocus__depth {
+  width: 120px;
+}
+
+.navFocus__tag {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .zoomrow {

@@ -21,7 +21,7 @@
 
 - Deterministic fixture generators:
   - `admin-fixtures/tools/README.md`
-  - `admin-fixtures/tools/generate_seed_greenfield_village_100.py`
+  - `admin-fixtures/tools/generate_fixtures.py`
 
 - Canonical fixtures (source of truth):
   - `admin-fixtures/v1/datasets/*.json`

@@ -1,6 +1,8 @@
 # Fixture generators (admin-fixtures/tools)
 
-This folder contains **deterministic generators** that write canonical fixture JSON files into:
+This folder contains **deterministic generators**.
+
+Canonical seed generators write fixture JSON files into:
 - `admin-fixtures/v1/datasets/`
 
 These datasets are then copied into the Admin UI public folder via:
@@ -40,6 +42,7 @@ For fixtures-first prototyping of clearing and balance analytics, generators sho
 
 And keep metadata in sync:
 - `admin-fixtures/v1/_meta.json`
+	- includes `seed_id` (guardrail: Admin UI validation only allows known seeds by default)
 
 ## How to run
 
@@ -54,17 +57,15 @@ Important:
 - Shared logic lives in `admin-fixtures/tools/seedlib.py`.
 
 Run one of:
-- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_greenfield_village_100.py`
-- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_riverside_town_50.py`
+- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100`
+- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50`
 
-### Generic generator (auxiliary)
+### Participant types
 
-`generate_admin_fixtures.py` generates a deterministic, UI-friendly fixture pack with lots of rows for pagination + common admin pages.
-
-Notes:
-- Defaults are compatible with `admin-ui/scripts/validate-fixtures.mjs` (equivalents must be exactly `UAH/EUR/HOUR`, participants typically 50/100).
-- You can tune sizes via CLI args, e.g.:
-	- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe admin-fixtures/tools/generate_admin_fixtures.py --participants 100 --trustlines 200 --transactions 400`
+Participant `type` is intentionally kept consistent across the repo:
+- `person`
+- `business`
+- `hub`
 
 ### Bottlenecks (Dashboard)
 

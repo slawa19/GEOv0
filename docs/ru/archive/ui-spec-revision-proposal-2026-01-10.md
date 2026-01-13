@@ -662,7 +662,7 @@ GET /admin/analytics/graph:
               properties:
                 pid: string
                 name: string
-                type: enum[person, organization, hub]
+                type: enum[person, business, hub]
                 status: enum[active, frozen, banned]
           edges:
             type: array

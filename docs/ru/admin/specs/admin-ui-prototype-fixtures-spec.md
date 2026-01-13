@@ -34,11 +34,9 @@
   - `debts.json`, `clearing-cycles.json`, `transactions.json`
 - `admin-fixtures/v1/scenarios/*.json` — сценарии поведения (ошибки/401/403/empty/slow).
 - `admin-fixtures/v1/api-snapshots/*.json` — примеры готовых ответов (для UI без мок‑сервера), опционально.
-- `admin-fixtures/tools/generate_admin_fixtures.py` — генератор (детерминированный).
-- Seed-генераторы (каноничные датасеты для графа):
-  - `admin-fixtures/tools/generate_seed_greenfield_village_100.py`
-  - `admin-fixtures/tools/generate_seed_riverside_town_50.py`
-  - общий модуль: `admin-fixtures/tools/seedlib.py`
+- `admin-fixtures/tools/generate_fixtures.py` — единый детерминированный генератор (каноничные community seeds).
+  - seeds: `greenfield-village-100` | `riverside-town-50`
+  - общие утилиты: `admin-fixtures/tools/seedlib.py`, `admin-fixtures/tools/adminlib.py`
 
   Копия для runtime Admin UI (синхронизируется из канона):
   - `admin-ui/public/admin-fixtures/v1/` — то, что реально грузит `mockApi` в браузере.
@@ -172,12 +170,14 @@ Guardrails валидации (фактическая проверка в реп
 - `admin.incidents.page1.per20.json`
 
 Команда (Windows/pwsh):
-- `python admin-fixtures/tools/generate_admin_fixtures.py`
+- `python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100`
+- `python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50`
 
-Опционально (для настройки объёмов/экспериментов):
-- `python admin-fixtures/tools/generate_admin_fixtures.py --participants 100 --trustlines 200 --transactions 400`
-- расширенный набор equivalents (может нарушить валидатор по умолчанию):
-  - `python admin-fixtures/tools/generate_admin_fixtures.py --equivalents extended`
+Опционально (хранить несколько паков без путаницы):
+- сгенерировать pack в `admin-fixtures/packs/<seed_id>/v1`:
+  - `python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100 --pack`
+- и активировать его как текущий канон (копирование в `admin-fixtures/v1`):
+  - `python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100 --pack --activate`
 
 ---
 
@@ -240,11 +240,16 @@ Guardrails валидации (фактическая проверка в реп
 Файл `admin-fixtures/v1/_meta.json` содержит информацию о последней генерации:
 - `generated_at` — timestamp генерации
 - `counts` — количество записей по каждому датасету
-- `seed_name` — имя использованного seed (например, "greenfield_village_100")
+- `seed_id` — идентификатор seed (например, `greenfield-village-100`)
+- `generator` — какой скрипт/entrypoint генерировал pack
 
 Используется для:
 - быстрой проверки актуальности фикстур;
 - обнаружения расхождений после запуска разных генераторов.
+
+Guardrails:
+- Admin UI валидатор сравнивает canonical `admin-fixtures/v1/_meta.json` и синхронизированную копию `admin-ui/public/admin-fixtures/v1/_meta.json`.
+- `seed_id` должен быть из allow‑list (чтобы случайно не подменить демо‑сообщество).
 
 ---
 
@@ -252,8 +257,15 @@ Guardrails валидации (фактическая проверка в реп
 
 1. **Сгенерировать canonical fixtures:**
    ```bash
-   python admin-fixtures/tools/generate_seed_greenfield_village_100.py
+  python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100
    ```
+
+  Альтернатива для параллельной работы с несколькими сообществами (packs + explicit activation):
+
+  ```bash
+  python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50 --pack
+  python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50 --pack --activate
+  ```
 
 2. **Синхронизировать в admin-ui:**
    ```bash

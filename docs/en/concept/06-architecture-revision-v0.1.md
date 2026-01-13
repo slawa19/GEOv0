@@ -138,7 +138,7 @@ Section describes **minimal entity set** on which GEO v0.1 protocol and MVP arch
 This can be:
 
 - individual;
-- organization;
+- business;
 - hub (community node that also participates in network as Participant).
 
 Main fields:
@@ -156,7 +156,7 @@ Main fields:
 - Profile:
 
   - "human" name or organization name;
-  - participant type (`person`, `organization`, `hub` etc.);
+  - participant type (`person`, `business`, `hub` etc.);
   - additional metadata (contacts, description, links etc.).
 
 - Status:

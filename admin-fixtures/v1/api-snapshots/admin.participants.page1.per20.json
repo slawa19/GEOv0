@@ -29,13 +29,13 @@
       {
         "pid": "PID_HUB_ADMIN_hub0admin1",
         "display_name": "Hub Admin (Test)",
-        "type": "organization",
+        "type": "business",
         "status": "active"
       },
       {
         "pid": "PID_U0001_9e3779b1",
         "display_name": "Org 0001",
-        "type": "organization",
+        "type": "business",
         "status": "active"
       },
       {
@@ -47,7 +47,7 @@
       {
         "pid": "PID_U0003_daa66d13",
         "display_name": "Org 0003",
-        "type": "organization",
+        "type": "business",
         "status": "frozen"
       },
       {
@@ -59,7 +59,7 @@
       {
         "pid": "PID_U0005_17156075",
         "display_name": "Org 0005",
-        "type": "organization",
+        "type": "business",
         "status": "active"
       },
       {
@@ -71,7 +71,7 @@
       {
         "pid": "PID_U0007_538453d7",
         "display_name": "Org 0007",
-        "type": "organization",
+        "type": "business",
         "status": "active"
       },
       {
@@ -83,7 +83,7 @@
       {
         "pid": "PID_U0009_8ff34739",
         "display_name": "Org 0009",
-        "type": "organization",
+        "type": "business",
         "status": "banned"
       },
       {
@@ -95,7 +95,7 @@
       {
         "pid": "PID_U0011_cc623a9b",
         "display_name": "Org 0011",
-        "type": "organization",
+        "type": "business",
         "status": "active"
       },
       {
@@ -107,7 +107,7 @@
       {
         "pid": "PID_U0013_08d12dfd",
         "display_name": "Org 0013",
-        "type": "organization",
+        "type": "business",
         "status": "frozen"
       },
       {
@@ -119,7 +119,7 @@
       {
         "pid": "PID_U0015_4540215f",
         "display_name": "Org 0015",
-        "type": "organization",
+        "type": "business",
         "status": "active"
       }
     ],
@@ -128,3 +128,4 @@
     "total": 100
   }
 }
+

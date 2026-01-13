@@ -9,6 +9,6 @@ Learn more about the recommended Project Setup and IDE Support in the [Vue Docs 
 The dev server reads JSON fixtures from `admin-ui/public/admin-fixtures/...`.
 
 - `npm run sync:fixtures` copies canonical fixtures from `../admin-fixtures` into `public/`.
-- `npm run validate:fixtures` checks that canonical+public fixtures are parseable and match the expected deterministic dataset (50 participants, equivalents UAH/EUR/HOUR, trustlines have required fields).
+- `npm run validate:fixtures` checks that canonical+public fixtures are parseable, `_meta.json` matches, `seed_id` is allow-listed, and participant/trustline fields follow the deterministic constraints (including supported participant types `person|business|hub`).
 
 `npm run dev` runs `sync:fixtures` + `validate:fixtures` automatically via `predev`.

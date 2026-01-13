@@ -4,12 +4,15 @@
 Goal: produce sufficiently large, stable datasets for pagination and UI states.
 No external dependencies.
 
-Outputs:
-- admin-fixtures/v1/datasets/*.json
-- admin-fixtures/v1/api-snapshots/*.json (optional: precomputed pages)
+Outputs (by default, non-canonical):
+- admin-fixtures/v1-synthetic/datasets/*.json
+- admin-fixtures/v1-synthetic/api-snapshots/*.json (optional: precomputed pages)
 
-Run:
-  python admin-fixtures/tools/generate_admin_fixtures.py
+Run (safe default):
+    python admin-fixtures/tools/generate_admin_fixtures.py
+
+To overwrite canonical fixtures (NOT recommended):
+    python admin-fixtures/tools/generate_admin_fixtures.py --out-v1 admin-fixtures/v1 --force-canonical
 """
 
 from __future__ import annotations
@@ -92,11 +95,11 @@ def generate_participants(total: int = 60) -> list[Participant]:
         Participant("PID_BOB_b2c3d4e5f6a1", "Bob (Test)", "person", "active"),
         Participant("PID_CAROL_c3d4e5f6a1b2", "Carol (Test)", "person", "active"),
         Participant("PID_DAVE_d4e5f6a1b2c3", "Dave (Test)", "person", "active"),
-        Participant("PID_HUB_ADMIN_hub0admin1", "Hub Admin (Test)", "organization", "active"),
+        Participant("PID_HUB_ADMIN_hub0admin1", "Hub Admin (Test)", "business", "active"),
     ]
 
     statuses = ["active", "active", "active", "frozen", "banned"]
-    types = ["person", "organization"]
+    types = ["person", "business"]
 
     out = list(base)
     for i in range(len(base), total):
@@ -104,7 +107,7 @@ def generate_participants(total: int = 60) -> list[Participant]:
         pid = f"PID_U{idx:04d}_{(idx * 2654435761) % 2**32:08x}"
         t = types[idx % len(types)]
         status = statuses[idx % len(statuses)]
-        name = f"{('Org' if t == 'organization' else 'User')} {idx:04d}"
+        name = f"{('Biz' if t == 'business' else 'User')} {idx:04d}"
         out.append(Participant(pid=pid, display_name=name, type=t, status=status))
 
     return out
@@ -501,6 +504,17 @@ def generate_transactions(
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Deterministic fixtures generator for GEO Hub Admin UI prototype")
+    p.add_argument(
+        "--out-v1",
+        type=str,
+        default=str((BASE_DIR / "v1-synthetic").as_posix()),
+        help='Output directory for fixture pack root ("v1"). Default: admin-fixtures/v1-synthetic',
+    )
+    p.add_argument(
+        "--force-canonical",
+        action="store_true",
+        help="Allow writing to admin-fixtures/v1 (canonical). Without this flag, writing to v1 is blocked.",
+    )
     p.add_argument("--participants", type=int, default=100, help="Participants count (recommended: 50 or 100)")
     p.add_argument("--trustlines", type=int, default=140, help="Trustlines count")
     p.add_argument("--audit-log", dest="audit_log", type=int, default=180, help="Audit log entries count")
@@ -544,6 +558,17 @@ def generate_migrations() -> dict[str, Any]:
 
 def main() -> None:
     args = _parse_args()
+
+    out_v1 = Path(args.out_v1).resolve()
+    canonical_v1 = V1_DIR.resolve()
+    if out_v1 == canonical_v1 and not args.force_canonical:
+        raise SystemExit(
+            "Refusing to write to canonical admin-fixtures/v1 without --force-canonical. "
+            "Use default output (v1-synthetic) or pass --out-v1 admin-fixtures/v1-synthetic."
+        )
+
+    datasets_dir = out_v1 / "datasets"
+    snapshots_dir = out_v1 / "api-snapshots"
 
     participants_total = max(1, int(args.participants))
     trustlines_total = max(0, int(args.trustlines))
@@ -589,21 +614,21 @@ def main() -> None:
     datasets["clearing_cycles"] = generate_clearing_cycles(participants, equivalents)
     datasets["transactions"] = generate_transactions(participants, equivalents, trustlines, total=transactions_total)
 
-    _write_json(DATASETS_DIR / "participants.json", datasets["participants"])
-    _write_json(DATASETS_DIR / "equivalents.json", datasets["equivalents"])
-    _write_json(DATASETS_DIR / "trustlines.json", datasets["trustlines"])
-    _write_json(DATASETS_DIR / "audit-log.json", datasets["audit_log"])
-    _write_json(DATASETS_DIR / "config.json", datasets["config"])
-    _write_json(DATASETS_DIR / "feature-flags.json", datasets["feature_flags"])
-    _write_json(DATASETS_DIR / "integrity-status.json", datasets["integrity_status"])
-    _write_json(DATASETS_DIR / "incidents.json", datasets["incidents"])
-    _write_json(DATASETS_DIR / "health.json", datasets["health"])
-    _write_json(DATASETS_DIR / "health-db.json", datasets["health_db"])
-    _write_json(DATASETS_DIR / "migrations.json", datasets["migrations"])
+    _write_json(datasets_dir / "participants.json", datasets["participants"])
+    _write_json(datasets_dir / "equivalents.json", datasets["equivalents"])
+    _write_json(datasets_dir / "trustlines.json", datasets["trustlines"])
+    _write_json(datasets_dir / "audit-log.json", datasets["audit_log"])
+    _write_json(datasets_dir / "config.json", datasets["config"])
+    _write_json(datasets_dir / "feature-flags.json", datasets["feature_flags"])
+    _write_json(datasets_dir / "integrity-status.json", datasets["integrity_status"])
+    _write_json(datasets_dir / "incidents.json", datasets["incidents"])
+    _write_json(datasets_dir / "health.json", datasets["health"])
+    _write_json(datasets_dir / "health-db.json", datasets["health_db"])
+    _write_json(datasets_dir / "migrations.json", datasets["migrations"])
 
-    _write_json(DATASETS_DIR / "debts.json", datasets["debts"])
-    _write_json(DATASETS_DIR / "clearing-cycles.json", datasets["clearing_cycles"])
-    _write_json(DATASETS_DIR / "transactions.json", datasets["transactions"])
+    _write_json(datasets_dir / "debts.json", datasets["debts"])
+    _write_json(datasets_dir / "clearing-cycles.json", datasets["clearing_cycles"])
+    _write_json(datasets_dir / "transactions.json", datasets["transactions"])
 
     # A few precomputed snapshots for quick prototypes.
     trust_items = datasets["trustlines"]
@@ -611,64 +636,66 @@ def main() -> None:
     participant_items = datasets["participants"]
 
     _write_json(
-        SNAPSHOTS_DIR / "health.get.json",
+        snapshots_dir / "health.get.json",
         {"success": True, "data": datasets["health"]},
     )
     _write_json(
-        SNAPSHOTS_DIR / "health.db.get.json",
+        snapshots_dir / "health.db.get.json",
         {"success": True, "data": datasets["health_db"]},
     )
     _write_json(
-        SNAPSHOTS_DIR / "admin.migrations.get.json",
+        snapshots_dir / "admin.migrations.get.json",
         {"success": True, "data": datasets["migrations"]},
     )
     _write_json(
-        SNAPSHOTS_DIR / "admin.config.get.json",
+        snapshots_dir / "admin.config.get.json",
         {"success": True, "data": datasets["config"]},
     )
     _write_json(
-        SNAPSHOTS_DIR / "admin.feature-flags.get.json",
+        snapshots_dir / "admin.feature-flags.get.json",
         {"success": True, "data": datasets["feature_flags"]},
     )
     _write_json(
-        SNAPSHOTS_DIR / "integrity.status.get.json",
+        snapshots_dir / "integrity.status.get.json",
         {"success": True, "data": datasets["integrity_status"]},
     )
 
     _write_json(
-        SNAPSHOTS_DIR / "admin.participants.page1.per20.json",
+        snapshots_dir / "admin.participants.page1.per20.json",
         {"success": True, "data": _paginate(participant_items, page=1, per_page=20)},
     )
     _write_json(
-        SNAPSHOTS_DIR / "admin.participants.page2.per20.json",
+        snapshots_dir / "admin.participants.page2.per20.json",
         {"success": True, "data": _paginate(participant_items, page=2, per_page=20)},
     )
 
     _write_json(
-        SNAPSHOTS_DIR / "admin.trustlines.page1.per20.json",
+        snapshots_dir / "admin.trustlines.page1.per20.json",
         {"success": True, "data": _paginate(trust_items, page=1, per_page=20)},
     )
     _write_json(
-        SNAPSHOTS_DIR / "admin.trustlines.page2.per20.json",
+        snapshots_dir / "admin.trustlines.page2.per20.json",
         {"success": True, "data": _paginate(trust_items, page=2, per_page=20)},
     )
     _write_json(
-        SNAPSHOTS_DIR / "admin.audit-log.page1.per20.json",
+        snapshots_dir / "admin.audit-log.page1.per20.json",
         {"success": True, "data": _paginate(audit_items, page=1, per_page=20)},
     )
     _write_json(
-        SNAPSHOTS_DIR / "admin.audit-log.page2.per20.json",
+        snapshots_dir / "admin.audit-log.page2.per20.json",
         {"success": True, "data": _paginate(audit_items, page=2, per_page=20)},
     )
 
     incident_items = datasets["incidents"]["items"]
     _write_json(
-        SNAPSHOTS_DIR / "admin.incidents.page1.per20.json",
+        snapshots_dir / "admin.incidents.page1.per20.json",
         {"success": True, "data": _paginate(incident_items, page=1, per_page=20)},
     )
 
     meta = {
         "version": "v1",
+        "seed_id": "synthetic-admin-fixtures",
+        "generator": "generate_admin_fixtures.py",
         "generated_at": _iso(BASE_TS),
         "counts": {
             "participants": len(participants),
@@ -686,7 +713,7 @@ def main() -> None:
             "Debt direction is debtor -> creditor (derived from trustline.used).",
         ],
     }
-    _write_json(V1_DIR / "_meta.json", meta)
+    _write_json(out_v1 / "_meta.json", meta)
 
     print("Generated admin fixtures:")
     print(json.dumps(meta, ensure_ascii=False, indent=2))

@@ -36,12 +36,14 @@ Seed‑документ — это НЕ:
 
 | Seed | Участников | Основная тема | Equivalents | Что посмотреть в первую очередь | Генератор |
 |------|-----------:|---------------|-------------|----------------------------------|----------|
-| [seed-greenfield-village-100.md](seed-greenfield-village-100.md) | 100 | «Село/громада» (кооператив, склад, закупка, рынок, пекарня, сервисы) | `UAH`, `EUR`, `HOUR` | Разделы про экономическую логику и degree‑summary | `admin-fixtures/tools/generate_seed_greenfield_village_100.py` |
-| [seed-riverside-town-50.md](seed-riverside-town-50.md) | 50 | «Приречный городок» (рыболовство, порт/кооп, рынок, сервисы в `HOUR`) | `UAH`, `EUR`, `HOUR` | Разделы `Economic Logic`, `Clearing Cycles Examples` | `admin-fixtures/tools/generate_seed_riverside_town_50.py` |
+| [seed-greenfield-village-100.md](seed-greenfield-village-100.md) | 100 | «Село/громада» (кооператив, склад, закупка, рынок, пекарня, сервисы) | `UAH`, `EUR`, `HOUR` | Разделы про экономическую логику и degree‑summary | `admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100` |
+| [seed-riverside-town-50.md](seed-riverside-town-50.md) | 50 | «Приречный городок» (рыболовство, порт/кооп, рынок, сервисы в `HOUR`) | `UAH`, `EUR`, `HOUR` | Разделы `Economic Logic`, `Clearing Cycles Examples` | `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50` |
 
 Примечание:
-- Оба генератора пишут в один и тот же canonical путь `admin-fixtures/v1/datasets/` и **перезаписывают** датасеты.
-- Общая логика вынесена в `admin-fixtures/tools/seedlib.py` (утилиты, debts/cycles/meta). Seed‑скрипты — тонкие сценарии.
+- Единственный «активный» набор фикстур для Admin UI — `admin-fixtures/v1`.
+- Admin UI всегда синхронизирует именно `admin-fixtures/v1` → `admin-ui/public/admin-fixtures/v1`.
+- Запускай `admin-fixtures/tools/generate_fixtures.py`: это единая точка входа, которая выбирает seed без двусмысленности.
+- Seed‑скрипты `generate_seed_*.py` считаются внутренними (их использует `generate_fixtures.py`) и могут перезаписать любой `--out-v1`.
 
 ## TrustLine Direction Rule
 
@@ -217,7 +219,9 @@ creditor → debtor
 
 ## Разработка генератора
 
-Генератор — это детерминированный скрипт, который по seed‑логике строит canonical fixtures (participants/equivalents/trustlines/…).
+Генератор — это детерминированный код, который по seed‑логике строит fixtures pack (participants/equivalents/trustlines/…).
+
+Важно: у проекта есть единая точка входа для генерации canonical pack — `admin-fixtures/tools/generate_fixtures.py`.
 
 Рекомендованный путь:
 
@@ -228,10 +232,18 @@ creditor → debtor
 Оба используют общий модуль:
 - `admin-fixtures/tools/seedlib.py`
 
-2) Создай новый файл вида:
+2) Создай новый seed‑скрипт вида:
 - `admin-fixtures/tools/generate_seed_<your_seed_name>.py`
 
-3) Требования к генератору:
+3) Зарегистрируй seed в unified entrypoint:
+- добавь `seed_id` в choices в `admin-fixtures/tools/generate_fixtures.py`
+- добавь ветку в `_load_seed_module(...)`.
+
+4) Добавь guardrails, чтобы новый seed нельзя было «подсунуть» случайно:
+- обнови allow‑list `seed_id` в `admin-ui/scripts/validate-fixtures.mjs`
+- при необходимости добавь seed в таблицу выше ("Доступные seeds").
+
+5) Требования к генератору:
 - **Детерминизм**: одинаковый вход → одинаковый JSON (включая порядок элементов).
 - **Стабильные идентификаторы**: `pid`/`id` должны генерироваться повторяемо (без `random`/`uuid4` без фиксированного seed).
 - **Стабильная сортировка**: не полагаться на порядок `dict` из неочевидных источников.
@@ -272,18 +284,26 @@ creditor → debtor
 1) Запусти детерминированный генератор (пример):
 
 ```bash
-python admin-fixtures/tools/generate_seed_greenfield_village_100.py
+python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100
 ```
 
 или:
 
 ```bash
-python admin-fixtures/tools/generate_seed_riverside_town_50.py
+python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50
+```
+
+Если ты работаешь с несколькими сообществами параллельно, используй packs:
+
+```bash
+python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50 --pack
+python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50 --pack --activate
 ```
 
 Notes:
-- На Windows лучше запускать из venv (пример): `D:/.../.venv/Scripts/python.exe admin-fixtures/tools/generate_seed_...py`.
-- Генератор перезаписывает canonical датасеты в `admin-fixtures/v1`.
+- На Windows лучше запускать из venv (пример): `D:/.../.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100`.
+- По умолчанию генератор пишет в `admin-fixtures/v1` (canonical active pack).
+- `--pack` пишет в `admin-fixtures/packs/<seed_id>/v1` и не трогает canonical, пока ты явно не сделаешь `--activate`.
 
 2) Синхронизируй и провалидируй fixtures для UI:
 

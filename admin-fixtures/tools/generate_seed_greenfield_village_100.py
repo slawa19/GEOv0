@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 import uuid
 import sys
+import argparse
 
 # Import shared seed helpers from this folder.
 TOOLS_DIR = Path(__file__).resolve().parent
@@ -37,6 +38,8 @@ from seedlib import (
     q as _q,
     write_json as _write_json,
 )
+
+from adminlib import write_common_admin_datasets
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -725,7 +728,22 @@ def build_transactions(
     return out
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Generate Greenfield seed fixtures")
+    p.add_argument(
+        "--out-v1",
+        type=str,
+        default=str(V1_DIR),
+        help="Output directory for fixture pack root (v1)",
+    )
+    return p.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
+    out_v1 = Path(args.out_v1)
+    datasets_dir = out_v1 / "datasets"
+
     participants = build_participants()
     trustlines = build_trustlines(participants)
     incidents = build_incidents(participants)
@@ -733,16 +751,20 @@ def main() -> None:
     clearing_cycles = build_clearing_cycles_from_debts(debts, max_cycles_per_equivalent=8)
     transactions = build_transactions(participants=participants, trustlines=trustlines, clearing_cycles=clearing_cycles)
 
-    _write_json(DATASETS_DIR / "equivalents.json", EQUIVALENTS)
-    _write_json(DATASETS_DIR / "participants.json", [p.__dict__ for p in participants])
-    _write_json(DATASETS_DIR / "trustlines.json", trustlines)
-    _write_json(DATASETS_DIR / "incidents.json", incidents)
-    _write_json(DATASETS_DIR / "debts.json", debts)
-    _write_json(DATASETS_DIR / "clearing-cycles.json", clearing_cycles)
-    _write_json(DATASETS_DIR / "transactions.json", transactions)
+    _write_json(datasets_dir / "equivalents.json", EQUIVALENTS)
+    _write_json(datasets_dir / "participants.json", [p.__dict__ for p in participants])
+    _write_json(datasets_dir / "trustlines.json", trustlines)
+    _write_json(datasets_dir / "incidents.json", incidents)
+    _write_json(datasets_dir / "debts.json", debts)
+    _write_json(datasets_dir / "clearing-cycles.json", clearing_cycles)
+    _write_json(datasets_dir / "transactions.json", transactions)
+
+    write_common_admin_datasets(datasets_dir=datasets_dir, participants=participants, base_ts=BASE_TS)
     _write_json(
-        V1_DIR / "_meta.json",
+        out_v1 / "_meta.json",
         build_meta(
+            seed_id="greenfield-village-100",
+            generator="generate_seed_greenfield_village_100.py",
             base_ts=BASE_TS,
             equivalents=EQUIVALENTS,
             participants=participants,

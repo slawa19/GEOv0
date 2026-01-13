@@ -3,8 +3,18 @@ import path from 'node:path'
 import process from 'node:process'
 
 const repoRoot = path.resolve(process.cwd(), '..')
+const canonicalV1Dir = path.join(repoRoot, 'admin-fixtures', 'v1')
 const canonicalDir = path.join(repoRoot, 'admin-fixtures', 'v1', 'datasets')
+const publicV1Dir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1')
 const publicDir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1', 'datasets')
+
+function allowedSeedIds() {
+  return ['greenfield-village-100', 'riverside-town-50']
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message)
+}
 
 function expectedParticipantsCount() {
   const raw = process.env.EXPECTED_PARTICIPANTS
@@ -58,10 +68,6 @@ function asEquivalentCodes(equivalents) {
     if (e && typeof e === 'object' && typeof e.code === 'string') return e.code
     return null
   })
-}
-
-function assert(condition, message) {
-  if (!condition) throw new Error(message)
 }
 
 function deepEqual(a, b) {
@@ -150,6 +156,22 @@ function validateClearingCycles(cyclesDoc, label) {
   }
 }
 
+function validateMeta(meta, label) {
+  assert(meta && typeof meta === 'object' && !Array.isArray(meta), `${label} _meta.json must be an object`)
+  assert(typeof meta.version === 'string' && meta.version.length > 0, `${label} _meta.json.version must be string`)
+  assert(typeof meta.generated_at === 'string' && meta.generated_at.length > 0, `${label} _meta.json.generated_at must be string`)
+  assert(typeof meta.seed_id === 'string' && meta.seed_id.length > 0, `${label} _meta.json.seed_id must be string`)
+  assert(typeof meta.generator === 'string' && meta.generator.length > 0, `${label} _meta.json.generator must be string`)
+
+  const allowed = new Set(allowedSeedIds())
+  assert(
+    allowed.has(meta.seed_id),
+    `${label} seed_id must be one of ${JSON.stringify(Array.from(allowed).sort())}. Got ${JSON.stringify(meta.seed_id)}.`,
+  )
+
+  assert(meta.counts && typeof meta.counts === 'object' && !Array.isArray(meta.counts), `${label} _meta.json.counts must be object`)
+}
+
 function isIsoDateString(s) {
   if (typeof s !== 'string' || s.length < 10) return false
   const t = Date.parse(s)
@@ -232,6 +254,20 @@ async function validateSide(label, dir) {
   const transactions = (await exists(txPath)) ? await readJson(txPath) : null
 
   assert(Array.isArray(participants), `${label} participants must be an array`)
+
+  // Guardrail: keep participant types consistent across the project.
+  const allowedTypes = new Set(['person', 'business', 'hub'])
+  const badTypes = new Set(
+    participants
+      .map((p) => String(p?.type || '').trim())
+      .filter((t) => t.length > 0 && !allowedTypes.has(t)),
+  )
+  assert(
+    badTypes.size === 0,
+    `${label} participants contain unsupported types: ${JSON.stringify(Array.from(badTypes).sort())}. ` +
+      `Allowed: ${JSON.stringify(Array.from(allowedTypes))}`,
+  )
+
   const expectedCount = expectedParticipantsCount()
   if (typeof expectedCount === 'number') {
     assert(
@@ -266,6 +302,15 @@ async function validateSide(label, dir) {
 }
 
 async function main() {
+  const canonicalMeta = await readJson(path.join(canonicalV1Dir, '_meta.json'))
+  const publicMeta = await readJson(path.join(publicV1Dir, '_meta.json'))
+  validateMeta(canonicalMeta, 'CANONICAL')
+  validateMeta(publicMeta, 'PUBLIC')
+  assert(
+    deepEqual(canonicalMeta, publicMeta),
+    'PUBLIC _meta.json differs from CANONICAL. Run `npm run sync:fixtures` in admin-ui.',
+  )
+
   const canonical = await validateSide('CANONICAL', canonicalDir)
   const publicSide = await validateSide('PUBLIC', publicDir)
 
@@ -281,6 +326,7 @@ async function main() {
   )
 
   console.log('Fixtures OK')
+  console.log(`- seed_id: ${publicMeta.seed_id}`)
   console.log(`- participants: ${publicSide.participants.length}`)
   console.log(`- equivalents: ${Array.from(new Set(asEquivalentCodes(publicSide.equivalents))).sort().join(', ')}`)
   console.log(`- trustlines: ${publicSide.trustlines.length}`)

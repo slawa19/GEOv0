@@ -18,6 +18,6 @@ class Participant(Base):
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        CheckConstraint("type IN ('person', 'organization', 'hub')", name='chk_participant_type'),
+        CheckConstraint("type IN ('person', 'business', 'hub')", name='chk_participant_type'),
         CheckConstraint("status IN ('active', 'suspended', 'left', 'deleted')", name='chk_participant_status'),
     )

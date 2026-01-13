@@ -34,7 +34,7 @@
   {
     "pid": "PID_HUB_ADMIN_hub0admin1",
     "display_name": "Hub Admin (Test)",
-    "type": "organization",
+    "type": "business",
     "status": "active",
     "public_key": "o2NrZXlfaW5kZXgEZHNlZWRsMjAyNS1nZW8tdGVzdA",
     "_comment": "Deterministic key: seed='2025-geo-test' index=4"

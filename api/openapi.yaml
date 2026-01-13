@@ -628,7 +628,7 @@ paths:
           name: type
           schema:
             type: string
-            enum: [person, organization, hub]
+            enum: [person, business, hub]
           description: Type filter
         - in: query
           name: limit
@@ -695,7 +695,7 @@ paths:
           name: type
           schema:
             type: string
-            enum: [person, organization, hub]
+            enum: [person, business, hub]
           description: Type filter
         - in: query
           name: limit
@@ -1649,7 +1649,7 @@ components:
           type: string
         type:
           type: string
-          enum: [person, organization, hub]
+          enum: [person, business, hub]
         status:
           type: string
           enum: [active, suspended, left, deleted]
@@ -1711,7 +1711,7 @@ components:
           type: string
         type:
           type: string
-          enum: [person, organization, hub]
+          enum: [person, business, hub]
           default: person
         public_key:
           type: string

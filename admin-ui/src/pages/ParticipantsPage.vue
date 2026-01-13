@@ -140,7 +140,8 @@ const statusOptions = computed(() => [
 const typeOptions = computed(() => [
   { label: 'Any type', value: '' },
   { label: 'person', value: 'person' },
-  { label: 'organization', value: 'organization' },
+  { label: 'business', value: 'business' },
+  { label: 'hub', value: 'hub' },
 ])
 </script>
 
@@ -177,7 +178,7 @@ const typeOptions = computed(() => [
         <el-table-column prop="type" width="140">
           <template #header><TooltipLabel label="Type" tooltip-key="participants.type" /></template>
           <template #default="scope">
-            <el-tag :type="scope.row.type === 'organization' ? 'warning' : 'info'" size="small">
+            <el-tag :type="scope.row.type === 'business' ? 'warning' : 'info'" size="small">
               {{ scope.row.type }}
             </el-tag>
           </template>
@@ -238,7 +239,7 @@ const typeOptions = computed(() => [
         <el-descriptions-item label="PID">{{ selected.pid }}</el-descriptions-item>
         <el-descriptions-item label="Display Name">{{ selected.display_name }}</el-descriptions-item>
         <el-descriptions-item label="Type">
-          <el-tag :type="selected.type === 'organization' ? 'warning' : 'info'" size="small">
+          <el-tag :type="selected.type === 'business' ? 'warning' : 'info'" size="small">
             {{ selected.type }}
           </el-tag>
         </el-descriptions-item>

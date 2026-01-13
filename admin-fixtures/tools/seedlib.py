@@ -160,6 +160,8 @@ def build_clearing_cycles_from_debts(
 
 def build_meta(
     *,
+    seed_id: str,
+    generator: str,
     base_ts: datetime,
     equivalents: list[dict[str, Any]],
     participants: list[Any],
@@ -169,6 +171,8 @@ def build_meta(
 ) -> dict[str, Any]:
     return {
         "version": "v1",
+        "seed_id": seed_id,
+        "generator": generator,
         "generated_at": iso(base_ts),
         "counts": {
             "participants": len(participants),

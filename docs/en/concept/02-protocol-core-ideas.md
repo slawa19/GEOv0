@@ -852,7 +852,7 @@ Additionally (from GEO approach):
 ## 9. "Hubs as participants" — unified protocol for people and communities
 
 **In GEO (by idea):**
- Any node is credit network participant, be it person, organization or service.
+ Any node is credit network participant, be it person, business or service.
 
 **What to take in v0:**
 

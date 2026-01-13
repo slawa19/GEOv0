@@ -254,7 +254,7 @@ Content-Type: application/json
 ```
 
 **`profile` object (recommended keys):**
-- `type` — participant type (e.g. `person`, `organization`, `hub`)
+- `type` — participant type (e.g. `person`, `business`, `hub`)
 - `description` — free-form short description
 - `contacts` — object with contact fields (e.g. `{ "email": "...", "telegram": "..." }`)
 
@@ -293,7 +293,7 @@ Authorization: Bearer {token}
 
 **Query parameters:**
 - `q` — search query (by name)
-- `type` — filter by type (`person`, `organization`, `hub`)
+- `type` — filter by type (`person`, `business`, `hub`)
 - `limit` — maximum results (default: 20)
 
 ---

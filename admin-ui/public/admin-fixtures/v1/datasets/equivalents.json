@@ -13,8 +13,8 @@
   },
   {
     "code": "HOUR",
-    "precision": 1,
-    "description": "Time-based unit (1 hour of work)",
+    "precision": 2,
+    "description": "Community time credit (hours)",
     "is_active": true
   }
 ]

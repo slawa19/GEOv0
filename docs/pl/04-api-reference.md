@@ -254,7 +254,7 @@ Content-Type: application/json
 ```
 
 **`profile` (zalecane klucze):**
-- `type` — typ uczestnika (np. `person`, `organization`, `hub`)
+- `type` — typ uczestnika (np. `person`, `business`, `hub`)
 - `description` — dowolny opis
 - `contacts` — obiekt z kontaktami (np. `{ "email": "...", "telegram": "..." }`)
 
@@ -294,7 +294,7 @@ Authorization: Bearer {token}
 **Parametry query:**
 
 - `q` — fraza wyszukiwania (po nazwie)  
-- `type` — filtr po typie (`person`, `organization`, `hub`)  
+- `type` — filtr po typie (`person`, `business`, `hub`)  
 - `limit` — maksymalna liczba wyników (domyślnie: 20)
 
 ---

@@ -254,7 +254,7 @@ Content-Type: application/json
 ```
 
 **`profile` (рекомендуемые ключи):**
-- `type` — тип участника (например, `person`, `organization`, `hub`)
+- `type` — тип участника (например, `person`, `business`, `hub`)
 - `description` — свободный текст-описание
 - `contacts` — объект с контактами (например, `{ "email": "...", "telegram": "..." }`)
 
@@ -293,7 +293,7 @@ Authorization: Bearer {token}
 
 **Query параметры:**
 - `q` — поисковый запрос (по имени)
-- `type` — фильтр по типу (`person`, `organization`, `hub`)
+- `type` — фильтр по типу (`person`, `business`, `hub`)
 - `limit` — максимум результатов (default: 20)
 
 ---

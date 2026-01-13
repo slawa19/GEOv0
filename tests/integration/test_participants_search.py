@@ -42,7 +42,7 @@ async def test_participants_search_by_q_type_and_limit(client: AsyncClient):
     requester = await register_and_login(client, "Requester_Search")
 
     alice_person = await _register_participant(client, display_name="Alice Alpha", type_="person")
-    alice_org = await _register_participant(client, display_name="Alice Org", type_="organization")
+    alice_org = await _register_participant(client, display_name="Alice Org", type_="business")
     _bob = await _register_participant(client, display_name="Bob Beta", type_="person")
 
     # Search by partial name
@@ -61,12 +61,12 @@ async def test_participants_search_by_q_type_and_limit(client: AsyncClient):
     resp = await client.get(
         "/api/v1/participants/search",
         headers=requester["headers"],
-        params={"q": "Alice", "type": "organization"},
+        params={"q": "Alice", "type": "business"},
     )
     assert resp.status_code == 200, resp.text
     items = resp.json()["items"]
     assert len(items) >= 1
-    assert all(i["type"] == "organization" for i in items)
+    assert all(i["type"] == "business" for i in items)
 
     # Limit
     resp = await client.get(

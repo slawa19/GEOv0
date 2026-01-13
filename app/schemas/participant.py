@@ -14,7 +14,7 @@ class ParticipantProfile(BaseModel):
 
 class ParticipantBase(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=255)
-    type: str = Field(default="person", pattern="^(person|organization|hub)$")
+    type: str = Field(default="person", pattern="^(person|business|hub)$")
     public_key: str
 
 class ParticipantCreateRequest(ParticipantBase):

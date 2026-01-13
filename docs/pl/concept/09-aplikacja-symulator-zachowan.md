@@ -82,7 +82,7 @@ Możliwość opisania parametrów sieci poprzez plik JSON:
 {
   "participants": [
     { "id": "p1", "name": "Jan", "type": "person" },
-    { "id": "p2", "name": "Kawiarnia", "type": "organization" }
+    { "id": "p2", "name": "Kawiarnia", "type": "business" }
   ],
   "trustlines": [
     { "from": "p1", "to": "p2", "limit": 1000 }
@@ -295,7 +295,7 @@ Każdy uczestnik to **ikona + etykieta**:
   | Typ           | Kształt    |
   |---------------|------------|
   | `person`      | koło       |
-  | `organization`| kwadrat    |
+  | `business`| kwadrat    |
   | `hub`         | sześciokąt |
 
 - **Kolor** odzwierciedla status:
@@ -336,7 +336,7 @@ Użytkownik może:
 
 Grupowanie wg:
 
-- typu (`person`, `organization`, `hub`);
+- typu (`person`, `business`, `hub`);
 - roli (np. „koordynator”, „dostawca usług”, „klient hurtowy”).
 
 Prezentacja:
@@ -610,7 +610,7 @@ showAiOverlays: boolean; // owerleje generowane przez AI
 **`FiltersPanel` — stan:**
 
 ```ts
-filter.types: { person: boolean; organization: boolean; hub: boolean };
+filter.types: { person: boolean; business: boolean; hub: boolean };
 filter.statuses: { active: boolean; suspended: boolean; left: boolean };
 filter.equivalentCode: string | 'ANY';
 filter.netBalanceRange: [number, number];
@@ -640,7 +640,7 @@ interface AiFlags {
 interface ParticipantNode {
   id: PID;
   name: string;
-  type: 'person' | 'organization' | 'hub';
+  type: 'person' | 'business' | 'hub';
   status: 'active' | 'suspended' | 'left';
   netBalance: number;
   activityScore: number;
@@ -688,7 +688,7 @@ interface AiHighlight {
 | Typ           | Kształt   |
 |---------------|-----------|
 | `person`      | koło      |
-| `organization`| kwadrat   |
+| `business`    | kwadrat   |
 | `hub`         | sześciokąt|
 
 | Status       | Kolor  |

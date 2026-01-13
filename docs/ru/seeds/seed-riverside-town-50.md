@@ -441,4 +441,4 @@ REMEMBER: The one who "gives first" (goods/services/liquidity)
 
 *Document version: 1.0*
 *Created: 2026-01-12*
-*Generator: `admin-fixtures/tools/generate_seed_riverside_town_50.py`*
+*Generator (entrypoint): `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50`*

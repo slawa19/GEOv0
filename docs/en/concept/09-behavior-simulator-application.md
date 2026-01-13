@@ -82,7 +82,7 @@ Ability to set network parameters via JSON file:
 {
   "participants": [
     { "id": "p1", "name": "Ivan", "type": "person" },
-    { "id": "p2", "name": "Coffee Shop", "type": "organization" }
+    { "id": "p2", "name": "Coffee Shop", "type": "business" }
   ],
   "trustlines": [
     { "from": "p1", "to": "p2", "limit": 1000 }
@@ -295,7 +295,7 @@ Each participant is **icon + label**:
   | Type           | Shape       |
   |----------------|-------------|
   | `person`       | circle      |
-  | `organization` | square      |
+  | `business`     | square      |
   | `hub`          | hexagon     |
 
 - **Color** ~ status:
@@ -335,7 +335,7 @@ User can:
 
 Grouping by:
 
-- type (`person`, `organization`, `hub`);
+- type (`person`, `business`, `hub`);
 - role (e.g., "coordinator", "supplier", "bulk buyer").
 
 Visually:
@@ -609,7 +609,7 @@ showAiOverlays: boolean; // AI-generated highlights and overlays
 **`FiltersPanel` state:**
 
 ```ts
-filter.types: { person: boolean; organization: boolean; hub: boolean };
+filter.types: { person: boolean; business: boolean; hub: boolean };
 filter.statuses: { active: boolean; suspended: boolean; left: boolean };
 filter.equivalentCode: string | 'ANY';
 filter.netBalanceRange: [number, number];
@@ -639,7 +639,7 @@ interface AiFlags {
 interface ParticipantNode {
   id: PID;
   name: string;
-  type: 'person' | 'organization' | 'hub';
+  type: 'person' | 'business' | 'hub';
   status: 'active' | 'suspended' | 'left';
   netBalance: number;
   activityScore: number;
@@ -687,7 +687,7 @@ interface AiHighlight {
 | Type           | Shape   |
 |----------------|---------|
 | `person`       | circle  |
-| `organization` | square  |
+| `business`     | square  |
 | `hub`          | hexagon |
 
 | Status     | Color  |
@@ -959,7 +959,7 @@ is to fill:
 5. UI:
 
    - displays summary:
-     - "Participants: 212 (person: 190, organization: 17, hub: 5)"
+     - "Participants: 212 (person: 190, business: 17, hub: 5)"
      - "Groups: A, B, C; strong intra-group trust"
      - "Profiles: normal_consumer (70%), hoarder (20%), panic_prone (10%)"
    - shows graph via `GraphView`;
@@ -1290,7 +1290,7 @@ On selection:
         ],
         "participants": [
           {
-            "filter": { "clusterId": "B", "type": "organization" },
+            "filter": { "clusterId": "B", "type": "business" },
             "set": { "behaviorProfileId": "local_connector" }
           }
         ]

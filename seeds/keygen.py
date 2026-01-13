@@ -45,7 +45,7 @@ def deterministic_keypair(seed: str, index: int) -> tuple[bytes, bytes, str]:
 def generate_test_participants(seed: str = "2025-geo-test", count: int = 5):
     """Generate test participant data with deterministic keys."""
     names = ["Alice", "Bob", "Carol", "Dave", "Hub Admin"]
-    types = ["person", "person", "person", "person", "organization"]
+    types = ["person", "person", "person", "person", "business"]
     
     participants = []
     for i in range(count):
