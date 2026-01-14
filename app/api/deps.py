@@ -16,6 +16,7 @@ from app.config import settings
 from app.utils.exceptions import TooManyRequestsException, UnauthorizedException
 
 reusable_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+optional_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 
 _rate_limit_lock = asyncio.Lock()
@@ -101,6 +102,40 @@ async def get_current_participant(
     if participant.status != 'active':
         raise ForbiddenException("Participant account is not active")
         
+    return participant
+
+
+async def require_participant_or_admin(
+    db: AsyncSession = Depends(get_db),
+    token: str | None = Depends(optional_oauth2),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> Participant | None:
+    # Admin token allows calling protected endpoints without participant auth.
+    if x_admin_token is not None:
+        if x_admin_token != settings.ADMIN_TOKEN:
+            raise ForbiddenException("Admin token required")
+        return None
+
+    if not token:
+        raise UnauthorizedException("Could not validate credentials")
+
+    payload = await decode_token(token)
+    if not payload:
+        raise UnauthorizedException("Could not validate credentials")
+
+    pid: str = payload.get("sub")
+    if pid is None:
+        raise UnauthorizedException("Could not validate credentials")
+
+    result = await db.execute(select(Participant).where(Participant.pid == pid))
+    participant = result.scalar_one_or_none()
+
+    if not participant:
+        raise UnauthorizedException("Participant not found")
+
+    if participant.status != 'active':
+        raise ForbiddenException("Participant account is not active")
+
     return participant
 
 

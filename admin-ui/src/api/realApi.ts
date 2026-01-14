@@ -156,11 +156,11 @@ export const realApi = {
   },
 
   integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/status')
+    return requestJson('/api/v1/integrity/status', { admin: true })
   },
 
   integrityVerify(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/verify', { method: 'POST', body: {} })
+    return requestJson('/api/v1/integrity/verify', { method: 'POST', body: {}, admin: true })
   },
 
   // The endpoints below should be aligned to OpenAPI; adjust pathname/query as backend stabilizes.

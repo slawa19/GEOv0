@@ -46,7 +46,7 @@ async def _latest_checkpoint(db: AsyncSession, *, equivalent_id) -> IntegrityChe
 @router.get("/status", response_model=IntegrityStatusResponse)
 async def get_integrity_status(
     db: AsyncSession = Depends(deps.get_db),
-    _current_participant=Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ) -> IntegrityStatusResponse:
     checker = InvariantChecker(db)
 
@@ -122,7 +122,7 @@ async def get_integrity_status(
 async def get_integrity_checksum(
     equivalent: str,
     db: AsyncSession = Depends(deps.get_db),
-    _current_participant=Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ) -> IntegrityChecksumResponse:
     validate_equivalent_code(equivalent)
 
@@ -146,7 +146,7 @@ async def get_integrity_checksum(
 async def verify_integrity(
     body: IntegrityVerifyRequest,
     db: AsyncSession = Depends(deps.get_db),
-    current_participant=Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ) -> IntegrityVerifyResponse:
     checker = InvariantChecker(db)
 
@@ -262,7 +262,7 @@ async def get_integrity_audit_log(
     page: int = 1,
     per_page: int = 20,
     db: AsyncSession = Depends(deps.get_db),
-    _current_participant=Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ) -> IntegrityAuditLogResponse:
     page = max(1, int(page))
     per_page = max(1, min(200, int(per_page)))
