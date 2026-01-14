@@ -76,8 +76,17 @@ async function loadBottlenecks() {
     // In real mode, replace with a thin endpoint like:
     //   GET /admin/trustlines/bottlenecks?threshold=&limit=
     // so we don't fetch hundreds of trustlines and sort client-side.
-    const page = assertSuccess(await api.listTrustlines({ page: 1, per_page: 250 }))
-    const all = page.items as Trustline[]
+    // Backend enforces per_page <= 200. Fetch a few pages (bounded) to find bottlenecks.
+    const perPage = 200
+    const maxPages = 5
+    const all: Trustline[] = []
+
+    for (let p = 1; p <= maxPages; p++) {
+      const page = assertSuccess(await api.listTrustlines({ page: p, per_page: perPage }))
+      all.push(...(page.items as Trustline[]))
+      const total = Number((page as any).total)
+      if ((Number.isFinite(total) && all.length >= total) || (page.items || []).length === 0) break
+    }
 
     const candidates = all.filter((t) => t.status === 'active' && isBottleneck(t))
     // naive ranking: lower available first

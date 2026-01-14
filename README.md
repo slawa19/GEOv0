@@ -259,6 +259,19 @@ docker compose exec app python scripts/seed_db.py
 # Docs: /docs
 ```
 
+If Docker is unavailable, you can run the backend locally using SQLite (development only):
+
+```powershell
+# 1) Initialize SQLite schema (creates ./geov0.db)
+python scripts/init_sqlite_db.py
+
+# 2) Seed demo data (from ./seeds/*.json)
+python scripts/seed_db.py
+
+# 3) Run API
+python -m uvicorn app.main:app --reload --port 8000
+```
+
 Health endpoints (also available as `/api/v1/*` aliases):
 
 - `GET /health` and `GET /healthz` → `{ "status": "ok" }`
@@ -366,6 +379,78 @@ curl -H "X-Admin-Token: dev-admin-token-change-me" http://localhost:8000/api/v1/
 ```
 
 For the canonical contract, see `api/openapi.yaml`.
+
+---
+
+## Admin UI (real-mode)
+
+Admin UI lives in `admin-ui/` and can run in two modes:
+
+- `mock` (fixtures) — deterministic JSON datasets
+- `real` — calls the backend Admin API (`/api/v1/admin/*`)
+
+Recommended (current repo setup): run real-mode using `VITE_API_BASE_URL`.
+
+Quickstart:
+
+Recommended on Windows (one command, avoids PowerShell quoting / port pitfalls):
+
+```powershell
+.\scripts\run_local.ps1 start
+```
+
+Stop:
+
+```powershell
+.\scripts\run_local.ps1 stop
+```
+
+Manual (Docker):
+
+```powershell
+# 1) Start backend + DB
+docker compose up -d --build
+
+# Optional seed
+docker compose exec app python scripts/seed_db.py
+
+# 2) Run Admin UI
+npm --prefix admin-ui install
+$env:VITE_API_MODE = 'real'
+$env:VITE_API_BASE_URL = 'http://localhost:8000'
+npm --prefix admin-ui run dev
+```
+
+No-Docker quickstart (SQLite):
+
+```powershell
+python scripts/init_sqlite_db.py
+# Recommended: seed from canonical admin fixtures datasets (richer demo data, like fixtures-mode UI)
+python scripts/seed_db.py --source fixtures
+
+# Choose a full community pack without modifying tracked fixtures (writes to .local-run/fixture-packs):
+python scripts/seed_db.py --source fixtures --community greenfield-village-100
+python scripts/seed_db.py --source fixtures --community riverside-town-50
+
+# Legacy small seed set:
+# python scripts/seed_db.py --source seeds
+
+python -m uvicorn app.main:app --reload --port 8000
+# If 8000 is unavailable on Windows, use --port 18000 and update VITE_API_BASE_URL accordingly.
+
+npm --prefix admin-ui install
+$env:VITE_API_MODE = 'real'
+$env:VITE_API_BASE_URL = 'http://localhost:8000'
+npm --prefix admin-ui run dev
+```
+
+Then open:
+
+- `http://localhost:5173/`
+
+Docs:
+
+- [admin-ui/docs/real-api-integration.md](admin-ui/docs/real-api-integration.md)
 
 ---
 

@@ -4,11 +4,15 @@ import { ElMessage } from 'element-plus'
 import cytoscape, { type Core, type EdgeSingular, type NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 
-import { loadFixtureJson } from '../api/fixtures'
+import { api } from '../api'
+import { assertSuccess } from '../api/envelope'
+import { buildFocusModeQuery, makeMetricsKey } from './graph/graphPageHelpers'
+import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { throttle } from '../utils/throttle'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
+import GraphAnalyticsTogglesCard from '../ui/GraphAnalyticsTogglesCard.vue'
 
 cytoscape.use(fcose)
 
@@ -30,6 +34,16 @@ type Debt = {
   debtor: string
   creditor: string
   amount: string
+}
+
+type GraphSnapshotPayload = {
+  participants: Participant[]
+  trustlines: Trustline[]
+  incidents: Incident[]
+  equivalents: Equivalent[]
+  debts: Debt[]
+  audit_log: AuditLogEntry[]
+  transactions: Transaction[]
 }
 
 type ClearingCycles = {
@@ -164,6 +178,11 @@ type DrawerTab = 'summary' | 'connections' | 'balance' | 'counterparties' | 'ris
 const drawerTab = ref<DrawerTab>('summary')
 const drawerEq = ref<string>('ALL')
 
+const analyticsEq = computed(() => {
+  const key = String(drawerEq.value || '').trim().toUpperCase()
+  return key === 'ALL' ? null : key
+})
+
 type AnalyticsToggles = {
   showRank: boolean
   showDistribution: boolean
@@ -181,6 +200,75 @@ const analytics = ref<AnalyticsToggles>({
   showBottlenecks: true,
   showActivity: true,
 })
+
+type AnalyticsToggleKey = keyof AnalyticsToggles
+
+type AnalyticsToggleItem = {
+  key: AnalyticsToggleKey
+  label: string
+  tooltipText: string
+  requires?: AnalyticsToggleKey
+}
+
+const summaryToggleItems: AnalyticsToggleItem[] = [
+  {
+    key: 'showRank',
+    label: 'Rank / percentile',
+    tooltipText: 'Your position among all participants by net balance for the selected equivalent.',
+  },
+  {
+    key: 'showConcentration',
+    label: 'Concentration risk',
+    tooltipText: 'How concentrated your debts/credits are across counterparties (top1/top5 shares + HHI).',
+  },
+  {
+    key: 'showCapacity',
+    label: 'Trustline capacity',
+    tooltipText: 'Aggregate trustline capacity around the participant: used% = total_used / total_limit.',
+  },
+  {
+    key: 'showActivity',
+    label: 'Activity / churn',
+    tooltipText: 'Recent changes around the participant in rolling windows (7/30/90 days).',
+  },
+]
+
+const balanceToggleItems: AnalyticsToggleItem[] = [
+  {
+    key: 'showRank',
+    label: 'Rank / percentile',
+    tooltipText: 'Rank/percentile of net balance across all participants (for selected equivalent).',
+  },
+  {
+    key: 'showDistribution',
+    label: 'Distribution histogram',
+    tooltipText: 'Tiny histogram of net balance distribution across all participants (selected equivalent).',
+  },
+]
+
+const riskToggleItems: AnalyticsToggleItem[] = [
+  {
+    key: 'showConcentration',
+    label: 'Concentration risk',
+    tooltipText: 'Top1/top5 shares and HHI derived from counterparty debt shares.',
+  },
+  {
+    key: 'showCapacity',
+    label: 'Trustline capacity',
+    tooltipText: 'Aggregate incoming/outgoing used vs limit and bottleneck detection.',
+  },
+  {
+    key: 'showBottlenecks',
+    label: 'Bottlenecks',
+    tooltipText: 'Show bottleneck count/list inside Trustline capacity (threshold-based).',
+    requires: 'showCapacity',
+  },
+  {
+    key: 'showActivity',
+    label: 'Activity / churn',
+    tooltipText: '7/30/90-day counts from fixtures timestamps (trustlines/incidents/audit/transactions).',
+  },
+]
 
 const seedLabel = computed(() => {
   const n = (participants.value || []).length
@@ -219,6 +307,105 @@ const layoutName = ref<'fcose' | 'grid' | 'circle'>('fcose')
 const layoutSpacing = ref<number>(2.2)
 
 const toolbarTab = ref<'filters' | 'display' | 'navigate'>('filters')
+
+const isRealMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toString().toLowerCase() === 'real')
+
+type ParticipantMetrics = {
+  pid: string
+  equivalent: string | null
+  balance_rows: BalanceRow[]
+  counterparty?: {
+    eq: string
+    totalDebt: string
+    totalCredit: string
+    creditors: CounterpartySplitRow[]
+    debtors: CounterpartySplitRow[]
+  } | null
+  concentration?: {
+    eq: string
+    outgoing: { top1: number; top5: number; hhi: number }
+    incoming: { top1: number; top5: number; hhi: number }
+  } | null
+  distribution?: {
+    eq: string
+    min_atoms: string
+    max_atoms: string
+    bins: Array<{ from_atoms: string; to_atoms: string; count: number }>
+  } | null
+  rank?: {
+    eq: string
+    rank: number
+    n: number
+    percentile: number
+    net: string
+  } | null
+  capacity?: {
+    eq: string
+    out: { limit: string; used: string; pct: number }
+    inc: { limit: string; used: string; pct: number }
+    bottlenecks: Array<{ dir: 'out' | 'in'; other: string; trustline: Trustline }>
+  } | null
+  activity?: {
+    windows: number[]
+    trustline_created: Record<number, number>
+    trustline_closed: Record<number, number>
+    incident_count: Record<number, number>
+    participant_ops: Record<number, number>
+    payment_committed: Record<number, number>
+    clearing_committed: Record<number, number>
+    has_transactions: boolean
+  } | null
+}
+
+const metricsCache = ref(new Map<string, ParticipantMetrics>())
+const metricsLoading = ref(false)
+const metricsError = ref<string | null>(null)
+
+const selected = ref<SelectedInfo | null>(null)
+
+function metricsKey(pid: string, eqCode: string | null, thr: string): string {
+  return makeMetricsKey(pid, eqCode, thr)
+}
+
+const selectedPid = computed(() => (selected.value && selected.value.kind === 'node' ? selected.value.pid : ''))
+const selectedEqCode = computed(() => analyticsEq.value)
+
+const selectedMetrics = computed(() => {
+  const pid = selectedPid.value
+  if (!pid) return null
+  const key = metricsKey(pid, selectedEqCode.value, String(threshold.value || ''))
+  return metricsCache.value.get(key) || null
+})
+
+async function loadSelectedMetrics() {
+  if (!isRealMode.value) return
+  const pid = selectedPid.value
+  if (!pid) return
+
+  const eqCode = selectedEqCode.value
+  const thr = String(threshold.value || '')
+  const key = metricsKey(pid, eqCode, thr)
+  if (metricsCache.value.has(key)) return
+
+  metricsLoading.value = true
+  metricsError.value = null
+  try {
+    const res = await api.participantMetrics(pid, { equivalent: eqCode, threshold: thr })
+    const m = assertSuccess(res) as ParticipantMetrics
+    metricsCache.value.set(key, m)
+  } catch (e: any) {
+    metricsError.value = String(e?.message || e || 'Failed to load metrics')
+  } finally {
+    metricsLoading.value = false
+  }
+}
+
+watch([selectedPid, selectedEqCode, threshold], () => {
+  // Lazy-load only when a participant is selected.
+  // In real-mode this ensures analytics are computed on the full dataset,
+  // not the current ego graph.
+  void loadSelectedMetrics()
+})
 
 const STORAGE_KEYS = {
   showLegend: 'geo.graph.showLegend',
@@ -288,7 +475,6 @@ const activeCycleKey = ref('')
 const activeConnectionKey = ref('')
 
 const drawerOpen = ref(false)
-const selected = ref<SelectedInfo | null>(null)
 
 function suggestPidForFocus(): string {
   if (selected.value && selected.value.kind === 'node') return selected.value.pid
@@ -364,10 +550,11 @@ function highlightCycle(cycle: Array<{ debtor: string; creditor: string; equival
 
   const touchedPids = new Set<string>()
   for (const e of cycle || []) {
-    const eqCode = normEq(e.equivalent)
     const debtor = String(e.debtor || '').trim()
     const creditor = String(e.creditor || '').trim()
-    if (!debtor || !creditor || !eqCode) continue
+    const mapped = cycleDebtEdgeToTrustlineDirection({ debtor, creditor, equivalent: e.equivalent })
+    if (!mapped) continue
+    const { from, to, equivalent } = mapped
 
     // Note: cycle edges are debt edges (debtor -> creditor).
     // TrustLine direction in the graph is creditor -> debtor.
@@ -375,7 +562,7 @@ function highlightCycle(cycle: Array<{ debtor: string; creditor: string; equival
       const src = String(edge.data('source') || '')
       const dst = String(edge.data('target') || '')
       const eeq = normEq(String(edge.data('equivalent') || ''))
-      if (src === creditor && dst === debtor && eeq === eqCode) edge.addClass('cycle-highlight')
+      if (src === from && dst === to && eeq === equivalent) edge.addClass('cycle-highlight')
     })
 
     touchedPids.add(debtor)
@@ -450,14 +637,6 @@ function atomsToDecimal(atoms: bigint, precision: number): string {
   return (neg ? '-' : '') + head + '.' + frac
 }
 
-async function loadOptionalFixtureJson<T>(relPath: string, fallback: T): Promise<T> {
-  try {
-    return await loadFixtureJson<T>(relPath)
-  } catch {
-    return fallback
-  }
-}
-
 function normEq(v: string): string {
   return String(v || '').trim().toUpperCase()
 }
@@ -482,11 +661,6 @@ const precisionByEq = computed(() => {
     if (Number.isFinite(p)) m.set(code, p)
   }
   return m
-})
-
-const analyticsEq = computed(() => {
-  const key = normEq(drawerEq.value)
-  return key === 'ALL' ? null : key
 })
 
 const participantByPid = computed(() => {
@@ -633,6 +807,8 @@ type BalanceRow = {
 }
 
 const selectedBalanceRows = computed<BalanceRow[]>(() => {
+  const m = selectedMetrics.value
+  if (m?.balance_rows) return m.balance_rows
   if (!selected.value || selected.value.kind !== 'node') return []
   const pid = selected.value.pid
   const precOf = (eqCode: string) => precisionByEq.value.get(eqCode) ?? 2
@@ -713,6 +889,19 @@ type CounterpartySplitRow = {
 }
 
 const selectedCounterpartySplit = computed(() => {
+  const m = selectedMetrics.value
+  if (m?.counterparty && m.counterparty.eq) {
+    const eqCode = m.counterparty.eq
+    const prec = precisionByEq.value.get(eqCode) ?? 2
+    return {
+      eq: eqCode,
+      totalDebtAtoms: decimalToAtoms(m.counterparty.totalDebt, prec),
+      totalCreditAtoms: decimalToAtoms(m.counterparty.totalCredit, prec),
+      creditors: m.counterparty.creditors,
+      debtors: m.counterparty.debtors,
+    }
+  }
+
   if (!selected.value || selected.value.kind !== 'node') {
     return {
       eq: null as string | null,
@@ -843,6 +1032,24 @@ type NetDist = {
 }
 
 const netDistribution = computed<NetDist | null>(() => {
+  const m = selectedMetrics.value
+  if (m?.distribution && m.distribution.eq) {
+    const bins = (m.distribution.bins || []).map((b) => ({
+      from: BigInt(b.from_atoms || '0'),
+      to: BigInt(b.to_atoms || '0'),
+      count: Number(b.count || 0),
+    }))
+    return {
+      eq: m.distribution.eq,
+      n: bins.reduce((acc, b) => acc + (b.count || 0), 0),
+      netAtomsByPid: new Map(),
+      sortedPids: [],
+      min: BigInt(m.distribution.min_atoms || '0'),
+      max: BigInt(m.distribution.max_atoms || '0'),
+      bins,
+    }
+  }
+
   const eqCode = analyticsEq.value
   if (!eqCode) return null
 
@@ -904,6 +1111,9 @@ const netDistribution = computed<NetDist | null>(() => {
 })
 
 const selectedRank = computed(() => {
+  const m = selectedMetrics.value
+  if (m?.rank && m.rank.eq) return m.rank
+
   if (!selected.value || selected.value.kind !== 'node') return null
   const dist = netDistribution.value
   if (!dist) return null
@@ -922,6 +1132,24 @@ const selectedRank = computed(() => {
 })
 
 const selectedCapacity = computed(() => {
+  const m = selectedMetrics.value
+  if (m?.capacity && m.capacity.eq) {
+    return {
+      eq: m.capacity.eq,
+      out: {
+        limit: decimalToAtoms(m.capacity.out.limit, precisionByEq.value.get(m.capacity.eq) ?? 2),
+        used: decimalToAtoms(m.capacity.out.used, precisionByEq.value.get(m.capacity.eq) ?? 2),
+        pct: Number(m.capacity.out.pct || 0),
+      },
+      inc: {
+        limit: decimalToAtoms(m.capacity.inc.limit, precisionByEq.value.get(m.capacity.eq) ?? 2),
+        used: decimalToAtoms(m.capacity.inc.used, precisionByEq.value.get(m.capacity.eq) ?? 2),
+        pct: Number(m.capacity.inc.pct || 0),
+      },
+      bottlenecks: (m.capacity.bottlenecks || []).map((b) => ({ dir: b.dir, other: b.other, t: b.trustline })),
+    }
+  }
+
   if (!selected.value || selected.value.kind !== 'node') return null
   const pid = selected.value.pid
   const eqCode = analyticsEq.value
@@ -963,6 +1191,20 @@ const selectedCapacity = computed(() => {
 })
 
 const selectedActivity = computed(() => {
+  const m = selectedMetrics.value
+  if (m?.activity) {
+    return {
+      windows: m.activity.windows,
+      trustlineCreated: m.activity.trustline_created,
+      trustlineClosed: m.activity.trustline_closed,
+      incidentCount: m.activity.incident_count,
+      participantOps: m.activity.participant_ops,
+      paymentCommitted: m.activity.payment_committed,
+      clearingCommitted: m.activity.clearing_committed,
+      hasTransactions: Boolean(m.activity.has_transactions),
+    }
+  }
+
   if (!selected.value || selected.value.kind !== 'node') return null
   const pid = selected.value.pid
   const eqCode = analyticsEq.value
@@ -1891,31 +2133,97 @@ async function loadData() {
   loading.value = true
   error.value = null
   try {
-    const [ps, tls, inc, eqs, ds, cc, al, txs] = await Promise.all([
-      loadFixtureJson<Participant[]>('datasets/participants.json'),
-      loadFixtureJson<Trustline[]>('datasets/trustlines.json'),
-      loadFixtureJson<{ items: Incident[] }>('datasets/incidents.json'),
-      loadFixtureJson<Equivalent[]>('datasets/equivalents.json'),
-      loadOptionalFixtureJson<Debt[]>('datasets/debts.json', []),
-      loadOptionalFixtureJson<ClearingCycles | null>('datasets/clearing-cycles.json', null),
-      loadOptionalFixtureJson<AuditLogEntry[]>('datasets/audit-log.json', []),
-      loadOptionalFixtureJson<Transaction[]>('datasets/transactions.json', []),
-    ])
+    const [snap, cc] = await Promise.all([api.graphSnapshot(), api.clearingCycles()])
 
-    participants.value = ps
-    trustlines.value = tls
-    incidents.value = inc.items
-    equivalents.value = eqs
-    debts.value = ds
-    clearingCycles.value = cc
-    auditLog.value = al
-    transactions.value = txs
+    const s = assertSuccess(snap)
+    const payload: GraphSnapshotPayload = {
+      participants: (s.participants || []) as Participant[],
+      trustlines: (s.trustlines || []) as Trustline[],
+      incidents: (s.incidents || []) as Incident[],
+      equivalents: (s.equivalents || []) as Equivalent[],
+      debts: (s.debts || []) as Debt[],
+      audit_log: (s.audit_log || []) as AuditLogEntry[],
+      transactions: (s.transactions || []) as Transaction[],
+    }
+
+    participants.value = payload.participants
+    trustlines.value = payload.trustlines
+    incidents.value = payload.incidents
+    equivalents.value = payload.equivalents
+    debts.value = payload.debts
+    auditLog.value = payload.audit_log
+    transactions.value = payload.transactions
+
+    clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
+
+    fullSnapshot = payload
+    fullClearingCycles = clearingCycles.value
 
     if (!availableEquivalents.value.includes(eq.value)) eq.value = 'ALL'
   } catch (e: any) {
     error.value = e?.message || 'Failed to load fixtures'
   } finally {
     loading.value = false
+  }
+}
+
+let fullSnapshot: GraphSnapshotPayload | null = null
+let fullClearingCycles: ClearingCycles | null = null
+
+function applySnapshotPayload(p: GraphSnapshotPayload) {
+  participants.value = p.participants || []
+  trustlines.value = p.trustlines || []
+  incidents.value = p.incidents || []
+  equivalents.value = p.equivalents || []
+  debts.value = p.debts || []
+  auditLog.value = p.audit_log || []
+  transactions.value = p.transactions || []
+}
+
+let focusReqId = 0
+async function refreshForFocusMode() {
+  if (!isRealMode.value) return
+
+  focusReqId += 1
+  const reqId = focusReqId
+
+  const query = buildFocusModeQuery({
+    enabled: Boolean(focusMode.value),
+    rootPid: focusRootPid.value,
+    depth: focusDepth.value,
+    equivalent: eq.value,
+    statusFilter: statusFilter.value,
+  })
+
+  if (!query) {
+    if (fullSnapshot) applySnapshotPayload(fullSnapshot)
+    clearingCycles.value = fullClearingCycles
+    return
+  }
+
+  try {
+    const [ego, cc] = await Promise.all([
+      api.graphEgo({ pid: query.pid, depth: query.depth, equivalent: query.equivalent, status: query.status }),
+      api.clearingCycles({ participant_pid: query.participant_pid }),
+    ])
+
+    if (reqId !== focusReqId) return
+
+    const e = assertSuccess(ego) as any
+    applySnapshotPayload({
+      participants: (e.participants || []) as Participant[],
+      trustlines: (e.trustlines || []) as Trustline[],
+      incidents: (e.incidents || []) as Incident[],
+      equivalents: (e.equivalents || []) as Equivalent[],
+      debts: (e.debts || []) as Debt[],
+      audit_log: (e.audit_log || []) as AuditLogEntry[],
+      transactions: (e.transactions || []) as Transaction[],
+    })
+
+    clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
+  } catch (e: any) {
+    if (reqId !== focusReqId) return
+    ElMessage.warning(e?.message || 'Failed to load focus-mode data')
   }
 }
 
@@ -2036,6 +2344,11 @@ const throttledRebuild = throttle(() => {
   rebuildGraph({ fit: false })
 }, 300)
 
+const throttledLayoutSpacing = throttle(() => {
+  if (!cy) return
+  runLayout()
+}, 250)
+
 watch([eq, statusFilter, threshold, showIncidents, hideIsolates], () => {
   throttledRebuild()
 })
@@ -2045,9 +2358,12 @@ watch([typeFilter, minDegree], () => {
 })
 
 watch([focusMode, focusDepth, focusRootPid], () => {
-  if (!cy) return
   if (focusMode.value) ensureFocusRootPid()
-  rebuildGraph({ fit: true })
+  void (async () => {
+    await refreshForFocusMode()
+    if (!cy) return
+    rebuildGraph({ fit: true })
+  })()
 })
 
 watch(
@@ -2055,8 +2371,21 @@ watch(
   (pid) => {
     clearCycleHighlight()
     clearConnectionHighlight()
-    if (!cy) return
-    applySelectedHighlight(pid)
+    void (async () => {
+      if (isRealMode.value && !focusMode.value) {
+        const p = String(pid || '').trim()
+        if (p) {
+          try {
+            const cc = await api.clearingCycles({ participant_pid: p })
+            clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
+          } catch {
+            // keep previous
+          }
+        }
+      }
+      if (!cy) return
+      applySelectedHighlight(pid)
+    })()
   }
 )
 
@@ -2088,7 +2417,7 @@ watch(layoutName, () => {
 
 watch(layoutSpacing, () => {
   if (!cy) return
-  runLayout()
+  throttledLayoutSpacing()
 })
 
 const statuses = [
@@ -2368,46 +2697,14 @@ function applyZoom(level: number) {
 
           <div class="hint">Fixtures-first: derived from trustlines + debts + incidents + audit-log.</div>
 
-          <!-- TODO(ui): toggles blocks are duplicated across Summary/Balance/Risk tabs.
-               Extract a shared WidgetTogglesCard (or a declarative config list) to avoid drift in text/disabled logic. -->
-          <el-card v-if="analyticsEq" shadow="never" class="mb">
-            <template #header>
-              <TooltipLabel
-                label="Summary widgets"
-                tooltip-text="Show/hide summary cards. These toggles are stored in localStorage for this browser."
-              />
-            </template>
-            <div class="toggleGrid">
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showRank" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel
-                  label="Rank / percentile"
-                  tooltip-text="Your position among all participants by net balance for the selected equivalent."
-                />
-              </div>
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showConcentration" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel
-                  label="Concentration risk"
-                  tooltip-text="How concentrated your debts/credits are across counterparties (top1/top5 shares + HHI)."
-                />
-              </div>
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showCapacity" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel
-                  label="Trustline capacity"
-                  tooltip-text="Aggregate trustline capacity around the participant: used% = total_used / total_limit."
-                />
-              </div>
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showActivity" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel
-                  label="Activity / churn"
-                  tooltip-text="Recent changes around the participant in rolling windows (7/30/90 days)."
-                />
-              </div>
-            </div>
-          </el-card>
+          <GraphAnalyticsTogglesCard
+            v-if="analyticsEq"
+            title="Summary widgets"
+            title-tooltip-text="Show/hide summary cards. These toggles are stored in localStorage for this browser."
+            :enabled="Boolean(analyticsEq)"
+            v-model="analytics"
+            :items="summaryToggleItems"
+          />
 
           <div v-if="analyticsEq" class="summaryGrid">
             <el-card shadow="never" class="summaryCard">
@@ -2663,30 +2960,14 @@ function applyZoom(level: number) {
             class="mb"
           />
 
-          <el-card v-if="analyticsEq" shadow="never" class="mb">
-            <template #header>
-              <TooltipLabel
-                label="Balance widgets"
-                tooltip-text="Show/hide balance visualizations. These toggles are stored in localStorage for this browser."
-              />
-            </template>
-            <div class="toggleGrid">
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showRank" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel
-                  label="Rank / percentile"
-                  tooltip-text="Rank/percentile of net balance across all participants (for selected equivalent)."
-                />
-              </div>
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showDistribution" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel
-                  label="Distribution histogram"
-                  tooltip-text="Tiny histogram of net balance distribution across all participants (selected equivalent)."
-                />
-              </div>
-            </div>
-          </el-card>
+          <GraphAnalyticsTogglesCard
+            v-if="analyticsEq"
+            title="Balance widgets"
+            title-tooltip-text="Show/hide balance visualizations. These toggles are stored in localStorage for this browser."
+            :enabled="Boolean(analyticsEq)"
+            v-model="analytics"
+            :items="balanceToggleItems"
+          />
 
           <el-card v-if="analytics.showRank && selectedRank" shadow="never" class="mb">
             <template #header>
@@ -2810,32 +3091,14 @@ function applyZoom(level: number) {
         <el-tab-pane label="Risk" name="risk">
           <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect risk metrics." type="info" show-icon class="mb" />
 
-          <el-card v-if="analyticsEq" shadow="never" class="mb">
-            <template #header>
-              <TooltipLabel
-                label="Risk widgets"
-                tooltip-text="Show/hide risk-related widgets in this tab. These toggles are stored in localStorage for this browser."
-              />
-            </template>
-            <div class="toggleGrid">
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showConcentration" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel label="Concentration risk" tooltip-text="Top1/top5 shares and HHI derived from counterparty debt shares." />
-              </div>
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showCapacity" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel label="Trustline capacity" tooltip-text="Aggregate incoming/outgoing used vs limit and bottleneck detection." />
-              </div>
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showBottlenecks" size="small" :disabled="!analyticsEq || !analytics.showCapacity" />
-                <TooltipLabel label="Bottlenecks" tooltip-text="Show bottleneck count/list inside Trustline capacity (threshold-based)." />
-              </div>
-              <div class="toggleLine">
-                <el-switch v-model="analytics.showActivity" size="small" :disabled="!analyticsEq" />
-                <TooltipLabel label="Activity / churn" tooltip-text="7/30/90-day counts from fixtures timestamps (trustlines/incidents/audit/transactions)." />
-              </div>
-            </div>
-          </el-card>
+          <GraphAnalyticsTogglesCard
+            v-if="analyticsEq"
+            title="Risk widgets"
+            title-tooltip-text="Show/hide risk-related widgets in this tab. These toggles are stored in localStorage for this browser."
+            :enabled="Boolean(analyticsEq)"
+            v-model="analytics"
+            :items="riskToggleItems"
+          />
 
           <el-card v-if="analyticsEq && analytics.showConcentration" shadow="never" class="mb">
             <template #header>

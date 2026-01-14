@@ -54,6 +54,53 @@ type Incident = {
   sla_seconds: number
 }
 
+type Debt = {
+  equivalent: string
+  debtor: string
+  creditor: string
+  amount: string
+}
+
+type Transaction = {
+  id?: string
+  tx_id: string
+  idempotency_key?: string | null
+  type: string
+  initiator_pid: string
+  payload: Record<string, unknown>
+  signatures?: unknown[] | null
+  state: string
+  error?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+type ClearingCycles = {
+  equivalents: Record<
+    string,
+    {
+      cycles: Array<
+        Array<{
+          equivalent: string
+          debtor: string
+          creditor: string
+          amount: string
+        }>
+      >
+    }
+  >
+}
+
+type GraphSnapshot = {
+  participants: Participant[]
+  trustlines: Trustline[]
+  incidents: Incident[]
+  equivalents: Equivalent[]
+  debts: Debt[]
+  audit_log: AuditLogEntry[]
+  transactions: Transaction[]
+}
+
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 
 const FIXTURES_BASE = '/admin-fixtures/v1'
@@ -73,6 +120,14 @@ async function loadJson<T>(relPath: string): Promise<T> {
   const data = (await res.json()) as T
   cache.set(key, data)
   return data
+}
+
+async function loadOptionalJson<T>(relPath: string, fallback: T): Promise<T> {
+  try {
+    return await loadJson<T>(relPath)
+  } catch {
+    return fallback
+  }
 }
 
 function matchOverride(pathname: string, overrides?: Record<string, ScenarioOverride>): ScenarioOverride | null {
@@ -236,6 +291,13 @@ export const mockApi = {
       const cfg = mockConfig ?? (mockConfig = await loadJson<Record<string, unknown>>('datasets/config.json'))
       return { success: true, data: cfg }
     })
+  },
+
+  async participantMetrics(
+    _pid: string,
+    _params?: { equivalent?: string | null; threshold?: string | number | null }
+  ): Promise<ApiEnvelope<never>> {
+    throw new Error('NOT_IMPLEMENTED')
   },
 
   async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
@@ -557,6 +619,108 @@ export const mockApi = {
         after_state: { state: 'aborted' },
       })
       return { success: true, data: { tx_id: txId, status: 'aborted' } }
+    })
+  },
+
+  async graphSnapshot(): Promise<ApiEnvelope<GraphSnapshot>> {
+    return withScenario('/api/v1/admin/graph/snapshot', async () => {
+      const [participants, trustlines, incidents, equivalents, debts, auditLog, transactions] = await Promise.all([
+        loadJson<Participant[]>('datasets/participants.json'),
+        loadJson<Trustline[]>('datasets/trustlines.json'),
+        loadJson<{ items: Incident[] }>('datasets/incidents.json').then((r) => r.items || []),
+        loadJson<Equivalent[]>('datasets/equivalents.json'),
+        loadOptionalJson<Debt[]>('datasets/debts.json', []),
+        loadOptionalJson<AuditLogEntry[]>('datasets/audit-log.json', []),
+        loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
+      ])
+
+      return {
+        success: true,
+        data: {
+          participants,
+          trustlines,
+          incidents,
+          equivalents,
+          debts,
+          audit_log: auditLog,
+          transactions,
+        },
+      }
+    })
+  },
+
+  async clearingCycles(): Promise<ApiEnvelope<ClearingCycles | null>> {
+    return withScenario('/api/v1/admin/clearing/cycles', async () => {
+      const cc = await loadOptionalJson<ClearingCycles | null>('datasets/clearing-cycles.json', null)
+      return { success: true, data: cc }
+    })
+  },
+
+  async graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
+    return withScenario('/api/v1/admin/graph/ego', async () => {
+      const pid = String(params.pid || '').trim()
+      const depth = params.depth ?? 1
+      const eq = String(params.equivalent || '').trim()
+      const statuses = new Set((params.status || []).map((s) => String(s || '').trim()).filter(Boolean))
+
+      const snapEnv = await mockApi.graphSnapshot()
+      if (!snapEnv.success) return snapEnv
+      const snap = snapEnv.data
+      if (!pid) return { success: true, data: snap }
+
+      const byPid = new Map(snap.participants.map((p) => [p.pid, p]))
+      const seen = new Set<string>()
+      const frontier: string[] = []
+
+      if (byPid.has(pid)) {
+        seen.add(pid)
+        frontier.push(pid)
+      }
+
+      const tlAllowed = (t: Trustline): boolean => {
+        if (eq && String(t.equivalent || '').trim() !== eq) return false
+        if (statuses.size && !statuses.has(String(t.status || '').trim())) return false
+        return true
+      }
+
+      for (let d = 0; d < depth; d++) {
+        const next: string[] = []
+        for (const cur of frontier) {
+          for (const t of snap.trustlines) {
+            if (!tlAllowed(t)) continue
+            if (t.from === cur && t.to && !seen.has(t.to)) {
+              seen.add(t.to)
+              next.push(t.to)
+            }
+            if (t.to === cur && t.from && !seen.has(t.from)) {
+              seen.add(t.from)
+              next.push(t.from)
+            }
+          }
+        }
+        frontier.splice(0, frontier.length, ...next)
+      }
+
+      const pids = seen
+      const participants = snap.participants.filter((p) => pids.has(p.pid))
+      const trustlines = snap.trustlines.filter((t) => pids.has(t.from) && pids.has(t.to) && tlAllowed(t))
+      const incidents = snap.incidents.filter((i) => pids.has(i.initiator_pid))
+      const debts = snap.debts.filter(
+        (d) => (pids.has(d.debtor) || pids.has(d.creditor)) && (!eq || String(d.equivalent || '').trim() === eq),
+      )
+
+      return {
+        success: true,
+        data: {
+          participants,
+          trustlines,
+          incidents,
+          equivalents: snap.equivalents,
+          debts,
+          audit_log: snap.audit_log,
+          transactions: snap.transactions,
+        },
+      }
     })
   },
 }

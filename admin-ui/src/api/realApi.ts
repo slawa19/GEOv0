@@ -1,6 +1,8 @@
 import { assertSuccess, type ApiEnvelope, ApiException } from './envelope'
+import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
 
 const DEFAULT_BASE = ''
+const DEFAULT_DEV_ADMIN_TOKEN = 'dev-admin-token-change-me'
 
 function baseUrl(): string {
   // When using Vite proxy, keep base empty and call relative paths.
@@ -9,11 +11,29 @@ function baseUrl(): string {
 
 function adminToken(): string | null {
   const key = 'admin-ui.adminToken'
+
+  // Prefer explicit env-configured token (useful for teams / non-default backend config).
+  const envTok = (import.meta.env.VITE_ADMIN_TOKEN || '').toString().trim()
+  if (envTok) return envTok
+
   try {
     const v = (localStorage.getItem(key) || '').trim()
-    return v || null
-  } catch {
+    if (v) return v
+
+    // Dev ergonomics: if no token is set yet, seed the default backend token.
+    // This avoids the UI spamming 403s on first run.
+    if (import.meta.env.DEV) {
+      try {
+        localStorage.setItem(key, DEFAULT_DEV_ADMIN_TOKEN)
+      } catch {
+        // ignore
+      }
+      return DEFAULT_DEV_ADMIN_TOKEN
+    }
+
     return null
+  } catch {
+    return import.meta.env.DEV ? DEFAULT_DEV_ADMIN_TOKEN : null
   }
 }
 
@@ -69,21 +89,6 @@ async function requestJson<T>(
   return { success: true, data: parsed as T }
 }
 
-function normalizeAdminStatusToUi(status: string | null | undefined): string {
-  const v = String(status || '').trim().toLowerCase()
-  if (v === 'suspended') return 'frozen'
-  if (v === 'deleted') return 'banned'
-  return v || ''
-}
-
-function mapUiStatusToAdmin(status: string | null | undefined): string | null {
-  const v = String(status || '').trim().toLowerCase()
-  if (!v) return null
-  if (v === 'frozen') return 'suspended'
-  if (v === 'banned') return 'deleted'
-  return v
-}
-
 function bestEffortTotal(page: number, perPage: number, itemsLen: number): number {
   const p = Math.max(1, page || 1)
   const pp = Math.max(1, perPage || 1)
@@ -98,13 +103,16 @@ function buildQuery(pathname: string, params: Record<string, unknown>): string {
   const u = new URL(`${baseUrl()}${pathname}`)
   for (const [k, v] of Object.entries(params || {})) {
     if (v === undefined || v === null || v === '') continue
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item === undefined || item === null || item === '') continue
+        u.searchParams.append(k, String(item))
+      }
+      continue
+    }
     u.searchParams.set(k, String(v))
   }
   return u.pathname + u.search
-}
-
-function notImplemented(message: string): never {
-  throw new ApiException({ status: 501, code: 'NOT_IMPLEMENTED', message })
 }
 
 export const realApi = {
@@ -167,12 +175,13 @@ export const realApi = {
     const per_page = params.per_page ?? 20
     const status = mapUiStatusToAdmin(params.status)
 
-    const payload = await requestJson<{ items: any[] }>(
+    const payload = await requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
       buildQuery('/api/v1/admin/participants', { ...params, status: status || undefined, page, per_page }),
       { admin: true },
     )
 
-    const items = (assertSuccess(payload).items || []).map((p: any) => ({
+    const backend = assertSuccess(payload)
+    const items = (backend.items || []).map((p: any) => ({
       ...p,
       status: normalizeAdminStatusToUi(p.status),
     }))
@@ -181,9 +190,9 @@ export const realApi = {
       success: true,
       data: {
         items,
-        page,
-        per_page,
-        total: bestEffortTotal(page, per_page, items.length),
+        page: backend.page ?? page,
+        per_page: backend.per_page ?? per_page,
+        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
       },
     }
   },
@@ -221,18 +230,19 @@ export const realApi = {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 20
 
-    const payload = await requestJson<{ items: any[] }>(
+    const payload = await requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
       buildQuery('/api/v1/admin/trustlines', { ...params, page, per_page }),
       { admin: true },
     )
-    const items = assertSuccess(payload).items || []
+    const backend = assertSuccess(payload)
+    const items = backend.items || []
     return {
       success: true,
       data: {
         items,
-        page,
-        per_page,
-        total: bestEffortTotal(page, per_page, items.length),
+        page: backend.page ?? page,
+        per_page: backend.per_page ?? per_page,
+        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
       },
     }
   },
@@ -247,18 +257,19 @@ export const realApi = {
   }): Promise<ApiEnvelope<{ items: any[]; page: number; per_page: number; total: number }>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 50
-    const payload = await requestJson<{ items: any[] }>(
+    const payload = await requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
       buildQuery('/api/v1/admin/audit-log', { ...params, page, per_page }),
       { admin: true },
     )
-    const items = assertSuccess(payload).items || []
+    const backend = assertSuccess(payload)
+    const items = backend.items || []
     return {
       success: true,
       data: {
         items,
-        page,
-        per_page,
-        total: bestEffortTotal(page, per_page, items.length),
+        page: backend.page ?? page,
+        per_page: backend.per_page ?? per_page,
+        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
       },
     }
   },
@@ -326,13 +337,79 @@ export const realApi = {
     page?: number
     per_page?: number
   }): Promise<ApiEnvelope<{ items: any[]; page: number; per_page: number; total: number }>> {
-    void params
-    notImplemented('Incidents are fixtures-only for now; backend /api/v1/admin/incidents is not available.')
+    const page = params.page ?? 1
+    const per_page = params.per_page ?? 20
+    return requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
+      buildQuery('/api/v1/admin/incidents', { page, per_page }),
+      { admin: true },
+    )
   },
 
   abortTx(txId: string, reason: string): Promise<ApiEnvelope<{ tx_id: string; status: 'aborted' }>> {
-    void txId
-    void reason
-    notImplemented('Abort transaction is not available in backend yet.')
+    return requestJson<{ tx_id: string; status: 'aborted' }>(
+      `/api/v1/admin/transactions/${encodeURIComponent(txId)}/abort`,
+      { method: 'POST', body: { reason }, admin: true },
+    )
+  },
+
+  graphSnapshot(): Promise<
+    ApiEnvelope<{
+      participants: any[]
+      trustlines: any[]
+      incidents: any[]
+      equivalents: any[]
+      debts: any[]
+      audit_log: any[]
+      transactions: any[]
+    }>
+  > {
+    return requestJson('/api/v1/admin/graph/snapshot', { admin: true }).then((r) => {
+      const s = assertSuccess(r) as any
+      const participants = (s.participants || []).map((p: any) => ({
+        ...p,
+        status: normalizeAdminStatusToUi(p.status),
+      }))
+      return { success: true, data: { ...s, participants } }
+    })
+  },
+
+  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[] }): Promise<
+    ApiEnvelope<{
+      participants: any[]
+      trustlines: any[]
+      incidents: any[]
+      equivalents: any[]
+      debts: any[]
+      audit_log: any[]
+      transactions: any[]
+    }>
+  > {
+    const pid = String(params?.pid || '').trim()
+    const depth = params?.depth ?? 1
+    const equivalent = String(params?.equivalent || '').trim()
+    const status = (params?.status || []).map((s) => String(s || '').trim()).filter(Boolean)
+    return requestJson(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status }), { admin: true }).then((r) => {
+      const s = assertSuccess(r) as any
+      const participants = (s.participants || []).map((p: any) => ({
+        ...p,
+        status: normalizeAdminStatusToUi(p.status),
+      }))
+      return { success: true, data: { ...s, participants } }
+    })
+  },
+
+  clearingCycles(params?: { participant_pid?: string }): Promise<ApiEnvelope<any>> {
+    const participant_pid = String(params?.participant_pid || '').trim()
+    return requestJson(buildQuery('/api/v1/admin/clearing/cycles', { participant_pid }), { admin: true })
+  },
+
+  async participantMetrics(pid: string, params?: { equivalent?: string | null; threshold?: string | number | null }) {
+    const eq = params?.equivalent ? String(params.equivalent) : undefined
+    const thrRaw = params?.threshold
+    const threshold = thrRaw === null || thrRaw === undefined || thrRaw === '' ? undefined : Number(thrRaw)
+
+    const pathname = `/api/v1/admin/participants/${encodeURIComponent(pid)}/metrics`
+    const url = buildQuery(pathname, { equivalent: eq, threshold: Number.isFinite(threshold) ? threshold : undefined })
+    return await requestJson(url, { admin: true })
   },
 }

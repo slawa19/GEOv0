@@ -67,6 +67,9 @@ dist/
 *.log
 *.tmp
 
+# Local run artifacts (scripts/run_local.ps1)
+.local-run/
+
 # Project-private working docs
 plans/
 docs/plans/

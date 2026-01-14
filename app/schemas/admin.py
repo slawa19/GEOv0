@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.types import StrictInt
+
+from app.schemas.trustline import TrustLine as TrustLineSchema
 
 
 class AdminConfigItem(BaseModel):
@@ -39,10 +43,19 @@ class AdminParticipantActionRequest(BaseModel):
     reason: str
 
 
+class AdminAbortTxRequest(BaseModel):
+    reason: str = Field(..., min_length=1)
+
+
+class AdminAbortTxResponse(BaseModel):
+    tx_id: str
+    status: str = Field(..., pattern="^aborted$")
+
+
 class AdminAuditLogItem(BaseModel):
-    id: str
+    id: UUID
     timestamp: datetime
-    actor_id: Optional[str] = None
+    actor_id: Optional[UUID] = None
     actor_role: Optional[str] = None
     action: str
     object_type: Optional[str] = None
@@ -59,6 +72,47 @@ class AdminAuditLogItem(BaseModel):
 
 class AdminAuditLogResponse(BaseModel):
     items: list[AdminAuditLogItem]
+
+
+class AdminPaginatedMeta(BaseModel):
+    page: StrictInt = Field(..., ge=1)
+    per_page: StrictInt = Field(..., ge=1, le=200)
+    total: StrictInt = Field(..., ge=0)
+
+
+class AdminParticipantListItem(BaseModel):
+    pid: str
+    display_name: str
+    type: str
+    status: str
+    verification_level: int
+    created_at: datetime
+
+
+class AdminParticipantsListResponse(AdminPaginatedMeta):
+    items: list[AdminParticipantListItem]
+
+
+class AdminTrustLinesListResponse(AdminPaginatedMeta):
+    items: list[TrustLineSchema]
+
+
+class AdminAuditLogListResponse(AdminPaginatedMeta):
+    items: list[AdminAuditLogItem]
+
+
+class AdminIncidentItem(BaseModel):
+    tx_id: str
+    state: str
+    initiator_pid: str
+    equivalent: str
+    age_seconds: StrictInt = Field(..., ge=0)
+    sla_seconds: StrictInt = Field(..., ge=0)
+    created_at: Optional[datetime] = None
+
+
+class AdminIncidentsListResponse(AdminPaginatedMeta):
+    items: list[AdminIncidentItem]
 
 
 class AdminMigrationsStatus(BaseModel):

@@ -71,6 +71,9 @@ async def test_admin_trustlines_list_filters_and_pagination(client, db_session):
     data = r.json()
     assert "items" in data
     assert len(data["items"]) == 2
+    assert data["page"] == 1
+    assert data["per_page"] == 20
+    assert data["total"] == 2
 
     # Assert: schema fields are hydrated
     by_pair = {(i["from"], i["to"], i["equivalent"]): i for i in data["items"]}
@@ -86,34 +89,50 @@ async def test_admin_trustlines_list_filters_and_pagination(client, db_session):
     # Filter by equivalent
     r = await client.get("/api/v1/admin/trustlines?equivalent=UAH", headers=headers)
     assert r.status_code == 200
-    items = r.json()["items"]
+    payload = r.json()
+    items = payload["items"]
     assert len(items) == 1
     assert items[0]["equivalent"] == "UAH"
+    assert payload["total"] == 1
 
     # Filter by status
     r = await client.get("/api/v1/admin/trustlines?status=frozen", headers=headers)
     assert r.status_code == 200
-    items = r.json()["items"]
+    payload = r.json()
+    items = payload["items"]
     assert len(items) == 1
     assert items[0]["status"] == "frozen"
+    assert payload["total"] == 1
 
     # Filter by creditor/debtor
     r = await client.get("/api/v1/admin/trustlines?creditor=alice", headers=headers)
     assert r.status_code == 200
-    items = r.json()["items"]
+    payload = r.json()
+    items = payload["items"]
     assert len(items) == 1
     assert items[0]["from"] == "alice"
+    assert payload["total"] == 1
 
     r = await client.get("/api/v1/admin/trustlines?debtor=bob", headers=headers)
     assert r.status_code == 200
-    items = r.json()["items"]
+    payload = r.json()
+    items = payload["items"]
     assert len(items) == 2
+    assert payload["total"] == 2
 
     # Pagination
     r = await client.get("/api/v1/admin/trustlines?per_page=1&page=1", headers=headers)
     assert r.status_code == 200
-    assert len(r.json()["items"]) == 1
+    payload = r.json()
+    assert len(payload["items"]) == 1
+    assert payload["page"] == 1
+    assert payload["per_page"] == 1
+    assert payload["total"] == 2
 
     r = await client.get("/api/v1/admin/trustlines?per_page=1&page=2", headers=headers)
     assert r.status_code == 200
-    assert len(r.json()["items"]) == 1
+    payload = r.json()
+    assert len(payload["items"]) == 1
+    assert payload["page"] == 2
+    assert payload["per_page"] == 1
+    assert payload["total"] == 2

@@ -6,6 +6,7 @@ import logging
 import time
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 
@@ -146,6 +147,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="GEO Hub Backend", debug=settings.DEBUG, lifespan=lifespan)
+
+# CORS middleware configuration for dev environment
+app.add_middleware(
+    CORSMiddleware,
+    # Allow local dev servers (Vite) on any port, but only on localhost.
+    # This avoids fragile port-specific CORS issues on Windows.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.middleware("http")
