@@ -9,8 +9,8 @@
 
 ## Seed docs & generators
 
-- Seed model for the current demo community: [docs/ru/seeds/seed-greenfield-village-100.md](docs/ru/seeds/seed-greenfield-village-100.md)
-- Authoring guide (how to design community economics + keep fixtures consistent): [docs/ru/seeds/README.md](docs/ru/seeds/README.md)
+- Seed model for the current demo community: [docs/ru/seeds/seed-greenfield-village-100.md](../docs/ru/seeds/seed-greenfield-village-100.md)
+- Authoring guide (how to design community economics + keep fixtures consistent): [docs/ru/seeds/README.md](../docs/ru/seeds/README.md)
 
 ## Source of truth
 
