@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import CopyIconButton from '../ui/CopyIconButton.vue'
 import { debounce } from '../utils/debounce'
 import type { AuditLogEntry } from '../types/domain'
 
@@ -93,6 +94,15 @@ watch(q, () => {
 
     <div v-else>
       <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
+        <el-table-column prop="id" width="90">
+          <template #header><TooltipLabel label="ID" tooltip-text="Audit log entry id." /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.id }}
+              <CopyIconButton :text="String(scope.row.id)" label="Audit ID" />
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column prop="timestamp" width="190">
           <template #header><TooltipLabel label="Timestamp" tooltip-key="audit.timestamp" /></template>
         </el-table-column>
@@ -110,6 +120,12 @@ watch(q, () => {
         </el-table-column>
         <el-table-column prop="object_id" min-width="220">
           <template #header><TooltipLabel label="Object ID" tooltip-key="audit.objectId" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.object_id }}
+              <CopyIconButton :text="scope.row.object_id" label="Object ID" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="reason" min-width="160">
           <template #header><TooltipLabel label="Reason" tooltip-key="audit.reason" /></template>
@@ -135,11 +151,21 @@ watch(q, () => {
       <el-tabs>
         <el-tab-pane label="Details">
           <el-descriptions :column="1" border>
-            <el-descriptions-item label="ID">{{ selected.id }}</el-descriptions-item>
+            <el-descriptions-item label="ID">
+              <span>
+                {{ selected.id }}
+                <CopyIconButton :text="String(selected.id)" label="Audit ID" />
+              </span>
+            </el-descriptions-item>
             <el-descriptions-item label="Timestamp">{{ selected.timestamp }}</el-descriptions-item>
             <el-descriptions-item label="Actor">{{ selected.actor_id }} ({{ selected.actor_role }})</el-descriptions-item>
             <el-descriptions-item label="Action">{{ selected.action }}</el-descriptions-item>
-            <el-descriptions-item label="Object">{{ selected.object_type }} / {{ selected.object_id }}</el-descriptions-item>
+            <el-descriptions-item label="Object">
+              <span>
+                {{ selected.object_type }} / {{ selected.object_id }}
+                <CopyIconButton :text="selected.object_id" label="Object ID" />
+              </span>
+            </el-descriptions-item>
             <el-descriptions-item label="Reason">{{ selected.reason }}</el-descriptions-item>
             <el-descriptions-item label="Request ID">{{ selected.request_id }}</el-descriptions-item>
             <el-descriptions-item label="IP Address">{{ selected.ip_address }}</el-descriptions-item>

@@ -123,6 +123,11 @@ function go(path: string) {
   void router.push({ path, query: { ...route.query } })
 }
 
+function goTrustlinesWithThreshold() {
+  const t = String(threshold.value || '').trim()
+  void router.push({ path: '/trustlines', query: { ...route.query, ...(t ? { threshold: t } : {}) } })
+}
+
 onMounted(() => {
   void load()
   void loadAudit()
@@ -189,7 +194,7 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
               <TooltipLabel label="Trustline bottlenecks" tooltip-key="dashboard.bottlenecks" />
               <div class="hdr__right">
                 <el-input v-model="threshold" size="small" style="width: 120px" placeholder="0.10" />
-                <el-button size="small" @click="go('/trustlines')">View all</el-button>
+                <el-button size="small" @click="goTrustlinesWithThreshold()">View all</el-button>
               </div>
             </div>
           </template>

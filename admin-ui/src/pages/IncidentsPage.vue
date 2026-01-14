@@ -5,6 +5,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import CopyIconButton from '../ui/CopyIconButton.vue'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { useConfigStore } from '../stores/config'
 import type { Incident } from '../types/domain'
@@ -152,6 +153,12 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
         <el-table-column prop="tx_id" min-width="220">
           <template #header><TooltipLabel label="Tx ID" tooltip-key="incidents.txId" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.tx_id }}
+              <CopyIconButton :text="scope.row.tx_id" label="Tx ID" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="state" width="200">
           <template #header><TooltipLabel label="State" tooltip-key="incidents.state" /></template>
@@ -161,9 +168,21 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         </el-table-column>
         <el-table-column prop="initiator_pid" min-width="220">
           <template #header><TooltipLabel label="Initiator" tooltip-key="incidents.initiator" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.initiator_pid }}
+              <CopyIconButton :text="scope.row.initiator_pid" label="Initiator PID" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="equivalent" width="120">
           <template #header><TooltipLabel label="Equivalent" tooltip-key="incidents.eq" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.equivalent }}
+              <CopyIconButton :text="scope.row.equivalent" label="Equivalent" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="age_seconds" width="120">
           <template #header><TooltipLabel label="Age" tooltip-key="incidents.age" /></template>
@@ -206,7 +225,12 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
   <el-drawer v-model="drawerOpen" title="Incident details" size="45%">
     <div v-if="selected">
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="Transaction ID">{{ selected.tx_id }}</el-descriptions-item>
+        <el-descriptions-item label="Transaction ID">
+          <span>
+            {{ selected.tx_id }}
+            <CopyIconButton :text="selected.tx_id" label="Tx ID" />
+          </span>
+        </el-descriptions-item>
         <el-descriptions-item label="State">
           <el-tag type="warning" size="small">{{ selected.state }}</el-tag>
         </el-descriptions-item>
@@ -214,11 +238,13 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
           <el-link type="primary" @click="goParticipant(selected.initiator_pid)">
             {{ selected.initiator_pid }}
           </el-link>
+          <CopyIconButton :text="selected.initiator_pid" label="Initiator PID" />
         </el-descriptions-item>
         <el-descriptions-item label="Equivalent">
           <el-link type="primary" @click="goEquivalent(selected.equivalent)">
             {{ selected.equivalent }}
           </el-link>
+          <CopyIconButton :text="selected.equivalent" label="Equivalent" />
         </el-descriptions-item>
         <el-descriptions-item label="Age">
           <span :class="{ bad: isOverSla(selected) }">{{ fmtAge(selected.age_seconds) }}</span>

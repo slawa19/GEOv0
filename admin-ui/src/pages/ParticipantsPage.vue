@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import CopyIconButton from '../ui/CopyIconButton.vue'
 import { useAuthStore } from '../stores/auth'
 import { debounce } from '../utils/debounce'
 import type { Participant } from '../types/domain'
@@ -171,6 +172,12 @@ const typeOptions = computed(() => [
       <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
         <el-table-column prop="pid" min-width="240">
           <template #header><TooltipLabel label="PID" tooltip-key="participants.pid" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.pid }}
+              <CopyIconButton :text="scope.row.pid" label="PID" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="display_name" min-width="200">
           <template #header><TooltipLabel label="Name" tooltip-key="participants.displayName" /></template>
@@ -236,7 +243,12 @@ const typeOptions = computed(() => [
   <el-drawer v-model="drawerOpen" title="Participant details" size="45%">
     <div v-if="selected">
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="PID">{{ selected.pid }}</el-descriptions-item>
+        <el-descriptions-item label="PID">
+          <span>
+            {{ selected.pid }}
+            <CopyIconButton :text="selected.pid" label="PID" />
+          </span>
+        </el-descriptions-item>
         <el-descriptions-item label="Display Name">{{ selected.display_name }}</el-descriptions-item>
         <el-descriptions-item label="Type">
           <el-tag :type="selected.type === 'business' ? 'warning' : 'info'" size="small">

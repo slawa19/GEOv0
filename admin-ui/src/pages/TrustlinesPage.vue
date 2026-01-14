@@ -7,6 +7,7 @@ import { api } from '../api'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import CopyIconButton from '../ui/CopyIconButton.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import type { Trustline } from '../types/domain'
@@ -95,6 +96,14 @@ watch(perPage, () => {
   void load()
 })
 
+watch(
+  () => route.query.threshold,
+  (v) => {
+    if (typeof v === 'string' && v.trim()) threshold.value = v
+  },
+  { immediate: true },
+)
+
 const debouncedReload = debounce(() => {
   page.value = 1
   void load()
@@ -139,12 +148,30 @@ const statusOptions = computed(() => [
       <el-table :data="items" size="small" @row-click="openRow" class="geoTable">
         <el-table-column prop="equivalent" width="120">
           <template #header><TooltipLabel label="Equivalent" tooltip-key="trustlines.eq" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.equivalent }}
+              <CopyIconButton :text="scope.row.equivalent" label="Equivalent" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="from" min-width="210">
           <template #header><TooltipLabel label="From" tooltip-key="trustlines.from" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.from }}
+              <CopyIconButton :text="scope.row.from" label="From PID" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="to" min-width="210">
           <template #header><TooltipLabel label="To" tooltip-key="trustlines.to" /></template>
+          <template #default="scope">
+            <span>
+              {{ scope.row.to }}
+              <CopyIconButton :text="scope.row.to" label="To PID" />
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="limit" width="120">
           <template #header><TooltipLabel label="Limit" tooltip-key="trustlines.limit" /></template>
@@ -190,11 +217,13 @@ const statusOptions = computed(() => [
           <el-link type="primary" @click="goEquivalent(selected.equivalent)">
             {{ selected.equivalent }}
           </el-link>
+          <CopyIconButton :text="selected.equivalent" label="Equivalent" />
         </el-descriptions-item>
         <el-descriptions-item label="From (Creditor)">
           <el-link type="primary" @click="goParticipant(selected.from)">
             {{ selected.from }}
           </el-link>
+          <CopyIconButton :text="selected.from" label="From PID" />
           <span v-if="selected.from_display_name" class="display-name">
             ({{ selected.from_display_name }})
           </span>
@@ -203,6 +232,7 @@ const statusOptions = computed(() => [
           <el-link type="primary" @click="goParticipant(selected.to)">
             {{ selected.to }}
           </el-link>
+          <CopyIconButton :text="selected.to" label="To PID" />
           <span v-if="selected.to_display_name" class="display-name">
             ({{ selected.to_display_name }})
           </span>

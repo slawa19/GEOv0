@@ -8,6 +8,7 @@ import { loadFixtureJson } from '../api/fixtures'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { throttle } from '../utils/throttle'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import CopyIconButton from '../ui/CopyIconButton.vue'
 
 cytoscape.use(fcose)
 
@@ -2329,7 +2330,12 @@ function applyZoom(level: number) {
   <el-drawer v-model="drawerOpen" title="Details" size="40%">
     <div v-if="selected && selected.kind === 'node'">
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="PID">{{ selected.pid }}</el-descriptions-item>
+        <el-descriptions-item label="PID">
+          <span>
+            {{ selected.pid }}
+            <CopyIconButton :text="selected.pid" label="PID" />
+          </span>
+        </el-descriptions-item>
         <el-descriptions-item label="Display name">{{ selected.display_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="Status">{{ selected.status || '-' }}</el-descriptions-item>
         <el-descriptions-item label="Type">{{ selected.type || '-' }}</el-descriptions-item>
@@ -3060,9 +3066,24 @@ function applyZoom(level: number) {
 
     <div v-else-if="selected && selected.kind === 'edge'">
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="Equivalent">{{ selected.equivalent }}</el-descriptions-item>
-        <el-descriptions-item label="From">{{ selected.from }}</el-descriptions-item>
-        <el-descriptions-item label="To">{{ selected.to }}</el-descriptions-item>
+        <el-descriptions-item label="Equivalent">
+          <span>
+            {{ selected.equivalent }}
+            <CopyIconButton :text="selected.equivalent" label="Equivalent" />
+          </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="From">
+          <span>
+            {{ selected.from }}
+            <CopyIconButton :text="selected.from" label="From PID" />
+          </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="To">
+          <span>
+            {{ selected.to }}
+            <CopyIconButton :text="selected.to" label="To PID" />
+          </span>
+        </el-descriptions-item>
         <el-descriptions-item label="Status">{{ selected.status }}</el-descriptions-item>
         <el-descriptions-item label="Limit">{{ money(selected.limit) }}</el-descriptions-item>
         <el-descriptions-item label="Used">{{ money(selected.used) }}</el-descriptions-item>
