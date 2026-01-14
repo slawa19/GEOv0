@@ -399,6 +399,18 @@ Recommended on Windows (one command, avoids PowerShell quoting / port pitfalls):
 .\scripts\run_local.ps1 start
 ```
 
+Choose a full community dataset (and refresh DB):
+
+```powershell
+# Greenfield (100 participants)
+.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures
+.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity greenfield-village-100
+
+# Riverside (50 participants)
+.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity riverside-town-50 -RegenerateFixtures
+.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity riverside-town-50
+```
+
 Stop:
 
 ```powershell
@@ -431,6 +443,10 @@ python scripts/seed_db.py --source fixtures
 # Choose a full community pack without modifying tracked fixtures (writes to .local-run/fixture-packs):
 python scripts/seed_db.py --source fixtures --community greenfield-village-100
 python scripts/seed_db.py --source fixtures --community riverside-town-50
+
+# Validate a generated pack (example: Riverside)
+cd admin-ui
+node scripts/validate-fixtures.mjs --only-pack --v1-dir ..\.local-run\fixture-packs\riverside-town-50\v1
 
 # Legacy small seed set:
 # python scripts/seed_db.py --source seeds

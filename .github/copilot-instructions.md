@@ -35,3 +35,15 @@
 
 - TrustLine direction is `from → to` = creditor → debtor (risk limit), *not* the reverse.
 - Keep changes deterministic and validate fixtures (`npm run validate:fixtures`) after regeneration.
+
+## Copilot operational notes (Windows)
+
+- Never paste Python code into PowerShell: run Python snippets via the Python interpreter (or prefer `mcp_pylance_mcp_s_pylanceRunCodeSnippet` / a dedicated script).
+- Avoid heredoc-style snippets in PowerShell (`<<EOF` / `<<'PY'`) — they are bash syntax and will fail.
+- If a terminal shows a `>>>` prompt, it is a Python REPL; exit it (`exit()`), then run PowerShell commands.
+- SQLite gotcha: column name `limit` is a SQL keyword; queries must quote it as `"limit"`.
+
+## Local DB sanity checks
+
+- Preferred: run [scripts/check_sqlite_db.py](../scripts/check_sqlite_db.py) using `.venv\Scripts\python.exe`.
+- Or use the runner action: `.\scripts\run_local.ps1 check-db`.

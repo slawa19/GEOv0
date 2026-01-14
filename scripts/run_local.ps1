@@ -17,13 +17,25 @@
     Перезапуск только бэкенда с флагом --reload.
 
 .EXAMPLE
+    .\run_local.ps1 -Action reset-db -SeedSource fixtures -FixturesCommunity riverside-town-50 -RegenerateFixtures
+    Пересоздать SQLite DB и наполнить данными Riverside (50 участников).
+
+.EXAMPLE
+    .\run_local.ps1 -Action reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures
+    Пересоздать SQLite DB и наполнить данными Greenfield (100 участников).
+
+.EXAMPLE
+    .\run_local.ps1 -Action check-db
+    Быстро проверить целостность текущей SQLite DB (geov0.db).
+
+.EXAMPLE
     .\run_local.ps1 -Action status -Verbose
     Показать статус сервисов с детальной информацией.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'restart-backend', 'status', 'reset-db')]
+    [ValidateSet('start', 'stop', 'restart', 'restart-backend', 'status', 'reset-db', 'check-db')]
     [string]$Action = 'start',
 
     [int]$BackendPort = 18000,
@@ -486,6 +498,16 @@ switch ($Action) {
         $seedArgs = Get-SeedDbArgs -SeedSource $SeedSource -FixturesCommunity $FixturesCommunity -RegenerateFixtures:$RegenerateFixtures
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
         Write-Host "DB reset complete." -ForegroundColor Green
+        exit 0
+    }
+
+    'check-db' {
+        $dbPath = Join-Path $RepoRoot 'geov0.db'
+        if (-not (Test-Path $dbPath)) {
+            throw "DB not found: $dbPath. Run: .\scripts\run_local.ps1 reset-db"
+        }
+
+        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\check_sqlite_db.py') -Description "check_sqlite_db.py"
         exit 0
     }
 

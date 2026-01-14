@@ -116,6 +116,16 @@ If you see `ERR_CONNECTION_REFUSED` on `http://localhost:5173/`, use the repo ru
 .\scripts\run_local.ps1 start
 ```
 
+Pick a full community dataset (recommended for graph testing):
+
+```powershell
+.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures
+.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity greenfield-village-100
+
+.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity riverside-town-50 -RegenerateFixtures
+.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity riverside-town-50
+```
+
 ### 7.1 Start backend + DB (Docker Compose)
 From repo root:
 
@@ -137,7 +147,17 @@ If Docker is unavailable, you can run the backend locally on SQLite:
   - Choose a full community pack without modifying tracked fixtures (writes to `.local-run/fixture-packs`):
     - `python scripts/seed_db.py --source fixtures --community greenfield-village-100`
     - `python scripts/seed_db.py --source fixtures --community riverside-town-50`
+  - Validate a generated pack (example: Riverside):
+    - `cd admin-ui && node scripts/validate-fixtures.mjs --only-pack --v1-dir ..\.local-run\fixture-packs\riverside-town-50\v1`
   - Legacy small seed set: `python scripts/seed_db.py --source seeds`
+
+Note on Windows terminals:
+- Python code snippets (e.g. SQLite checks) must be run with `python` / `.venv\Scripts\python.exe`.
+- If you paste Python code into PowerShell, you'll get PowerShell `ParserError` and `The term 'db' is not recognized...` errors.
+
+Quick DB sanity check:
+- From repo root: `.\.venv\Scripts\python.exe scripts\check_sqlite_db.py`
+- Or via the repo runner: `.\scripts\run_local.ps1 check-db`
 - Run API:
   - `python -m uvicorn app.main:app --reload --port 8000`
   - If `8000` is unavailable on Windows, use `--port 18000`.

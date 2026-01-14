@@ -3,10 +3,33 @@ import path from 'node:path'
 import process from 'node:process'
 
 const repoRoot = path.resolve(process.cwd(), '..')
-const canonicalV1Dir = path.join(repoRoot, 'admin-fixtures', 'v1')
-const canonicalDir = path.join(repoRoot, 'admin-fixtures', 'v1', 'datasets')
-const publicV1Dir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1')
-const publicDir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1', 'datasets')
+const defaultCanonicalV1Dir = path.join(repoRoot, 'admin-fixtures', 'v1')
+const defaultCanonicalDir = path.join(repoRoot, 'admin-fixtures', 'v1', 'datasets')
+const defaultPublicV1Dir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1')
+const defaultPublicDir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1', 'datasets')
+
+function parseArgs(argv) {
+  const out = {
+    v1Dir: null,
+    onlyPack: false,
+  }
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i]
+    if (a === '--only-pack') {
+      out.onlyPack = true
+    } else if (a === '--v1-dir') {
+      const v = argv[i + 1]
+      if (!v) throw new Error('Missing value for --v1-dir')
+      out.v1Dir = path.resolve(process.cwd(), v)
+      i += 1
+    } else {
+      throw new Error(`Unknown arg: ${a}`)
+    }
+  }
+
+  return out
+}
 
 function allowedSeedIds() {
   return ['greenfield-village-100', 'riverside-town-50']
@@ -302,6 +325,34 @@ async function validateSide(label, dir) {
 }
 
 async function main() {
+  const opts = parseArgs(process.argv.slice(2))
+
+  if (opts.onlyPack) {
+    const v1Dir = opts.v1Dir ?? defaultCanonicalV1Dir
+    const datasetsDir = path.join(v1Dir, 'datasets')
+
+    const meta = await readJson(path.join(v1Dir, '_meta.json'))
+    validateMeta(meta, 'PACK')
+    const pack = await validateSide('PACK', datasetsDir)
+
+    console.log('Fixtures OK (pack)')
+    console.log(`- v1Dir: ${v1Dir}`)
+    console.log(`- seed_id: ${meta.seed_id}`)
+    console.log(`- participants: ${pack.participants.length}`)
+    console.log(`- equivalents: ${Array.from(new Set(asEquivalentCodes(pack.equivalents))).sort().join(', ')}`)
+    console.log(`- trustlines: ${pack.trustlines.length}`)
+    console.log(`- incidents: ${pack.incidentItems.length}`)
+    if (Array.isArray(pack.debts)) console.log(`- debts: ${pack.debts.length}`)
+    if (pack.clearingCycles) console.log(`- clearing-cycles: yes`)
+    if (Array.isArray(pack.transactions)) console.log(`- transactions: ${pack.transactions.length}`)
+    return
+  }
+
+  const canonicalV1Dir = defaultCanonicalV1Dir
+  const canonicalDir = defaultCanonicalDir
+  const publicV1Dir = defaultPublicV1Dir
+  const publicDir = defaultPublicDir
+
   const canonicalMeta = await readJson(path.join(canonicalV1Dir, '_meta.json'))
   const publicMeta = await readJson(path.join(publicV1Dir, '_meta.json'))
   validateMeta(canonicalMeta, 'CANONICAL')
