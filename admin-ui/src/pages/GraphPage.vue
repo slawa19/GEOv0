@@ -7,7 +7,7 @@ import fcose from 'cytoscape-fcose'
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
 import { useGraphData } from '../composables/useGraphData'
-import { makeMetricsKey } from './graph/graphPageHelpers'
+import { useGraphAnalytics } from '../composables/useGraphAnalytics'
 import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { throttle } from '../utils/throttle'
@@ -15,13 +15,8 @@ import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../ui/GraphAnalyticsTogglesCard.vue'
 import type {
-  AuditLogEntry,
   ClearingCycles,
-  Debt,
-  Equivalent,
-  Incident,
   Participant,
-  Transaction,
   Trustline,
 } from './graph/graphTypes'
 
@@ -220,102 +215,10 @@ const layoutSpacing = ref<number>(2.2)
 const toolbarTab = ref<'filters' | 'display' | 'navigate'>('filters')
 
 const isRealMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toString().toLowerCase() === 'real')
-
-type ParticipantMetrics = {
-  pid: string
-  equivalent: string | null
-  balance_rows: BalanceRow[]
-  counterparty?: {
-    eq: string
-    totalDebt: string
-    totalCredit: string
-    creditors: CounterpartySplitRow[]
-    debtors: CounterpartySplitRow[]
-  } | null
-  concentration?: {
-    eq: string
-    outgoing: { top1: number; top5: number; hhi: number }
-    incoming: { top1: number; top5: number; hhi: number }
-  } | null
-  distribution?: {
-    eq: string
-    min_atoms: string
-    max_atoms: string
-    bins: Array<{ from_atoms: string; to_atoms: string; count: number }>
-  } | null
-  rank?: {
-    eq: string
-    rank: number
-    n: number
-    percentile: number
-    net: string
-  } | null
-  capacity?: {
-    eq: string
-    out: { limit: string; used: string; pct: number }
-    inc: { limit: string; used: string; pct: number }
-    bottlenecks: Array<{ dir: 'out' | 'in'; other: string; trustline: Trustline }>
-  } | null
-  activity?: {
-    windows: number[]
-    trustline_created: Record<number, number>
-    trustline_closed: Record<number, number>
-    incident_count: Record<number, number>
-    participant_ops: Record<number, number>
-    payment_committed: Record<number, number>
-    clearing_committed: Record<number, number>
-    has_transactions: boolean
-  } | null
-}
-
-const metricsCache = ref(new Map<string, ParticipantMetrics>())
-const metricsLoading = ref(false)
-const metricsError = ref<string | null>(null)
-
 const selected = ref<SelectedInfo | null>(null)
 
-function metricsKey(pid: string, eqCode: string | null, thr: string): string {
-  return makeMetricsKey(pid, eqCode, thr)
-}
-
-const selectedPid = computed(() => (selected.value && selected.value.kind === 'node' ? selected.value.pid : ''))
-const selectedEqCode = computed(() => analyticsEq.value)
-
-const selectedMetrics = computed(() => {
-  const pid = selectedPid.value
-  if (!pid) return null
-  const key = metricsKey(pid, selectedEqCode.value, String(threshold.value || ''))
-  return metricsCache.value.get(key) || null
-})
-
-async function loadSelectedMetrics() {
-  if (!isRealMode.value) return
-  const pid = selectedPid.value
-  if (!pid) return
-
-  const eqCode = selectedEqCode.value
-  const thr = String(threshold.value || '')
-  const key = metricsKey(pid, eqCode, thr)
-  if (metricsCache.value.has(key)) return
-
-  metricsLoading.value = true
-  metricsError.value = null
-  try {
-    const res = await api.participantMetrics(pid, { equivalent: eqCode, threshold: thr })
-    const m = assertSuccess(res) as ParticipantMetrics
-    metricsCache.value.set(key, m)
-  } catch (e: any) {
-    metricsError.value = String(e?.message || e || 'Failed to load metrics')
-  } finally {
-    metricsLoading.value = false
-  }
-}
-
-watch([selectedPid, selectedEqCode, threshold], () => {
-  // Lazy-load only when a participant is selected.
-  // In real-mode this ensures analytics are computed on the full dataset,
-  // not the current ego graph.
-  void loadSelectedMetrics()
+watch(selected, () => {
+  stopSelectedPulse()
 })
 
 const STORAGE_KEYS = {
@@ -387,7 +290,6 @@ const {
   participants,
   trustlines,
   incidents,
-  equivalents,
   debts,
   clearingCycles,
   auditLog,
@@ -404,6 +306,26 @@ const {
   focusRootPid,
   focusDepth,
   statusFilter,
+})
+
+const graphAnalytics = useGraphAnalytics({
+  isRealMode,
+  threshold,
+  analyticsEq,
+
+  precisionByEq,
+  availableEquivalents,
+  participantByPid,
+
+  participants,
+  trustlines,
+  debts,
+  incidents,
+  auditLog,
+  transactions,
+  clearingCycles,
+
+  selected,
 })
 
 const activeCycleKey = ref('')
@@ -539,26 +461,6 @@ function pct(x: number, digits = 0): string {
   if (!Number.isFinite(x)) return '0%'
   const p = clamp(x * 100, 0, 100)
   return `${p.toFixed(digits)}%`
-}
-
-function parseIsoMillis(ts?: string | null): number | null {
-  const s = String(ts || '').trim()
-  if (!s) return null
-  const ms = Date.parse(s)
-  return Number.isFinite(ms) ? ms : null
-}
-
-function decimalToAtoms(input: string, precision: number): bigint {
-  const raw = String(input ?? '').trim()
-  if (!raw) return 0n
-  const m = /^(-)?(\d+)(?:\.(\d+))?$/.exec(raw)
-  if (!m) return 0n
-  const neg = Boolean(m[1])
-  const intPart = m[2] || '0'
-  const fracPart = m[3] || ''
-  const frac = (fracPart + '0'.repeat(precision)).slice(0, precision)
-  const atoms = BigInt((intPart + frac).replace(/^0+(?=\d)/, '') || '0')
-  return neg ? -atoms : atoms
 }
 
 function atomsToDecimal(atoms: bigint, precision: number): string {
@@ -705,544 +607,23 @@ function onConnectionRowClick(row: ConnectionRow) {
   goToPid(row.counterparty_pid)
 }
 
-type BalanceRow = {
-  equivalent: string
-  outgoing_limit: string
-  outgoing_used: string
-  incoming_limit: string
-  incoming_used: string
-  total_debt: string
-  total_credit: string
-  net: string
-}
-
-const selectedBalanceRows = computed<BalanceRow[]>(() => {
-  const m = selectedMetrics.value
-  if (m?.balance_rows) return m.balance_rows
-  if (!selected.value || selected.value.kind !== 'node') return []
-  const pid = selected.value.pid
-  const precOf = (eqCode: string) => precisionByEq.value.get(eqCode) ?? 2
-
-  const debtAtomsByEq = new Map<string, bigint>()
-  const creditAtomsByEq = new Map<string, bigint>()
-
-  for (const d of debts.value || []) {
-    const eqCode = normEq(d.equivalent)
-    if (!eqCode) continue
-    const p = precOf(eqCode)
-    const amt = decimalToAtoms(d.amount, p)
-    if (d.debtor === pid) debtAtomsByEq.set(eqCode, (debtAtomsByEq.get(eqCode) || 0n) + amt)
-    if (d.creditor === pid) creditAtomsByEq.set(eqCode, (creditAtomsByEq.get(eqCode) || 0n) + amt)
-  }
-
-  const outLimitByEq = new Map<string, bigint>()
-  const outUsedByEq = new Map<string, bigint>()
-  const inLimitByEq = new Map<string, bigint>()
-  const inUsedByEq = new Map<string, bigint>()
-
-  for (const t of trustlines.value || []) {
-    const eqCode = normEq(t.equivalent)
-    if (!eqCode) continue
-    const p = precOf(eqCode)
-    const lim = decimalToAtoms(t.limit, p)
-    const used = decimalToAtoms(t.used, p)
-    if (t.from === pid) {
-      outLimitByEq.set(eqCode, (outLimitByEq.get(eqCode) || 0n) + lim)
-      outUsedByEq.set(eqCode, (outUsedByEq.get(eqCode) || 0n) + used)
-    }
-    if (t.to === pid) {
-      inLimitByEq.set(eqCode, (inLimitByEq.get(eqCode) || 0n) + lim)
-      inUsedByEq.set(eqCode, (inUsedByEq.get(eqCode) || 0n) + used)
-    }
-  }
-
-  const eqs = (availableEquivalents.value || []).filter((x) => x !== 'ALL')
-  const wanted = analyticsEq.value ? [analyticsEq.value] : eqs
-
-  return wanted
-    .map((eqCode) => {
-      const p = precOf(eqCode)
-      const debt = debtAtomsByEq.get(eqCode) || 0n
-      const credit = creditAtomsByEq.get(eqCode) || 0n
-      const net = credit - debt
-      return {
-        equivalent: eqCode,
-        outgoing_limit: atomsToDecimal(outLimitByEq.get(eqCode) || 0n, p),
-        outgoing_used: atomsToDecimal(outUsedByEq.get(eqCode) || 0n, p),
-        incoming_limit: atomsToDecimal(inLimitByEq.get(eqCode) || 0n, p),
-        incoming_used: atomsToDecimal(inUsedByEq.get(eqCode) || 0n, p),
-        total_debt: atomsToDecimal(debt, p),
-        total_credit: atomsToDecimal(credit, p),
-        net: atomsToDecimal(net, p),
-      }
-    })
-    .filter((r) => {
-      // Hide completely empty rows when eq=ALL.
-      if (analyticsEq.value) return true
-      const p = precOf(r.equivalent)
-      return !(
-        decimalToAtoms(r.outgoing_limit, p) === 0n &&
-        decimalToAtoms(r.incoming_limit, p) === 0n &&
-        decimalToAtoms(r.total_debt, p) === 0n &&
-        decimalToAtoms(r.total_credit, p) === 0n
-      )
-    })
-})
+const selectedBalanceRows = graphAnalytics.selectedBalanceRows
 
 // Note: we keep split counterparties (creditors vs debtors) as the primary UI.
 
-type CounterpartySplitRow = {
-  pid: string
-  display_name: string
-  amount: string
-  share: number
-}
+const selectedCounterpartySplit = graphAnalytics.selectedCounterpartySplit
 
-const selectedCounterpartySplit = computed(() => {
-  const m = selectedMetrics.value
-  if (m?.counterparty && m.counterparty.eq) {
-    const eqCode = m.counterparty.eq
-    const prec = precisionByEq.value.get(eqCode) ?? 2
-    return {
-      eq: eqCode,
-      totalDebtAtoms: decimalToAtoms(m.counterparty.totalDebt, prec),
-      totalCreditAtoms: decimalToAtoms(m.counterparty.totalCredit, prec),
-      creditors: m.counterparty.creditors,
-      debtors: m.counterparty.debtors,
-    }
-  }
+const selectedConcentration = graphAnalytics.selectedConcentration
 
-  if (!selected.value || selected.value.kind !== 'node') {
-    return {
-      eq: null as string | null,
-      totalDebtAtoms: 0n,
-      totalCreditAtoms: 0n,
-      creditors: [] as CounterpartySplitRow[],
-      debtors: [] as CounterpartySplitRow[],
-    }
-  }
+const netDistribution = graphAnalytics.netDistribution
 
-  const eqCode = analyticsEq.value
-  if (!eqCode) {
-    return {
-      eq: null as string | null,
-      totalDebtAtoms: 0n,
-      totalCreditAtoms: 0n,
-      creditors: [] as CounterpartySplitRow[],
-      debtors: [] as CounterpartySplitRow[],
-    }
-  }
+const selectedRank = graphAnalytics.selectedRank
 
-  const pid = selected.value.pid
-  const prec = precisionByEq.value.get(eqCode) ?? 2
+const selectedCapacity = graphAnalytics.selectedCapacity
 
-  const creditors = new Map<string, bigint>() // who pid owes to (pid is debtor)
-  const debtors = new Map<string, bigint>() // who owes pid (pid is creditor)
+const selectedActivity = graphAnalytics.selectedActivity
 
-  let totalDebtAtoms = 0n
-  let totalCreditAtoms = 0n
-
-  for (const d of debts.value || []) {
-    if (normEq(d.equivalent) !== eqCode) continue
-    const amt = decimalToAtoms(d.amount, prec)
-    if (d.debtor === pid) {
-      totalDebtAtoms += amt
-      const other = String(d.creditor || '').trim()
-      if (other) creditors.set(other, (creditors.get(other) || 0n) + amt)
-    } else if (d.creditor === pid) {
-      totalCreditAtoms += amt
-      const other = String(d.debtor || '').trim()
-      if (other) debtors.set(other, (debtors.get(other) || 0n) + amt)
-    }
-  }
-
-  const toRows = (m: Map<string, bigint>, total: bigint): CounterpartySplitRow[] => {
-    const out: CounterpartySplitRow[] = []
-    for (const [otherPid, amt] of m.entries()) {
-      const p = participantByPid.value.get(otherPid)
-      const name = String(p?.display_name || '').trim()
-      const share = total > 0n ? Number(amt) / Number(total) : 0
-      out.push({
-        pid: otherPid,
-        display_name: name || otherPid,
-        amount: atomsToDecimal(amt, prec),
-        share,
-      })
-    }
-    out.sort((a, b) => {
-      const ai = decimalToAtoms(a.amount, prec)
-      const bi = decimalToAtoms(b.amount, prec)
-      if (ai === bi) return a.pid.localeCompare(b.pid)
-      return bi > ai ? 1 : -1
-    })
-    return out
-  }
-
-  return {
-    eq: eqCode,
-    totalDebtAtoms,
-    totalCreditAtoms,
-    creditors: toRows(creditors, totalDebtAtoms),
-    debtors: toRows(debtors, totalCreditAtoms),
-  }
-})
-
-function hhiFromShares(rows: Array<{ share: number }>): number {
-  let hhi = 0
-  for (const r of rows) {
-    const s = Number(r.share) || 0
-    hhi += s * s
-  }
-  return hhi
-}
-
-function hhiLevel(hhi: number): { label: string; type: 'success' | 'warning' | 'danger' } {
-  if (hhi >= 0.25) return { label: 'high', type: 'danger' }
-  if (hhi >= 0.15) return { label: 'medium', type: 'warning' }
-  return { label: 'low', type: 'success' }
-}
-
-const selectedConcentration = computed(() => {
-  const eqCode = selectedCounterpartySplit.value.eq
-  if (!eqCode) {
-    return {
-      eq: null as string | null,
-      outgoing: { top1: 0, top5: 0, hhi: 0, level: hhiLevel(0) },
-      incoming: { top1: 0, top5: 0, hhi: 0, level: hhiLevel(0) },
-    }
-  }
-
-  // outgoing = who you owe to (creditors map)
-  const outRows = selectedCounterpartySplit.value.creditors
-  const inRows = selectedCounterpartySplit.value.debtors
-
-  const outTop1 = outRows[0]?.share || 0
-  const outTop5 = outRows.slice(0, 5).reduce((acc, r) => acc + (r.share || 0), 0)
-  const outHhi = hhiFromShares(outRows)
-
-  const inTop1 = inRows[0]?.share || 0
-  const inTop5 = inRows.slice(0, 5).reduce((acc, r) => acc + (r.share || 0), 0)
-  const inHhi = hhiFromShares(inRows)
-
-  return {
-    eq: eqCode,
-    outgoing: { top1: outTop1, top5: outTop5, hhi: outHhi, level: hhiLevel(outHhi) },
-    incoming: { top1: inTop1, top5: inTop5, hhi: inHhi, level: hhiLevel(inHhi) },
-  }
-})
-
-type NetDist = {
-  eq: string
-  n: number
-  netAtomsByPid: Map<string, bigint>
-  sortedPids: string[]
-  min: bigint
-  max: bigint
-  bins: Array<{ from: bigint; to: bigint; count: number }>
-}
-
-const netDistribution = computed<NetDist | null>(() => {
-  const m = selectedMetrics.value
-  if (m?.distribution && m.distribution.eq) {
-    const bins = (m.distribution.bins || []).map((b) => ({
-      from: BigInt(b.from_atoms || '0'),
-      to: BigInt(b.to_atoms || '0'),
-      count: Number(b.count || 0),
-    }))
-    return {
-      eq: m.distribution.eq,
-      n: bins.reduce((acc, b) => acc + (b.count || 0), 0),
-      netAtomsByPid: new Map(),
-      sortedPids: [],
-      min: BigInt(m.distribution.min_atoms || '0'),
-      max: BigInt(m.distribution.max_atoms || '0'),
-      bins,
-    }
-  }
-
-  const eqCode = analyticsEq.value
-  if (!eqCode) return null
-
-  const prec = precisionByEq.value.get(eqCode) ?? 2
-  const net = new Map<string, bigint>()
-
-  for (const p of participants.value || []) {
-    if (p?.pid) net.set(p.pid, 0n)
-  }
-
-  for (const d of debts.value || []) {
-    if (normEq(d.equivalent) !== eqCode) continue
-    const amt = decimalToAtoms(d.amount, prec)
-    const debtor = String(d.debtor || '').trim()
-    const creditor = String(d.creditor || '').trim()
-    if (debtor) net.set(debtor, (net.get(debtor) || 0n) - amt)
-    if (creditor) net.set(creditor, (net.get(creditor) || 0n) + amt)
-  }
-
-  const pids = Array.from(net.keys())
-  pids.sort((a, b) => {
-    const av = net.get(a) || 0n
-    const bv = net.get(b) || 0n
-    if (av === bv) return a.localeCompare(b)
-    return bv > av ? 1 : -1
-  })
-
-  let min = 0n
-  let max = 0n
-  for (const v of net.values()) {
-    if (v < min) min = v
-    if (v > max) max = v
-  }
-
-  // Histogram
-  const binsCount = 20
-  const span = max - min
-  const bins: Array<{ from: bigint; to: bigint; count: number }> = []
-  if (span <= 0n) {
-    bins.push({ from: min, to: max, count: pids.length })
-  } else {
-    // integer bucket width (ceil)
-    const w = (span + BigInt(binsCount) - 1n) / BigInt(binsCount)
-    for (let i = 0; i < binsCount; i++) {
-      const from = min + BigInt(i) * w
-      const to = i === binsCount - 1 ? max : from + w
-      bins.push({ from, to, count: 0 })
-    }
-    for (const pid of pids) {
-      const v = net.get(pid) || 0n
-      const idx = w > 0n ? Number((v - min) / w) : 0
-      const safe = clamp(idx, 0, binsCount - 1)
-      const bucket = bins[safe]
-      if (bucket) bucket.count += 1
-    }
-  }
-
-  return { eq: eqCode, n: pids.length, netAtomsByPid: net, sortedPids: pids, min, max, bins }
-})
-
-const selectedRank = computed(() => {
-  const m = selectedMetrics.value
-  if (m?.rank && m.rank.eq) return m.rank
-
-  if (!selected.value || selected.value.kind !== 'node') return null
-  const dist = netDistribution.value
-  if (!dist) return null
-  const idx = dist.sortedPids.indexOf(selected.value.pid)
-  if (idx < 0) return null
-  const rank = idx + 1
-  const n = dist.n
-  const percentile = n <= 1 ? 1 : (n - rank) / (n - 1) // 1.0 = top
-  return {
-    eq: dist.eq,
-    rank,
-    n,
-    percentile,
-    net: atomsToDecimal(dist.netAtomsByPid.get(selected.value.pid) || 0n, precisionByEq.value.get(dist.eq) ?? 2),
-  }
-})
-
-const selectedCapacity = computed(() => {
-  const m = selectedMetrics.value
-  if (m?.capacity && m.capacity.eq) {
-    return {
-      eq: m.capacity.eq,
-      out: {
-        limit: decimalToAtoms(m.capacity.out.limit, precisionByEq.value.get(m.capacity.eq) ?? 2),
-        used: decimalToAtoms(m.capacity.out.used, precisionByEq.value.get(m.capacity.eq) ?? 2),
-        pct: Number(m.capacity.out.pct || 0),
-      },
-      inc: {
-        limit: decimalToAtoms(m.capacity.inc.limit, precisionByEq.value.get(m.capacity.eq) ?? 2),
-        used: decimalToAtoms(m.capacity.inc.used, precisionByEq.value.get(m.capacity.eq) ?? 2),
-        pct: Number(m.capacity.inc.pct || 0),
-      },
-      bottlenecks: (m.capacity.bottlenecks || []).map((b) => ({ dir: b.dir, other: b.other, t: b.trustline })),
-    }
-  }
-
-  if (!selected.value || selected.value.kind !== 'node') return null
-  const pid = selected.value.pid
-  const eqCode = analyticsEq.value
-  const precOf = (eqc: string) => precisionByEq.value.get(eqc) ?? 2
-
-  let outLimit = 0n
-  let outUsed = 0n
-  let inLimit = 0n
-  let inUsed = 0n
-
-  const bottlenecks: Array<{ dir: 'out' | 'in'; other: string; t: Trustline }> = []
-
-  for (const t of trustlines.value || []) {
-    const e = normEq(t.equivalent)
-    if (eqCode && e !== eqCode) continue
-    const p = precOf(e)
-    const lim = decimalToAtoms(t.limit, p)
-    const used = decimalToAtoms(t.used, p)
-    if (t.from === pid) {
-      outLimit += lim
-      outUsed += used
-      if (isBottleneck(t)) bottlenecks.push({ dir: 'out', other: t.to, t })
-    } else if (t.to === pid) {
-      inLimit += lim
-      inUsed += used
-      if (isBottleneck(t)) bottlenecks.push({ dir: 'in', other: t.from, t })
-    }
-  }
-
-  const outPct = outLimit > 0n ? Number(outUsed) / Number(outLimit) : 0
-  const inPct = inLimit > 0n ? Number(inUsed) / Number(inLimit) : 0
-
-  return {
-    eq: eqCode,
-    out: { limit: outLimit, used: outUsed, pct: outPct },
-    inc: { limit: inLimit, used: inUsed, pct: inPct },
-    bottlenecks,
-  }
-})
-
-const selectedActivity = computed(() => {
-  const m = selectedMetrics.value
-  if (m?.activity) {
-    return {
-      windows: m.activity.windows,
-      trustlineCreated: m.activity.trustline_created,
-      trustlineClosed: m.activity.trustline_closed,
-      incidentCount: m.activity.incident_count,
-      participantOps: m.activity.participant_ops,
-      paymentCommitted: m.activity.payment_committed,
-      clearingCommitted: m.activity.clearing_committed,
-      hasTransactions: Boolean(m.activity.has_transactions),
-    }
-  }
-
-  if (!selected.value || selected.value.kind !== 'node') return null
-  const pid = selected.value.pid
-  const eqCode = analyticsEq.value
-
-  const tsCandidates: number[] = []
-  for (const t of trustlines.value || []) {
-    const ms = parseIsoMillis(t.created_at)
-    if (ms !== null) tsCandidates.push(ms)
-  }
-  for (const i of incidents.value || []) {
-    const ms = parseIsoMillis(i.created_at)
-    if (ms !== null) tsCandidates.push(ms)
-  }
-  for (const a of auditLog.value || []) {
-    const ms = parseIsoMillis(a.timestamp)
-    if (ms !== null) tsCandidates.push(ms)
-  }
-
-  for (const t of transactions.value || []) {
-    const ms = parseIsoMillis(t.updated_at || t.created_at)
-    if (ms !== null) tsCandidates.push(ms)
-  }
-
-  const now = tsCandidates.length ? Math.max(...tsCandidates) : Date.now()
-  const dayMs = 24 * 60 * 60 * 1000
-
-  const windows = [7, 30, 90]
-  const trustlineCreated: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
-  const trustlineClosed: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
-  const incidentCount: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
-  const participantOps: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
-  const paymentCommitted: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
-  const clearingCommitted: Record<number, number> = { 7: 0, 30: 0, 90: 0 }
-
-  for (const t of trustlines.value || []) {
-    if (eqCode && normEq(t.equivalent) !== eqCode) continue
-    if (t.from !== pid && t.to !== pid) continue
-    const ms = parseIsoMillis(t.created_at)
-    if (ms === null) continue
-    const ageDays = (now - ms) / dayMs
-    for (const w of windows) {
-      if (ageDays <= w) {
-        trustlineCreated[w] = (trustlineCreated[w] ?? 0) + 1
-        // NOTE: fixtures-first approximation.
-        // This is NOT a "trustline closed event" counter.
-        // It's: among trustlines created inside the window, how many are currently status=closed.
-        // Do not copy this semantic into the future backend API (use event-based closed_at/audit-log instead).
-        if (String(t.status || '').toLowerCase() === 'closed') trustlineClosed[w] = (trustlineClosed[w] ?? 0) + 1
-      }
-    }
-  }
-
-  for (const i of incidents.value || []) {
-    if (eqCode && normEq(i.equivalent) !== eqCode) continue
-    if (i.initiator_pid !== pid) continue
-    const ms = parseIsoMillis(i.created_at)
-    if (ms === null) continue
-    const ageDays = (now - ms) / dayMs
-    for (const w of windows) {
-      if (ageDays <= w) incidentCount[w] = (incidentCount[w] ?? 0) + 1
-    }
-  }
-
-  for (const a of auditLog.value || []) {
-    if (String(a.object_id || '') !== pid) continue
-    const action = String(a.action || '')
-    if (!action.startsWith('PARTICIPANT_')) continue
-    const ms = parseIsoMillis(a.timestamp)
-    if (ms === null) continue
-    const ageDays = (now - ms) / dayMs
-    for (const w of windows) {
-      if (ageDays <= w) participantOps[w] = (participantOps[w] ?? 0) + 1
-    }
-  }
-
-  for (const tx of transactions.value || []) {
-    const type = String(tx.type || '')
-    if (type !== 'PAYMENT' && type !== 'CLEARING') continue
-    if (String(tx.state || '') !== 'COMMITTED') continue
-
-    const payload = (tx.payload || {}) as Record<string, unknown>
-    const payloadEq = typeof payload.equivalent === 'string' ? payload.equivalent : null
-    if (eqCode && payloadEq && normEq(payloadEq) !== eqCode) continue
-
-    let involved = false
-    if (type === 'PAYMENT') {
-      const from = typeof payload.from === 'string' ? payload.from : ''
-      const to = typeof payload.to === 'string' ? payload.to : ''
-      involved = from === pid || to === pid
-    } else {
-      const edges = Array.isArray(payload.edges) ? (payload.edges as any[]) : []
-      involved = edges.some((e) => e && (e.debtor === pid || e.creditor === pid))
-      if (!involved) involved = String(tx.initiator_pid || '') === pid
-    }
-    if (!involved) continue
-
-    const ms = parseIsoMillis(tx.updated_at || tx.created_at)
-    if (ms === null) continue
-    const ageDays = (now - ms) / dayMs
-    for (const w of windows) {
-      if (ageDays <= w) {
-        if (type === 'PAYMENT') paymentCommitted[w] = (paymentCommitted[w] ?? 0) + 1
-        if (type === 'CLEARING') clearingCommitted[w] = (clearingCommitted[w] ?? 0) + 1
-      }
-    }
-  }
-
-  return {
-    windows,
-    trustlineCreated,
-    trustlineClosed,
-    incidentCount,
-    participantOps,
-    paymentCommitted,
-    clearingCommitted,
-    hasTransactions: (transactions.value || []).length > 0,
-  }
-})
-
-const selectedCycles = computed(() => {
-  if (!selected.value || selected.value.kind !== 'node') return []
-  const eqCode = analyticsEq.value
-  if (!eqCode) return []
-  const pid = selected.value.pid
-
-  const cycles = clearingCycles.value?.equivalents?.[eqCode]?.cycles || []
-  return cycles.filter((c) => c.some((e) => e.debtor === pid || e.creditor === pid)).slice(0, 10)
-})
+const selectedCycles = graphAnalytics.selectedCycles
 
 const filteredTrustlines = computed(() => {
   const eqKey = normEq(eq.value)

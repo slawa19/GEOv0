@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { toastApiError } from '../api/errorToast'

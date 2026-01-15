@@ -574,7 +574,7 @@ export const mockApi = {
         const ms = safeIsoToMs(t.created_at)
         if (!ms) continue
         for (const w of windows) {
-          if (ms >= nowMs - w * 24 * 3600 * 1000) trustline_created[w] += 1
+          if (ms >= nowMs - w * 24 * 3600 * 1000) trustline_created[w] = (trustline_created[w] ?? 0) + 1
         }
       }
 

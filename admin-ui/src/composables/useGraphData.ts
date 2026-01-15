@@ -26,7 +26,7 @@ export function useGraphData(opts: {
   focusMode: Ref<boolean>
   focusRootPid: Ref<string>
   focusDepth: Ref<number>
-  statusFilter: Ref<string>
+  statusFilter: Ref<string[]>
 }) {
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -64,6 +64,32 @@ export function useGraphData(opts: {
       if (p?.pid) m.set(p.pid, p)
     }
     return m
+  })
+
+  const filteredTrustlines = computed(() => {
+    const eqKey = normEq(opts.eq.value)
+    const allowed = new Set((opts.statusFilter.value || []).map((s) => String(s).toLowerCase()))
+    return (trustlines.value || []).filter((t) => {
+      if (eqKey !== 'ALL' && normEq(t.equivalent) !== eqKey) return false
+      if (allowed.size && !allowed.has(String(t.status || '').toLowerCase())) return false
+      return true
+    })
+  })
+
+  const incidentRatioByPid = computed(() => {
+    const eqKey = normEq(opts.eq.value)
+    const ratios = new Map<string, number>()
+
+    for (const i of incidents.value || []) {
+      if (eqKey !== 'ALL' && normEq(i.equivalent) !== eqKey) continue
+      const pid = String(i.initiator_pid || '').trim()
+      if (!pid) continue
+      const ratio = i.sla_seconds > 0 ? i.age_seconds / i.sla_seconds : 0
+      const prev = ratios.get(pid) || 0
+      if (ratio > prev) ratios.set(pid, ratio)
+    }
+
+    return ratios
   })
 
   let fullSnapshot: GraphSnapshotPayload | null = null
@@ -174,6 +200,8 @@ export function useGraphData(opts: {
     availableEquivalents,
     precisionByEq,
     participantByPid,
+    filteredTrustlines,
+    incidentRatioByPid,
 
     loadData,
     refreshForFocusMode,

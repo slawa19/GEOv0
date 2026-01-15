@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiException } from './envelope'
 import { requestJson } from './realApi'
 
 afterEach(() => {
@@ -16,7 +15,7 @@ describe('realApi.requestJson', () => {
       vi.fn(async () => new Response('not-json', { status: 200, statusText: 'OK' })) as any,
     )
 
-    await expect(requestJson('/api/v1/health')).rejects.toMatchObject<ApiException>({
+    await expect(requestJson('/api/v1/health')).rejects.toMatchObject({
       name: 'ApiException',
       code: 'INVALID_JSON',
     })
@@ -30,7 +29,7 @@ describe('realApi.requestJson', () => {
       vi.fn(async () => new Response('', { status: 200, statusText: 'OK' })) as any,
     )
 
-    await expect(requestJson('/api/v1/health')).rejects.toMatchObject<ApiException>({
+    await expect(requestJson('/api/v1/health')).rejects.toMatchObject({
       name: 'ApiException',
       code: 'INVALID_JSON',
     })
