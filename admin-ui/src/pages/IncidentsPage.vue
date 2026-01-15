@@ -132,19 +132,35 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Incidents" tooltip-key="nav.incidents" />
-        <el-tooltip placement="top" effect="dark" :show-after="850" popper-class="geoTooltip geoTooltip--menu">
+        <TooltipLabel
+          label="Incidents"
+          tooltip-key="nav.incidents"
+        />
+        <el-tooltip
+          placement="top"
+          effect="dark"
+          :show-after="850"
+          popper-class="geoTooltip geoTooltip--menu"
+        >
           <template #content>
             <span class="geoTooltipText geoTooltipText--clamp2">
               Incidents whose Age is greater than SLA (on this page).
             </span>
           </template>
-          <el-tag type="warning">SLA breaches: {{ overSlaCount }}</el-tag>
+          <el-tag type="warning">
+            SLA breaches: {{ overSlaCount }}
+          </el-tag>
         </el-tooltip>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
     <el-alert
       v-else-if="lastAbortTxId"
       type="success"
@@ -155,59 +171,142 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       <template #default>
         <div class="okrow">
           <div>Audit entry should be available for {{ lastAbortTxId }}.</div>
-          <el-button size="small" type="primary" @click="goAudit(lastAbortTxId)">Open audit log</el-button>
+          <el-button
+            size="small"
+            type="primary"
+            @click="goAudit(lastAbortTxId)"
+          >
+            Open audit log
+          </el-button>
         </div>
       </template>
     </el-alert>
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
-    <el-empty v-else-if="items.length === 0" description="No incidents" />
+    <el-empty
+      v-else-if="items.length === 0"
+      description="No incidents"
+    />
 
     <div v-else>
-      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="clickable-table geoTable">
-        <el-table-column prop="tx_id" min-width="200">
-          <template #header><TooltipLabel label="Tx ID" tooltip-key="incidents.txId" /></template>
+      <el-table
+        :data="items"
+        size="small"
+        table-layout="fixed"
+        class="clickable-table geoTable"
+        @row-click="openRow"
+      >
+        <el-table-column
+          prop="tx_id"
+          min-width="200"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Tx ID"
+              tooltip-key="incidents.txId"
+            />
+          </template>
           <template #default="scope">
             <span class="geoInlineRow">
               <TableCellEllipsis :text="scope.row.tx_id" />
-              <CopyIconButton :text="scope.row.tx_id" label="Tx ID" />
+              <CopyIconButton
+                :text="scope.row.tx_id"
+                label="Tx ID"
+              />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="state" width="170">
-          <template #header><TooltipLabel label="State" tooltip-key="incidents.state" /></template>
+        <el-table-column
+          prop="state"
+          width="170"
+        >
+          <template #header>
+            <TooltipLabel
+              label="State"
+              tooltip-key="incidents.state"
+            />
+          </template>
           <template #default="scope">
-            <el-tag type="warning" size="small">{{ scope.row.state }}</el-tag>
+            <el-tag
+              type="warning"
+              size="small"
+            >
+              {{ scope.row.state }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="initiator_pid" min-width="200">
-          <template #header><TooltipLabel label="Initiator" tooltip-key="incidents.initiator" /></template>
+        <el-table-column
+          prop="initiator_pid"
+          min-width="200"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Initiator"
+              tooltip-key="incidents.initiator"
+            />
+          </template>
           <template #default="scope">
             <span class="geoInlineRow">
               <TableCellEllipsis :text="scope.row.initiator_pid" />
-              <CopyIconButton :text="scope.row.initiator_pid" label="Initiator PID" />
+              <CopyIconButton
+                :text="scope.row.initiator_pid"
+                label="Initiator PID"
+              />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="equivalent" width="100">
-          <template #header><TooltipLabel label="Equivalent" tooltip-key="incidents.eq" /></template>
+        <el-table-column
+          prop="equivalent"
+          width="100"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Equivalent"
+              tooltip-key="incidents.eq"
+            />
+          </template>
           <template #default="scope">
             <span>
               {{ scope.row.equivalent }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="age_seconds" width="120">
-          <template #header><TooltipLabel label="Age" tooltip-key="incidents.age" /></template>
+        <el-table-column
+          prop="age_seconds"
+          width="120"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Age"
+              tooltip-key="incidents.age"
+            />
+          </template>
           <template #default="scope">
             <span :class="{ bad: isOverSla(scope.row) }">{{ fmtAge(scope.row.age_seconds) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="sla_seconds" width="120">
-          <template #header><TooltipLabel label="SLA" tooltip-key="incidents.sla" /></template>
-          <template #default="scope">{{ fmtAge(scope.row.sla_seconds) }}</template>
+        <el-table-column
+          prop="sla_seconds"
+          width="120"
+        >
+          <template #header>
+            <TooltipLabel
+              label="SLA"
+              tooltip-key="incidents.sla"
+            />
+          </template>
+          <template #default="scope">
+            {{ fmtAge(scope.row.sla_seconds) }}
+          </template>
         </el-table-column>
-        <el-table-column label="Actions" width="140">
+        <el-table-column
+          label="Actions"
+          width="140"
+        >
           <template #default="scope">
             <el-button
               size="small"
@@ -223,7 +322,9 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint geoHint">Showing {{ items.length }} / {{ perPage }} on this page</div>
+        <div class="pager__hint geoHint">
+          Showing {{ items.length }} / {{ perPage }} on this page
+        </div>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="perPage"
@@ -236,37 +337,69 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
     </div>
   </el-card>
 
-  <el-drawer v-model="drawerOpen" title="Incident details" size="45%">
+  <el-drawer
+    v-model="drawerOpen"
+    title="Incident details"
+    size="45%"
+  >
     <div v-if="selected">
-      <el-descriptions :column="1" border>
+      <el-descriptions
+        :column="1"
+        border
+      >
         <el-descriptions-item label="Transaction ID">
           <span class="geoInlineRow">
             <TableCellEllipsis :text="selected.tx_id" />
-            <CopyIconButton :text="selected.tx_id" label="Tx ID" />
+            <CopyIconButton
+              :text="selected.tx_id"
+              label="Tx ID"
+            />
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="State">
-          <el-tag type="warning" size="small">{{ selected.state }}</el-tag>
+          <el-tag
+            type="warning"
+            size="small"
+          >
+            {{ selected.state }}
+          </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="Initiator PID">
           <span class="geoInlineRow">
-            <el-link type="primary" @click="goParticipant(selected.initiator_pid)">
+            <el-link
+              type="primary"
+              @click="goParticipant(selected.initiator_pid)"
+            >
               {{ selected.initiator_pid }}
             </el-link>
-            <CopyIconButton :text="selected.initiator_pid" label="Initiator PID" />
+            <CopyIconButton
+              :text="selected.initiator_pid"
+              label="Initiator PID"
+            />
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="Equivalent">
-          <el-link type="primary" @click="goEquivalent(selected.equivalent)">
+          <el-link
+            type="primary"
+            @click="goEquivalent(selected.equivalent)"
+          >
             {{ selected.equivalent }}
           </el-link>
         </el-descriptions-item>
         <el-descriptions-item label="Age">
           <span :class="{ bad: isOverSla(selected) }">{{ fmtAge(selected.age_seconds) }}</span>
-          <span v-if="isOverSla(selected)" class="sla-warn"> (over SLA!)</span>
+          <span
+            v-if="isOverSla(selected)"
+            class="sla-warn"
+          > (over SLA!)</span>
         </el-descriptions-item>
-        <el-descriptions-item label="SLA">{{ fmtAge(selected.sla_seconds) }}</el-descriptions-item>
-        <el-descriptions-item v-if="selected.created_at" label="Created At">
+        <el-descriptions-item label="SLA">
+          {{ fmtAge(selected.sla_seconds) }}
+        </el-descriptions-item>
+        <el-descriptions-item
+          v-if="selected.created_at"
+          label="Created At"
+        >
           {{ fmtTs(selected.created_at) }}
         </el-descriptions-item>
       </el-descriptions>
@@ -274,10 +407,17 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       <el-divider>Related data</el-divider>
 
       <div class="drawer-actions">
-        <el-button type="primary" size="small" @click="goParticipant(selected.initiator_pid)">
+        <el-button
+          type="primary"
+          size="small"
+          @click="goParticipant(selected.initiator_pid)"
+        >
           View initiator participant
         </el-button>
-        <el-button size="small" @click="goAudit(selected.tx_id)">
+        <el-button
+          size="small"
+          @click="goAudit(selected.tx_id)"
+        >
           View audit log
         </el-button>
       </div>

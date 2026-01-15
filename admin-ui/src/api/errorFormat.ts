@@ -21,7 +21,7 @@ export function formatApiError(e: unknown): { title: string; hint?: string } {
     const status = e.status
 
     // Default title is already decorated in realApi.ts (method + url + status + server msg)
-    let title = e.message || `HTTP ${status}`
+    const title = e.message || `HTTP ${status}`
 
     // Provide a more actionable hint for common dev misconfigs.
     let hint: string | undefined

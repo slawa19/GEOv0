@@ -216,27 +216,69 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Equivalents" tooltip-key="nav.equivalents" />
+        <TooltipLabel
+          label="Equivalents"
+          tooltip-key="nav.equivalents"
+        />
         <div class="hdr__actions">
-          <el-button :disabled="authStore.isReadOnly" type="primary" @click="openCreate">Create</el-button>
-          <el-switch v-model="includeInactive" active-text="Include inactive" />
-          <el-tag type="info">Active: {{ activeCount }}</el-tag>
+          <el-button
+            :disabled="authStore.isReadOnly"
+            type="primary"
+            @click="openCreate"
+          >
+            Create
+          </el-button>
+          <el-switch
+            v-model="includeInactive"
+            active-text="Include inactive"
+          />
+          <el-tag type="info">
+            Active: {{ activeCount }}
+          </el-tag>
         </div>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
-    <el-empty v-else-if="items.length === 0" description="No equivalents" />
+    <el-empty
+      v-else-if="items.length === 0"
+      description="No equivalents"
+    />
 
     <div v-else>
-      <el-table :data="items" size="small" table-layout="fixed" @cell-mouse-enter="onCellMouseEnter" class="geoTable">
-        <el-table-column prop="code" label="Code" width="200">
+      <el-table
+        :data="items"
+        size="small"
+        table-layout="fixed"
+        class="geoTable"
+        @cell-mouse-enter="onCellMouseEnter"
+      >
+        <el-table-column
+          prop="code"
+          label="Code"
+          width="200"
+        >
           <template #default="scope">
             <div class="code">
-              <div class="code__main">{{ scope.row.code }}</div>
-              <div class="code__sub" v-if="usageByCode[scope.row.code]">
+              <div class="code__main">
+                {{ scope.row.code }}
+              </div>
+              <div
+                v-if="usageByCode[scope.row.code]"
+                class="code__sub"
+              >
                 <template v-if="typeof usageByCode[scope.row.code]!.debts === 'number' || typeof usageByCode[scope.row.code]!.integrity_checkpoints === 'number'">
                   Used by {{ usageByCode[scope.row.code]!.trustlines ?? 0 }} TL / {{ usageByCode[scope.row.code]!.debts ?? 0 }} Debts / {{ usageByCode[scope.row.code]!.integrity_checkpoints ?? 0 }} IC
                 </template>
@@ -244,23 +286,62 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                   Used by {{ usageByCode[scope.row.code]!.trustlines ?? 0 }} TL / {{ usageByCode[scope.row.code]!.incidents ?? 0 }} Inc
                 </template>
               </div>
-              <div class="code__sub" v-else-if="usageLoadingByCode[scope.row.code]">
+              <div
+                v-else-if="usageLoadingByCode[scope.row.code]"
+                class="code__sub"
+              >
                 Loading usage…
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="precision" label="Precision" width="90" align="center" header-align="center" />
-        <el-table-column prop="description" label="Description" min-width="280" show-overflow-tooltip />
-        <el-table-column prop="is_active" label="Active" width="90" align="center" header-align="center">
+        <el-table-column
+          prop="precision"
+          label="Precision"
+          width="90"
+          align="center"
+          header-align="center"
+        />
+        <el-table-column
+          prop="description"
+          label="Description"
+          min-width="280"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="is_active"
+          label="Active"
+          width="90"
+          align="center"
+          header-align="center"
+        >
           <template #default="scope">
-            <el-tag v-if="scope.row.is_active" type="success">yes</el-tag>
-            <el-tag v-else type="info">no</el-tag>
+            <el-tag
+              v-if="scope.row.is_active"
+              type="success"
+            >
+              yes
+            </el-tag>
+            <el-tag
+              v-else
+              type="info"
+            >
+              no
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="280">
+        <el-table-column
+          label="Actions"
+          width="280"
+        >
           <template #default="scope">
-            <el-button size="small" :disabled="authStore.isReadOnly" @click="openEdit(scope.row)">Edit</el-button>
+            <el-button
+              size="small"
+              :disabled="authStore.isReadOnly"
+              @click="openEdit(scope.row)"
+            >
+              Edit
+            </el-button>
             <el-button
               v-if="scope.row.is_active"
               size="small"
@@ -288,47 +369,96 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             >
               Delete
             </el-button>
-            <el-button size="small" @click="goAudit(scope.row)">Audit</el-button>
+            <el-button
+              size="small"
+              @click="goAudit(scope.row)"
+            >
+              Audit
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
   </el-card>
 
-  <el-dialog v-model="createOpen" title="Create Equivalent" width="520">
+  <el-dialog
+    v-model="createOpen"
+    title="Create Equivalent"
+    width="520"
+  >
     <el-form label-width="120">
       <el-form-item label="Code">
-        <el-input v-model="createForm.code" placeholder="e.g. UAH" style="width: 200px" />
+        <el-input
+          v-model="createForm.code"
+          placeholder="e.g. UAH"
+          style="width: 200px"
+        />
       </el-form-item>
       <el-form-item label="Precision">
-        <el-input-number v-model="createForm.precision" :min="0" :max="18" />
+        <el-input-number
+          v-model="createForm.precision"
+          :min="0"
+          :max="18"
+        />
       </el-form-item>
       <el-form-item label="Description">
-        <el-input v-model="createForm.description" placeholder="Human description" />
+        <el-input
+          v-model="createForm.description"
+          placeholder="Human description"
+        />
       </el-form-item>
       <el-form-item label="Active">
         <el-switch v-model="createForm.is_active" />
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="createOpen = false">Cancel</el-button>
-      <el-button type="primary" :disabled="authStore.isReadOnly" @click="createEq">Create</el-button>
+      <el-button @click="createOpen = false">
+        Cancel
+      </el-button>
+      <el-button
+        type="primary"
+        :disabled="authStore.isReadOnly"
+        @click="createEq"
+      >
+        Create
+      </el-button>
     </template>
   </el-dialog>
 
-  <el-dialog v-model="editOpen" title="Edit Equivalent" width="520">
-    <div v-if="editing" class="muted">Editing: {{ editing.code }}</div>
+  <el-dialog
+    v-model="editOpen"
+    title="Edit Equivalent"
+    width="520"
+  >
+    <div
+      v-if="editing"
+      class="muted"
+    >
+      Editing: {{ editing.code }}
+    </div>
     <el-form label-width="120">
       <el-form-item label="Precision">
-        <el-input-number v-model="editForm.precision" :min="0" :max="18" />
+        <el-input-number
+          v-model="editForm.precision"
+          :min="0"
+          :max="18"
+        />
       </el-form-item>
       <el-form-item label="Description">
         <el-input v-model="editForm.description" />
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="editOpen = false">Cancel</el-button>
-      <el-button type="primary" :disabled="authStore.isReadOnly" @click="saveEdit">Save</el-button>
+      <el-button @click="editOpen = false">
+        Cancel
+      </el-button>
+      <el-button
+        type="primary"
+        :disabled="authStore.isReadOnly"
+        @click="saveEdit"
+      >
+        Save
+      </el-button>
     </template>
   </el-dialog>
 </template>

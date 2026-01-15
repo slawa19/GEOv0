@@ -3,6 +3,7 @@ import cytoscape, { type Core, type EdgeSingular, type NodeSingular } from 'cyto
 import fcose from 'cytoscape-fcose'
 import { computed, onBeforeUnmount, onMounted, type ComputedRef, type Ref } from 'vue'
 
+import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
 import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import type { Participant, Trustline } from '../pages/graph/graphTypes'
@@ -122,8 +123,6 @@ export function useGraphVisualization(options: {
 
   let lastNodeTapAt = 0
   let lastNodeTapPid = ''
-
-  const NODE_DOUBLE_TAP_MS = 700
 
   let pendingNodeTapTimer: number | null = null
 

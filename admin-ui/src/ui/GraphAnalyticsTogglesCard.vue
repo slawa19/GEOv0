@@ -36,20 +36,33 @@ function setToggle(key: ToggleKey, value: boolean) {
 </script>
 
 <template>
-  <el-card shadow="never" class="mb">
+  <el-card
+    shadow="never"
+    class="mb"
+  >
     <template #header>
-      <TooltipLabel :label="title" :tooltip-text="titleTooltipText" />
+      <TooltipLabel
+        :label="title"
+        :tooltip-text="titleTooltipText"
+      />
     </template>
 
     <div class="toggleGrid">
-      <div v-for="item in items" :key="item.key" class="toggleLine">
+      <div
+        v-for="item in items"
+        :key="item.key"
+        class="toggleLine"
+      >
         <el-switch
           :model-value="modelValue[item.key]"
           size="small"
           :disabled="isDisabled(item)"
           @update:model-value="(v: boolean) => setToggle(item.key, v)"
         />
-        <TooltipLabel :label="item.label" :tooltip-text="item.tooltipText" />
+        <TooltipLabel
+          :label="item.label"
+          :tooltip-text="item.tooltipText"
+        />
       </div>
     </div>
   </el-card>

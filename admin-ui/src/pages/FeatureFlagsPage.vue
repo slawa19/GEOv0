@@ -80,12 +80,23 @@ onMounted(() => void load())
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Feature Flags" tooltip-key="nav.featureFlags" />
-        <el-tag type="info">Dirty: {{ dirtyCount }}</el-tag>
+        <TooltipLabel
+          label="Feature Flags"
+          tooltip-key="nav.featureFlags"
+        />
+        <el-tag type="info">
+          Dirty: {{ dirtyCount }}
+        </el-tag>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
     <el-alert
       v-else-if="fullMultipathEnabled"
       title="Experimental: full_multipath_enabled is ON"
@@ -93,27 +104,73 @@ onMounted(() => void load())
       show-icon
       class="mb"
     />
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
-    <el-empty v-else-if="rows.length === 0" description="No boolean flags in dataset" />
+    <el-empty
+      v-else-if="rows.length === 0"
+      description="No boolean flags in dataset"
+    />
 
     <div v-else>
-      <el-table :data="rows" size="small" table-layout="fixed" class="geoTable">
-        <el-table-column prop="key" label="Flag" width="420" show-overflow-tooltip>
+      <el-table
+        :data="rows"
+        size="small"
+        table-layout="fixed"
+        class="geoTable"
+      >
+        <el-table-column
+          prop="key"
+          label="Flag"
+          width="420"
+          show-overflow-tooltip
+        >
           <template #default="scope">
             <TableCellEllipsis :text="scope.row.key" />
           </template>
         </el-table-column>
-        <el-table-column label="Value" width="140" align="center" header-align="center">
+        <el-table-column
+          label="Value"
+          width="140"
+          align="center"
+          header-align="center"
+        >
           <template #default="scope">
-            <el-switch v-model="scope.row.value" :disabled="authStore.isReadOnly" @change="persistRow(scope.row)" />
+            <el-switch
+              v-model="scope.row.value"
+              :disabled="authStore.isReadOnly"
+              @change="persistRow(scope.row)"
+            />
           </template>
         </el-table-column>
-        <el-table-column label="Status" width="140" align="center" header-align="center">
+        <el-table-column
+          label="Status"
+          width="140"
+          align="center"
+          header-align="center"
+        >
           <template #default="scope">
-            <el-tag v-if="savingKey === scope.row.key" type="info">Saving…</el-tag>
-            <el-tag v-else-if="scope.row.value !== scope.row.original" type="warning">Pending</el-tag>
-            <el-tag v-else type="success">Synced</el-tag>
+            <el-tag
+              v-if="savingKey === scope.row.key"
+              type="info"
+            >
+              Saving…
+            </el-tag>
+            <el-tag
+              v-else-if="scope.row.value !== scope.row.original"
+              type="warning"
+            >
+              Pending
+            </el-tag>
+            <el-tag
+              v-else
+              type="success"
+            >
+              Synced
+            </el-tag>
           </template>
         </el-table-column>
       </el-table>

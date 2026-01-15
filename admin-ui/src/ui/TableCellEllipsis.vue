@@ -3,7 +3,10 @@ defineProps<{ text: string | number | null | undefined }>()
 </script>
 
 <template>
-  <span class="cell" :title="text === null || text === undefined || String(text).trim() === '' ? '' : String(text)">
+  <span
+    class="cell"
+    :title="text === null || text === undefined || String(text).trim() === '' ? '' : String(text)"
+  >
     {{ text === null || text === undefined || String(text).trim() === '' ? '—' : String(text) }}
   </span>
 </template>

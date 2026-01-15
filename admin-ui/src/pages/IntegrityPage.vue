@@ -181,13 +181,33 @@ onMounted(() => void load())
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Integrity" tooltip-key="nav.integrity" />
-        <el-button :loading="verifyLoading" :disabled="authStore.isReadOnly" type="primary" @click="verify">Verify</el-button>
+        <TooltipLabel
+          label="Integrity"
+          tooltip-key="nav.integrity"
+        />
+        <el-button
+          :loading="verifyLoading"
+          :disabled="authStore.isReadOnly"
+          type="primary"
+          @click="verify"
+        >
+          Verify
+        </el-button>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
     <div v-else>
       <el-alert
@@ -202,23 +222,46 @@ onMounted(() => void load())
         </template>
 
         <div class="help">
-          <div v-if="overallStatus === 'healthy'" class="helpText">
+          <div
+            v-if="overallStatus === 'healthy'"
+            class="helpText"
+          >
             All checked invariants pass: no exceeded limits, balanced totals, and no mutual debts.
           </div>
 
-          <div v-else class="helpText">
+          <div
+            v-else
+            class="helpText"
+          >
             Integrity checks found problems that should be investigated.
           </div>
 
-          <div v-if="detectedIssues.length" class="helpDetected">
-            <div class="helpHdr">Detected issues</div>
+          <div
+            v-if="detectedIssues.length"
+            class="helpDetected"
+          >
+            <div class="helpHdr">
+              Detected issues
+            </div>
             <div class="pillRow">
-              <el-tag v-for="k in detectedIssues" :key="k" effect="plain" type="warning">{{ issueLabel(k) }}</el-tag>
+              <el-tag
+                v-for="k in detectedIssues"
+                :key="k"
+                effect="plain"
+                type="warning"
+              >
+                {{ issueLabel(k) }}
+              </el-tag>
             </div>
           </div>
 
-          <div v-if="overallStatus !== 'healthy'" class="help">
-            <div class="helpHdr">How to respond (non-technical)</div>
+          <div
+            v-if="overallStatus !== 'healthy'"
+            class="help"
+          >
+            <div class="helpHdr">
+              How to respond (non-technical)
+            </div>
             <ul class="helpList">
               <li>Click <span class="mono">Verify</span> to re-check the database right now and refresh the results.</li>
               <li>Review <span class="mono">Alerts</span> and the table below to see which equivalent is affected.</li>
@@ -228,11 +271,21 @@ onMounted(() => void load())
 
           <el-divider class="helpDivider" />
 
-          <div v-if="overallStatus !== 'healthy' && detectedIssues.length" class="helpHdr">Interpretation & fixes (only for detected issues)</div>
+          <div
+            v-if="overallStatus !== 'healthy' && detectedIssues.length"
+            class="helpHdr"
+          >
+            Interpretation & fixes (only for detected issues)
+          </div>
 
-          <div v-if="detectedIssues.includes('debt_symmetry')" class="helpCase">
+          <div
+            v-if="detectedIssues.includes('debt_symmetry')"
+            class="helpCase"
+          >
             <div class="helpCaseTitle">
-              <el-tag type="warning">Warning</el-tag>
+              <el-tag type="warning">
+                Warning
+              </el-tag>
               <span class="helpCaseName">Debt symmetry (mutual debts)</span>
             </div>
             <div class="helpText">
@@ -257,9 +310,14 @@ onMounted(() => void load())
             </div>
           </div>
 
-          <div v-if="detectedIssues.includes('trust_limits')" class="helpCase">
+          <div
+            v-if="detectedIssues.includes('trust_limits')"
+            class="helpCase"
+          >
             <div class="helpCaseTitle">
-              <el-tag type="danger">Critical</el-tag>
+              <el-tag type="danger">
+                Critical
+              </el-tag>
               <span class="helpCaseName">Trust limits exceeded</span>
             </div>
             <div class="helpText">
@@ -283,9 +341,14 @@ onMounted(() => void load())
             </div>
           </div>
 
-          <div v-if="detectedIssues.includes('zero_sum')" class="helpCase">
+          <div
+            v-if="detectedIssues.includes('zero_sum')"
+            class="helpCase"
+          >
             <div class="helpCaseTitle">
-              <el-tag type="danger">Critical</el-tag>
+              <el-tag type="danger">
+                Critical
+              </el-tag>
               <span class="helpCaseName">Zero-sum violated</span>
             </div>
             <div class="helpText">
@@ -300,28 +363,51 @@ onMounted(() => void load())
         </div>
       </el-alert>
 
-      <el-descriptions :column="2" border>
+      <el-descriptions
+        :column="2"
+        border
+      >
         <el-descriptions-item label="Status">
           <el-tag :type="tagTypeForIntegrityStatus(overallStatus)">
             {{ overallStatus }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Last Check">{{ status?.last_check }}</el-descriptions-item>
-        <el-descriptions-item label="Alerts">{{ (status as any)?.alerts?.length ?? 0 }}</el-descriptions-item>
-        <el-descriptions-item label="Equivalents">{{ Object.keys(equivalents).length }}</el-descriptions-item>
+        <el-descriptions-item label="Last Check">
+          {{ status?.last_check }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Alerts">
+          {{ (status as any)?.alerts?.length ?? 0 }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Equivalents">
+          {{ Object.keys(equivalents).length }}
+        </el-descriptions-item>
       </el-descriptions>
 
       <el-divider />
 
-      <div class="sub">Equivalents</div>
-      <el-table :data="Object.entries(equivalents)" size="small" border table-layout="fixed" class="tbl">
-        <el-table-column label="Code" width="110">
+      <div class="sub">
+        Equivalents
+      </div>
+      <el-table
+        :data="Object.entries(equivalents)"
+        size="small"
+        border
+        table-layout="fixed"
+        class="tbl"
+      >
+        <el-table-column
+          label="Code"
+          width="110"
+        >
           <template #default="scope">
             <span class="mono">{{ scope.row[0] }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="Status" width="120">
+        <el-table-column
+          label="Status"
+          width="120"
+        >
           <template #default="scope">
             <el-tag :type="tagTypeForIntegrityStatus(asIntegrityStatus(scope.row[1]?.status))">
               {{ asIntegrityStatus(scope.row[1]?.status) }}
@@ -329,7 +415,10 @@ onMounted(() => void load())
           </template>
         </el-table-column>
 
-        <el-table-column label="Debt symmetry" min-width="260">
+        <el-table-column
+          label="Debt symmetry"
+          min-width="260"
+        >
           <template #default="scope">
             <div class="row">
               <el-tag
@@ -345,7 +434,10 @@ onMounted(() => void load())
           </template>
         </el-table-column>
 
-        <el-table-column label="Zero-sum" width="140">
+        <el-table-column
+          label="Zero-sum"
+          width="140"
+        >
           <template #default="scope">
             <el-tag
               :type="tagTypeForPassed(scope.row[1]?.invariants?.zero_sum?.passed)"
@@ -356,7 +448,10 @@ onMounted(() => void load())
           </template>
         </el-table-column>
 
-        <el-table-column label="Trust limits" width="170">
+        <el-table-column
+          label="Trust limits"
+          width="170"
+        >
           <template #default="scope">
             <div class="row">
               <el-tag
@@ -375,7 +470,9 @@ onMounted(() => void load())
 
       <el-divider />
 
-      <div class="sub">Raw Payload</div>
+      <div class="sub">
+        Raw Payload
+      </div>
       <pre class="json">{{ JSON.stringify(status, null, 2) }}</pre>
     </div>
   </el-card>

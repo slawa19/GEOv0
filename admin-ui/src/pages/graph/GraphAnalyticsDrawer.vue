@@ -107,7 +107,7 @@ const analytics = defineModel<AnalyticsToggles>('analytics', { required: true })
 const connectionsIncomingPage = defineModel<number>('connectionsIncomingPage', { required: true })
 const connectionsOutgoingPage = defineModel<number>('connectionsOutgoingPage', { required: true })
 
-const props = defineProps<{
+defineProps<{
   selected: SelectedInfo | null
   showIncidents: boolean
   incidentRatioByPid: Map<string, number>
@@ -158,21 +158,44 @@ const props = defineProps<{
 </script>
 
 <template>
-  <el-drawer v-model="open" title="Details" size="40%">
+  <el-drawer
+    v-model="open"
+    title="Details"
+    size="40%"
+  >
     <div v-if="selected && selected.kind === 'node'">
-      <el-descriptions :column="1" border>
+      <el-descriptions
+        :column="1"
+        border
+      >
         <el-descriptions-item label="PID">
           <span class="geoInlineRow">
             {{ selected.pid }}
-            <CopyIconButton :text="selected.pid" label="PID" />
+            <CopyIconButton
+              :text="selected.pid"
+              label="PID"
+            />
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Display name">{{ selected.display_name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Status">{{ selected.status || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Type">{{ selected.type || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Degree">{{ selected.degree }}</el-descriptions-item>
-        <el-descriptions-item label="In / out">{{ selected.inDegree }} / {{ selected.outDegree }}</el-descriptions-item>
-        <el-descriptions-item v-if="showIncidents" label="Incident ratio">
+        <el-descriptions-item label="Display name">
+          {{ selected.display_name || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Status">
+          {{ selected.status || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Type">
+          {{ selected.type || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Degree">
+          {{ selected.degree }}
+        </el-descriptions-item>
+        <el-descriptions-item label="In / out">
+          {{ selected.inDegree }} / {{ selected.outDegree }}
+        </el-descriptions-item>
+        <el-descriptions-item
+          v-if="showIncidents"
+          label="Incident ratio"
+        >
           {{ (incidentRatioByPid.get(selected.pid) || 0).toFixed(2) }}
         </el-descriptions-item>
       </el-descriptions>
@@ -182,81 +205,171 @@ const props = defineProps<{
       <div class="drawerControls">
         <div class="drawerControls__row">
           <div class="ctl">
-            <div class="toolbarLabel">Equivalent</div>
-            <el-select v-model="eq" size="small" filterable class="ctl__field" placeholder="Equivalent">
-              <el-option v-for="o in availableEquivalents" :key="o" :label="o" :value="o" />
+            <div class="toolbarLabel">
+              Equivalent
+            </div>
+            <el-select
+              v-model="eq"
+              size="small"
+              filterable
+              class="ctl__field"
+              placeholder="Equivalent"
+            >
+              <el-option
+                v-for="o in availableEquivalents"
+                :key="o"
+                :label="o"
+                :value="o"
+              />
             </el-select>
           </div>
           <div class="drawerControls__actions">
-            <el-button size="small" @click="loadData">Refresh</el-button>
+            <el-button
+              size="small"
+              @click="loadData"
+            >
+              Refresh
+            </el-button>
           </div>
         </div>
       </div>
 
-      <el-tabs v-model="tab" class="drawerTabs">
-        <el-tab-pane label="Summary" name="summary">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) for full analytics." type="info" show-icon class="mb" />
+      <el-tabs
+        v-model="tab"
+        class="drawerTabs"
+      >
+        <el-tab-pane
+          label="Summary"
+          name="summary"
+        >
+          <el-alert
+            v-if="!analyticsEq"
+            title="Pick an equivalent (not ALL) for full analytics."
+            type="info"
+            show-icon
+            class="mb"
+          />
 
-          <div class="hint">Fixtures-first: derived from trustlines + debts + incidents + audit-log.</div>
+          <div class="hint">
+            Fixtures-first: derived from trustlines + debts + incidents + audit-log.
+          </div>
 
           <GraphAnalyticsTogglesCard
             v-if="analyticsEq"
+            v-model="analytics"
             title="Summary widgets"
             title-tooltip-text="Show/hide summary cards. These toggles are stored in localStorage for this browser."
             :enabled="Boolean(analyticsEq)"
-            v-model="analytics"
             :items="summaryToggleItems"
           />
 
-          <div v-if="analyticsEq" class="summaryGrid">
-            <el-card shadow="never" class="summaryCard">
+          <div
+            v-if="analyticsEq"
+            class="summaryGrid"
+          >
+            <el-card
+              shadow="never"
+              class="summaryCard"
+            >
               <template #header>
                 <TooltipLabel
                   label="Net position"
                   tooltip-text="Net balance in the selected equivalent: total_credit − total_debt (derived from debts fixture)."
                 />
               </template>
-              <div v-if="selectedRank" class="kpi">
-                <div class="kpi__value">{{ money(selectedRank.net) }} {{ selectedRank.eq }}</div>
-                <div class="kpi__hint muted">credit − debt</div>
+              <div
+                v-if="selectedRank"
+                class="kpi"
+              >
+                <div class="kpi__value">
+                  {{ money(selectedRank.net) }} {{ selectedRank.eq }}
+                </div>
+                <div class="kpi__hint muted">
+                  credit − debt
+                </div>
               </div>
-              <div v-else class="muted">No data</div>
+              <div
+                v-else
+                class="muted"
+              >
+                No data
+              </div>
             </el-card>
 
-            <el-card v-if="analytics.showRank" shadow="never" class="summaryCard">
+            <el-card
+              v-if="analytics.showRank"
+              shadow="never"
+              class="summaryCard"
+            >
               <template #header>
                 <TooltipLabel
                   label="Rank / percentile"
                   tooltip-text="Your position among all participants by net balance for the selected equivalent (1 = top net creditor)."
                 />
               </template>
-              <div v-if="selectedRank" class="kpi">
-                <div class="kpi__value">rank {{ selectedRank.rank }}/{{ selectedRank.n }}</div>
-                <el-progress :percentage="Math.round((selectedRank.percentile || 0) * 100)" :stroke-width="10" :show-text="false" />
-                <div class="kpi__hint muted">Percentile: {{ pct(selectedRank.percentile, 0) }}</div>
+              <div
+                v-if="selectedRank"
+                class="kpi"
+              >
+                <div class="kpi__value">
+                  rank {{ selectedRank.rank }}/{{ selectedRank.n }}
+                </div>
+                <el-progress
+                  :percentage="Math.round((selectedRank.percentile || 0) * 100)"
+                  :stroke-width="10"
+                  :show-text="false"
+                />
+                <div class="kpi__hint muted">
+                  Percentile: {{ pct(selectedRank.percentile, 0) }}
+                </div>
               </div>
-              <div v-else class="muted">No data</div>
+              <div
+                v-else
+                class="muted"
+              >
+                No data
+              </div>
             </el-card>
 
-            <el-card v-if="analytics.showConcentration" shadow="never" class="summaryCard">
+            <el-card
+              v-if="analytics.showConcentration"
+              shadow="never"
+              class="summaryCard"
+            >
               <template #header>
                 <TooltipLabel
                   label="Concentration"
                   tooltip-text="How concentrated your debts/credits are across counterparties (top1/top5 shares + HHI). Higher = more dependence on a few counterparties."
                 />
               </template>
-              <div v-if="selectedConcentration.eq" class="kpi">
+              <div
+                v-if="selectedConcentration.eq"
+                class="kpi"
+              >
                 <div class="kpi__row">
                   <span class="geoLabel">Outgoing (you owe)</span>
-                  <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
+                  <el-tag
+                    :type="selectedConcentration.outgoing.level.type"
+                    size="small"
+                  >
+                    {{ selectedConcentration.outgoing.level.label }}
+                  </el-tag>
                 </div>
                 <div class="metricRows">
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top1 share"
+                      tooltip-text="Share of total outgoing debt owed to the largest single creditor."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top5 share"
+                      tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
@@ -268,17 +381,33 @@ const props = defineProps<{
                     <span class="metricRow__value">{{ selectedConcentration.outgoing.hhi.toFixed(2) }}</span>
                   </div>
                 </div>
-                <div class="kpi__row" style="margin-top: 10px">
+                <div
+                  class="kpi__row"
+                  style="margin-top: 10px"
+                >
                   <span class="geoLabel">Incoming (owed to you)</span>
-                  <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
+                  <el-tag
+                    :type="selectedConcentration.incoming.level.type"
+                    size="small"
+                  >
+                    {{ selectedConcentration.incoming.level.label }}
+                  </el-tag>
                 </div>
                 <div class="metricRows">
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top1 share"
+                      tooltip-text="Share of total incoming credit owed by the largest single debtor."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top5 share"
+                      tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
@@ -291,42 +420,81 @@ const props = defineProps<{
                   </div>
                 </div>
               </div>
-              <div v-else class="muted">No data</div>
+              <div
+                v-else
+                class="muted"
+              >
+                No data
+              </div>
             </el-card>
 
-            <el-card v-if="analytics.showCapacity" shadow="never" class="summaryCard">
+            <el-card
+              v-if="analytics.showCapacity"
+              shadow="never"
+              class="summaryCard"
+            >
               <template #header>
                 <TooltipLabel
                   label="Capacity"
                   tooltip-text="Aggregate trustline capacity around the participant: used% = total_used / total_limit (incoming/outgoing)."
                 />
               </template>
-              <div v-if="selectedCapacity" class="kpi">
+              <div
+                v-if="selectedCapacity"
+                class="kpi"
+              >
                 <div class="kpi__row">
                   <span class="muted">Outgoing used</span>
                   <span class="kpi__metric">{{ pct(selectedCapacity.out.pct, 0) }}</span>
                 </div>
-                <el-progress :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-                <div class="kpi__row" style="margin-top: 10px">
+                <el-progress
+                  :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)"
+                  :stroke-width="10"
+                  :show-text="false"
+                />
+                <div
+                  class="kpi__row"
+                  style="margin-top: 10px"
+                >
                   <span class="muted">Incoming used</span>
                   <span class="kpi__metric">{{ pct(selectedCapacity.inc.pct, 0) }}</span>
                 </div>
-                <el-progress :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-                <div v-if="analytics.showBottlenecks" class="kpi__hint muted" style="margin-top: 8px">
+                <el-progress
+                  :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)"
+                  :stroke-width="10"
+                  :show-text="false"
+                />
+                <div
+                  v-if="analytics.showBottlenecks"
+                  class="kpi__hint muted"
+                  style="margin-top: 8px"
+                >
                   Bottlenecks: {{ selectedCapacity.bottlenecks.length }} (threshold {{ threshold }})
                 </div>
               </div>
-              <div v-else class="muted">No data</div>
+              <div
+                v-else
+                class="muted"
+              >
+                No data
+              </div>
             </el-card>
 
-            <el-card v-if="analytics.showActivity" shadow="never" class="summaryCard">
+            <el-card
+              v-if="analytics.showActivity"
+              shadow="never"
+              class="summaryCard"
+            >
               <template #header>
                 <TooltipLabel
                   label="Activity / churn"
                   tooltip-text="Recent changes around the participant in rolling windows (7/30/90 days), based on fixture timestamps."
                 />
               </template>
-              <div v-if="selectedActivity" class="metricRows">
+              <div
+                v-if="selectedActivity"
+                class="metricRows"
+              >
                 <div class="metricRow">
                   <TooltipLabel
                     class="metricRow__label"
@@ -360,15 +528,28 @@ const props = defineProps<{
                   <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
                 </div>
               </div>
-              <div v-else class="muted">No data</div>
+              <div
+                v-else
+                class="muted"
+              >
+                No data
+              </div>
             </el-card>
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="Connections" name="connections">
-          <div class="hint">Derived from visible graph edges (incoming/outgoing trustlines).</div>
+        <el-tab-pane
+          label="Connections"
+          name="connections"
+        >
+          <div class="hint">
+            Derived from visible graph edges (incoming/outgoing trustlines).
+          </div>
 
-          <el-empty v-if="selectedConnectionsIncoming.length + selectedConnectionsOutgoing.length === 0" description="No connections in current view" />
+          <el-empty
+            v-if="selectedConnectionsIncoming.length + selectedConnectionsOutgoing.length === 0"
+            description="No connections in current view"
+          />
           <div v-else>
             <el-divider>Incoming (owed to you)</el-divider>
             <div class="tableTop">
@@ -391,22 +572,51 @@ const props = defineProps<{
               highlight-current-row
               @row-click="onConnectionRowClick"
             >
-              <el-table-column label="Counterparty" min-width="220">
+              <el-table-column
+                label="Counterparty"
+                min-width="220"
+              >
                 <template #default="{ row }">
                   <span class="mono pidLink">{{ row.counterparty_pid }}</span>
-                  <span v-if="row.counterparty_name" class="muted"> — {{ row.counterparty_name }}</span>
+                  <span
+                    v-if="row.counterparty_name"
+                    class="muted"
+                  > — {{ row.counterparty_name }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="equivalent" label="Eq" width="80" />
-              <el-table-column prop="status" label="Status" width="90" />
-              <el-table-column label="Available" width="120">
-                <template #default="{ row }">{{ money(row.available) }}</template>
+              <el-table-column
+                prop="equivalent"
+                label="Eq"
+                width="80"
+              />
+              <el-table-column
+                prop="status"
+                label="Status"
+                width="90"
+              />
+              <el-table-column
+                label="Available"
+                width="120"
+              >
+                <template #default="{ row }">
+                  {{ money(row.available) }}
+                </template>
               </el-table-column>
-              <el-table-column label="Used" width="120">
-                <template #default="{ row }">{{ money(row.used) }}</template>
+              <el-table-column
+                label="Used"
+                width="120"
+              >
+                <template #default="{ row }">
+                  {{ money(row.used) }}
+                </template>
               </el-table-column>
-              <el-table-column label="Limit" width="120">
-                <template #default="{ row }">{{ money(row.limit) }}</template>
+              <el-table-column
+                label="Limit"
+                width="120"
+              >
+                <template #default="{ row }">
+                  {{ money(row.limit) }}
+                </template>
               </el-table-column>
             </el-table>
 
@@ -431,29 +641,63 @@ const props = defineProps<{
               highlight-current-row
               @row-click="onConnectionRowClick"
             >
-              <el-table-column label="Counterparty" min-width="220">
+              <el-table-column
+                label="Counterparty"
+                min-width="220"
+              >
                 <template #default="{ row }">
                   <span class="mono pidLink">{{ row.counterparty_pid }}</span>
-                  <span v-if="row.counterparty_name" class="muted"> — {{ row.counterparty_name }}</span>
+                  <span
+                    v-if="row.counterparty_name"
+                    class="muted"
+                  > — {{ row.counterparty_name }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="equivalent" label="Eq" width="80" />
-              <el-table-column prop="status" label="Status" width="90" />
-              <el-table-column label="Available" width="120">
-                <template #default="{ row }">{{ money(row.available) }}</template>
+              <el-table-column
+                prop="equivalent"
+                label="Eq"
+                width="80"
+              />
+              <el-table-column
+                prop="status"
+                label="Status"
+                width="90"
+              />
+              <el-table-column
+                label="Available"
+                width="120"
+              >
+                <template #default="{ row }">
+                  {{ money(row.available) }}
+                </template>
               </el-table-column>
-              <el-table-column label="Used" width="120">
-                <template #default="{ row }">{{ money(row.used) }}</template>
+              <el-table-column
+                label="Used"
+                width="120"
+              >
+                <template #default="{ row }">
+                  {{ money(row.used) }}
+                </template>
               </el-table-column>
-              <el-table-column label="Limit" width="120">
-                <template #default="{ row }">{{ money(row.limit) }}</template>
+              <el-table-column
+                label="Limit"
+                width="120"
+              >
+                <template #default="{ row }">
+                  {{ money(row.limit) }}
+                </template>
               </el-table-column>
             </el-table>
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="Balance" name="balance">
-          <div class="hint">Derived from trustlines + debts fixtures (debts are derived from trustline.used).</div>
+        <el-tab-pane
+          label="Balance"
+          name="balance"
+        >
+          <div class="hint">
+            Derived from trustlines + debts fixtures (debts are derived from trustline.used).
+          </div>
 
           <el-alert
             v-if="!analyticsEq"
@@ -466,14 +710,18 @@ const props = defineProps<{
 
           <GraphAnalyticsTogglesCard
             v-if="analyticsEq"
+            v-model="analytics"
             title="Balance widgets"
             title-tooltip-text="Show/hide balance visualizations. These toggles are stored in localStorage for this browser."
             :enabled="Boolean(analyticsEq)"
-            v-model="analytics"
             :items="balanceToggleItems"
           />
 
-          <el-card v-if="analytics.showRank && selectedRank" shadow="never" class="mb">
+          <el-card
+            v-if="analytics.showRank && selectedRank"
+            shadow="never"
+            class="mb"
+          >
             <template #header>
               <TooltipLabel
                 :label="`Rank / percentile (${selectedRank.eq})`"
@@ -481,13 +729,25 @@ const props = defineProps<{
               />
             </template>
             <div class="kpi">
-              <div class="kpi__value">rank {{ selectedRank.rank }}/{{ selectedRank.n }}</div>
-              <el-progress :percentage="Math.round((selectedRank.percentile || 0) * 100)" :stroke-width="10" :show-text="false" />
-              <div class="kpi__hint muted">Percentile: {{ pct(selectedRank.percentile, 0) }}</div>
+              <div class="kpi__value">
+                rank {{ selectedRank.rank }}/{{ selectedRank.n }}
+              </div>
+              <el-progress
+                :percentage="Math.round((selectedRank.percentile || 0) * 100)"
+                :stroke-width="10"
+                :show-text="false"
+              />
+              <div class="kpi__hint muted">
+                Percentile: {{ pct(selectedRank.percentile, 0) }}
+              </div>
             </div>
           </el-card>
 
-          <el-card v-if="analytics.showDistribution && netDistribution" shadow="never" class="mb">
+          <el-card
+            v-if="analytics.showDistribution && netDistribution"
+            shadow="never"
+            class="mb"
+          >
             <template #header>
               <TooltipLabel
                 :label="`Distribution (${netDistribution.eq})`"
@@ -509,35 +769,99 @@ const props = defineProps<{
             </div>
           </el-card>
 
-          <el-empty v-if="selectedBalanceRows.length === 0" description="No data" />
-          <el-table v-else :data="selectedBalanceRows" size="small" table-layout="fixed" class="geoTable">
-            <el-table-column prop="equivalent" label="Equivalent" width="120" />
-            <el-table-column prop="outgoing_limit" label="Out limit" min-width="120">
-              <template #default="{ row }">{{ money(row.outgoing_limit) }}</template>
+          <el-empty
+            v-if="selectedBalanceRows.length === 0"
+            description="No data"
+          />
+          <el-table
+            v-else
+            :data="selectedBalanceRows"
+            size="small"
+            table-layout="fixed"
+            class="geoTable"
+          >
+            <el-table-column
+              prop="equivalent"
+              label="Equivalent"
+              width="120"
+            />
+            <el-table-column
+              prop="outgoing_limit"
+              label="Out limit"
+              min-width="120"
+            >
+              <template #default="{ row }">
+                {{ money(row.outgoing_limit) }}
+              </template>
             </el-table-column>
-            <el-table-column prop="outgoing_used" label="Out used" min-width="120">
-              <template #default="{ row }">{{ money(row.outgoing_used) }}</template>
+            <el-table-column
+              prop="outgoing_used"
+              label="Out used"
+              min-width="120"
+            >
+              <template #default="{ row }">
+                {{ money(row.outgoing_used) }}
+              </template>
             </el-table-column>
-            <el-table-column prop="incoming_limit" label="In limit" min-width="120">
-              <template #default="{ row }">{{ money(row.incoming_limit) }}</template>
+            <el-table-column
+              prop="incoming_limit"
+              label="In limit"
+              min-width="120"
+            >
+              <template #default="{ row }">
+                {{ money(row.incoming_limit) }}
+              </template>
             </el-table-column>
-            <el-table-column prop="incoming_used" label="In used" min-width="120">
-              <template #default="{ row }">{{ money(row.incoming_used) }}</template>
+            <el-table-column
+              prop="incoming_used"
+              label="In used"
+              min-width="120"
+            >
+              <template #default="{ row }">
+                {{ money(row.incoming_used) }}
+              </template>
             </el-table-column>
-            <el-table-column prop="total_debt" label="Debt" min-width="120">
-              <template #default="{ row }">{{ money(row.total_debt) }}</template>
+            <el-table-column
+              prop="total_debt"
+              label="Debt"
+              min-width="120"
+            >
+              <template #default="{ row }">
+                {{ money(row.total_debt) }}
+              </template>
             </el-table-column>
-            <el-table-column prop="total_credit" label="Credit" min-width="120">
-              <template #default="{ row }">{{ money(row.total_credit) }}</template>
+            <el-table-column
+              prop="total_credit"
+              label="Credit"
+              min-width="120"
+            >
+              <template #default="{ row }">
+                {{ money(row.total_credit) }}
+              </template>
             </el-table-column>
-            <el-table-column prop="net" label="Net" min-width="120">
-              <template #default="{ row }">{{ money(row.net) }}</template>
+            <el-table-column
+              prop="net"
+              label="Net"
+              min-width="120"
+            >
+              <template #default="{ row }">
+                {{ money(row.net) }}
+              </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
 
-        <el-tab-pane label="Counterparties" name="counterparties">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect counterparties." type="info" show-icon class="mb" />
+        <el-tab-pane
+          label="Counterparties"
+          name="counterparties"
+        >
+          <el-alert
+            v-if="!analyticsEq"
+            title="Pick an equivalent (not ALL) to inspect counterparties."
+            type="info"
+            show-icon
+            class="mb"
+          />
 
           <div v-else>
             <div class="splitGrid">
@@ -548,16 +872,43 @@ const props = defineProps<{
                     tooltip-text="Participants who are creditors of this participant (debts where you are the debtor)."
                   />
                 </template>
-                <el-empty v-if="selectedCounterpartySplit.creditors.length === 0" description="No creditors" />
-                <el-table v-else :data="selectedCounterpartySplit.creditors.slice(0, 10)" size="small" table-layout="fixed" class="geoTable">
-                  <el-table-column prop="display_name" label="Participant" min-width="220" />
-                  <el-table-column prop="amount" label="Amount" min-width="120">
-                    <template #default="{ row }">{{ money(row.amount) }}</template>
+                <el-empty
+                  v-if="selectedCounterpartySplit.creditors.length === 0"
+                  description="No creditors"
+                />
+                <el-table
+                  v-else
+                  :data="selectedCounterpartySplit.creditors.slice(0, 10)"
+                  size="small"
+                  table-layout="fixed"
+                  class="geoTable"
+                >
+                  <el-table-column
+                    prop="display_name"
+                    label="Participant"
+                    min-width="220"
+                  />
+                  <el-table-column
+                    prop="amount"
+                    label="Amount"
+                    min-width="120"
+                  >
+                    <template #default="{ row }">
+                      {{ money(row.amount) }}
+                    </template>
                   </el-table-column>
-                  <el-table-column prop="share" label="Share" min-width="140">
+                  <el-table-column
+                    prop="share"
+                    label="Share"
+                    min-width="140"
+                  >
                     <template #default="{ row }">
                       <div class="shareCell">
-                        <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
+                        <el-progress
+                          :percentage="Math.round((row.share || 0) * 100)"
+                          :stroke-width="10"
+                          :show-text="false"
+                        />
                         <span class="muted">{{ pct(row.share, 0) }}</span>
                       </div>
                     </template>
@@ -572,16 +923,43 @@ const props = defineProps<{
                     tooltip-text="Participants who are debtors to this participant (debts where you are the creditor)."
                   />
                 </template>
-                <el-empty v-if="selectedCounterpartySplit.debtors.length === 0" description="No debtors" />
-                <el-table v-else :data="selectedCounterpartySplit.debtors.slice(0, 10)" size="small" table-layout="fixed" class="geoTable">
-                  <el-table-column prop="display_name" label="Participant" min-width="220" />
-                  <el-table-column prop="amount" label="Amount" min-width="120">
-                    <template #default="{ row }">{{ money(row.amount) }}</template>
+                <el-empty
+                  v-if="selectedCounterpartySplit.debtors.length === 0"
+                  description="No debtors"
+                />
+                <el-table
+                  v-else
+                  :data="selectedCounterpartySplit.debtors.slice(0, 10)"
+                  size="small"
+                  table-layout="fixed"
+                  class="geoTable"
+                >
+                  <el-table-column
+                    prop="display_name"
+                    label="Participant"
+                    min-width="220"
+                  />
+                  <el-table-column
+                    prop="amount"
+                    label="Amount"
+                    min-width="120"
+                  >
+                    <template #default="{ row }">
+                      {{ money(row.amount) }}
+                    </template>
                   </el-table-column>
-                  <el-table-column prop="share" label="Share" min-width="140">
+                  <el-table-column
+                    prop="share"
+                    label="Share"
+                    min-width="140"
+                  >
                     <template #default="{ row }">
                       <div class="shareCell">
-                        <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
+                        <el-progress
+                          :percentage="Math.round((row.share || 0) * 100)"
+                          :stroke-width="10"
+                          :show-text="false"
+                        />
                         <span class="muted">{{ pct(row.share, 0) }}</span>
                       </div>
                     </template>
@@ -592,41 +970,70 @@ const props = defineProps<{
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="Risk" name="risk">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect risk metrics." type="info" show-icon class="mb" />
+        <el-tab-pane
+          label="Risk"
+          name="risk"
+        >
+          <el-alert
+            v-if="!analyticsEq"
+            title="Pick an equivalent (not ALL) to inspect risk metrics."
+            type="info"
+            show-icon
+            class="mb"
+          />
 
           <GraphAnalyticsTogglesCard
             v-if="analyticsEq"
+            v-model="analytics"
             title="Risk widgets"
             title-tooltip-text="Show/hide risk-related widgets in this tab. These toggles are stored in localStorage for this browser."
             :enabled="Boolean(analyticsEq)"
-            v-model="analytics"
             :items="riskToggleItems"
           />
 
-          <el-card v-if="analyticsEq && analytics.showConcentration" shadow="never" class="mb">
+          <el-card
+            v-if="analyticsEq && analytics.showConcentration"
+            shadow="never"
+            class="mb"
+          >
             <template #header>
               <TooltipLabel
                 :label="`Concentration (${analyticsEq})`"
                 tooltip-text="Counterparty concentration risk derived from debt shares: top1/top5 and HHI."
               />
             </template>
-            <div v-if="selectedConcentration.eq" class="riskGrid">
+            <div
+              v-if="selectedConcentration.eq"
+              class="riskGrid"
+            >
               <div class="riskBlock">
                 <div class="riskBlock__hdr">
                   <TooltipLabel
                     label="Outgoing concentration"
                     tooltip-text="How concentrated your outgoing debts are (you owe). Higher = dependence on fewer creditors."
                   />
-                  <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
+                  <el-tag
+                    :type="selectedConcentration.outgoing.level.type"
+                    size="small"
+                  >
+                    {{ selectedConcentration.outgoing.level.label }}
+                  </el-tag>
                 </div>
                 <div class="metricRows">
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top1 share"
+                      tooltip-text="Share of total outgoing debt owed to the largest single creditor."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top5 share"
+                      tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
@@ -645,15 +1052,28 @@ const props = defineProps<{
                     label="Incoming concentration"
                     tooltip-text="How concentrated your incoming credits are (owed to you). Higher = dependence on fewer debtors."
                   />
-                  <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
+                  <el-tag
+                    :type="selectedConcentration.incoming.level.type"
+                    size="small"
+                  >
+                    {{ selectedConcentration.incoming.level.label }}
+                  </el-tag>
                 </div>
                 <div class="metricRows">
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top1 share"
+                      tooltip-text="Share of total incoming credit owed by the largest single debtor."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />
+                    <TooltipLabel
+                      class="metricRow__label"
+                      label="Top5 share"
+                      tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined."
+                    />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
@@ -667,10 +1087,19 @@ const props = defineProps<{
                 </div>
               </div>
             </div>
-            <div v-else class="muted">No data</div>
+            <div
+              v-else
+              class="muted"
+            >
+              No data
+            </div>
           </el-card>
 
-          <el-card v-if="analyticsEq && analytics.showCapacity && selectedCapacity" shadow="never" class="mb">
+          <el-card
+            v-if="analyticsEq && analytics.showCapacity && selectedCapacity"
+            shadow="never"
+            class="mb"
+          >
             <template #header>
               <TooltipLabel
                 label="Trustline capacity"
@@ -679,36 +1108,86 @@ const props = defineProps<{
             </template>
             <div class="capRow">
               <div class="capRow__label">
-                <TooltipLabel label="Outgoing used" tooltip-text="Used / limit aggregated across all outgoing trustlines (participant is creditor)." />
+                <TooltipLabel
+                  label="Outgoing used"
+                  tooltip-text="Used / limit aggregated across all outgoing trustlines (participant is creditor)."
+                />
               </div>
-              <el-progress :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-              <div class="capRow__value">{{ pct(selectedCapacity.out.pct, 0) }}</div>
+              <el-progress
+                :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)"
+                :stroke-width="10"
+                :show-text="false"
+              />
+              <div class="capRow__value">
+                {{ pct(selectedCapacity.out.pct, 0) }}
+              </div>
             </div>
             <div class="capRow">
               <div class="capRow__label">
-                <TooltipLabel label="Incoming used" tooltip-text="Used / limit aggregated across all incoming trustlines (participant is debtor)." />
+                <TooltipLabel
+                  label="Incoming used"
+                  tooltip-text="Used / limit aggregated across all incoming trustlines (participant is debtor)."
+                />
               </div>
-              <el-progress :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-              <div class="capRow__value">{{ pct(selectedCapacity.inc.pct, 0) }}</div>
+              <el-progress
+                :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)"
+                :stroke-width="10"
+                :show-text="false"
+              />
+              <div class="capRow__value">
+                {{ pct(selectedCapacity.inc.pct, 0) }}
+              </div>
             </div>
-            <div v-if="analytics.showBottlenecks" class="mb" style="margin-top: 10px">
-              <el-tag type="info" size="small">
+            <div
+              v-if="analytics.showBottlenecks"
+              class="mb"
+              style="margin-top: 10px"
+            >
+              <el-tag
+                type="info"
+                size="small"
+              >
                 <TooltipLabel
                   :label="`Bottlenecks: ${selectedCapacity.bottlenecks.length}`"
                   tooltip-text="Trustlines where available/limit is below the selected threshold."
                 />
               </el-tag>
-              <span class="muted" style="margin-left: 8px">threshold {{ threshold }}</span>
+              <span
+                class="muted"
+                style="margin-left: 8px"
+              >threshold {{ threshold }}</span>
             </div>
-            <el-collapse v-if="analytics.showBottlenecks && selectedCapacity.bottlenecks.length" accordion>
+            <el-collapse
+              v-if="analytics.showBottlenecks && selectedCapacity.bottlenecks.length"
+              accordion
+            >
               <el-collapse-item name="bottlenecks">
                 <template #title>
-                  <TooltipLabel label="Bottlenecks list" tooltip-text="List of trustlines close to saturation (low available relative to limit)." />
+                  <TooltipLabel
+                    label="Bottlenecks list"
+                    tooltip-text="List of trustlines close to saturation (low available relative to limit)."
+                  />
                 </template>
-                <el-table :data="selectedCapacity.bottlenecks" size="small" table-layout="fixed" class="geoTable">
-                  <el-table-column prop="dir" label="Dir" width="70" />
-                  <el-table-column prop="other" label="Counterparty" min-width="220" />
-                  <el-table-column label="Limit / Used / Avail" min-width="220">
+                <el-table
+                  :data="selectedCapacity.bottlenecks"
+                  size="small"
+                  table-layout="fixed"
+                  class="geoTable"
+                >
+                  <el-table-column
+                    prop="dir"
+                    label="Dir"
+                    width="70"
+                  />
+                  <el-table-column
+                    prop="other"
+                    label="Counterparty"
+                    min-width="220"
+                  />
+                  <el-table-column
+                    label="Limit / Used / Avail"
+                    min-width="220"
+                  >
                     <template #default="{ row }">
                       {{ money(row.t.limit) }} / {{ money(row.t.used) }} / {{ money(row.t.available) }}
                     </template>
@@ -718,7 +1197,10 @@ const props = defineProps<{
             </el-collapse>
           </el-card>
 
-          <el-card v-if="analyticsEq && analytics.showActivity && selectedActivity" shadow="never">
+          <el-card
+            v-if="analyticsEq && analytics.showActivity && selectedActivity"
+            shadow="never"
+          >
             <template #header>
               <TooltipLabel
                 label="Activity / churn"
@@ -787,10 +1269,25 @@ const props = defineProps<{
           </el-card>
         </el-tab-pane>
 
-        <el-tab-pane label="Cycles" name="cycles">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect clearing cycles." type="info" show-icon class="mb" />
-          <el-empty v-else-if="selectedCycles.length === 0" description="No cycles found in fixtures" />
-          <div v-else class="cycles">
+        <el-tab-pane
+          label="Cycles"
+          name="cycles"
+        >
+          <el-alert
+            v-if="!analyticsEq"
+            title="Pick an equivalent (not ALL) to inspect clearing cycles."
+            type="info"
+            show-icon
+            class="mb"
+          />
+          <el-empty
+            v-else-if="selectedCycles.length === 0"
+            description="No cycles found in fixtures"
+          />
+          <div
+            v-else
+            class="cycles"
+          >
             <div class="hint">
               <TooltipLabel
                 label="Clearing cycles"
@@ -810,7 +1307,11 @@ const props = defineProps<{
                   tooltip-text="A cycle is a set of debts that can be cleared together while preserving net positions (cycle cancelation)."
                 />
               </div>
-              <div v-for="(e, j) in c" :key="j" class="cycleEdge">
+              <div
+                v-for="(e, j) in c"
+                :key="j"
+                class="cycleEdge"
+              >
                 <span class="mono">{{ e.debtor }}</span>
                 <span class="muted">→</span>
                 <span class="mono">{{ e.creditor }}</span>
@@ -823,7 +1324,10 @@ const props = defineProps<{
     </div>
 
     <div v-else-if="selected && selected.kind === 'edge'">
-      <el-descriptions :column="1" border>
+      <el-descriptions
+        :column="1"
+        border
+      >
         <el-descriptions-item label="Equivalent">
           <span>
             {{ selected.equivalent }}
@@ -832,20 +1336,36 @@ const props = defineProps<{
         <el-descriptions-item label="From">
           <span class="geoInlineRow">
             {{ selected.from }}
-            <CopyIconButton :text="selected.from" label="From PID" />
+            <CopyIconButton
+              :text="selected.from"
+              label="From PID"
+            />
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="To">
           <span class="geoInlineRow">
             {{ selected.to }}
-            <CopyIconButton :text="selected.to" label="To PID" />
+            <CopyIconButton
+              :text="selected.to"
+              label="To PID"
+            />
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Status">{{ selected.status }}</el-descriptions-item>
-        <el-descriptions-item label="Limit">{{ money(selected.limit) }}</el-descriptions-item>
-        <el-descriptions-item label="Used">{{ money(selected.used) }}</el-descriptions-item>
-        <el-descriptions-item label="Available">{{ money(selected.available) }}</el-descriptions-item>
-        <el-descriptions-item label="Created at">{{ selected.created_at }}</el-descriptions-item>
+        <el-descriptions-item label="Status">
+          {{ selected.status }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Limit">
+          {{ money(selected.limit) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Used">
+          {{ money(selected.used) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Available">
+          {{ money(selected.available) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Created at">
+          {{ selected.created_at }}
+        </el-descriptions-item>
       </el-descriptions>
     </div>
   </el-drawer>

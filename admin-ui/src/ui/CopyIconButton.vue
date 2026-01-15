@@ -13,6 +13,7 @@ type Props = {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  label: '',
   tooltip: 'Copy',
   successText: 'Copied',
   stopPropagation: true,
@@ -40,8 +41,22 @@ async function onClick(e: MouseEvent) {
 </script>
 
 <template>
-  <el-tooltip :content="tooltip" placement="top" effect="dark" :show-after="850" popper-class="geoTooltip geoTooltip--label">
-    <button class="copyBtn" type="button" :aria-label="ariaLabel" :disabled="disabled" @click="onClick">⧉</button>
+  <el-tooltip
+    :content="tooltip"
+    placement="top"
+    effect="dark"
+    :show-after="850"
+    popper-class="geoTooltip geoTooltip--label"
+  >
+    <button
+      class="copyBtn"
+      type="button"
+      :aria-label="ariaLabel"
+      :disabled="disabled"
+      @click="onClick"
+    >
+      ⧉
+    </button>
   </el-tooltip>
 </template>
 

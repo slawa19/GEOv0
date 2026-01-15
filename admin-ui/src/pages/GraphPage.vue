@@ -8,12 +8,25 @@ import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
 import { useGraphData } from '../composables/useGraphData'
 import { useGraphAnalytics } from '../composables/useGraphAnalytics'
+import type { DrawerTab, SelectedInfo } from '../composables/useGraphVisualization'
 import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { throttle } from '../utils/throttle'
+import { THROTTLE_GRAPH_REBUILD_MS, THROTTLE_LAYOUT_SPACING_MS } from '../constants/timing'
+import {
+  DEFAULT_FOCUS_DEPTH,
+  DEFAULT_LAYOUT_SPACING,
+  DEFAULT_THRESHOLD,
+  MIN_ZOOM_LABELS_ALL,
+  MIN_ZOOM_LABELS_PERSON,
+  NODE_DOUBLE_TAP_MS,
+  PARTICIPANT_SUGGESTIONS_LIMIT,
+  SELECTED_PULSE_INTERVAL_MS,
+} from '../constants/graph'
 import TooltipLabel from '../ui/TooltipLabel.vue'
-import CopyIconButton from '../ui/CopyIconButton.vue'
-import GraphAnalyticsTogglesCard from '../ui/GraphAnalyticsTogglesCard.vue'
+import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
+import GraphLegend from './graph/GraphLegend.vue'
+import GraphFiltersToolbar from './graph/GraphFiltersToolbar.vue'
 import type {
   ClearingCycles,
   Participant,
@@ -21,9 +34,6 @@ import type {
 } from './graph/graphTypes'
 
 cytoscape.use(fcose)
-type SelectedInfo =
-  | { kind: 'node'; pid: string; display_name?: string; type?: string; status?: string; degree: number; inDegree: number; outDegree: number }
-  | { kind: 'edge'; id: string; equivalent: string; from: string; to: string; status: string; limit: string; used: string; available: string; created_at: string }
 
 const cyRoot = ref<HTMLElement | null>(null)
 let cy: Core | null = null
@@ -31,8 +41,6 @@ let zoomUpdatingFromCy = false
 
 let lastNodeTapAt = 0
 let lastNodeTapPid = ''
-
-const NODE_DOUBLE_TAP_MS = 700
 
 let pendingNodeTapTimer: number | null = null
 
@@ -77,10 +85,9 @@ function applySelectedHighlight(pid: string) {
     selectedPulseOn = !selectedPulseOn
     if (selectedPulseOn) nn.addClass('selected-pulse')
     else nn.removeClass('selected-pulse')
-  }, 520)
+  }, SELECTED_PULSE_INTERVAL_MS)
 }
 
-type DrawerTab = 'summary' | 'connections' | 'balance' | 'counterparties' | 'risk' | 'cycles'
 const drawerTab = ref<DrawerTab>('summary')
 const drawerEq = ref<string>('ALL')
 
@@ -191,7 +198,7 @@ const seedLabel = computed(() => {
 
 const eq = ref<string>('ALL')
 const statusFilter = ref<string[]>(['active', 'frozen', 'closed'])
-const threshold = ref<string>('0.10')
+const threshold = ref<string>(DEFAULT_THRESHOLD)
 
 const typeFilter = ref<string[]>(['person', 'business'])
 const minDegree = ref<number>(0)
@@ -202,15 +209,15 @@ const showLabels = ref(true)
 const labelModeBusiness = ref<LabelMode>('name')
 const labelModePerson = ref<LabelMode>('name')
 const autoLabelsByZoom = ref(true)
-const minZoomLabelsAll = ref(0.85)
-const minZoomLabelsPerson = ref(1.25)
+const minZoomLabelsAll = ref(MIN_ZOOM_LABELS_ALL)
+const minZoomLabelsPerson = ref(MIN_ZOOM_LABELS_PERSON)
 
 const showIncidents = ref(true)
 const hideIsolates = ref(true)
 const showLegend = ref(false)
 
 const layoutName = ref<'fcose' | 'grid' | 'circle'>('fcose')
-const layoutSpacing = ref<number>(2.2)
+const layoutSpacing = ref<number>(DEFAULT_LAYOUT_SPACING)
 
 const toolbarTab = ref<'filters' | 'display' | 'navigate'>('filters')
 
@@ -275,13 +282,14 @@ const personLabelParts = computed<LabelPart[]>({
     labelModePerson.value = labelPartsToMode(parts)
   },
 })
+
 type ParticipantSuggestion = { value: string; pid: string }
 
 const searchQuery = ref('')
 const focusPid = ref('')
 
 const focusMode = ref(false)
-const focusDepth = ref<1 | 2>(1)
+const focusDepth = ref<1 | 2>(DEFAULT_FOCUS_DEPTH)
 const focusRootPid = ref('')
 
 const {
@@ -1173,19 +1181,15 @@ function visibleParticipantSuggestions(): ParticipantSuggestion[] {
 function querySearchParticipants(query: string, cb: (results: ParticipantSuggestion[]) => void) {
   const q = String(query || '').trim().toLowerCase()
   if (!q) {
-    cb(visibleParticipantSuggestions().slice(0, 20))
+    cb(visibleParticipantSuggestions().slice(0, PARTICIPANT_SUGGESTIONS_LIMIT))
     return
   }
 
   const results = visibleParticipantSuggestions()
     .filter((s) => s.value.toLowerCase().includes(q) || s.pid.toLowerCase().includes(q))
-    .slice(0, 20)
+    .slice(0, PARTICIPANT_SUGGESTIONS_LIMIT)
 
   cb(results)
-}
-
-function onSearchSelect(s: ParticipantSuggestion) {
-  focusPid.value = s.pid
 }
 
 function goToPid(pid: string) {
@@ -1535,12 +1539,12 @@ onBeforeUnmount(() => {
 const throttledRebuild = throttle(() => {
   if (!cy) return
   rebuildGraph({ fit: false })
-}, 300)
+}, THROTTLE_GRAPH_REBUILD_MS)
 
 const throttledLayoutSpacing = throttle(() => {
   if (!cy) return
   runLayout()
-}, 250)
+}, THROTTLE_LAYOUT_SPACING_MS)
 
 watch([eq, statusFilter, threshold, showIncidents, hideIsolates], () => {
   throttledRebuild()
@@ -1644,6 +1648,8 @@ const canFind = computed(() => {
   return Boolean(getZoomPid())
 })
 
+const canUseSelectedForFocus = computed(() => Boolean(selected.value && selected.value.kind === 'node'))
+
 function applyZoom(level: number) {
   if (!cy) return
   const z = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), level))
@@ -1656,899 +1662,129 @@ function applyZoom(level: number) {
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Network Graph" tooltip-key="nav.graph" />
+        <TooltipLabel
+          label="Network Graph"
+          tooltip-key="nav.graph"
+        />
         <div class="hdr__right">
-          <el-tag type="info">{{ seedLabel }}</el-tag>
-          <el-tag type="info">Nodes: {{ stats.nodes }}</el-tag>
-          <el-tag type="info">Edges: {{ stats.edges }}</el-tag>
-          <el-tag v-if="stats.bottlenecks" type="danger">Bottlenecks: {{ stats.bottlenecks }}</el-tag>
+          <el-tag type="info">
+            {{ seedLabel }}
+          </el-tag>
+          <el-tag type="info">
+            Nodes: {{ stats.nodes }}
+          </el-tag>
+          <el-tag type="info">
+            Edges: {{ stats.edges }}
+          </el-tag>
+          <el-tag
+            v-if="stats.bottlenecks"
+            type="danger"
+          >
+            Bottlenecks: {{ stats.bottlenecks }}
+          </el-tag>
         </div>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
 
-    <div class="toolbar">
-      <el-tabs v-model="toolbarTab" type="card" class="toolbarTabs">
-        <el-tab-pane label="Filters" name="filters">
-          <div class="paneGrid">
-            <div class="ctl ctl--eq">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Equivalent" tooltip-key="graph.eq" />
-              <el-select v-model="eq" size="small" class="ctl__field">
-                <el-option v-for="c in availableEquivalents" :key="c" :label="c" :value="c" />
-              </el-select>
-            </div>
+    <GraphFiltersToolbar
+      v-model:toolbar-tab="toolbarTab"
+      v-model:eq="eq"
+      v-model:status-filter="statusFilter"
+      v-model:threshold="threshold"
+      v-model:type-filter="typeFilter"
+      v-model:min-degree="minDegree"
+      v-model:layout-name="layoutName"
+      v-model:layout-spacing="layoutSpacing"
+      v-model:business-label-parts="businessLabelParts"
+      v-model:person-label-parts="personLabelParts"
+      v-model:show-labels="showLabels"
+      v-model:auto-labels-by-zoom="autoLabelsByZoom"
+      v-model:show-incidents="showIncidents"
+      v-model:hide-isolates="hideIsolates"
+      v-model:show-legend="showLegend"
+      v-model:search-query="searchQuery"
+      v-model:focus-pid="focusPid"
+      v-model:zoom="zoom"
+      v-model:focus-mode="focusMode"
+      v-model:focus-depth="focusDepth"
+      :available-equivalents="availableEquivalents"
+      :statuses="statuses"
+      :layout-options="layoutOptions"
+      :fetch-suggestions="querySearchParticipants"
+      :on-focus-search="focusSearch"
+      :on-fit="fit"
+      :on-relayout="runLayout"
+      :can-find="canFind"
+      :focus-root-pid="focusRootPid"
+      :can-use-selected-for-focus="canUseSelectedForFocus"
+      :on-use-selected-for-focus="useSelectedForFocus"
+      :on-clear-focus-mode="clearFocusMode"
+    />
 
-            <div class="ctl ctl--status">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Status" tooltip-key="graph.status" />
-              <el-select v-model="statusFilter" multiple collapse-tags collapse-tags-tooltip size="small" class="ctl__field">
-                <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
-              </el-select>
-            </div>
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="6"
+    />
 
-            <div class="ctl ctl--threshold">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Bottleneck" tooltip-key="graph.threshold" />
-              <el-input v-model="threshold" size="small" class="ctl__field" placeholder="0.10" />
-            </div>
-
-            <div class="ctl">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Type" tooltip-key="graph.type" />
-              <el-checkbox-group v-model="typeFilter" size="small">
-                <el-checkbox-button label="person">person</el-checkbox-button>
-                <el-checkbox-button label="business">business</el-checkbox-button>
-              </el-checkbox-group>
-            </div>
-
-            <div class="ctl ctl--degree">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Min degree" tooltip-key="graph.minDegree" />
-              <el-input-number v-model="minDegree" size="small" :min="0" :max="20" controls-position="right" class="ctl__field" />
-            </div>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="Display" name="display">
-          <div class="paneGrid">
-            <div class="ctl ctl--layout">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Layout" tooltip-key="graph.layout" />
-              <el-select v-model="layoutName" size="small" class="ctl__field">
-                <el-option v-for="o in layoutOptions" :key="o.value" :label="o.label" :value="o.value" />
-              </el-select>
-            </div>
-
-            <div class="ctl">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Layout spacing" tooltip-key="graph.spacing" />
-              <el-slider v-model="layoutSpacing" :min="1" :max="3" :step="0.1" class="sliderField" />
-            </div>
-
-            <div class="ctl">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Business labels" tooltip-key="graph.labels" />
-              <el-checkbox-group v-model="businessLabelParts" size="small">
-                <el-checkbox-button label="name">name</el-checkbox-button>
-                <el-checkbox-button label="pid">pid</el-checkbox-button>
-              </el-checkbox-group>
-            </div>
-
-            <div class="ctl">
-              <TooltipLabel class="toolbarLabel ctl__label" label="Person labels" tooltip-key="graph.labels" />
-              <el-checkbox-group v-model="personLabelParts" size="small">
-                <el-checkbox-button label="name">name</el-checkbox-button>
-                <el-checkbox-button label="pid">pid</el-checkbox-button>
-              </el-checkbox-group>
-            </div>
-
-            <div class="toggleGrid">
-              <div class="toggleLine">
-                <TooltipLabel class="toolbarLabel" label="Labels" tooltip-key="graph.labels" />
-                <el-switch v-model="showLabels" size="small" />
-              </div>
-              <div class="toggleLine">
-                <TooltipLabel class="toolbarLabel" label="Auto labels" tooltip-key="graph.labels" />
-                <el-switch v-model="autoLabelsByZoom" size="small" />
-              </div>
-              <div class="toggleLine">
-                <TooltipLabel class="toolbarLabel" label="Incidents" tooltip-key="graph.incidents" />
-                <el-switch v-model="showIncidents" size="small" />
-              </div>
-              <div class="toggleLine">
-                <TooltipLabel class="toolbarLabel" label="Hide isolates" tooltip-key="graph.hideIsolates" />
-                <el-switch v-model="hideIsolates" size="small" />
-              </div>
-              <div class="toggleLine">
-                <TooltipLabel class="toolbarLabel" label="Legend" tooltip-key="graph.legend" />
-                <el-switch v-model="showLegend" size="small" />
-              </div>
-            </div>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="Navigate" name="navigate">
-          <div class="navPane">
-            <div class="navRow navRow--search">
-              <TooltipLabel class="toolbarLabel navRow__label" label="Search" tooltip-key="graph.search" />
-              <el-autocomplete
-                v-model="searchQuery"
-                :fetch-suggestions="querySearchParticipants"
-                placeholder="Type PID or name…"
-                size="small"
-                clearable
-                class="navRow__field"
-                @select="onSearchSelect"
-                @keyup.enter="focusSearch"
-              />
-            </div>
-
-            <div class="navRow navRow--actions">
-              <TooltipLabel class="toolbarLabel navRow__label" label="Actions" tooltip-key="graph.actions" />
-              <div class="navActions">
-                <el-button size="small" :disabled="!canFind" @click="focusSearch">Find</el-button>
-                <el-button size="small" @click="fit">Fit</el-button>
-                <el-button size="small" @click="runLayout">Re-layout</el-button>
-
-                <div class="zoomrow">
-                  <TooltipLabel class="toolbarLabel zoomrow__label" label="Zoom" tooltip-key="graph.zoom" />
-                  <el-slider v-model="zoom" :min="0.1" :max="3" :step="0.05" class="zoomrow__slider" />
-                </div>
-              </div>
-            </div>
-
-            <div class="navRow navRow--focus">
-              <TooltipLabel
-                class="toolbarLabel navRow__label"
-                label="Focus"
-                tooltip-text="Focus Mode shows a small ego-subgraph (depth 1–2) around a participant to reduce noise."
-              />
-              <div class="navFocus">
-                <el-switch v-model="focusMode" size="small" />
-                <el-select v-model="focusDepth" size="small" class="navFocus__depth" :disabled="!focusMode">
-                  <el-option label="Depth 1" :value="1" />
-                  <el-option label="Depth 2" :value="2" />
-                </el-select>
-
-                <el-tag v-if="focusMode && focusRootPid" type="info" class="navFocus__tag">{{ focusRootPid }}</el-tag>
-
-                <el-button size="small" :disabled="!(selected && selected.kind === 'node')" @click="useSelectedForFocus">Use selected</el-button>
-                <el-button size="small" :disabled="!focusMode" @click="clearFocusMode">Clear</el-button>
-              </div>
-            </div>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
-    </div>
-
-    <el-skeleton v-if="loading" animated :rows="6" />
-
-    <div v-else class="cy-wrap">
-      <div v-if="showLegend" class="legend">
-        <div class="legend__title">Legend</div>
-        <div class="legend__row">
-          <span class="swatch swatch--node-active" /> active participant
-        </div>
-        <div class="legend__row">
-          <span class="swatch swatch--node-frozen" /> frozen participant
-        </div>
-        <div class="legend__row">
-          <span class="swatch swatch--node-business" /> business (node shape)
-        </div>
-        <div class="legend__row">
-          <span class="swatch swatch--edge-active" /> active trustline
-        </div>
-        <div class="legend__row">
-          <span class="swatch swatch--edge-frozen" /> frozen trustline
-        </div>
-        <div class="legend__row">
-          <span class="swatch swatch--edge-closed" /> closed trustline
-        </div>
-        <div class="legend__row">
-          <span class="swatch swatch--edge-bottleneck" /> bottleneck (thick)
-        </div>
-        <div class="legend__row">
-          <span class="swatch swatch--edge-incident" /> incident initiator side (dashed)
-        </div>
-      </div>
-      <div ref="cyRoot" class="cy" />
+    <div
+      v-else
+      class="cy-wrap"
+    >
+      <GraphLegend :open="showLegend" />
+      <div
+        ref="cyRoot"
+        class="cy"
+      />
     </div>
   </el-card>
 
-  <el-drawer v-model="drawerOpen" title="Details" size="40%">
-    <div v-if="selected && selected.kind === 'node'">
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="PID">
-          <span class="geoInlineRow">
-            {{ selected.pid }}
-            <CopyIconButton :text="selected.pid" label="PID" />
-          </span>
-        </el-descriptions-item>
-        <el-descriptions-item label="Display name">{{ selected.display_name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Status">{{ selected.status || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Type">{{ selected.type || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Degree">{{ selected.degree }}</el-descriptions-item>
-        <el-descriptions-item label="In / out">{{ selected.inDegree }} / {{ selected.outDegree }}</el-descriptions-item>
-        <el-descriptions-item v-if="showIncidents" label="Incident ratio">
-          {{ (incidentRatioByPid.get(selected.pid) || 0).toFixed(2) }}
-        </el-descriptions-item>
-      </el-descriptions>
-
-      <el-divider>Analytics (fixtures-first)</el-divider>
-
-      <div class="drawerControls">
-        <div class="drawerControls__row">
-          <div class="ctl">
-            <div class="toolbarLabel">Equivalent</div>
-            <el-select v-model="drawerEq" size="small" filterable class="ctl__field" placeholder="Equivalent">
-              <el-option v-for="o in availableEquivalents" :key="o" :label="o" :value="o" />
-            </el-select>
-          </div>
-          <div class="drawerControls__actions">
-            <el-button size="small" @click="loadData">Refresh</el-button>
-          </div>
-        </div>
-      </div>
-
-      <el-tabs v-model="drawerTab" class="drawerTabs">
-        <el-tab-pane label="Summary" name="summary">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) for full analytics." type="info" show-icon class="mb" />
-
-          <div class="hint">Fixtures-first: derived from trustlines + debts + incidents + audit-log.</div>
-
-          <GraphAnalyticsTogglesCard
-            v-if="analyticsEq"
-            title="Summary widgets"
-            title-tooltip-text="Show/hide summary cards. These toggles are stored in localStorage for this browser."
-            :enabled="Boolean(analyticsEq)"
-            v-model="analytics"
-            :items="summaryToggleItems"
-          />
-
-          <div v-if="analyticsEq" class="summaryGrid">
-            <el-card shadow="never" class="summaryCard">
-              <template #header>
-                <TooltipLabel
-                  label="Net position"
-                  tooltip-text="Net balance in the selected equivalent: total_credit − total_debt (derived from debts fixture)."
-                />
-              </template>
-              <div v-if="selectedRank" class="kpi">
-                <div class="kpi__value">{{ money(selectedRank.net) }} {{ selectedRank.eq }}</div>
-                <div class="kpi__hint muted">credit − debt</div>
-              </div>
-              <div v-else class="muted">No data</div>
-            </el-card>
-
-            <el-card v-if="analytics.showRank" shadow="never" class="summaryCard">
-              <template #header>
-                <TooltipLabel
-                  label="Rank / percentile"
-                  tooltip-text="Your position among all participants by net balance for the selected equivalent (1 = top net creditor)."
-                />
-              </template>
-              <div v-if="selectedRank" class="kpi">
-                <div class="kpi__value">rank {{ selectedRank.rank }}/{{ selectedRank.n }}</div>
-                <el-progress :percentage="Math.round((selectedRank.percentile || 0) * 100)" :stroke-width="10" :show-text="false" />
-                <div class="kpi__hint muted">Percentile: {{ pct(selectedRank.percentile, 0) }}</div>
-              </div>
-              <div v-else class="muted">No data</div>
-            </el-card>
-
-            <el-card v-if="analytics.showConcentration" shadow="never" class="summaryCard">
-              <template #header>
-                <TooltipLabel
-                  label="Concentration"
-                  tooltip-text="How concentrated your debts/credits are across counterparties (top1/top5 shares + HHI). Higher = more dependence on a few counterparties."
-                />
-              </template>
-              <div v-if="selectedConcentration.eq" class="kpi">
-                <div class="kpi__row">
-                  <span class="geoLabel">Outgoing (you owe)</span>
-                  <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
-                </div>
-                <div class="metricRows">
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
-                    />
-                    <span class="metricRow__value">{{ selectedConcentration.outgoing.hhi.toFixed(2) }}</span>
-                  </div>
-                </div>
-                <div class="kpi__row" style="margin-top: 10px">
-                  <span class="geoLabel">Incoming (owed to you)</span>
-                  <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
-                </div>
-                <div class="metricRows">
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
-                    />
-                    <span class="metricRow__value">{{ selectedConcentration.incoming.hhi.toFixed(2) }}</span>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="muted">No data</div>
-            </el-card>
-
-            <el-card v-if="analytics.showCapacity" shadow="never" class="summaryCard">
-              <template #header>
-                <TooltipLabel
-                  label="Capacity"
-                  tooltip-text="Aggregate trustline capacity around the participant: used% = total_used / total_limit (incoming/outgoing)."
-                />
-              </template>
-              <div v-if="selectedCapacity" class="kpi">
-                <div class="kpi__row">
-                  <span class="muted">Outgoing used</span>
-                  <span class="kpi__metric">{{ pct(selectedCapacity.out.pct, 0) }}</span>
-                </div>
-                <el-progress :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-                <div class="kpi__row" style="margin-top: 10px">
-                  <span class="muted">Incoming used</span>
-                  <span class="kpi__metric">{{ pct(selectedCapacity.inc.pct, 0) }}</span>
-                </div>
-                <el-progress :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-                <div v-if="analytics.showBottlenecks" class="kpi__hint muted" style="margin-top: 8px">
-                  Bottlenecks: {{ selectedCapacity.bottlenecks.length }} (threshold {{ threshold }})
-                </div>
-              </div>
-              <div v-else class="muted">No data</div>
-            </el-card>
-
-            <el-card v-if="analytics.showActivity" shadow="never" class="summaryCard">
-              <template #header>
-                <TooltipLabel
-                  label="Activity / churn"
-                  tooltip-text="Recent changes around the participant in rolling windows (7/30/90 days), based on fixture timestamps."
-                />
-              </template>
-              <div v-if="selectedActivity" class="metricRows">
-                <div class="metricRow">
-                  <TooltipLabel
-                    class="metricRow__label"
-                    label="Trustlines created (7/30/90d)"
-                    tooltip-text="Count of trustlines involving this participant with created_at inside each window."
-                  />
-                  <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
-                </div>
-                <div class="metricRow">
-                  <TooltipLabel
-                    class="metricRow__label"
-                    label="Trustlines closed now (7/30/90d)"
-                    tooltip-text="Not an event counter: among trustlines created inside each window, how many are currently status=closed."
-                  />
-                  <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
-                </div>
-                <div class="metricRow">
-                  <TooltipLabel
-                    class="metricRow__label"
-                    label="Incidents (initiator, 7/30/90d)"
-                    tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
-                  />
-                  <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
-                </div>
-                <div class="metricRow">
-                  <TooltipLabel
-                    class="metricRow__label"
-                    label="Participant ops (audit-log, 7/30/90d)"
-                    tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
-                  />
-                  <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
-                </div>
-              </div>
-              <div v-else class="muted">No data</div>
-            </el-card>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="Connections" name="connections">
-          <div class="hint">Derived from visible graph edges (incoming/outgoing trustlines).</div>
-
-          <el-empty v-if="selectedConnectionsIncoming.length + selectedConnectionsOutgoing.length === 0" description="No connections in current view" />
-          <div v-else>
-            <el-divider>Incoming (owed to you)</el-divider>
-            <div class="tableTop">
-              <el-pagination
-                v-model:current-page="connectionsIncomingPage"
-                :page-size="connectionsPageSize"
-                :total="selectedConnectionsIncoming.length"
-                small
-                background
-                layout="prev, pager, next, total"
-              />
-            </div>
-            <el-table
-              :data="selectedConnectionsIncomingPaged"
-              size="small"
-              border
-              table-layout="fixed"
-              style="width: 100%"
-              class="mb clickable-table"
-              highlight-current-row
-              @row-click="onConnectionRowClick"
-            >
-              <el-table-column label="Counterparty" min-width="220">
-                <template #default="{ row }">
-                  <span class="mono pidLink">{{ row.counterparty_pid }}</span>
-                  <span v-if="row.counterparty_name" class="muted"> — {{ row.counterparty_name }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="equivalent" label="Eq" width="80" />
-              <el-table-column prop="status" label="Status" width="90" />
-              <el-table-column label="Available" width="120">
-                <template #default="{ row }">{{ money(row.available) }}</template>
-              </el-table-column>
-              <el-table-column label="Used" width="120">
-                <template #default="{ row }">{{ money(row.used) }}</template>
-              </el-table-column>
-              <el-table-column label="Limit" width="120">
-                <template #default="{ row }">{{ money(row.limit) }}</template>
-              </el-table-column>
-            </el-table>
-
-            <el-divider>Outgoing (you owe)</el-divider>
-            <div class="tableTop">
-              <el-pagination
-                v-model:current-page="connectionsOutgoingPage"
-                :page-size="connectionsPageSize"
-                :total="selectedConnectionsOutgoing.length"
-                small
-                background
-                layout="prev, pager, next, total"
-              />
-            </div>
-            <el-table
-              :data="selectedConnectionsOutgoingPaged"
-              size="small"
-              border
-              table-layout="fixed"
-              style="width: 100%"
-              class="clickable-table"
-              highlight-current-row
-              @row-click="onConnectionRowClick"
-            >
-              <el-table-column label="Counterparty" min-width="220">
-                <template #default="{ row }">
-                  <span class="mono pidLink">{{ row.counterparty_pid }}</span>
-                  <span v-if="row.counterparty_name" class="muted"> — {{ row.counterparty_name }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="equivalent" label="Eq" width="80" />
-              <el-table-column prop="status" label="Status" width="90" />
-              <el-table-column label="Available" width="120">
-                <template #default="{ row }">{{ money(row.available) }}</template>
-              </el-table-column>
-              <el-table-column label="Used" width="120">
-                <template #default="{ row }">{{ money(row.used) }}</template>
-              </el-table-column>
-              <el-table-column label="Limit" width="120">
-                <template #default="{ row }">{{ money(row.limit) }}</template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="Balance" name="balance">
-          <div class="hint">Derived from trustlines + debts fixtures (debts are derived from trustline.used).</div>
-
-          <el-alert
-            v-if="!analyticsEq"
-            title="Pick an equivalent (not ALL) to enable analytics cards"
-            description="With ALL selected, the Balance table still works, but Rank/Distribution/Counterparty/Risk visualizations are hidden because they are per-equivalent."
-            type="info"
-            show-icon
-            class="mb"
-          />
-
-          <GraphAnalyticsTogglesCard
-            v-if="analyticsEq"
-            title="Balance widgets"
-            title-tooltip-text="Show/hide balance visualizations. These toggles are stored in localStorage for this browser."
-            :enabled="Boolean(analyticsEq)"
-            v-model="analytics"
-            :items="balanceToggleItems"
-          />
-
-          <el-card v-if="analytics.showRank && selectedRank" shadow="never" class="mb">
-            <template #header>
-              <TooltipLabel
-                :label="`Rank / percentile (${selectedRank.eq})`"
-                tooltip-text="Rank is 1..N by net balance; percentile is normalized to 0..100 where 100% is the top net creditor."
-              />
-            </template>
-            <div class="kpi">
-              <div class="kpi__value">rank {{ selectedRank.rank }}/{{ selectedRank.n }}</div>
-              <el-progress :percentage="Math.round((selectedRank.percentile || 0) * 100)" :stroke-width="10" :show-text="false" />
-              <div class="kpi__hint muted">Percentile: {{ pct(selectedRank.percentile, 0) }}</div>
-            </div>
-          </el-card>
-
-          <el-card v-if="analytics.showDistribution && netDistribution" shadow="never" class="mb">
-            <template #header>
-              <TooltipLabel
-                :label="`Distribution (${netDistribution.eq})`"
-                tooltip-text="Histogram of net balances across all participants for the selected equivalent."
-              />
-            </template>
-            <div class="hist">
-              <div
-                v-for="(b, i) in netDistribution.bins"
-                :key="i"
-                class="hist__bar"
-                :style="{ height: ((b.count / Math.max(1, Math.max(...netDistribution.bins.map(x => x.count)))) * 48).toFixed(0) + 'px' }"
-                :title="String(b.count)"
-              />
-            </div>
-            <div class="hist__labels muted">
-              <span>{{ money(atomsToDecimal(netDistribution.min, precisionByEq.get(netDistribution.eq) ?? 2)) }}</span>
-              <span>{{ money(atomsToDecimal(netDistribution.max, precisionByEq.get(netDistribution.eq) ?? 2)) }}</span>
-            </div>
-          </el-card>
-
-          <el-empty v-if="selectedBalanceRows.length === 0" description="No data" />
-          <el-table v-else :data="selectedBalanceRows" size="small" table-layout="fixed" class="geoTable">
-            <el-table-column prop="equivalent" label="Equivalent" width="120" />
-            <el-table-column prop="outgoing_limit" label="Out limit" min-width="120">
-              <template #default="{ row }">{{ money(row.outgoing_limit) }}</template>
-            </el-table-column>
-            <el-table-column prop="outgoing_used" label="Out used" min-width="120">
-              <template #default="{ row }">{{ money(row.outgoing_used) }}</template>
-            </el-table-column>
-            <el-table-column prop="incoming_limit" label="In limit" min-width="120">
-              <template #default="{ row }">{{ money(row.incoming_limit) }}</template>
-            </el-table-column>
-            <el-table-column prop="incoming_used" label="In used" min-width="120">
-              <template #default="{ row }">{{ money(row.incoming_used) }}</template>
-            </el-table-column>
-            <el-table-column prop="total_debt" label="Debt" min-width="120">
-              <template #default="{ row }">{{ money(row.total_debt) }}</template>
-            </el-table-column>
-            <el-table-column prop="total_credit" label="Credit" min-width="120">
-              <template #default="{ row }">{{ money(row.total_credit) }}</template>
-            </el-table-column>
-            <el-table-column prop="net" label="Net" min-width="120">
-              <template #default="{ row }">{{ money(row.net) }}</template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-
-        <el-tab-pane label="Counterparties" name="counterparties">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect counterparties." type="info" show-icon class="mb" />
-
-          <div v-else>
-            <div class="splitGrid">
-              <el-card shadow="never">
-                <template #header>
-                  <TooltipLabel
-                    label="Top creditors (you owe)"
-                    tooltip-text="Participants who are creditors of this participant (debts where you are the debtor)."
-                  />
-                </template>
-                <el-empty v-if="selectedCounterpartySplit.creditors.length === 0" description="No creditors" />
-                <el-table v-else :data="selectedCounterpartySplit.creditors.slice(0, 10)" size="small" table-layout="fixed" class="geoTable">
-                  <el-table-column prop="display_name" label="Participant" min-width="220" />
-                  <el-table-column prop="amount" label="Amount" min-width="120">
-                    <template #default="{ row }">{{ money(row.amount) }}</template>
-                  </el-table-column>
-                  <el-table-column prop="share" label="Share" min-width="140">
-                    <template #default="{ row }">
-                      <div class="shareCell">
-                        <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
-                        <span class="muted">{{ pct(row.share, 0) }}</span>
-                      </div>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </el-card>
-
-              <el-card shadow="never">
-                <template #header>
-                  <TooltipLabel
-                    label="Top debtors (owed to you)"
-                    tooltip-text="Participants who are debtors to this participant (debts where you are the creditor)."
-                  />
-                </template>
-                <el-empty v-if="selectedCounterpartySplit.debtors.length === 0" description="No debtors" />
-                <el-table v-else :data="selectedCounterpartySplit.debtors.slice(0, 10)" size="small" table-layout="fixed" class="geoTable">
-                  <el-table-column prop="display_name" label="Participant" min-width="220" />
-                  <el-table-column prop="amount" label="Amount" min-width="120">
-                    <template #default="{ row }">{{ money(row.amount) }}</template>
-                  </el-table-column>
-                  <el-table-column prop="share" label="Share" min-width="140">
-                    <template #default="{ row }">
-                      <div class="shareCell">
-                        <el-progress :percentage="Math.round((row.share || 0) * 100)" :stroke-width="10" :show-text="false" />
-                        <span class="muted">{{ pct(row.share, 0) }}</span>
-                      </div>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </el-card>
-            </div>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="Risk" name="risk">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect risk metrics." type="info" show-icon class="mb" />
-
-          <GraphAnalyticsTogglesCard
-            v-if="analyticsEq"
-            title="Risk widgets"
-            title-tooltip-text="Show/hide risk-related widgets in this tab. These toggles are stored in localStorage for this browser."
-            :enabled="Boolean(analyticsEq)"
-            v-model="analytics"
-            :items="riskToggleItems"
-          />
-
-          <el-card v-if="analyticsEq && analytics.showConcentration" shadow="never" class="mb">
-            <template #header>
-              <TooltipLabel
-                :label="`Concentration (${analyticsEq})`"
-                tooltip-text="Counterparty concentration risk derived from debt shares: top1/top5 and HHI."
-              />
-            </template>
-            <div v-if="selectedConcentration.eq" class="riskGrid">
-              <div class="riskBlock">
-                <div class="riskBlock__hdr">
-                  <TooltipLabel
-                    label="Outgoing concentration"
-                    tooltip-text="How concentrated your outgoing debts are (you owe). Higher = dependence on fewer creditors."
-                  />
-                  <el-tag :type="selectedConcentration.outgoing.level.type" size="small">{{ selectedConcentration.outgoing.level.label }}</el-tag>
-                </div>
-                <div class="metricRows">
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total outgoing debt owed to the largest single creditor." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
-                    />
-                    <span class="metricRow__value">{{ selectedConcentration.outgoing.hhi.toFixed(2) }}</span>
-                  </div>
-                </div>
-              </div>
-              <div class="riskBlock">
-                <div class="riskBlock__hdr">
-                  <TooltipLabel
-                    label="Incoming concentration"
-                    tooltip-text="How concentrated your incoming credits are (owed to you). Higher = dependence on fewer debtors."
-                  />
-                  <el-tag :type="selectedConcentration.incoming.level.type" size="small">{{ selectedConcentration.incoming.level.label }}</el-tag>
-                </div>
-                <div class="metricRows">
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top1 share" tooltip-text="Share of total incoming credit owed by the largest single debtor." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel class="metricRow__label" label="Top5 share" tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined." />
-                    <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
-                    />
-                    <span class="metricRow__value">{{ selectedConcentration.incoming.hhi.toFixed(2) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-else class="muted">No data</div>
-          </el-card>
-
-          <el-card v-if="analyticsEq && analytics.showCapacity && selectedCapacity" shadow="never" class="mb">
-            <template #header>
-              <TooltipLabel
-                label="Trustline capacity"
-                tooltip-text="How much of the participant’s trustline limits are already used. Outgoing = used on lines where participant is creditor; incoming = used on lines where participant is debtor."
-              />
-            </template>
-            <div class="capRow">
-              <div class="capRow__label">
-                <TooltipLabel
-                  label="Outgoing used"
-                  tooltip-text="Used / limit aggregated across all outgoing trustlines (participant is creditor)."
-                />
-              </div>
-              <el-progress :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-              <div class="capRow__value">{{ pct(selectedCapacity.out.pct, 0) }}</div>
-            </div>
-            <div class="capRow">
-              <div class="capRow__label">
-                <TooltipLabel
-                  label="Incoming used"
-                  tooltip-text="Used / limit aggregated across all incoming trustlines (participant is debtor)."
-                />
-              </div>
-              <el-progress :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)" :stroke-width="10" :show-text="false" />
-              <div class="capRow__value">{{ pct(selectedCapacity.inc.pct, 0) }}</div>
-            </div>
-            <div v-if="analytics.showBottlenecks" class="mb" style="margin-top: 10px">
-              <el-tag type="info" size="small">
-                <TooltipLabel
-                  :label="`Bottlenecks: ${selectedCapacity.bottlenecks.length}`"
-                  tooltip-text="Trustlines where available/limit is below the selected threshold."
-                />
-              </el-tag>
-              <span class="muted" style="margin-left: 8px">threshold {{ threshold }}</span>
-            </div>
-            <el-collapse v-if="analytics.showBottlenecks && selectedCapacity.bottlenecks.length" accordion>
-              <el-collapse-item name="bottlenecks">
-                <template #title>
-                  <TooltipLabel
-                    label="Bottlenecks list"
-                    tooltip-text="List of trustlines close to saturation (low available relative to limit)."
-                  />
-                </template>
-                <el-table :data="selectedCapacity.bottlenecks" size="small" table-layout="fixed" class="geoTable">
-                  <el-table-column prop="dir" label="Dir" width="70" />
-                  <el-table-column prop="other" label="Counterparty" min-width="220" />
-                  <el-table-column label="Limit / Used / Avail" min-width="220">
-                    <template #default="{ row }">
-                      {{ money(row.t.limit) }} / {{ money(row.t.used) }} / {{ money(row.t.available) }}
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </el-collapse-item>
-            </el-collapse>
-          </el-card>
-
-          <el-card v-if="analyticsEq && analytics.showActivity && selectedActivity" shadow="never">
-            <template #header>
-              <TooltipLabel
-                label="Activity / churn"
-                tooltip-text="Counts by 7/30/90-day windows. Sources: trustlines.created_at, incidents.created_at, audit-log.timestamp, transactions.updated_at."
-              />
-            </template>
-            <div class="metricRows">
-              <div class="metricRow">
-                <TooltipLabel
-                  class="metricRow__label"
-                  label="Trustlines created (7/30/90d)"
-                  tooltip-text="Count of trustlines involving this participant with created_at inside each window."
-                />
-                <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
-              </div>
-              <div class="metricRow">
-                <TooltipLabel
-                  class="metricRow__label"
-                  label="Trustlines closed now (7/30/90d)"
-                  tooltip-text="Not an event counter: among trustlines created inside each window, how many are currently status=closed."
-                />
-                <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
-              </div>
-              <div class="metricRow">
-                <TooltipLabel
-                  class="metricRow__label"
-                  label="Incidents (initiator, 7/30/90d)"
-                  tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
-                />
-                <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
-              </div>
-              <div class="metricRow">
-                <TooltipLabel
-                  class="metricRow__label"
-                  label="Participant ops (audit-log, 7/30/90d)"
-                  tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
-                />
-                <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
-              </div>
-              <div class="metricRow">
-                <TooltipLabel
-                  class="metricRow__label"
-                  label="Payments committed (7/30/90d)"
-                  tooltip-text="Count of committed PAYMENT transactions involving this participant (as sender or receiver), by updated_at window."
-                />
-                <span class="metricRow__value">{{ selectedActivity.paymentCommitted[7] }} / {{ selectedActivity.paymentCommitted[30] }} / {{ selectedActivity.paymentCommitted[90] }}</span>
-              </div>
-              <div class="metricRow">
-                <TooltipLabel
-                  class="metricRow__label"
-                  label="Clearing committed (7/30/90d)"
-                  tooltip-text="Count of committed CLEARING transactions where this participant appears in any cycle edge (or is initiator), by updated_at window."
-                />
-                <span class="metricRow__value">{{ selectedActivity.clearingCommitted[7] }} / {{ selectedActivity.clearingCommitted[30] }} / {{ selectedActivity.clearingCommitted[90] }}</span>
-              </div>
-            </div>
-            <el-alert
-              v-if="!selectedActivity.hasTransactions"
-              type="warning"
-              show-icon
-              title="Transactions-based activity is unavailable in fixtures"
-              description="Missing datasets/transactions.json in the current seed. In real mode this must come from API."
-              class="mb"
-              style="margin-top: 10px"
-            />
-          </el-card>
-        </el-tab-pane>
-
-        <el-tab-pane label="Cycles" name="cycles">
-          <el-alert v-if="!analyticsEq" title="Pick an equivalent (not ALL) to inspect clearing cycles." type="info" show-icon class="mb" />
-          <el-empty v-else-if="selectedCycles.length === 0" description="No cycles found in fixtures" />
-          <div v-else class="cycles">
-            <div class="hint">
-              <TooltipLabel
-                label="Clearing cycles"
-                tooltip-text="Each cycle is a directed loop in the debt graph for the selected equivalent. Clearing reduces each edge by the shown amount."
-              />
-            </div>
-            <div
-              v-for="(c, idx) in selectedCycles"
-              :key="idx"
-              class="cycleItem"
-              :class="{ 'cycleItem--active': isCycleActive(c) }"
-              @click="toggleCycleHighlight(c)"
-            >
-              <div class="cycleTitle">
-                <TooltipLabel
-                  :label="`Cycle #${idx + 1}`"
-                  tooltip-text="A cycle is a set of debts that can be cleared together while preserving net positions (cycle cancelation)."
-                />
-              </div>
-              <div v-for="(e, j) in c" :key="j" class="cycleEdge">
-                <span class="mono">{{ e.debtor }}</span>
-                <span class="muted">→</span>
-                <span class="mono">{{ e.creditor }}</span>
-                <span class="muted">({{ e.equivalent }} {{ money(e.amount) }})</span>
-              </div>
-            </div>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
-    </div>
-
-    <div v-else-if="selected && selected.kind === 'edge'">
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="Equivalent">
-          <span>
-            {{ selected.equivalent }}
-          </span>
-        </el-descriptions-item>
-        <el-descriptions-item label="From">
-          <span class="geoInlineRow">
-            {{ selected.from }}
-            <CopyIconButton :text="selected.from" label="From PID" />
-          </span>
-        </el-descriptions-item>
-        <el-descriptions-item label="To">
-          <span class="geoInlineRow">
-            {{ selected.to }}
-            <CopyIconButton :text="selected.to" label="To PID" />
-          </span>
-        </el-descriptions-item>
-        <el-descriptions-item label="Status">{{ selected.status }}</el-descriptions-item>
-        <el-descriptions-item label="Limit">{{ money(selected.limit) }}</el-descriptions-item>
-        <el-descriptions-item label="Used">{{ money(selected.used) }}</el-descriptions-item>
-        <el-descriptions-item label="Available">{{ money(selected.available) }}</el-descriptions-item>
-        <el-descriptions-item label="Created at">{{ selected.created_at }}</el-descriptions-item>
-      </el-descriptions>
-    </div>
-  </el-drawer>
+  <GraphAnalyticsDrawer
+    v-model="drawerOpen"
+    v-model:tab="drawerTab"
+    v-model:eq="drawerEq"
+    v-model:analytics="analytics"
+    v-model:connections-incoming-page="connectionsIncomingPage"
+    v-model:connections-outgoing-page="connectionsOutgoingPage"
+    :selected="selected"
+    :show-incidents="showIncidents"
+    :incident-ratio-by-pid="incidentRatioByPid"
+    :available-equivalents="availableEquivalents"
+    :analytics-eq="analyticsEq"
+    :threshold="threshold"
+    :precision-by-eq="precisionByEq"
+    :atoms-to-decimal="atomsToDecimal"
+    :load-data="loadData"
+    :money="money"
+    :pct="pct"
+    :selected-rank="selectedRank"
+    :selected-concentration="selectedConcentration"
+    :selected-capacity="selectedCapacity"
+    :selected-activity="selectedActivity"
+    :net-distribution="netDistribution"
+    :selected-balance-rows="selectedBalanceRows"
+    :selected-counterparty-split="selectedCounterpartySplit"
+    :selected-connections-incoming="selectedConnectionsIncoming"
+    :selected-connections-outgoing="selectedConnectionsOutgoing"
+    :selected-connections-incoming-paged="selectedConnectionsIncomingPaged"
+    :selected-connections-outgoing-paged="selectedConnectionsOutgoingPaged"
+    :connections-page-size="connectionsPageSize"
+    :on-connection-row-click="onConnectionRowClick"
+    :selected-cycles="selectedCycles"
+    :is-cycle-active="isCycleActive"
+    :toggle-cycle-highlight="toggleCycleHighlight"
+    :summary-toggle-items="summaryToggleItems"
+    :balance-toggle-items="balanceToggleItems"
+    :risk-toggle-items="riskToggleItems"
+  />
 </template>
 
 <style scoped>
@@ -2571,15 +1807,6 @@ function applyZoom(level: number) {
 
 .toolbar {
   margin-bottom: 12px;
-}
-
-
-.toolbarTabs :deep(.el-tabs__header) {
-  margin: 0 0 8px 0;
-}
-
-.toolbarTabs :deep(.el-tabs__content) {
-  padding: 0;
 }
 
 .drawerControls {
@@ -2838,258 +2065,11 @@ function applyZoom(level: number) {
   flex-wrap: wrap;
 }
 
-.paneGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px 12px;
-  align-items: start;
-}
-
-.paneGrid > .toggleGrid {
-  grid-column: 1 / -1;
-}
-
-.ctl {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.toolbarLabel {
-  font-size: var(--geo-font-size-label);
-  font-weight: var(--geo-font-weight-label);
-  color: var(--el-text-color-secondary);
-}
-
-.ctl__label {
-  min-height: 18px;
-}
-
-.ctl__field {
-  width: 100%;
-}
-
-.sliderField {
-  width: 100%;
-  min-width: 220px;
-}
-
-.ctl--eq {
-  min-width: 160px;
-}
-
-.ctl--status {
-  min-width: 220px;
-}
-
-.ctl--threshold {
-  min-width: 160px;
-}
-
-.ctl--degree {
-  min-width: 160px;
-}
-
-.ctl--layout {
-  min-width: 200px;
-}
-
-.toggleGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 6px 12px;
-  align-items: center;
-}
-
-.toggleLine {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  padding: 2px 6px;
-  min-height: 28px;
-  border-radius: 8px;
-}
-
-.toggleLine:hover {
-  background: var(--el-fill-color-light);
-}
-
-.toggleLine :deep(.el-switch) {
-  flex: 0 0 auto;
-}
-
-.navPane {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.navRow {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
-  align-items: center;
-}
-
-.navRow__label {
-  min-width: 76px;
-}
-
-.navRow__field :deep(.el-autocomplete),
-.navRow__field :deep(.el-input),
-.navRow__field :deep(.el-input__wrapper) {
-  width: 100%;
-}
-
-.navActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.navFocus {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.navFocus__depth {
-  width: 120px;
-}
-
-.navFocus__tag {
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.zoomrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.zoomrow__label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--el-text-color-regular);
-}
-
-.zoomrow__slider {
-  width: clamp(160px, 18vw, 260px);
-}
-
-@media (max-width: 992px) {
-  .paneGrid {
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  }
-
-  .sliderField {
-    min-width: 200px;
-  }
-}
-
-@media (max-width: 768px) {
-  .navRow {
-    grid-template-columns: 1fr;
-    align-items: start;
-  }
-
-  .navRow__label {
-    min-width: 0;
-  }
-
-  .zoomrow__slider {
-    width: clamp(180px, 60vw, 320px);
-  }
-}
 
 .cy-wrap {
   position: relative;
   height: calc(100vh - 260px);
   min-height: 520px;
-}
-
-.legend {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 2;
-  background: rgba(17, 19, 23, 0.85);
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 12px;
-  color: var(--el-text-color-primary);
-  min-width: 240px;
-  backdrop-filter: blur(4px);
-}
-
-.legend__title {
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.legend__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0;
-}
-
-.swatch {
-  display: inline-block;
-  width: 18px;
-  height: 10px;
-  border-radius: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-}
-
-.swatch--node-active {
-  width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  background: #67c23a;
-}
-
-.swatch--node-frozen {
-  width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  background: #e6a23c;
-}
-
-.swatch--node-business {
-  width: 14px;
-  height: 10px;
-  border-radius: 4px;
-  background: #1f2d3d;
-  border: 2px solid #409eff;
-}
-
-.swatch--edge-active {
-  background: #409eff;
-}
-
-.swatch--edge-frozen {
-  background: #909399;
-}
-
-.swatch--edge-closed {
-  background: #a3a6ad;
-}
-
-.swatch--edge-bottleneck {
-  background: #f56c6c;
-  height: 10px;
-}
-
-.swatch--edge-incident {
-  background: repeating-linear-gradient(90deg, #606266 0 4px, transparent 4px 7px);
 }
 
 .cy {

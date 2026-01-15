@@ -176,7 +176,10 @@ watch(
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Config" tooltip-key="nav.config" />
+        <TooltipLabel
+          label="Config"
+          tooltip-key="nav.config"
+        />
         <div class="hdr__actions">
           <el-input
             v-model="filterKey"
@@ -185,18 +188,47 @@ watch(
             placeholder="Filter by Key"
             style="width: 260px"
           />
-          <el-tag type="info">Dirty: {{ dirtyKeys.length }}</el-tag>
-          <el-button :disabled="authStore.isReadOnly || dirtyKeys.length === 0" :loading="saving" type="primary" @click="save">Save</el-button>
+          <el-tag type="info">
+            Dirty: {{ dirtyKeys.length }}
+          </el-tag>
+          <el-button
+            :disabled="authStore.isReadOnly || dirtyKeys.length === 0"
+            :loading="saving"
+            type="primary"
+            @click="save"
+          >
+            Save
+          </el-button>
         </div>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
     <div v-else>
-      <el-table :data="visibleRows" size="small" table-layout="fixed" class="geoTable">
-        <el-table-column prop="key" label="Key" width="420" show-overflow-tooltip>
+      <el-table
+        :data="visibleRows"
+        size="small"
+        table-layout="fixed"
+        class="geoTable"
+      >
+        <el-table-column
+          prop="key"
+          label="Key"
+          width="420"
+          show-overflow-tooltip
+        >
           <template #default="scope">
             <span :class="{ focus: focusKey && scope.row.key === focusKey }">
               <TableCellEllipsis :text="scope.row.key" />
@@ -204,7 +236,10 @@ watch(
           </template>
         </el-table-column>
 
-        <el-table-column label="Scope" width="140">
+        <el-table-column
+          label="Scope"
+          width="140"
+        >
           <template #default="scope">
             <template v-if="scopeForKey(scope.row.key).length">
               <el-tag
@@ -217,17 +252,32 @@ watch(
                 {{ t }}
               </el-tag>
             </template>
-            <span v-else class="geoHint">—</span>
+            <span
+              v-else
+              class="geoHint"
+            >—</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="Value" min-width="420">
+        <el-table-column
+          label="Value"
+          min-width="420"
+        >
           <template #default="scope">
             <div class="cfgValueRow">
               <template v-if="scope.row.kind === 'boolean'">
-                <span class="cfgBoolLabel" :class="{ 'cfgBoolLabel--active': scope.row.value === false }">false</span>
-                <el-switch v-model="scope.row.value" :disabled="isKeyReadOnly(scope.row.key)" />
-                <span class="cfgBoolLabel" :class="{ 'cfgBoolLabel--active': scope.row.value === true }">true</span>
+                <span
+                  class="cfgBoolLabel"
+                  :class="{ 'cfgBoolLabel--active': scope.row.value === false }"
+                >false</span>
+                <el-switch
+                  v-model="scope.row.value"
+                  :disabled="isKeyReadOnly(scope.row.key)"
+                />
+                <span
+                  class="cfgBoolLabel"
+                  :class="{ 'cfgBoolLabel--active': scope.row.value === true }"
+                >true</span>
               </template>
 
               <el-input-number
@@ -250,7 +300,12 @@ watch(
                   class="cfgSelect"
                   placeholder="INFO"
                 >
-                  <el-option v-for="opt in LOG_LEVEL_OPTIONS" :key="opt" :label="opt" :value="opt" />
+                  <el-option
+                    v-for="opt in LOG_LEVEL_OPTIONS"
+                    :key="opt"
+                    :label="opt"
+                    :value="opt"
+                  />
                 </el-select>
 
                 <el-input
@@ -274,12 +329,20 @@ watch(
                 class="cfgJson"
               />
 
-              <el-tag v-if="isKeyReadOnly(scope.row.key)" size="small" type="info">Read-only</el-tag>
+              <el-tag
+                v-if="isKeyReadOnly(scope.row.key)"
+                size="small"
+                type="info"
+              >
+                Read-only
+              </el-tag>
             </div>
           </template>
         </el-table-column>
       </el-table>
-      <div class="count">Showing {{ visibleRows.length }} / {{ rows.length }} keys</div>
+      <div class="count">
+        Showing {{ visibleRows.length }} / {{ rows.length }} keys
+      </div>
     </div>
   </el-card>
 </template>

@@ -10,6 +10,7 @@ import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useAuthStore } from '../stores/auth'
 import { debounce } from '../utils/debounce'
+import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 import type { Participant } from '../types/domain'
 
 const router = useRouter()
@@ -127,7 +128,7 @@ watch(perPage, () => {
 const debouncedReload = debounce(() => {
   page.value = 1
   void load()
-}, 250)
+}, DEBOUNCE_SEARCH_MS)
 
 watch([q, status, type], () => {
   debouncedReload()
@@ -152,51 +153,138 @@ const typeOptions = computed(() => [
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Participants" tooltip-key="nav.participants" />
+        <TooltipLabel
+          label="Participants"
+          tooltip-key="nav.participants"
+        />
         <div class="filters">
-          <el-input v-model="q" size="small" placeholder="Search PID / name" clearable style="width: 240px" />
-          <el-select v-model="type" size="small" style="width: 140px" placeholder="Type">
-            <el-option v-for="o in typeOptions" :key="o.value" :label="o.label" :value="o.value" />
+          <el-input
+            v-model="q"
+            size="small"
+            placeholder="Search PID / name"
+            clearable
+            style="width: 240px"
+          />
+          <el-select
+            v-model="type"
+            size="small"
+            style="width: 140px"
+            placeholder="Type"
+          >
+            <el-option
+              v-for="o in typeOptions"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value"
+            />
           </el-select>
-          <el-select v-model="status" size="small" style="width: 140px" placeholder="Status">
-            <el-option v-for="o in statusOptions" :key="o.value" :label="o.label" :value="o.value" />
+          <el-select
+            v-model="status"
+            size="small"
+            style="width: 140px"
+            placeholder="Status"
+          >
+            <el-option
+              v-for="o in statusOptions"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value"
+            />
           </el-select>
         </div>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
-    <el-empty v-else-if="items.length === 0" description="No participants" />
+    <el-empty
+      v-else-if="items.length === 0"
+      description="No participants"
+    />
 
     <div v-else>
-      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="clickable-table geoTable">
-        <el-table-column prop="pid" min-width="210">
-          <template #header><TooltipLabel label="PID" tooltip-key="participants.pid" /></template>
+      <el-table
+        :data="items"
+        size="small"
+        table-layout="fixed"
+        class="clickable-table geoTable"
+        @row-click="openRow"
+      >
+        <el-table-column
+          prop="pid"
+          min-width="210"
+        >
+          <template #header>
+            <TooltipLabel
+              label="PID"
+              tooltip-key="participants.pid"
+            />
+          </template>
           <template #default="scope">
             <span class="geoInlineRow">
               <TableCellEllipsis :text="scope.row.pid" />
-              <CopyIconButton :text="scope.row.pid" label="PID" />
+              <CopyIconButton
+                :text="scope.row.pid"
+                label="PID"
+              />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="display_name" min-width="180" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Name" tooltip-key="participants.displayName" /></template>
+        <el-table-column
+          prop="display_name"
+          min-width="180"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Name"
+              tooltip-key="participants.displayName"
+            />
+          </template>
           <template #default="scope">
             <TableCellEllipsis :text="scope.row.display_name" />
           </template>
         </el-table-column>
-        <el-table-column prop="type" width="140">
-          <template #header><TooltipLabel label="Type" tooltip-key="participants.type" /></template>
+        <el-table-column
+          prop="type"
+          width="140"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Type"
+              tooltip-key="participants.type"
+            />
+          </template>
           <template #default="scope">
-            <el-tag :type="scope.row.type === 'business' ? 'warning' : 'info'" size="small">
+            <el-tag
+              :type="scope.row.type === 'business' ? 'warning' : 'info'"
+              size="small"
+            >
               {{ scope.row.type }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" width="120">
-          <template #header><TooltipLabel label="Status" tooltip-key="participants.status" /></template>
+        <el-table-column
+          prop="status"
+          width="120"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Status"
+              tooltip-key="participants.status"
+            />
+          </template>
           <template #default="scope">
             <el-tag
               :type="scope.row.status === 'active' ? 'success' : scope.row.status === 'frozen' ? 'warning' : 'danger'"
@@ -206,7 +294,10 @@ const typeOptions = computed(() => [
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="140">
+        <el-table-column
+          label="Actions"
+          width="140"
+        >
           <template #default="scope">
             <el-button
               v-if="scope.row.status === 'active'"
@@ -226,13 +317,20 @@ const typeOptions = computed(() => [
             >
               Unfreeze
             </el-button>
-            <el-tag v-else type="info">n/a</el-tag>
+            <el-tag
+              v-else
+              type="info"
+            >
+              n/a
+            </el-tag>
           </template>
         </el-table-column>
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint geoHint">Showing {{ items.length }} / {{ perPage }} on this page</div>
+        <div class="pager__hint geoHint">
+          Showing {{ items.length }} / {{ perPage }} on this page
+        </div>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="perPage"
@@ -245,18 +343,33 @@ const typeOptions = computed(() => [
     </div>
   </el-card>
 
-  <el-drawer v-model="drawerOpen" title="Participant details" size="45%">
+  <el-drawer
+    v-model="drawerOpen"
+    title="Participant details"
+    size="45%"
+  >
     <div v-if="selected">
-      <el-descriptions :column="1" border>
+      <el-descriptions
+        :column="1"
+        border
+      >
         <el-descriptions-item label="PID">
           <span class="geoInlineRow">
             <TableCellEllipsis :text="selected.pid" />
-            <CopyIconButton :text="selected.pid" label="PID" />
+            <CopyIconButton
+              :text="selected.pid"
+              label="PID"
+            />
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Display Name">{{ selected.display_name }}</el-descriptions-item>
+        <el-descriptions-item label="Display Name">
+          {{ selected.display_name }}
+        </el-descriptions-item>
         <el-descriptions-item label="Type">
-          <el-tag :type="selected.type === 'business' ? 'warning' : 'info'" size="small">
+          <el-tag
+            :type="selected.type === 'business' ? 'warning' : 'info'"
+            size="small"
+          >
             {{ selected.type }}
           </el-tag>
         </el-descriptions-item>
@@ -268,10 +381,16 @@ const typeOptions = computed(() => [
             {{ selected.status }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item v-if="selected.created_at" label="Created At">
+        <el-descriptions-item
+          v-if="selected.created_at"
+          label="Created At"
+        >
           {{ selected.created_at }}
         </el-descriptions-item>
-        <el-descriptions-item v-if="selected.meta && Object.keys(selected.meta).length > 0" label="Meta">
+        <el-descriptions-item
+          v-if="selected.meta && Object.keys(selected.meta).length > 0"
+          label="Meta"
+        >
           <pre class="json">{{ JSON.stringify(selected.meta, null, 2) }}</pre>
         </el-descriptions-item>
       </el-descriptions>
@@ -279,20 +398,36 @@ const typeOptions = computed(() => [
       <el-divider>Related data</el-divider>
 
       <div class="drawer-actions">
-        <el-button type="primary" size="small" @click="goTrustlines(selected.pid)">
+        <el-button
+          type="primary"
+          size="small"
+          @click="goTrustlines(selected.pid)"
+        >
           View trustlines as creditor
         </el-button>
-        <el-button type="primary" size="small" @click="goTrustlinesAsDebtor(selected.pid)">
+        <el-button
+          type="primary"
+          size="small"
+          @click="goTrustlinesAsDebtor(selected.pid)"
+        >
           View trustlines as debtor
         </el-button>
-        <el-button size="small" @click="goAuditLog(selected.pid)">
+        <el-button
+          size="small"
+          @click="goAuditLog(selected.pid)"
+        >
           View audit log
         </el-button>
       </div>
 
-      <el-divider v-if="selected.status !== 'banned'">Actions</el-divider>
+      <el-divider v-if="selected.status !== 'banned'">
+        Actions
+      </el-divider>
 
-      <div v-if="selected.status !== 'banned'" class="drawer-actions">
+      <div
+        v-if="selected.status !== 'banned'"
+        class="drawer-actions"
+      >
         <el-button
           v-if="selected.status === 'active'"
           type="warning"

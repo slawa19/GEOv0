@@ -106,13 +106,27 @@ function navigate(path: string) {
 
 <template>
   <el-container class="app-root">
-    <el-aside width="168px" class="aside">
-      <div class="brand" @click="navigate('/dashboard')">
-        <div class="brand__title">GEO Hub</div>
-        <div class="brand__subtitle">Admin Console<span v-if="isMockMode"> (prototype)</span></div>
+    <el-aside
+      width="168px"
+      class="aside"
+    >
+      <div
+        class="brand"
+        @click="navigate('/dashboard')"
+      >
+        <div class="brand__title">
+          GEO Hub
+        </div>
+        <div class="brand__subtitle">
+          Admin Console<span v-if="isMockMode"> (prototype)</span>
+        </div>
       </div>
 
-      <el-menu :default-active="activePath" router class="menu">
+      <el-menu
+        :default-active="activePath"
+        router
+        class="menu"
+      >
         <el-tooltip
           v-for="item in navItems"
           :key="item.path"
@@ -124,7 +138,10 @@ function navigate(path: string) {
           <template #content>
             <span class="geoTooltipText geoTooltipText--clamp2">{{ getTooltipContent(item.tooltipKey) }}</span>
           </template>
-          <el-menu-item :index="item.path" @click="navigate(item.path)">
+          <el-menu-item
+            :index="item.path"
+            @click="navigate(item.path)"
+          >
             {{ item.label }}
           </el-menu-item>
         </el-tooltip>
@@ -140,39 +157,107 @@ function navigate(path: string) {
           </el-breadcrumb>
 
           <div class="status">
-            <el-tooltip v-if="healthStore.error" :content="healthStore.error" placement="bottom" effect="dark">
-              <el-tag type="danger">health error</el-tag>
+            <el-tooltip
+              v-if="healthStore.error"
+              :content="healthStore.error"
+              placement="bottom"
+              effect="dark"
+            >
+              <el-tag type="danger">
+                health error
+              </el-tag>
             </el-tooltip>
-            <el-tag v-else type="success">ok</el-tag>
+            <el-tag
+              v-else
+              type="success"
+            >
+              ok
+            </el-tag>
 
-            <el-tooltip placement="bottom" effect="dark" :show-after="850" popper-class="geoTooltip geoTooltip--menu">
+            <el-tooltip
+              placement="bottom"
+              effect="dark"
+              :show-after="850"
+              popper-class="geoTooltip geoTooltip--menu"
+            >
               <template #content>
                 <span class="geoTooltipText geoTooltipText--clamp2">API source: {{ apiBaseLabel }}</span>
               </template>
-              <el-tag :type="apiModeBadgeType" effect="plain">{{ apiModeBadge }}</el-tag>
+              <el-tag
+                :type="apiModeBadgeType"
+                effect="plain"
+              >
+                {{ apiModeBadge }}
+              </el-tag>
             </el-tooltip>
 
-            <el-tag v-if="isMockMode" type="info">scenario: {{ scenario }}</el-tag>
+            <el-tag
+              v-if="isMockMode"
+              type="info"
+            >
+              scenario: {{ scenario }}
+            </el-tag>
           </div>
         </div>
 
         <div class="header__right">
-          <el-select v-model="authStore.role" size="small" style="width: 150px">
-            <el-option label="admin" value="admin" />
-            <el-option label="operator" value="operator" />
-            <el-option label="auditor (read-only)" value="auditor" />
+          <el-select
+            v-model="authStore.role"
+            size="small"
+            style="width: 150px"
+          >
+            <el-option
+              label="admin"
+              value="admin"
+            />
+            <el-option
+              label="operator"
+              value="operator"
+            />
+            <el-option
+              label="auditor (read-only)"
+              value="auditor"
+            />
           </el-select>
 
-          <el-select v-if="isMockMode" v-model="scenario" size="small" style="width: 190px">
-            <el-option label="happy" value="happy" />
-            <el-option label="empty" value="empty" />
-            <el-option label="error500" value="error500" />
-            <el-option label="admin_forbidden403" value="admin_forbidden403" />
-            <el-option label="integrity_unauthorized401" value="integrity_unauthorized401" />
-            <el-option label="slow" value="slow" />
+          <el-select
+            v-if="isMockMode"
+            v-model="scenario"
+            size="small"
+            style="width: 190px"
+          >
+            <el-option
+              label="happy"
+              value="happy"
+            />
+            <el-option
+              label="empty"
+              value="empty"
+            />
+            <el-option
+              label="error500"
+              value="error500"
+            />
+            <el-option
+              label="admin_forbidden403"
+              value="admin_forbidden403"
+            />
+            <el-option
+              label="integrity_unauthorized401"
+              value="integrity_unauthorized401"
+            />
+            <el-option
+              label="slow"
+              value="slow"
+            />
           </el-select>
 
-          <el-switch v-model="dark" size="small" active-text="Dark" inactive-text="Light" />
+          <el-switch
+            v-model="dark"
+            size="small"
+            active-text="Dark"
+            inactive-text="Light"
+          />
         </div>
       </el-header>
 

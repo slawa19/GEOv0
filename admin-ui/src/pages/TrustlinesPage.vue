@@ -11,6 +11,7 @@ import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
+import { DEBOUNCE_FILTER_MS } from '../constants/timing'
 import type { Trustline } from '../types/domain'
 
 const router = useRouter()
@@ -108,7 +109,7 @@ watch(
 const debouncedReload = debounce(() => {
   page.value = 1
   void load()
-}, 250)
+}, DEBOUNCE_FILTER_MS)
 
 // NOTE: threshold is a UI-only highlight knob; do not reload the list when it changes.
 watch([equivalent, creditor, debtor, status], () => {
@@ -127,77 +128,209 @@ const statusOptions = computed(() => [
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Trustlines" tooltip-key="nav.trustlines" />
+        <TooltipLabel
+          label="Trustlines"
+          tooltip-key="nav.trustlines"
+        />
         <div class="filters">
-          <el-input v-model="equivalent" size="small" placeholder="Equivalent (e.g. UAH)" clearable style="width: 170px" />
-          <el-input v-model="creditor" size="small" placeholder="Creditor PID (from)" clearable style="width: 220px" />
-          <el-input v-model="debtor" size="small" placeholder="Debtor PID (to)" clearable style="width: 220px" />
-          <el-select v-model="status" size="small" style="width: 140px">
-            <el-option v-for="o in statusOptions" :key="o.value" :label="o.label" :value="o.value" />
+          <el-input
+            v-model="equivalent"
+            size="small"
+            placeholder="Equivalent (e.g. UAH)"
+            clearable
+            style="width: 170px"
+          />
+          <el-input
+            v-model="creditor"
+            size="small"
+            placeholder="Creditor PID (from)"
+            clearable
+            style="width: 220px"
+          />
+          <el-input
+            v-model="debtor"
+            size="small"
+            placeholder="Debtor PID (to)"
+            clearable
+            style="width: 220px"
+          />
+          <el-select
+            v-model="status"
+            size="small"
+            style="width: 140px"
+          >
+            <el-option
+              v-for="o in statusOptions"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value"
+            />
           </el-select>
-          <el-input v-model="threshold" size="small" placeholder="Threshold" style="width: 110px" />
+          <el-input
+            v-model="threshold"
+            size="small"
+            placeholder="Threshold"
+            style="width: 110px"
+          />
         </div>
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
-    <el-empty v-else-if="items.length === 0" description="No trustlines match filters" />
+    <el-empty
+      v-else-if="items.length === 0"
+      description="No trustlines match filters"
+    />
 
     <div v-else>
-      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="geoTable">
-        <el-table-column prop="equivalent" width="100">
-          <template #header><TooltipLabel label="Equivalent" tooltip-key="trustlines.eq" /></template>
+      <el-table
+        :data="items"
+        size="small"
+        table-layout="fixed"
+        class="geoTable"
+        @row-click="openRow"
+      >
+        <el-table-column
+          prop="equivalent"
+          width="100"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Equivalent"
+              tooltip-key="trustlines.eq"
+            />
+          </template>
           <template #default="scope">
             <span>
               {{ scope.row.equivalent }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="from" min-width="190">
-          <template #header><TooltipLabel label="From" tooltip-key="trustlines.from" /></template>
+        <el-table-column
+          prop="from"
+          min-width="190"
+        >
+          <template #header>
+            <TooltipLabel
+              label="From"
+              tooltip-key="trustlines.from"
+            />
+          </template>
           <template #default="scope">
             <span class="geoInlineRow">
               <TableCellEllipsis :text="scope.row.from" />
-              <CopyIconButton :text="scope.row.from" label="From PID" />
+              <CopyIconButton
+                :text="scope.row.from"
+                label="From PID"
+              />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="to" min-width="190">
-          <template #header><TooltipLabel label="To" tooltip-key="trustlines.to" /></template>
+        <el-table-column
+          prop="to"
+          min-width="190"
+        >
+          <template #header>
+            <TooltipLabel
+              label="To"
+              tooltip-key="trustlines.to"
+            />
+          </template>
           <template #default="scope">
             <span class="geoInlineRow">
               <TableCellEllipsis :text="scope.row.to" />
-              <CopyIconButton :text="scope.row.to" label="To PID" />
+              <CopyIconButton
+                :text="scope.row.to"
+                label="To PID"
+              />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="limit" width="110">
-          <template #header><TooltipLabel label="Limit" tooltip-key="trustlines.limit" /></template>
-          <template #default="scope">{{ money(scope.row.limit) }}</template>
+        <el-table-column
+          prop="limit"
+          width="110"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Limit"
+              tooltip-key="trustlines.limit"
+            />
+          </template>
+          <template #default="scope">
+            {{ money(scope.row.limit) }}
+          </template>
         </el-table-column>
-        <el-table-column prop="used" width="110">
-          <template #header><TooltipLabel label="Used" tooltip-key="trustlines.used" /></template>
-          <template #default="scope">{{ money(scope.row.used) }}</template>
+        <el-table-column
+          prop="used"
+          width="110"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Used"
+              tooltip-key="trustlines.used"
+            />
+          </template>
+          <template #default="scope">
+            {{ money(scope.row.used) }}
+          </template>
         </el-table-column>
-        <el-table-column prop="available" width="110">
-          <template #header><TooltipLabel label="Available" tooltip-key="trustlines.available" /></template>
+        <el-table-column
+          prop="available"
+          width="110"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Available"
+              tooltip-key="trustlines.available"
+            />
+          </template>
           <template #default="scope">
             <span :class="{ bottleneck: isBottleneck(scope.row) }">{{ money(scope.row.available) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" width="95">
-          <template #header><TooltipLabel label="Status" tooltip-key="trustlines.status" /></template>
+        <el-table-column
+          prop="status"
+          width="95"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Status"
+              tooltip-key="trustlines.status"
+            />
+          </template>
         </el-table-column>
-        <el-table-column prop="created_at" width="170">
-          <template #header><TooltipLabel label="Created at" tooltip-key="trustlines.createdAt" /></template>
-          <template #default="scope">{{ fmtTs(scope.row.created_at) }}</template>
+        <el-table-column
+          prop="created_at"
+          width="170"
+        >
+          <template #header>
+            <TooltipLabel
+              label="Created at"
+              tooltip-key="trustlines.createdAt"
+            />
+          </template>
+          <template #default="scope">
+            {{ fmtTs(scope.row.created_at) }}
+          </template>
         </el-table-column>
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint geoHint">Showing {{ items.length }} / {{ perPage }} on this page</div>
+        <div class="pager__hint geoHint">
+          Showing {{ items.length }} / {{ perPage }} on this page
+        </div>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="perPage"
@@ -210,41 +343,80 @@ const statusOptions = computed(() => [
     </div>
   </el-card>
 
-  <el-drawer v-model="drawerOpen" title="Trustline details" size="45%">
+  <el-drawer
+    v-model="drawerOpen"
+    title="Trustline details"
+    size="45%"
+  >
     <div v-if="selected">
-      <el-descriptions :column="1" border>
+      <el-descriptions
+        :column="1"
+        border
+      >
         <el-descriptions-item label="Equivalent">
-          <el-link type="primary" @click="goEquivalent(selected.equivalent)">
+          <el-link
+            type="primary"
+            @click="goEquivalent(selected.equivalent)"
+          >
             {{ selected.equivalent }}
           </el-link>
         </el-descriptions-item>
         <el-descriptions-item label="From (Creditor)">
           <span class="geoInlineRow">
-            <el-link type="primary" @click="goParticipant(selected.from)">
+            <el-link
+              type="primary"
+              @click="goParticipant(selected.from)"
+            >
               {{ selected.from }}
             </el-link>
-            <CopyIconButton :text="selected.from" label="From PID" />
+            <CopyIconButton
+              :text="selected.from"
+              label="From PID"
+            />
           </span>
-          <span v-if="selected.from_display_name" class="display-name">
+          <span
+            v-if="selected.from_display_name"
+            class="display-name"
+          >
             ({{ selected.from_display_name }})
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="To (Debtor)">
           <span class="geoInlineRow">
-            <el-link type="primary" @click="goParticipant(selected.to)">
+            <el-link
+              type="primary"
+              @click="goParticipant(selected.to)"
+            >
               {{ selected.to }}
             </el-link>
-            <CopyIconButton :text="selected.to" label="To PID" />
+            <CopyIconButton
+              :text="selected.to"
+              label="To PID"
+            />
           </span>
-          <span v-if="selected.to_display_name" class="display-name">
+          <span
+            v-if="selected.to_display_name"
+            class="display-name"
+          >
             ({{ selected.to_display_name }})
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Limit">{{ money(selected.limit) }}</el-descriptions-item>
-        <el-descriptions-item label="Used">{{ money(selected.used) }}</el-descriptions-item>
+        <el-descriptions-item label="Limit">
+          {{ money(selected.limit) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Used">
+          {{ money(selected.used) }}
+        </el-descriptions-item>
         <el-descriptions-item label="Available">
           <span :class="{ bottleneck: isBottleneck(selected) }">{{ money(selected.available) }}</span>
-          <el-tag v-if="isBottleneck(selected)" type="danger" size="small" style="margin-left: 8px">Bottleneck</el-tag>
+          <el-tag
+            v-if="isBottleneck(selected)"
+            type="danger"
+            size="small"
+            style="margin-left: 8px"
+          >
+            Bottleneck
+          </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="Status">
           <el-tag
@@ -254,7 +426,9 @@ const statusOptions = computed(() => [
             {{ selected.status }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Created At">{{ fmtTs(selected.created_at) }}</el-descriptions-item>
+        <el-descriptions-item label="Created At">
+          {{ fmtTs(selected.created_at) }}
+        </el-descriptions-item>
         <el-descriptions-item label="Policy">
           <pre class="json">{{ JSON.stringify(selected.policy, null, 2) }}</pre>
         </el-descriptions-item>
@@ -263,10 +437,18 @@ const statusOptions = computed(() => [
       <el-divider>Related participants</el-divider>
 
       <div class="drawer-actions">
-        <el-button type="primary" size="small" @click="goParticipant(selected.from)">
+        <el-button
+          type="primary"
+          size="small"
+          @click="goParticipant(selected.from)"
+        >
           View creditor (from)
         </el-button>
-        <el-button type="primary" size="small" @click="goParticipant(selected.to)">
+        <el-button
+          type="primary"
+          size="small"
+          @click="goParticipant(selected.to)"
+        >
           View debtor (to)
         </el-button>
       </div>

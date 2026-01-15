@@ -83,62 +83,169 @@ watch(q, () => {
   <el-card class="geoCard">
     <template #header>
       <div class="hdr">
-        <TooltipLabel label="Audit Log" tooltip-key="nav.auditLog" />
-        <el-input v-model="q" size="small" clearable placeholder="Filter (Id/Actor/Action/Object/Reason)" style="width: 320px" />
+        <TooltipLabel
+          label="Audit Log"
+          tooltip-key="nav.auditLog"
+        />
+        <el-input
+          v-model="q"
+          size="small"
+          clearable
+          placeholder="Filter (Id/Actor/Action/Object/Reason)"
+          style="width: 320px"
+        />
       </div>
     </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon class="mb" />
-    <el-skeleton v-if="loading" animated :rows="10" />
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
+    <el-skeleton
+      v-if="loading"
+      animated
+      :rows="10"
+    />
 
-    <el-empty v-else-if="items.length === 0" description="No audit entries" />
+    <el-empty
+      v-else-if="items.length === 0"
+      description="No audit entries"
+    />
 
     <div v-else>
-      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="clickable-table geoTable">
-        <el-table-column prop="id" width="220" show-overflow-tooltip>
-          <template #header><TooltipLabel label="ID" tooltip-text="Audit log entry id." /></template>
+      <el-table
+        :data="items"
+        size="small"
+        table-layout="fixed"
+        class="clickable-table geoTable"
+        @row-click="openRow"
+      >
+        <el-table-column
+          prop="id"
+          width="220"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="ID"
+              tooltip-text="Audit log entry id."
+            />
+          </template>
           <template #default="scope">
             <span class="geoInlineRow">
               <TableCellEllipsis :text="scope.row.id" />
-              <CopyIconButton :text="String(scope.row.id)" label="Audit ID" />
+              <CopyIconButton
+                :text="String(scope.row.id)"
+                label="Audit ID"
+              />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="timestamp" width="180" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Timestamp" tooltip-key="audit.timestamp" /></template>
+        <el-table-column
+          prop="timestamp"
+          width="180"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Timestamp"
+              tooltip-key="audit.timestamp"
+            />
+          </template>
         </el-table-column>
-        <el-table-column prop="actor_id" width="150" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Actor" tooltip-key="audit.actor" /></template>
+        <el-table-column
+          prop="actor_id"
+          width="150"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Actor"
+              tooltip-key="audit.actor"
+            />
+          </template>
           <template #default="scope">
             <TableCellEllipsis :text="scope.row.actor_id" />
           </template>
         </el-table-column>
-        <el-table-column prop="actor_role" width="140" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Role" tooltip-key="audit.role" /></template>
+        <el-table-column
+          prop="actor_role"
+          width="140"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Role"
+              tooltip-key="audit.role"
+            />
+          </template>
           <template #default="scope">
             <TableCellEllipsis :text="scope.row.actor_role" />
           </template>
         </el-table-column>
-        <el-table-column prop="action" min-width="240" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Action" tooltip-key="audit.action" /></template>
+        <el-table-column
+          prop="action"
+          min-width="240"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Action"
+              tooltip-key="audit.action"
+            />
+          </template>
           <template #default="scope">
             <TableCellEllipsis :text="scope.row.action" />
           </template>
         </el-table-column>
-        <el-table-column prop="object_type" width="120" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Object" tooltip-key="audit.objectType" /></template>
+        <el-table-column
+          prop="object_type"
+          width="120"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Object"
+              tooltip-key="audit.objectType"
+            />
+          </template>
         </el-table-column>
-        <el-table-column prop="object_id" min-width="280" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Object ID" tooltip-key="audit.objectId" /></template>
+        <el-table-column
+          prop="object_id"
+          min-width="280"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Object ID"
+              tooltip-key="audit.objectId"
+            />
+          </template>
           <template #default="scope">
             <span class="geoInlineRow">
               <TableCellEllipsis :text="scope.row.object_id" />
-              <CopyIconButton v-if="scope.row.object_id" :text="scope.row.object_id" label="Object ID" />
+              <CopyIconButton
+                v-if="scope.row.object_id"
+                :text="scope.row.object_id"
+                label="Object ID"
+              />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="reason" min-width="200" show-overflow-tooltip>
-          <template #header><TooltipLabel label="Reason" tooltip-key="audit.reason" /></template>
+        <el-table-column
+          prop="reason"
+          min-width="200"
+          show-overflow-tooltip
+        >
+          <template #header>
+            <TooltipLabel
+              label="Reason"
+              tooltip-key="audit.reason"
+            />
+          </template>
           <template #default="scope">
             <TableCellEllipsis :text="scope.row.reason" />
           </template>
@@ -146,7 +253,9 @@ watch(q, () => {
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint">Showing {{ items.length }} / {{ perPage }} on this page</div>
+        <div class="pager__hint">
+          Showing {{ items.length }} / {{ perPage }} on this page
+        </div>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="perPage"
@@ -159,36 +268,64 @@ watch(q, () => {
     </div>
   </el-card>
 
-  <el-drawer v-model="drawerOpen" title="Audit entry" size="45%">
+  <el-drawer
+    v-model="drawerOpen"
+    title="Audit entry"
+    size="45%"
+  >
     <div v-if="selected">
       <el-tabs>
         <el-tab-pane label="Details">
-          <el-descriptions :column="1" border>
+          <el-descriptions
+            :column="1"
+            border
+          >
             <el-descriptions-item label="ID">
               <span class="geoInlineRow">
                 <TableCellEllipsis :text="selected.id" />
-                <CopyIconButton :text="String(selected.id)" label="Audit ID" />
+                <CopyIconButton
+                  :text="String(selected.id)"
+                  label="Audit ID"
+                />
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Timestamp">{{ selected.timestamp }}</el-descriptions-item>
+            <el-descriptions-item label="Timestamp">
+              {{ selected.timestamp }}
+            </el-descriptions-item>
             <el-descriptions-item label="Actor">
               <span class="geoInlineRow">
                 <TableCellEllipsis :text="selected.actor_id" />
                 <span>({{ selected.actor_role || '—' }})</span>
-                <CopyIconButton v-if="selected.actor_id" :text="String(selected.actor_id)" label="Actor ID" />
+                <CopyIconButton
+                  v-if="selected.actor_id"
+                  :text="String(selected.actor_id)"
+                  label="Actor ID"
+                />
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Action">{{ selected.action }}</el-descriptions-item>
+            <el-descriptions-item label="Action">
+              {{ selected.action }}
+            </el-descriptions-item>
             <el-descriptions-item label="Object">
               <span class="geoInlineRow">
                 <span>{{ selected.object_type || '—' }} /</span>
                 <TableCellEllipsis :text="selected.object_id" />
-                <CopyIconButton v-if="selected.object_id" :text="selected.object_id" label="Object ID" />
+                <CopyIconButton
+                  v-if="selected.object_id"
+                  :text="selected.object_id"
+                  label="Object ID"
+                />
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Reason">{{ selected.reason }}</el-descriptions-item>
-            <el-descriptions-item label="Request ID">{{ selected.request_id }}</el-descriptions-item>
-            <el-descriptions-item label="IP Address">{{ selected.ip_address }}</el-descriptions-item>
+            <el-descriptions-item label="Reason">
+              {{ selected.reason }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Request ID">
+              {{ selected.request_id }}
+            </el-descriptions-item>
+            <el-descriptions-item label="IP Address">
+              {{ selected.ip_address }}
+            </el-descriptions-item>
           </el-descriptions>
         </el-tab-pane>
         <el-tab-pane label="Before">

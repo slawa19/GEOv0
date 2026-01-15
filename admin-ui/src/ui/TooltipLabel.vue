@@ -49,7 +49,11 @@ const ariaLabel = computed(() => {
       <template #content>
         <span class="geoTooltipText geoTooltipText--clamp2">{{ tooltipContent }}</span>
       </template>
-      <button class="tl__icon" type="button" :aria-label="ariaLabel">?</button>
+      <button
+        class="tl__icon"
+        type="button"
+        :aria-label="ariaLabel"
+      >?</button>
     </el-tooltip>
   </span>
 </template>
