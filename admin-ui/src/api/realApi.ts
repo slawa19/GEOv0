@@ -1,9 +1,38 @@
 import { assertSuccess, type ApiEnvelope, ApiException } from './envelope'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
+import type {
+  AuditLogEntry,
+  ClearingCycles,
+  Equivalent,
+  GraphSnapshot,
+  Incident,
+  Paginated,
+  Participant,
+  ParticipantMetrics,
+  Trustline,
+} from '../types/domain'
 
 const DEFAULT_BASE = ''
 const DEFAULT_DEV_ADMIN_TOKEN = 'dev-admin-token-change-me'
 const DEFAULT_DEV_BASE_URL = 'http://127.0.0.1:18000'
+
+let warnedDefaultDevToken = false
+
+function isProdBuild(): boolean {
+  const forced = (globalThis as any)?.__GEO_ADMINUI_FORCE_PROD__
+  if (forced === true) return true
+  if (forced === false) return false
+
+  // In Vite builds, PROD is a boolean constant; MODE is typically 'production'.
+  // In tests, PROD may be non-writable; MODE is easier to stub.
+  const mode = String((import.meta.env as any).MODE || '').toLowerCase()
+  // Read NODE_ENV via globalThis to avoid transform-time replacement.
+  const nodeEnv =
+    typeof globalThis !== 'undefined' && (globalThis as any)?.process?.env
+      ? String((globalThis as any).process.env.NODE_ENV || '')
+      : ''
+  return Boolean(import.meta.env.PROD) || mode === 'production' || nodeEnv.toLowerCase() === 'production'
+}
 
 function baseUrl(): string {
   // When using Vite proxy, keep base empty and call relative paths.
@@ -23,11 +52,35 @@ function adminToken(): string | null {
 
   // Prefer explicit env-configured token (useful for teams / non-default backend config).
   const envTok = (import.meta.env.VITE_ADMIN_TOKEN || '').toString().trim()
-  if (envTok) return envTok
+  if (envTok) {
+    if (envTok === DEFAULT_DEV_ADMIN_TOKEN) {
+      if (isProdBuild()) {
+        throw new Error('Refusing to use DEFAULT_DEV_ADMIN_TOKEN in production build')
+      }
+      if (!warnedDefaultDevToken) {
+        warnedDefaultDevToken = true
+        // eslint-disable-next-line no-console
+        console.warn('Using DEFAULT_DEV_ADMIN_TOKEN (dev-only). Do not use in production.')
+      }
+    }
+    return envTok
+  }
 
   try {
     const v = (localStorage.getItem(key) || '').trim()
-    if (v) return v
+    if (v) {
+      if (v === DEFAULT_DEV_ADMIN_TOKEN) {
+        if (isProdBuild()) {
+          throw new Error('Refusing to use DEFAULT_DEV_ADMIN_TOKEN from localStorage in production build')
+        }
+        if (!warnedDefaultDevToken) {
+          warnedDefaultDevToken = true
+          // eslint-disable-next-line no-console
+          console.warn('Using DEFAULT_DEV_ADMIN_TOKEN from localStorage (dev-only). Do not use in production.')
+        }
+      }
+      return v
+    }
 
     // Dev ergonomics: if no token is set yet, seed the default backend token.
     // This avoids the UI spamming 403s on first run.
@@ -37,16 +90,31 @@ function adminToken(): string | null {
       } catch {
         // ignore
       }
+
+      if (!warnedDefaultDevToken) {
+        warnedDefaultDevToken = true
+        // eslint-disable-next-line no-console
+        console.warn('Seeding DEFAULT_DEV_ADMIN_TOKEN into localStorage (dev-only). Do not use in production.')
+      }
       return DEFAULT_DEV_ADMIN_TOKEN
     }
 
     return null
-  } catch {
-    return import.meta.env.DEV ? DEFAULT_DEV_ADMIN_TOKEN : null
+  } catch (err) {
+    if (err instanceof Error && /refusing to use default_dev_admin_token/i.test(err.message)) {
+      throw err
+    }
+    if (isProdBuild()) return null
+    if (!warnedDefaultDevToken) {
+      warnedDefaultDevToken = true
+      // eslint-disable-next-line no-console
+      console.warn('Using DEFAULT_DEV_ADMIN_TOKEN due to localStorage access error (dev-only). Do not use in production.')
+    }
+    return DEFAULT_DEV_ADMIN_TOKEN
   }
 }
 
-async function requestJson<T>(
+export async function requestJson<T>(
   pathname: string,
   opts?: {
     method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
@@ -77,11 +145,27 @@ async function requestJson<T>(
 
   // The backend might already return ApiEnvelope. If not, adapt here.
   const text = await res.text()
-  let parsed: unknown = null
+  let parsed: unknown = undefined
   try {
-    parsed = text ? JSON.parse(text) : null
+    parsed = text ? JSON.parse(text) : undefined
   } catch {
-    parsed = null
+    parsed = undefined
+  }
+
+  // If backend claims OK but returns empty/invalid JSON, fail loudly.
+  if (res.ok && (!text || parsed === undefined || parsed === null)) {
+    throw new ApiException({
+      status: res.status,
+      code: 'INVALID_JSON',
+      message: `${method} ${url} -> ${res.status}: Invalid/empty JSON response`,
+      details: {
+        url,
+        method,
+        status: res.status,
+        status_text: (res.statusText || '').trim(),
+        body_preview: (text || '').slice(0, 500),
+      },
+    })
   }
 
   if (res.ok && parsed && typeof parsed === 'object' && 'success' in (parsed as any)) {
@@ -124,19 +208,29 @@ function bestEffortTotal(page: number, perPage: number, itemsLen: number): numbe
   return itemsLen < pp ? offset + itemsLen : offset + itemsLen + 1
 }
 
-function buildQuery(pathname: string, params: Record<string, unknown>): string {
-  const u = new URL(`${baseUrl()}${pathname}`)
+export function buildQuery(pathname: string, params: Record<string, unknown>): string {
+  const rawBase = baseUrl()
+
+  const [pathOnly = '', initialQuery = ''] = String(pathname || '').split('?', 2)
+  const sp = new URLSearchParams(initialQuery)
+
   for (const [k, v] of Object.entries(params || {})) {
     if (v === undefined || v === null || v === '') continue
     if (Array.isArray(v)) {
       for (const item of v) {
         if (item === undefined || item === null || item === '') continue
-        u.searchParams.append(k, String(item))
+        sp.append(k, String(item))
       }
       continue
     }
-    u.searchParams.set(k, String(v))
+    sp.set(k, String(v))
   }
+
+  const qs = sp.toString()
+  if (!rawBase) return qs ? `${pathOnly}?${qs}` : pathOnly
+
+  const u = new URL(`${rawBase}${pathOnly}`)
+  u.search = qs ? `?${qs}` : ''
   return u.pathname + u.search
 }
 
@@ -203,18 +297,18 @@ export const realApi = {
     status?: string
     type?: string
     q?: string
-  }): Promise<ApiEnvelope<{ items: any[]; page: number; per_page: number; total: number }>> {
+  }): Promise<ApiEnvelope<Paginated<Participant>>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 20
     const status = mapUiStatusToAdmin(params.status)
 
-    const payload = await requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
+    const payload = await requestJson<Paginated<Participant>>(
       buildQuery('/api/v1/admin/participants', { ...params, status: status || undefined, page, per_page }),
       { admin: true },
     )
 
     const backend = assertSuccess(payload)
-    const items = (backend.items || []).map((p: any) => ({
+    const items = (backend.items || []).map((p) => ({
       ...p,
       status: normalizeAdminStatusToUi(p.status),
     }))
@@ -230,26 +324,32 @@ export const realApi = {
     }
   },
 
-  freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    return requestJson(`/api/v1/admin/participants/${encodeURIComponent(pid)}/freeze`, {
+  async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
+    const r = await requestJson<{ pid: string; status: string }>(
+      `/api/v1/admin/participants/${encodeURIComponent(pid)}/freeze`,
+      {
       method: 'POST',
       body: { reason },
       admin: true,
-    }).then((r) => ({
-      success: true,
-      data: { pid: (r as any).data?.pid || pid, status: normalizeAdminStatusToUi((r as any).data?.status) },
-    }))
+      },
+    )
+
+    if (!r.success) return r
+    return { success: true, data: { pid: r.data?.pid || pid, status: normalizeAdminStatusToUi(r.data?.status) } }
   },
 
-  unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    return requestJson(`/api/v1/admin/participants/${encodeURIComponent(pid)}/unfreeze`, {
+  async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
+    const r = await requestJson<{ pid: string; status: string }>(
+      `/api/v1/admin/participants/${encodeURIComponent(pid)}/unfreeze`,
+      {
       method: 'POST',
       body: { reason },
       admin: true,
-    }).then((r) => ({
-      success: true,
-      data: { pid: (r as any).data?.pid || pid, status: normalizeAdminStatusToUi((r as any).data?.status) },
-    }))
+      },
+    )
+
+    if (!r.success) return r
+    return { success: true, data: { pid: r.data?.pid || pid, status: normalizeAdminStatusToUi(r.data?.status) } }
   },
 
   async listTrustlines(params: {
@@ -259,11 +359,11 @@ export const realApi = {
     creditor?: string
     debtor?: string
     status?: string
-  }): Promise<ApiEnvelope<{ items: any[]; page: number; per_page: number; total: number }>> {
+  }): Promise<ApiEnvelope<Paginated<Trustline>>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 20
 
-    const payload = await requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
+    const payload = await requestJson<Paginated<Trustline>>(
       buildQuery('/api/v1/admin/trustlines', { ...params, page, per_page }),
       { admin: true },
     )
@@ -287,10 +387,10 @@ export const realApi = {
     action?: string
     object_type?: string
     object_id?: string
-  }): Promise<ApiEnvelope<{ items: any[]; page: number; per_page: number; total: number }>> {
+  }): Promise<ApiEnvelope<Paginated<AuditLogEntry>>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 50
-    const payload = await requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
+    const payload = await requestJson<Paginated<AuditLogEntry>>(
       buildQuery('/api/v1/admin/audit-log', { ...params, page, per_page }),
       { admin: true },
     )
@@ -307,10 +407,10 @@ export const realApi = {
     }
   },
 
-  async listEquivalents(params: { include_inactive?: boolean }): Promise<ApiEnvelope<{ items: any[] }>> {
-    const payload = await requestJson<{ items: any[] }>('/api/v1/admin/equivalents', { admin: true })
+  async listEquivalents(params: { include_inactive?: boolean }): Promise<ApiEnvelope<{ items: Equivalent[] }>> {
+    const payload = await requestJson<{ items: Equivalent[] }>('/api/v1/admin/equivalents', { admin: true })
     const all = assertSuccess(payload).items || []
-    const items = params.include_inactive ? all : all.filter((e: any) => e?.is_active)
+    const items = params.include_inactive ? all : all.filter((e) => e?.is_active)
     return { success: true, data: { items } }
   },
 
@@ -319,8 +419,8 @@ export const realApi = {
     precision: number
     description: string
     is_active?: boolean
-  }): Promise<ApiEnvelope<{ created: any }>> {
-    const created = await requestJson<any>('/api/v1/admin/equivalents', {
+  }): Promise<ApiEnvelope<{ created: Equivalent }>> {
+    const created = await requestJson<Equivalent>('/api/v1/admin/equivalents', {
       method: 'POST',
       body: {
         code: input.code,
@@ -336,8 +436,8 @@ export const realApi = {
   async updateEquivalent(
     code: string,
     patch: Partial<{ precision: number; description: string }>,
-  ): Promise<ApiEnvelope<{ updated: any }>> {
-    const updated = await requestJson<any>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
+  ): Promise<ApiEnvelope<{ updated: Equivalent }>> {
+    const updated = await requestJson<Equivalent>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
       method: 'PATCH',
       body: patch,
       admin: true,
@@ -345,8 +445,8 @@ export const realApi = {
     return { success: true, data: { updated: assertSuccess(updated) } }
   },
 
-  async setEquivalentActive(code: string, isActive: boolean, reason: string): Promise<ApiEnvelope<{ updated: any }>> {
-    const updated = await requestJson<any>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
+  async setEquivalentActive(code: string, isActive: boolean, reason: string): Promise<ApiEnvelope<{ updated: Equivalent }>> {
+    const updated = await requestJson<Equivalent>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
       method: 'PATCH',
       body: { is_active: isActive, reason },
       admin: true,
@@ -369,10 +469,10 @@ export const realApi = {
   listIncidents(params: {
     page?: number
     per_page?: number
-  }): Promise<ApiEnvelope<{ items: any[]; page: number; per_page: number; total: number }>> {
+  }): Promise<ApiEnvelope<Paginated<Incident>>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 20
-    return requestJson<{ items: any[]; page: number; per_page: number; total: number }>(
+    return requestJson<Paginated<Incident>>(
       buildQuery('/api/v1/admin/incidents', { page, per_page }),
       { admin: true },
     )
@@ -385,20 +485,10 @@ export const realApi = {
     )
   },
 
-  graphSnapshot(): Promise<
-    ApiEnvelope<{
-      participants: any[]
-      trustlines: any[]
-      incidents: any[]
-      equivalents: any[]
-      debts: any[]
-      audit_log: any[]
-      transactions: any[]
-    }>
-  > {
-    return requestJson('/api/v1/admin/graph/snapshot', { admin: true }).then((r) => {
-      const s = assertSuccess(r) as any
-      const participants = (s.participants || []).map((p: any) => ({
+  graphSnapshot(): Promise<ApiEnvelope<GraphSnapshot>> {
+    return requestJson<GraphSnapshot>('/api/v1/admin/graph/snapshot', { admin: true }).then((r) => {
+      const s = assertSuccess(r)
+      const participants = (s.participants || []).map((p) => ({
         ...p,
         status: normalizeAdminStatusToUi(p.status),
       }))
@@ -406,24 +496,14 @@ export const realApi = {
     })
   },
 
-  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[] }): Promise<
-    ApiEnvelope<{
-      participants: any[]
-      trustlines: any[]
-      incidents: any[]
-      equivalents: any[]
-      debts: any[]
-      audit_log: any[]
-      transactions: any[]
-    }>
-  > {
+  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
     const pid = String(params?.pid || '').trim()
     const depth = params?.depth ?? 1
     const equivalent = String(params?.equivalent || '').trim()
     const status = (params?.status || []).map((s) => String(s || '').trim()).filter(Boolean)
-    return requestJson(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status }), { admin: true }).then((r) => {
-      const s = assertSuccess(r) as any
-      const participants = (s.participants || []).map((p: any) => ({
+    return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status }), { admin: true }).then((r) => {
+      const s = assertSuccess(r)
+      const participants = (s.participants || []).map((p) => ({
         ...p,
         status: normalizeAdminStatusToUi(p.status),
       }))
@@ -431,18 +511,21 @@ export const realApi = {
     })
   },
 
-  clearingCycles(params?: { participant_pid?: string }): Promise<ApiEnvelope<any>> {
+  clearingCycles(params?: { participant_pid?: string }): Promise<ApiEnvelope<ClearingCycles>> {
     const participant_pid = String(params?.participant_pid || '').trim()
-    return requestJson(buildQuery('/api/v1/admin/clearing/cycles', { participant_pid }), { admin: true })
+    return requestJson<ClearingCycles>(buildQuery('/api/v1/admin/clearing/cycles', { participant_pid }), { admin: true })
   },
 
-  async participantMetrics(pid: string, params?: { equivalent?: string | null; threshold?: string | number | null }) {
+  async participantMetrics(
+    pid: string,
+    params?: { equivalent?: string | null; threshold?: string | number | null },
+  ): Promise<ApiEnvelope<ParticipantMetrics>> {
     const eq = params?.equivalent ? String(params.equivalent) : undefined
     const thrRaw = params?.threshold
     const threshold = thrRaw === null || thrRaw === undefined || thrRaw === '' ? undefined : Number(thrRaw)
 
     const pathname = `/api/v1/admin/participants/${encodeURIComponent(pid)}/metrics`
     const url = buildQuery(pathname, { equivalent: eq, threshold: Number.isFinite(threshold) ? threshold : undefined })
-    return await requestJson(url, { admin: true })
+    return await requestJson<ParticipantMetrics>(url, { admin: true })
   },
 }

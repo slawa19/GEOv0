@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
+import { toastApiError } from '../api/errorToast'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
@@ -53,7 +54,7 @@ async function load() {
     items.value = data.items
   } catch (e: any) {
     error.value = e?.message || 'Failed to load participants'
-    ElMessage.error(error.value || 'Failed to load participants')
+    void toastApiError(e, { fallbackTitle: error.value || 'Failed to load participants' })
   } finally {
     loading.value = false
   }
@@ -82,7 +83,7 @@ async function freeze(row: Participant) {
     ElMessage.success(`Frozen ${row.pid}`)
     await load()
   } catch (e: any) {
-    ElMessage.error(e?.message || 'Freeze failed')
+    void toastApiError(e, { fallbackTitle: e?.message || 'Freeze failed' })
   }
 }
 
@@ -94,7 +95,7 @@ async function unfreeze(row: Participant) {
     ElMessage.success(`Unfrozen ${row.pid}`)
     await load()
   } catch (e: any) {
-    ElMessage.error(e?.message || 'Unfreeze failed')
+    void toastApiError(e, { fallbackTitle: e?.message || 'Unfreeze failed' })
   }
 }
 

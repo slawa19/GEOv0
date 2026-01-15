@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
+import { toastApiError } from '../api/errorToast'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
@@ -66,7 +67,7 @@ async function persistRow(row: FlagRow) {
     ElMessage.success('Updated')
   } catch (e: any) {
     row.value = row.original
-    ElMessage.error(e?.message || 'Update failed')
+    void toastApiError(e, { fallbackTitle: e?.message || 'Update failed' })
   } finally {
     savingKey.value = null
   }

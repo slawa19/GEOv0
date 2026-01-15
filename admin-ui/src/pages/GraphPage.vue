@@ -6,109 +6,29 @@ import fcose from 'cytoscape-fcose'
 
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
-import { buildFocusModeQuery, makeMetricsKey } from './graph/graphPageHelpers'
+import { useGraphData } from '../composables/useGraphData'
+import { makeMetricsKey } from './graph/graphPageHelpers'
 import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { throttle } from '../utils/throttle'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../ui/GraphAnalyticsTogglesCard.vue'
+import type {
+  AuditLogEntry,
+  ClearingCycles,
+  Debt,
+  Equivalent,
+  Incident,
+  Participant,
+  Transaction,
+  Trustline,
+} from './graph/graphTypes'
 
 cytoscape.use(fcose)
-
-type Participant = { pid: string; display_name?: string; type?: string; status?: string }
-
-type Trustline = {
-  equivalent: string
-  from: string
-  to: string
-  limit: string
-  used: string
-  available: string
-  status: string
-  created_at: string
-}
-
-type Debt = {
-  equivalent: string
-  debtor: string
-  creditor: string
-  amount: string
-}
-
-type GraphSnapshotPayload = {
-  participants: Participant[]
-  trustlines: Trustline[]
-  incidents: Incident[]
-  equivalents: Equivalent[]
-  debts: Debt[]
-  audit_log: AuditLogEntry[]
-  transactions: Transaction[]
-}
-
-type ClearingCycles = {
-  equivalents: Record<
-    string,
-    {
-      cycles: Array<
-        Array<{
-          equivalent: string
-          debtor: string
-          creditor: string
-          amount: string
-        }>
-      >
-    }
-  >
-}
-
-type Incident = {
-  tx_id: string
-  state: string
-  initiator_pid: string
-  equivalent: string
-  age_seconds: number
-  sla_seconds: number
-  created_at?: string
-}
-
-type AuditLogEntry = {
-  id: string
-  timestamp: string
-  actor_id?: string
-  actor_role?: string
-  action: string
-  object_type: string
-  object_id: string
-  reason?: string | null
-  before_state?: unknown
-  after_state?: unknown
-  request_id?: string
-  ip_address?: string
-}
-
-type Transaction = {
-  id?: string
-  tx_id: string
-  idempotency_key?: string | null
-  type: string
-  initiator_pid: string
-  payload: Record<string, unknown>
-  signatures?: unknown[] | null
-  state: string
-  error?: Record<string, unknown> | null
-  created_at: string
-  updated_at: string
-}
-
-type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
-
 type SelectedInfo =
   | { kind: 'node'; pid: string; display_name?: string; type?: string; status?: string; degree: number; inDegree: number; outDegree: number }
   | { kind: 'edge'; id: string; equivalent: string; from: string; to: string; status: string; limit: string; used: string; available: string; created_at: string }
-
-const loading = ref(false)
-const error = ref<string | null>(null)
 
 const cyRoot = ref<HTMLElement | null>(null)
 let cy: Core | null = null
@@ -164,15 +84,6 @@ function applySelectedHighlight(pid: string) {
     else nn.removeClass('selected-pulse')
   }, 520)
 }
-
-const participants = ref<Participant[]>([])
-const trustlines = ref<Trustline[]>([])
-const incidents = ref<Incident[]>([])
-const equivalents = ref<Equivalent[]>([])
-const debts = ref<Debt[]>([])
-const clearingCycles = ref<ClearingCycles | null>(null)
-const auditLog = ref<AuditLogEntry[]>([])
-const transactions = ref<Transaction[]>([])
 
 type DrawerTab = 'summary' | 'connections' | 'balance' | 'counterparties' | 'risk' | 'cycles'
 const drawerTab = ref<DrawerTab>('summary')
@@ -470,6 +381,31 @@ const focusMode = ref(false)
 const focusDepth = ref<1 | 2>(1)
 const focusRootPid = ref('')
 
+const {
+  loading,
+  error,
+  participants,
+  trustlines,
+  incidents,
+  equivalents,
+  debts,
+  clearingCycles,
+  auditLog,
+  transactions,
+  availableEquivalents,
+  precisionByEq,
+  participantByPid,
+  loadData,
+  refreshForFocusMode,
+} = useGraphData({
+  eq,
+  isRealMode,
+  focusMode,
+  focusRootPid,
+  focusDepth,
+  statusFilter,
+})
+
 const activeCycleKey = ref('')
 
 const activeConnectionKey = ref('')
@@ -644,32 +580,6 @@ function normEq(v: string): string {
 function isBottleneck(t: Trustline): boolean {
   return isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: threshold.value })
 }
-
-const availableEquivalents = computed(() => {
-  const fromDs = (equivalents.value || []).map((e) => e.code).filter(Boolean)
-  const fromTls = (trustlines.value || []).map((t) => normEq(t.equivalent)).filter(Boolean)
-  const all = Array.from(new Set([...fromDs, ...fromTls])).sort()
-  return ['ALL', ...all]
-})
-
-const precisionByEq = computed(() => {
-  const m = new Map<string, number>()
-  for (const e of equivalents.value || []) {
-    const code = normEq(e.code)
-    if (!code) continue
-    const p = Number(e.precision)
-    if (Number.isFinite(p)) m.set(code, p)
-  }
-  return m
-})
-
-const participantByPid = computed(() => {
-  const m = new Map<string, Participant>()
-  for (const p of participants.value || []) {
-    if (p?.pid) m.set(p.pid, p)
-  }
-  return m
-})
 
 type ConnectionRow = {
   direction: 'incoming' | 'outgoing'
@@ -2127,104 +2037,6 @@ function focusSearch() {
   }
   cy.animate({ fit: { eles, padding: 80 } }, { duration: 300 })
   ElMessage.info(`${matches.length} matches (showing first ${Math.min(40, matches.length)}). Refine query.`)
-}
-
-async function loadData() {
-  loading.value = true
-  error.value = null
-  try {
-    const [snap, cc] = await Promise.all([api.graphSnapshot(), api.clearingCycles()])
-
-    const s = assertSuccess(snap)
-    const payload: GraphSnapshotPayload = {
-      participants: (s.participants || []) as Participant[],
-      trustlines: (s.trustlines || []) as Trustline[],
-      incidents: (s.incidents || []) as Incident[],
-      equivalents: (s.equivalents || []) as Equivalent[],
-      debts: (s.debts || []) as Debt[],
-      audit_log: (s.audit_log || []) as AuditLogEntry[],
-      transactions: (s.transactions || []) as Transaction[],
-    }
-
-    participants.value = payload.participants
-    trustlines.value = payload.trustlines
-    incidents.value = payload.incidents
-    equivalents.value = payload.equivalents
-    debts.value = payload.debts
-    auditLog.value = payload.audit_log
-    transactions.value = payload.transactions
-
-    clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
-
-    fullSnapshot = payload
-    fullClearingCycles = clearingCycles.value
-
-    if (!availableEquivalents.value.includes(eq.value)) eq.value = 'ALL'
-  } catch (e: any) {
-    error.value = e?.message || 'Failed to load fixtures'
-  } finally {
-    loading.value = false
-  }
-}
-
-let fullSnapshot: GraphSnapshotPayload | null = null
-let fullClearingCycles: ClearingCycles | null = null
-
-function applySnapshotPayload(p: GraphSnapshotPayload) {
-  participants.value = p.participants || []
-  trustlines.value = p.trustlines || []
-  incidents.value = p.incidents || []
-  equivalents.value = p.equivalents || []
-  debts.value = p.debts || []
-  auditLog.value = p.audit_log || []
-  transactions.value = p.transactions || []
-}
-
-let focusReqId = 0
-async function refreshForFocusMode() {
-  if (!isRealMode.value) return
-
-  focusReqId += 1
-  const reqId = focusReqId
-
-  const query = buildFocusModeQuery({
-    enabled: Boolean(focusMode.value),
-    rootPid: focusRootPid.value,
-    depth: focusDepth.value,
-    equivalent: eq.value,
-    statusFilter: statusFilter.value,
-  })
-
-  if (!query) {
-    if (fullSnapshot) applySnapshotPayload(fullSnapshot)
-    clearingCycles.value = fullClearingCycles
-    return
-  }
-
-  try {
-    const [ego, cc] = await Promise.all([
-      api.graphEgo({ pid: query.pid, depth: query.depth, equivalent: query.equivalent, status: query.status }),
-      api.clearingCycles({ participant_pid: query.participant_pid }),
-    ])
-
-    if (reqId !== focusReqId) return
-
-    const e = assertSuccess(ego) as any
-    applySnapshotPayload({
-      participants: (e.participants || []) as Participant[],
-      trustlines: (e.trustlines || []) as Trustline[],
-      incidents: (e.incidents || []) as Incident[],
-      equivalents: (e.equivalents || []) as Equivalent[],
-      debts: (e.debts || []) as Debt[],
-      audit_log: (e.audit_log || []) as AuditLogEntry[],
-      transactions: (e.transactions || []) as Transaction[],
-    })
-
-    clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
-  } catch (e: any) {
-    if (reqId !== focusReqId) return
-    ElMessage.warning(e?.message || 'Failed to load focus-mode data')
-  }
 }
 
 onMounted(async () => {

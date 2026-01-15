@@ -54,3 +54,110 @@ export type AuditLogEntry = {
   request_id?: string
   ip_address?: string
 }
+
+export type Debt = {
+  equivalent: string
+  debtor: string
+  creditor: string
+  amount: string
+}
+
+export type Transaction = {
+  id?: string
+  tx_id: string
+  idempotency_key?: string | null
+  type: string
+  initiator_pid: string
+  payload: Record<string, unknown>
+  signatures?: unknown[] | null
+  state: string
+  error?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export type GraphSnapshot = {
+  participants: Participant[]
+  trustlines: Trustline[]
+  incidents: Incident[]
+  equivalents: Equivalent[]
+  debts: Debt[]
+  audit_log: AuditLogEntry[]
+  transactions: Transaction[]
+}
+
+export type ClearingCycleEdge = {
+  equivalent: string
+  debtor: string
+  creditor: string
+  amount: string
+}
+
+export type ClearingCycles = {
+  equivalents: Record<string, { cycles: ClearingCycleEdge[][] }>
+}
+
+export type BalanceRow = {
+  equivalent: string
+  outgoing_limit: string
+  outgoing_used: string
+  incoming_limit: string
+  incoming_used: string
+  total_debt: string
+  total_credit: string
+  net: string
+}
+
+export type CounterpartySplitRow = {
+  pid: string
+  display_name: string
+  amount: string
+  share: number
+}
+
+export type ParticipantMetrics = {
+  pid: string
+  equivalent: string | null
+  balance_rows: BalanceRow[]
+  counterparty?: {
+    eq: string
+    totalDebt: string
+    totalCredit: string
+    creditors: CounterpartySplitRow[]
+    debtors: CounterpartySplitRow[]
+  } | null
+  concentration?: {
+    eq: string
+    outgoing: { top1: number; top5: number; hhi: number }
+    incoming: { top1: number; top5: number; hhi: number }
+  } | null
+  distribution?: {
+    eq: string
+    min_atoms: string
+    max_atoms: string
+    bins: Array<{ from_atoms: string; to_atoms: string; count: number }>
+  } | null
+  rank?: {
+    eq: string
+    rank: number
+    n: number
+    percentile: number
+    net: string
+  } | null
+  capacity?: {
+    eq: string
+    out: { limit: string; used: string; pct: number }
+    inc: { limit: string; used: string; pct: number }
+    bottlenecks: Array<{ dir: 'out' | 'in'; other: string; trustline: Trustline }>
+  } | null
+  activity?: {
+    windows: number[]
+    trustline_created: Record<number, number>
+    trustline_closed: Record<number, number>
+    incident_count: Record<number, number>
+    participant_ops: Record<number, number>
+    payment_committed: Record<number, number>
+    clearing_committed: Record<number, number>
+    has_transactions: boolean
+  } | null
+}

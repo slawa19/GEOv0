@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
+import { toastApiError } from '../api/errorToast'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
@@ -71,7 +72,7 @@ async function load() {
     items.value = data.items
   } catch (e: any) {
     error.value = e?.message || 'Failed to load trustlines'
-    ElMessage.error(error.value || 'Failed to load trustlines')
+    void toastApiError(e, { fallbackTitle: error.value || 'Failed to load trustlines' })
   } finally {
     loading.value = false
   }

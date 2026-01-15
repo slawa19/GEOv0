@@ -1,4 +1,20 @@
 import { ApiException, type ApiEnvelope } from './envelope'
+import { isRatioBelowThreshold } from '../utils/decimal'
+import type {
+  AuditLogEntry,
+  BalanceRow,
+  ClearingCycles,
+  CounterpartySplitRow,
+  Debt,
+  Equivalent,
+  GraphSnapshot,
+  Incident,
+  Paginated,
+  Participant,
+  ParticipantMetrics,
+  Trustline,
+  Transaction,
+} from '../types/domain'
 
 type ScenarioOverride =
   | { mode: 'empty' }
@@ -11,101 +27,35 @@ type Scenario = {
   overrides?: Record<string, ScenarioOverride>
 }
 
-type Paginated<T> = { items: T[]; page: number; per_page: number; total: number }
-
-type Participant = { pid: string; display_name: string; type: string; status: string }
-
-type Trustline = {
-  equivalent: string
-  from: string
-  to: string
-  from_display_name?: string | null
-  to_display_name?: string | null
-  limit: string
-  used: string
-  available: string
-  status: string
-  created_at: string
-  policy: Record<string, unknown>
-}
-
-type AuditLogEntry = {
-  id: string
-  timestamp: string
-  actor_id: string
-  actor_role: string
-  action: string
-  object_type: string
-  object_id: string
-  reason?: string | null
-  before_state?: unknown
-  after_state?: unknown
-  request_id?: string
-  ip_address?: string
-}
-
-type Incident = {
-  tx_id: string
-  state: string
-  initiator_pid: string
-  equivalent: string
-  age_seconds: number
-  created_at?: string
-  sla_seconds: number
-}
-
-type Debt = {
-  equivalent: string
-  debtor: string
-  creditor: string
-  amount: string
-}
-
-type Transaction = {
-  id?: string
-  tx_id: string
-  idempotency_key?: string | null
-  type: string
-  initiator_pid: string
-  payload: Record<string, unknown>
-  signatures?: unknown[] | null
-  state: string
-  error?: Record<string, unknown> | null
-  created_at: string
-  updated_at: string
-}
-
-type ClearingCycles = {
-  equivalents: Record<
-    string,
-    {
-      cycles: Array<
-        Array<{
-          equivalent: string
-          debtor: string
-          creditor: string
-          amount: string
-        }>
-      >
-    }
-  >
-}
-
-type GraphSnapshot = {
-  participants: Participant[]
-  trustlines: Trustline[]
-  incidents: Incident[]
-  equivalents: Equivalent[]
-  debts: Debt[]
-  audit_log: AuditLogEntry[]
-  transactions: Transaction[]
-}
-
-type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
-
 const FIXTURES_BASE = '/admin-fixtures/v1'
 
 const cache = new Map<string, unknown>()
+
+let lastToastAt = 0
+let lastToastMsg = ''
+
+async function notifyLoadError(message: string) {
+  // Best-effort toast: do not crash the app if UI layer isn't available.
+  const now = Date.now()
+  if (message === lastToastMsg && now - lastToastAt < 2000) return
+  lastToastAt = now
+  lastToastMsg = message
+
+  try {
+    const mod = await import('element-plus')
+    const ElMessage = (mod as any)?.ElMessage
+    if (typeof ElMessage?.error === 'function') {
+      ElMessage.error(message)
+      return
+    }
+  } catch {
+    // ignore
+  }
+
+  // Fallback: console (e.g., in tests or stripped UI runtimes).
+  // eslint-disable-next-line no-console
+  console.error(message)
+}
 
 function scenarioNameFromUrl(): string {
   const u = new URL(window.location.href)
@@ -115,11 +65,46 @@ function scenarioNameFromUrl(): string {
 async function loadJson<T>(relPath: string): Promise<T> {
   const key = relPath
   if (cache.has(key)) return cache.get(key) as T
-  const res = await fetch(`${FIXTURES_BASE}/${relPath}`)
-  if (!res.ok) throw new ApiException({ status: res.status, code: 'INTERNAL_ERROR', message: `Failed to load ${relPath}` })
-  const data = (await res.json()) as T
-  cache.set(key, data)
-  return data
+
+  const url = `${FIXTURES_BASE}/${relPath}`
+  const attempts = 3
+
+  let lastErr: unknown = null
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) {
+        throw new ApiException({
+          status: res.status,
+          code: 'INTERNAL_ERROR',
+          message: `Failed to load ${relPath}`,
+          details: { url, status: res.status, statusText: res.statusText },
+        })
+      }
+
+      const data = (await res.json()) as T
+      cache.set(key, data)
+      return data
+    } catch (e) {
+      lastErr = e
+
+      // Offline fallback: if we have cached data, prefer it.
+      if (cache.has(key)) return cache.get(key) as T
+
+      if (attempt < attempts) {
+        const base = 120
+        const backoff = base * Math.pow(3, attempt - 1)
+        const jitter = Math.floor(Math.random() * 40)
+        await sleep(backoff + jitter)
+        continue
+      }
+    }
+  }
+
+  await notifyLoadError(`Failed to load fixtures: ${relPath}`)
+
+  if (lastErr instanceof ApiException) throw lastErr
+  throw new ApiException({ status: 0, code: 'INTERNAL_ERROR', message: `Failed to load ${relPath}`, details: lastErr })
 }
 
 async function loadOptionalJson<T>(relPath: string, fallback: T): Promise<T> {
@@ -209,6 +194,64 @@ async function getTrustlinesDataset(): Promise<Trustline[]> {
   return await loadJson<Trustline[]>('datasets/trustlines.json')
 }
 
+function decimalToAtoms(amount: string, precision: number): bigint {
+  const m = String(amount || '').trim().match(/^(-)?(\d+)(?:\.(\d+))?$/)
+  if (!m) return 0n
+  const neg = Boolean(m[1])
+  const intPart = m[2] || '0'
+  const fracPart = m[3] || ''
+  const frac = (fracPart + '0'.repeat(precision)).slice(0, precision)
+  const atoms = BigInt((intPart + frac).replace(/^0+(?=\d)/, '') || '0')
+  return neg ? -atoms : atoms
+}
+
+function atomsToDecimal(atoms: bigint, precision: number): string {
+  const neg = atoms < 0n
+  const abs = neg ? -atoms : atoms
+  const s = abs.toString()
+  if (precision <= 0) return (neg ? '-' : '') + s
+  const pad = precision + 1
+  const padded = s.length >= pad ? s : '0'.repeat(pad - s.length) + s
+  const head = padded.slice(0, padded.length - precision)
+  const frac = padded.slice(padded.length - precision)
+  return (neg ? '-' : '') + head + '.' + frac
+}
+
+function safeIsoToMs(ts: string | undefined | null): number | null {
+  const t = String(ts || '').trim()
+  if (!t) return null
+  const ms = Date.parse(t)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function computeShareRows(
+  amountsByPid: Map<string, bigint>,
+  total: bigint,
+  prec: number,
+  pidToName: Map<string, string>,
+): CounterpartySplitRow[] {
+  const denom = total > 0n ? Number(total) : 0
+  const rows: CounterpartySplitRow[] = []
+  for (const [pid, amt] of amountsByPid.entries()) {
+    rows.push({
+      pid,
+      display_name: pidToName.get(pid) || pid,
+      amount: atomsToDecimal(amt, prec),
+      share: denom > 0 ? Number(amt) / denom : 0,
+    })
+  }
+  rows.sort((a, b) => Number(decimalToAtoms(b.amount, prec) - decimalToAtoms(a.amount, prec)))
+  return rows
+}
+
+function topShares(shares: number[]): { top1: number; top5: number; hhi: number } {
+  const sorted = [...shares].sort((a, b) => b - a)
+  const top1 = sorted[0] ?? 0
+  const top5 = sorted.slice(0, 5).reduce((acc, x) => acc + x, 0)
+  const hhi = sorted.reduce((acc, x) => acc + x * x, 0)
+  return { top1, top5, hhi }
+}
+
 async function getIncidentsDataset(): Promise<Incident[]> {
   const ds = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
   return ds.items
@@ -294,10 +337,273 @@ export const mockApi = {
   },
 
   async participantMetrics(
-    _pid: string,
-    _params?: { equivalent?: string | null; threshold?: string | number | null }
-  ): Promise<ApiEnvelope<never>> {
-    throw new Error('NOT_IMPLEMENTED')
+    pid: string,
+    params?: { equivalent?: string | null; threshold?: string | number | null },
+  ): Promise<ApiEnvelope<ParticipantMetrics>> {
+    return withScenario('/api/v1/admin/participants/metrics', async () => {
+      const pidKey = String(pid || '').trim()
+      if (!pidKey) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'pid is required' } }
+
+      const eqRaw = String(params?.equivalent || '').trim().toUpperCase()
+      const eqCode = eqRaw && eqRaw !== 'ALL' ? eqRaw : null
+      const thrStr = String(params?.threshold ?? '0.10').trim() || '0.10'
+
+      const [participants, equivalents, trustlines, debts] = await Promise.all([
+        getParticipantsDataset(),
+        getEquivalentsDataset(),
+        getTrustlinesDataset(),
+        loadOptionalJson<Debt[]>('datasets/debts.json', []),
+      ])
+
+      const pidToName = new Map(participants.map((p) => [p.pid, String(p.display_name || '').trim() || p.pid]))
+      const precisionByEq = new Map(
+        (equivalents || [])
+          .map((e) => [String(e.code || '').trim().toUpperCase(), Number(e.precision)] as const)
+          .filter((x) => x[0] && Number.isFinite(x[1])),
+      )
+
+      const eqs = eqCode
+        ? [eqCode]
+        : Array.from(
+            new Set([
+              ...(equivalents || []).map((e) => String(e.code || '').trim().toUpperCase()).filter(Boolean),
+              ...(trustlines || []).map((t) => String(t.equivalent || '').trim().toUpperCase()).filter(Boolean),
+              ...(debts || []).map((d) => String(d.equivalent || '').trim().toUpperCase()).filter(Boolean),
+            ]),
+          ).sort()
+
+      const balance_rows: BalanceRow[] = []
+
+      for (const code of eqs) {
+        const prec = precisionByEq.get(code) ?? 2
+
+        let outLimit = 0n
+        let outUsed = 0n
+        let inLimit = 0n
+        let inUsed = 0n
+
+        for (const t of trustlines || []) {
+          if (String(t.equivalent || '').trim().toUpperCase() !== code) continue
+          const lim = decimalToAtoms(t.limit, prec)
+          const used = decimalToAtoms(t.used, prec)
+          if (t.from === pidKey) {
+            outLimit += lim
+            outUsed += used
+          } else if (t.to === pidKey) {
+            inLimit += lim
+            inUsed += used
+          }
+        }
+
+        let debtAtoms = 0n
+        let creditAtoms = 0n
+        for (const d of debts || []) {
+          if (String(d.equivalent || '').trim().toUpperCase() !== code) continue
+          const amt = decimalToAtoms(d.amount, prec)
+          if (d.debtor === pidKey) debtAtoms += amt
+          if (d.creditor === pidKey) creditAtoms += amt
+        }
+
+        const netAtoms = creditAtoms - debtAtoms
+        balance_rows.push({
+          equivalent: code,
+          outgoing_limit: atomsToDecimal(outLimit, prec),
+          outgoing_used: atomsToDecimal(outUsed, prec),
+          incoming_limit: atomsToDecimal(inLimit, prec),
+          incoming_used: atomsToDecimal(inUsed, prec),
+          total_debt: atomsToDecimal(debtAtoms, prec),
+          total_credit: atomsToDecimal(creditAtoms, prec),
+          net: atomsToDecimal(netAtoms, prec),
+        })
+      }
+
+      let counterparty: ParticipantMetrics['counterparty'] = null
+      let concentration: ParticipantMetrics['concentration'] = null
+      let distribution: ParticipantMetrics['distribution'] = null
+      let rank: ParticipantMetrics['rank'] = null
+      let capacity: ParticipantMetrics['capacity'] = null
+
+      if (eqCode) {
+        const prec = precisionByEq.get(eqCode) ?? 2
+
+        const creditorsAtoms = new Map<string, bigint>()
+        const debtorsAtoms = new Map<string, bigint>()
+        let totalDebtAtoms = 0n
+        let totalCreditAtoms = 0n
+
+        for (const d of debts || []) {
+          if (String(d.equivalent || '').trim().toUpperCase() !== eqCode) continue
+          const amt = decimalToAtoms(d.amount, prec)
+          if (d.debtor === pidKey) {
+            totalDebtAtoms += amt
+            const other = String(d.creditor || '').trim()
+            creditorsAtoms.set(other, (creditorsAtoms.get(other) || 0n) + amt)
+          }
+          if (d.creditor === pidKey) {
+            totalCreditAtoms += amt
+            const other = String(d.debtor || '').trim()
+            debtorsAtoms.set(other, (debtorsAtoms.get(other) || 0n) + amt)
+          }
+        }
+
+        const creditors = computeShareRows(creditorsAtoms, totalDebtAtoms, prec, pidToName)
+        const debtors = computeShareRows(debtorsAtoms, totalCreditAtoms, prec, pidToName)
+        counterparty = {
+          eq: eqCode,
+          totalDebt: atomsToDecimal(totalDebtAtoms, prec),
+          totalCredit: atomsToDecimal(totalCreditAtoms, prec),
+          creditors,
+          debtors,
+        }
+
+        concentration = {
+          eq: eqCode,
+          outgoing: topShares(creditors.map((r) => r.share)),
+          incoming: topShares(debtors.map((r) => r.share)),
+        }
+
+        // Distribution + rank use net = credit - debt over all participants.
+        const netAtomsByPid = new Map<string, bigint>()
+        for (const p of participants || []) netAtomsByPid.set(p.pid, 0n)
+        for (const d of debts || []) {
+          if (String(d.equivalent || '').trim().toUpperCase() !== eqCode) continue
+          const amt = decimalToAtoms(d.amount, prec)
+          netAtomsByPid.set(d.debtor, (netAtomsByPid.get(d.debtor) || 0n) - amt)
+          netAtomsByPid.set(d.creditor, (netAtomsByPid.get(d.creditor) || 0n) + amt)
+        }
+
+        const sortedPids = Array.from(netAtomsByPid.entries())
+          .sort((a, b) => (a[1] === b[1] ? a[0].localeCompare(b[0]) : b[1] > a[1] ? 1 : -1))
+          .map(([p]) => p)
+
+        const atomsVals = Array.from(netAtomsByPid.values())
+        const minAtoms = atomsVals.reduce((m, v) => (v < m ? v : m), 0n)
+        const maxAtoms = atomsVals.reduce((m, v) => (v > m ? v : m), 0n)
+
+        const binsCount = 20
+        const range = maxAtoms - minAtoms
+        const bins: Array<{ from_atoms: string; to_atoms: string; count: number }> = []
+        if (range === 0n) {
+          bins.push({ from_atoms: String(minAtoms), to_atoms: String(maxAtoms), count: atomsVals.length })
+        } else {
+          const step = range / BigInt(binsCount)
+          const safeStep = step > 0n ? step : 1n
+          for (let i = 0; i < binsCount; i++) {
+            const from = minAtoms + BigInt(i) * safeStep
+            const to = i === binsCount - 1 ? maxAtoms : from + safeStep
+            bins.push({ from_atoms: String(from), to_atoms: String(to), count: 0 })
+          }
+          for (const v of atomsVals) {
+            const idx = Number((v - minAtoms) / safeStep)
+            const clamped = Math.max(0, Math.min(binsCount - 1, idx))
+            bins[clamped]!.count += 1
+          }
+        }
+
+        distribution = {
+          eq: eqCode,
+          min_atoms: String(minAtoms),
+          max_atoms: String(maxAtoms),
+          bins,
+        }
+
+        const idx = sortedPids.indexOf(pidKey)
+        if (idx >= 0) {
+          const rnk = idx + 1
+          const n = sortedPids.length
+          const percentile = n <= 1 ? 1 : (n - rnk) / (n - 1)
+          rank = {
+            eq: eqCode,
+            rank: rnk,
+            n,
+            percentile,
+            net: atomsToDecimal(netAtomsByPid.get(pidKey) || 0n, prec),
+          }
+        }
+
+        // Capacity: total in/out usage + bottlenecks (available/limit < threshold).
+        let outLimit = 0n
+        let outUsed = 0n
+        let inLimit = 0n
+        let inUsed = 0n
+        const bottlenecks: Array<{ dir: 'out' | 'in'; other: string; trustline: Trustline }> = []
+
+        for (const t of trustlines || []) {
+          if (String(t.equivalent || '').trim().toUpperCase() !== eqCode) continue
+          const lim = decimalToAtoms(t.limit, prec)
+          const used = decimalToAtoms(t.used, prec)
+          if (t.from === pidKey) {
+            outLimit += lim
+            outUsed += used
+            if (t.status === 'active' && isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: thrStr })) {
+              bottlenecks.push({ dir: 'out', other: t.to, trustline: t })
+            }
+          } else if (t.to === pidKey) {
+            inLimit += lim
+            inUsed += used
+            if (t.status === 'active' && isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: thrStr })) {
+              bottlenecks.push({ dir: 'in', other: t.from, trustline: t })
+            }
+          }
+        }
+
+        const outPct = outLimit > 0n ? Number(outUsed) / Number(outLimit) : 0
+        const inPct = inLimit > 0n ? Number(inUsed) / Number(inLimit) : 0
+
+        capacity = {
+          eq: eqCode,
+          out: { limit: atomsToDecimal(outLimit, prec), used: atomsToDecimal(outUsed, prec), pct: outPct },
+          inc: { limit: atomsToDecimal(inLimit, prec), used: atomsToDecimal(inUsed, prec), pct: inPct },
+          bottlenecks,
+        }
+      }
+
+      // Basic activity placeholder: keep schema stable without depending on extra datasets.
+      const nowMs = Date.now()
+      const windows = [7, 30, 90]
+      const trustline_created: Record<number, number> = {}
+      const trustline_closed: Record<number, number> = {}
+      for (const w of windows) {
+        trustline_created[w] = 0
+        trustline_closed[w] = 0
+      }
+
+      for (const t of trustlines || []) {
+        if (!eqCode || String(t.equivalent || '').trim().toUpperCase() !== eqCode) continue
+        if (t.from !== pidKey && t.to !== pidKey) continue
+        const ms = safeIsoToMs(t.created_at)
+        if (!ms) continue
+        for (const w of windows) {
+          if (ms >= nowMs - w * 24 * 3600 * 1000) trustline_created[w] += 1
+        }
+      }
+
+      const activity: ParticipantMetrics['activity'] = {
+        windows,
+        trustline_created,
+        trustline_closed,
+        incident_count: { 7: 0, 30: 0, 90: 0 },
+        participant_ops: { 7: 0, 30: 0, 90: 0 },
+        payment_committed: { 7: 0, 30: 0, 90: 0 },
+        clearing_committed: { 7: 0, 30: 0, 90: 0 },
+        has_transactions: false,
+      }
+
+      return {
+        success: true,
+        data: {
+          pid: pidKey,
+          equivalent: eqCode,
+          balance_rows,
+          counterparty,
+          concentration,
+          distribution,
+          rank,
+          capacity,
+          activity,
+        },
+      }
+    })
   },
 
   async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
@@ -743,4 +1049,17 @@ export const mockApi = {
       }
     })
   },
+}
+
+// Test-only helper: clears in-memory fixture caches and state.
+// This keeps unit tests isolated (vitest runs files in the same process).
+export function __resetMockApiForTests() {
+  cache.clear()
+  mockConfig = null
+  mockFlags = null
+  mockParticipants = null
+  mockEquivalents = null
+  mockAuditLog = null
+  lastToastAt = 0
+  lastToastMsg = ''
 }
