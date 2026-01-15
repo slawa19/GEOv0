@@ -3,7 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
+import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 
 type FlagRow = { key: string; value: boolean; original: boolean }
 
@@ -12,6 +14,8 @@ const error = ref<string | null>(null)
 const savingKey = ref<string | null>(null)
 
 const rows = ref<FlagRow[]>([])
+
+const authStore = useAuthStore()
 
 async function load() {
   loading.value = true
@@ -34,6 +38,12 @@ const dirtyCount = computed(() => rows.value.filter((r) => r.value !== r.origina
 const fullMultipathEnabled = computed(() => rows.value.find((r) => r.key === 'full_multipath_enabled')?.value === true)
 
 async function persistRow(row: FlagRow) {
+  if (authStore.isReadOnly) {
+    // Revert any UI toggle attempt.
+    row.value = row.original
+    ElMessage.error('Read-only role: updates are disabled')
+    return
+  }
   if (row.value === row.original) return
 
   const previous = row.original
@@ -87,14 +97,18 @@ onMounted(() => void load())
     <el-empty v-else-if="rows.length === 0" description="No boolean flags in dataset" />
 
     <div v-else>
-      <el-table :data="rows" size="small" class="geoTable">
-        <el-table-column prop="key" label="Flag" min-width="320" />
-        <el-table-column label="Value" width="180">
+      <el-table :data="rows" size="small" table-layout="fixed" class="geoTable">
+        <el-table-column prop="key" label="Flag" width="420" show-overflow-tooltip>
           <template #default="scope">
-            <el-switch v-model="scope.row.value" @change="persistRow(scope.row)" />
+            <TableCellEllipsis :text="scope.row.key" />
           </template>
         </el-table-column>
-        <el-table-column label="Status" width="160">
+        <el-table-column label="Value" width="140" align="center" header-align="center">
+          <template #default="scope">
+            <el-switch v-model="scope.row.value" :disabled="authStore.isReadOnly" @change="persistRow(scope.row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="Status" width="140" align="center" header-align="center">
           <template #default="scope">
             <el-tag v-if="savingKey === scope.row.key" type="info">Saving…</el-tag>
             <el-tag v-else-if="scope.row.value !== scope.row.original" type="warning">Pending</el-tag>

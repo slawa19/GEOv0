@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any
+import uuid
 import sys
 import argparse
 
@@ -500,6 +501,189 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _tx_uuid(name: str) -> uuid.UUID:
+    # Deterministic UUIDs for reproducible fixtures.
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"geov0-admin-fixtures:{name}")
+
+
+def build_transactions(
+    *,
+    participants: list[Participant],
+    trustlines: list[dict[str, Any]],
+    clearing_cycles: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Generate Transaction-like fixtures close to the backend Transaction model."""
+
+    pids = [p.pid for p in participants]
+    if not pids:
+        return []
+
+    def pick_pid(i: int, salt: int = 0) -> str:
+        return pids[(i + salt) % len(pids)]
+
+    def pick_other_pid(a: str, i: int) -> str:
+        b = pick_pid(i, 17)
+        if b == a:
+            b = pick_pid(i, 29)
+        return b
+
+    eqs = [e["code"] for e in EQUIVALENTS]
+
+    out: list[dict[str, Any]] = []
+
+    # Payments: spread over time so Activity windows have signal.
+    payment_count = 120
+    for i in range(payment_count):
+        sender = pick_pid(i, 3)
+        receiver = pick_other_pid(sender, i)
+        eq = eqs[i % len(eqs)]
+        amount = _q(Decimal(5 + (i % 37) * 3), 2)
+
+        created_at = BASE_TS - timedelta(days=(i % 96), hours=(i % 24), minutes=(i * 13) % 60)
+        committed = (i % 11) != 0
+        updated_at = created_at + timedelta(minutes=5 if committed else 2)
+
+        tx_id = str(_tx_uuid(f"payment:{i}"))
+        state = "COMMITTED" if committed else "ABORTED"
+
+        out.append(
+            {
+                "id": tx_id,
+                "tx_id": tx_id,
+                "idempotency_key": f"idem_payment_{i:04d}" if (i % 5 == 0) else None,
+                "type": "PAYMENT",
+                "initiator_pid": sender,
+                "payload": {
+                    "from": sender,
+                    "to": receiver,
+                    "amount": str(amount),
+                    "equivalent": eq,
+                    "routes": [
+                        {
+                            "path": [sender, receiver],
+                            "amount": str(amount),
+                        }
+                    ],
+                    "idempotency": {
+                        "key": f"idem_payment_{i:04d}",
+                        "fingerprint": f"fp_payment_{i:04d}",
+                    }
+                    if (i % 5 == 0)
+                    else None,
+                },
+                "signatures": [],
+                "state": state,
+                "error": {"code": "ABORTED", "message": "Simulated abort"} if state == "ABORTED" else None,
+                "created_at": _iso(created_at),
+                "updated_at": _iso(updated_at),
+            }
+        )
+
+    # Clearings: take a subset of available cycles.
+    cycles_by_eq: dict[str, list[list[dict[str, Any]]]] = {}
+    try:
+        for eq, entry in (clearing_cycles.get("equivalents") or {}).items():
+            if not entry or not isinstance(entry, dict):
+                continue
+            cycles = entry.get("cycles")
+            if isinstance(cycles, list):
+                cycles_by_eq[str(eq)] = cycles
+    except Exception:
+        cycles_by_eq = {}
+
+    clearing_target = 18
+    clearing_idx = 0
+    for eq, cycles in cycles_by_eq.items():
+        for cycle in cycles:
+            if clearing_idx >= clearing_target:
+                break
+            if not isinstance(cycle, list) or not cycle:
+                continue
+
+            initiator = str(cycle[0].get("debtor") or pick_pid(clearing_idx, 9))
+            clear_amount = str(cycle[0].get("amount") or "1.00")
+
+            created_at = BASE_TS - timedelta(days=(clearing_idx % 60), hours=(clearing_idx % 12), minutes=(clearing_idx * 19) % 60)
+            updated_at = created_at + timedelta(minutes=3)
+
+            tx_id = str(_tx_uuid(f"clearing:{clearing_idx}"))
+
+            edges_payload: list[dict[str, Any]] = []
+            for e in cycle:
+                if not e or not isinstance(e, dict):
+                    continue
+                edges_payload.append(
+                    {
+                        "debtor": str(e.get("debtor") or ""),
+                        "creditor": str(e.get("creditor") or ""),
+                        "amount": str(e.get("amount") or ""),
+                    }
+                )
+
+            out.append(
+                {
+                    "id": tx_id,
+                    "tx_id": tx_id,
+                    "idempotency_key": None,
+                    "type": "CLEARING",
+                    "initiator_pid": initiator,
+                    "payload": {
+                        "cycle": [f"debt_{clearing_idx:04d}_{j:02d}" for j in range(len(edges_payload))],
+                        "amount": clear_amount,
+                        "equivalent": eq,
+                        "edges": edges_payload,
+                    },
+                    "signatures": [],
+                    "state": "COMMITTED",
+                    "error": None,
+                    "created_at": _iso(created_at),
+                    "updated_at": _iso(updated_at),
+                }
+            )
+            clearing_idx += 1
+
+        if clearing_idx >= clearing_target:
+            break
+
+    # Trustline ops.
+    tl_ops = 40
+    for i in range(tl_ops):
+        t = trustlines[i % len(trustlines)] if trustlines else None
+        if not t:
+            break
+
+        created_at = BASE_TS - timedelta(days=(i % 90), minutes=(i * 23) % 60)
+        updated_at = created_at + timedelta(minutes=1)
+
+        op_type = "TRUST_LINE_CREATE" if i % 3 == 0 else ("TRUST_LINE_UPDATE" if i % 3 == 1 else "TRUST_LINE_CLOSE")
+        initiator = str(t.get("from") or pick_pid(i, 5))
+
+        tx_id = str(_tx_uuid(f"trustline-op:{i}"))
+
+        out.append(
+            {
+                "id": tx_id,
+                "tx_id": tx_id,
+                "idempotency_key": None,
+                "type": op_type,
+                "initiator_pid": initiator,
+                "payload": {
+                    "equivalent": str(t.get("equivalent") or ""),
+                    "from": str(t.get("from") or ""),
+                    "to": str(t.get("to") or ""),
+                    "limit": str(t.get("limit") or ""),
+                },
+                "signatures": [],
+                "state": "COMMITTED",
+                "error": None,
+                "created_at": _iso(created_at),
+                "updated_at": _iso(updated_at),
+            }
+        )
+
+    return out
+
+
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
     out_v1 = Path(args.out_v1)
@@ -510,6 +694,7 @@ def main(argv: list[str] | None = None) -> None:
     incidents = build_incidents(participants)
     debts = build_debts_from_trustlines(trustlines)
     clearing_cycles = build_clearing_cycles_from_debts(debts)
+    transactions = build_transactions(participants=participants, trustlines=trustlines, clearing_cycles=clearing_cycles)
 
     _write_json(datasets_dir / "participants.json", [p.__dict__ for p in participants])
     _write_json(datasets_dir / "equivalents.json", EQUIVALENTS)
@@ -517,6 +702,7 @@ def main(argv: list[str] | None = None) -> None:
     _write_json(datasets_dir / "incidents.json", incidents)
     _write_json(datasets_dir / "debts.json", debts)
     _write_json(datasets_dir / "clearing-cycles.json", clearing_cycles)
+    _write_json(datasets_dir / "transactions.json", transactions)
 
     write_common_admin_datasets(datasets_dir=datasets_dir, participants=participants, base_ts=BASE_TS)
     _write_json(
@@ -538,6 +724,7 @@ def main(argv: list[str] | None = None) -> None:
     print("Wrote equivalents: 3")
     print(f"Wrote incidents: {len(incidents.get('items', []))}")
     print(f"Wrote debts: {len(debts)}")
+    print(f"Wrote transactions: {len(transactions)}")
 
 
 if __name__ == "__main__":

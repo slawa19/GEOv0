@@ -315,43 +315,50 @@ def generate_feature_flags() -> dict[str, Any]:
 
 
 def generate_integrity_status() -> dict[str, Any]:
-    checks = [
-        {
-            "name": "zero_sum_by_equivalent",
-            "status": "ok",
-            "last_check": _iso(BASE_TS - timedelta(minutes=18)),
-            "details": {"checked_equivalents": 5},
-        },
-        {
-            "name": "limits_consistency",
-            "status": "warning",
-            "last_check": _iso(BASE_TS - timedelta(minutes=33)),
-            "details": {"warnings": 2},
-        },
-        {
-            "name": "orphan_participants",
-            "status": "ok",
-            "last_check": _iso(BASE_TS - timedelta(minutes=45)),
-            "details": {"count": 0},
-        },
-    ]
+    # Align with live backend schema:
+    # app/schemas/integrity.py::IntegrityStatusResponse
+    # Fields: status, last_check, equivalents, alerts
+    last_check = BASE_TS - timedelta(minutes=2)
 
-    last_checked_at = max((c.get("last_check") for c in checks if isinstance(c.get("last_check"), str)), default=_iso(BASE_TS))
-    checks_failed = sum(1 for c in checks if c.get("status") in ("failed", "error", "critical"))
-    checks_warn = any(c.get("status") == "warning" for c in checks)
+    equivalents: dict[str, Any] = {}
+    alerts: list[str] = []
 
-    overall = "ok"
-    if checks_failed > 0:
-        overall = "failed"
-    elif checks_warn:
-        overall = "warning"
+    # Keep deterministic and compatible with canonical equivalens.
+    for code in ["UAH", "EUR", "HOUR"]:
+        eq_status = "healthy"
+        invariants: dict[str, Any] = {
+            "zero_sum": {"passed": True, "value": "0"},
+            "trust_limits": {"passed": True, "violations": 0},
+            "debt_symmetry": {"passed": True, "violations": 0},
+        }
+
+        if code == "UAH":
+            eq_status = "warning"
+            invariants["debt_symmetry"] = {
+                "passed": False,
+                "violations": 2,
+                "details": {"sample": [{"debtor": "PID_SAMPLE", "creditor": "PID_SAMPLE2", "amount": "1.00"}]},
+            }
+            alerts.append("Debt symmetry violations in UAH: 2")
+
+        equivalents[code] = {
+            "status": eq_status,
+            "checksum": "",
+            "last_verified": _iso(BASE_TS - timedelta(minutes=10)),
+            "invariants": invariants,
+        }
+
+    overall_status = "healthy"
+    if any(e.get("status") == "critical" for e in equivalents.values()):
+        overall_status = "critical"
+    elif any(e.get("status") == "warning" for e in equivalents.values()):
+        overall_status = "warning"
 
     return {
-        "status": overall,
-        "last_checked_at": last_checked_at,
-        "checks_total": len(checks),
-        "checks_failed": checks_failed,
-        "checks": checks,
+        "status": overall_status,
+        "last_check": _iso(last_check),
+        "equivalents": equivalents,
+        "alerts": alerts,
     }
 
 
@@ -379,19 +386,35 @@ def generate_debts(trustlines: list[Trustline]) -> list[dict[str, Any]]:
     # Derived deterministically from trustline.used:
     # trustline from -> to is creditor -> debtor
     # debt direction is debtor -> creditor
-    out: list[dict[str, Any]] = []
+    # Invariants alignment:
+    # - use active trustlines only (missing/closed/frozen treated as limit=0)
+    # - net mutual debts so debt_symmetry passes
+
+    used_by_edge: dict[tuple[str, str, str], Decimal] = {}
     for t in trustlines:
+        if str(t.status or "active").lower() != "active":
+            continue
         used = _d(t.used)
         if used <= 0:
             continue
-        out.append(
-            {
-                "equivalent": t.equivalent,
-                "debtor": t.to_pid,
-                "creditor": t.from_pid,
-                "amount": t.used,
-            }
-        )
+        used_by_edge[(t.equivalent, t.to_pid, t.from_pid)] = used
+
+    out: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str, str]] = set()
+    for (eq, debtor, creditor), ab in list(used_by_edge.items()):
+        pair = (eq, min(debtor, creditor), max(debtor, creditor))
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        ba = used_by_edge.get((eq, creditor, debtor), Decimal("0"))
+        if ab == ba:
+            continue
+        if ab > ba:
+            out.append({"equivalent": eq, "debtor": debtor, "creditor": creditor, "amount": str(ab - ba)})
+        else:
+            out.append({"equivalent": eq, "debtor": creditor, "creditor": debtor, "amount": str(ba - ab)})
+
+    out.sort(key=lambda d: (d["equivalent"], d["debtor"], d["creditor"]))
     return out
 
 
@@ -549,8 +572,8 @@ def generate_health_db() -> dict[str, Any]:
 
 def generate_migrations() -> dict[str, Any]:
     return {
-        "head": "0001_initial",
-        "current": "0001_initial",
+        "head_revision": "0001_initial",
+        "current_revision": "0001_initial",
         "is_up_to_date": True,
         "timestamp": _iso(BASE_TS - timedelta(minutes=5)),
     }

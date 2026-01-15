@@ -56,10 +56,13 @@ def build_debts_from_trustlines(trustlines: list[dict[str, Any]]) -> list[dict[s
     Output shape matches Admin UI fixtures: {equivalent, debtor, creditor, amount}.
     """
 
-    out: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-
+    # 1) Collect directed used amounts (active trustlines only).
+    used_by_edge: dict[tuple[str, str, str], Decimal] = {}
     for t in trustlines:
+        status = str(t.get("status") or "active").strip().lower()
+        if status != "active":
+            continue
+
         eq = str(t.get("equivalent") or "")
         debtor = str(t.get("to") or "")
         creditor = str(t.get("from") or "")
@@ -70,16 +73,36 @@ def build_debts_from_trustlines(trustlines: list[dict[str, Any]]) -> list[dict[s
         except Exception:
             continue
 
-        if used <= 0:
+        if used <= 0 or not (eq and debtor and creditor) or debtor == creditor:
             continue
 
-        key = (eq, debtor, creditor)
-        if key in seen:
+        used_by_edge[(eq, debtor, creditor)] = used
+
+    # 2) Net mutual edges so debt_symmetry invariant passes.
+    out: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str, str]] = set()
+
+    for (eq, debtor, creditor), ab in list(used_by_edge.items()):
+        a = debtor
+        b = creditor
+        pair = (eq, min(a, b), max(a, b))
+        if pair in seen_pairs:
             continue
-        seen.add(key)
+        seen_pairs.add(pair)
 
-        out.append({"equivalent": eq, "debtor": debtor, "creditor": creditor, "amount": used_raw})
+        ba = used_by_edge.get((eq, creditor, debtor), Decimal("0"))
 
+        if ab == ba:
+            continue
+        if ab > ba:
+            net = ab - ba
+            out.append({"equivalent": eq, "debtor": debtor, "creditor": creditor, "amount": str(net)})
+        else:
+            net = ba - ab
+            out.append({"equivalent": eq, "debtor": creditor, "creditor": debtor, "amount": str(net)})
+
+    # Deterministic output ordering.
+    out.sort(key=lambda d: (str(d.get("equivalent") or ""), str(d.get("debtor") or ""), str(d.get("creditor") or "")))
     return out
 
 

@@ -40,7 +40,7 @@ async function onClick(e: MouseEvent) {
 </script>
 
 <template>
-  <el-tooltip :content="tooltip" placement="top" effect="dark">
+  <el-tooltip :content="tooltip" placement="top" effect="dark" :show-after="850" popper-class="geoTooltip geoTooltip--label">
     <button class="copyBtn" type="button" :aria-label="ariaLabel" :disabled="disabled" @click="onClick">⧉</button>
   </el-tooltip>
 </template>
@@ -50,10 +50,10 @@ async function onClick(e: MouseEvent) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   padding: 0;
-  margin-left: 6px;
+  margin-left: 0;
 
   border: 0;
   border-radius: 4px;
@@ -63,7 +63,7 @@ async function onClick(e: MouseEvent) {
   cursor: pointer;
   user-select: none;
   font: inherit;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
 }
 

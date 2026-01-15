@@ -51,6 +51,44 @@ body {
   color: var(--el-text-color-primary);
 }
 
+/* Inline rows for "value + small icons" (copy buttons, etc.) */
+.geoInlineRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Tooltips: compact, typography-consistent */
+.geoTooltip {
+  font-size: var(--geo-font-size-sub);
+  font-weight: var(--geo-font-weight-label);
+}
+
+/* Tooltip inner text */
+.geoTooltipText {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+/* 2-line clamp for tooltip text (keeps popper arrow intact) */
+.geoTooltipText--clamp2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Width presets */
+.geoTooltip--menu {
+  max-width: 280px;
+}
+
+.geoTooltip--label {
+  max-width: 360px;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;

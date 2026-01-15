@@ -6,6 +6,7 @@ import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
+import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useAuthStore } from '../stores/auth'
 import { debounce } from '../utils/debounce'
 import type { Participant } from '../types/domain'
@@ -169,18 +170,21 @@ const typeOptions = computed(() => [
     <el-empty v-else-if="items.length === 0" description="No participants" />
 
     <div v-else>
-      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
-        <el-table-column prop="pid" min-width="240">
+      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="clickable-table geoTable">
+        <el-table-column prop="pid" min-width="210">
           <template #header><TooltipLabel label="PID" tooltip-key="participants.pid" /></template>
           <template #default="scope">
-            <span>
-              {{ scope.row.pid }}
+            <span class="geoInlineRow">
+              <TableCellEllipsis :text="scope.row.pid" />
               <CopyIconButton :text="scope.row.pid" label="PID" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="display_name" min-width="200">
+        <el-table-column prop="display_name" min-width="180" show-overflow-tooltip>
           <template #header><TooltipLabel label="Name" tooltip-key="participants.displayName" /></template>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.display_name" />
+          </template>
         </el-table-column>
         <el-table-column prop="type" width="140">
           <template #header><TooltipLabel label="Type" tooltip-key="participants.type" /></template>
@@ -201,7 +205,7 @@ const typeOptions = computed(() => [
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="160">
+        <el-table-column label="Actions" width="140">
           <template #default="scope">
             <el-button
               v-if="scope.row.status === 'active'"
@@ -244,8 +248,8 @@ const typeOptions = computed(() => [
     <div v-if="selected">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="PID">
-          <span>
-            {{ selected.pid }}
+          <span class="geoInlineRow">
+            <TableCellEllipsis :text="selected.pid" />
             <CopyIconButton :text="selected.pid" label="PID" />
           </span>
         </el-descriptions-item>

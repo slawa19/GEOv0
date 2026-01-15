@@ -6,9 +6,16 @@ import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 
 type RowKind = 'boolean' | 'number' | 'string' | 'json'
 type Row = { key: string; kind: RowKind; value: unknown }
+
+const LOG_LEVEL_OPTIONS = ['CRITICAL', 'ERROR', 'WARNING', 'WARN', 'INFO', 'DEBUG', 'TRACE'] as const
+
+function isLogLevelKey(key: string): boolean {
+  return String(key || '').trim().toUpperCase() === 'LOG_LEVEL'
+}
 
 const loading = ref(false)
 const saving = ref(false)
@@ -22,13 +29,25 @@ const authStore = useAuthStore()
 type ScopeTag = 'runtime' | 'restart' | 'readonly'
 
 function scopeForKey(key: string): ScopeTag[] {
+  const raw = String(key || '').trim()
+  const upper = raw.toUpperCase()
   const out: ScopeTag[] = []
-  if (key.startsWith('feature_flags.')) out.push('runtime')
-  if (key.startsWith('routing.')) out.push('runtime')
-  if (key.startsWith('observability.')) out.push('runtime')
-  if (key.startsWith('limits.')) out.push('restart')
+
+  // Backend currently exposes config keys as env-style UPPER_SNAKE_CASE.
+  // Support both formats (env-style + dotted) so Scope doesn't look empty.
+  if (raw.startsWith('feature_flags.') || upper.startsWith('FEATURE_FLAGS_')) out.push('runtime')
+  if (raw.startsWith('routing.') || upper.startsWith('ROUTING_')) out.push('runtime')
+  if (raw.startsWith('observability.') || upper.startsWith('OBSERVABILITY_') || upper.startsWith('METRICS_')) out.push('runtime')
+  if (upper === 'LOG_LEVEL') out.push('runtime')
+  if (upper.startsWith('RATE_LIMIT_')) out.push('runtime')
+
+  // Background loops are wired on startup in the backend.
+  if (upper.startsWith('RECOVERY_')) out.push('restart')
+  if (upper.startsWith('INTEGRITY_CHECKPOINT_')) out.push('restart')
+  if (raw.startsWith('limits.') || upper.startsWith('LIMITS_')) out.push('restart')
+
   // Prototype rule: clearing.* keys are treated as read-only.
-  if (key.startsWith('clearing.')) out.push('readonly')
+  if (raw.startsWith('clearing.') || upper.startsWith('CLEARING_')) out.push('readonly')
   return out
 }
 
@@ -100,6 +119,10 @@ const dirtyKeys = computed(() => {
 })
 
 async function save() {
+  if (authStore.isReadOnly) {
+    ElMessage.error('Read-only role: updates are disabled')
+    return
+  }
   const keys = dirtyKeys.value
   if (keys.length === 0) {
     ElMessage.info('No changes')
@@ -163,7 +186,7 @@ watch(
             style="width: 260px"
           />
           <el-tag type="info">Dirty: {{ dirtyKeys.length }}</el-tag>
-          <el-button :disabled="dirtyKeys.length === 0" :loading="saving" type="primary" @click="save">Save</el-button>
+          <el-button :disabled="authStore.isReadOnly || dirtyKeys.length === 0" :loading="saving" type="primary" @click="save">Save</el-button>
         </div>
       </div>
     </template>
@@ -172,54 +195,87 @@ watch(
     <el-skeleton v-if="loading" animated :rows="10" />
 
     <div v-else>
-      <el-table :data="visibleRows" size="small" class="geoTable">
-        <el-table-column prop="key" label="Key" min-width="320">
+      <el-table :data="visibleRows" size="small" table-layout="fixed" class="geoTable">
+        <el-table-column prop="key" label="Key" width="420" show-overflow-tooltip>
           <template #default="scope">
-            <span :class="{ focus: focusKey && scope.row.key === focusKey }">{{ scope.row.key }}</span>
+            <span :class="{ focus: focusKey && scope.row.key === focusKey }">
+              <TableCellEllipsis :text="scope.row.key" />
+            </span>
           </template>
         </el-table-column>
 
-        <el-table-column label="Scope" width="160">
+        <el-table-column label="Scope" width="140">
           <template #default="scope">
-            <el-tag v-for="t in scopeForKey(scope.row.key)" :key="t" size="small" :type="t === 'readonly' ? 'info' : t === 'restart' ? 'warning' : 'success'" style="margin-right: 6px">
-              {{ t }}
-            </el-tag>
+            <template v-if="scopeForKey(scope.row.key).length">
+              <el-tag
+                v-for="t in scopeForKey(scope.row.key)"
+                :key="t"
+                size="small"
+                :type="t === 'readonly' ? 'info' : t === 'restart' ? 'warning' : 'success'"
+                style="margin-right: 6px"
+              >
+                {{ t }}
+              </el-tag>
+            </template>
+            <span v-else class="geoHint">—</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="Value" min-width="320">
+        <el-table-column label="Value" min-width="420">
           <template #default="scope">
-            <el-switch
-              v-if="scope.row.kind === 'boolean'"
-              v-model="scope.row.value"
-              :disabled="isKeyReadOnly(scope.row.key)"
-              active-text="true"
-              inactive-text="false"
-            />
-            <el-input-number
-              v-else-if="scope.row.kind === 'number'"
-              v-model="scope.row.value"
-              :disabled="isKeyReadOnly(scope.row.key)"
-              controls-position="right"
-              style="width: 220px"
-            />
-            <el-input
-              v-else-if="scope.row.kind === 'string'"
-              v-model="scope.row.value"
-              :disabled="isKeyReadOnly(scope.row.key)"
-              size="small"
-              placeholder="value"
-            />
-            <el-input
-              v-else
-              v-model="scope.row.value"
-              :disabled="isKeyReadOnly(scope.row.key)"
-              size="small"
-              type="textarea"
-              :rows="2"
-              placeholder="JSON (stringified)"
-            />
-            <el-tag v-if="isKeyReadOnly(scope.row.key)" size="small" type="info" style="margin-left: 8px">Read-only</el-tag>
+            <div class="cfgValueRow">
+              <template v-if="scope.row.kind === 'boolean'">
+                <span class="cfgBoolLabel" :class="{ 'cfgBoolLabel--active': scope.row.value === false }">false</span>
+                <el-switch v-model="scope.row.value" :disabled="isKeyReadOnly(scope.row.key)" />
+                <span class="cfgBoolLabel" :class="{ 'cfgBoolLabel--active': scope.row.value === true }">true</span>
+              </template>
+
+              <el-input-number
+                v-else-if="scope.row.kind === 'number'"
+                v-model="scope.row.value"
+                :disabled="isKeyReadOnly(scope.row.key)"
+                controls-position="right"
+                class="cfgNumber"
+                style="width: 160px"
+              />
+
+              <template v-else-if="scope.row.kind === 'string'">
+                <el-select
+                  v-if="isLogLevelKey(scope.row.key)"
+                  v-model="scope.row.value"
+                  :disabled="isKeyReadOnly(scope.row.key)"
+                  filterable
+                  allow-create
+                  default-first-option
+                  class="cfgSelect"
+                  placeholder="INFO"
+                >
+                  <el-option v-for="opt in LOG_LEVEL_OPTIONS" :key="opt" :label="opt" :value="opt" />
+                </el-select>
+
+                <el-input
+                  v-else
+                  v-model="scope.row.value"
+                  :disabled="isKeyReadOnly(scope.row.key)"
+                  size="small"
+                  placeholder="value"
+                  class="cfgText"
+                />
+              </template>
+
+              <el-input
+                v-else
+                v-model="scope.row.value"
+                :disabled="isKeyReadOnly(scope.row.key)"
+                size="small"
+                type="textarea"
+                :rows="2"
+                placeholder="JSON (stringified)"
+                class="cfgJson"
+              />
+
+              <el-tag v-if="isKeyReadOnly(scope.row.key)" size="small" type="info">Read-only</el-tag>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -246,6 +302,44 @@ watch(
   margin-top: 10px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+.cfgValueRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cfgBoolLabel {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-weight: 500;
+}
+
+.cfgBoolLabel--active {
+  color: var(--el-text-color-primary);
+  font-weight: 700;
+}
+
+.cfgNumber {
+  width: 160px;
+  flex: 0 0 auto;
+}
+
+.cfgSelect {
+  width: 160px;
+}
+
+.cfgText {
+  width: 320px;
+  max-width: 420px;
+  flex: 0 0 auto;
+}
+
+.cfgJson {
+  flex: 1 1 auto;
+  min-width: 260px;
 }
 .focus {
   background: var(--el-fill-color-light);

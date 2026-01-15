@@ -3,7 +3,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+import os
 import time
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -207,6 +209,17 @@ async def geo_exception_handler(request: Request, exc: GeoException):
 
 app.include_router(api_router, prefix="/api/v1")
 
+_START_TIME = time.time()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _best_effort_version() -> str:
+    v = (os.getenv("GEO_APP_VERSION") or os.getenv("APP_VERSION") or "").strip()
+    return v or "dev"
+
 
 if getattr(settings, "METRICS_ENABLED", True):
 
@@ -220,7 +233,12 @@ if getattr(settings, "METRICS_ENABLED", True):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "version": _best_effort_version(),
+        "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),
+        "timestamp": _utc_now_iso(),
+    }
 
 
 @app.get("/healthz")
@@ -231,8 +249,22 @@ async def healthz_check():
 @app.get("/health/db")
 async def health_db_check():
     try:
+        t0 = time.perf_counter()
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        return {"status": "ok"}
+        latency_ms = int(round((time.perf_counter() - t0) * 1000.0))
+        return {
+            "status": "ok",
+            "db": {"reachable": True, "latency_ms": latency_ms},
+            "timestamp": _utc_now_iso(),
+        }
     except Exception as exc:
-        return JSONResponse(status_code=503, content={"status": "error", "details": str(exc)})
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "db": {"reachable": False, "latency_ms": None},
+                "details": str(exc),
+                "timestamp": _utc_now_iso(),
+            },
+        )

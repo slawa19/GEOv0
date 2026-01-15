@@ -2660,7 +2660,7 @@ function applyZoom(level: number) {
     <div v-if="selected && selected.kind === 'node'">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="PID">
-          <span>
+          <span class="geoInlineRow">
             {{ selected.pid }}
             <CopyIconButton :text="selected.pid" label="PID" />
           </span>
@@ -2883,6 +2883,7 @@ function applyZoom(level: number) {
               :data="selectedConnectionsIncomingPaged"
               size="small"
               border
+              table-layout="fixed"
               style="width: 100%"
               class="mb clickable-table"
               highlight-current-row
@@ -2922,6 +2923,7 @@ function applyZoom(level: number) {
               :data="selectedConnectionsOutgoingPaged"
               size="small"
               border
+              table-layout="fixed"
               style="width: 100%"
               class="clickable-table"
               highlight-current-row
@@ -3006,7 +3008,7 @@ function applyZoom(level: number) {
           </el-card>
 
           <el-empty v-if="selectedBalanceRows.length === 0" description="No data" />
-          <el-table v-else :data="selectedBalanceRows" size="small" class="geoTable">
+          <el-table v-else :data="selectedBalanceRows" size="small" table-layout="fixed" class="geoTable">
             <el-table-column prop="equivalent" label="Equivalent" width="120" />
             <el-table-column prop="outgoing_limit" label="Out limit" min-width="120">
               <template #default="{ row }">{{ money(row.outgoing_limit) }}</template>
@@ -3045,7 +3047,7 @@ function applyZoom(level: number) {
                   />
                 </template>
                 <el-empty v-if="selectedCounterpartySplit.creditors.length === 0" description="No creditors" />
-                <el-table v-else :data="selectedCounterpartySplit.creditors.slice(0, 10)" size="small" class="geoTable">
+                <el-table v-else :data="selectedCounterpartySplit.creditors.slice(0, 10)" size="small" table-layout="fixed" class="geoTable">
                   <el-table-column prop="display_name" label="Participant" min-width="220" />
                   <el-table-column prop="amount" label="Amount" min-width="120">
                     <template #default="{ row }">{{ money(row.amount) }}</template>
@@ -3069,7 +3071,7 @@ function applyZoom(level: number) {
                   />
                 </template>
                 <el-empty v-if="selectedCounterpartySplit.debtors.length === 0" description="No debtors" />
-                <el-table v-else :data="selectedCounterpartySplit.debtors.slice(0, 10)" size="small" class="geoTable">
+                <el-table v-else :data="selectedCounterpartySplit.debtors.slice(0, 10)" size="small" table-layout="fixed" class="geoTable">
                   <el-table-column prop="display_name" label="Participant" min-width="220" />
                   <el-table-column prop="amount" label="Amount" min-width="120">
                     <template #default="{ row }">{{ money(row.amount) }}</template>
@@ -3210,7 +3212,7 @@ function applyZoom(level: number) {
                     tooltip-text="List of trustlines close to saturation (low available relative to limit)."
                   />
                 </template>
-                <el-table :data="selectedCapacity.bottlenecks" size="small" class="geoTable">
+                <el-table :data="selectedCapacity.bottlenecks" size="small" table-layout="fixed" class="geoTable">
                   <el-table-column prop="dir" label="Dir" width="70" />
                   <el-table-column prop="other" label="Counterparty" min-width="220" />
                   <el-table-column label="Limit / Used / Avail" min-width="220">
@@ -3332,17 +3334,16 @@ function applyZoom(level: number) {
         <el-descriptions-item label="Equivalent">
           <span>
             {{ selected.equivalent }}
-            <CopyIconButton :text="selected.equivalent" label="Equivalent" />
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="From">
-          <span>
+          <span class="geoInlineRow">
             {{ selected.from }}
             <CopyIconButton :text="selected.from" label="From PID" />
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="To">
-          <span>
+          <span class="geoInlineRow">
             {{ selected.to }}
             <CopyIconButton :text="selected.to" label="To PID" />
           </span>

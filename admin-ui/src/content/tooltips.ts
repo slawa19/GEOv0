@@ -304,7 +304,7 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
   },
   'audit.actor': {
     title: 'actor',
-    body: ['Who performed the action (PID/user id depending on backend).'],
+    body: ['Who performed the action (actor_id).', 'May be empty for system/admin-token actions (MVP auth).'],
   },
   'audit.role': {
     title: 'role',
@@ -327,3 +327,5 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
     body: ['Optional operator-provided reason for the action.'],
   },
 }
+
+export default TOOLTIPS

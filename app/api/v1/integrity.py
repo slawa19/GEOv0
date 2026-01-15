@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import desc, select
@@ -10,8 +11,10 @@ from app.api import deps
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
 from app.db.models.audit_log import AuditLog, IntegrityAuditLog
+from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
+from app.db.models.trustline import TrustLine
 from app.schemas.integrity import (
     EquivalentIntegrityStatus,
     IntegrityAuditLogItem,
@@ -255,6 +258,127 @@ async def verify_integrity(
         equivalents=equivalents_status,
         alerts=alerts,
     )
+
+
+@router.post("/repair/net-mutual-debts")
+async def repair_net_mutual_debts(
+    db: AsyncSession = Depends(deps.get_db),
+    _admin=Depends(deps.require_admin),
+) -> dict:
+    """Repair mutual debts by netting A→B and B→A into a single directed debt.
+
+    Admin-only because it mutates persisted debt state.
+    """
+
+    debts = (await db.execute(select(Debt))).scalars().all()
+    by_key: dict[tuple, Debt] = {(d.equivalent_id, d.debtor_id, d.creditor_id): d for d in debts}
+
+    processed_pairs: set[tuple] = set()
+    updated = 0
+    deleted = 0
+    netted_pairs = 0
+
+    for (eq_id, debtor_id, creditor_id), d_ab in list(by_key.items()):
+        if debtor_id == creditor_id:
+            continue
+
+        # Process undirected pair once.
+        pair = (eq_id, min(debtor_id, creditor_id), max(debtor_id, creditor_id))
+        if pair in processed_pairs:
+            continue
+
+        d_ba = by_key.get((eq_id, creditor_id, debtor_id))
+        if d_ba is None:
+            continue
+
+        processed_pairs.add(pair)
+        netted_pairs += 1
+
+        a = Decimal(str(d_ab.amount))
+        b = Decimal(str(d_ba.amount))
+
+        if a == b:
+            await db.delete(d_ab)
+            await db.delete(d_ba)
+            deleted += 2
+            continue
+
+        if a > b:
+            diff = a - b
+            d_ab.amount = diff
+            updated += 1
+            await db.delete(d_ba)
+            deleted += 1
+        else:
+            diff = b - a
+            d_ba.amount = diff
+            updated += 1
+            await db.delete(d_ab)
+            deleted += 1
+
+    await db.commit()
+
+    return {
+        "ok": True,
+        "action": "net-mutual-debts",
+        "netted_pairs": netted_pairs,
+        "updated": updated,
+        "deleted": deleted,
+    }
+
+
+@router.post("/repair/cap-debts-to-trust-limits")
+async def repair_cap_debts_to_trust_limits(
+    db: AsyncSession = Depends(deps.get_db),
+    _admin=Depends(deps.require_admin),
+) -> dict:
+    """Repair debts that violate trust limits by capping to the active trustline limit.
+
+    If a debt has no active trustline (limit treated as 0), the debt is removed.
+    Admin-only because it mutates persisted debt state.
+    """
+
+    # Map active trust limits for (equivalent, debtor, creditor).
+    tls = (
+        await db.execute(select(TrustLine).where(TrustLine.status == "active"))
+    ).scalars().all()
+    limit_by_edge: dict[tuple, Decimal] = {}
+    for tl in tls:
+        key = (tl.equivalent_id, tl.to_participant_id, tl.from_participant_id)
+        limit_by_edge[key] = Decimal(str(tl.limit))
+
+    debts = (await db.execute(select(Debt))).scalars().all()
+    scanned = 0
+    updated = 0
+    deleted = 0
+    tol = Decimal("0.000000001")
+
+    for d in debts:
+        scanned += 1
+        key = (d.equivalent_id, d.debtor_id, d.creditor_id)
+        limit = limit_by_edge.get(key, Decimal("0"))
+
+        amount = Decimal(str(d.amount))
+        if amount <= limit + tol:
+            continue
+
+        if limit <= tol:
+            await db.delete(d)
+            deleted += 1
+            continue
+
+        d.amount = limit
+        updated += 1
+
+    await db.commit()
+
+    return {
+        "ok": True,
+        "action": "cap-debts-to-trust-limits",
+        "scanned": scanned,
+        "updated": updated,
+        "deleted": deleted,
+    }
 
 
 @router.get("/audit-log", response_model=IntegrityAuditLogResponse)

@@ -4,7 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useHealthStore } from '../stores/health'
 import { useAuthStore } from '../stores/auth'
 import { useConfigStore } from '../stores/config'
-import { TOOLTIPS, type TooltipKey } from '../content/tooltips'
+import * as Tooltips from '../content/tooltips'
+import type { TooltipKey } from '../content/tooltips'
 
 type NavItem = {
   path: string
@@ -26,12 +27,28 @@ const navItems: NavItem[] = [
 ]
 
 function getTooltipContent(key: TooltipKey): string {
-  const t = TOOLTIPS[key]
+  const tooltips = ((Tooltips as any).TOOLTIPS || (Tooltips as any).default || {}) as Record<string, any>
+  const t = tooltips[key]
+  if (!t) return ''
   return t.body.join(' ')
 }
 
 const route = useRoute()
 const router = useRouter()
+
+const isMockMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toString().toLowerCase() !== 'real')
+
+const apiBaseLabel = computed(() => {
+  if (isMockMode.value) return 'fixtures: /admin-fixtures/v1'
+  const envVal = (import.meta.env as any).VITE_API_BASE_URL
+  const raw = (envVal === undefined || envVal === null ? '' : String(envVal)).trim()
+  if (raw) return raw
+  if (import.meta.env.DEV) return 'http://127.0.0.1:18000 (default)'
+  return '(same origin)'
+})
+
+const apiModeBadge = computed(() => (isMockMode.value ? 'MOCK DATA' : 'REAL API'))
+const apiModeBadgeType = computed(() => (isMockMode.value ? 'warning' : 'success'))
 
 const healthStore = useHealthStore()
 const authStore = useAuthStore()
@@ -48,6 +65,14 @@ const scenario = computed({
   set: (v: string) => {
     void router.replace({ query: { ...route.query, scenario: v } })
   },
+})
+
+// Scenario is a mock-only UI feature; strip it in real mode.
+onMounted(() => {
+  if (isMockMode.value) return
+  if (!('scenario' in (route.query || {}))) return
+  const { scenario: _ignored, ...rest } = (route.query || {}) as any
+  void router.replace({ query: rest })
 })
 
 const THEME_KEY = 'admin-ui.theme'
@@ -81,21 +106,24 @@ function navigate(path: string) {
 
 <template>
   <el-container class="app-root">
-    <el-aside width="240px" class="aside">
+    <el-aside width="168px" class="aside">
       <div class="brand" @click="navigate('/dashboard')">
         <div class="brand__title">GEO Hub</div>
-        <div class="brand__subtitle">Admin Console (prototype)</div>
+        <div class="brand__subtitle">Admin Console<span v-if="isMockMode"> (prototype)</span></div>
       </div>
 
       <el-menu :default-active="activePath" router class="menu">
         <el-tooltip
           v-for="item in navItems"
           :key="item.path"
-          :content="getTooltipContent(item.tooltipKey)"
           placement="right"
-          :show-after="400"
+          :show-after="850"
           effect="dark"
+          popper-class="geoTooltip geoTooltip--menu"
         >
+          <template #content>
+            <span class="geoTooltipText geoTooltipText--clamp2">{{ getTooltipContent(item.tooltipKey) }}</span>
+          </template>
           <el-menu-item :index="item.path" @click="navigate(item.path)">
             {{ item.label }}
           </el-menu-item>
@@ -116,7 +144,15 @@ function navigate(path: string) {
               <el-tag type="danger">health error</el-tag>
             </el-tooltip>
             <el-tag v-else type="success">ok</el-tag>
-            <el-tag type="info">scenario: {{ scenario }}</el-tag>
+
+            <el-tooltip placement="bottom" effect="dark" :show-after="850" popper-class="geoTooltip geoTooltip--menu">
+              <template #content>
+                <span class="geoTooltipText geoTooltipText--clamp2">API source: {{ apiBaseLabel }}</span>
+              </template>
+              <el-tag :type="apiModeBadgeType" effect="plain">{{ apiModeBadge }}</el-tag>
+            </el-tooltip>
+
+            <el-tag v-if="isMockMode" type="info">scenario: {{ scenario }}</el-tag>
           </div>
         </div>
 
@@ -127,7 +163,7 @@ function navigate(path: string) {
             <el-option label="auditor (read-only)" value="auditor" />
           </el-select>
 
-          <el-select v-model="scenario" size="small" style="width: 190px">
+          <el-select v-if="isMockMode" v-model="scenario" size="small" style="width: 190px">
             <el-option label="happy" value="happy" />
             <el-option label="empty" value="empty" />
             <el-option label="error500" value="error500" />
@@ -154,6 +190,21 @@ function navigate(path: string) {
 
 .aside {
   border-right: 1px solid var(--el-border-color);
+}
+
+.menu :deep(.el-menu-item) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.brand__title,
+.brand__subtitle {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand {

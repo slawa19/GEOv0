@@ -8,6 +8,7 @@ import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
+import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import type { Trustline } from '../types/domain'
@@ -145,52 +146,51 @@ const statusOptions = computed(() => [
     <el-empty v-else-if="items.length === 0" description="No trustlines match filters" />
 
     <div v-else>
-      <el-table :data="items" size="small" @row-click="openRow" class="geoTable">
-        <el-table-column prop="equivalent" width="120">
+      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="geoTable">
+        <el-table-column prop="equivalent" width="100">
           <template #header><TooltipLabel label="Equivalent" tooltip-key="trustlines.eq" /></template>
           <template #default="scope">
             <span>
               {{ scope.row.equivalent }}
-              <CopyIconButton :text="scope.row.equivalent" label="Equivalent" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="from" min-width="210">
+        <el-table-column prop="from" min-width="190">
           <template #header><TooltipLabel label="From" tooltip-key="trustlines.from" /></template>
           <template #default="scope">
-            <span>
-              {{ scope.row.from }}
+            <span class="geoInlineRow">
+              <TableCellEllipsis :text="scope.row.from" />
               <CopyIconButton :text="scope.row.from" label="From PID" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="to" min-width="210">
+        <el-table-column prop="to" min-width="190">
           <template #header><TooltipLabel label="To" tooltip-key="trustlines.to" /></template>
           <template #default="scope">
-            <span>
-              {{ scope.row.to }}
+            <span class="geoInlineRow">
+              <TableCellEllipsis :text="scope.row.to" />
               <CopyIconButton :text="scope.row.to" label="To PID" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="limit" width="120">
+        <el-table-column prop="limit" width="110">
           <template #header><TooltipLabel label="Limit" tooltip-key="trustlines.limit" /></template>
           <template #default="scope">{{ money(scope.row.limit) }}</template>
         </el-table-column>
-        <el-table-column prop="used" width="120">
+        <el-table-column prop="used" width="110">
           <template #header><TooltipLabel label="Used" tooltip-key="trustlines.used" /></template>
           <template #default="scope">{{ money(scope.row.used) }}</template>
         </el-table-column>
-        <el-table-column prop="available" width="120">
+        <el-table-column prop="available" width="110">
           <template #header><TooltipLabel label="Available" tooltip-key="trustlines.available" /></template>
           <template #default="scope">
             <span :class="{ bottleneck: isBottleneck(scope.row) }">{{ money(scope.row.available) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" width="110">
+        <el-table-column prop="status" width="95">
           <template #header><TooltipLabel label="Status" tooltip-key="trustlines.status" /></template>
         </el-table-column>
-        <el-table-column prop="created_at" width="190">
+        <el-table-column prop="created_at" width="170">
           <template #header><TooltipLabel label="Created at" tooltip-key="trustlines.createdAt" /></template>
           <template #default="scope">{{ fmtTs(scope.row.created_at) }}</template>
         </el-table-column>
@@ -217,22 +217,25 @@ const statusOptions = computed(() => [
           <el-link type="primary" @click="goEquivalent(selected.equivalent)">
             {{ selected.equivalent }}
           </el-link>
-          <CopyIconButton :text="selected.equivalent" label="Equivalent" />
         </el-descriptions-item>
         <el-descriptions-item label="From (Creditor)">
-          <el-link type="primary" @click="goParticipant(selected.from)">
-            {{ selected.from }}
-          </el-link>
-          <CopyIconButton :text="selected.from" label="From PID" />
+          <span class="geoInlineRow">
+            <el-link type="primary" @click="goParticipant(selected.from)">
+              {{ selected.from }}
+            </el-link>
+            <CopyIconButton :text="selected.from" label="From PID" />
+          </span>
           <span v-if="selected.from_display_name" class="display-name">
             ({{ selected.from_display_name }})
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="To (Debtor)">
-          <el-link type="primary" @click="goParticipant(selected.to)">
-            {{ selected.to }}
-          </el-link>
-          <CopyIconButton :text="selected.to" label="To PID" />
+          <span class="geoInlineRow">
+            <el-link type="primary" @click="goParticipant(selected.to)">
+              {{ selected.to }}
+            </el-link>
+            <CopyIconButton :text="selected.to" label="To PID" />
+          </span>
           <span v-if="selected.to_display_name" class="display-name">
             ({{ selected.to_display_name }})
           </span>
@@ -277,6 +280,7 @@ const statusOptions = computed(() => [
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .filters {
   display: flex;
@@ -284,6 +288,23 @@ const statusOptions = computed(() => [
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .hdr {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filters {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .filters :deep(.el-input),
+  .filters :deep(.el-select) {
+    width: 100% !important;
+  }
 }
 .mb {
   margin-bottom: 12px;

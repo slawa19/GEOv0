@@ -231,8 +231,8 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
     <el-empty v-else-if="items.length === 0" description="No equivalents" />
 
     <div v-else>
-      <el-table :data="items" size="small" @cell-mouse-enter="onCellMouseEnter" class="geoTable">
-        <el-table-column prop="code" label="Code" width="160">
+      <el-table :data="items" size="small" table-layout="fixed" @cell-mouse-enter="onCellMouseEnter" class="geoTable">
+        <el-table-column prop="code" label="Code" width="200">
           <template #default="scope">
             <div class="code">
               <div class="code__main">{{ scope.row.code }}</div>
@@ -250,15 +250,15 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="precision" label="Precision" width="120" />
-        <el-table-column prop="description" label="Description" min-width="320" />
-        <el-table-column prop="is_active" label="Active" width="120">
+        <el-table-column prop="precision" label="Precision" width="90" align="center" header-align="center" />
+        <el-table-column prop="description" label="Description" min-width="280" show-overflow-tooltip />
+        <el-table-column prop="is_active" label="Active" width="90" align="center" header-align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.is_active" type="success">yes</el-tag>
             <el-tag v-else type="info">no</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="330">
+        <el-table-column label="Actions" width="280">
           <template #default="scope">
             <el-button size="small" :disabled="authStore.isReadOnly" @click="openEdit(scope.row)">Edit</el-button>
             <el-button

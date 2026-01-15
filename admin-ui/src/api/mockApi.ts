@@ -329,8 +329,28 @@ export const mockApi = {
     return withScenario('/api/v1/integrity/status', async () => ({ success: true, data: await loadJson('datasets/integrity-status.json') }))
   },
 
-  async integrityVerify(): Promise<ApiEnvelope<{ status: 'started' }>> {
-    return withScenario('/api/v1/integrity/verify', async () => ({ success: true, data: { status: 'started' } }))
+  async integrityVerify(): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return withScenario('/api/v1/integrity/verify', async () => ({
+      success: true,
+      data: {
+        status: 'finished',
+        checked_at: new Date().toISOString(),
+      },
+    }))
+  },
+
+  async integrityRepairNetMutualDebts(): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return withScenario('/api/v1/integrity/repair/net-mutual-debts', async () => ({
+      success: true,
+      data: { status: 'finished', repaired: true },
+    }))
+  },
+
+  async integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return withScenario('/api/v1/integrity/repair/cap-debts-to-trust-limits', async () => ({
+      success: true,
+      data: { status: 'finished', repaired: true },
+    }))
   },
 
   async listParticipants(params: {

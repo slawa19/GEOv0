@@ -37,8 +37,8 @@ def generate_health_db(*, base_ts: datetime) -> dict[str, Any]:
 
 def generate_migrations(*, base_ts: datetime) -> dict[str, Any]:
     return {
-        "head": "0001_initial",
-        "current": "0001_initial",
+        "head_revision": "0001_initial",
+        "current_revision": "0001_initial",
         "is_up_to_date": True,
         "timestamp": _iso(base_ts - timedelta(minutes=5)),
     }
@@ -60,14 +60,52 @@ def generate_config() -> dict[str, Any]:
 
 
 def generate_integrity_status(*, base_ts: datetime) -> dict[str, Any]:
+    # Align with live backend schema:
+    # app/schemas/integrity.py::IntegrityStatusResponse
+    # Fields: status, last_check, equivalents, alerts
+    last_check = base_ts - timedelta(minutes=2)
+
+    equivalents: dict[str, Any] = {}
+    alerts: list[str] = []
+
+    # Keep deterministic and compatible with canonical seeds.
+    # NOTE: statuses are: healthy | warning | critical
+    for code in ["UAH", "EUR", "HOUR"]:
+        eq_status = "healthy"
+        invariants: dict[str, Any] = {
+            "zero_sum": {"passed": True, "value": "0"},
+            "trust_limits": {"passed": True, "violations": 0},
+            "debt_symmetry": {"passed": True, "violations": 0},
+        }
+
+        if code == "UAH":
+            # One mild warning to let the UI show a non-healthy state.
+            eq_status = "warning"
+            invariants["debt_symmetry"] = {
+                "passed": False,
+                "violations": 2,
+                "details": {"sample": [{"debtor": "PID_SAMPLE", "creditor": "PID_SAMPLE2", "amount": "1.00"}]},
+            }
+            alerts.append("Debt symmetry violations in UAH: 2")
+
+        equivalents[code] = {
+            "status": eq_status,
+            "checksum": "",
+            "last_verified": _iso(base_ts - timedelta(minutes=10)),
+            "invariants": invariants,
+        }
+
+    overall_status = "healthy"
+    if any(e.get("status") == "critical" for e in equivalents.values()):
+        overall_status = "critical"
+    elif any(e.get("status") == "warning" for e in equivalents.values()):
+        overall_status = "warning"
+
     return {
-        "ok": True,
-        "checks": [
-            {"id": "trustlines.direction", "ok": True},
-            {"id": "debts.derived_from_used", "ok": True},
-            {"id": "participants.unique_pid", "ok": True},
-        ],
-        "timestamp": _iso(base_ts - timedelta(minutes=2)),
+        "status": overall_status,
+        "last_check": _iso(last_check),
+        "equivalents": equivalents,
+        "alerts": alerts,
     }
 
 

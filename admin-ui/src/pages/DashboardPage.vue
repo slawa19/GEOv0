@@ -6,6 +6,7 @@ import { ApiException, assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { Incident, Trustline } from '../types/domain'
 
 const router = useRouter()
@@ -145,6 +146,17 @@ onMounted(() => {
 })
 
 const statusText = computed(() => String(health.value?.status ?? 'unknown'))
+
+const migrationsCurrent = computed(() => String((migrations.value as any)?.current_revision ?? '—'))
+const migrationsHead = computed(() => String((migrations.value as any)?.head_revision ?? '—'))
+const migrationsUpToDateLabel = computed(() => {
+  const m: any = migrations.value
+  if (!m) return 'unknown'
+  const cur = m?.current_revision
+  const head = m?.head_revision
+  if (!cur && !head) return 'unknown'
+  return m?.is_up_to_date ? 'yes' : 'no'
+})
 </script>
 
 <template>
@@ -187,9 +199,9 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
           </template>
           <el-skeleton v-if="loading" animated :rows="3" />
           <div v-else>
-            <div><span class="geoLabel">Up to date:</span> {{ migrations?.is_up_to_date }}</div>
-            <div><span class="geoLabel">Current:</span> {{ migrations?.current }}</div>
-            <div><span class="geoLabel">Head:</span> {{ migrations?.head }}</div>
+            <div><span class="geoLabel">Up to date:</span> {{ migrationsUpToDateLabel }}</div>
+            <div><span class="geoLabel">Current:</span> {{ migrationsCurrent }}</div>
+            <div><span class="geoLabel">Head:</span> {{ migrationsHead }}</div>
           </div>
         </el-card>
       </el-col>
@@ -213,10 +225,18 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
 
           <el-empty v-else-if="bottleneckItems.length === 0" description="No bottlenecks under threshold" />
 
-          <el-table v-else :data="bottleneckItems" size="small" height="360" class="geoTable">
+          <el-table v-else :data="bottleneckItems" size="small" height="360" table-layout="fixed" class="geoTable">
             <el-table-column prop="equivalent" label="Equivalent" width="110" />
-            <el-table-column prop="from" label="From" min-width="180" />
-            <el-table-column prop="to" label="To" min-width="180" />
+            <el-table-column prop="from" label="From" min-width="180" show-overflow-tooltip>
+              <template #default="scope">
+                <TableCellEllipsis :text="scope.row.from" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="to" label="To" min-width="180" show-overflow-tooltip>
+              <template #default="scope">
+                <TableCellEllipsis :text="scope.row.to" />
+              </template>
+            </el-table-column>
             <el-table-column prop="limit" label="Limit" width="110">
               <template #default="scope">{{ money(scope.row.limit) }}</template>
             </el-table-column>
@@ -246,8 +266,12 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
 
           <el-empty v-else-if="incidentsOverSla.length === 0" description="No incidents over SLA" />
 
-          <el-table v-else :data="incidentsOverSla" size="small" height="360" class="geoTable">
-            <el-table-column prop="tx_id" label="Tx ID" min-width="200" />
+          <el-table v-else :data="incidentsOverSla" size="small" height="360" table-layout="fixed" class="geoTable">
+            <el-table-column prop="tx_id" label="Tx ID" min-width="200" show-overflow-tooltip>
+              <template #default="scope">
+                <TableCellEllipsis :text="scope.row.tx_id" />
+              </template>
+            </el-table-column>
             <el-table-column prop="state" label="State" width="180" />
             <el-table-column prop="equivalent" label="Equivalent" width="110" />
             <el-table-column prop="age_seconds" label="Age (s)" width="110">
@@ -272,13 +296,29 @@ const statusText = computed(() => String(health.value?.status ?? 'unknown'))
       <el-alert v-if="auditError" :title="auditError" type="warning" show-icon class="mb" />
       <el-skeleton v-if="auditLoading" animated :rows="6" />
 
-      <el-table v-else :data="auditItems" size="small" height="360" class="geoTable">
-        <el-table-column prop="timestamp" label="Timestamp" width="190" />
-        <el-table-column prop="actor_id" label="Actor" width="160" />
-        <el-table-column prop="actor_role" label="Role" width="120" />
-        <el-table-column prop="action" label="Action" />
-        <el-table-column prop="object_type" label="Object" width="140" />
-        <el-table-column prop="object_id" label="Object ID" />
+      <el-table v-else :data="auditItems" size="small" height="360" table-layout="fixed" class="geoTable">
+        <el-table-column prop="timestamp" label="Timestamp" width="200" show-overflow-tooltip />
+        <el-table-column prop="actor_id" label="Actor" width="110" show-overflow-tooltip>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.actor_id" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="actor_role" label="Role" width="130" show-overflow-tooltip>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.actor_role" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="action" label="Action" min-width="280" show-overflow-tooltip>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.action" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="object_type" label="Object" width="140" show-overflow-tooltip />
+        <el-table-column prop="object_id" label="Object ID" min-width="360" show-overflow-tooltip>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.object_id" />
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>

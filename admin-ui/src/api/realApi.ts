@@ -3,10 +3,19 @@ import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
 
 const DEFAULT_BASE = ''
 const DEFAULT_DEV_ADMIN_TOKEN = 'dev-admin-token-change-me'
+const DEFAULT_DEV_BASE_URL = 'http://127.0.0.1:18000'
 
 function baseUrl(): string {
   // When using Vite proxy, keep base empty and call relative paths.
-  return (import.meta.env.VITE_API_BASE_URL || DEFAULT_BASE).toString().replace(/\/$/, '')
+  const envVal = (import.meta.env as any).VITE_API_BASE_URL
+  const raw = (envVal === undefined || envVal === null ? DEFAULT_BASE : String(envVal)).trim()
+  if (raw) return raw.replace(/\/$/, '')
+
+  // Dev ergonomics: if API mode is real and base URL is not configured, default
+  // to the standard local backend port used by scripts/run_local.ps1.
+  if (import.meta.env.DEV && (envVal === undefined || envVal === null)) return DEFAULT_DEV_BASE_URL
+
+  return ''
 }
 
 function adminToken(): string | null {
@@ -46,6 +55,7 @@ async function requestJson<T>(
     admin?: boolean
   },
 ): Promise<ApiEnvelope<T>> {
+  const method = opts?.method || 'GET'
   const url = `${baseUrl()}${pathname}`
 
   const headers: Record<string, string> = {
@@ -60,7 +70,7 @@ async function requestJson<T>(
   }
 
   const res = await fetch(url, {
-    method: opts?.method || 'GET',
+    method,
     headers,
     body: opts?.body ? JSON.stringify(opts.body) : undefined,
   })
@@ -82,7 +92,22 @@ async function requestJson<T>(
     const msg = (parsed as any)?.error?.message || (parsed as any)?.message || `HTTP ${res.status}`
     const code = (parsed as any)?.error?.code || (parsed as any)?.code || 'HTTP_ERROR'
     const details = (parsed as any)?.error?.details || (parsed as any)?.details
-    throw new ApiException({ status: res.status, code, message: msg, details })
+    const statusText = (res.statusText || '').trim()
+    const decorated = `${method} ${url} -> ${res.status}${statusText ? ` ${statusText}` : ''}: ${msg}`
+    throw new ApiException({
+      status: res.status,
+      code,
+      message: decorated,
+      details: {
+        url,
+        method,
+        status: res.status,
+        status_text: statusText,
+        code,
+        message: msg,
+        details,
+      },
+    })
   }
 
   // If backend returns raw payload (non-envelope), wrap it.
@@ -161,6 +186,14 @@ export const realApi = {
 
   integrityVerify(): Promise<ApiEnvelope<Record<string, unknown>>> {
     return requestJson('/api/v1/integrity/verify', { method: 'POST', body: {}, admin: true })
+  },
+
+  integrityRepairNetMutualDebts(): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return requestJson('/api/v1/integrity/repair/net-mutual-debts', { method: 'POST', body: {}, admin: true })
+  },
+
+  integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return requestJson('/api/v1/integrity/repair/cap-debts-to-trust-limits', { method: 'POST', body: {}, admin: true })
   },
 
   // The endpoints below should be aligned to OpenAPI; adjust pathname/query as backend stabilizes.

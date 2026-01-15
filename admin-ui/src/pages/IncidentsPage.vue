@@ -6,8 +6,10 @@ import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
+import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { useConfigStore } from '../stores/config'
+import { useAuthStore } from '../stores/auth'
 import type { Incident } from '../types/domain'
 
 const loading = ref(false)
@@ -28,6 +30,7 @@ const drawerOpen = ref(false)
 const selected = ref<Incident | null>(null)
 
 const configStore = useConfigStore()
+const authStore = useAuthStore()
 const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
 
 function fmtTs(iso: string | undefined): string {
@@ -68,6 +71,10 @@ function isOverSla(row: Incident): boolean {
 }
 
 async function forceAbort(row: Incident) {
+  if (authStore.isReadOnly) {
+    ElMessage.error('Read-only role: abort is disabled')
+    return
+  }
   let reason: string
   try {
     reason = await ElMessageBox.prompt('Reason for abort (required)', 'Force abort transaction', {
@@ -126,7 +133,14 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
     <template #header>
       <div class="hdr">
         <TooltipLabel label="Incidents" tooltip-key="nav.incidents" />
-        <el-tag type="warning">Over SLA: {{ overSlaCount }}</el-tag>
+        <el-tooltip placement="top" effect="dark" :show-after="850" popper-class="geoTooltip geoTooltip--menu">
+          <template #content>
+            <span class="geoTooltipText geoTooltipText--clamp2">
+              Incidents whose Age is greater than SLA (on this page).
+            </span>
+          </template>
+          <el-tag type="warning">SLA breaches: {{ overSlaCount }}</el-tag>
+        </el-tooltip>
       </div>
     </template>
 
@@ -150,37 +164,36 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
     <el-empty v-else-if="items.length === 0" description="No incidents" />
 
     <div v-else>
-      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
-        <el-table-column prop="tx_id" min-width="220">
+      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="clickable-table geoTable">
+        <el-table-column prop="tx_id" min-width="200">
           <template #header><TooltipLabel label="Tx ID" tooltip-key="incidents.txId" /></template>
           <template #default="scope">
-            <span>
-              {{ scope.row.tx_id }}
+            <span class="geoInlineRow">
+              <TableCellEllipsis :text="scope.row.tx_id" />
               <CopyIconButton :text="scope.row.tx_id" label="Tx ID" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="state" width="200">
+        <el-table-column prop="state" width="170">
           <template #header><TooltipLabel label="State" tooltip-key="incidents.state" /></template>
           <template #default="scope">
             <el-tag type="warning" size="small">{{ scope.row.state }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="initiator_pid" min-width="220">
+        <el-table-column prop="initiator_pid" min-width="200">
           <template #header><TooltipLabel label="Initiator" tooltip-key="incidents.initiator" /></template>
           <template #default="scope">
-            <span>
-              {{ scope.row.initiator_pid }}
+            <span class="geoInlineRow">
+              <TableCellEllipsis :text="scope.row.initiator_pid" />
               <CopyIconButton :text="scope.row.initiator_pid" label="Initiator PID" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="equivalent" width="120">
+        <el-table-column prop="equivalent" width="100">
           <template #header><TooltipLabel label="Equivalent" tooltip-key="incidents.eq" /></template>
           <template #default="scope">
             <span>
               {{ scope.row.equivalent }}
-              <CopyIconButton :text="scope.row.equivalent" label="Equivalent" />
             </span>
           </template>
         </el-table-column>
@@ -194,12 +207,13 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
           <template #header><TooltipLabel label="SLA" tooltip-key="incidents.sla" /></template>
           <template #default="scope">{{ fmtAge(scope.row.sla_seconds) }}</template>
         </el-table-column>
-        <el-table-column label="Actions" width="160">
+        <el-table-column label="Actions" width="140">
           <template #default="scope">
             <el-button
               size="small"
               type="danger"
               :loading="abortingTxId === scope.row.tx_id"
+              :disabled="authStore.isReadOnly"
               @click.stop="forceAbort(scope.row)"
             >
               Force abort
@@ -226,8 +240,8 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
     <div v-if="selected">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="Transaction ID">
-          <span>
-            {{ selected.tx_id }}
+          <span class="geoInlineRow">
+            <TableCellEllipsis :text="selected.tx_id" />
             <CopyIconButton :text="selected.tx_id" label="Tx ID" />
           </span>
         </el-descriptions-item>
@@ -235,16 +249,17 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
           <el-tag type="warning" size="small">{{ selected.state }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="Initiator PID">
-          <el-link type="primary" @click="goParticipant(selected.initiator_pid)">
-            {{ selected.initiator_pid }}
-          </el-link>
-          <CopyIconButton :text="selected.initiator_pid" label="Initiator PID" />
+          <span class="geoInlineRow">
+            <el-link type="primary" @click="goParticipant(selected.initiator_pid)">
+              {{ selected.initiator_pid }}
+            </el-link>
+            <CopyIconButton :text="selected.initiator_pid" label="Initiator PID" />
+          </span>
         </el-descriptions-item>
         <el-descriptions-item label="Equivalent">
           <el-link type="primary" @click="goEquivalent(selected.equivalent)">
             {{ selected.equivalent }}
           </el-link>
-          <CopyIconButton :text="selected.equivalent" label="Equivalent" />
         </el-descriptions-item>
         <el-descriptions-item label="Age">
           <span :class="{ bad: isOverSla(selected) }">{{ fmtAge(selected.age_seconds) }}</span>

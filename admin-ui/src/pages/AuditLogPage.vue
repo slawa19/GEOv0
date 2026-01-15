@@ -6,6 +6,7 @@ import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
+import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { debounce } from '../utils/debounce'
 import type { AuditLogEntry } from '../types/domain'
 
@@ -93,42 +94,54 @@ watch(q, () => {
     <el-empty v-else-if="items.length === 0" description="No audit entries" />
 
     <div v-else>
-      <el-table :data="items" size="small" @row-click="openRow" class="clickable-table geoTable">
-        <el-table-column prop="id" width="90">
+      <el-table :data="items" size="small" table-layout="fixed" @row-click="openRow" class="clickable-table geoTable">
+        <el-table-column prop="id" width="220" show-overflow-tooltip>
           <template #header><TooltipLabel label="ID" tooltip-text="Audit log entry id." /></template>
           <template #default="scope">
-            <span>
-              {{ scope.row.id }}
+            <span class="geoInlineRow">
+              <TableCellEllipsis :text="scope.row.id" />
               <CopyIconButton :text="String(scope.row.id)" label="Audit ID" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="timestamp" width="190">
+        <el-table-column prop="timestamp" width="180" show-overflow-tooltip>
           <template #header><TooltipLabel label="Timestamp" tooltip-key="audit.timestamp" /></template>
         </el-table-column>
-        <el-table-column prop="actor_id" width="160">
+        <el-table-column prop="actor_id" width="150" show-overflow-tooltip>
           <template #header><TooltipLabel label="Actor" tooltip-key="audit.actor" /></template>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.actor_id" />
+          </template>
         </el-table-column>
-        <el-table-column prop="actor_role" width="120">
+        <el-table-column prop="actor_role" width="140" show-overflow-tooltip>
           <template #header><TooltipLabel label="Role" tooltip-key="audit.role" /></template>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.actor_role" />
+          </template>
         </el-table-column>
-        <el-table-column prop="action" min-width="180">
+        <el-table-column prop="action" min-width="240" show-overflow-tooltip>
           <template #header><TooltipLabel label="Action" tooltip-key="audit.action" /></template>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.action" />
+          </template>
         </el-table-column>
-        <el-table-column prop="object_type" width="140">
+        <el-table-column prop="object_type" width="120" show-overflow-tooltip>
           <template #header><TooltipLabel label="Object" tooltip-key="audit.objectType" /></template>
         </el-table-column>
-        <el-table-column prop="object_id" min-width="220">
+        <el-table-column prop="object_id" min-width="280" show-overflow-tooltip>
           <template #header><TooltipLabel label="Object ID" tooltip-key="audit.objectId" /></template>
           <template #default="scope">
-            <span>
-              {{ scope.row.object_id }}
-              <CopyIconButton :text="scope.row.object_id" label="Object ID" />
+            <span class="geoInlineRow">
+              <TableCellEllipsis :text="scope.row.object_id" />
+              <CopyIconButton v-if="scope.row.object_id" :text="scope.row.object_id" label="Object ID" />
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="reason" min-width="160">
+        <el-table-column prop="reason" min-width="200" show-overflow-tooltip>
           <template #header><TooltipLabel label="Reason" tooltip-key="audit.reason" /></template>
+          <template #default="scope">
+            <TableCellEllipsis :text="scope.row.reason" />
+          </template>
         </el-table-column>
       </el-table>
 
@@ -152,18 +165,25 @@ watch(q, () => {
         <el-tab-pane label="Details">
           <el-descriptions :column="1" border>
             <el-descriptions-item label="ID">
-              <span>
-                {{ selected.id }}
+              <span class="geoInlineRow">
+                <TableCellEllipsis :text="selected.id" />
                 <CopyIconButton :text="String(selected.id)" label="Audit ID" />
               </span>
             </el-descriptions-item>
             <el-descriptions-item label="Timestamp">{{ selected.timestamp }}</el-descriptions-item>
-            <el-descriptions-item label="Actor">{{ selected.actor_id }} ({{ selected.actor_role }})</el-descriptions-item>
+            <el-descriptions-item label="Actor">
+              <span class="geoInlineRow">
+                <TableCellEllipsis :text="selected.actor_id" />
+                <span>({{ selected.actor_role || '—' }})</span>
+                <CopyIconButton v-if="selected.actor_id" :text="String(selected.actor_id)" label="Actor ID" />
+              </span>
+            </el-descriptions-item>
             <el-descriptions-item label="Action">{{ selected.action }}</el-descriptions-item>
             <el-descriptions-item label="Object">
-              <span>
-                {{ selected.object_type }} / {{ selected.object_id }}
-                <CopyIconButton :text="selected.object_id" label="Object ID" />
+              <span class="geoInlineRow">
+                <span>{{ selected.object_type || '—' }} /</span>
+                <TableCellEllipsis :text="selected.object_id" />
+                <CopyIconButton v-if="selected.object_id" :text="selected.object_id" label="Object ID" />
               </span>
             </el-descriptions-item>
             <el-descriptions-item label="Reason">{{ selected.reason }}</el-descriptions-item>

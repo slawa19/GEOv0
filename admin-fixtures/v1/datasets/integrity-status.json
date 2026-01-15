@@ -1,32 +1,75 @@
 {
   "status": "warning",
-  "last_checked_at": "2026-01-10T23:42:00Z",
-  "checks_total": 3,
-  "checks_failed": 0,
-  "checks": [
-    {
-      "name": "zero_sum_by_equivalent",
-      "status": "ok",
-      "last_check": "2026-01-10T23:42:00Z",
-      "details": {
-        "checked_equivalents": 5
-      }
-    },
-    {
-      "name": "limits_consistency",
+  "last_check": "2026-01-10T23:58:00Z",
+  "equivalents": {
+    "UAH": {
       "status": "warning",
-      "last_check": "2026-01-10T23:27:00Z",
-      "details": {
-        "warnings": 2
+      "checksum": "",
+      "last_verified": "2026-01-10T23:50:00Z",
+      "invariants": {
+        "zero_sum": {
+          "passed": true,
+          "value": "0"
+        },
+        "trust_limits": {
+          "passed": true,
+          "violations": 0
+        },
+        "debt_symmetry": {
+          "passed": false,
+          "violations": 2,
+          "details": {
+            "sample": [
+              {
+                "debtor": "PID_SAMPLE",
+                "creditor": "PID_SAMPLE2",
+                "amount": "1.00"
+              }
+            ]
+          }
+        }
       }
     },
-    {
-      "name": "orphan_participants",
-      "status": "ok",
-      "last_check": "2026-01-10T23:15:00Z",
-      "details": {
-        "count": 0
+    "EUR": {
+      "status": "healthy",
+      "checksum": "",
+      "last_verified": "2026-01-10T23:50:00Z",
+      "invariants": {
+        "zero_sum": {
+          "passed": true,
+          "value": "0"
+        },
+        "trust_limits": {
+          "passed": true,
+          "violations": 0
+        },
+        "debt_symmetry": {
+          "passed": true,
+          "violations": 0
+        }
+      }
+    },
+    "HOUR": {
+      "status": "healthy",
+      "checksum": "",
+      "last_verified": "2026-01-10T23:50:00Z",
+      "invariants": {
+        "zero_sum": {
+          "passed": true,
+          "value": "0"
+        },
+        "trust_limits": {
+          "passed": true,
+          "violations": 0
+        },
+        "debt_symmetry": {
+          "passed": true,
+          "violations": 0
+        }
       }
     }
+  },
+  "alerts": [
+    "Debt symmetry violations in UAH: 2"
   ]
 }

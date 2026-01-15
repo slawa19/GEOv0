@@ -10,12 +10,12 @@ Seeds:
 By default this writes into admin-fixtures/v1 (the canonical pack that Admin UI syncs).
 
 Usage (from repo root):
-  .\.venv\Scripts\python.exe admin-fixtures\tools\generate_fixtures.py --seed greenfield-village-100
-  .\.venv\Scripts\python.exe admin-fixtures\tools\generate_fixtures.py --seed riverside-town-50
+    ./.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100
+    ./.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50
 
 Optional: build a named pack under admin-fixtures/packs/<seed_id>/v1 and activate it:
-  .\.venv\Scripts\python.exe admin-fixtures\tools\generate_fixtures.py --seed greenfield-village-100 --pack
-  .\.venv\Scripts\python.exe admin-fixtures\tools\generate_fixtures.py --seed riverside-town-50 --pack --activate
+    ./.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100 --pack
+    ./.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50 --pack --activate
 
 Rationale:
 - `admin-fixtures/v1` stays the single active canonical pack.
@@ -33,7 +33,8 @@ import sys
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
-BASE_DIR = TOOLS_DIR.parents[1]  # .../admin-fixtures
+# tools/ is directly under admin-fixtures/
+BASE_DIR = TOOLS_DIR.parent  # .../admin-fixtures
 CANONICAL_V1_DIR = BASE_DIR / "v1"
 PACKS_DIR = BASE_DIR / "packs"
 
