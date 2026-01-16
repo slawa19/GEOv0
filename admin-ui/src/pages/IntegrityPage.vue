@@ -6,7 +6,7 @@ import { api } from '../api'
 import { formatApiError } from '../api/errorFormat'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 
 const authStore = useAuthStore()
 
@@ -301,9 +301,9 @@ onMounted(() => void load())
           >
             <div class="helpCaseTitle">
               <el-tag type="warning">
-                Warning
+                {{ t('common.warning') }}
               </el-tag>
-              <span class="helpCaseName">Debt symmetry (mutual debts)</span>
+              <span class="helpCaseName">{{ t('integrity.help.caseDebtSymmetry.title') }}</span>
             </div>
             <div class="helpText">
               {{ t('integrity.help.caseDebtSymmetry.text') }}
@@ -332,9 +332,9 @@ onMounted(() => void load())
           >
             <div class="helpCaseTitle">
               <el-tag type="danger">
-                Critical
+                {{ t('common.critical') }}
               </el-tag>
-              <span class="helpCaseName">Trust limits exceeded</span>
+              <span class="helpCaseName">{{ t('integrity.help.caseTrustLimits.title') }}</span>
             </div>
             <div class="helpText">
               {{ t('integrity.help.caseTrustLimits.text') }}
@@ -363,9 +363,9 @@ onMounted(() => void load())
           >
             <div class="helpCaseTitle">
               <el-tag type="danger">
-                Critical
+                {{ t('common.critical') }}
               </el-tag>
-              <span class="helpCaseName">Zero-sum violated</span>
+              <span class="helpCaseName">{{ t('integrity.help.caseZeroSum.title') }}</span>
             </div>
             <div class="helpText">
               {{ t('integrity.help.caseZeroSum.text') }}
@@ -385,7 +385,7 @@ onMounted(() => void load())
       >
         <el-descriptions-item :label="t('common.status')">
           <el-tag :type="tagTypeForIntegrityStatus(overallStatus)">
-            {{ overallStatus }}
+            {{ t(`integrity.status.${overallStatus}`) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item :label="t('integrity.lastCheck')">

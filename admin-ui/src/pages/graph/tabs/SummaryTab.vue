@@ -299,7 +299,7 @@
 import GraphAnalyticsTogglesCard from '../../../ui/GraphAnalyticsTogglesCard.vue'
 import type { ToggleKey } from '../../../ui/GraphAnalyticsTogglesCard.vue'
 import TooltipLabel from '../../../ui/TooltipLabel.vue'
-import { t } from '../../../i18n/en'
+import { t } from '../../../i18n'
 
 type AnalyticsModel = Record<ToggleKey, boolean>
 

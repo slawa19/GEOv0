@@ -1,5 +1,7 @@
 import { ApiException, type ApiEnvelope } from './envelope'
+import { TOAST_DEDUPE_MS } from '../constants/timing'
 import { isRatioBelowThreshold } from '../utils/decimal'
+import { t } from '../i18n'
 import type {
   AuditLogEntry,
   BalanceRow,
@@ -37,7 +39,7 @@ let lastToastMsg = ''
 async function notifyLoadError(message: string) {
   // Best-effort toast: do not crash the app if UI layer isn't available.
   const now = Date.now()
-  if (message === lastToastMsg && now - lastToastAt < 2000) return
+  if (message === lastToastMsg && now - lastToastAt < TOAST_DEDUPE_MS) return
   lastToastAt = now
   lastToastMsg = message
 
@@ -77,7 +79,7 @@ async function loadJson<T>(relPath: string): Promise<T> {
         throw new ApiException({
           status: res.status,
           code: 'INTERNAL_ERROR',
-          message: `Failed to load ${relPath}`,
+          message: t('fixtures.loadFailedPath', { path: relPath }),
           details: { url, status: res.status, statusText: res.statusText },
         })
       }
@@ -101,10 +103,15 @@ async function loadJson<T>(relPath: string): Promise<T> {
     }
   }
 
-  await notifyLoadError(`Failed to load fixtures: ${relPath}`)
+  await notifyLoadError(t('fixtures.loadFailedMany', { path: relPath }))
 
   if (lastErr instanceof ApiException) throw lastErr
-  throw new ApiException({ status: 0, code: 'INTERNAL_ERROR', message: `Failed to load ${relPath}`, details: lastErr })
+  throw new ApiException({
+    status: 0,
+    code: 'INTERNAL_ERROR',
+    message: t('fixtures.loadFailedPath', { path: relPath }),
+    details: lastErr,
+  })
 }
 
 async function loadOptionalJson<T>(relPath: string, fallback: T): Promise<T> {

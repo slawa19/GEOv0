@@ -18,7 +18,7 @@ import {
   MIN_ZOOM_LABELS_PERSON,
 } from '../constants/graph'
 import TooltipLabel from '../ui/TooltipLabel.vue'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
 import GraphLegend from './graph/GraphLegend.vue'
 import GraphFiltersToolbar from './graph/GraphFiltersToolbar.vue'
@@ -42,8 +42,10 @@ import {
 } from './graph/graphPageHelpers'
 import { useGraphConnections } from './graph/useGraphConnections'
 import { useGraphFocusMode } from './graph/useGraphFocusMode'
-import { layoutOptions, statuses } from './graph/graphUiOptions'
 import { useGraphPageStorage } from './graph/useGraphPageStorage'
+import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS } from '../constants/timing'
+
+type Option = { label: string; value: string }
 
 type GeoDevHooks = {
   __GEO_CY__?: Core | null
@@ -54,6 +56,18 @@ type GeoDevHooks = {
 const cyRoot = ref<HTMLElement | null>(null)
 let cy: Core | null = null
 const getCy = () => cy
+
+const statuses = computed<Option[]>(() => [
+  { label: t('trustlines.status.active'), value: 'active' },
+  { label: t('trustlines.status.frozen'), value: 'frozen' },
+  { label: t('trustlines.status.closed'), value: 'closed' },
+])
+
+const layoutOptions = computed<Option[]>(() => [
+  { label: t('graph.display.layoutOption.fcose'), value: 'fcose' },
+  { label: t('graph.display.layoutOption.grid'), value: 'grid' },
+  { label: t('graph.display.layoutOption.circle'), value: 'circle' },
+])
 
 const setCy = (next: Core | null) => {
   cy = next
@@ -70,7 +84,7 @@ const setCy = (next: Core | null) => {
       // The app opens the drawer on *double* tap. Emit two taps within the
       // threshold to exercise the real handler deterministically.
       n.emit('tap')
-      window.setTimeout(() => n.emit('tap'), 50)
+      window.setTimeout(() => n.emit('tap'), DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
       return true
     }
 

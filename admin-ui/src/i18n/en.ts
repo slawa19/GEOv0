@@ -43,6 +43,17 @@ export const EN: Record<string, string> = {
   'common.valuePlaceholder': 'value',
   'common.yes': 'yes',
   'common.dirtyCount': 'Dirty: {n}',
+  'common.viewAll': 'View all',
+  'common.unknown': 'unknown',
+  'common.warning': 'Warning',
+  'common.critical': 'Critical',
+  'common.copy': 'Copy',
+  'common.copied': 'Copied',
+  'common.copyFailed': 'Copy failed',
+  'common.copyToClipboard': 'Copy to clipboard',
+  'common.copyLabel': 'Copy {label}',
+  'common.helpTitle': 'Help: {title}',
+  'common.helpForLabel': 'Help for {label}',
 
   'equivalents.activeCount': 'Active: {n}',
   'equivalents.activated': 'Activated {code}',
@@ -78,6 +89,28 @@ export const EN: Record<string, string> = {
   'equivalents.usage.tlDebtsIc': 'Used by {trustlines} TL / {debts} Debts / {ic} IC',
   'equivalents.usage.tlInc': 'Used by {trustlines} TL / {incidents} Inc',
   'equivalents.warning.deletePermanent': 'This permanently deletes the equivalent. This cannot be undone.',
+
+  'dashboard.title': 'Dashboard',
+  'dashboard.card.api': 'API',
+  'dashboard.card.db': 'DB',
+  'dashboard.card.migrations': 'Migrations',
+  'dashboard.card.bottlenecks': 'Trustline bottlenecks',
+  'dashboard.card.incidentsOverSla': 'Incidents over SLA',
+  'dashboard.card.recentAudit': 'Recent Audit Log',
+  'dashboard.field.status': 'Status',
+  'dashboard.field.version': 'Version',
+  'dashboard.field.uptime': 'Uptime',
+  'dashboard.field.reachable': 'Reachable',
+  'dashboard.field.latency': 'Latency',
+  'dashboard.field.upToDate': 'Up to date',
+  'dashboard.field.current': 'Current',
+  'dashboard.field.head': 'Head',
+  'dashboard.empty.noBottlenecks': 'No bottlenecks under threshold',
+  'dashboard.empty.noIncidentsOverSla': 'No incidents over SLA',
+  'dashboard.incidents.ageSeconds': 'Age (s)',
+  'dashboard.incidents.slaSeconds': 'SLA (s)',
+  'dashboard.loadFailed': 'Failed to load dashboard',
+  'dashboard.bottlenecksLoadFailed': 'Failed to load trustline bottlenecks',
 
   'participant.frozen': 'Frozen {pid}',
   'participant.freeze': 'Freeze',
@@ -189,6 +222,12 @@ export const EN: Record<string, string> = {
   'config.savedKeys': 'Saved ({n} keys)',
   'config.showingKeys': 'Showing {shown} / {total} keys',
 
+  'health.loadFailed': 'Failed to load health',
+
+  'fixtures.loadFailedOne': 'Failed to load fixture: {path} ({status})',
+  'fixtures.loadFailedPath': 'Failed to load {path}',
+  'fixtures.loadFailedMany': 'Failed to load fixtures: {path}',
+
   'integrity.title': 'Integrity',
   'integrity.lastCheck': 'Last Check',
   'integrity.alerts': 'Alerts',
@@ -218,16 +257,22 @@ export const EN: Record<string, string> = {
   'integrity.help.respond.stepAlerts': 'Review Alerts and the table below to see which equivalent is affected.',
   'integrity.help.respond.stepRepair': 'Try the available Repair action (only for detected issue types) and re-run Verify.',
   'integrity.help.interpretation': 'Interpretation & fixes (only for detected issues)',
+  'integrity.status.healthy': 'healthy',
+  'integrity.status.warning': 'warning',
+  'integrity.status.critical': 'critical',
+  'integrity.help.caseDebtSymmetry.title': 'Debt symmetry (mutual debts)',
   'integrity.help.caseDebtSymmetry.text':
     'This means for some participant pairs both debts exist at the same time: A → B and B → A. In a consistent ledger, these should be netted so that only one directed debt remains.',
   'integrity.help.caseDebtSymmetry.step1': 'Identify affected pairs in the Debt symmetry column (violations).',
   'integrity.help.caseDebtSymmetry.step2': 'Use Repair: net mutual debts to automatically net the pairs into a single directed debt.',
   'integrity.actions.repairNetMutualDebts': 'Repair: net mutual debts',
+  'integrity.help.caseTrustLimits.title': 'Trust limits exceeded',
   'integrity.help.caseTrustLimits.text':
     'Some debts are larger than the allowed trust limit for the same edge. This can break routing and risk controls.',
   'integrity.help.caseTrustLimits.step1': 'Use Repair: cap debts to trust limits to automatically adjust (or remove) violating debts.',
   'integrity.help.caseTrustLimits.step2': 'Re-run Verify after repair to confirm the invariant passes.',
   'integrity.actions.repairCapDebts': 'Repair: cap debts to trust limits',
+  'integrity.help.caseZeroSum.title': 'Zero-sum violated',
   'integrity.help.caseZeroSum.text':
     'Total balances are not self-consistent (the overall sum is not zero). This strongly indicates data corruption or missing/duplicated edges.',
   'integrity.help.caseZeroSum.step1': 'Stop balance-impacting operations and take a database backup/snapshot.',
@@ -278,6 +323,18 @@ export const EN: Record<string, string> = {
 
   'graph.search.label': 'Search',
   'graph.search.placeholder': 'Type PID or name…',
+  'graph.search.hintNoQuery': 'Type PID/name, select a suggestion, or click a node',
+  'graph.search.notFoundInGraph': 'Not found in current graph: {pid}',
+  'graph.search.queryDidNotMatchCentered': 'Query did not match; centered on the selected node.',
+  'graph.search.noMatches': 'No matches: {query}',
+  'graph.search.matchesShowingFirst': '{matches} matches (showing first {shown}). Refine query.',
+
+  'graph.data.loadFailed': 'Failed to load graph data',
+  'graph.focusMode.loadFailed': 'Failed to load focus-mode data',
+  'graph.analytics.metricsLoadFailed': 'Failed to load metrics',
+  'graph.analytics.hhiLevel.high': 'high',
+  'graph.analytics.hhiLevel.medium': 'medium',
+  'graph.analytics.hhiLevel.low': 'low',
 
   'graph.toolbar.filtersTab': 'Filters',
   'graph.toolbar.displayTab': 'Display',
@@ -291,6 +348,9 @@ export const EN: Record<string, string> = {
   'graph.filters.minDegree': 'Min degree',
 
   'graph.display.layout': 'Layout',
+  'graph.display.layoutOption.fcose': 'fcose (force)',
+  'graph.display.layoutOption.grid': 'grid',
+  'graph.display.layoutOption.circle': 'circle',
   'graph.display.layoutSpacing': 'Layout spacing',
   'graph.display.businessLabels': 'Business labels',
   'graph.display.personLabels': 'Person labels',
@@ -309,6 +369,7 @@ export const EN: Record<string, string> = {
   'graph.navigate.zoom': 'Zoom',
   'graph.navigate.focus': 'Focus',
   'graph.navigate.focus.tooltip': 'Focus selected node',
+  'graph.navigate.focusMode.tooltip': 'Focus Mode shows a small ego-subgraph (depth 1–2) around a participant to reduce noise.',
   'graph.navigate.depth1': 'Depth 1',
   'graph.navigate.depth2': 'Depth 2',
   'graph.navigate.useSelected': 'Use selected',
@@ -444,14 +505,37 @@ export const EN: Record<string, string> = {
   'graph.analytics.cycles.cycleNumber': 'Cycle #{n}',
   'graph.analytics.cycles.cycleTooltip':
     'A cycle is a set of debts that can be cleared together while preserving net positions (cycle cancelation).',
-}
 
-export function t(key: string, params?: Record<string, string | number>): string {
-  const template = EN[key] ?? key
-  if (!params) return template
-
-  return template.replace(/\{(\w+)\}/g, (_m, name: string) => {
-    const value = params[name]
-    return value === undefined || value === null ? `{${name}}` : String(value)
-  })
+  // App shell / global UI
+  'app.brand.subtitle': 'Admin Console',
+  'app.brand.prototype': '(prototype)',
+  'app.breadcrumb.admin': 'Admin',
+  'app.titleFallback': 'Admin',
+  'app.status.healthError': 'health error',
+  'app.status.ok': 'ok',
+  'app.status.apiSource': 'API source: {label}',
+  'app.status.scenario': 'scenario: {scenario}',
+  'app.apiMode.mock': 'MOCK DATA',
+  'app.apiMode.real': 'REAL API',
+  'app.apiBase.fixtures': 'fixtures: {path}',
+  'app.apiBase.defaultDev': '{url} (default)',
+  'app.apiBase.sameOrigin': '(same origin)',
+  'app.role.admin': 'admin',
+  'app.role.operator': 'operator',
+  'app.role.auditor': 'auditor (read-only)',
+  'app.theme.dark': 'Dark',
+  'app.theme.light': 'Light',
+  'app.locale.label': 'Language',
+  'app.locale.en': 'English',
+  'app.locale.ru': 'Русский',
+  'nav.dashboard.label': 'Dashboard',
+  'nav.integrity.label': 'Integrity',
+  'nav.incidents.label': 'Incidents',
+  'nav.trustlines.label': 'Trustlines',
+  'nav.graph.label': 'Network Graph',
+  'nav.participants.label': 'Participants',
+  'nav.config.label': 'Config',
+  'nav.featureFlags.label': 'Feature Flags',
+  'nav.auditLog.label': 'Audit Log',
+  'nav.equivalents.label': 'Equivalents',
 }

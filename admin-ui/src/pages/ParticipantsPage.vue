@@ -11,7 +11,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useAuthStore } from '../stores/auth'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 import type { Participant } from '../types/domain'
 
 const router = useRouter()

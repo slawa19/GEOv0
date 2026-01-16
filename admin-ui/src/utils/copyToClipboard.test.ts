@@ -6,13 +6,13 @@ describe('copyToClipboard', () => {
   it('uses navigator.clipboard.writeText when available', async () => {
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
 
-    const writeText = vi.fn<[string], Promise<void>>().mockResolvedValue(undefined)
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {
       value: ({ writeText } as unknown) as Clipboard,
       configurable: true,
     })
 
-    const exec = vi.fn<[string], boolean>(() => true)
+    const exec = vi.fn<(commandId: string) => boolean>(() => true)
     Object.defineProperty(document, 'execCommand', {
       value: (exec as unknown) as Document['execCommand'],
       configurable: true,
@@ -29,7 +29,7 @@ describe('copyToClipboard', () => {
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 
-    const exec = vi.fn<[string], boolean>(() => true)
+    const exec = vi.fn<(commandId: string) => boolean>(() => true)
     Object.defineProperty(document, 'execCommand', {
       value: (exec as unknown) as Document['execCommand'],
       configurable: true,
@@ -46,7 +46,7 @@ describe('copyToClipboard', () => {
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 
-    const exec = vi.fn<[string], boolean>(() => false)
+    const exec = vi.fn<(commandId: string) => boolean>(() => false)
     Object.defineProperty(document, 'execCommand', {
       value: (exec as unknown) as Document['execCommand'],
       configurable: true,

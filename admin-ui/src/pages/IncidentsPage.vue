@@ -11,7 +11,7 @@ import { formatIsoInTimeZone } from '../utils/datetime'
 import { useConfigStore } from '../stores/config'
 import { useAuthStore } from '../stores/auth'
 import type { Incident } from '../types/domain'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 
 const loading = ref(false)
 const error = ref<string | null>(null)

@@ -66,8 +66,10 @@ export type TooltipContent = {
   links?: TooltipLink[]
 }
 
+export type TooltipLocale = 'en' | 'ru'
+
 // Keep content short and review-friendly.
-export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
+export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
   // Navigation section tooltips
   'nav.dashboard': {
     title: 'Dashboard',
@@ -328,4 +330,273 @@ export const TOOLTIPS: Record<TooltipKey, TooltipContent> = {
   },
 }
 
-export default TOOLTIPS
+export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
+  'nav.dashboard': {
+    title: 'Дашборд',
+    body: ['Обзор состояния системы: API, DB, статус миграций.', 'Показывает узкие места trustline и инциденты сверх SLA.'],
+  },
+  'nav.integrity': {
+    title: 'Целостность',
+    body: ['Проверки целостности данных: нулевой баланс, согласованность лимитов.', 'Автоматическая валидация инвариантов сети.'],
+  },
+  'nav.incidents': {
+    title: 'Инциденты',
+    body: ['Зависшие транзакции, требующие ручного вмешательства.', 'Отсортированы по возрасту; админ может принудительно отменить.'],
+  },
+  'nav.trustlines': {
+    title: 'Трастлайны',
+    body: ['Кредитные линии между участниками сети.', 'Фильтры по эквиваленту, кредитору, должнику, статусу.'],
+  },
+  'nav.graph': {
+    title: 'Граф сети',
+    body: ['Визуальное представление сети доверия.', 'Интерактивный граф с фильтрами и масштабированием.'],
+  },
+  'nav.participants': {
+    title: 'Участники',
+    body: ['Управление участниками сети.', 'Детали, заморозка/разморозка аккаунтов.'],
+  },
+  'nav.config': {
+    title: 'Конфиг',
+    body: ['Настройки системы: лимиты, маршрутизация, политики.', 'Некоторые ключи требуют перезапуска сервиса.'],
+  },
+  'nav.featureFlags': {
+    title: 'Фиче-флаги',
+    body: ['Переключатели функций в рантайме.', 'Включение/выключение экспериментальных возможностей.'],
+  },
+  'nav.auditLog': {
+    title: 'Аудит-лог',
+    body: ['Журнал административных действий.', 'Кто, что, когда и почему — по всем изменениям.'],
+  },
+  'nav.equivalents': {
+    title: 'Эквиваленты',
+    body: ['Каталог валют/единиц (UAH, USD, POINT).', 'Точность и описание для каждой.'],
+  },
+
+  'dashboard.api': {
+    title: 'API',
+    body: ['Базовое состояние сервиса из /api/v1/health.', 'Используется для проверки доступности бэкенда.'],
+  },
+  'dashboard.db': {
+    title: 'DB',
+    body: ['Доступность/латентность БД из /api/v1/health/db.', 'Помогает выявлять проблемы подключения к БД.'],
+  },
+  'dashboard.migrations': {
+    title: 'Миграции',
+    body: ['Статус миграций схемы из /api/v1/admin/migrations.', 'В норме должно быть “актуально” на здоровом деплое.'],
+  },
+  'dashboard.bottlenecks': {
+    title: 'Узкие места trustline',
+    body: ['Трастлайны, где available / limit ниже порога.', 'Порог — настройка UI; расчёт безопасен для decimal (без float).'],
+    links: [{ label: 'Открыть трастлайны', to: { path: '/trustlines' } }],
+  },
+  'dashboard.incidentsOverSla': {
+    title: 'Инциденты сверх SLA',
+    body: ['Транзакции, застрявшие дольше SLA.', 'age_seconds > sla_seconds → сверх SLA.'],
+    links: [{ label: 'Открыть инциденты', to: { path: '/incidents' } }],
+  },
+  'dashboard.recentAudit': {
+    title: 'Последние действия',
+    body: ['Последние 10 административных действий.', 'Показывает кто что сделал и когда.'],
+    links: [{ label: 'Открыть аудит-лог', to: { path: '/audit-log' } }],
+  },
+
+  'participants.pid': {
+    title: 'PID',
+    body: ['Идентификатор участника в сети GEO.'],
+  },
+  'participants.displayName': {
+    title: 'Имя',
+    body: ['Человекочитаемое имя (если задано).'],
+  },
+  'participants.type': {
+    title: 'Тип',
+    body: ['Категория участника (напр., user/org/admin — зависит от бэкенда).'],
+  },
+  'participants.status': {
+    title: 'Статус',
+    body: ['Статус аккаунта для доступа/маршрутизации.', 'Типичные значения: active, frozen, banned.'],
+  },
+
+  'trustlines.eq': {
+    title: 'Эквивалент',
+    body: ['Код эквивалента (валюта/единица), напр. UAH, USD.'],
+    links: [{ label: 'Открыть эквиваленты', to: { path: '/equivalents' } }],
+  },
+  'trustlines.from': {
+    title: 'from',
+    body: ['PID кредитора (источник trustline).'],
+  },
+  'trustlines.to': {
+    title: 'to',
+    body: ['PID должника (получатель trustline).'],
+  },
+  'trustlines.limit': {
+    title: 'limit',
+    body: ['Кредитный лимит трастлайна (decimal-строка).', 'Крайний случай: limit = 0 допустим.'],
+    links: [
+      {
+        label: 'Лимит по умолчанию (Конфиг)',
+        to: { path: '/config', query: { key: 'limits.default_trustline_limit' } },
+      },
+    ],
+  },
+  'trustlines.used': {
+    title: 'used',
+    body: ['Текущая зарезервированная/использованная сумма (decimal-строка).'],
+  },
+  'trustlines.available': {
+    title: 'available',
+    body: ['Оставшаяся доступная сумма (decimal-строка).', 'Подсвечивается красным при значении ниже порога.'],
+  },
+  'trustlines.status': {
+    title: 'status',
+    body: ['Состояние жизненного цикла трастлайна.', 'Типичные значения: active, frozen, closed.'],
+  },
+  'trustlines.createdAt': {
+    title: 'created_at',
+    body: ['Время создания (ISO 8601).'],
+  },
+
+  'incidents.txId': {
+    title: 'tx_id',
+    body: ['Идентификатор транзакции.'],
+  },
+  'incidents.state': {
+    title: 'state',
+    body: ['Текущее состояние зависшей транзакции.'],
+  },
+  'incidents.initiator': {
+    title: 'initiator',
+    body: ['PID инициатора транзакции.'],
+  },
+  'incidents.eq': {
+    title: 'Эквивалент',
+    body: ['Эквивалент, задействованный в транзакции.'],
+    links: [{ label: 'Открыть эквиваленты', to: { path: '/equivalents' } }],
+  },
+  'incidents.age': {
+    title: 'age',
+    body: ['Сколько времени транзакция зависла (секунды).'],
+  },
+  'incidents.sla': {
+    title: 'sla',
+    body: ['Допустимый бюджет времени (секунды).', 'age > sla → сверх SLA.'],
+  },
+
+  'graph.eq': {
+    title: 'Фильтр эквивалента',
+    body: ['Фильтрует рёбра по коду эквивалента.', 'ALL показывает все эквиваленты из фикстур.'],
+    links: [{ label: 'Открыть эквиваленты', to: { path: '/equivalents' } }],
+  },
+  'graph.status': {
+    title: 'Фильтр статуса',
+    body: ['Фильтрует рёбра по статусу трастлайна.'],
+    links: [{ label: 'Открыть трастлайны', to: { path: '/trustlines' } }],
+  },
+  'graph.threshold': {
+    title: 'Порог узких мест',
+    body: ['Трастлайн — узкое место, если available / limit ниже этого значения.', 'Расчёт безопасен для decimal (без float).'],
+  },
+  'graph.layout': {
+    title: 'Раскладка',
+    body: ['Управляет расположением графа.', 'fcose хорош для кластеров; grid/circle детерминированы.'],
+  },
+  'graph.type': {
+    title: 'Тип участника',
+    body: [
+      'Фильтрует узлы по типу участника (например, человек vs бизнес).',
+      'Рёбра показываются только между участниками одного типа (межтиповые скрываются).',
+    ],
+  },
+  'graph.minDegree': {
+    title: 'Минимальная степень',
+    body: ['Скрывает слабо-связанные узлы, чтобы уменьшить шум.', 'Степень считается после применения текущих фильтров.'],
+  },
+  'graph.labels': {
+    title: 'Подписи',
+    body: ['Показывает display name + PID на узлах.', 'Отключите для производительности на больших графах.'],
+  },
+  'graph.incidents': {
+    title: 'Инциденты',
+    body: ['Подсвечивает узлы/рёбра, связанные с инициаторами инцидентов.', 'Пунктирные рёбра показывают сторону инициатора.'],
+    links: [{ label: 'Открыть инциденты', to: { path: '/incidents' } }],
+  },
+  'graph.hideIsolates': {
+    title: 'Скрыть изолятов',
+    body: ['Если включено — показывает только участников, которые встречаются в трастлайнах после фильтрации.'],
+  },
+  'graph.search': {
+    title: 'Поиск',
+    body: [
+      'Поиск по PID или имени участника (частичное совпадение).',
+      'Выберите подсказку, чтобы задать фокус-узел для Find и Fit.',
+      'Если совпадений несколько, Find центрирует и подсветит часть; уточните запрос.',
+    ],
+  },
+  'graph.zoom': {
+    title: 'Масштабирование',
+    body: ['Используйте слайдер или колёсико мыши для zoom in/out.', 'Толщина рёбер и размер текста адаптируются для читабельности.'],
+  },
+  'graph.actions': {
+    title: 'Действия графа',
+    body: [
+      'Find: центрирует на фокусном участнике (из поиска) или на последнем кликнутом узле.',
+      'Fit: вписывает весь граф в область просмотра.',
+      'Re-layout: запускает выбранный алгоритм раскладки ещё раз (после фильтров/spacing).',
+      'Zoom: слайдером масштабируйте (также работает колёсико).',
+    ],
+  },
+  'graph.spacing': {
+    title: 'Плотность раскладки',
+    body: ['Задаёт “разброс” силовой раскладки.', 'Большие значения уменьшают скученность, но дольше стабилизируются.'],
+  },
+  'graph.legend': {
+    title: 'Легенда',
+    body: ['Объясняет цвета и стили узлов/рёбер в этой визуализации.'],
+  },
+
+  'audit.timestamp': {
+    title: 'timestamp',
+    body: ['Когда произошло событие (ISO 8601).'],
+  },
+  'audit.actor': {
+    title: 'actor',
+    body: ['Кто выполнил действие (actor_id).', 'Может быть пустым для system/admin-token (MVP auth).'],
+  },
+  'audit.role': {
+    title: 'role',
+    body: ['Роль, от имени которой выполнено действие.'],
+  },
+  'audit.action': {
+    title: 'action',
+    body: ['Название действия (например, create/update/verify).'],
+  },
+  'audit.objectType': {
+    title: 'object',
+    body: ['Тип доменного объекта, который затронут действием.'],
+  },
+  'audit.objectId': {
+    title: 'object_id',
+    body: ['Идентификатор затронутого объекта.'],
+  },
+  'audit.reason': {
+    title: 'reason',
+    body: ['Необязательная причина, заданная оператором.'],
+  },
+}
+
+export const TOOLTIPS = TOOLTIPS_EN
+
+export function getTooltips(locale: TooltipLocale): Record<TooltipKey, TooltipContent> {
+  return locale === 'ru' ? TOOLTIPS_RU : TOOLTIPS_EN
+}
+
+export function getTooltipContent(key: TooltipKey, locale: TooltipLocale): string {
+  const entry = getTooltips(locale)[key]
+  if (!entry) return ''
+  const title = (entry.title || '').trim()
+  const body = (entry.body || []).join(' ').trim()
+  return title ? `${title}. ${body}`.trim() : body
+}
+
+export default TOOLTIPS_EN

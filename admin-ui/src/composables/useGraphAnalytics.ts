@@ -2,6 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
+import { t } from '../i18n'
 import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import type { ParticipantMetrics } from '../types/domain'
@@ -80,9 +81,9 @@ function hhiFromShares(rows: Array<{ share: number }>): number {
 }
 
 function hhiLevel(hhi: number): { label: string; type: 'success' | 'warning' | 'danger' } {
-  if (hhi >= 0.25) return { label: 'high', type: 'danger' }
-  if (hhi >= 0.15) return { label: 'medium', type: 'warning' }
-  return { label: 'low', type: 'success' }
+  if (hhi >= 0.25) return { label: t('graph.analytics.hhiLevel.high'), type: 'danger' }
+  if (hhi >= 0.15) return { label: t('graph.analytics.hhiLevel.medium'), type: 'warning' }
+  return { label: t('graph.analytics.hhiLevel.low'), type: 'success' }
 }
 
 export function useGraphAnalytics(opts: {
@@ -136,7 +137,7 @@ export function useGraphAnalytics(opts: {
       metricsCache.value.set(key, m)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
-      metricsError.value = msg || 'Failed to load metrics'
+      metricsError.value = msg || t('graph.analytics.metricsLoadFailed')
     } finally {
       metricsLoading.value = false
     }

@@ -12,7 +12,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 import type { Trustline } from '../types/domain'
 
 const router = useRouter()

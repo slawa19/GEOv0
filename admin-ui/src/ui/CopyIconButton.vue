@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { copyToClipboard } from '../utils/copyToClipboard'
+import { t } from '../i18n'
 
 type Props = {
   text: string
@@ -14,15 +15,18 @@ type Props = {
 
 const props = withDefaults(defineProps<Props>(), {
   label: '',
-  tooltip: 'Copy',
-  successText: 'Copied',
+  tooltip: undefined,
+  successText: undefined,
   stopPropagation: true,
   disabled: false,
 })
 
+const tooltipText = computed(() => props.tooltip ?? t('common.copy'))
+const successToastText = computed(() => props.successText ?? t('common.copied'))
+
 const ariaLabel = computed(() => {
-  if (props.label) return `Copy ${props.label}`
-  return 'Copy to clipboard'
+  if (props.label) return t('common.copyLabel', { label: props.label })
+  return t('common.copyToClipboard')
 })
 
 async function onClick(e: MouseEvent) {
@@ -33,16 +37,16 @@ async function onClick(e: MouseEvent) {
 
   const r = await copyToClipboard(props.text)
   if (r.ok) {
-    ElMessage.success(props.successText)
+    ElMessage.success(successToastText.value)
   } else {
-    ElMessage.error(r.error || 'Copy failed')
+    ElMessage.error(r.error || t('common.copyFailed'))
   }
 }
 </script>
 
 <template>
   <el-tooltip
-    :content="tooltip"
+    :content="tooltipText"
     placement="top"
     effect="dark"
     :show-after="850"

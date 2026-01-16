@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import TooltipLabel from '../../ui/TooltipLabel.vue'
 import GraphSearchBar from './GraphSearchBar.vue'
+import { t } from '../../i18n'
 
 type ToolbarTab = 'filters' | 'display' | 'navigate'
 type LayoutName = 'fcose' | 'grid' | 'circle'
@@ -201,14 +202,14 @@ const focusDepthModel = computed({
       class="toolbarTabs"
     >
       <el-tab-pane
-        label="Filters"
+        :label="t('graph.toolbar.filtersTab')"
         name="filters"
       >
         <div class="paneGrid">
           <div class="ctl ctl--eq">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Equivalent"
+              :label="t('graph.filters.equivalent')"
               tooltip-key="graph.eq"
             />
             <el-select
@@ -229,7 +230,7 @@ const focusDepthModel = computed({
           <div class="ctl ctl--status">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Status"
+              :label="t('graph.filters.status')"
               tooltip-key="graph.status"
             />
             <el-select
@@ -252,21 +253,21 @@ const focusDepthModel = computed({
           <div class="ctl ctl--threshold">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Bottleneck"
+              :label="t('graph.filters.bottleneck')"
               tooltip-key="graph.threshold"
             />
             <el-input
               v-model="thresholdModel"
               size="small"
               class="ctl__field"
-              placeholder="0.10"
+              :placeholder="t('graph.filters.bottleneckPlaceholder')"
             />
           </div>
 
           <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Type"
+              :label="t('graph.filters.type')"
               tooltip-key="graph.type"
             />
             <el-checkbox-group
@@ -274,10 +275,10 @@ const focusDepthModel = computed({
               size="small"
             >
               <el-checkbox-button label="person">
-                person
+                {{ t('participant.type.person') }}
               </el-checkbox-button>
               <el-checkbox-button label="business">
-                business
+                {{ t('participant.type.business') }}
               </el-checkbox-button>
             </el-checkbox-group>
           </div>
@@ -285,7 +286,7 @@ const focusDepthModel = computed({
           <div class="ctl ctl--degree">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Min degree"
+              :label="t('graph.filters.minDegree')"
               tooltip-key="graph.minDegree"
             />
             <el-input-number
@@ -301,14 +302,14 @@ const focusDepthModel = computed({
       </el-tab-pane>
 
       <el-tab-pane
-        label="Display"
+        :label="t('graph.toolbar.displayTab')"
         name="display"
       >
         <div class="paneGrid">
           <div class="ctl ctl--layout">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Layout"
+              :label="t('graph.display.layout')"
               tooltip-key="graph.layout"
             />
             <el-select
@@ -328,7 +329,7 @@ const focusDepthModel = computed({
           <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Layout spacing"
+              :label="t('graph.display.layoutSpacing')"
               tooltip-key="graph.spacing"
             />
             <el-slider
@@ -343,7 +344,7 @@ const focusDepthModel = computed({
           <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Business labels"
+              :label="t('graph.display.businessLabels')"
               tooltip-key="graph.labels"
             />
             <el-checkbox-group
@@ -351,10 +352,10 @@ const focusDepthModel = computed({
               size="small"
             >
               <el-checkbox-button label="name">
-                name
+                {{ t('graph.display.labelPart.name') }}
               </el-checkbox-button>
               <el-checkbox-button label="pid">
-                pid
+                {{ t('graph.display.labelPart.pid') }}
               </el-checkbox-button>
             </el-checkbox-group>
           </div>
@@ -362,7 +363,7 @@ const focusDepthModel = computed({
           <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
-              label="Person labels"
+              :label="t('graph.display.personLabels')"
               tooltip-key="graph.labels"
             />
             <el-checkbox-group
@@ -370,10 +371,10 @@ const focusDepthModel = computed({
               size="small"
             >
               <el-checkbox-button label="name">
-                name
+                {{ t('graph.display.labelPart.name') }}
               </el-checkbox-button>
               <el-checkbox-button label="pid">
-                pid
+                {{ t('graph.display.labelPart.pid') }}
               </el-checkbox-button>
             </el-checkbox-group>
           </div>
@@ -382,7 +383,7 @@ const focusDepthModel = computed({
             <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
-                label="Labels"
+                :label="t('graph.display.labels')"
                 tooltip-key="graph.labels"
               />
               <el-switch
@@ -393,7 +394,7 @@ const focusDepthModel = computed({
             <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
-                label="Auto labels"
+                :label="t('graph.display.autoLabels')"
                 tooltip-key="graph.labels"
               />
               <el-switch
@@ -404,7 +405,7 @@ const focusDepthModel = computed({
             <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
-                label="Incidents"
+                :label="t('graph.display.incidents')"
                 tooltip-key="graph.incidents"
               />
               <el-switch
@@ -415,7 +416,7 @@ const focusDepthModel = computed({
             <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
-                label="Hide isolates"
+                :label="t('graph.display.hideIsolates')"
                 tooltip-key="graph.hideIsolates"
               />
               <el-switch
@@ -426,7 +427,7 @@ const focusDepthModel = computed({
             <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
-                label="Legend"
+                :label="t('graph.display.legend')"
                 tooltip-key="graph.legend"
               />
               <el-switch
@@ -439,7 +440,7 @@ const focusDepthModel = computed({
       </el-tab-pane>
 
       <el-tab-pane
-        label="Navigate"
+        :label="t('graph.toolbar.navigateTab')"
         name="navigate"
       >
         <div class="navPane">
@@ -453,7 +454,7 @@ const focusDepthModel = computed({
           <div class="navRow navRow--actions">
             <TooltipLabel
               class="toolbarLabel navRow__label"
-              label="Actions"
+              :label="t('graph.navigate.actions')"
               tooltip-key="graph.actions"
             />
             <div class="navActions">
@@ -462,25 +463,25 @@ const focusDepthModel = computed({
                 :disabled="!canFind"
                 @click="onFocusSearch"
               >
-                Find
+                {{ t('graph.navigate.find') }}
               </el-button>
               <el-button
                 size="small"
                 @click="onFit"
               >
-                Fit
+                {{ t('graph.navigate.fit') }}
               </el-button>
               <el-button
                 size="small"
                 @click="onRelayout"
               >
-                Re-layout
+                {{ t('graph.navigate.relayout') }}
               </el-button>
 
               <div class="zoomrow">
                 <TooltipLabel
                   class="toolbarLabel zoomrow__label"
-                  label="Zoom"
+                  :label="t('graph.navigate.zoom')"
                   tooltip-key="graph.zoom"
                 />
                 <el-slider
@@ -497,8 +498,8 @@ const focusDepthModel = computed({
           <div class="navRow navRow--focus">
             <TooltipLabel
               class="toolbarLabel navRow__label"
-              label="Focus"
-              tooltip-text="Focus Mode shows a small ego-subgraph (depth 1–2) around a participant to reduce noise."
+              :label="t('graph.navigate.focus')"
+              :tooltip-text="t('graph.navigate.focusMode.tooltip')"
             />
             <div class="navFocus">
               <el-switch
@@ -512,11 +513,11 @@ const focusDepthModel = computed({
                 :disabled="!focusMode"
               >
                 <el-option
-                  label="Depth 1"
+                  :label="t('graph.navigate.depth1')"
                   :value="1"
                 />
                 <el-option
-                  label="Depth 2"
+                  :label="t('graph.navigate.depth2')"
                   :value="2"
                 />
               </el-select>
@@ -534,14 +535,14 @@ const focusDepthModel = computed({
                 :disabled="!canUseSelectedForFocus"
                 @click="onUseSelectedForFocus"
               >
-                Use selected
+                {{ t('graph.navigate.useSelected') }}
               </el-button>
               <el-button
                 size="small"
                 :disabled="!focusMode"
                 @click="onClearFocusMode"
               >
-                Clear
+                {{ t('graph.navigate.clear') }}
               </el-button>
             </div>
           </div>

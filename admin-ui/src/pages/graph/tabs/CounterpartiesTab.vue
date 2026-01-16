@@ -116,7 +116,7 @@
 
 <script setup lang="ts">
 import TooltipLabel from '../../../ui/TooltipLabel.vue'
-import { t } from '../../../i18n/en'
+import { t } from '../../../i18n'
 
 type CounterpartyRow = {
   display_name: string

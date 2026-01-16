@@ -2,7 +2,7 @@
 import TooltipLabel from '../../ui/TooltipLabel.vue'
 import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../../ui/GraphAnalyticsTogglesCard.vue'
-import { t } from '../../i18n/en'
+import { t } from '../../i18n'
 
 import type { DrawerTab, SelectedInfo } from '../../composables/useGraphVisualization'
 import type { ClearingCycles } from './graphTypes'
@@ -1328,42 +1328,42 @@ defineProps<{
           :column="1"
           border
         >
-          <el-descriptions-item label="Equivalent">
+          <el-descriptions-item :label="t('trustlines.equivalent')">
             <span>
               {{ selected.equivalent }}
             </span>
           </el-descriptions-item>
-          <el-descriptions-item label="From">
+          <el-descriptions-item :label="t('trustlines.from')">
             <span class="geoInlineRow">
               {{ selected.from }}
               <CopyIconButton
                 :text="selected.from"
-                label="From PID"
+                :label="t('trustlines.fromPidLabel')"
               />
             </span>
           </el-descriptions-item>
-          <el-descriptions-item label="To">
+          <el-descriptions-item :label="t('trustlines.to')">
             <span class="geoInlineRow">
               {{ selected.to }}
               <CopyIconButton
                 :text="selected.to"
-                label="To PID"
+                :label="t('trustlines.toPidLabel')"
               />
             </span>
           </el-descriptions-item>
-          <el-descriptions-item label="Status">
+          <el-descriptions-item :label="t('common.status')">
             {{ selected.status }}
           </el-descriptions-item>
-          <el-descriptions-item label="Limit">
+          <el-descriptions-item :label="t('trustlines.limit')">
             {{ money(selected.limit) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Used">
+          <el-descriptions-item :label="t('trustlines.used')">
             {{ money(selected.used) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Available">
+          <el-descriptions-item :label="t('trustlines.available')">
             {{ money(selected.available) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Created at">
+          <el-descriptions-item :label="t('trustlines.createdAt')">
             {{ selected.created_at }}
           </el-descriptions-item>
         </el-descriptions>

@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
+import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
+import { t } from '../i18n'
 
 type HealthState = {
   loading: boolean
@@ -44,7 +46,7 @@ export const useHealthStore = defineStore('health', {
           this.healthDb = assertSuccess(await api.healthDb())
           this.migrations = assertSuccess(await api.migrations())
         } catch (e: unknown) {
-          this.error = e instanceof Error ? e.message : 'Failed to load health'
+          this.error = e instanceof Error ? e.message : t('health.loadFailed')
         } finally {
           this.loading = false
           this._refreshPromise = null
@@ -53,7 +55,7 @@ export const useHealthStore = defineStore('health', {
 
       return this._refreshPromise
     },
-    startPolling(intervalMs = 15000) {
+    startPolling(intervalMs = HEALTH_POLL_INTERVAL_MS) {
       // Keep polling singleton across HMR/module reloads.
       const g = getHealthPollGlobal()
       if (typeof g.__GEO_HEALTH_POLL_TIMER__ === 'number') {

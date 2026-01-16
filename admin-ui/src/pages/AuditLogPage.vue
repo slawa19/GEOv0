@@ -8,7 +8,7 @@ import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { debounce } from '../utils/debounce'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 import type { AuditLogEntry } from '../types/domain'
 
 const loading = ref(false)

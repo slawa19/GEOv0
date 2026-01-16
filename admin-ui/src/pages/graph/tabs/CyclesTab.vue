@@ -51,7 +51,7 @@
 
 <script setup lang="ts">
 import TooltipLabel from '../../../ui/TooltipLabel.vue'
-import { t } from '../../../i18n/en'
+import { t } from '../../../i18n'
 
 type CycleEdge = { debtor: string; creditor: string; equivalent: string; amount: string }
 

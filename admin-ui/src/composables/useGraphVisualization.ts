@@ -4,11 +4,13 @@ import fcose from 'cytoscape-fcose'
 import { computed, onBeforeUnmount, onMounted, type ComputedRef, type Ref } from 'vue'
 
 import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
+import { GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
 import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import type { Participant, Trustline } from '../pages/graph/graphTypes'
+import { t } from '../i18n'
 
-cytoscape.use(fcose)
+cytoscape.use(fcose as unknown as cytoscape.Ext)
 
 export type SelectedInfo =
   | {
@@ -928,17 +930,17 @@ export function useGraphVisualization(options: {
     if (!q) {
       const pid = getZoomPid()
       if (!pid) {
-        ElMessage.info('Type PID/name, select a suggestion, or click a node')
+        ElMessage.info(t('graph.search.hintNoQuery'))
         return
       }
       const n = cy.getElementById(pid)
       if (!n || n.empty()) {
-        ElMessage.warning(`Not found in current graph: ${pid}`)
+        ElMessage.warning(t('graph.search.notFoundInGraph', { pid }))
         return
       }
       cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
       n.addClass('search-hit')
-      setTimeout(() => n.removeClass('search-hit'), 900)
+      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
       return
     }
 
@@ -946,12 +948,12 @@ export function useGraphVisualization(options: {
     if (options.focusPid.value) {
       const n = cy.getElementById(options.focusPid.value)
       if (!n || n.empty()) {
-        ElMessage.warning(`Not found in current graph: ${options.focusPid.value}`)
+        ElMessage.warning(t('graph.search.notFoundInGraph', { pid: options.focusPid.value }))
         return
       }
       cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
       n.addClass('search-hit')
-      setTimeout(() => n.removeClass('search-hit'), 900)
+      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
       return
     }
 
@@ -961,7 +963,7 @@ export function useGraphVisualization(options: {
       if (n && !n.empty()) {
         cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
         n.addClass('search-hit')
-        setTimeout(() => n.removeClass('search-hit'), 900)
+        setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
         return
       }
     }
@@ -971,7 +973,7 @@ export function useGraphVisualization(options: {
     if (exact && !exact.empty()) {
       cy.animate({ center: { eles: exact }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
       exact.addClass('search-hit')
-      setTimeout(() => exact.removeClass('search-hit'), 900)
+      setTimeout(() => exact.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
       return
     }
 
@@ -984,12 +986,12 @@ export function useGraphVisualization(options: {
         if (n && !n.empty()) {
           cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
           n.addClass('search-hit')
-          setTimeout(() => n.removeClass('search-hit'), 900)
-          ElMessage.info('Query did not match; centered on the selected node.')
+          setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+          ElMessage.info(t('graph.search.queryDidNotMatchCentered'))
           return
         }
       }
-      ElMessage.warning(`No matches: ${q}`)
+      ElMessage.warning(t('graph.search.noMatches', { query: q }))
       return
     }
 
@@ -999,7 +1001,7 @@ export function useGraphVisualization(options: {
       const n = cy.getElementById(pid)
       cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
       n.addClass('search-hit')
-      setTimeout(() => n.removeClass('search-hit'), 900)
+      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
       return
     }
 
@@ -1008,7 +1010,7 @@ export function useGraphVisualization(options: {
       eles = eles.union(cy.getElementById(pid))
     }
     cy.animate({ fit: { eles, padding: 80 } }, { duration: 300 })
-    ElMessage.info(`${matches.length} matches (showing first ${Math.min(40, matches.length)}). Refine query.`)
+    ElMessage.info(t('graph.search.matchesShowingFirst', { matches: matches.length, shown: Math.min(40, matches.length) }))
   }
 
   function attachHandlers() {

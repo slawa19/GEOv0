@@ -8,6 +8,7 @@ import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
+import { t } from '../i18n'
 
 const router = useRouter()
 const route = useRoute()
@@ -42,8 +43,8 @@ async function load() {
     migrations.value = assertSuccess(await api.migrations())
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || 'Failed to load'
-    ElMessage.error(error.value || 'Failed to load')
+    error.value = msg || t('dashboard.loadFailed')
+    ElMessage.error(error.value || t('dashboard.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -57,7 +58,7 @@ async function loadAudit() {
     auditItems.value = page.items
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    auditError.value = msg || 'Failed to load audit log'
+    auditError.value = msg || t('auditLog.loadFailed')
   } finally {
     auditLoading.value = false
   }
@@ -105,7 +106,7 @@ async function loadBottlenecks() {
       bottlenecksError.value = `${e.message} (${e.status} ${e.code})`
     } else {
       const msg = e instanceof Error ? e.message : String(e)
-      bottlenecksError.value = msg || 'Failed to load trustline bottlenecks'
+      bottlenecksError.value = msg || t('dashboard.bottlenecksLoadFailed')
     }
   } finally {
     bottlenecksLoading.value = false
@@ -126,7 +127,7 @@ async function loadIncidents() {
       incidentsError.value = `${e.message} (${e.status} ${e.code})`
     } else {
       const msg = e instanceof Error ? e.message : String(e)
-      incidentsError.value = msg || 'Failed to load incidents'
+      incidentsError.value = msg || t('incidents.loadFailed')
     }
   } finally {
     incidentsLoading.value = false
@@ -149,7 +150,7 @@ onMounted(() => {
   void loadIncidents()
 })
 
-const statusText = computed(() => String(health.value?.status ?? 'unknown'))
+const statusText = computed(() => String(health.value?.status ?? t('common.unknown')))
 
 const migrationsCurrent = computed(() => {
   const m = migrations.value
@@ -165,12 +166,12 @@ const migrationsHead = computed(() => {
 })
 const migrationsUpToDateLabel = computed(() => {
   const m = migrations.value
-  if (!m) return 'unknown'
+  if (!m) return t('common.unknown')
   const rec = m as Record<string, unknown>
   const cur = rec.current_revision
   const head = rec.head_revision
-  if (!cur && !head) return 'unknown'
-  return rec.is_up_to_date ? 'yes' : 'no'
+  if (!cur && !head) return t('common.unknown')
+  return rec.is_up_to_date ? t('common.yes') : t('common.no')
 })
 
 const healthDbInfo = computed(() => {
@@ -197,7 +198,7 @@ const healthDbInfo = computed(() => {
         <el-card class="geoCard">
           <template #header>
             <TooltipLabel
-              label="API"
+              :label="t('dashboard.card.api')"
               tooltip-key="dashboard.api"
             />
           </template>
@@ -207,9 +208,9 @@ const healthDbInfo = computed(() => {
             :rows="3"
           />
           <div v-else>
-            <div><span class="geoLabel">Status:</span> {{ statusText }}</div>
-            <div><span class="geoLabel">Version:</span> {{ health?.version }}</div>
-            <div><span class="geoLabel">Uptime:</span> {{ health?.uptime_seconds }}s</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.status') }}:</span> {{ statusText }}</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.version') }}:</span> {{ health?.version }}</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.uptime') }}:</span> {{ health?.uptime_seconds }}s</div>
           </div>
         </el-card>
       </el-col>
@@ -218,7 +219,7 @@ const healthDbInfo = computed(() => {
         <el-card class="geoCard">
           <template #header>
             <TooltipLabel
-              label="DB"
+              :label="t('dashboard.card.db')"
               tooltip-key="dashboard.db"
             />
           </template>
@@ -228,9 +229,9 @@ const healthDbInfo = computed(() => {
             :rows="3"
           />
           <div v-else>
-            <div><span class="geoLabel">Status:</span> {{ healthDb?.status }}</div>
-            <div><span class="geoLabel">Reachable:</span> {{ healthDbInfo?.reachable }}</div>
-            <div><span class="geoLabel">Latency:</span> {{ healthDbInfo?.latency_ms }}ms</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.status') }}:</span> {{ healthDb?.status }}</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.reachable') }}:</span> {{ healthDbInfo?.reachable }}</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.latency') }}:</span> {{ healthDbInfo?.latency_ms }}ms</div>
           </div>
         </el-card>
       </el-col>
@@ -239,7 +240,7 @@ const healthDbInfo = computed(() => {
         <el-card class="geoCard">
           <template #header>
             <TooltipLabel
-              label="Migrations"
+              :label="t('dashboard.card.migrations')"
               tooltip-key="dashboard.migrations"
             />
           </template>
@@ -249,9 +250,9 @@ const healthDbInfo = computed(() => {
             :rows="3"
           />
           <div v-else>
-            <div><span class="geoLabel">Up to date:</span> {{ migrationsUpToDateLabel }}</div>
-            <div><span class="geoLabel">Current:</span> {{ migrationsCurrent }}</div>
-            <div><span class="geoLabel">Head:</span> {{ migrationsHead }}</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.upToDate') }}:</span> {{ migrationsUpToDateLabel }}</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.current') }}:</span> {{ migrationsCurrent }}</div>
+            <div><span class="geoLabel">{{ t('dashboard.field.head') }}:</span> {{ migrationsHead }}</div>
           </div>
         </el-card>
       </el-col>
@@ -266,7 +267,7 @@ const healthDbInfo = computed(() => {
           <template #header>
             <div class="hdr">
               <TooltipLabel
-                label="Trustline bottlenecks"
+                :label="t('dashboard.card.bottlenecks')"
                 tooltip-key="dashboard.bottlenecks"
               />
               <div class="hdr__right">
@@ -280,7 +281,7 @@ const healthDbInfo = computed(() => {
                   size="small"
                   @click="goTrustlinesWithThreshold()"
                 >
-                  View all
+                  {{ t('common.viewAll') }}
                 </el-button>
               </div>
             </div>
@@ -301,7 +302,7 @@ const healthDbInfo = computed(() => {
 
           <el-empty
             v-else-if="bottleneckItems.length === 0"
-            description="No bottlenecks under threshold"
+            :description="t('dashboard.empty.noBottlenecks')"
           />
 
           <el-table
@@ -314,12 +315,12 @@ const healthDbInfo = computed(() => {
           >
             <el-table-column
               prop="equivalent"
-              label="Equivalent"
+              :label="t('trustlines.equivalent')"
               width="110"
             />
             <el-table-column
               prop="from"
-              label="From"
+              :label="t('trustlines.from')"
               min-width="180"
               show-overflow-tooltip
             >
@@ -329,7 +330,7 @@ const healthDbInfo = computed(() => {
             </el-table-column>
             <el-table-column
               prop="to"
-              label="To"
+              :label="t('trustlines.to')"
               min-width="180"
               show-overflow-tooltip
             >
@@ -339,7 +340,7 @@ const healthDbInfo = computed(() => {
             </el-table-column>
             <el-table-column
               prop="limit"
-              label="Limit"
+              :label="t('trustlines.limit')"
               width="110"
             >
               <template #default="scope">
@@ -348,7 +349,7 @@ const healthDbInfo = computed(() => {
             </el-table-column>
             <el-table-column
               prop="available"
-              label="Available"
+              :label="t('trustlines.available')"
               width="110"
             >
               <template #default="scope">
@@ -357,7 +358,7 @@ const healthDbInfo = computed(() => {
             </el-table-column>
             <el-table-column
               prop="status"
-              label="Status"
+              :label="t('common.status')"
               width="100"
             />
           </el-table>
@@ -369,7 +370,7 @@ const healthDbInfo = computed(() => {
           <template #header>
             <div class="hdr">
               <TooltipLabel
-                label="Incidents over SLA"
+                :label="t('dashboard.card.incidentsOverSla')"
                 tooltip-key="dashboard.incidentsOverSla"
               />
               <div class="hdr__right">
@@ -377,7 +378,7 @@ const healthDbInfo = computed(() => {
                   size="small"
                   @click="go('/incidents')"
                 >
-                  View all
+                  {{ t('common.viewAll') }}
                 </el-button>
               </div>
             </div>
@@ -398,7 +399,7 @@ const healthDbInfo = computed(() => {
 
           <el-empty
             v-else-if="incidentsOverSla.length === 0"
-            description="No incidents over SLA"
+            :description="t('dashboard.empty.noIncidentsOverSla')"
           />
 
           <el-table
@@ -411,7 +412,7 @@ const healthDbInfo = computed(() => {
           >
             <el-table-column
               prop="tx_id"
-              label="Tx ID"
+              :label="t('incidents.columns.txId')"
               min-width="200"
               show-overflow-tooltip
             >
@@ -421,17 +422,17 @@ const healthDbInfo = computed(() => {
             </el-table-column>
             <el-table-column
               prop="state"
-              label="State"
+              :label="t('incidents.columns.state')"
               width="180"
             />
             <el-table-column
               prop="equivalent"
-              label="Equivalent"
+              :label="t('incidents.columns.equivalent')"
               width="110"
             />
             <el-table-column
               prop="age_seconds"
-              label="Age (s)"
+              :label="t('dashboard.incidents.ageSeconds')"
               width="110"
             >
               <template #default="scope">
@@ -440,7 +441,7 @@ const healthDbInfo = computed(() => {
             </el-table-column>
             <el-table-column
               prop="sla_seconds"
-              label="SLA (s)"
+              :label="t('dashboard.incidents.slaSeconds')"
               width="90"
             />
           </el-table>
@@ -452,14 +453,14 @@ const healthDbInfo = computed(() => {
       <template #header>
         <div class="hdr">
           <TooltipLabel
-            label="Recent Audit Log"
+            :label="t('dashboard.card.recentAudit')"
             tooltip-key="dashboard.recentAudit"
           />
           <el-button
             size="small"
             @click="go('/audit-log')"
           >
-            View all
+            {{ t('common.viewAll') }}
           </el-button>
         </div>
       </template>
@@ -487,13 +488,13 @@ const healthDbInfo = computed(() => {
       >
         <el-table-column
           prop="timestamp"
-          label="Timestamp"
+          :label="t('auditLog.timestamp')"
           width="200"
           show-overflow-tooltip
         />
         <el-table-column
           prop="actor_id"
-          label="Actor"
+          :label="t('auditLog.actor')"
           width="110"
           show-overflow-tooltip
         >
@@ -503,7 +504,7 @@ const healthDbInfo = computed(() => {
         </el-table-column>
         <el-table-column
           prop="actor_role"
-          label="Role"
+          :label="t('auditLog.role')"
           width="130"
           show-overflow-tooltip
         >
@@ -513,7 +514,7 @@ const healthDbInfo = computed(() => {
         </el-table-column>
         <el-table-column
           prop="action"
-          label="Action"
+          :label="t('auditLog.action')"
           min-width="280"
           show-overflow-tooltip
         >
@@ -523,13 +524,13 @@ const healthDbInfo = computed(() => {
         </el-table-column>
         <el-table-column
           prop="object_type"
-          label="Object"
+          :label="t('auditLog.object')"
           width="140"
           show-overflow-tooltip
         />
         <el-table-column
           prop="object_id"
-          label="Object ID"
+          :label="t('auditLog.objectId')"
           min-width="360"
           show-overflow-tooltip
         >

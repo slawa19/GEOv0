@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import TooltipLabel from '../../ui/TooltipLabel.vue'
-import { t } from '../../i18n/en'
+import { t } from '../../i18n'
 
 type ParticipantSuggestion = {
   value: string

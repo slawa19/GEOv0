@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus'
 
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
+import { t } from '../i18n'
 import { buildFocusModeQuery } from '../pages/graph/graphPageHelpers'
 import type {
   AuditLogEntry,
@@ -149,7 +150,7 @@ export function useGraphData(opts: {
       if (!availableEquivalents.value.includes(opts.eq.value)) opts.eq.value = 'ALL'
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || 'Failed to load fixtures'
+      error.value = msg || t('graph.data.loadFailed')
     } finally {
       loading.value = false
     }
@@ -199,7 +200,7 @@ export function useGraphData(opts: {
     } catch (e: unknown) {
       if (reqId !== focusReqId) return
       const msg = e instanceof Error ? e.message : String(e)
-      ElMessage.warning(msg || 'Failed to load focus-mode data')
+      ElMessage.warning(msg || t('graph.focusMode.loadFailed'))
     }
   }
 

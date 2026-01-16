@@ -6,7 +6,7 @@ import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }

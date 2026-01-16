@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { TOOLTIPS, type TooltipKey } from '../content/tooltips'
+import { getTooltips, getTooltipContent, type TooltipKey } from '../content/tooltips'
+import { locale, t } from '../i18n'
 
 type Props = {
   label: string
@@ -11,7 +12,7 @@ type Props = {
 const props = defineProps<Props>()
 
 const structured = computed(() => {
-  if (props.tooltipKey) return TOOLTIPS[props.tooltipKey]
+  if (props.tooltipKey) return getTooltips(locale.value)[props.tooltipKey]
   return null
 })
 
@@ -19,17 +20,15 @@ const hasTooltip = computed(() => Boolean(structured.value || props.tooltipText)
 
 const tooltipContent = computed(() => {
   if (props.tooltipText) return props.tooltipText
-  if (!structured.value) return ''
-  const title = structured.value.title
-  const body = (structured.value.body || []).join(' ')
+  if (!props.tooltipKey) return ''
   // Keep it short: two lines max via CSS clamp.
-  return title ? `${title}. ${body}`.trim() : body.trim()
+  return getTooltipContent(props.tooltipKey, locale.value)
 })
 
 const ariaLabel = computed(() => {
   const title = structured.value?.title
-  if (title) return `Help: ${title}`
-  return `Help for ${props.label}`
+  if (title) return t('common.helpTitle', { title })
+  return t('common.helpForLabel', { label: props.label })
 })
 
 // Note: TooltipLabel is intentionally compact; links are omitted.

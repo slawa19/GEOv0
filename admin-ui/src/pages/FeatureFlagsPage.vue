@@ -7,7 +7,7 @@ import { toastApiError } from '../api/errorToast'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 
 type FlagRow = { key: string; value: boolean; original: boolean }
 

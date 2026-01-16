@@ -7,7 +7,7 @@ import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import { t } from '../i18n/en'
+import { t } from '../i18n'
 
 type RowKind = 'boolean' | 'number' | 'string' | 'json'
 type Row = { key: string; kind: RowKind; value: unknown }

@@ -4,37 +4,29 @@ import { useRoute, useRouter } from 'vue-router'
 import { useHealthStore } from '../stores/health'
 import { useAuthStore } from '../stores/auth'
 import { useConfigStore } from '../stores/config'
-import * as Tooltips from '../content/tooltips'
+import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
+import { locale, setLocale, t } from '../i18n'
+import { getTooltipContent } from '../content/tooltips'
 import type { TooltipKey } from '../content/tooltips'
 
 type NavItem = {
   path: string
-  label: string
+  labelKey: string
   tooltipKey: TooltipKey
 }
 
 const navItems: NavItem[] = [
-  { path: '/dashboard', label: 'Dashboard', tooltipKey: 'nav.dashboard' },
-  { path: '/integrity', label: 'Integrity', tooltipKey: 'nav.integrity' },
-  { path: '/incidents', label: 'Incidents', tooltipKey: 'nav.incidents' },
-  { path: '/trustlines', label: 'Trustlines', tooltipKey: 'nav.trustlines' },
-  { path: '/graph', label: 'Network Graph', tooltipKey: 'nav.graph' },
-  { path: '/participants', label: 'Participants', tooltipKey: 'nav.participants' },
-  { path: '/config', label: 'Config', tooltipKey: 'nav.config' },
-  { path: '/feature-flags', label: 'Feature Flags', tooltipKey: 'nav.featureFlags' },
-  { path: '/audit-log', label: 'Audit Log', tooltipKey: 'nav.auditLog' },
-  { path: '/equivalents', label: 'Equivalents', tooltipKey: 'nav.equivalents' },
+  { path: '/dashboard', labelKey: 'nav.dashboard.label', tooltipKey: 'nav.dashboard' },
+  { path: '/integrity', labelKey: 'nav.integrity.label', tooltipKey: 'nav.integrity' },
+  { path: '/incidents', labelKey: 'nav.incidents.label', tooltipKey: 'nav.incidents' },
+  { path: '/trustlines', labelKey: 'nav.trustlines.label', tooltipKey: 'nav.trustlines' },
+  { path: '/graph', labelKey: 'nav.graph.label', tooltipKey: 'nav.graph' },
+  { path: '/participants', labelKey: 'nav.participants.label', tooltipKey: 'nav.participants' },
+  { path: '/config', labelKey: 'nav.config.label', tooltipKey: 'nav.config' },
+  { path: '/feature-flags', labelKey: 'nav.featureFlags.label', tooltipKey: 'nav.featureFlags' },
+  { path: '/audit-log', labelKey: 'nav.auditLog.label', tooltipKey: 'nav.auditLog' },
+  { path: '/equivalents', labelKey: 'nav.equivalents.label', tooltipKey: 'nav.equivalents' },
 ]
-
-function getTooltipContent(key: TooltipKey): string {
-  type TooltipEntry = { body: string[] }
-  const mod = Tooltips as unknown as Record<string, unknown>
-  const candidate = (mod.TOOLTIPS ?? mod.default ?? {}) as unknown
-  const tooltips = (candidate && typeof candidate === 'object') ? (candidate as Record<string, TooltipEntry>) : {}
-  const t = tooltips[key]
-  if (!t) return ''
-  return t.body.join(' ')
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -42,16 +34,16 @@ const router = useRouter()
 const isMockMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toString().toLowerCase() !== 'real')
 
 const apiBaseLabel = computed(() => {
-  if (isMockMode.value) return 'fixtures: /admin-fixtures/v1'
+  if (isMockMode.value) return t('app.apiBase.fixtures', { path: '/admin-fixtures/v1' })
   const env = import.meta.env as unknown as Record<string, unknown>
   const envVal = env.VITE_API_BASE_URL
   const raw = (envVal === undefined || envVal === null ? '' : String(envVal)).trim()
   if (raw) return raw
-  if (import.meta.env.DEV) return 'http://127.0.0.1:18000 (default)'
-  return '(same origin)'
+  if (import.meta.env.DEV) return t('app.apiBase.defaultDev', { url: 'http://127.0.0.1:18000' })
+  return t('app.apiBase.sameOrigin')
 })
 
-const apiModeBadge = computed(() => (isMockMode.value ? 'MOCK DATA' : 'REAL API'))
+const apiModeBadge = computed(() => (isMockMode.value ? t('app.apiMode.mock') : t('app.apiMode.real')))
 const apiModeBadgeType = computed(() => (isMockMode.value ? 'warning' : 'success'))
 
 const healthStore = useHealthStore()
@@ -59,7 +51,7 @@ const authStore = useAuthStore()
 const configStore = useConfigStore()
 
 onMounted(() => {
-  healthStore.startPolling(15000)
+  healthStore.startPolling(HEALTH_POLL_INTERVAL_MS)
   authStore.load()
   void configStore.load()
 })
@@ -111,7 +103,17 @@ watch(
 
 const activePath = computed(() => route.path)
 
-const title = computed(() => (route.meta.title as string | undefined) || 'Admin')
+const title = computed(() => {
+  const titleKey = route.meta?.titleKey as string | undefined
+  const rawTitle = route.meta?.title as string | undefined
+  if (titleKey) return t(titleKey)
+  return rawTitle || t('app.titleFallback')
+})
+
+const uiLocale = computed({
+  get: () => locale.value,
+  set: (v: 'en' | 'ru') => setLocale(v),
+})
 
 function navigate(path: string) {
   void router.push({ path, query: { ...route.query } })
@@ -132,7 +134,7 @@ function navigate(path: string) {
           GEO Hub
         </div>
         <div class="brand__subtitle">
-          Admin Console<span v-if="isMockMode"> (prototype)</span>
+          {{ t('app.brand.subtitle') }}<span v-if="isMockMode"> {{ t('app.brand.prototype') }}</span>
         </div>
       </div>
 
@@ -150,13 +152,13 @@ function navigate(path: string) {
           popper-class="geoTooltip geoTooltip--menu"
         >
           <template #content>
-            <span class="geoTooltipText geoTooltipText--clamp2">{{ getTooltipContent(item.tooltipKey) }}</span>
+            <span class="geoTooltipText geoTooltipText--clamp2">{{ getTooltipContent(item.tooltipKey, locale) }}</span>
           </template>
           <el-menu-item
             :index="item.path"
             @click="navigate(item.path)"
           >
-            {{ item.label }}
+            {{ t(item.labelKey) }}
           </el-menu-item>
         </el-tooltip>
       </el-menu>
@@ -166,7 +168,7 @@ function navigate(path: string) {
       <el-header class="header">
         <div class="header__left">
           <el-breadcrumb separator="/">
-            <el-breadcrumb-item>Admin</el-breadcrumb-item>
+            <el-breadcrumb-item>{{ t('app.breadcrumb.admin') }}</el-breadcrumb-item>
             <el-breadcrumb-item>{{ title }}</el-breadcrumb-item>
           </el-breadcrumb>
 
@@ -178,14 +180,14 @@ function navigate(path: string) {
               effect="dark"
             >
               <el-tag type="danger">
-                health error
+                {{ t('app.status.healthError') }}
               </el-tag>
             </el-tooltip>
             <el-tag
               v-else
               type="success"
             >
-              ok
+              {{ t('app.status.ok') }}
             </el-tag>
 
             <el-tooltip
@@ -195,7 +197,7 @@ function navigate(path: string) {
               popper-class="geoTooltip geoTooltip--menu"
             >
               <template #content>
-                <span class="geoTooltipText geoTooltipText--clamp2">API source: {{ apiBaseLabel }}</span>
+                <span class="geoTooltipText geoTooltipText--clamp2">{{ t('app.status.apiSource', { label: apiBaseLabel }) }}</span>
               </template>
               <el-tag
                 :type="apiModeBadgeType"
@@ -209,27 +211,42 @@ function navigate(path: string) {
               v-if="isMockMode"
               type="info"
             >
-              scenario: {{ scenario }}
+              {{ t('app.status.scenario', { scenario }) }}
             </el-tag>
           </div>
         </div>
 
         <div class="header__right">
           <el-select
+            v-model="uiLocale"
+            size="small"
+            style="width: 140px"
+          >
+            <el-option
+              :label="t('app.locale.en')"
+              value="en"
+            />
+            <el-option
+              :label="t('app.locale.ru')"
+              value="ru"
+            />
+          </el-select>
+
+          <el-select
             v-model="authStore.role"
             size="small"
             style="width: 150px"
           >
             <el-option
-              label="admin"
+              :label="t('app.role.admin')"
               value="admin"
             />
             <el-option
-              label="operator"
+              :label="t('app.role.operator')"
               value="operator"
             />
             <el-option
-              label="auditor (read-only)"
+              :label="t('app.role.auditor')"
               value="auditor"
             />
           </el-select>
@@ -269,8 +286,8 @@ function navigate(path: string) {
           <el-switch
             v-model="dark"
             size="small"
-            active-text="Dark"
-            inactive-text="Light"
+            :active-text="t('app.theme.dark')"
+            :inactive-text="t('app.theme.light')"
           />
         </div>
       </el-header>
