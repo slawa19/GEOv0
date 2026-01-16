@@ -1,14 +1,14 @@
 <template>
   <el-alert
     v-if="!analyticsEq"
-    title="Pick an equivalent (not ALL) to inspect clearing cycles."
+    :title="t('graph.analytics.cycles.pickEquivalentTitle')"
     type="info"
     show-icon
     class="mb"
   />
   <el-empty
     v-else-if="selectedCycles.length === 0"
-    description="No cycles found in fixtures"
+    :description="t('graph.analytics.cycles.noneInFixtures')"
   />
 
   <div
@@ -17,8 +17,8 @@
   >
     <div class="hint">
       <TooltipLabel
-        label="Clearing cycles"
-        tooltip-text="Each cycle is a directed loop in the debt graph for the selected equivalent. Clearing reduces each edge by the shown amount."
+        :label="t('graph.analytics.cycles.title')"
+        :tooltip-text="t('graph.analytics.cycles.titleTooltip')"
       />
     </div>
 
@@ -31,8 +31,8 @@
     >
       <div class="cycleTitle">
         <TooltipLabel
-          :label="`Cycle #${idx + 1}`"
-          tooltip-text="A cycle is a set of debts that can be cleared together while preserving net positions (cycle cancelation)."
+          :label="t('graph.analytics.cycles.cycleNumber', { n: idx + 1 })"
+          :tooltip-text="t('graph.analytics.cycles.cycleTooltip')"
         />
       </div>
       <div
@@ -51,6 +51,7 @@
 
 <script setup lang="ts">
 import TooltipLabel from '../../../ui/TooltipLabel.vue'
+import { t } from '../../../i18n/en'
 
 type CycleEdge = { debtor: string; creditor: string; equivalent: string; amount: string }
 

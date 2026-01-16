@@ -47,11 +47,11 @@ function setToggle(key: ToggleKey, value: boolean) {
       />
     </template>
 
-    <div class="toggleGrid">
+    <div class="geoToggleGrid">
       <div
         v-for="item in items"
         :key="item.key"
-        class="toggleLine"
+        class="geoToggleLine"
       >
         <el-switch
           :model-value="modelValue[item.key]"

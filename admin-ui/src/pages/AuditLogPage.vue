@@ -8,6 +8,7 @@ import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { debounce } from '../utils/debounce'
+import { t } from '../i18n/en'
 import type { AuditLogEntry } from '../types/domain'
 
 const loading = ref(false)
@@ -42,8 +43,8 @@ async function load() {
     }
     items.value = data.items
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load audit log'
-    ElMessage.error(error.value || 'Failed to load audit log')
+    error.value = e?.message || t('auditLog.loadFailed')
+    ElMessage.error(error.value || t('auditLog.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -84,14 +85,14 @@ watch(q, () => {
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Audit Log"
+          :label="t('auditLog.title')"
           tooltip-key="nav.auditLog"
         />
         <el-input
           v-model="q"
           size="small"
           clearable
-          placeholder="Filter (Id/Actor/Action/Object/Reason)"
+          :placeholder="t('auditLog.filterPlaceholder')"
           style="width: 320px"
         />
       </div>
@@ -112,7 +113,7 @@ watch(q, () => {
 
     <el-empty
       v-else-if="items.length === 0"
-      description="No audit entries"
+      :description="t('auditLog.none')"
     />
 
     <div v-else>
@@ -130,8 +131,8 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="ID"
-              tooltip-text="Audit log entry id."
+              :label="t('auditLog.id')"
+              :tooltip-text="t('auditLog.tooltip.id')"
             />
           </template>
           <template #default="scope">
@@ -139,7 +140,7 @@ watch(q, () => {
               <TableCellEllipsis :text="scope.row.id" />
               <CopyIconButton
                 :text="String(scope.row.id)"
-                label="Audit ID"
+                :label="t('auditLog.auditId')"
               />
             </span>
           </template>
@@ -151,7 +152,7 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="Timestamp"
+              :label="t('auditLog.timestamp')"
               tooltip-key="audit.timestamp"
             />
           </template>
@@ -163,7 +164,7 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="Actor"
+              :label="t('auditLog.actor')"
               tooltip-key="audit.actor"
             />
           </template>
@@ -178,7 +179,7 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="Role"
+              :label="t('auditLog.role')"
               tooltip-key="audit.role"
             />
           </template>
@@ -193,7 +194,7 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="Action"
+              :label="t('auditLog.action')"
               tooltip-key="audit.action"
             />
           </template>
@@ -208,7 +209,7 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="Object"
+              :label="t('auditLog.object')"
               tooltip-key="audit.objectType"
             />
           </template>
@@ -220,7 +221,7 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="Object ID"
+              :label="t('auditLog.objectId')"
               tooltip-key="audit.objectId"
             />
           </template>
@@ -230,7 +231,7 @@ watch(q, () => {
               <CopyIconButton
                 v-if="scope.row.object_id"
                 :text="scope.row.object_id"
-                label="Object ID"
+                :label="t('auditLog.objectIdCopyLabel')"
               />
             </span>
           </template>
@@ -242,7 +243,7 @@ watch(q, () => {
         >
           <template #header>
             <TooltipLabel
-              label="Reason"
+              :label="t('auditLog.reason')"
               tooltip-key="audit.reason"
             />
           </template>
@@ -254,7 +255,7 @@ watch(q, () => {
 
       <div class="pager">
         <div class="pager__hint">
-          Showing {{ items.length }} / {{ perPage }} on this page
+          {{ t('auditLog.pager.hint', { count: items.length, perPage }) }}
         </div>
         <el-pagination
           v-model:current-page="page"
@@ -270,68 +271,68 @@ watch(q, () => {
 
   <el-drawer
     v-model="drawerOpen"
-    title="Audit entry"
+    :title="t('auditLog.auditEntry')"
     size="45%"
   >
     <div v-if="selected">
       <el-tabs>
-        <el-tab-pane label="Details">
+        <el-tab-pane :label="t('auditLog.details')">
           <el-descriptions
             :column="1"
             border
           >
-            <el-descriptions-item label="ID">
+            <el-descriptions-item :label="t('auditLog.id')">
               <span class="geoInlineRow">
                 <TableCellEllipsis :text="selected.id" />
                 <CopyIconButton
                   :text="String(selected.id)"
-                  label="Audit ID"
+                  :label="t('auditLog.auditId')"
                 />
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Timestamp">
+            <el-descriptions-item :label="t('auditLog.timestamp')">
               {{ selected.timestamp }}
             </el-descriptions-item>
-            <el-descriptions-item label="Actor">
+            <el-descriptions-item :label="t('auditLog.actor')">
               <span class="geoInlineRow">
                 <TableCellEllipsis :text="selected.actor_id" />
-                <span>({{ selected.actor_role || '—' }})</span>
+                <span>({{ selected.actor_role || t('common.na') }})</span>
                 <CopyIconButton
                   v-if="selected.actor_id"
                   :text="String(selected.actor_id)"
-                  label="Actor ID"
+                  :label="t('auditLog.actorId')"
                 />
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Action">
+            <el-descriptions-item :label="t('auditLog.action')">
               {{ selected.action }}
             </el-descriptions-item>
-            <el-descriptions-item label="Object">
+            <el-descriptions-item :label="t('auditLog.object')">
               <span class="geoInlineRow">
-                <span>{{ selected.object_type || '—' }} /</span>
+                <span>{{ selected.object_type || t('common.na') }} /</span>
                 <TableCellEllipsis :text="selected.object_id" />
                 <CopyIconButton
                   v-if="selected.object_id"
                   :text="selected.object_id"
-                  label="Object ID"
+                  :label="t('auditLog.objectIdCopyLabel')"
                 />
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Reason">
+            <el-descriptions-item :label="t('auditLog.reason')">
               {{ selected.reason }}
             </el-descriptions-item>
-            <el-descriptions-item label="Request ID">
+            <el-descriptions-item :label="t('auditLog.requestId')">
               {{ selected.request_id }}
             </el-descriptions-item>
-            <el-descriptions-item label="IP Address">
+            <el-descriptions-item :label="t('auditLog.ipAddress')">
               {{ selected.ip_address }}
             </el-descriptions-item>
           </el-descriptions>
         </el-tab-pane>
-        <el-tab-pane label="Before">
+        <el-tab-pane :label="t('auditLog.before')">
           <pre class="json">{{ JSON.stringify(selected.before_state, null, 2) }}</pre>
         </el-tab-pane>
-        <el-tab-pane label="After">
+        <el-tab-pane :label="t('auditLog.after')">
           <pre class="json">{{ JSON.stringify(selected.after_state, null, 2) }}</pre>
         </el-tab-pane>
       </el-tabs>

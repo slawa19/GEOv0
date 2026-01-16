@@ -1,5 +1,7 @@
 import { assertSuccess, type ApiEnvelope, ApiException } from './envelope'
+import { toastApiError } from './errorToast'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
+import { z, type ZodTypeAny } from 'zod'
 import type {
   AuditLogEntry,
   ClearingCycles,
@@ -17,6 +19,165 @@ const DEFAULT_DEV_ADMIN_TOKEN = 'dev-admin-token-change-me'
 const DEFAULT_DEV_BASE_URL = 'http://127.0.0.1:18000'
 
 let warnedDefaultDevToken = false
+
+function safeJsonPreview(value: unknown, maxLen = 500): string | null {
+  try {
+    return JSON.stringify(value).slice(0, maxLen)
+  } catch {
+    return null
+  }
+}
+
+const ParticipantSchema = z
+  .object({
+    pid: z.string(),
+    display_name: z.string(),
+    type: z.string(),
+    status: z.string(),
+    created_at: z.string().optional(),
+    meta: z.record(z.string(), z.unknown()).optional(),
+  })
+  .passthrough()
+
+const TrustlineSchema = z
+  .object({
+    equivalent: z.string(),
+    from: z.string(),
+    to: z.string(),
+    from_display_name: z.string().nullable().optional(),
+    to_display_name: z.string().nullable().optional(),
+    limit: z.string(),
+    used: z.string(),
+    available: z.string(),
+    status: z.string(),
+    created_at: z.string(),
+    policy: z.record(z.string(), z.unknown()).optional(),
+  })
+  .passthrough()
+
+const IncidentSchema = z
+  .object({
+    tx_id: z.string(),
+    state: z.string(),
+    initiator_pid: z.string(),
+    equivalent: z.string(),
+    age_seconds: z.number(),
+    sla_seconds: z.number(),
+    created_at: z.string().optional(),
+  })
+  .passthrough()
+
+const EquivalentSchema = z
+  .object({
+    code: z.string(),
+    precision: z.number(),
+    description: z.string(),
+    is_active: z.boolean(),
+  })
+  .passthrough()
+
+const DebtSchema = z
+  .object({
+    equivalent: z.string(),
+    debtor: z.string(),
+    creditor: z.string(),
+    amount: z.string(),
+  })
+  .passthrough()
+
+const AuditLogEntrySchema = z
+  .object({
+    id: z.string(),
+    timestamp: z.string(),
+    actor_id: z.string(),
+    actor_role: z.string(),
+    action: z.string(),
+    object_type: z.string(),
+    object_id: z.string(),
+    reason: z.string().nullable().optional(),
+    before_state: z.unknown().optional(),
+    after_state: z.unknown().optional(),
+    request_id: z.string().optional(),
+    ip_address: z.string().optional(),
+  })
+  .passthrough()
+
+const TransactionSchema = z
+  .object({
+    id: z.string().optional(),
+    tx_id: z.string(),
+    idempotency_key: z.string().nullable().optional(),
+    type: z.string(),
+    initiator_pid: z.string(),
+    payload: z.record(z.string(), z.unknown()),
+    signatures: z.array(z.unknown()).nullable().optional(),
+    state: z.string(),
+    error: z.record(z.string(), z.unknown()).nullable().optional(),
+    created_at: z.string(),
+    updated_at: z.string(),
+  })
+  .passthrough()
+
+const GraphSnapshotSchema = z
+  .object({
+    participants: z.array(ParticipantSchema),
+    trustlines: z.array(TrustlineSchema),
+    incidents: z.array(IncidentSchema),
+    equivalents: z.array(EquivalentSchema),
+    debts: z.array(DebtSchema),
+    audit_log: z.array(AuditLogEntrySchema),
+    transactions: z.array(TransactionSchema),
+  })
+  .passthrough()
+
+const ClearingCycleEdgeSchema = z
+  .object({
+    equivalent: z.string(),
+    debtor: z.string(),
+    creditor: z.string(),
+    amount: z.string(),
+  })
+  .passthrough()
+
+const ClearingCyclesSchema = z
+  .object({
+    equivalents: z.record(
+      z.string(),
+      z
+        .object({
+          cycles: z.array(z.array(ClearingCycleEdgeSchema)),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough()
+
+const BalanceRowSchema = z
+  .object({
+    equivalent: z.string(),
+    outgoing_limit: z.string(),
+    outgoing_used: z.string(),
+    incoming_limit: z.string(),
+    incoming_used: z.string(),
+    total_debt: z.string(),
+    total_credit: z.string(),
+    net: z.string(),
+  })
+  .passthrough()
+
+const ParticipantMetricsSchema = z
+  .object({
+    pid: z.string(),
+    equivalent: z.string().nullable(),
+    balance_rows: z.array(BalanceRowSchema),
+    counterparty: z.unknown().nullable().optional(),
+    concentration: z.unknown().nullable().optional(),
+    distribution: z.unknown().nullable().optional(),
+    rank: z.unknown().nullable().optional(),
+    capacity: z.unknown().nullable().optional(),
+    activity: z.unknown().nullable().optional(),
+  })
+  .passthrough()
 
 function isProdBuild(): boolean {
   const forced = (globalThis as any)?.__GEO_ADMINUI_FORCE_PROD__
@@ -121,81 +282,142 @@ export async function requestJson<T>(
     body?: unknown
     headers?: Record<string, string>
     admin?: boolean
+    timeoutMs?: number
+    schema?: ZodTypeAny
+    toast?: boolean
   },
 ): Promise<ApiEnvelope<T>> {
   const method = opts?.method || 'GET'
   const url = `${baseUrl()}${pathname}`
 
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    ...(opts?.body ? { 'Content-Type': 'application/json' } : {}),
-    ...(opts?.headers || {}),
-  }
-
-  if (opts?.admin) {
-    const tok = adminToken()
-    if (tok) headers['X-Admin-Token'] = tok
-  }
-
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: opts?.body ? JSON.stringify(opts.body) : undefined,
-  })
-
-  // The backend might already return ApiEnvelope. If not, adapt here.
-  const text = await res.text()
-  let parsed: unknown = undefined
   try {
-    parsed = text ? JSON.parse(text) : undefined
-  } catch {
-    parsed = undefined
-  }
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      ...(opts?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(opts?.headers || {}),
+    }
 
-  // If backend claims OK but returns empty/invalid JSON, fail loudly.
-  if (res.ok && (!text || parsed === undefined || parsed === null)) {
-    throw new ApiException({
-      status: res.status,
-      code: 'INVALID_JSON',
-      message: `${method} ${url} -> ${res.status}: Invalid/empty JSON response`,
-      details: {
-        url,
+    if (opts?.admin) {
+      const tok = adminToken()
+      if (tok) headers['X-Admin-Token'] = tok
+    }
+
+    const timeoutMs = typeof opts?.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : undefined
+    const controller = timeoutMs !== undefined ? new AbortController() : undefined
+    const timeoutId: ReturnType<typeof setTimeout> | undefined =
+      controller && timeoutMs !== undefined && timeoutMs > 0
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : undefined
+
+    let res: Response
+    try {
+      res = await fetch(url, {
         method,
-        status: res.status,
-        status_text: (res.statusText || '').trim(),
-        body_preview: (text || '').slice(0, 500),
-      },
-    })
-  }
+        headers,
+        body: opts?.body ? JSON.stringify(opts.body) : undefined,
+        signal: controller?.signal,
+      })
+    } catch (err) {
+      if (timeoutId) clearTimeout(timeoutId)
+      const isAbort = controller?.signal.aborted || (err instanceof Error && /abort/i.test(err.name))
+      if (isAbort) {
+        throw new ApiException({
+          status: 0,
+          code: 'TIMEOUT',
+          message: `${method} ${url} -> timeout after ${timeoutMs}ms`,
+          details: {
+            url,
+            method,
+            timeout_ms: timeoutMs,
+          },
+        })
+      }
+      throw err
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId)
+    }
 
-  if (res.ok && parsed && typeof parsed === 'object' && 'success' in (parsed as any)) {
-    return parsed as ApiEnvelope<T>
-  }
+    // The backend might already return ApiEnvelope. If not, adapt here.
+    const text = await res.text()
+    let parsed: unknown = undefined
+    try {
+      parsed = text ? JSON.parse(text) : undefined
+    } catch {
+      parsed = undefined
+    }
 
-  if (!res.ok) {
-    const msg = (parsed as any)?.error?.message || (parsed as any)?.message || `HTTP ${res.status}`
-    const code = (parsed as any)?.error?.code || (parsed as any)?.code || 'HTTP_ERROR'
-    const details = (parsed as any)?.error?.details || (parsed as any)?.details
-    const statusText = (res.statusText || '').trim()
-    const decorated = `${method} ${url} -> ${res.status}${statusText ? ` ${statusText}` : ''}: ${msg}`
-    throw new ApiException({
-      status: res.status,
-      code,
-      message: decorated,
-      details: {
-        url,
-        method,
+    // If backend claims OK but returns empty/invalid JSON, fail loudly.
+    if (res.ok && (!text || parsed === undefined || parsed === null)) {
+      throw new ApiException({
         status: res.status,
-        status_text: statusText,
+        code: 'INVALID_JSON',
+        message: `${method} ${url} -> ${res.status}: Invalid/empty JSON response`,
+        details: {
+          url,
+          method,
+          status: res.status,
+          status_text: (res.statusText || '').trim(),
+          body_preview: (text || '').slice(0, 500),
+        },
+      })
+    }
+
+    let env: ApiEnvelope<T>
+    if (res.ok && parsed && typeof parsed === 'object' && 'success' in (parsed as any)) {
+      env = parsed as ApiEnvelope<T>
+    } else if (!res.ok) {
+      const msg = (parsed as any)?.error?.message || (parsed as any)?.message || `HTTP ${res.status}`
+      const code = (parsed as any)?.error?.code || (parsed as any)?.code || 'HTTP_ERROR'
+      const details = (parsed as any)?.error?.details || (parsed as any)?.details
+      const statusText = (res.statusText || '').trim()
+      const decorated = `${method} ${url} -> ${res.status}${statusText ? ` ${statusText}` : ''}: ${msg}`
+      throw new ApiException({
+        status: res.status,
         code,
-        message: msg,
-        details,
-      },
-    })
-  }
+        message: decorated,
+        details: {
+          url,
+          method,
+          status: res.status,
+          status_text: statusText,
+          code,
+          message: msg,
+          details,
+        },
+      })
+    } else {
+      // If backend returns raw payload (non-envelope), wrap it.
+      env = { success: true, data: parsed as T }
+    }
 
-  // If backend returns raw payload (non-envelope), wrap it.
-  return { success: true, data: parsed as T }
+    const schema = opts?.schema
+    if (schema && env.success) {
+      const validated = schema.safeParse(env.data)
+      if (!validated.success) {
+        throw new ApiException({
+          status: res.status,
+          code: 'INVALID_RESPONSE',
+          message: `${method} ${url} -> ${res.status}: Response JSON does not match expected schema`,
+          details: {
+            url,
+            method,
+            status: res.status,
+            issues: validated.error.issues,
+            data_preview: safeJsonPreview(env.data),
+          },
+        })
+      }
+
+      env = { ...env, data: validated.data as T }
+    }
+
+    return env
+  } catch (err) {
+    if (opts?.toast !== false) {
+      void toastApiError(err, { fallbackTitle: `${method} ${pathname} failed` })
+    }
+    throw err
+  }
 }
 
 function bestEffortTotal(page: number, perPage: number, itemsLen: number): number {
@@ -486,7 +708,7 @@ export const realApi = {
   },
 
   graphSnapshot(): Promise<ApiEnvelope<GraphSnapshot>> {
-    return requestJson<GraphSnapshot>('/api/v1/admin/graph/snapshot', { admin: true }).then((r) => {
+    return requestJson<GraphSnapshot>('/api/v1/admin/graph/snapshot', { admin: true, schema: GraphSnapshotSchema }).then((r) => {
       const s = assertSuccess(r)
       const participants = (s.participants || []).map((p) => ({
         ...p,
@@ -501,7 +723,10 @@ export const realApi = {
     const depth = params?.depth ?? 1
     const equivalent = String(params?.equivalent || '').trim()
     const status = (params?.status || []).map((s) => String(s || '').trim()).filter(Boolean)
-    return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status }), { admin: true }).then((r) => {
+    return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status }), {
+      admin: true,
+      schema: GraphSnapshotSchema,
+    }).then((r) => {
       const s = assertSuccess(r)
       const participants = (s.participants || []).map((p) => ({
         ...p,
@@ -513,7 +738,10 @@ export const realApi = {
 
   clearingCycles(params?: { participant_pid?: string }): Promise<ApiEnvelope<ClearingCycles>> {
     const participant_pid = String(params?.participant_pid || '').trim()
-    return requestJson<ClearingCycles>(buildQuery('/api/v1/admin/clearing/cycles', { participant_pid }), { admin: true })
+    return requestJson<ClearingCycles>(buildQuery('/api/v1/admin/clearing/cycles', { participant_pid }), {
+      admin: true,
+      schema: ClearingCyclesSchema,
+    })
   },
 
   async participantMetrics(
@@ -526,6 +754,6 @@ export const realApi = {
 
     const pathname = `/api/v1/admin/participants/${encodeURIComponent(pid)}/metrics`
     const url = buildQuery(pathname, { equivalent: eq, threshold: Number.isFinite(threshold) ? threshold : undefined })
-    return await requestJson<ParticipantMetrics>(url, { admin: true })
+    return await requestJson<ParticipantMetrics>(url, { admin: true, schema: ParticipantMetricsSchema })
   },
 }

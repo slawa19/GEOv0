@@ -11,6 +11,7 @@ import { formatIsoInTimeZone } from '../utils/datetime'
 import { useConfigStore } from '../stores/config'
 import { useAuthStore } from '../stores/auth'
 import type { Incident } from '../types/domain'
+import { t } from '../i18n/en'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -34,7 +35,7 @@ const authStore = useAuthStore()
 const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
 
 function fmtTs(iso: string | undefined): string {
-  if (!iso) return '—'
+  if (!iso) return t('common.na')
   return formatIsoInTimeZone(iso, timeZone.value)
 }
 
@@ -59,8 +60,8 @@ async function load() {
     }
     items.value = data.items
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load incidents'
-    ElMessage.error(error.value || 'Failed to load incidents')
+    error.value = e?.message || t('incidents.loadFailed')
+    ElMessage.error(error.value || t('incidents.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -72,16 +73,16 @@ function isOverSla(row: Incident): boolean {
 
 async function forceAbort(row: Incident) {
   if (authStore.isReadOnly) {
-    ElMessage.error('Read-only role: abort is disabled')
+    ElMessage.error(t('incidents.readOnlyAbortDisabled'))
     return
   }
   let reason: string
   try {
-    reason = await ElMessageBox.prompt('Reason for abort (required)', 'Force abort transaction', {
-      confirmButtonText: 'Abort',
-      cancelButtonText: 'Cancel',
-      inputPlaceholder: 'e.g. stuck prepare, manual intervention',
-      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : 'reason is required'),
+    reason = await ElMessageBox.prompt(t('incidents.abort.reasonRequired'), t('incidents.abort.title'), {
+      confirmButtonText: t('common.abort'),
+      cancelButtonText: t('common.cancel'),
+      inputPlaceholder: t('incidents.abort.reasonPlaceholder'),
+      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
       type: 'warning',
     }).then((r) => r.value)
   } catch {
@@ -91,11 +92,11 @@ async function forceAbort(row: Incident) {
   abortingTxId.value = row.tx_id
   try {
     assertSuccess(await api.abortTx(row.tx_id, reason))
-    ElMessage.success(`Aborted ${row.tx_id}`)
+    ElMessage.success(t('incidents.aborted', { txId: row.tx_id }))
     lastAbortTxId.value = row.tx_id
     drawerOpen.value = false
   } catch (e: any) {
-    ElMessage.error(e?.message || 'Abort failed')
+    ElMessage.error(e?.message || t('incidents.abortFailed'))
   } finally {
     abortingTxId.value = null
   }
@@ -133,7 +134,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Incidents"
+          :label="t('incidents.title')"
           tooltip-key="nav.incidents"
         />
         <el-tooltip
@@ -144,11 +145,11 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         >
           <template #content>
             <span class="geoTooltipText geoTooltipText--clamp2">
-              Incidents whose Age is greater than SLA (on this page).
+              {{ t('incidents.slaTooltip') }}
             </span>
           </template>
           <el-tag type="warning">
-            SLA breaches: {{ overSlaCount }}
+            {{ t('incidents.slaBreaches', { n: overSlaCount }) }}
           </el-tag>
         </el-tooltip>
       </div>
@@ -166,17 +167,17 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       type="success"
       show-icon
       class="mb"
-      title="Abort completed"
+      :title="t('incidents.abortCompleted')"
     >
       <template #default>
         <div class="okrow">
-          <div>Audit entry should be available for {{ lastAbortTxId }}.</div>
+          <div>{{ t('incidents.auditEntryAvailableFor', { txId: lastAbortTxId }) }}</div>
           <el-button
             size="small"
             type="primary"
             @click="goAudit(lastAbortTxId)"
           >
-            Open audit log
+            {{ t('incidents.openAuditLog') }}
           </el-button>
         </div>
       </template>
@@ -189,7 +190,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
 
     <el-empty
       v-else-if="items.length === 0"
-      description="No incidents"
+      :description="t('incidents.none')"
     />
 
     <div v-else>
@@ -206,7 +207,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         >
           <template #header>
             <TooltipLabel
-              label="Tx ID"
+              :label="t('incidents.columns.txId')"
               tooltip-key="incidents.txId"
             />
           </template>
@@ -215,7 +216,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
               <TableCellEllipsis :text="scope.row.tx_id" />
               <CopyIconButton
                 :text="scope.row.tx_id"
-                label="Tx ID"
+                :label="t('incidents.columns.txId')"
               />
             </span>
           </template>
@@ -226,7 +227,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         >
           <template #header>
             <TooltipLabel
-              label="State"
+              :label="t('incidents.columns.state')"
               tooltip-key="incidents.state"
             />
           </template>
@@ -245,7 +246,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         >
           <template #header>
             <TooltipLabel
-              label="Initiator"
+              :label="t('incidents.columns.initiator')"
               tooltip-key="incidents.initiator"
             />
           </template>
@@ -254,7 +255,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
               <TableCellEllipsis :text="scope.row.initiator_pid" />
               <CopyIconButton
                 :text="scope.row.initiator_pid"
-                label="Initiator PID"
+                :label="t('incidents.columns.initiatorPid')"
               />
             </span>
           </template>
@@ -265,7 +266,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         >
           <template #header>
             <TooltipLabel
-              label="Equivalent"
+              :label="t('incidents.columns.equivalent')"
               tooltip-key="incidents.eq"
             />
           </template>
@@ -281,7 +282,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         >
           <template #header>
             <TooltipLabel
-              label="Age"
+              :label="t('incidents.columns.age')"
               tooltip-key="incidents.age"
             />
           </template>
@@ -295,7 +296,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         >
           <template #header>
             <TooltipLabel
-              label="SLA"
+              :label="t('incidents.columns.sla')"
               tooltip-key="incidents.sla"
             />
           </template>
@@ -303,10 +304,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
             {{ fmtAge(scope.row.sla_seconds) }}
           </template>
         </el-table-column>
-        <el-table-column
-          label="Actions"
-          width="140"
-        >
+        <el-table-column :label="t('common.actions')" width="140">
           <template #default="scope">
             <el-button
               size="small"
@@ -315,7 +313,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
               :disabled="authStore.isReadOnly"
               @click.stop="forceAbort(scope.row)"
             >
-              Force abort
+              {{ t('incidents.forceAbort') }}
             </el-button>
           </template>
         </el-table-column>
@@ -323,7 +321,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
 
       <div class="pager">
         <div class="pager__hint geoHint">
-          Showing {{ items.length }} / {{ perPage }} on this page
+          {{ t('incidents.pager.hint', { count: items.length, perPage }) }}
         </div>
         <el-pagination
           v-model:current-page="page"
@@ -339,7 +337,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
 
   <el-drawer
     v-model="drawerOpen"
-    title="Incident details"
+    :title="t('incidents.drawer.title')"
     size="45%"
   >
     <div v-if="selected">
@@ -347,16 +345,16 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
         :column="1"
         border
       >
-        <el-descriptions-item label="Transaction ID">
+        <el-descriptions-item :label="t('incidents.drawer.transactionId')">
           <span class="geoInlineRow">
             <TableCellEllipsis :text="selected.tx_id" />
             <CopyIconButton
               :text="selected.tx_id"
-              label="Tx ID"
+              :label="t('incidents.columns.txId')"
             />
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="State">
+        <el-descriptions-item :label="t('incidents.columns.state')">
           <el-tag
             type="warning"
             size="small"
@@ -364,7 +362,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
             {{ selected.state }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Initiator PID">
+        <el-descriptions-item :label="t('incidents.columns.initiatorPid')">
           <span class="geoInlineRow">
             <el-link
               type="primary"
@@ -374,11 +372,11 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
             </el-link>
             <CopyIconButton
               :text="selected.initiator_pid"
-              label="Initiator PID"
+              :label="t('incidents.columns.initiatorPid')"
             />
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Equivalent">
+        <el-descriptions-item :label="t('incidents.columns.equivalent')">
           <el-link
             type="primary"
             @click="goEquivalent(selected.equivalent)"
@@ -386,25 +384,25 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
             {{ selected.equivalent }}
           </el-link>
         </el-descriptions-item>
-        <el-descriptions-item label="Age">
+        <el-descriptions-item :label="t('incidents.columns.age')">
           <span :class="{ bad: isOverSla(selected) }">{{ fmtAge(selected.age_seconds) }}</span>
           <span
             v-if="isOverSla(selected)"
             class="sla-warn"
-          > (over SLA!)</span>
+          > {{ t('incidents.overSla') }}</span>
         </el-descriptions-item>
-        <el-descriptions-item label="SLA">
+        <el-descriptions-item :label="t('incidents.columns.sla')">
           {{ fmtAge(selected.sla_seconds) }}
         </el-descriptions-item>
         <el-descriptions-item
           v-if="selected.created_at"
-          label="Created At"
+          :label="t('incidents.createdAt')"
         >
           {{ fmtTs(selected.created_at) }}
         </el-descriptions-item>
       </el-descriptions>
 
-      <el-divider>Related data</el-divider>
+      <el-divider>{{ t('incidents.drawer.relatedData') }}</el-divider>
 
       <div class="drawer-actions">
         <el-button
@@ -412,17 +410,17 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
           size="small"
           @click="goParticipant(selected.initiator_pid)"
         >
-          View initiator participant
+          {{ t('incidents.drawer.viewInitiator') }}
         </el-button>
         <el-button
           size="small"
           @click="goAudit(selected.tx_id)"
         >
-          View audit log
+          {{ t('incidents.drawer.viewAuditLog') }}
         </el-button>
       </div>
 
-      <el-divider>Actions</el-divider>
+      <el-divider>{{ t('common.actions') }}</el-divider>
 
       <div class="drawer-actions">
         <el-button
@@ -430,7 +428,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
           :loading="abortingTxId === selected.tx_id"
           @click="forceAbort(selected)"
         >
-          Force abort transaction
+          {{ t('incidents.drawer.forceAbortTransaction') }}
         </el-button>
       </div>
     </div>

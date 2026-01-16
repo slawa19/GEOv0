@@ -7,6 +7,7 @@ import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import { t } from '../i18n/en'
 
 type RowKind = 'boolean' | 'number' | 'string' | 'json'
 type Row = { key: string; kind: RowKind; value: unknown }
@@ -92,7 +93,7 @@ async function load() {
     original.value = { ...cfg }
     rows.value = toRows(cfg)
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load config'
+    error.value = e?.message || t('config.loadFailed')
   } finally {
     loading.value = false
   }
@@ -120,12 +121,12 @@ const dirtyKeys = computed(() => {
 
 async function save() {
   if (authStore.isReadOnly) {
-    ElMessage.error('Read-only role: updates are disabled')
+    ElMessage.error(t('common.readOnlyUpdatesDisabled'))
     return
   }
   const keys = dirtyKeys.value
   if (keys.length === 0) {
-    ElMessage.info('No changes')
+    ElMessage.info(t('common.noChanges'))
     return
   }
 
@@ -143,7 +144,7 @@ async function save() {
         try {
           patch[k] = JSON.parse(String(r.value))
         } catch {
-          ElMessage.error(`Invalid JSON for ${k}`)
+              ElMessage.error(t('config.invalidJsonForKey', { key: k }))
           return
         }
       } else {
@@ -152,10 +153,10 @@ async function save() {
     }
 
     assertSuccess(await api.patchConfig(patch))
-    ElMessage.success(`Saved (${keys.length} keys)`)
+    ElMessage.success(t('config.savedKeys', { n: keys.length }))
     await load()
   } catch (e: any) {
-    ElMessage.error(e?.message || 'Save failed')
+    ElMessage.error(e?.message || t('config.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -177,7 +178,7 @@ watch(
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Config"
+          :label="t('config.title')"
           tooltip-key="nav.config"
         />
         <div class="hdr__actions">
@@ -185,11 +186,11 @@ watch(
             v-model="filterKey"
             size="small"
             clearable
-            placeholder="Filter by Key"
+            :placeholder="t('config.filterByKeyPlaceholder')"
             style="width: 260px"
           />
           <el-tag type="info">
-            Dirty: {{ dirtyKeys.length }}
+            {{ t('common.dirtyCount', { n: dirtyKeys.length }) }}
           </el-tag>
           <el-button
             :disabled="authStore.isReadOnly || dirtyKeys.length === 0"
@@ -197,7 +198,7 @@ watch(
             type="primary"
             @click="save"
           >
-            Save
+            {{ t('common.save') }}
           </el-button>
         </div>
       </div>
@@ -225,7 +226,7 @@ watch(
       >
         <el-table-column
           prop="key"
-          label="Key"
+          :label="t('config.columns.key')"
           width="420"
           show-overflow-tooltip
         >
@@ -237,7 +238,7 @@ watch(
         </el-table-column>
 
         <el-table-column
-          label="Scope"
+          :label="t('config.columns.scope')"
           width="140"
         >
           <template #default="scope">
@@ -255,12 +256,12 @@ watch(
             <span
               v-else
               class="geoHint"
-            >—</span>
+            >{{ t('common.na') }}</span>
           </template>
         </el-table-column>
 
         <el-table-column
-          label="Value"
+          :label="t('common.value')"
           min-width="420"
         >
           <template #default="scope">
@@ -269,7 +270,7 @@ watch(
                 <span
                   class="cfgBoolLabel"
                   :class="{ 'cfgBoolLabel--active': scope.row.value === false }"
-                >false</span>
+                >{{ t('common.false') }}</span>
                 <el-switch
                   v-model="scope.row.value"
                   :disabled="isKeyReadOnly(scope.row.key)"
@@ -277,7 +278,7 @@ watch(
                 <span
                   class="cfgBoolLabel"
                   :class="{ 'cfgBoolLabel--active': scope.row.value === true }"
-                >true</span>
+                >{{ t('common.true') }}</span>
               </template>
 
               <el-input-number
@@ -298,7 +299,7 @@ watch(
                   allow-create
                   default-first-option
                   class="cfgSelect"
-                  placeholder="INFO"
+                  :placeholder="t('config.logLevelPlaceholder')"
                 >
                   <el-option
                     v-for="opt in LOG_LEVEL_OPTIONS"
@@ -313,7 +314,7 @@ watch(
                   v-model="scope.row.value"
                   :disabled="isKeyReadOnly(scope.row.key)"
                   size="small"
-                  placeholder="value"
+                  :placeholder="t('common.valuePlaceholder')"
                   class="cfgText"
                 />
               </template>
@@ -325,7 +326,7 @@ watch(
                 size="small"
                 type="textarea"
                 :rows="2"
-                placeholder="JSON (stringified)"
+                :placeholder="t('config.jsonStringifiedPlaceholder')"
                 class="cfgJson"
               />
 
@@ -334,14 +335,14 @@ watch(
                 size="small"
                 type="info"
               >
-                Read-only
+                {{ t('common.readOnly') }}
               </el-tag>
             </div>
           </template>
         </el-table-column>
       </el-table>
       <div class="count">
-        Showing {{ visibleRows.length }} / {{ rows.length }} keys
+        {{ t('config.showingKeys', { shown: visibleRows.length, total: rows.length }) }}
       </div>
     </div>
   </el-card>

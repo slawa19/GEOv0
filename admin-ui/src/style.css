@@ -89,6 +89,53 @@ body {
   max-width: 360px;
 }
 
+/* Compact toggle lists (switch + label) */
+.geoToggleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  align-items: center;
+}
+
+@media (max-width: 520px) {
+  .geoToggleGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.geoToggleLine {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 1px 6px;
+  min-height: 24px;
+  border-radius: 8px;
+}
+
+.geoToggleLine:hover {
+  background: var(--el-fill-color-light);
+}
+
+.geoToggleLine :is(.el-switch) {
+  flex: 0 0 auto;
+}
+
+/* TooltipLabel inside compact toggle rows */
+.geoToggleLine :is(.tl) {
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+}
+
+.geoToggleLine :is(.tl__label) {
+  display: inline-block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;

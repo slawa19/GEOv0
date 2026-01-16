@@ -1,15 +1,15 @@
 <template>
   <div class="hint">
-    Derived from visible graph edges (incoming/outgoing trustlines).
+    {{ t('graph.hint.connectionsDerivedFromEdges') }}
   </div>
 
   <el-empty
     v-if="selectedConnectionsIncoming.length + selectedConnectionsOutgoing.length === 0"
-    description="No connections in current view"
+    :description="t('graph.analytics.connections.noneInView')"
   />
 
   <div v-else>
-    <el-divider>Incoming (owed to you)</el-divider>
+    <el-divider>{{ t('graph.common.incomingOwedToYou') }}</el-divider>
     <div class="tableTop">
       <el-pagination
         v-model:current-page="incomingPage"
@@ -32,7 +32,7 @@
       @row-click="onConnectionRowClick"
     >
       <el-table-column
-        label="Counterparty"
+        :label="t('graph.analytics.connections.columns.counterparty')"
         min-width="220"
       >
         <template #default="{ row }">
@@ -45,16 +45,16 @@
       </el-table-column>
       <el-table-column
         prop="equivalent"
-        label="Eq"
+        :label="t('graph.analytics.connections.columns.eq')"
         width="80"
       />
       <el-table-column
         prop="status"
-        label="Status"
+        :label="t('common.status')"
         width="90"
       />
       <el-table-column
-        label="Available"
+        :label="t('trustlines.available')"
         width="120"
       >
         <template #default="{ row }">
@@ -62,7 +62,7 @@
         </template>
       </el-table-column>
       <el-table-column
-        label="Used"
+        :label="t('trustlines.used')"
         width="120"
       >
         <template #default="{ row }">
@@ -70,7 +70,7 @@
         </template>
       </el-table-column>
       <el-table-column
-        label="Limit"
+        :label="t('trustlines.limit')"
         width="120"
       >
         <template #default="{ row }">
@@ -79,7 +79,7 @@
       </el-table-column>
     </el-table>
 
-    <el-divider>Outgoing (you owe)</el-divider>
+    <el-divider>{{ t('graph.common.outgoingYouOwe') }}</el-divider>
     <div class="tableTop">
       <el-pagination
         v-model:current-page="outgoingPage"
@@ -102,7 +102,7 @@
       @row-click="onConnectionRowClick"
     >
       <el-table-column
-        label="Counterparty"
+        :label="t('graph.analytics.connections.columns.counterparty')"
         min-width="220"
       >
         <template #default="{ row }">
@@ -115,16 +115,16 @@
       </el-table-column>
       <el-table-column
         prop="equivalent"
-        label="Eq"
+        :label="t('graph.analytics.connections.columns.eq')"
         width="80"
       />
       <el-table-column
         prop="status"
-        label="Status"
+        :label="t('common.status')"
         width="90"
       />
       <el-table-column
-        label="Available"
+        :label="t('trustlines.available')"
         width="120"
       >
         <template #default="{ row }">
@@ -132,7 +132,7 @@
         </template>
       </el-table-column>
       <el-table-column
-        label="Used"
+        :label="t('trustlines.used')"
         width="120"
       >
         <template #default="{ row }">
@@ -140,7 +140,7 @@
         </template>
       </el-table-column>
       <el-table-column
-        label="Limit"
+        :label="t('trustlines.limit')"
         width="120"
       >
         <template #default="{ row }">
@@ -152,6 +152,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../../i18n/en'
+
 export type ConnectionRow = {
   direction: 'incoming' | 'outgoing'
   counterparty_pid: string

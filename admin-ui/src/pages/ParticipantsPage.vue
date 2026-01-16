@@ -11,6 +11,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useAuthStore } from '../stores/auth'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
+import { t } from '../i18n/en'
 import type { Participant } from '../types/domain'
 
 const router = useRouter()
@@ -54,8 +55,8 @@ async function load() {
     }
     items.value = data.items
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load participants'
-    void toastApiError(e, { fallbackTitle: error.value || 'Failed to load participants' })
+    error.value = e?.message || t('participant.loadFailed')
+    void toastApiError(e, { fallbackTitle: error.value || t('participant.loadFailed') })
   } finally {
     loading.value = false
   }
@@ -63,11 +64,11 @@ async function load() {
 
 async function promptReason(title: string): Promise<string | null> {
   try {
-    const r = await ElMessageBox.prompt('Reason (required)', title, {
-      confirmButtonText: 'Confirm',
-      cancelButtonText: 'Cancel',
-      inputPlaceholder: 'e.g. suspicious activity, compliance hold',
-      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : 'reason is required'),
+    const r = await ElMessageBox.prompt(t('common.reasonRequired'), title, {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+      inputPlaceholder: t('participant.prompt.reasonPlaceholder'),
+      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
       type: 'warning',
     })
     return r.value
@@ -81,10 +82,10 @@ async function freeze(row: Participant) {
   if (!reason) return
   try {
     assertSuccess(await api.freezeParticipant(row.pid, reason))
-    ElMessage.success(`Frozen ${row.pid}`)
+    ElMessage.success(t('participant.frozen', { pid: row.pid }))
     await load()
   } catch (e: any) {
-    void toastApiError(e, { fallbackTitle: e?.message || 'Freeze failed' })
+    void toastApiError(e, { fallbackTitle: e?.message || t('participant.freezeFailed') })
   }
 }
 
@@ -93,10 +94,10 @@ async function unfreeze(row: Participant) {
   if (!reason) return
   try {
     assertSuccess(await api.unfreezeParticipant(row.pid, reason))
-    ElMessage.success(`Unfrozen ${row.pid}`)
+    ElMessage.success(t('participant.unfrozen', { pid: row.pid }))
     await load()
   } catch (e: any) {
-    void toastApiError(e, { fallbackTitle: e?.message || 'Unfreeze failed' })
+    void toastApiError(e, { fallbackTitle: e?.message || t('participant.unfreezeFailed') })
   }
 }
 
@@ -135,17 +136,17 @@ watch([q, status, type], () => {
 })
 
 const statusOptions = computed(() => [
-  { label: 'Any status', value: '' },
-  { label: 'active', value: 'active' },
-  { label: 'frozen', value: 'frozen' },
-  { label: 'banned', value: 'banned' },
+  { label: t('participant.status.any'), value: '' },
+  { label: t('participant.status.active'), value: 'active' },
+  { label: t('participant.status.frozen'), value: 'frozen' },
+  { label: t('participant.status.banned'), value: 'banned' },
 ])
 
 const typeOptions = computed(() => [
-  { label: 'Any type', value: '' },
-  { label: 'person', value: 'person' },
-  { label: 'business', value: 'business' },
-  { label: 'hub', value: 'hub' },
+  { label: t('participant.type.any'), value: '' },
+  { label: t('participant.type.person'), value: 'person' },
+  { label: t('participant.type.business'), value: 'business' },
+  { label: t('participant.type.hub'), value: 'hub' },
 ])
 </script>
 
@@ -154,14 +155,14 @@ const typeOptions = computed(() => [
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Participants"
+          :label="t('participant.title')"
           tooltip-key="nav.participants"
         />
         <div class="filters">
           <el-input
             v-model="q"
             size="small"
-            placeholder="Search PID / name"
+            :placeholder="t('participant.filter.searchPlaceholder')"
             clearable
             style="width: 240px"
           />
@@ -169,7 +170,7 @@ const typeOptions = computed(() => [
             v-model="type"
             size="small"
             style="width: 140px"
-            placeholder="Type"
+            :placeholder="t('participant.filter.typePlaceholder')"
           >
             <el-option
               v-for="o in typeOptions"
@@ -182,7 +183,7 @@ const typeOptions = computed(() => [
             v-model="status"
             size="small"
             style="width: 140px"
-            placeholder="Status"
+            :placeholder="t('participant.filter.statusPlaceholder')"
           >
             <el-option
               v-for="o in statusOptions"
@@ -210,7 +211,7 @@ const typeOptions = computed(() => [
 
     <el-empty
       v-else-if="items.length === 0"
-      description="No participants"
+      :description="t('participant.none')"
     />
 
     <div v-else>
@@ -227,7 +228,7 @@ const typeOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="PID"
+              :label="t('participant.columns.pid')"
               tooltip-key="participants.pid"
             />
           </template>
@@ -236,7 +237,7 @@ const typeOptions = computed(() => [
               <TableCellEllipsis :text="scope.row.pid" />
               <CopyIconButton
                 :text="scope.row.pid"
-                label="PID"
+                :label="t('participant.columns.pid')"
               />
             </span>
           </template>
@@ -248,7 +249,7 @@ const typeOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Name"
+              :label="t('participant.columns.name')"
               tooltip-key="participants.displayName"
             />
           </template>
@@ -262,7 +263,7 @@ const typeOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Type"
+              :label="t('participant.columns.type')"
               tooltip-key="participants.type"
             />
           </template>
@@ -281,7 +282,7 @@ const typeOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Status"
+              :label="t('participant.columns.status')"
               tooltip-key="participants.status"
             />
           </template>
@@ -294,10 +295,7 @@ const typeOptions = computed(() => [
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column
-          label="Actions"
-          width="140"
-        >
+        <el-table-column :label="t('common.actions')" width="140">
           <template #default="scope">
             <el-button
               v-if="scope.row.status === 'active'"
@@ -306,7 +304,7 @@ const typeOptions = computed(() => [
               :disabled="authStore.isReadOnly"
               @click.stop="freeze(scope.row)"
             >
-              Freeze
+              {{ t('participant.freeze') }}
             </el-button>
             <el-button
               v-else-if="scope.row.status === 'frozen'"
@@ -315,13 +313,13 @@ const typeOptions = computed(() => [
               :disabled="authStore.isReadOnly"
               @click.stop="unfreeze(scope.row)"
             >
-              Unfreeze
+              {{ t('participant.unfreeze') }}
             </el-button>
             <el-tag
               v-else
               type="info"
             >
-              n/a
+              {{ t('common.n_a') }}
             </el-tag>
           </template>
         </el-table-column>
@@ -329,7 +327,7 @@ const typeOptions = computed(() => [
 
       <div class="pager">
         <div class="pager__hint geoHint">
-          Showing {{ items.length }} / {{ perPage }} on this page
+          {{ t('participant.pager.hint', { count: items.length, perPage }) }}
         </div>
         <el-pagination
           v-model:current-page="page"
@@ -345,7 +343,7 @@ const typeOptions = computed(() => [
 
   <el-drawer
     v-model="drawerOpen"
-    title="Participant details"
+    :title="t('participant.drawer.title')"
     size="45%"
   >
     <div v-if="selected">
@@ -353,19 +351,19 @@ const typeOptions = computed(() => [
         :column="1"
         border
       >
-        <el-descriptions-item label="PID">
+        <el-descriptions-item :label="t('participant.columns.pid')">
           <span class="geoInlineRow">
             <TableCellEllipsis :text="selected.pid" />
             <CopyIconButton
               :text="selected.pid"
-              label="PID"
+              :label="t('participant.columns.pid')"
             />
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Display Name">
+        <el-descriptions-item :label="t('participant.drawer.displayName')">
           {{ selected.display_name }}
         </el-descriptions-item>
-        <el-descriptions-item label="Type">
+        <el-descriptions-item :label="t('participant.columns.type')">
           <el-tag
             :type="selected.type === 'business' ? 'warning' : 'info'"
             size="small"
@@ -373,7 +371,7 @@ const typeOptions = computed(() => [
             {{ selected.type }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Status">
+        <el-descriptions-item :label="t('participant.columns.status')">
           <el-tag
             :type="selected.status === 'active' ? 'success' : selected.status === 'frozen' ? 'warning' : 'danger'"
             size="small"
@@ -383,19 +381,19 @@ const typeOptions = computed(() => [
         </el-descriptions-item>
         <el-descriptions-item
           v-if="selected.created_at"
-          label="Created At"
+          :label="t('participant.drawer.createdAt')"
         >
           {{ selected.created_at }}
         </el-descriptions-item>
         <el-descriptions-item
           v-if="selected.meta && Object.keys(selected.meta).length > 0"
-          label="Meta"
+          :label="t('participant.drawer.meta')"
         >
           <pre class="json">{{ JSON.stringify(selected.meta, null, 2) }}</pre>
         </el-descriptions-item>
       </el-descriptions>
 
-      <el-divider>Related data</el-divider>
+      <el-divider>{{ t('participant.drawer.relatedData') }}</el-divider>
 
       <div class="drawer-actions">
         <el-button
@@ -403,25 +401,25 @@ const typeOptions = computed(() => [
           size="small"
           @click="goTrustlines(selected.pid)"
         >
-          View trustlines as creditor
+          {{ t('participant.drawer.viewTrustlinesAsCreditor') }}
         </el-button>
         <el-button
           type="primary"
           size="small"
           @click="goTrustlinesAsDebtor(selected.pid)"
         >
-          View trustlines as debtor
+          {{ t('participant.drawer.viewTrustlinesAsDebtor') }}
         </el-button>
         <el-button
           size="small"
           @click="goAuditLog(selected.pid)"
         >
-          View audit log
+          {{ t('participant.drawer.viewAuditLog') }}
         </el-button>
       </div>
 
       <el-divider v-if="selected.status !== 'banned'">
-        Actions
+        {{ t('common.actions') }}
       </el-divider>
 
       <div
@@ -434,7 +432,7 @@ const typeOptions = computed(() => [
           :disabled="authStore.isReadOnly"
           @click="freeze(selected)"
         >
-          Freeze participant
+          {{ t('participant.drawer.freezeParticipant') }}
         </el-button>
         <el-button
           v-else-if="selected.status === 'frozen'"
@@ -442,7 +440,7 @@ const typeOptions = computed(() => [
           :disabled="authStore.isReadOnly"
           @click="unfreeze(selected)"
         >
-          Unfreeze participant
+          {{ t('participant.drawer.unfreezeParticipant') }}
         </el-button>
       </div>
     </div>

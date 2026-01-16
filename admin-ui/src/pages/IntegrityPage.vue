@@ -6,6 +6,7 @@ import { api } from '../api'
 import { formatApiError } from '../api/errorFormat'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import { t } from '../i18n/en'
 
 const authStore = useAuthStore()
 
@@ -54,9 +55,9 @@ const detectedIssues = computed<IssueKey[]>(() => {
 })
 
 function issueLabel(k: IssueKey): string {
-  if (k === 'zero_sum') return 'Zero-sum'
-  if (k === 'trust_limits') return 'Trust limits'
-  return 'Debt symmetry'
+  if (k === 'zero_sum') return t('integrity.issue.zeroSum')
+  if (k === 'trust_limits') return t('integrity.issue.trustLimits')
+  return t('integrity.issue.debtSymmetry')
 }
 
 function tagTypeForPassed(passed: unknown): 'success' | 'danger' | 'info' {
@@ -80,17 +81,17 @@ async function load() {
 
 async function verify() {
   if (authStore.isReadOnly) {
-    ElMessage.error('Read-only role: verification is disabled')
+    ElMessage.error(t('integrity.readOnlyVerificationDisabled'))
     return
   }
   try {
     await ElMessageBox.confirm(
-      'Run integrity verification now? This may take a few seconds.',
-      'Confirm verification',
+      t('integrity.verify.confirmText'),
+      t('integrity.verify.confirmTitle'),
       {
         type: 'warning',
-        confirmButtonText: 'Run',
-        cancelButtonText: 'Cancel',
+        confirmButtonText: t('common.run'),
+        cancelButtonText: t('common.cancel'),
       },
     )
   } catch {
@@ -100,7 +101,7 @@ async function verify() {
   verifyLoading.value = true
   try {
     assertSuccess(await api.integrityVerify())
-    ElMessage.success('Integrity verification finished')
+    ElMessage.success(t('integrity.verify.finished'))
     await load()
   } catch (e: any) {
     const f = formatApiError(e)
@@ -112,17 +113,17 @@ async function verify() {
 
 async function repairDebtSymmetry() {
   if (authStore.isReadOnly) {
-    ElMessage.error('Read-only role: repair actions are disabled')
+    ElMessage.error(t('integrity.readOnlyRepairDisabled'))
     return
   }
   try {
     await ElMessageBox.confirm(
-      'Repair will modify debt records in the database by netting mutual debts (A→B and B→A) into a single directed debt. Continue?',
-      'Confirm repair',
+      t('integrity.repair.debtSymmetry.confirmText'),
+      t('integrity.repair.confirmTitle'),
       {
         type: 'warning',
-        confirmButtonText: 'Repair',
-        cancelButtonText: 'Cancel',
+        confirmButtonText: t('common.repair'),
+        cancelButtonText: t('common.cancel'),
       },
     )
   } catch {
@@ -132,7 +133,7 @@ async function repairDebtSymmetry() {
   repairLoading.value = 'debt_symmetry'
   try {
     assertSuccess(await api.integrityRepairNetMutualDebts())
-    ElMessage.success('Repair finished: mutual debts were netted')
+    ElMessage.success(t('integrity.repair.debtSymmetry.finished'))
     await load()
   } catch (e: any) {
     const f = formatApiError(e)
@@ -144,17 +145,17 @@ async function repairDebtSymmetry() {
 
 async function repairTrustLimits() {
   if (authStore.isReadOnly) {
-    ElMessage.error('Read-only role: repair actions are disabled')
+    ElMessage.error(t('integrity.readOnlyRepairDisabled'))
     return
   }
   try {
     await ElMessageBox.confirm(
-      'Repair will modify debt records in the database by capping or removing debts that exceed trust limits. Continue?',
-      'Confirm repair',
+      t('integrity.repair.trustLimits.confirmText'),
+      t('integrity.repair.confirmTitle'),
       {
         type: 'warning',
-        confirmButtonText: 'Repair',
-        cancelButtonText: 'Cancel',
+        confirmButtonText: t('common.repair'),
+        cancelButtonText: t('common.cancel'),
       },
     )
   } catch {
@@ -164,7 +165,7 @@ async function repairTrustLimits() {
   repairLoading.value = 'trust_limits'
   try {
     assertSuccess(await api.integrityRepairCapDebtsToTrustLimits())
-    ElMessage.success('Repair finished: debts were adjusted to trust limits')
+    ElMessage.success(t('integrity.repair.trustLimits.finished'))
     await load()
   } catch (e: any) {
     const f = formatApiError(e)
@@ -182,7 +183,7 @@ onMounted(() => void load())
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Integrity"
+          :label="t('integrity.title')"
           tooltip-key="nav.integrity"
         />
         <el-button
@@ -191,7 +192,7 @@ onMounted(() => void load())
           type="primary"
           @click="verify"
         >
-          Verify
+          {{ t('integrity.verify.action') }}
         </el-button>
       </div>
     </template>
@@ -218,7 +219,7 @@ onMounted(() => void load())
         class="mb"
       >
         <template #title>
-          <span class="helpTitle">Integrity status: what it means and what to do</span>
+          <span class="helpTitle">{{ t('integrity.help.title') }}</span>
         </template>
 
         <div class="help">
@@ -226,14 +227,14 @@ onMounted(() => void load())
             v-if="overallStatus === 'healthy'"
             class="helpText"
           >
-            All checked invariants pass: no exceeded limits, balanced totals, and no mutual debts.
+            {{ t('integrity.help.healthy') }}
           </div>
 
           <div
             v-else
             class="helpText"
           >
-            Integrity checks found problems that should be investigated.
+            {{ t('integrity.help.notHealthy') }}
           </div>
 
           <div
@@ -241,7 +242,7 @@ onMounted(() => void load())
             class="helpDetected"
           >
             <div class="helpHdr">
-              Detected issues
+              {{ t('integrity.help.detectedIssues') }}
             </div>
             <div class="pillRow">
               <el-tag
@@ -260,12 +261,12 @@ onMounted(() => void load())
             class="help"
           >
             <div class="helpHdr">
-              How to respond (non-technical)
+              {{ t('integrity.help.howToRespond') }}
             </div>
             <ul class="helpList">
-              <li>Click <span class="mono">Verify</span> to re-check the database right now and refresh the results.</li>
-              <li>Review <span class="mono">Alerts</span> and the table below to see which equivalent is affected.</li>
-              <li>Try the available <span class="mono">Repair</span> action (only for detected issue types) and re-run <span class="mono">Verify</span>.</li>
+              <li>{{ t('integrity.help.respond.stepVerify') }}</li>
+              <li>{{ t('integrity.help.respond.stepAlerts') }}</li>
+              <li>{{ t('integrity.help.respond.stepRepair') }}</li>
             </ul>
           </div>
 
@@ -275,7 +276,7 @@ onMounted(() => void load())
             v-if="overallStatus !== 'healthy' && detectedIssues.length"
             class="helpHdr"
           >
-            Interpretation & fixes (only for detected issues)
+            {{ t('integrity.help.interpretation') }}
           </div>
 
           <div
@@ -289,12 +290,11 @@ onMounted(() => void load())
               <span class="helpCaseName">Debt symmetry (mutual debts)</span>
             </div>
             <div class="helpText">
-              This means for some participant pairs both debts exist at the same time: <span class="mono">A → B</span> and <span class="mono">B → A</span>.
-              In a consistent ledger, these should be netted so that only one directed debt remains.
+              {{ t('integrity.help.caseDebtSymmetry.text') }}
             </div>
             <ul class="helpList">
-              <li>Identify affected pairs in the <span class="mono">Debt symmetry</span> column (<span class="mono">violations</span>).</li>
-              <li>Use <span class="mono">Repair: net mutual debts</span> to automatically net the pairs into a single directed debt.</li>
+              <li>{{ t('integrity.help.caseDebtSymmetry.step1') }}</li>
+              <li>{{ t('integrity.help.caseDebtSymmetry.step2') }}</li>
             </ul>
 
             <div class="actions">
@@ -305,7 +305,7 @@ onMounted(() => void load())
                 :disabled="authStore.isReadOnly"
                 @click="repairDebtSymmetry"
               >
-                Repair: net mutual debts
+                {{ t('integrity.actions.repairNetMutualDebts') }}
               </el-button>
             </div>
           </div>
@@ -321,11 +321,11 @@ onMounted(() => void load())
               <span class="helpCaseName">Trust limits exceeded</span>
             </div>
             <div class="helpText">
-              Some debts are larger than the allowed trust limit for the same edge. This can break routing and risk controls.
+              {{ t('integrity.help.caseTrustLimits.text') }}
             </div>
             <ul class="helpList">
-              <li>Use <span class="mono">Repair: cap debts to trust limits</span> to automatically adjust (or remove) violating debts.</li>
-              <li>Re-run <span class="mono">Verify</span> after repair to confirm the invariant passes.</li>
+              <li>{{ t('integrity.help.caseTrustLimits.step1') }}</li>
+              <li>{{ t('integrity.help.caseTrustLimits.step2') }}</li>
             </ul>
 
             <div class="actions">
@@ -336,7 +336,7 @@ onMounted(() => void load())
                 :disabled="authStore.isReadOnly"
                 @click="repairTrustLimits"
               >
-                Repair: cap debts to trust limits
+                {{ t('integrity.actions.repairCapDebts') }}
               </el-button>
             </div>
           </div>
@@ -352,12 +352,12 @@ onMounted(() => void load())
               <span class="helpCaseName">Zero-sum violated</span>
             </div>
             <div class="helpText">
-              Total balances are not self-consistent (the overall sum is not zero). This strongly indicates data corruption or missing/duplicated edges.
+              {{ t('integrity.help.caseZeroSum.text') }}
             </div>
             <ul class="helpList">
-              <li>Stop balance-impacting operations and take a database backup/snapshot.</li>
-              <li>Run <span class="mono">Verify</span> again to confirm it is reproducible (not a transient write state).</li>
-              <li>Then proceed with controlled reconciliation (replay/rebuild) according to your operational playbook.</li>
+              <li>{{ t('integrity.help.caseZeroSum.step1') }}</li>
+              <li>{{ t('integrity.help.caseZeroSum.step2') }}</li>
+              <li>{{ t('integrity.help.caseZeroSum.step3') }}</li>
             </ul>
           </div>
         </div>
@@ -367,18 +367,18 @@ onMounted(() => void load())
         :column="2"
         border
       >
-        <el-descriptions-item label="Status">
+        <el-descriptions-item :label="t('common.status')">
           <el-tag :type="tagTypeForIntegrityStatus(overallStatus)">
             {{ overallStatus }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Last Check">
+        <el-descriptions-item :label="t('integrity.lastCheck')">
           {{ status?.last_check }}
         </el-descriptions-item>
-        <el-descriptions-item label="Alerts">
+        <el-descriptions-item :label="t('integrity.alerts')">
           {{ (status as any)?.alerts?.length ?? 0 }}
         </el-descriptions-item>
-        <el-descriptions-item label="Equivalents">
+        <el-descriptions-item :label="t('integrity.equivalents')">
           {{ Object.keys(equivalents).length }}
         </el-descriptions-item>
       </el-descriptions>
@@ -386,7 +386,7 @@ onMounted(() => void load())
       <el-divider />
 
       <div class="sub">
-        Equivalents
+        {{ t('integrity.section.equivalents') }}
       </div>
       <el-table
         :data="Object.entries(equivalents)"
@@ -396,7 +396,7 @@ onMounted(() => void load())
         class="tbl"
       >
         <el-table-column
-          label="Code"
+          :label="t('common.code')"
           width="110"
         >
           <template #default="scope">
@@ -405,7 +405,7 @@ onMounted(() => void load())
         </el-table-column>
 
         <el-table-column
-          label="Status"
+          :label="t('common.status')"
           width="120"
         >
           <template #default="scope">
@@ -416,7 +416,7 @@ onMounted(() => void load())
         </el-table-column>
 
         <el-table-column
-          label="Debt symmetry"
+          :label="t('integrity.columns.debtSymmetry')"
           min-width="260"
         >
           <template #default="scope">
@@ -425,17 +425,17 @@ onMounted(() => void load())
                 :type="tagTypeForPassed(scope.row[1]?.invariants?.debt_symmetry?.passed)"
                 effect="plain"
               >
-                passed: {{ scope.row[1]?.invariants?.debt_symmetry?.passed ?? '—' }}
+                {{ t('common.passedPrefix') }} {{ scope.row[1]?.invariants?.debt_symmetry?.passed ?? t('common.na') }}
               </el-tag>
               <span class="muted">
-                violations: {{ scope.row[1]?.invariants?.debt_symmetry?.violations ?? '—' }}
+                {{ t('common.violationsPrefix') }} {{ scope.row[1]?.invariants?.debt_symmetry?.violations ?? t('common.na') }}
               </span>
             </div>
           </template>
         </el-table-column>
 
         <el-table-column
-          label="Zero-sum"
+          :label="t('integrity.columns.zeroSum')"
           width="140"
         >
           <template #default="scope">
@@ -443,13 +443,13 @@ onMounted(() => void load())
               :type="tagTypeForPassed(scope.row[1]?.invariants?.zero_sum?.passed)"
               effect="plain"
             >
-              {{ scope.row[1]?.invariants?.zero_sum?.passed ? 'passed' : 'failed' }}
+              {{ scope.row[1]?.invariants?.zero_sum?.passed ? t('common.passed') : t('common.failed') }}
             </el-tag>
           </template>
         </el-table-column>
 
         <el-table-column
-          label="Trust limits"
+          :label="t('integrity.columns.trustLimits')"
           width="170"
         >
           <template #default="scope">
@@ -458,10 +458,10 @@ onMounted(() => void load())
                 :type="tagTypeForPassed(scope.row[1]?.invariants?.trust_limits?.passed)"
                 effect="plain"
               >
-                {{ scope.row[1]?.invariants?.trust_limits?.passed ? 'passed' : 'failed' }}
+                {{ scope.row[1]?.invariants?.trust_limits?.passed ? t('common.passed') : t('common.failed') }}
               </el-tag>
               <span class="muted">
-                violations: {{ scope.row[1]?.invariants?.trust_limits?.violations ?? '—' }}
+                {{ t('common.violationsPrefix') }} {{ scope.row[1]?.invariants?.trust_limits?.violations ?? t('common.na') }}
               </span>
             </div>
           </template>
@@ -471,7 +471,7 @@ onMounted(() => void load())
       <el-divider />
 
       <div class="sub">
-        Raw Payload
+        {{ t('integrity.section.rawPayload') }}
       </div>
       <pre class="json">{{ JSON.stringify(status, null, 2) }}</pre>
     </div>

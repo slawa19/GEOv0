@@ -6,6 +6,7 @@ import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import { t } from '../i18n/en'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }
@@ -63,8 +64,8 @@ async function load() {
     const data = assertSuccess(await api.listEquivalents({ include_inactive: includeInactive.value }))
     items.value = data.items
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load equivalents'
-    ElMessage.error(error.value || 'Failed to load equivalents')
+    error.value = e?.message || t('equivalents.loadFailed')
+    ElMessage.error(error.value || t('equivalents.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -95,12 +96,12 @@ async function createEq() {
         is_active: Boolean(createForm.is_active),
       }),
     ).created
-    ElMessage.success(`Created ${created.code}`)
+    ElMessage.success(t('equivalents.created', { code: created.code }))
     createOpen.value = false
     includeInactive.value = true
     await load()
   } catch (e: any) {
-    ElMessage.error(e?.message || 'Create failed')
+    ElMessage.error(e?.message || t('equivalents.createFailed'))
   }
 }
 
@@ -113,35 +114,39 @@ async function saveEdit() {
         description: editForm.description,
       }),
     ).updated
-    ElMessage.success(`Updated ${updated.code}`)
+    ElMessage.success(t('equivalents.updated', { code: updated.code }))
     editOpen.value = false
     await load()
   } catch (e: any) {
-    ElMessage.error(e?.message || 'Update failed')
+    ElMessage.error(e?.message || t('equivalents.updateFailed'))
   }
 }
 
 async function setActive(row: Equivalent, next: boolean) {
   let reason: string
   try {
-    reason = await ElMessageBox.prompt('Reason (required)', next ? `Activate ${row.code}` : `Deactivate ${row.code}`, {
-      confirmButtonText: next ? 'Activate' : 'Deactivate',
-      cancelButtonText: 'Cancel',
-      inputPlaceholder: 'e.g. enable new equivalent, deprecated unit',
-      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : 'reason is required'),
-      type: 'warning',
-    }).then((r) => r.value)
+    reason = await ElMessageBox.prompt(
+      t('common.reasonRequired'),
+      next ? `${t('common.activate')} ${row.code}` : `${t('common.deactivate')} ${row.code}`,
+      {
+        confirmButtonText: next ? t('common.activate') : t('common.deactivate'),
+        cancelButtonText: t('common.cancel'),
+        inputPlaceholder: t('equivalents.reasonPlaceholder.activate'),
+        inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
+        type: 'warning',
+      },
+    ).then((r) => r.value)
   } catch {
     return
   }
 
   try {
     assertSuccess(await api.setEquivalentActive(row.code, next, reason))
-    ElMessage.success(next ? `Activated ${row.code}` : `Deactivated ${row.code}`)
+    ElMessage.success(next ? t('equivalents.activated', { code: row.code }) : t('equivalents.deactivated', { code: row.code }))
     includeInactive.value = true
     await load()
   } catch (e: any) {
-    ElMessage.error(e?.message || 'Update failed')
+    ElMessage.error(e?.message || t('equivalents.updateFailed'))
   }
 }
 
@@ -154,11 +159,11 @@ async function deleteEq(row: Equivalent) {
     const debts = (usage as any).debts
     const ic = (usage as any).integrity_checkpoints
     const parts: string[] = []
-    parts.push(`${tl} trustlines`)
-    if (typeof inc === 'number') parts.push(`${inc} incidents`)
-    if (typeof debts === 'number') parts.push(`${debts} debts`)
-    if (typeof ic === 'number') parts.push(`${ic} integrity_checkpoints`)
-    usageLine = parts.length ? `Used by ${parts.join(', ')}.` : ''
+    parts.push(t('equivalents.delete.usage.trustlines', { n: tl }))
+    if (typeof inc === 'number') parts.push(t('equivalents.delete.usage.incidents', { n: inc }))
+    if (typeof debts === 'number') parts.push(t('equivalents.delete.usage.debts', { n: debts }))
+    if (typeof ic === 'number') parts.push(t('equivalents.delete.usage.integrityCheckpoints', { n: ic }))
+    usageLine = parts.length ? t('equivalents.delete.usage.usedBy', { parts: parts.join(', ') }) : ''
   } catch {
     usageLine = ''
   }
@@ -166,15 +171,15 @@ async function deleteEq(row: Equivalent) {
   let reason: string
   try {
     reason = await ElMessageBox.prompt(
-      [usageLine, 'This permanently deletes the equivalent. This cannot be undone.', '', 'Reason (required)']
+      [usageLine, t('equivalents.warning.deletePermanent'), '', t('common.reasonRequired')]
         .filter(Boolean)
         .join('\n'),
-      `Delete ${row.code}`,
+      t('equivalents.delete.title', { code: row.code }),
       {
-        confirmButtonText: 'Delete',
-        cancelButtonText: 'Cancel',
-        inputPlaceholder: 'e.g. cleanup unused unit',
-        inputValidator: (v) => (String(v || '').trim().length > 0 ? true : 'reason is required'),
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+        inputPlaceholder: t('equivalents.reasonPlaceholder.delete'),
+        inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
         type: 'warning',
       },
     ).then((r) => r.value)
@@ -184,7 +189,7 @@ async function deleteEq(row: Equivalent) {
 
   try {
     assertSuccess(await api.deleteEquivalent(row.code, reason))
-    ElMessage.success(`Deleted ${row.code}`)
+    ElMessage.success(t('equivalents.deleted', { code: row.code }))
     includeInactive.value = true
     await load()
   } catch (e: any) {
@@ -194,10 +199,10 @@ async function deleteEq(row: Equivalent) {
     const ic = e?.details?.integrity_checkpoints
     if ([t, i, d, ic].some((v) => typeof v === 'number')) {
       ElMessage.error(
-        `${e?.message || 'Delete failed'} (trustlines: ${t ?? 0}, incidents: ${i ?? 0}, debts: ${d ?? 0}, integrity_checkpoints: ${ic ?? 0})`,
+        `${e?.message || t('equivalents.deleteFailed')} (trustlines: ${t ?? 0}, incidents: ${i ?? 0}, debts: ${d ?? 0}, integrity_checkpoints: ${ic ?? 0})`,
       )
     } else {
-      ElMessage.error(e?.message || 'Delete failed')
+      ElMessage.error(e?.message || t('equivalents.deleteFailed'))
     }
   }
 }
@@ -217,7 +222,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Equivalents"
+          :label="t('equivalents.title')"
           tooltip-key="nav.equivalents"
         />
         <div class="hdr__actions">
@@ -226,14 +231,14 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             type="primary"
             @click="openCreate"
           >
-            Create
+            {{ t('common.create') }}
           </el-button>
           <el-switch
             v-model="includeInactive"
-            active-text="Include inactive"
+            :active-text="t('equivalents.includeInactive')"
           />
           <el-tag type="info">
-            Active: {{ activeCount }}
+            {{ t('equivalents.activeCount', { n: activeCount }) }}
           </el-tag>
         </div>
       </div>
@@ -254,7 +259,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
 
     <el-empty
       v-else-if="items.length === 0"
-      description="No equivalents"
+      :description="t('equivalents.none')"
     />
 
     <div v-else>
@@ -267,7 +272,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       >
         <el-table-column
           prop="code"
-          label="Code"
+          :label="t('common.code')"
           width="200"
         >
           <template #default="scope">
@@ -280,37 +285,48 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 class="code__sub"
               >
                 <template v-if="typeof usageByCode[scope.row.code]!.debts === 'number' || typeof usageByCode[scope.row.code]!.integrity_checkpoints === 'number'">
-                  Used by {{ usageByCode[scope.row.code]!.trustlines ?? 0 }} TL / {{ usageByCode[scope.row.code]!.debts ?? 0 }} Debts / {{ usageByCode[scope.row.code]!.integrity_checkpoints ?? 0 }} IC
+                  {{
+                    t('equivalents.usage.tlDebtsIc', {
+                      trustlines: usageByCode[scope.row.code]!.trustlines ?? 0,
+                      debts: usageByCode[scope.row.code]!.debts ?? 0,
+                      ic: usageByCode[scope.row.code]!.integrity_checkpoints ?? 0,
+                    })
+                  }}
                 </template>
                 <template v-else>
-                  Used by {{ usageByCode[scope.row.code]!.trustlines ?? 0 }} TL / {{ usageByCode[scope.row.code]!.incidents ?? 0 }} Inc
+                  {{
+                    t('equivalents.usage.tlInc', {
+                      trustlines: usageByCode[scope.row.code]!.trustlines ?? 0,
+                      incidents: usageByCode[scope.row.code]!.incidents ?? 0,
+                    })
+                  }}
                 </template>
               </div>
               <div
                 v-else-if="usageLoadingByCode[scope.row.code]"
                 class="code__sub"
               >
-                Loading usage…
+                {{ t('equivalents.usage.loading') }}
               </div>
             </div>
           </template>
         </el-table-column>
         <el-table-column
           prop="precision"
-          label="Precision"
+          :label="t('common.precision')"
           width="90"
           align="center"
           header-align="center"
         />
         <el-table-column
           prop="description"
-          label="Description"
+          :label="t('common.description')"
           min-width="280"
           show-overflow-tooltip
         />
         <el-table-column
           prop="is_active"
-          label="Active"
+          :label="t('common.active')"
           width="90"
           align="center"
           header-align="center"
@@ -320,18 +336,18 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
               v-if="scope.row.is_active"
               type="success"
             >
-              yes
+              {{ t('common.yes') }}
             </el-tag>
             <el-tag
               v-else
               type="info"
             >
-              no
+              {{ t('common.no') }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column
-          label="Actions"
+          :label="t('equivalents.columns.actions')"
           width="280"
         >
           <template #default="scope">
@@ -340,7 +356,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
               :disabled="authStore.isReadOnly"
               @click="openEdit(scope.row)"
             >
-              Edit
+              {{ t('common.edit') }}
             </el-button>
             <el-button
               v-if="scope.row.is_active"
@@ -349,7 +365,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
               :disabled="authStore.isReadOnly"
               @click="setActive(scope.row, false)"
             >
-              Deactivate
+              {{ t('common.deactivate') }}
             </el-button>
             <el-button
               v-else
@@ -358,7 +374,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
               :disabled="authStore.isReadOnly"
               @click="setActive(scope.row, true)"
             >
-              Activate
+              {{ t('common.activate') }}
             </el-button>
             <el-button
               v-if="!scope.row.is_active"
@@ -367,13 +383,13 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
               :disabled="authStore.isReadOnly"
               @click="deleteEq(scope.row)"
             >
-              Delete
+              {{ t('common.delete') }}
             </el-button>
             <el-button
               size="small"
               @click="goAudit(scope.row)"
             >
-              Audit
+              {{ t('common.audit') }}
             </el-button>
           </template>
         </el-table-column>
@@ -383,81 +399,81 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
 
   <el-dialog
     v-model="createOpen"
-    title="Create Equivalent"
+    :title="t('equivalents.dialog.createTitle')"
     width="520"
   >
     <el-form label-width="120">
-      <el-form-item label="Code">
+      <el-form-item :label="t('common.code')">
         <el-input
           v-model="createForm.code"
-          placeholder="e.g. UAH"
+          :placeholder="t('equivalents.form.codePlaceholder')"
           style="width: 200px"
         />
       </el-form-item>
-      <el-form-item label="Precision">
+      <el-form-item :label="t('common.precision')">
         <el-input-number
           v-model="createForm.precision"
           :min="0"
           :max="18"
         />
       </el-form-item>
-      <el-form-item label="Description">
+      <el-form-item :label="t('common.description')">
         <el-input
           v-model="createForm.description"
-          placeholder="Human description"
+          :placeholder="t('equivalents.form.descriptionPlaceholder')"
         />
       </el-form-item>
-      <el-form-item label="Active">
+      <el-form-item :label="t('common.active')">
         <el-switch v-model="createForm.is_active" />
       </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="createOpen = false">
-        Cancel
+        {{ t('common.cancel') }}
       </el-button>
       <el-button
         type="primary"
         :disabled="authStore.isReadOnly"
         @click="createEq"
       >
-        Create
+        {{ t('common.create') }}
       </el-button>
     </template>
   </el-dialog>
 
   <el-dialog
     v-model="editOpen"
-    title="Edit Equivalent"
+    :title="t('equivalents.dialog.editTitle')"
     width="520"
   >
     <div
       v-if="editing"
       class="muted"
     >
-      Editing: {{ editing.code }}
+      {{ t('equivalents.dialog.editing', { code: editing.code }) }}
     </div>
     <el-form label-width="120">
-      <el-form-item label="Precision">
+      <el-form-item :label="t('common.precision')">
         <el-input-number
           v-model="editForm.precision"
           :min="0"
           :max="18"
         />
       </el-form-item>
-      <el-form-item label="Description">
+      <el-form-item :label="t('common.description')">
         <el-input v-model="editForm.description" />
       </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="editOpen = false">
-        Cancel
+        {{ t('common.cancel') }}
       </el-button>
       <el-button
         type="primary"
         :disabled="authStore.isReadOnly"
         @click="saveEdit"
       >
-        Save
+        {{ t('common.save') }}
       </el-button>
     </template>
   </el-dialog>

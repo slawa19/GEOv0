@@ -12,6 +12,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
+import { t } from '../i18n/en'
 import type { Trustline } from '../types/domain'
 
 const router = useRouter()
@@ -71,8 +72,8 @@ async function load() {
     }
     items.value = data.items
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load trustlines'
-    void toastApiError(e, { fallbackTitle: error.value || 'Failed to load trustlines' })
+    error.value = e?.message || t('trustlines.loadFailed')
+    void toastApiError(e, { fallbackTitle: error.value || t('trustlines.loadFailed') })
   } finally {
     loading.value = false
   }
@@ -117,10 +118,10 @@ watch([equivalent, creditor, debtor, status], () => {
 })
 
 const statusOptions = computed(() => [
-  { label: 'Any', value: '' },
-  { label: 'active', value: 'active' },
-  { label: 'frozen', value: 'frozen' },
-  { label: 'closed', value: 'closed' },
+  { label: t('common.any'), value: '' },
+  { label: t('trustlines.status.active'), value: 'active' },
+  { label: t('trustlines.status.frozen'), value: 'frozen' },
+  { label: t('trustlines.status.closed'), value: 'closed' },
 ])
 </script>
 
@@ -129,28 +130,28 @@ const statusOptions = computed(() => [
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Trustlines"
+          :label="t('trustlines.title')"
           tooltip-key="nav.trustlines"
         />
         <div class="filters">
           <el-input
             v-model="equivalent"
             size="small"
-            placeholder="Equivalent (e.g. UAH)"
+            :placeholder="t('trustlines.filter.equivalentPlaceholder')"
             clearable
             style="width: 170px"
           />
           <el-input
             v-model="creditor"
             size="small"
-            placeholder="Creditor PID (from)"
+            :placeholder="t('trustlines.creditorFrom')"
             clearable
             style="width: 220px"
           />
           <el-input
             v-model="debtor"
             size="small"
-            placeholder="Debtor PID (to)"
+            :placeholder="t('trustlines.debtorTo')"
             clearable
             style="width: 220px"
           />
@@ -169,7 +170,7 @@ const statusOptions = computed(() => [
           <el-input
             v-model="threshold"
             size="small"
-            placeholder="Threshold"
+            :placeholder="t('trustlines.filter.thresholdPlaceholder')"
             style="width: 110px"
           />
         </div>
@@ -191,7 +192,7 @@ const statusOptions = computed(() => [
 
     <el-empty
       v-else-if="items.length === 0"
-      description="No trustlines match filters"
+      :description="t('trustlines.none')"
     />
 
     <div v-else>
@@ -208,7 +209,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Equivalent"
+              :label="t('trustlines.equivalent')"
               tooltip-key="trustlines.eq"
             />
           </template>
@@ -224,7 +225,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="From"
+              :label="t('trustlines.from')"
               tooltip-key="trustlines.from"
             />
           </template>
@@ -233,7 +234,7 @@ const statusOptions = computed(() => [
               <TableCellEllipsis :text="scope.row.from" />
               <CopyIconButton
                 :text="scope.row.from"
-                label="From PID"
+                :label="t('trustlines.fromPidLabel')"
               />
             </span>
           </template>
@@ -244,7 +245,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="To"
+              :label="t('trustlines.to')"
               tooltip-key="trustlines.to"
             />
           </template>
@@ -253,7 +254,7 @@ const statusOptions = computed(() => [
               <TableCellEllipsis :text="scope.row.to" />
               <CopyIconButton
                 :text="scope.row.to"
-                label="To PID"
+                :label="t('trustlines.toPidLabel')"
               />
             </span>
           </template>
@@ -264,7 +265,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Limit"
+              :label="t('trustlines.limit')"
               tooltip-key="trustlines.limit"
             />
           </template>
@@ -278,7 +279,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Used"
+              :label="t('trustlines.used')"
               tooltip-key="trustlines.used"
             />
           </template>
@@ -292,7 +293,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Available"
+              :label="t('trustlines.available')"
               tooltip-key="trustlines.available"
             />
           </template>
@@ -306,7 +307,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Status"
+              :label="t('common.status')"
               tooltip-key="trustlines.status"
             />
           </template>
@@ -317,7 +318,7 @@ const statusOptions = computed(() => [
         >
           <template #header>
             <TooltipLabel
-              label="Created at"
+              :label="t('trustlines.createdAt')"
               tooltip-key="trustlines.createdAt"
             />
           </template>
@@ -329,7 +330,7 @@ const statusOptions = computed(() => [
 
       <div class="pager">
         <div class="pager__hint geoHint">
-          Showing {{ items.length }} / {{ perPage }} on this page
+          {{ t('trustlines.pager.hint', { count: items.length, perPage }) }}
         </div>
         <el-pagination
           v-model:current-page="page"
@@ -345,7 +346,7 @@ const statusOptions = computed(() => [
 
   <el-drawer
     v-model="drawerOpen"
-    title="Trustline details"
+    :title="t('trustlines.detailsTitle')"
     size="45%"
   >
     <div v-if="selected">
@@ -353,7 +354,7 @@ const statusOptions = computed(() => [
         :column="1"
         border
       >
-        <el-descriptions-item label="Equivalent">
+        <el-descriptions-item :label="t('trustlines.equivalent')">
           <el-link
             type="primary"
             @click="goEquivalent(selected.equivalent)"
@@ -361,7 +362,7 @@ const statusOptions = computed(() => [
             {{ selected.equivalent }}
           </el-link>
         </el-descriptions-item>
-        <el-descriptions-item label="From (Creditor)">
+        <el-descriptions-item :label="t('trustlines.fromCreditor')">
           <span class="geoInlineRow">
             <el-link
               type="primary"
@@ -371,7 +372,7 @@ const statusOptions = computed(() => [
             </el-link>
             <CopyIconButton
               :text="selected.from"
-              label="From PID"
+              :label="t('trustlines.fromPidLabel')"
             />
           </span>
           <span
@@ -381,7 +382,7 @@ const statusOptions = computed(() => [
             ({{ selected.from_display_name }})
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="To (Debtor)">
+        <el-descriptions-item :label="t('trustlines.toDebtor')">
           <span class="geoInlineRow">
             <el-link
               type="primary"
@@ -391,7 +392,7 @@ const statusOptions = computed(() => [
             </el-link>
             <CopyIconButton
               :text="selected.to"
-              label="To PID"
+              :label="t('trustlines.toPidLabel')"
             />
           </span>
           <span
@@ -401,13 +402,13 @@ const statusOptions = computed(() => [
             ({{ selected.to_display_name }})
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Limit">
+        <el-descriptions-item :label="t('trustlines.limit')">
           {{ money(selected.limit) }}
         </el-descriptions-item>
-        <el-descriptions-item label="Used">
+        <el-descriptions-item :label="t('trustlines.used')">
           {{ money(selected.used) }}
         </el-descriptions-item>
-        <el-descriptions-item label="Available">
+        <el-descriptions-item :label="t('trustlines.available')">
           <span :class="{ bottleneck: isBottleneck(selected) }">{{ money(selected.available) }}</span>
           <el-tag
             v-if="isBottleneck(selected)"
@@ -415,10 +416,10 @@ const statusOptions = computed(() => [
             size="small"
             style="margin-left: 8px"
           >
-            Bottleneck
+            {{ t('trustlines.bottleneck') }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Status">
+        <el-descriptions-item :label="t('common.status')">
           <el-tag
             :type="selected.status === 'active' ? 'success' : selected.status === 'frozen' ? 'warning' : 'info'"
             size="small"
@@ -426,15 +427,15 @@ const statusOptions = computed(() => [
             {{ selected.status }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Created At">
+        <el-descriptions-item :label="t('trustlines.createdAt')">
           {{ fmtTs(selected.created_at) }}
         </el-descriptions-item>
-        <el-descriptions-item label="Policy">
+        <el-descriptions-item :label="t('trustlines.policy')">
           <pre class="json">{{ JSON.stringify(selected.policy, null, 2) }}</pre>
         </el-descriptions-item>
       </el-descriptions>
 
-      <el-divider>Related participants</el-divider>
+      <el-divider>{{ t('trustlines.relatedParticipants') }}</el-divider>
 
       <div class="drawer-actions">
         <el-button
@@ -442,14 +443,14 @@ const statusOptions = computed(() => [
           size="small"
           @click="goParticipant(selected.from)"
         >
-          View creditor (from)
+          {{ t('trustlines.viewCreditorFrom') }}
         </el-button>
         <el-button
           type="primary"
           size="small"
           @click="goParticipant(selected.to)"
         >
-          View debtor (to)
+          {{ t('trustlines.viewDebtorTo') }}
         </el-button>
       </div>
     </div>

@@ -2,6 +2,7 @@
 import TooltipLabel from '../../ui/TooltipLabel.vue'
 import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../../ui/GraphAnalyticsTogglesCard.vue'
+import { t } from '../../i18n/en'
 
 import type { DrawerTab, SelectedInfo } from '../../composables/useGraphVisualization'
 import type { ClearingCycles } from './graphTypes'
@@ -160,7 +161,7 @@ defineProps<{
 <template>
   <el-drawer
     v-model="open"
-    title="Details"
+    :title="t('graph.drawer.detailsTitle')"
     size="40%"
   >
     <div v-if="selected && selected.kind === 'node'">
@@ -168,52 +169,52 @@ defineProps<{
         :column="1"
         border
       >
-        <el-descriptions-item label="PID">
+        <el-descriptions-item :label="t('participant.columns.pid')">
           <span class="geoInlineRow">
             {{ selected.pid }}
             <CopyIconButton
               :text="selected.pid"
-              label="PID"
+              :label="t('participant.columns.pid')"
             />
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="Display name">
-          {{ selected.display_name || '-' }}
+        <el-descriptions-item :label="t('participant.drawer.displayName')">
+          {{ selected.display_name || t('common.na') }}
         </el-descriptions-item>
-        <el-descriptions-item label="Status">
-          {{ selected.status || '-' }}
+        <el-descriptions-item :label="t('common.status')">
+          {{ selected.status || t('common.na') }}
         </el-descriptions-item>
-        <el-descriptions-item label="Type">
-          {{ selected.type || '-' }}
+        <el-descriptions-item :label="t('participant.columns.type')">
+          {{ selected.type || t('common.na') }}
         </el-descriptions-item>
-        <el-descriptions-item label="Degree">
+        <el-descriptions-item :label="t('graph.drawer.degree')">
           {{ selected.degree }}
         </el-descriptions-item>
-        <el-descriptions-item label="In / out">
+        <el-descriptions-item :label="t('graph.drawer.inOut')">
           {{ selected.inDegree }} / {{ selected.outDegree }}
         </el-descriptions-item>
         <el-descriptions-item
           v-if="showIncidents"
-          label="Incident ratio"
+          :label="t('graph.drawer.incidentRatio')"
         >
           {{ (incidentRatioByPid.get(selected.pid) || 0).toFixed(2) }}
         </el-descriptions-item>
       </el-descriptions>
 
-      <el-divider>Analytics (fixtures-first)</el-divider>
+      <el-divider>{{ t('graph.drawer.analyticsDivider') }}</el-divider>
 
       <div class="drawerControls">
         <div class="drawerControls__row">
           <div class="ctl">
             <div class="toolbarLabel">
-              Equivalent
+              {{ t('graph.filters.equivalent') }}
             </div>
             <el-select
               v-model="eq"
               size="small"
               filterable
               class="ctl__field"
-              placeholder="Equivalent"
+              :placeholder="t('graph.filters.equivalent')"
             >
               <el-option
                 v-for="o in availableEquivalents"
@@ -228,7 +229,7 @@ defineProps<{
               size="small"
               @click="loadData"
             >
-              Refresh
+              {{ t('common.refresh') }}
             </el-button>
           </div>
         </div>
@@ -239,26 +240,26 @@ defineProps<{
         class="drawerTabs"
       >
         <el-tab-pane
-          label="Summary"
+          :label="t('graph.drawer.tabs.summary')"
           name="summary"
         >
           <el-alert
             v-if="!analyticsEq"
-            title="Pick an equivalent (not ALL) for full analytics."
+            :title="t('graph.analytics.summary.pickEquivalentTitle')"
             type="info"
             show-icon
             class="mb"
           />
 
           <div class="hint">
-            Fixtures-first: derived from trustlines + debts + incidents + audit-log.
+            {{ t('graph.hint.fixturesFirstDerivedFromDatasets') }}
           </div>
 
           <GraphAnalyticsTogglesCard
             v-if="analyticsEq"
             v-model="analytics"
-            title="Summary widgets"
-            title-tooltip-text="Show/hide summary cards. These toggles are stored in localStorage for this browser."
+            :title="t('graph.analytics.summary.widgetsTitle')"
+            :title-tooltip-text="t('graph.analytics.summary.widgetsTooltip')"
             :enabled="Boolean(analyticsEq)"
             :items="summaryToggleItems"
           />
@@ -273,8 +274,8 @@ defineProps<{
             >
               <template #header>
                 <TooltipLabel
-                  label="Net position"
-                  tooltip-text="Net balance in the selected equivalent: total_credit − total_debt (derived from debts fixture)."
+                  :label="t('graph.analytics.netPosition.title')"
+                  :tooltip-text="t('graph.analytics.netPosition.tooltip')"
                 />
               </template>
               <div
@@ -285,14 +286,14 @@ defineProps<{
                   {{ money(selectedRank.net) }} {{ selectedRank.eq }}
                 </div>
                 <div class="kpi__hint muted">
-                  credit − debt
+                  {{ t('graph.analytics.netPosition.hint') }}
                 </div>
               </div>
               <div
                 v-else
                 class="muted"
               >
-                No data
+                {{ t('common.noData') }}
               </div>
             </el-card>
 
@@ -303,8 +304,8 @@ defineProps<{
             >
               <template #header>
                 <TooltipLabel
-                  label="Rank / percentile"
-                  tooltip-text="Your position among all participants by net balance for the selected equivalent (1 = top net creditor)."
+                  :label="t('graph.analytics.rankPercentile.title')"
+                  :tooltip-text="t('graph.analytics.rankPercentile.tooltip')"
                 />
               </template>
               <div
@@ -312,7 +313,7 @@ defineProps<{
                 class="kpi"
               >
                 <div class="kpi__value">
-                  rank {{ selectedRank.rank }}/{{ selectedRank.n }}
+                  {{ t('graph.analytics.common.rank') }} {{ selectedRank.rank }}/{{ selectedRank.n }}
                 </div>
                 <el-progress
                   :percentage="Math.round((selectedRank.percentile || 0) * 100)"
@@ -320,14 +321,14 @@ defineProps<{
                   :show-text="false"
                 />
                 <div class="kpi__hint muted">
-                  Percentile: {{ pct(selectedRank.percentile, 0) }}
+                  {{ t('graph.analytics.common.percentile') }}: {{ pct(selectedRank.percentile, 0) }}
                 </div>
               </div>
               <div
                 v-else
                 class="muted"
               >
-                No data
+                {{ t('common.noData') }}
               </div>
             </el-card>
 
@@ -338,8 +339,8 @@ defineProps<{
             >
               <template #header>
                 <TooltipLabel
-                  label="Concentration"
-                  tooltip-text="How concentrated your debts/credits are across counterparties (top1/top5 shares + HHI). Higher = more dependence on a few counterparties."
+                  :label="t('graph.analytics.concentration.title')"
+                  :tooltip-text="t('graph.analytics.concentration.tooltip')"
                 />
               </template>
               <div
@@ -347,7 +348,7 @@ defineProps<{
                 class="kpi"
               >
                 <div class="kpi__row">
-                  <span class="geoLabel">Outgoing (you owe)</span>
+                  <span class="geoLabel">{{ t('graph.common.outgoingYouOwe') }}</span>
                   <el-tag
                     :type="selectedConcentration.outgoing.level.type"
                     size="small"
@@ -359,24 +360,24 @@ defineProps<{
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top1 share"
-                      tooltip-text="Share of total outgoing debt owed to the largest single creditor."
+                      :label="t('graph.analytics.concentration.top1.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top1.outgoing.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top5 share"
-                      tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined."
+                      :label="t('graph.analytics.concentration.top5.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top5.outgoing.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                      :label="t('graph.analytics.concentration.hhi.label')"
+                      :tooltip-text="t('graph.analytics.concentration.hhi.tooltip')"
                     />
                     <span class="metricRow__value">{{ selectedConcentration.outgoing.hhi.toFixed(2) }}</span>
                   </div>
@@ -385,7 +386,7 @@ defineProps<{
                   class="kpi__row"
                   style="margin-top: 10px"
                 >
-                  <span class="geoLabel">Incoming (owed to you)</span>
+                  <span class="geoLabel">{{ t('graph.common.incomingOwedToYou') }}</span>
                   <el-tag
                     :type="selectedConcentration.incoming.level.type"
                     size="small"
@@ -397,24 +398,24 @@ defineProps<{
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top1 share"
-                      tooltip-text="Share of total incoming credit owed by the largest single debtor."
+                      :label="t('graph.analytics.concentration.top1.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top1.incoming.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top5 share"
-                      tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined."
+                      :label="t('graph.analytics.concentration.top5.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top5.incoming.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                      :label="t('graph.analytics.concentration.hhi.label')"
+                      :tooltip-text="t('graph.analytics.concentration.hhi.tooltip')"
                     />
                     <span class="metricRow__value">{{ selectedConcentration.incoming.hhi.toFixed(2) }}</span>
                   </div>
@@ -424,7 +425,7 @@ defineProps<{
                 v-else
                 class="muted"
               >
-                No data
+                {{ t('common.noData') }}
               </div>
             </el-card>
 
@@ -435,8 +436,8 @@ defineProps<{
             >
               <template #header>
                 <TooltipLabel
-                  label="Capacity"
-                  tooltip-text="Aggregate trustline capacity around the participant: used% = total_used / total_limit (incoming/outgoing)."
+                  :label="t('graph.analytics.capacity.title')"
+                  :tooltip-text="t('graph.analytics.capacity.tooltip')"
                 />
               </template>
               <div
@@ -444,7 +445,7 @@ defineProps<{
                 class="kpi"
               >
                 <div class="kpi__row">
-                  <span class="muted">Outgoing used</span>
+                  <span class="muted">{{ t('graph.analytics.capacity.outgoingUsed') }}</span>
                   <span class="kpi__metric">{{ pct(selectedCapacity.out.pct, 0) }}</span>
                 </div>
                 <el-progress
@@ -456,7 +457,7 @@ defineProps<{
                   class="kpi__row"
                   style="margin-top: 10px"
                 >
-                  <span class="muted">Incoming used</span>
+                  <span class="muted">{{ t('graph.analytics.capacity.incomingUsed') }}</span>
                   <span class="kpi__metric">{{ pct(selectedCapacity.inc.pct, 0) }}</span>
                 </div>
                 <el-progress
@@ -469,14 +470,14 @@ defineProps<{
                   class="kpi__hint muted"
                   style="margin-top: 8px"
                 >
-                  Bottlenecks: {{ selectedCapacity.bottlenecks.length }} (threshold {{ threshold }})
+                  {{ t('graph.analytics.bottlenecks.countWithThreshold', { n: selectedCapacity.bottlenecks.length, threshold }) }}
                 </div>
               </div>
               <div
                 v-else
                 class="muted"
               >
-                No data
+                {{ t('common.noData') }}
               </div>
             </el-card>
 
@@ -487,8 +488,8 @@ defineProps<{
             >
               <template #header>
                 <TooltipLabel
-                  label="Activity / churn"
-                  tooltip-text="Recent changes around the participant in rolling windows (7/30/90 days), based on fixture timestamps."
+                  :label="t('graph.analytics.activity.title')"
+                  :tooltip-text="t('graph.analytics.activity.summaryTooltip')"
                 />
               </template>
               <div
@@ -498,32 +499,32 @@ defineProps<{
                 <div class="metricRow">
                   <TooltipLabel
                     class="metricRow__label"
-                    label="Trustlines created (7/30/90d)"
-                    tooltip-text="Count of trustlines involving this participant with created_at inside each window."
+                    :label="t('graph.analytics.activity.trustlinesCreated')"
+                    :tooltip-text="t('graph.analytics.activity.trustlinesCreatedTooltip')"
                   />
                   <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
                     class="metricRow__label"
-                    label="Trustlines closed now (7/30/90d)"
-                    tooltip-text="Not an event counter: among trustlines created inside each window, how many are currently status=closed."
+                    :label="t('graph.analytics.activity.trustlinesClosedNow')"
+                    :tooltip-text="t('graph.analytics.activity.trustlinesClosedNowTooltip')"
                   />
                   <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
                     class="metricRow__label"
-                    label="Incidents (initiator, 7/30/90d)"
-                    tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
+                    :label="t('graph.analytics.activity.incidentsInitiator')"
+                    :tooltip-text="t('graph.analytics.activity.incidentsInitiatorTooltip')"
                   />
                   <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
                     class="metricRow__label"
-                    label="Participant ops (audit-log, 7/30/90d)"
-                    tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
+                    :label="t('graph.analytics.activity.participantOps')"
+                    :tooltip-text="t('graph.analytics.activity.participantOpsTooltip')"
                   />
                   <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
                 </div>
@@ -532,26 +533,26 @@ defineProps<{
                 v-else
                 class="muted"
               >
-                No data
+                {{ t('common.noData') }}
               </div>
             </el-card>
           </div>
         </el-tab-pane>
 
         <el-tab-pane
-          label="Connections"
+          :label="t('graph.drawer.tabs.connections')"
           name="connections"
         >
           <div class="hint">
-            Derived from visible graph edges (incoming/outgoing trustlines).
+            {{ t('graph.hint.connectionsDerivedFromEdges') }}
           </div>
 
           <el-empty
             v-if="selectedConnectionsIncoming.length + selectedConnectionsOutgoing.length === 0"
-            description="No connections in current view"
+            :description="t('graph.analytics.connections.noneInView')"
           />
           <div v-else>
-            <el-divider>Incoming (owed to you)</el-divider>
+            <el-divider>{{ t('graph.common.incomingOwedToYou') }}</el-divider>
             <div class="tableTop">
               <el-pagination
                 v-model:current-page="connectionsIncomingPage"
@@ -573,7 +574,7 @@ defineProps<{
               @row-click="onConnectionRowClick"
             >
               <el-table-column
-                label="Counterparty"
+                :label="t('graph.analytics.connections.columns.counterparty')"
                 min-width="220"
               >
                 <template #default="{ row }">
@@ -586,16 +587,16 @@ defineProps<{
               </el-table-column>
               <el-table-column
                 prop="equivalent"
-                label="Eq"
+                :label="t('graph.analytics.connections.columns.eq')"
                 width="80"
               />
               <el-table-column
                 prop="status"
-                label="Status"
+                :label="t('common.status')"
                 width="90"
               />
               <el-table-column
-                label="Available"
+                :label="t('trustlines.available')"
                 width="120"
               >
                 <template #default="{ row }">
@@ -603,7 +604,7 @@ defineProps<{
                 </template>
               </el-table-column>
               <el-table-column
-                label="Used"
+                :label="t('trustlines.used')"
                 width="120"
               >
                 <template #default="{ row }">
@@ -611,7 +612,7 @@ defineProps<{
                 </template>
               </el-table-column>
               <el-table-column
-                label="Limit"
+                :label="t('trustlines.limit')"
                 width="120"
               >
                 <template #default="{ row }">
@@ -620,7 +621,7 @@ defineProps<{
               </el-table-column>
             </el-table>
 
-            <el-divider>Outgoing (you owe)</el-divider>
+            <el-divider>{{ t('graph.common.outgoingYouOwe') }}</el-divider>
             <div class="tableTop">
               <el-pagination
                 v-model:current-page="connectionsOutgoingPage"
@@ -642,7 +643,7 @@ defineProps<{
               @row-click="onConnectionRowClick"
             >
               <el-table-column
-                label="Counterparty"
+                :label="t('graph.analytics.connections.columns.counterparty')"
                 min-width="220"
               >
                 <template #default="{ row }">
@@ -655,16 +656,16 @@ defineProps<{
               </el-table-column>
               <el-table-column
                 prop="equivalent"
-                label="Eq"
+                :label="t('graph.analytics.connections.columns.eq')"
                 width="80"
               />
               <el-table-column
                 prop="status"
-                label="Status"
+                :label="t('common.status')"
                 width="90"
               />
               <el-table-column
-                label="Available"
+                :label="t('trustlines.available')"
                 width="120"
               >
                 <template #default="{ row }">
@@ -672,7 +673,7 @@ defineProps<{
                 </template>
               </el-table-column>
               <el-table-column
-                label="Used"
+                :label="t('trustlines.used')"
                 width="120"
               >
                 <template #default="{ row }">
@@ -680,7 +681,7 @@ defineProps<{
                 </template>
               </el-table-column>
               <el-table-column
-                label="Limit"
+                :label="t('trustlines.limit')"
                 width="120"
               >
                 <template #default="{ row }">
@@ -692,17 +693,15 @@ defineProps<{
         </el-tab-pane>
 
         <el-tab-pane
-          label="Balance"
+          :label="t('graph.drawer.tabs.balance')"
           name="balance"
         >
-          <div class="hint">
-            Derived from trustlines + debts fixtures (debts are derived from trustline.used).
-          </div>
+          <div class="hint">{{ t('graph.hint.balanceDerivedFromTrustlinesDebts') }}</div>
 
           <el-alert
             v-if="!analyticsEq"
-            title="Pick an equivalent (not ALL) to enable analytics cards"
-            description="With ALL selected, the Balance table still works, but Rank/Distribution/Counterparty/Risk visualizations are hidden because they are per-equivalent."
+            :title="t('graph.analytics.balance.pickEquivalentTitle')"
+            :description="t('graph.analytics.balance.pickEquivalentDescription')"
             type="info"
             show-icon
             class="mb"
@@ -711,8 +710,8 @@ defineProps<{
           <GraphAnalyticsTogglesCard
             v-if="analyticsEq"
             v-model="analytics"
-            title="Balance widgets"
-            title-tooltip-text="Show/hide balance visualizations. These toggles are stored in localStorage for this browser."
+            :title="t('graph.analytics.balance.widgetsTitle')"
+            :title-tooltip-text="t('graph.analytics.balance.widgetsTooltip')"
             :enabled="Boolean(analyticsEq)"
             :items="balanceToggleItems"
           />
@@ -724,13 +723,13 @@ defineProps<{
           >
             <template #header>
               <TooltipLabel
-                :label="`Rank / percentile (${selectedRank.eq})`"
-                tooltip-text="Rank is 1..N by net balance; percentile is normalized to 0..100 where 100% is the top net creditor."
+                :label="t('graph.analytics.balance.rankPercentileWithEq', { eq: selectedRank.eq })"
+                :tooltip-text="t('graph.analytics.balance.rankPercentileTooltip')"
               />
             </template>
             <div class="kpi">
               <div class="kpi__value">
-                rank {{ selectedRank.rank }}/{{ selectedRank.n }}
+                {{ t('graph.analytics.common.rank') }} {{ selectedRank.rank }}/{{ selectedRank.n }}
               </div>
               <el-progress
                 :percentage="Math.round((selectedRank.percentile || 0) * 100)"
@@ -738,7 +737,7 @@ defineProps<{
                 :show-text="false"
               />
               <div class="kpi__hint muted">
-                Percentile: {{ pct(selectedRank.percentile, 0) }}
+                {{ t('graph.analytics.common.percentile') }}: {{ pct(selectedRank.percentile, 0) }}
               </div>
             </div>
           </el-card>
@@ -750,8 +749,8 @@ defineProps<{
           >
             <template #header>
               <TooltipLabel
-                :label="`Distribution (${netDistribution.eq})`"
-                tooltip-text="Histogram of net balances across all participants for the selected equivalent."
+                :label="t('graph.analytics.balance.distributionWithEq', { eq: netDistribution.eq })"
+                :tooltip-text="t('graph.analytics.balance.distributionTooltip')"
               />
             </template>
             <div class="hist">
@@ -771,7 +770,7 @@ defineProps<{
 
           <el-empty
             v-if="selectedBalanceRows.length === 0"
-            description="No data"
+            :description="t('common.noData')"
           />
           <el-table
             v-else
@@ -782,12 +781,12 @@ defineProps<{
           >
             <el-table-column
               prop="equivalent"
-              label="Equivalent"
+              :label="t('trustlines.equivalent')"
               width="120"
             />
             <el-table-column
               prop="outgoing_limit"
-              label="Out limit"
+              :label="t('graph.analytics.balance.columns.outLimit')"
               min-width="120"
             >
               <template #default="{ row }">
@@ -796,7 +795,7 @@ defineProps<{
             </el-table-column>
             <el-table-column
               prop="outgoing_used"
-              label="Out used"
+              :label="t('graph.analytics.balance.columns.outUsed')"
               min-width="120"
             >
               <template #default="{ row }">
@@ -805,7 +804,7 @@ defineProps<{
             </el-table-column>
             <el-table-column
               prop="incoming_limit"
-              label="In limit"
+              :label="t('graph.analytics.balance.columns.inLimit')"
               min-width="120"
             >
               <template #default="{ row }">
@@ -814,7 +813,7 @@ defineProps<{
             </el-table-column>
             <el-table-column
               prop="incoming_used"
-              label="In used"
+              :label="t('graph.analytics.balance.columns.inUsed')"
               min-width="120"
             >
               <template #default="{ row }">
@@ -823,7 +822,7 @@ defineProps<{
             </el-table-column>
             <el-table-column
               prop="total_debt"
-              label="Debt"
+              :label="t('graph.analytics.balance.columns.debt')"
               min-width="120"
             >
               <template #default="{ row }">
@@ -832,7 +831,7 @@ defineProps<{
             </el-table-column>
             <el-table-column
               prop="total_credit"
-              label="Credit"
+              :label="t('graph.analytics.balance.columns.credit')"
               min-width="120"
             >
               <template #default="{ row }">
@@ -841,7 +840,7 @@ defineProps<{
             </el-table-column>
             <el-table-column
               prop="net"
-              label="Net"
+              :label="t('graph.analytics.balance.columns.net')"
               min-width="120"
             >
               <template #default="{ row }">
@@ -852,12 +851,12 @@ defineProps<{
         </el-tab-pane>
 
         <el-tab-pane
-          label="Counterparties"
+          :label="t('graph.drawer.tabs.counterparties')"
           name="counterparties"
         >
           <el-alert
             v-if="!analyticsEq"
-            title="Pick an equivalent (not ALL) to inspect counterparties."
+            :title="t('graph.analytics.counterparties.pickEquivalentTitle')"
             type="info"
             show-icon
             class="mb"
@@ -868,13 +867,13 @@ defineProps<{
               <el-card shadow="never">
                 <template #header>
                   <TooltipLabel
-                    label="Top creditors (you owe)"
-                    tooltip-text="Participants who are creditors of this participant (debts where you are the debtor)."
+                    :label="t('graph.analytics.counterparties.topCreditorsYouOwe')"
+                    :tooltip-text="t('graph.analytics.counterparties.topCreditorsYouOweTooltip')"
                   />
                 </template>
                 <el-empty
                   v-if="selectedCounterpartySplit.creditors.length === 0"
-                  description="No creditors"
+                  :description="t('graph.analytics.counterparties.noCreditors')"
                 />
                 <el-table
                   v-else
@@ -885,12 +884,12 @@ defineProps<{
                 >
                   <el-table-column
                     prop="display_name"
-                    label="Participant"
+                    :label="t('graph.analytics.common.participant')"
                     min-width="220"
                   />
                   <el-table-column
                     prop="amount"
-                    label="Amount"
+                    :label="t('graph.analytics.common.amount')"
                     min-width="120"
                   >
                     <template #default="{ row }">
@@ -899,7 +898,7 @@ defineProps<{
                   </el-table-column>
                   <el-table-column
                     prop="share"
-                    label="Share"
+                    :label="t('graph.analytics.common.share')"
                     min-width="140"
                   >
                     <template #default="{ row }">
@@ -919,13 +918,13 @@ defineProps<{
               <el-card shadow="never">
                 <template #header>
                   <TooltipLabel
-                    label="Top debtors (owed to you)"
-                    tooltip-text="Participants who are debtors to this participant (debts where you are the creditor)."
+                    :label="t('graph.analytics.counterparties.topDebtorsOwedToYou')"
+                    :tooltip-text="t('graph.analytics.counterparties.topDebtorsOwedToYouTooltip')"
                   />
                 </template>
                 <el-empty
                   v-if="selectedCounterpartySplit.debtors.length === 0"
-                  description="No debtors"
+                  :description="t('graph.analytics.counterparties.noDebtors')"
                 />
                 <el-table
                   v-else
@@ -936,12 +935,12 @@ defineProps<{
                 >
                   <el-table-column
                     prop="display_name"
-                    label="Participant"
+                    :label="t('graph.analytics.common.participant')"
                     min-width="220"
                   />
                   <el-table-column
                     prop="amount"
-                    label="Amount"
+                    :label="t('graph.analytics.common.amount')"
                     min-width="120"
                   >
                     <template #default="{ row }">
@@ -950,7 +949,7 @@ defineProps<{
                   </el-table-column>
                   <el-table-column
                     prop="share"
-                    label="Share"
+                    :label="t('graph.analytics.common.share')"
                     min-width="140"
                   >
                     <template #default="{ row }">
@@ -971,12 +970,12 @@ defineProps<{
         </el-tab-pane>
 
         <el-tab-pane
-          label="Risk"
+          :label="t('graph.drawer.tabs.risk')"
           name="risk"
         >
           <el-alert
             v-if="!analyticsEq"
-            title="Pick an equivalent (not ALL) to inspect risk metrics."
+            :title="t('graph.analytics.risk.pickEquivalentTitle')"
             type="info"
             show-icon
             class="mb"
@@ -985,8 +984,8 @@ defineProps<{
           <GraphAnalyticsTogglesCard
             v-if="analyticsEq"
             v-model="analytics"
-            title="Risk widgets"
-            title-tooltip-text="Show/hide risk-related widgets in this tab. These toggles are stored in localStorage for this browser."
+            :title="t('graph.analytics.risk.widgetsTitle')"
+            :title-tooltip-text="t('graph.analytics.risk.widgetsTooltip')"
             :enabled="Boolean(analyticsEq)"
             :items="riskToggleItems"
           />
@@ -998,8 +997,8 @@ defineProps<{
           >
             <template #header>
               <TooltipLabel
-                :label="`Concentration (${analyticsEq})`"
-                tooltip-text="Counterparty concentration risk derived from debt shares: top1/top5 and HHI."
+                :label="t('graph.analytics.risk.counterpartyConcentration.title')"
+                :tooltip-text="t('graph.analytics.risk.counterpartyConcentration.tooltip')"
               />
             </template>
             <div
@@ -1008,10 +1007,7 @@ defineProps<{
             >
               <div class="riskBlock">
                 <div class="riskBlock__hdr">
-                  <TooltipLabel
-                    label="Outgoing concentration"
-                    tooltip-text="How concentrated your outgoing debts are (you owe). Higher = dependence on fewer creditors."
-                  />
+                  <span class="geoLabel">{{ t('graph.common.outgoingYouOwe') }}</span>
                   <el-tag
                     :type="selectedConcentration.outgoing.level.type"
                     size="small"
@@ -1023,24 +1019,24 @@ defineProps<{
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top1 share"
-                      tooltip-text="Share of total outgoing debt owed to the largest single creditor."
+                      :label="t('graph.analytics.concentration.top1.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top1.outgoing.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top5 share"
-                      tooltip-text="Share of total outgoing debt owed to the largest 5 creditors combined."
+                      :label="t('graph.analytics.concentration.top5.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top5.outgoing.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.outgoing.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                      :label="t('graph.analytics.concentration.hhi.label')"
+                      :tooltip-text="t('graph.analytics.concentration.hhi.tooltip')"
                     />
                     <span class="metricRow__value">{{ selectedConcentration.outgoing.hhi.toFixed(2) }}</span>
                   </div>
@@ -1048,10 +1044,7 @@ defineProps<{
               </div>
               <div class="riskBlock">
                 <div class="riskBlock__hdr">
-                  <TooltipLabel
-                    label="Incoming concentration"
-                    tooltip-text="How concentrated your incoming credits are (owed to you). Higher = dependence on fewer debtors."
-                  />
+                  <span class="geoLabel">{{ t('graph.common.incomingOwedToYou') }}</span>
                   <el-tag
                     :type="selectedConcentration.incoming.level.type"
                     size="small"
@@ -1063,24 +1056,24 @@ defineProps<{
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top1 share"
-                      tooltip-text="Share of total incoming credit owed by the largest single debtor."
+                      :label="t('graph.analytics.concentration.top1.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top1.incoming.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top1, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="Top5 share"
-                      tooltip-text="Share of total incoming credit owed by the largest 5 debtors combined."
+                      :label="t('graph.analytics.concentration.top5.label')"
+                      :tooltip-text="t('graph.analytics.concentration.top5.incoming.tooltip')"
                     />
                     <span class="metricRow__value">{{ pct(selectedConcentration.incoming.top5, 0) }}</span>
                   </div>
                   <div class="metricRow">
                     <TooltipLabel
                       class="metricRow__label"
-                      label="HHI"
-                      tooltip-text="Herfindahl–Hirschman Index = sum of squared counterparty shares. Closer to 1 means more concentrated."
+                      :label="t('graph.analytics.concentration.hhi.label')"
+                      :tooltip-text="t('graph.analytics.concentration.hhi.tooltip')"
                     />
                     <span class="metricRow__value">{{ selectedConcentration.incoming.hhi.toFixed(2) }}</span>
                   </div>
@@ -1091,7 +1084,7 @@ defineProps<{
               v-else
               class="muted"
             >
-              No data
+              {{ t('common.noData') }}
             </div>
           </el-card>
 
@@ -1102,15 +1095,15 @@ defineProps<{
           >
             <template #header>
               <TooltipLabel
-                label="Trustline capacity"
-                tooltip-text="How much of the participant’s trustline limits are already used. Outgoing = used on lines where participant is creditor; incoming = used on lines where participant is debtor."
+                :label="t('graph.analytics.risk.trustlineCapacity.title')"
+                :tooltip-text="t('graph.analytics.risk.trustlineCapacity.tooltip')"
               />
             </template>
             <div class="capRow">
               <div class="capRow__label">
                 <TooltipLabel
-                  label="Outgoing used"
-                  tooltip-text="Used / limit aggregated across all outgoing trustlines (participant is creditor)."
+                  :label="t('graph.analytics.capacity.outgoingUsed')"
+                  :tooltip-text="t('graph.analytics.risk.trustlineCapacity.outgoingUsedTooltip')"
                 />
               </div>
               <el-progress
@@ -1125,8 +1118,8 @@ defineProps<{
             <div class="capRow">
               <div class="capRow__label">
                 <TooltipLabel
-                  label="Incoming used"
-                  tooltip-text="Used / limit aggregated across all incoming trustlines (participant is debtor)."
+                  :label="t('graph.analytics.capacity.incomingUsed')"
+                  :tooltip-text="t('graph.analytics.risk.trustlineCapacity.incomingUsedTooltip')"
                 />
               </div>
               <el-progress
@@ -1148,14 +1141,14 @@ defineProps<{
                 size="small"
               >
                 <TooltipLabel
-                  :label="`Bottlenecks: ${selectedCapacity.bottlenecks.length}`"
-                  tooltip-text="Trustlines where available/limit is below the selected threshold."
+                  :label="t('graph.analytics.risk.bottlenecksCount', { n: selectedCapacity.bottlenecks.length })"
+                  :tooltip-text="t('graph.analytics.risk.bottlenecksTooltip')"
                 />
               </el-tag>
               <span
                 class="muted"
                 style="margin-left: 8px"
-              >threshold {{ threshold }}</span>
+              >{{ t('graph.analytics.risk.threshold', { threshold }) }}</span>
             </div>
             <el-collapse
               v-if="analytics.showBottlenecks && selectedCapacity.bottlenecks.length"
@@ -1164,8 +1157,8 @@ defineProps<{
               <el-collapse-item name="bottlenecks">
                 <template #title>
                   <TooltipLabel
-                    label="Bottlenecks list"
-                    tooltip-text="List of trustlines close to saturation (low available relative to limit)."
+                    :label="t('graph.analytics.risk.bottlenecksListTitle')"
+                    :tooltip-text="t('graph.analytics.risk.bottlenecksListTooltip')"
                   />
                 </template>
                 <el-table
@@ -1176,16 +1169,16 @@ defineProps<{
                 >
                   <el-table-column
                     prop="dir"
-                    label="Dir"
+                    :label="t('graph.analytics.risk.columns.dir')"
                     width="70"
                   />
                   <el-table-column
                     prop="other"
-                    label="Counterparty"
+                    :label="t('graph.analytics.connections.columns.counterparty')"
                     min-width="220"
                   />
                   <el-table-column
-                    label="Limit / Used / Avail"
+                    :label="t('graph.analytics.risk.columns.limitUsedAvail')"
                     min-width="220"
                   >
                     <template #default="{ row }">
@@ -1203,56 +1196,56 @@ defineProps<{
           >
             <template #header>
               <TooltipLabel
-                label="Activity / churn"
-                tooltip-text="Counts by 7/30/90-day windows. Sources: trustlines.created_at, incidents.created_at, audit-log.timestamp, transactions.updated_at."
+                :label="t('graph.analytics.activity.title')"
+                :tooltip-text="t('graph.analytics.risk.activityTooltip')"
               />
             </template>
             <div class="metricRows">
               <div class="metricRow">
                 <TooltipLabel
                   class="metricRow__label"
-                  label="Trustlines created (7/30/90d)"
-                  tooltip-text="Count of trustlines involving this participant with created_at inside each window."
+                  :label="t('graph.analytics.activity.trustlinesCreated')"
+                  :tooltip-text="t('graph.analytics.activity.trustlinesCreatedTooltip')"
                 />
                 <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
               </div>
               <div class="metricRow">
                 <TooltipLabel
                   class="metricRow__label"
-                  label="Trustlines closed now (7/30/90d)"
-                  tooltip-text="Not an event counter: among trustlines created inside each window, how many are currently status=closed."
+                  :label="t('graph.analytics.activity.trustlinesClosedNow')"
+                  :tooltip-text="t('graph.analytics.activity.trustlinesClosedNowTooltip')"
                 />
                 <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
               </div>
               <div class="metricRow">
                 <TooltipLabel
                   class="metricRow__label"
-                  label="Incidents (initiator, 7/30/90d)"
-                  tooltip-text="Count of incident records where this participant is the initiator_pid, by created_at window."
+                  :label="t('graph.analytics.activity.incidentsInitiator')"
+                  :tooltip-text="t('graph.analytics.activity.incidentsInitiatorTooltip')"
                 />
                 <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
               </div>
               <div class="metricRow">
                 <TooltipLabel
                   class="metricRow__label"
-                  label="Participant ops (audit-log, 7/30/90d)"
-                  tooltip-text="Count of audit-log actions starting with PARTICIPANT_* for this pid (object_id), by timestamp window."
+                  :label="t('graph.analytics.activity.participantOps')"
+                  :tooltip-text="t('graph.analytics.activity.participantOpsTooltip')"
                 />
                 <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
               </div>
               <div class="metricRow">
                 <TooltipLabel
                   class="metricRow__label"
-                  label="Payments committed (7/30/90d)"
-                  tooltip-text="Count of committed PAYMENT transactions involving this participant (as sender or receiver), by updated_at window."
+                  :label="t('graph.analytics.activity.paymentsCommitted')"
+                  :tooltip-text="t('graph.analytics.activity.paymentsCommittedTooltip')"
                 />
                 <span class="metricRow__value">{{ selectedActivity.paymentCommitted[7] }} / {{ selectedActivity.paymentCommitted[30] }} / {{ selectedActivity.paymentCommitted[90] }}</span>
               </div>
               <div class="metricRow">
                 <TooltipLabel
                   class="metricRow__label"
-                  label="Clearing committed (7/30/90d)"
-                  tooltip-text="Count of committed CLEARING transactions where this participant appears in any cycle edge (or is initiator), by updated_at window."
+                  :label="t('graph.analytics.activity.clearingCommitted')"
+                  :tooltip-text="t('graph.analytics.activity.clearingCommittedTooltip')"
                 />
                 <span class="metricRow__value">{{ selectedActivity.clearingCommitted[7] }} / {{ selectedActivity.clearingCommitted[30] }} / {{ selectedActivity.clearingCommitted[90] }}</span>
               </div>
@@ -1261,8 +1254,8 @@ defineProps<{
               v-if="!selectedActivity.hasTransactions"
               type="warning"
               show-icon
-              title="Transactions-based activity is unavailable in fixtures"
-              description="Missing datasets/transactions.json in the current seed. In real mode this must come from API."
+              :title="t('graph.analytics.activity.transactionsUnavailableTitle')"
+              :description="t('graph.analytics.activity.transactionsUnavailableDescription')"
               class="mb"
               style="margin-top: 10px"
             />
@@ -1270,19 +1263,19 @@ defineProps<{
         </el-tab-pane>
 
         <el-tab-pane
-          label="Cycles"
+          :label="t('graph.drawer.tabs.cycles')"
           name="cycles"
         >
           <el-alert
             v-if="!analyticsEq"
-            title="Pick an equivalent (not ALL) to inspect clearing cycles."
+            :title="t('graph.analytics.cycles.pickEquivalentTitle')"
             type="info"
             show-icon
             class="mb"
           />
           <el-empty
             v-else-if="selectedCycles.length === 0"
-            description="No cycles found in fixtures"
+            :description="t('graph.analytics.cycles.noneInFixtures')"
           />
           <div
             v-else
@@ -1290,8 +1283,8 @@ defineProps<{
           >
             <div class="hint">
               <TooltipLabel
-                label="Clearing cycles"
-                tooltip-text="Each cycle is a directed loop in the debt graph for the selected equivalent. Clearing reduces each edge by the shown amount."
+                :label="t('graph.analytics.cycles.title')"
+                :tooltip-text="t('graph.analytics.cycles.titleTooltip')"
               />
             </div>
             <div
@@ -1303,8 +1296,8 @@ defineProps<{
             >
               <div class="cycleTitle">
                 <TooltipLabel
-                  :label="`Cycle #${idx + 1}`"
-                  tooltip-text="A cycle is a set of debts that can be cleared together while preserving net positions (cycle cancelation)."
+                  :label="t('graph.analytics.cycles.cycleNumber', { n: idx + 1 })"
+                  :tooltip-text="t('graph.analytics.cycles.cycleTooltip')"
                 />
               </div>
               <div

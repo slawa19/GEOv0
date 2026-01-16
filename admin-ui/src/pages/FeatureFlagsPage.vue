@@ -7,6 +7,7 @@ import { toastApiError } from '../api/errorToast'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import { t } from '../i18n/en'
 
 type FlagRow = { key: string; value: boolean; original: boolean }
 
@@ -28,7 +29,7 @@ async function load() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => ({ key: k, value: v as boolean, original: v as boolean }))
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load feature flags'
+    error.value = e?.message || t('featureFlags.loadFailed')
   } finally {
     loading.value = false
   }
@@ -42,7 +43,7 @@ async function persistRow(row: FlagRow) {
   if (authStore.isReadOnly) {
     // Revert any UI toggle attempt.
     row.value = row.original
-    ElMessage.error('Read-only role: updates are disabled')
+    ElMessage.error(t('common.readOnlyUpdatesDisabled'))
     return
   }
   if (row.value === row.original) return
@@ -50,10 +51,10 @@ async function persistRow(row: FlagRow) {
   const previous = row.original
 
   try {
-    await ElMessageBox.confirm(`Set ${row.key} = ${row.value}?`, 'Confirm', {
+    await ElMessageBox.confirm(t('featureFlags.confirmSet', { key: row.key, value: String(row.value) }), t('common.confirm'), {
       type: 'warning',
-      confirmButtonText: 'Apply',
-      cancelButtonText: 'Cancel',
+      confirmButtonText: t('common.apply'),
+      cancelButtonText: t('common.cancel'),
     })
   } catch {
     row.value = previous
@@ -64,10 +65,10 @@ async function persistRow(row: FlagRow) {
   try {
     assertSuccess(await api.patchFeatureFlags({ [row.key]: row.value }))
     row.original = row.value
-    ElMessage.success('Updated')
+    ElMessage.success(t('common.updated'))
   } catch (e: any) {
     row.value = row.original
-    void toastApiError(e, { fallbackTitle: e?.message || 'Update failed' })
+    void toastApiError(e, { fallbackTitle: e?.message || t('featureFlags.updateFailed') })
   } finally {
     savingKey.value = null
   }
@@ -81,11 +82,11 @@ onMounted(() => void load())
     <template #header>
       <div class="hdr">
         <TooltipLabel
-          label="Feature Flags"
+          :label="t('featureFlags.title')"
           tooltip-key="nav.featureFlags"
         />
         <el-tag type="info">
-          Dirty: {{ dirtyCount }}
+          {{ t('common.dirtyCount', { n: dirtyCount }) }}
         </el-tag>
       </div>
     </template>
@@ -99,7 +100,7 @@ onMounted(() => void load())
     />
     <el-alert
       v-else-if="fullMultipathEnabled"
-      title="Experimental: full_multipath_enabled is ON"
+      :title="t('featureFlags.experimentalMultipathOn')"
       type="warning"
       show-icon
       class="mb"
@@ -112,7 +113,7 @@ onMounted(() => void load())
 
     <el-empty
       v-else-if="rows.length === 0"
-      description="No boolean flags in dataset"
+      :description="t('featureFlags.none')"
     />
 
     <div v-else>
@@ -124,7 +125,7 @@ onMounted(() => void load())
       >
         <el-table-column
           prop="key"
-          label="Flag"
+          :label="t('featureFlags.columns.flag')"
           width="420"
           show-overflow-tooltip
         >
@@ -133,7 +134,7 @@ onMounted(() => void load())
           </template>
         </el-table-column>
         <el-table-column
-          label="Value"
+          :label="t('common.value')"
           width="140"
           align="center"
           header-align="center"
@@ -147,7 +148,7 @@ onMounted(() => void load())
           </template>
         </el-table-column>
         <el-table-column
-          label="Status"
+          :label="t('common.status')"
           width="140"
           align="center"
           header-align="center"
@@ -157,19 +158,19 @@ onMounted(() => void load())
               v-if="savingKey === scope.row.key"
               type="info"
             >
-              Saving…
+              {{ t('common.saving') }}
             </el-tag>
             <el-tag
               v-else-if="scope.row.value !== scope.row.original"
               type="warning"
             >
-              Pending
+              {{ t('common.pending') }}
             </el-tag>
             <el-tag
               v-else
               type="success"
             >
-              Synced
+              {{ t('common.synced') }}
             </el-tag>
           </template>
         </el-table-column>

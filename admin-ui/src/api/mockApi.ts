@@ -348,11 +348,13 @@ export const mockApi = {
       const eqCode = eqRaw && eqRaw !== 'ALL' ? eqRaw : null
       const thrStr = String(params?.threshold ?? '0.10').trim() || '0.10'
 
-      const [participants, equivalents, trustlines, debts] = await Promise.all([
+      const [participants, equivalents, trustlines, debts, incidents, transactions] = await Promise.all([
         getParticipantsDataset(),
         getEquivalentsDataset(),
         getTrustlinesDataset(),
         loadOptionalJson<Debt[]>('datasets/debts.json', []),
+        loadOptionalJson<Incident[]>('datasets/incidents.json', []),
+        loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
       ])
 
       const pidToName = new Map(participants.map((p) => [p.pid, String(p.display_name || '').trim() || p.pid]))
@@ -558,23 +560,72 @@ export const mockApi = {
         }
       }
 
-      // Basic activity placeholder: keep schema stable without depending on extra datasets.
       const nowMs = Date.now()
       const windows = [7, 30, 90]
+      const dayMs = 24 * 3600 * 1000
+
       const trustline_created: Record<number, number> = {}
       const trustline_closed: Record<number, number> = {}
+      const incident_count: Record<number, number> = {}
+      const participant_ops: Record<number, number> = {}
+      const payment_committed: Record<number, number> = {}
+      const clearing_committed: Record<number, number> = {}
       for (const w of windows) {
         trustline_created[w] = 0
         trustline_closed[w] = 0
+        incident_count[w] = 0
+        participant_ops[w] = 0
+        payment_committed[w] = 0
+        clearing_committed[w] = 0
+      }
+
+      const getTxEq = (tx: Transaction): string => {
+        const v = (tx as any)?.payload?.equivalent
+        return typeof v === 'string' ? v.trim().toUpperCase() : ''
       }
 
       for (const t of trustlines || []) {
-        if (!eqCode || String(t.equivalent || '').trim().toUpperCase() !== eqCode) continue
+        if (eqCode && String(t.equivalent || '').trim().toUpperCase() !== eqCode) continue
         if (t.from !== pidKey && t.to !== pidKey) continue
         const ms = safeIsoToMs(t.created_at)
         if (!ms) continue
         for (const w of windows) {
-          if (ms >= nowMs - w * 24 * 3600 * 1000) trustline_created[w] = (trustline_created[w] ?? 0) + 1
+          if (ms >= nowMs - w * dayMs) {
+            trustline_created[w] = (trustline_created[w] ?? 0) + 1
+            if (String(t.status || '').trim().toLowerCase() === 'closed') {
+              trustline_closed[w] = (trustline_closed[w] ?? 0) + 1
+            }
+          }
+        }
+      }
+
+      for (const inc of incidents || []) {
+        if (String(inc.initiator_pid || '').trim() !== pidKey) continue
+        if (eqCode && String(inc.equivalent || '').trim().toUpperCase() !== eqCode) continue
+        const createdMs =
+          safeIsoToMs(inc.created_at) ??
+          (Number.isFinite(inc.age_seconds) ? nowMs - Math.max(0, Number(inc.age_seconds)) * 1000 : null)
+        if (!createdMs) continue
+        for (const w of windows) {
+          if (createdMs >= nowMs - w * dayMs) incident_count[w] = (incident_count[w] ?? 0) + 1
+        }
+      }
+
+      for (const tx of transactions || []) {
+        if (String(tx.initiator_pid || '').trim() !== pidKey) continue
+        if (eqCode && getTxEq(tx) !== eqCode) continue
+        const createdMs = safeIsoToMs(tx.created_at)
+        if (!createdMs) continue
+
+        const type = String(tx.type || '').trim().toUpperCase()
+        const state = String(tx.state || '').trim().toUpperCase()
+        const isCommitted = state === 'COMMITTED'
+
+        for (const w of windows) {
+          if (createdMs < nowMs - w * dayMs) continue
+          participant_ops[w] = (participant_ops[w] ?? 0) + 1
+          if (isCommitted && type === 'PAYMENT') payment_committed[w] = (payment_committed[w] ?? 0) + 1
+          if (isCommitted && type === 'CLEARING') clearing_committed[w] = (clearing_committed[w] ?? 0) + 1
         }
       }
 
@@ -582,11 +633,13 @@ export const mockApi = {
         windows,
         trustline_created,
         trustline_closed,
-        incident_count: { 7: 0, 30: 0, 90: 0 },
-        participant_ops: { 7: 0, 30: 0, 90: 0 },
-        payment_committed: { 7: 0, 30: 0, 90: 0 },
-        clearing_committed: { 7: 0, 30: 0, 90: 0 },
-        has_transactions: false,
+        incident_count,
+        participant_ops,
+        payment_committed,
+        clearing_committed,
+        has_transactions: (transactions || []).some(
+          (tx) => String(tx.initiator_pid || '').trim() === pidKey && (!eqCode || getTxEq(tx) === eqCode),
+        ),
       }
 
       return {

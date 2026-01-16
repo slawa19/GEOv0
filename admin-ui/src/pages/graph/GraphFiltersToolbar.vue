@@ -377,8 +377,8 @@ const focusDepthModel = computed({
             </el-checkbox-group>
           </div>
 
-          <div class="toggleGrid">
-            <div class="toggleLine">
+          <div class="geoToggleGrid">
+            <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
                 label="Labels"
@@ -389,7 +389,7 @@ const focusDepthModel = computed({
                 size="small"
               />
             </div>
-            <div class="toggleLine">
+            <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
                 label="Auto labels"
@@ -400,7 +400,7 @@ const focusDepthModel = computed({
                 size="small"
               />
             </div>
-            <div class="toggleLine">
+            <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
                 label="Incidents"
@@ -411,7 +411,7 @@ const focusDepthModel = computed({
                 size="small"
               />
             </div>
-            <div class="toggleLine">
+            <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
                 label="Hide isolates"
@@ -422,7 +422,7 @@ const focusDepthModel = computed({
                 size="small"
               />
             </div>
-            <div class="toggleLine">
+            <div class="geoToggleLine">
               <TooltipLabel
                 class="toolbarLabel"
                 label="Legend"
@@ -570,7 +570,7 @@ const focusDepthModel = computed({
   align-items: start;
 }
 
-.paneGrid > .toggleGrid {
+.paneGrid > .geoToggleGrid {
   grid-column: 1 / -1;
 }
 
@@ -620,30 +620,7 @@ const focusDepthModel = computed({
   min-width: 200px;
 }
 
-.toggleGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 6px 12px;
-  align-items: center;
-}
 
-.toggleLine {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  padding: 2px 6px;
-  min-height: 28px;
-  border-radius: 8px;
-}
-
-.toggleLine:hover {
-  background: var(--el-fill-color-light);
-}
-
-.toggleLine :deep(.el-switch) {
-  flex: 0 0 auto;
-}
 
 .navPane {
   display: flex;

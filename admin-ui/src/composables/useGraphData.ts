@@ -16,8 +16,39 @@ import type {
   Trustline,
 } from '../pages/graph/graphTypes'
 
-function normEq(v: string): string {
+export function normalizeEqCode(v: string): string {
   return String(v || '').trim().toUpperCase()
+}
+
+export function filterTrustlinesByEqAndStatus(input: {
+  trustlines: Trustline[]
+  equivalent: string
+  statusFilter: string[]
+}): Trustline[] {
+  const eqKey = normalizeEqCode(input.equivalent)
+  const allowed = new Set((input.statusFilter || []).map((s) => String(s).toLowerCase()).filter(Boolean))
+
+  return (input.trustlines || []).filter((t) => {
+    if (eqKey !== 'ALL' && normalizeEqCode(t.equivalent) !== eqKey) return false
+    if (allowed.size && !allowed.has(String(t.status || '').toLowerCase())) return false
+    return true
+  })
+}
+
+export function computeIncidentRatioByPid(input: { incidents: Incident[]; equivalent: string }): Map<string, number> {
+  const eqKey = normalizeEqCode(input.equivalent)
+  const ratios = new Map<string, number>()
+
+  for (const i of input.incidents || []) {
+    if (eqKey !== 'ALL' && normalizeEqCode(i.equivalent) !== eqKey) continue
+    const pid = String(i.initiator_pid || '').trim()
+    if (!pid) continue
+    const ratio = i.sla_seconds > 0 ? i.age_seconds / i.sla_seconds : 0
+    const prev = ratios.get(pid) || 0
+    if (ratio > prev) ratios.set(pid, ratio)
+  }
+
+  return ratios
 }
 
 export function useGraphData(opts: {
@@ -41,8 +72,8 @@ export function useGraphData(opts: {
   const transactions = ref<Transaction[]>([])
 
   const availableEquivalents = computed(() => {
-    const fromDs = (equivalents.value || []).map((e) => e.code).filter(Boolean)
-    const fromTls = (trustlines.value || []).map((t) => normEq(t.equivalent)).filter(Boolean)
+    const fromDs = (equivalents.value || []).map((e) => normalizeEqCode(e.code)).filter(Boolean)
+    const fromTls = (trustlines.value || []).map((t) => normalizeEqCode(t.equivalent)).filter(Boolean)
     const all = Array.from(new Set([...fromDs, ...fromTls])).sort()
     return ['ALL', ...all]
   })
@@ -50,7 +81,7 @@ export function useGraphData(opts: {
   const precisionByEq = computed(() => {
     const m = new Map<string, number>()
     for (const e of equivalents.value || []) {
-      const code = normEq(e.code)
+      const code = normalizeEqCode(e.code)
       if (!code) continue
       const p = Number(e.precision)
       if (Number.isFinite(p)) m.set(code, p)
@@ -67,29 +98,15 @@ export function useGraphData(opts: {
   })
 
   const filteredTrustlines = computed(() => {
-    const eqKey = normEq(opts.eq.value)
-    const allowed = new Set((opts.statusFilter.value || []).map((s) => String(s).toLowerCase()))
-    return (trustlines.value || []).filter((t) => {
-      if (eqKey !== 'ALL' && normEq(t.equivalent) !== eqKey) return false
-      if (allowed.size && !allowed.has(String(t.status || '').toLowerCase())) return false
-      return true
+    return filterTrustlinesByEqAndStatus({
+      trustlines: trustlines.value || [],
+      equivalent: opts.eq.value,
+      statusFilter: opts.statusFilter.value || [],
     })
   })
 
   const incidentRatioByPid = computed(() => {
-    const eqKey = normEq(opts.eq.value)
-    const ratios = new Map<string, number>()
-
-    for (const i of incidents.value || []) {
-      if (eqKey !== 'ALL' && normEq(i.equivalent) !== eqKey) continue
-      const pid = String(i.initiator_pid || '').trim()
-      if (!pid) continue
-      const ratio = i.sla_seconds > 0 ? i.age_seconds / i.sla_seconds : 0
-      const prev = ratios.get(pid) || 0
-      if (ratio > prev) ratios.set(pid, ratio)
-    }
-
-    return ratios
+    return computeIncidentRatioByPid({ incidents: incidents.value || [], equivalent: opts.eq.value })
   })
 
   let fullSnapshot: GraphSnapshotPayload | null = null

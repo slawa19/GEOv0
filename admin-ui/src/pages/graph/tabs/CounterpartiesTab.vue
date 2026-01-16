@@ -1,7 +1,7 @@
 <template>
   <el-alert
     v-if="!analyticsEq"
-    title="Pick an equivalent (not ALL) to inspect counterparties."
+    :title="t('graph.analytics.counterparties.pickEquivalentTitle')"
     type="info"
     show-icon
     class="mb"
@@ -12,13 +12,13 @@
       <el-card shadow="never">
         <template #header>
           <TooltipLabel
-            label="Top creditors (you owe)"
-            tooltip-text="Participants who are creditors of this participant (debts where you are the debtor)."
+            :label="t('graph.analytics.counterparties.topCreditorsYouOwe')"
+            :tooltip-text="t('graph.analytics.counterparties.topCreditorsTooltip')"
           />
         </template>
         <el-empty
           v-if="selectedCounterpartySplit.creditors.length === 0"
-          description="No creditors"
+          :description="t('graph.analytics.counterparties.noCreditors')"
         />
         <el-table
           v-else
@@ -29,12 +29,12 @@
         >
           <el-table-column
             prop="display_name"
-            label="Participant"
+            :label="t('graph.analytics.common.participant')"
             min-width="220"
           />
           <el-table-column
             prop="amount"
-            label="Amount"
+            :label="t('graph.analytics.common.amount')"
             min-width="120"
           >
             <template #default="{ row }">
@@ -43,7 +43,7 @@
           </el-table-column>
           <el-table-column
             prop="share"
-            label="Share"
+            :label="t('graph.analytics.common.share')"
             min-width="140"
           >
             <template #default="{ row }">
@@ -63,13 +63,13 @@
       <el-card shadow="never">
         <template #header>
           <TooltipLabel
-            label="Top debtors (owed to you)"
-            tooltip-text="Participants who are debtors to this participant (debts where you are the creditor)."
+            :label="t('graph.analytics.counterparties.topDebtorsOwedToYou')"
+            :tooltip-text="t('graph.analytics.counterparties.topDebtorsTooltip')"
           />
         </template>
         <el-empty
           v-if="selectedCounterpartySplit.debtors.length === 0"
-          description="No debtors"
+          :description="t('graph.analytics.counterparties.noDebtors')"
         />
         <el-table
           v-else
@@ -80,12 +80,12 @@
         >
           <el-table-column
             prop="display_name"
-            label="Participant"
+            :label="t('graph.analytics.common.participant')"
             min-width="220"
           />
           <el-table-column
             prop="amount"
-            label="Amount"
+            :label="t('graph.analytics.common.amount')"
             min-width="120"
           >
             <template #default="{ row }">
@@ -94,7 +94,7 @@
           </el-table-column>
           <el-table-column
             prop="share"
-            label="Share"
+            :label="t('graph.analytics.common.share')"
             min-width="140"
           >
             <template #default="{ row }">
@@ -116,6 +116,7 @@
 
 <script setup lang="ts">
 import TooltipLabel from '../../../ui/TooltipLabel.vue'
+import { t } from '../../../i18n/en'
 
 type CounterpartyRow = {
   display_name: string

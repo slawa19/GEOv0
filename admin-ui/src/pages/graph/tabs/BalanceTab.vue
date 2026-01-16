@@ -1,12 +1,12 @@
 <template>
   <div class="hint">
-    Derived from trustlines + debts fixtures (debts are derived from trustline.used).
+    {{ t('graph.hint.balanceDerivedFromTrustlinesDebts') }}
   </div>
 
   <el-alert
     v-if="!analyticsEq"
-    title="Pick an equivalent (not ALL) to enable analytics cards"
-    description="With ALL selected, the Balance table still works, but Rank/Distribution/Counterparty/Risk visualizations are hidden because they are per-equivalent."
+    :title="t('graph.analytics.balance.pickEquivalentTitle')"
+    :description="t('graph.analytics.balance.pickEquivalentDescription')"
     type="info"
     show-icon
     class="mb"
@@ -15,8 +15,8 @@
   <GraphAnalyticsTogglesCard
     v-if="analyticsEq"
     v-model="analytics"
-    title="Balance widgets"
-    title-tooltip-text="Show/hide balance visualizations. These toggles are stored in localStorage for this browser."
+    :title="t('graph.analytics.balance.widgetsTitle')"
+    :title-tooltip-text="t('graph.analytics.balance.widgetsTooltip')"
     :enabled="analyticsEq"
     :items="balanceToggleItems"
   />
@@ -28,13 +28,13 @@
   >
     <template #header>
       <TooltipLabel
-        :label="`Rank / percentile (${selectedRank.eq})`"
-        tooltip-text="Rank is 1..N by net balance; percentile is normalized to 0..100 where 100% is the top net creditor."
+        :label="t('graph.analytics.balance.rankPercentileWithEq', { eq: selectedRank.eq })"
+        :tooltip-text="t('graph.analytics.balance.rankPercentileTooltip')"
       />
     </template>
     <div class="kpi">
       <div class="kpi__value">
-        rank {{ selectedRank.rank }}/{{ selectedRank.n }}
+        {{ t('graph.analytics.common.rank') }} {{ selectedRank.rank }}/{{ selectedRank.n }}
       </div>
       <el-progress
         :percentage="Math.round((selectedRank.percentile || 0) * 100)"
@@ -42,7 +42,7 @@
         :show-text="false"
       />
       <div class="kpi__hint muted">
-        Percentile: {{ pct(selectedRank.percentile, 0) }}
+        {{ t('graph.analytics.common.percentile') }}: {{ pct(selectedRank.percentile, 0) }}
       </div>
     </div>
   </el-card>
@@ -54,8 +54,8 @@
   >
     <template #header>
       <TooltipLabel
-        :label="`Distribution (${netDistribution.eq})`"
-        tooltip-text="Histogram of net balances across all participants for the selected equivalent."
+        :label="t('graph.analytics.balance.distributionWithEq', { eq: netDistribution.eq })"
+        :tooltip-text="t('graph.analytics.balance.distributionTooltip')"
       />
     </template>
     <div class="hist">
@@ -75,7 +75,7 @@
 
   <el-empty
     v-if="selectedBalanceRows.length === 0"
-    description="No data"
+    :description="t('common.noData')"
   />
   <el-table
     v-else
@@ -86,12 +86,12 @@
   >
     <el-table-column
       prop="equivalent"
-      label="Equivalent"
+      :label="t('trustlines.equivalent')"
       width="120"
     />
     <el-table-column
       prop="outgoing_limit"
-      label="Out limit"
+      :label="t('graph.analytics.balance.columns.outLimit')"
       min-width="120"
     >
       <template #default="{ row }">
@@ -100,7 +100,7 @@
     </el-table-column>
     <el-table-column
       prop="outgoing_used"
-      label="Out used"
+      :label="t('graph.analytics.balance.columns.outUsed')"
       min-width="120"
     >
       <template #default="{ row }">
@@ -109,7 +109,7 @@
     </el-table-column>
     <el-table-column
       prop="incoming_limit"
-      label="In limit"
+      :label="t('graph.analytics.balance.columns.inLimit')"
       min-width="120"
     >
       <template #default="{ row }">
@@ -118,7 +118,7 @@
     </el-table-column>
     <el-table-column
       prop="incoming_used"
-      label="In used"
+      :label="t('graph.analytics.balance.columns.inUsed')"
       min-width="120"
     >
       <template #default="{ row }">
@@ -127,7 +127,7 @@
     </el-table-column>
     <el-table-column
       prop="total_debt"
-      label="Debt"
+      :label="t('graph.analytics.balance.columns.debt')"
       min-width="120"
     >
       <template #default="{ row }">
@@ -136,7 +136,7 @@
     </el-table-column>
     <el-table-column
       prop="total_credit"
-      label="Credit"
+      :label="t('graph.analytics.balance.columns.credit')"
       min-width="120"
     >
       <template #default="{ row }">
@@ -145,7 +145,7 @@
     </el-table-column>
     <el-table-column
       prop="net"
-      label="Net"
+      :label="t('graph.analytics.balance.columns.net')"
       min-width="120"
     >
       <template #default="{ row }">
@@ -159,6 +159,7 @@
 import GraphAnalyticsTogglesCard from '../../../ui/GraphAnalyticsTogglesCard.vue'
 import type { ToggleKey } from '../../../ui/GraphAnalyticsTogglesCard.vue'
 import TooltipLabel from '../../../ui/TooltipLabel.vue'
+import { t } from '../../../i18n/en'
 
 type AnalyticsModel = Record<ToggleKey, boolean>
 

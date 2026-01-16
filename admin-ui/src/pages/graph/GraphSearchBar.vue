@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import TooltipLabel from '../../ui/TooltipLabel.vue'
+import { t } from '../../i18n/en'
 
 type ParticipantSuggestion = {
   value: string
@@ -37,13 +38,13 @@ const onSelect = (s: ParticipantSuggestion) => {
   <div class="navRow navRow--search">
     <TooltipLabel
       class="toolbarLabel navRow__label"
-      label="Search"
+      :label="t('graph.search.label')"
       tooltip-key="graph.search"
     />
     <el-autocomplete
       v-model="searchQueryModel"
       :fetch-suggestions="fetchSuggestions"
-      placeholder="Type PID or name…"
+      :placeholder="t('graph.search.placeholder')"
       size="small"
       clearable
       class="navRow__field"
