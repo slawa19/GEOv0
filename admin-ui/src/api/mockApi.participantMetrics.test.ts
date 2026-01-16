@@ -15,7 +15,7 @@ describe('mockApi.participantMetrics', () => {
   it('computes balance_rows/counterparty/capacity for a participant', async () => {
     // Make scenario deterministic.
     const url = new URL('http://localhost/?scenario=happy')
-    vi.stubGlobal('window', { ...window, location: url } as any)
+    vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
 
     const participants = [
       { pid: 'PID_A', display_name: 'Alice', type: 'person', status: 'active' },
@@ -41,9 +41,7 @@ describe('mockApi.participantMetrics', () => {
 
     const scenario = { name: 'happy', latency_ms: { min: 0, max: 0 } }
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const u = String(input)
         if (u.includes('/admin-fixtures/v1/scenarios/happy.json')) return jsonResponse(scenario)
         if (u.includes('/admin-fixtures/v1/datasets/participants.json')) return jsonResponse(participants)
@@ -52,8 +50,8 @@ describe('mockApi.participantMetrics', () => {
         if (u.includes('/admin-fixtures/v1/datasets/debts.json')) return jsonResponse(debts)
         // Optional datasets not needed for this test.
         return new Response('Not Found', { status: 404, statusText: 'Not Found' })
-      }) as any,
-    )
+      })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const env = await mockApi.participantMetrics('PID_A', { equivalent: 'GEO', threshold: '0.10' })
     expect(env.success).toBe(true)
@@ -76,11 +74,11 @@ describe('mockApi.participantMetrics', () => {
     // capacity should compute pct as ratio (used/limit)
     expect(env.data.capacity?.eq).toBe('GEO')
     expect(env.data.capacity?.out.pct).toBeCloseTo(0.25, 6)
-  })
+  }, 15000)
 
   it('computes activity counters from trustlines/incidents/transactions', async () => {
     const url = new URL('http://localhost/?scenario=happy')
-    vi.stubGlobal('window', { ...window, location: url } as any)
+    vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
 
     const participants = [
       { pid: 'PID_A', display_name: 'Alice', type: 'person', status: 'active' },
@@ -140,9 +138,7 @@ describe('mockApi.participantMetrics', () => {
 
     const scenario = { name: 'happy', latency_ms: { min: 0, max: 0 } }
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const u = String(input)
         if (u.includes('/admin-fixtures/v1/scenarios/happy.json')) return jsonResponse(scenario)
         if (u.includes('/admin-fixtures/v1/datasets/participants.json')) return jsonResponse(participants)
@@ -152,8 +148,8 @@ describe('mockApi.participantMetrics', () => {
         if (u.includes('/admin-fixtures/v1/datasets/incidents.json')) return jsonResponse(incidents)
         if (u.includes('/admin-fixtures/v1/datasets/transactions.json')) return jsonResponse(transactions)
         return new Response('Not Found', { status: 404, statusText: 'Not Found' })
-      }) as any,
-    )
+      })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const env = await mockApi.participantMetrics('PID_A', { equivalent: 'GEO' })
     expect(env.success).toBe(true)

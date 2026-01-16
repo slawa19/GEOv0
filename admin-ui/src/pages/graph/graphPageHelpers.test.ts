@@ -31,9 +31,7 @@ describe('graphPageHelpers', () => {
 
   it('computeSeedLabel handles known seeds and fallback', () => {
     expect(computeSeedLabel(undefined)).toBe('Seed: (not loaded)')
-    expect(computeSeedLabel([{ display_name: 'Greenfield Village (Test)' } as any, { display_name: 'x' } as any])).toMatch(
-      /^Seed: 2 participants, first:/,
-    )
+    expect(computeSeedLabel([{ display_name: 'Greenfield Village (Test)' }, { display_name: 'x' }])).toMatch(/^Seed: 2 participants, first:/)
 
     const greenfield = Array.from({ length: 100 }, (_, i) => ({ display_name: i === 0 ? 'Greenfield Village (Test)' : 'X' }))
     expect(computeSeedLabel(greenfield)).toBe('Seed: Greenfield (100)')

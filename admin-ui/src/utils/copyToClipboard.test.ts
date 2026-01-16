@@ -6,11 +6,17 @@ describe('copyToClipboard', () => {
   it('uses navigator.clipboard.writeText when available', async () => {
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
 
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    ;(navigator as any).clipboard = { writeText }
+    const writeText = vi.fn<[string], Promise<void>>().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: ({ writeText } as unknown) as Clipboard,
+      configurable: true,
+    })
 
-    const exec = vi.fn(() => true)
-    ;(document as any).execCommand = exec
+    const exec = vi.fn<[string], boolean>(() => true)
+    Object.defineProperty(document, 'execCommand', {
+      value: (exec as unknown) as Document['execCommand'],
+      configurable: true,
+    })
 
     const res = await copyToClipboard('hello')
 
@@ -21,10 +27,13 @@ describe('copyToClipboard', () => {
 
   it('falls back to execCommand when clipboard API is unavailable', async () => {
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
-    ;(navigator as any).clipboard = undefined
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 
-    const exec = vi.fn(() => true)
-    ;(document as any).execCommand = exec
+    const exec = vi.fn<[string], boolean>(() => true)
+    Object.defineProperty(document, 'execCommand', {
+      value: (exec as unknown) as Document['execCommand'],
+      configurable: true,
+    })
 
     const res = await copyToClipboard('  x  ')
 
@@ -35,10 +44,13 @@ describe('copyToClipboard', () => {
 
   it('returns an error when execCommand fails', async () => {
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
-    ;(navigator as any).clipboard = undefined
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 
-    const exec = vi.fn(() => false)
-    ;(document as any).execCommand = exec
+    const exec = vi.fn<[string], boolean>(() => false)
+    Object.defineProperty(document, 'execCommand', {
+      value: (exec as unknown) as Document['execCommand'],
+      configurable: true,
+    })
 
     const res = await copyToClipboard('x')
 

@@ -5,6 +5,9 @@ afterEach(() => {
 })
 
 // JSDOM may not implement execCommand; tests can override per-case.
-if (!(document as any).execCommand) {
-  ;(document as any).execCommand = () => false
+if (typeof document.execCommand !== 'function') {
+  Object.defineProperty(document, 'execCommand', {
+    value: () => false,
+    configurable: true,
+  })
 }

@@ -43,7 +43,7 @@ async function notifyLoadError(message: string) {
 
   try {
     const mod = await import('element-plus')
-    const ElMessage = (mod as any)?.ElMessage
+    const ElMessage = (mod as unknown as { ElMessage?: { error?: (msg: string) => void } }).ElMessage
     if (typeof ElMessage?.error === 'function') {
       ElMessage.error(message)
       return
@@ -580,7 +580,8 @@ export const mockApi = {
       }
 
       const getTxEq = (tx: Transaction): string => {
-        const v = (tx as any)?.payload?.equivalent
+        const payload = (tx as unknown as { payload?: unknown }).payload
+        const v = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).equivalent : undefined
         return typeof v === 'string' ? v.trim().toUpperCase() : ''
       }
 

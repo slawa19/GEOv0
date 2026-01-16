@@ -1,4 +1,4 @@
 declare module 'cytoscape-fcose' {
-  const ext: any
+  const ext: unknown
   export default ext
 }

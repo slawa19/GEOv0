@@ -42,8 +42,9 @@ async function load() {
       return
     }
     items.value = data.items
-  } catch (e: any) {
-    error.value = e?.message || t('auditLog.loadFailed')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || t('auditLog.loadFailed')
     ElMessage.error(error.value || t('auditLog.loadFailed'))
   } finally {
     loading.value = false

@@ -59,8 +59,9 @@ async function load() {
       return
     }
     items.value = data.items
-  } catch (e: any) {
-    error.value = e?.message || t('incidents.loadFailed')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || t('incidents.loadFailed')
     ElMessage.error(error.value || t('incidents.loadFailed'))
   } finally {
     loading.value = false
@@ -95,8 +96,9 @@ async function forceAbort(row: Incident) {
     ElMessage.success(t('incidents.aborted', { txId: row.tx_id }))
     lastAbortTxId.value = row.tx_id
     drawerOpen.value = false
-  } catch (e: any) {
-    ElMessage.error(e?.message || t('incidents.abortFailed'))
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    ElMessage.error(msg || t('incidents.abortFailed'))
   } finally {
     abortingTxId.value = null
   }
@@ -304,7 +306,10 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
             {{ fmtAge(scope.row.sla_seconds) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="140">
+        <el-table-column
+          :label="t('common.actions')"
+          width="140"
+        >
           <template #default="scope">
             <el-button
               size="small"

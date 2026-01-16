@@ -8,7 +8,7 @@ export async function copyToClipboard(text: string): Promise<CopyResult> {
       await navigator.clipboard.writeText(value)
       return { ok: true }
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     // Fall back to execCommand below.
   }
 
@@ -32,7 +32,8 @@ export async function copyToClipboard(text: string): Promise<CopyResult> {
 
     if (!ok) return { ok: false, error: 'Copy failed' }
     return { ok: true }
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'Copy failed' }
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e.message : 'Copy failed'
+    return { ok: false, error }
   }
 }

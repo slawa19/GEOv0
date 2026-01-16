@@ -7,7 +7,7 @@ import { api } from '../api'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import type { Incident, Trustline } from '../types/domain'
+import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
 
 const router = useRouter()
 const route = useRoute()
@@ -21,7 +21,7 @@ const migrations = ref<Record<string, unknown> | null>(null)
 
 const auditLoading = ref(false)
 const auditError = ref<string | null>(null)
-const auditItems = ref<any[]>([])
+const auditItems = ref<AuditLogEntry[]>([])
 
 const threshold = ref('0.10')
 
@@ -40,8 +40,9 @@ async function load() {
     health.value = assertSuccess(await api.health())
     healthDb.value = assertSuccess(await api.healthDb())
     migrations.value = assertSuccess(await api.migrations())
-  } catch (e: any) {
-    error.value = e?.message || 'Failed to load'
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || 'Failed to load'
     ElMessage.error(error.value || 'Failed to load')
   } finally {
     loading.value = false
@@ -54,8 +55,9 @@ async function loadAudit() {
   try {
     const page = assertSuccess(await api.listAuditLog({ page: 1, per_page: 10 }))
     auditItems.value = page.items
-  } catch (e: any) {
-    auditError.value = e?.message || 'Failed to load audit log'
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    auditError.value = msg || 'Failed to load audit log'
   } finally {
     auditLoading.value = false
   }
@@ -85,7 +87,7 @@ async function loadBottlenecks() {
     for (let p = 1; p <= maxPages; p++) {
       const page = assertSuccess(await api.listTrustlines({ page: p, per_page: perPage }))
       all.push(...(page.items as Trustline[]))
-      const total = Number((page as any).total)
+      const total = Number((page as { total?: unknown }).total)
       if ((Number.isFinite(total) && all.length >= total) || (page.items || []).length === 0) break
     }
 
@@ -98,11 +100,12 @@ async function loadBottlenecks() {
       return a.created_at.localeCompare(b.created_at)
     })
     bottleneckItems.value = candidates.slice(0, 10)
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (e instanceof ApiException) {
       bottlenecksError.value = `${e.message} (${e.status} ${e.code})`
     } else {
-      bottlenecksError.value = e?.message || 'Failed to load trustline bottlenecks'
+      const msg = e instanceof Error ? e.message : String(e)
+      bottlenecksError.value = msg || 'Failed to load trustline bottlenecks'
     }
   } finally {
     bottlenecksLoading.value = false
@@ -118,11 +121,12 @@ async function loadIncidents() {
     const over = all.filter((i) => i.age_seconds > i.sla_seconds)
     over.sort((a, b) => b.age_seconds - a.age_seconds)
     incidentsOverSla.value = over.slice(0, 10)
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (e instanceof ApiException) {
       incidentsError.value = `${e.message} (${e.status} ${e.code})`
     } else {
-      incidentsError.value = e?.message || 'Failed to load incidents'
+      const msg = e instanceof Error ? e.message : String(e)
+      incidentsError.value = msg || 'Failed to load incidents'
     }
   } finally {
     incidentsLoading.value = false
@@ -147,15 +151,31 @@ onMounted(() => {
 
 const statusText = computed(() => String(health.value?.status ?? 'unknown'))
 
-const migrationsCurrent = computed(() => String((migrations.value as any)?.current_revision ?? '—'))
-const migrationsHead = computed(() => String((migrations.value as any)?.head_revision ?? '—'))
+const migrationsCurrent = computed(() => {
+  const m = migrations.value
+  if (!m) return '—'
+  const rec = m as Record<string, unknown>
+  return String(rec.current_revision ?? '—')
+})
+const migrationsHead = computed(() => {
+  const m = migrations.value
+  if (!m) return '—'
+  const rec = m as Record<string, unknown>
+  return String(rec.head_revision ?? '—')
+})
 const migrationsUpToDateLabel = computed(() => {
-  const m: any = migrations.value
+  const m = migrations.value
   if (!m) return 'unknown'
-  const cur = m?.current_revision
-  const head = m?.head_revision
+  const rec = m as Record<string, unknown>
+  const cur = rec.current_revision
+  const head = rec.head_revision
   if (!cur && !head) return 'unknown'
-  return m?.is_up_to_date ? 'yes' : 'no'
+  return rec.is_up_to_date ? 'yes' : 'no'
+})
+
+const healthDbInfo = computed(() => {
+  const db = healthDb.value?.db
+  return db && typeof db === 'object' ? (db as Record<string, unknown>) : null
 })
 </script>
 
@@ -209,8 +229,8 @@ const migrationsUpToDateLabel = computed(() => {
           />
           <div v-else>
             <div><span class="geoLabel">Status:</span> {{ healthDb?.status }}</div>
-            <div><span class="geoLabel">Reachable:</span> {{ (healthDb?.db as any)?.reachable }}</div>
-            <div><span class="geoLabel">Latency:</span> {{ (healthDb?.db as any)?.latency_ms }}ms</div>
+            <div><span class="geoLabel">Reachable:</span> {{ healthDbInfo?.reachable }}</div>
+            <div><span class="geoLabel">Latency:</span> {{ healthDbInfo?.latency_ms }}ms</div>
           </div>
         </el-card>
       </el-col>

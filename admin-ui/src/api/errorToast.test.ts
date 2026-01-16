@@ -29,7 +29,7 @@ describe('toastApiError', () => {
 
     await toastApiError(e)
     expect(ElMessage.error).toHaveBeenCalledTimes(1)
-    expect(String((ElMessage.error as any).mock.calls[0][0])).toMatch(/not authorized/i)
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringMatching(/not authorized/i))
   })
 
   it('dedupes repeated messages within a short window', async () => {

@@ -215,6 +215,7 @@ const focusDepthModel = computed({
               v-model="eqModel"
               size="small"
               class="ctl__field"
+              data-testid="graph-filter-eq"
             >
               <el-option
                 v-for="c in availableEquivalents"

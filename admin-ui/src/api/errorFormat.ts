@@ -11,7 +11,7 @@ function safeString(v: unknown): string {
 
 function getDetail(obj: unknown, key: string): unknown {
   if (!obj || typeof obj !== 'object') return undefined
-  return (obj as any)[key]
+  return (obj as Record<string, unknown>)[key]
 }
 
 export function formatApiError(e: unknown): { title: string; hint?: string } {

@@ -2,31 +2,33 @@ import { describe, expect, it } from 'vitest'
 import { computed, ref } from 'vue'
 
 import { useGraphAnalytics } from './useGraphAnalytics'
+import type { SelectedInfo } from './useGraphVisualization'
+import type { AuditLogEntry, ClearingCycles, Debt, Incident, Participant, Transaction, Trustline } from '../pages/graph/graphTypes'
 
 describe('useGraphAnalytics (fixtures-first)', () => {
   it('computes selectedBalanceRows from trustlines + debts', () => {
-    const selected = ref<any>({ kind: 'node', pid: 'PID_A' })
+    const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
 
-    const participants = ref<any[]>([
+    const participants = ref<Participant[]>([
       { pid: 'PID_A', display_name: 'Alice' },
       { pid: 'PID_B', display_name: 'Bob' },
       { pid: 'PID_C', display_name: 'Carol' },
     ])
 
-    const trustlines = ref<any[]>([
+    const trustlines = ref<Trustline[]>([
       // PID_A is creditor (outgoing limit)
       { from: 'PID_A', to: 'PID_B', equivalent: 'EUR', limit: '10.00', used: '3.00', available: '7.00', status: 'active', created_at: 't' },
       // PID_A is debtor (incoming limit)
       { from: 'PID_C', to: 'PID_A', equivalent: 'EUR', limit: '5.00', used: '1.00', available: '4.00', status: 'active', created_at: 't' },
     ])
 
-    const debts = ref<any[]>([
+    const debts = ref<Debt[]>([
       { debtor: 'PID_A', creditor: 'PID_B', equivalent: 'EUR', amount: '3.00' },
       { debtor: 'PID_C', creditor: 'PID_A', equivalent: 'EUR', amount: '1.50' },
     ])
 
     const participantByPid = computed(() => {
-      const m = new Map<string, any>()
+      const m = new Map<string, Participant>()
       for (const p of participants.value) m.set(p.pid, p)
       return m
     })
@@ -43,10 +45,10 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       participants,
       trustlines,
       debts,
-      incidents: ref<any[]>([]),
-      auditLog: ref<any[]>([]),
-      transactions: ref<any[]>([]),
-      clearingCycles: ref<any>(null),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
 
       selected,
     })
@@ -66,9 +68,9 @@ describe('useGraphAnalytics (fixtures-first)', () => {
   })
 
   it('computes concentration (top shares + HHI) from debts', () => {
-    const selected = ref<any>({ kind: 'node', pid: 'PID_A' })
+    const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
 
-    const participants = ref<any[]>([
+    const participants = ref<Participant[]>([
       { pid: 'PID_A', display_name: 'Alice' },
       { pid: 'PID_B', display_name: 'Bob' },
       { pid: 'PID_C', display_name: 'Carol' },
@@ -76,7 +78,7 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       { pid: 'PID_E', display_name: 'Eve' },
     ])
 
-    const debts = ref<any[]>([
+    const debts = ref<Debt[]>([
       // outgoing (you owe): total 4.00 => shares 0.75 + 0.25, HHI = 0.625
       { debtor: 'PID_A', creditor: 'PID_B', equivalent: 'EUR', amount: '3.00' },
       { debtor: 'PID_A', creditor: 'PID_C', equivalent: 'EUR', amount: '1.00' },
@@ -86,7 +88,7 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     ])
 
     const participantByPid = computed(() => {
-      const m = new Map<string, any>()
+      const m = new Map<string, Participant>()
       for (const p of participants.value) m.set(p.pid, p)
       return m
     })
@@ -101,12 +103,12 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       participantByPid,
 
       participants,
-      trustlines: ref<any[]>([]),
+      trustlines: ref<Trustline[]>([]),
       debts,
-      incidents: ref<any[]>([]),
-      auditLog: ref<any[]>([]),
-      transactions: ref<any[]>([]),
-      clearingCycles: ref<any>(null),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
 
       selected,
     })
@@ -126,16 +128,16 @@ describe('useGraphAnalytics (fixtures-first)', () => {
   })
 
   it('flags bottlenecks in selectedCapacity using threshold', () => {
-    const selected = ref<any>({ kind: 'node', pid: 'PID_A' })
+    const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
     const threshold = ref('0.20')
 
-    const participants = ref<any[]>([
+    const participants = ref<Participant[]>([
       { pid: 'PID_A', display_name: 'Alice' },
       { pid: 'PID_B', display_name: 'Bob' },
       { pid: 'PID_C', display_name: 'Carol' },
     ])
 
-    const trustlines = ref<any[]>([
+    const trustlines = ref<Trustline[]>([
       // 1/10 = 0.1 < 0.2 => bottleneck
       { from: 'PID_A', to: 'PID_B', equivalent: 'EUR', limit: '10.00', used: '9.00', available: '1.00', status: 'active', created_at: 't' },
       // 4/10 = 0.4 >= 0.2 => not bottleneck
@@ -143,7 +145,7 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     ])
 
     const participantByPid = computed(() => {
-      const m = new Map<string, any>()
+      const m = new Map<string, Participant>()
       for (const p of participants.value) m.set(p.pid, p)
       return m
     })
@@ -159,11 +161,11 @@ describe('useGraphAnalytics (fixtures-first)', () => {
 
       participants,
       trustlines,
-      debts: ref<any[]>([]),
-      incidents: ref<any[]>([]),
-      auditLog: ref<any[]>([]),
-      transactions: ref<any[]>([]),
-      clearingCycles: ref<any>(null),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
 
       selected,
     })

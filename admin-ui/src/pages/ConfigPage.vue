@@ -92,8 +92,9 @@ async function load() {
     const cfg = assertSuccess(await api.getConfig())
     original.value = { ...cfg }
     rows.value = toRows(cfg)
-  } catch (e: any) {
-    error.value = e?.message || t('config.loadFailed')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || t('config.loadFailed')
   } finally {
     loading.value = false
   }
@@ -144,7 +145,7 @@ async function save() {
         try {
           patch[k] = JSON.parse(String(r.value))
         } catch {
-              ElMessage.error(t('config.invalidJsonForKey', { key: k }))
+          ElMessage.error(t('config.invalidJsonForKey', { key: k }))
           return
         }
       } else {
@@ -155,8 +156,9 @@ async function save() {
     assertSuccess(await api.patchConfig(patch))
     ElMessage.success(t('config.savedKeys', { n: keys.length }))
     await load()
-  } catch (e: any) {
-    ElMessage.error(e?.message || t('config.saveFailed'))
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    ElMessage.error(msg || t('config.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -244,13 +246,13 @@ watch(
           <template #default="scope">
             <template v-if="scopeForKey(scope.row.key).length">
               <el-tag
-                v-for="t in scopeForKey(scope.row.key)"
-                :key="t"
+                v-for="tag in scopeForKey(scope.row.key)"
+                :key="tag"
                 size="small"
-                :type="t === 'readonly' ? 'info' : t === 'restart' ? 'warning' : 'success'"
+                :type="tag === 'readonly' ? 'info' : tag === 'restart' ? 'warning' : 'success'"
                 style="margin-right: 6px"
               >
-                {{ t }}
+                {{ tag }}
               </el-tag>
             </template>
             <span

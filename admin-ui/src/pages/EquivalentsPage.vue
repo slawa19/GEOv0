@@ -39,12 +39,13 @@ async function warmUsage(code: string) {
   usageLoadingByCode[key] = true
   try {
     const usage = assertSuccess(await api.getEquivalentUsage(key))
+    const u = usage as unknown as Record<string, unknown>
     usageByCode[key] = {
-      trustlines: Number((usage as any).trustlines ?? 0),
-      incidents: typeof (usage as any).incidents === 'number' ? Number((usage as any).incidents) : undefined,
-      debts: typeof (usage as any).debts === 'number' ? Number((usage as any).debts) : undefined,
+      trustlines: Number(u.trustlines ?? 0),
+      incidents: typeof u.incidents === 'number' ? Number(u.incidents) : undefined,
+      debts: typeof u.debts === 'number' ? Number(u.debts) : undefined,
       integrity_checkpoints:
-        typeof (usage as any).integrity_checkpoints === 'number' ? Number((usage as any).integrity_checkpoints) : undefined,
+        typeof u.integrity_checkpoints === 'number' ? Number(u.integrity_checkpoints) : undefined,
     }
   } catch {
     // best-effort only
@@ -63,8 +64,9 @@ async function load() {
   try {
     const data = assertSuccess(await api.listEquivalents({ include_inactive: includeInactive.value }))
     items.value = data.items
-  } catch (e: any) {
-    error.value = e?.message || t('equivalents.loadFailed')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || t('equivalents.loadFailed')
     ElMessage.error(error.value || t('equivalents.loadFailed'))
   } finally {
     loading.value = false
@@ -100,8 +102,9 @@ async function createEq() {
     createOpen.value = false
     includeInactive.value = true
     await load()
-  } catch (e: any) {
-    ElMessage.error(e?.message || t('equivalents.createFailed'))
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    ElMessage.error(msg || t('equivalents.createFailed'))
   }
 }
 
@@ -117,8 +120,9 @@ async function saveEdit() {
     ElMessage.success(t('equivalents.updated', { code: updated.code }))
     editOpen.value = false
     await load()
-  } catch (e: any) {
-    ElMessage.error(e?.message || t('equivalents.updateFailed'))
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    ElMessage.error(msg || t('equivalents.updateFailed'))
   }
 }
 
@@ -145,8 +149,9 @@ async function setActive(row: Equivalent, next: boolean) {
     ElMessage.success(next ? t('equivalents.activated', { code: row.code }) : t('equivalents.deactivated', { code: row.code }))
     includeInactive.value = true
     await load()
-  } catch (e: any) {
-    ElMessage.error(e?.message || t('equivalents.updateFailed'))
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    ElMessage.error(msg || t('equivalents.updateFailed'))
   }
 }
 
@@ -154,10 +159,11 @@ async function deleteEq(row: Equivalent) {
   let usageLine = ''
   try {
     const usage = assertSuccess(await api.getEquivalentUsage(row.code))
-    const tl = Number((usage as any).trustlines ?? 0)
-    const inc = (usage as any).incidents
-    const debts = (usage as any).debts
-    const ic = (usage as any).integrity_checkpoints
+    const u = usage as unknown as Record<string, unknown>
+    const tl = Number(u.trustlines ?? 0)
+    const inc = u.incidents
+    const debts = u.debts
+    const ic = u.integrity_checkpoints
     const parts: string[] = []
     parts.push(t('equivalents.delete.usage.trustlines', { n: tl }))
     if (typeof inc === 'number') parts.push(t('equivalents.delete.usage.incidents', { n: inc }))
@@ -192,17 +198,21 @@ async function deleteEq(row: Equivalent) {
     ElMessage.success(t('equivalents.deleted', { code: row.code }))
     includeInactive.value = true
     await load()
-  } catch (e: any) {
-    const t = e?.details?.trustlines
-    const i = e?.details?.incidents
-    const d = e?.details?.debts
-    const ic = e?.details?.integrity_checkpoints
-    if ([t, i, d, ic].some((v) => typeof v === 'number')) {
+  } catch (e: unknown) {
+    const err = e as { message?: unknown; details?: Record<string, unknown> }
+    const details = err?.details
+    const tl = details?.trustlines
+    const inc = details?.incidents
+    const debts = details?.debts
+    const ic = details?.integrity_checkpoints
+    const msg = e instanceof Error ? e.message : String(err?.message ?? e)
+
+    if ([tl, inc, debts, ic].some((v) => typeof v === 'number')) {
       ElMessage.error(
-        `${e?.message || t('equivalents.deleteFailed')} (trustlines: ${t ?? 0}, incidents: ${i ?? 0}, debts: ${d ?? 0}, integrity_checkpoints: ${ic ?? 0})`,
+        `${msg || t('equivalents.deleteFailed')} (trustlines: ${tl ?? 0}, incidents: ${inc ?? 0}, debts: ${debts ?? 0}, integrity_checkpoints: ${ic ?? 0})`,
       )
     } else {
-      ElMessage.error(e?.message || t('equivalents.deleteFailed'))
+      ElMessage.error(msg || t('equivalents.deleteFailed'))
     }
   }
 }

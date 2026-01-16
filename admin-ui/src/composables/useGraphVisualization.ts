@@ -1,5 +1,5 @@
 import { ElMessage } from 'element-plus'
-import cytoscape, { type Core, type EdgeSingular, type NodeSingular } from 'cytoscape'
+import cytoscape, { type Core, type EdgeSingular, type ElementDefinition, type LayoutOptions, type NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import { computed, onBeforeUnmount, onMounted, type ComputedRef, type Ref } from 'vue'
 
@@ -90,7 +90,7 @@ export function useGraphVisualization(options: {
   extractPidFromText: (text: string) => string | null
 }): {
   canFind: ComputedRef<boolean>
-  buildElements: () => { nodes: any[]; edges: any[] }
+  buildElements: () => { nodes: ElementDefinition[]; edges: ElementDefinition[] }
   initCy: () => void
   destroyCy: () => void
 
@@ -658,7 +658,8 @@ export function useGraphVisualization(options: {
         ? cy.layout({ name: 'grid', padding: 30 })
         : name === 'circle'
           ? cy.layout({ name: 'circle', padding: 30 })
-          : cy.layout({
+          : cy.layout(
+              {
               name: 'fcose',
               animate: false,
               randomize: true,
@@ -674,7 +675,8 @@ export function useGraphVisualization(options: {
               avoidOverlap: true,
               nodeDimensionsIncludeLabels: true,
               packComponents: true,
-            } as any)
+              } as unknown as LayoutOptions
+            )
 
     layout.run()
   }

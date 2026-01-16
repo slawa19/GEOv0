@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHealthStore } from '../stores/health'
 import { useAuthStore } from '../stores/auth'
@@ -27,7 +27,10 @@ const navItems: NavItem[] = [
 ]
 
 function getTooltipContent(key: TooltipKey): string {
-  const tooltips = ((Tooltips as any).TOOLTIPS || (Tooltips as any).default || {}) as Record<string, any>
+  type TooltipEntry = { body: string[] }
+  const mod = Tooltips as unknown as Record<string, unknown>
+  const candidate = (mod.TOOLTIPS ?? mod.default ?? {}) as unknown
+  const tooltips = (candidate && typeof candidate === 'object') ? (candidate as Record<string, TooltipEntry>) : {}
   const t = tooltips[key]
   if (!t) return ''
   return t.body.join(' ')
@@ -40,7 +43,8 @@ const isMockMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toSt
 
 const apiBaseLabel = computed(() => {
   if (isMockMode.value) return 'fixtures: /admin-fixtures/v1'
-  const envVal = (import.meta.env as any).VITE_API_BASE_URL
+  const env = import.meta.env as unknown as Record<string, unknown>
+  const envVal = env.VITE_API_BASE_URL
   const raw = (envVal === undefined || envVal === null ? '' : String(envVal)).trim()
   if (raw) return raw
   if (import.meta.env.DEV) return 'http://127.0.0.1:18000 (default)'
@@ -60,6 +64,16 @@ onMounted(() => {
   void configStore.load()
 })
 
+onBeforeUnmount(() => {
+  healthStore.stopPolling()
+})
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    healthStore.stopPolling()
+  })
+}
+
 const scenario = computed({
   get: () => (route.query.scenario as string | undefined) || 'happy',
   set: (v: string) => {
@@ -71,7 +85,7 @@ const scenario = computed({
 onMounted(() => {
   if (isMockMode.value) return
   if (!('scenario' in (route.query || {}))) return
-  const { scenario: _ignored, ...rest } = (route.query || {}) as any
+  const { scenario: _ignored, ...rest } = route.query || {}
   void router.replace({ query: rest })
 })
 

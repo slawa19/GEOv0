@@ -147,8 +147,9 @@ export function useGraphData(opts: {
       fullClearingCycles = clearingCycles.value
 
       if (!availableEquivalents.value.includes(opts.eq.value)) opts.eq.value = 'ALL'
-    } catch (e: any) {
-      error.value = e?.message || 'Failed to load fixtures'
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      error.value = msg || 'Failed to load fixtures'
     } finally {
       loading.value = false
     }
@@ -183,7 +184,7 @@ export function useGraphData(opts: {
 
       if (reqId !== focusReqId) return
 
-      const e = assertSuccess(ego) as any
+      const e = assertSuccess(ego) as Partial<GraphSnapshotPayload>
       applySnapshotPayload({
         participants: (e.participants || []) as Participant[],
         trustlines: (e.trustlines || []) as Trustline[],
@@ -195,9 +196,10 @@ export function useGraphData(opts: {
       })
 
       clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (reqId !== focusReqId) return
-      ElMessage.warning(e?.message || 'Failed to load focus-mode data')
+      const msg = e instanceof Error ? e.message : String(e)
+      ElMessage.warning(msg || 'Failed to load focus-mode data')
     }
   }
 

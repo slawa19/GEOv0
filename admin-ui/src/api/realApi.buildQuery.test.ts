@@ -4,7 +4,8 @@ import { buildQuery } from './realApi'
 
 describe('realApi.buildQuery', () => {
   it('builds a relative URL when VITE_API_BASE_URL is empty (vite proxy scenario)', () => {
-    ;(import.meta as any).env.VITE_API_BASE_URL = ''
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_API_BASE_URL = ''
 
     const url = buildQuery('/api/v1/admin/graph/ego', {
       pid: 'PID_ABC_DEF',

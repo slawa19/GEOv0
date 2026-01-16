@@ -35,7 +35,7 @@ afterEach(() => {
 describe('API contract invariants', () => {
   it('mockApi.graphSnapshot and mockApi.graphEgo return GraphSnapshot-like shapes', async () => {
     const url = new URL('http://localhost/?scenario=happy')
-    vi.stubGlobal('window', { ...window, location: url } as any)
+    vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
 
     const scenario = { name: 'happy', latency_ms: { min: 0, max: 0 } }
 
@@ -60,9 +60,7 @@ describe('API contract invariants', () => {
       },
     ]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const u = String(input)
         if (u.includes('/admin-fixtures/v1/scenarios/happy.json')) return jsonResponse(scenario)
         if (u.includes('/admin-fixtures/v1/datasets/participants.json')) return jsonResponse(participants)
@@ -74,8 +72,9 @@ describe('API contract invariants', () => {
         if (u.includes('/admin-fixtures/v1/datasets/audit-log.json')) return jsonResponse([])
         if (u.includes('/admin-fixtures/v1/datasets/transactions.json')) return jsonResponse([])
         return new Response('Not Found', { status: 404, statusText: 'Not Found' })
-      }) as any,
-    )
+      })
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const snapEnv = await mockApi.graphSnapshot()
     expect(snapEnv.success).toBe(true)
@@ -87,9 +86,10 @@ describe('API contract invariants', () => {
   })
 
   it('realApi.graphSnapshot returns GraphSnapshot-like shape (envelope stub)', async () => {
-    ;(import.meta as any).env.VITE_API_BASE_URL = ''
-    ;(import.meta as any).env.PROD = false
-    ;(import.meta as any).env.DEV = true
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_API_BASE_URL = ''
+    meta.env.PROD = false
+    meta.env.DEV = true
 
     const payload: GraphSnapshot = {
       participants: [{ pid: 'PID_A', display_name: 'Alice', type: 'person', status: 'active' }],
@@ -101,10 +101,8 @@ describe('API contract invariants', () => {
       transactions: [],
     }
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => jsonResponse({ success: true, data: payload })) as any,
-    )
+    const fetchMock = vi.fn(async () => jsonResponse({ success: true, data: payload }))
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const env = await realApi.graphSnapshot()
     expect(env.success).toBe(true)

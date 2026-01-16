@@ -54,8 +54,9 @@ async function load() {
       return
     }
     items.value = data.items
-  } catch (e: any) {
-    error.value = e?.message || t('participant.loadFailed')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || t('participant.loadFailed')
     void toastApiError(e, { fallbackTitle: error.value || t('participant.loadFailed') })
   } finally {
     loading.value = false
@@ -84,8 +85,9 @@ async function freeze(row: Participant) {
     assertSuccess(await api.freezeParticipant(row.pid, reason))
     ElMessage.success(t('participant.frozen', { pid: row.pid }))
     await load()
-  } catch (e: any) {
-    void toastApiError(e, { fallbackTitle: e?.message || t('participant.freezeFailed') })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    void toastApiError(e, { fallbackTitle: msg || t('participant.freezeFailed') })
   }
 }
 
@@ -96,8 +98,9 @@ async function unfreeze(row: Participant) {
     assertSuccess(await api.unfreezeParticipant(row.pid, reason))
     ElMessage.success(t('participant.unfrozen', { pid: row.pid }))
     await load()
-  } catch (e: any) {
-    void toastApiError(e, { fallbackTitle: e?.message || t('participant.unfreezeFailed') })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    void toastApiError(e, { fallbackTitle: msg || t('participant.unfreezeFailed') })
   }
 }
 
@@ -164,6 +167,7 @@ const typeOptions = computed(() => [
             size="small"
             :placeholder="t('participant.filter.searchPlaceholder')"
             clearable
+            data-testid="participants-filter-q"
             style="width: 240px"
           />
           <el-select
@@ -171,6 +175,7 @@ const typeOptions = computed(() => [
             size="small"
             style="width: 140px"
             :placeholder="t('participant.filter.typePlaceholder')"
+            data-testid="participants-filter-type"
           >
             <el-option
               v-for="o in typeOptions"
@@ -184,6 +189,7 @@ const typeOptions = computed(() => [
             size="small"
             style="width: 140px"
             :placeholder="t('participant.filter.statusPlaceholder')"
+            data-testid="participants-filter-status"
           >
             <el-option
               v-for="o in statusOptions"
@@ -220,6 +226,7 @@ const typeOptions = computed(() => [
         size="small"
         table-layout="fixed"
         class="clickable-table geoTable"
+        data-testid="participants-table"
         @row-click="openRow"
       >
         <el-table-column
@@ -295,13 +302,17 @@ const typeOptions = computed(() => [
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="140">
+        <el-table-column
+          :label="t('common.actions')"
+          width="140"
+        >
           <template #default="scope">
             <el-button
               v-if="scope.row.status === 'active'"
               size="small"
               type="warning"
               :disabled="authStore.isReadOnly"
+              data-testid="participants-freeze-btn"
               @click.stop="freeze(scope.row)"
             >
               {{ t('participant.freeze') }}
@@ -311,6 +322,7 @@ const typeOptions = computed(() => [
               size="small"
               type="success"
               :disabled="authStore.isReadOnly"
+              data-testid="participants-unfreeze-btn"
               @click.stop="unfreeze(scope.row)"
             >
               {{ t('participant.unfreeze') }}

@@ -22,7 +22,7 @@ export async function toastApiError(
   // Best-effort toast: do not crash the app if UI layer isn't available.
   try {
     const mod = await import('element-plus')
-    const ElMessage = (mod as any)?.ElMessage
+    const ElMessage = (mod as unknown as { ElMessage?: { error?: (msg: string) => void } }).ElMessage
     if (typeof ElMessage?.error === 'function') {
       ElMessage.error(msg)
       return

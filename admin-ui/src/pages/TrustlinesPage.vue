@@ -71,8 +71,9 @@ async function load() {
       return
     }
     items.value = data.items
-  } catch (e: any) {
-    error.value = e?.message || t('trustlines.loadFailed')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || t('trustlines.loadFailed')
     void toastApiError(e, { fallbackTitle: error.value || t('trustlines.loadFailed') })
   } finally {
     loading.value = false

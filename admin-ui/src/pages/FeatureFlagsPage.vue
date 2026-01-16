@@ -28,8 +28,9 @@ async function load() {
       .filter(([, v]) => typeof v === 'boolean')
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => ({ key: k, value: v as boolean, original: v as boolean }))
-  } catch (e: any) {
-    error.value = e?.message || t('featureFlags.loadFailed')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    error.value = msg || t('featureFlags.loadFailed')
   } finally {
     loading.value = false
   }
@@ -66,9 +67,10 @@ async function persistRow(row: FlagRow) {
     assertSuccess(await api.patchFeatureFlags({ [row.key]: row.value }))
     row.original = row.value
     ElMessage.success(t('common.updated'))
-  } catch (e: any) {
+  } catch (e: unknown) {
     row.value = row.original
-    void toastApiError(e, { fallbackTitle: e?.message || t('featureFlags.updateFailed') })
+    const msg = e instanceof Error ? e.message : String(e)
+    void toastApiError(e, { fallbackTitle: msg || t('featureFlags.updateFailed') })
   } finally {
     savingKey.value = null
   }

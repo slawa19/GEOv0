@@ -33,9 +33,20 @@ function tagTypeForIntegrityStatus(s: IntegrityStatus): 'success' | 'warning' | 
 
 const overallStatus = computed<IntegrityStatus>(() => asIntegrityStatus(status.value?.status))
 
-const equivalents = computed<Record<string, any>>(() => {
-  const v = (status.value as any)?.equivalents
-  return (v && typeof v === 'object') ? v : {}
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : null
+}
+
+const equivalents = computed<Record<string, unknown>>(() => {
+  const s = asRecord(status.value)
+  const v = s?.equivalents
+  return asRecord(v) ?? {}
+})
+
+const alertsCount = computed(() => {
+  const s = asRecord(status.value)
+  const alerts = s?.alerts
+  return Array.isArray(alerts) ? alerts.length : 0
 })
 
 type IssueKey = 'debt_symmetry' | 'trust_limits' | 'zero_sum'
@@ -43,11 +54,16 @@ type IssueKey = 'debt_symmetry' | 'trust_limits' | 'zero_sum'
 const detectedIssues = computed<IssueKey[]>(() => {
   const found = new Set<IssueKey>()
   for (const [, eq] of Object.entries(equivalents.value)) {
-    const inv = (eq as any)?.invariants
-    if (!inv || typeof inv !== 'object') continue
-    if (inv.debt_symmetry?.passed === false) found.add('debt_symmetry')
-    if (inv.trust_limits?.passed === false) found.add('trust_limits')
-    if (inv.zero_sum?.passed === false) found.add('zero_sum')
+    const inv = asRecord(asRecord(eq)?.invariants)
+    if (!inv) continue
+
+    const debt = asRecord(inv.debt_symmetry)
+    const trust = asRecord(inv.trust_limits)
+    const zero = asRecord(inv.zero_sum)
+
+    if (debt?.passed === false) found.add('debt_symmetry')
+    if (trust?.passed === false) found.add('trust_limits')
+    if (zero?.passed === false) found.add('zero_sum')
   }
 
   // Show in a stable order.
@@ -71,7 +87,7 @@ async function load() {
   error.value = null
   try {
     status.value = assertSuccess(await api.integrityStatus())
-  } catch (e: any) {
+  } catch (e: unknown) {
     const f = formatApiError(e)
     error.value = f.hint ? `${f.title} — ${f.hint}` : f.title
   } finally {
@@ -103,7 +119,7 @@ async function verify() {
     assertSuccess(await api.integrityVerify())
     ElMessage.success(t('integrity.verify.finished'))
     await load()
-  } catch (e: any) {
+  } catch (e: unknown) {
     const f = formatApiError(e)
     ElMessage.error(f.hint ? `${f.title} — ${f.hint}` : f.title)
   } finally {
@@ -135,7 +151,7 @@ async function repairDebtSymmetry() {
     assertSuccess(await api.integrityRepairNetMutualDebts())
     ElMessage.success(t('integrity.repair.debtSymmetry.finished'))
     await load()
-  } catch (e: any) {
+  } catch (e: unknown) {
     const f = formatApiError(e)
     ElMessage.error(f.hint ? `${f.title} — ${f.hint}` : f.title)
   } finally {
@@ -167,7 +183,7 @@ async function repairTrustLimits() {
     assertSuccess(await api.integrityRepairCapDebtsToTrustLimits())
     ElMessage.success(t('integrity.repair.trustLimits.finished'))
     await load()
-  } catch (e: any) {
+  } catch (e: unknown) {
     const f = formatApiError(e)
     ElMessage.error(f.hint ? `${f.title} — ${f.hint}` : f.title)
   } finally {
@@ -376,7 +392,7 @@ onMounted(() => void load())
           {{ status?.last_check }}
         </el-descriptions-item>
         <el-descriptions-item :label="t('integrity.alerts')">
-          {{ (status as any)?.alerts?.length ?? 0 }}
+          {{ alertsCount }}
         </el-descriptions-item>
         <el-descriptions-item :label="t('integrity.equivalents')">
           {{ Object.keys(equivalents).length }}

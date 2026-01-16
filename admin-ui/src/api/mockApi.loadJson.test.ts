@@ -17,15 +17,13 @@ describe('mockApi.loadJson via endpoints', () => {
     vi.useFakeTimers()
 
     const url = new URL('http://localhost/?scenario=happy')
-    vi.stubGlobal('window', { ...window, location: url } as any)
+    vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
 
     const scenario = { name: 'happy', latency_ms: { min: 0, max: 0 } }
 
     let healthCalls = 0
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const u = String(input)
         if (u.includes('/admin-fixtures/v1/scenarios/happy.json')) return jsonResponse(scenario)
         if (u.includes('/admin-fixtures/v1/datasets/health.json')) {
@@ -34,8 +32,8 @@ describe('mockApi.loadJson via endpoints', () => {
           return jsonResponse({ ok: true })
         }
         return new Response('Not Found', { status: 404, statusText: 'Not Found' })
-      }) as any,
-    )
+      })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const p = mockApi.health()
 
@@ -50,15 +48,13 @@ describe('mockApi.loadJson via endpoints', () => {
 
   it('returns cached fixtures without refetch (offline-friendly)', async () => {
     const url = new URL('http://localhost/?scenario=happy')
-    vi.stubGlobal('window', { ...window, location: url } as any)
+    vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
 
     const scenario = { name: 'happy', latency_ms: { min: 0, max: 0 } }
 
     let healthCalls = 0
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const u = String(input)
         if (u.includes('/admin-fixtures/v1/scenarios/happy.json')) return jsonResponse(scenario)
         if (u.includes('/admin-fixtures/v1/datasets/health.json')) {
@@ -66,17 +62,15 @@ describe('mockApi.loadJson via endpoints', () => {
           return jsonResponse({ ok: true })
         }
         return new Response('Not Found', { status: 404, statusText: 'Not Found' })
-      }) as any,
-    )
+      })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const a = await mockApi.health()
     expect(a.success).toBe(true)
 
     // Even if fetch would fail now, cache should short-circuit.
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('offline', { status: 0, statusText: 'Offline' })) as any,
-    )
+    const fetchOfflineMock = vi.fn(async () => new Response('offline', { status: 0, statusText: 'Offline' }))
+    vi.stubGlobal('fetch', fetchOfflineMock as unknown as typeof fetch)
 
     const b = await mockApi.health()
     expect(b.success).toBe(true)

@@ -180,24 +180,24 @@ const ParticipantMetricsSchema = z
   .passthrough()
 
 function isProdBuild(): boolean {
-  const forced = (globalThis as any)?.__GEO_ADMINUI_FORCE_PROD__
+  const forced = (globalThis as unknown as { __GEO_ADMINUI_FORCE_PROD__?: unknown })?.__GEO_ADMINUI_FORCE_PROD__
   if (forced === true) return true
   if (forced === false) return false
 
   // In Vite builds, PROD is a boolean constant; MODE is typically 'production'.
   // In tests, PROD may be non-writable; MODE is easier to stub.
-  const mode = String((import.meta.env as any).MODE || '').toLowerCase()
+  const mode = String((import.meta.env as unknown as Record<string, unknown>).MODE || '').toLowerCase()
   // Read NODE_ENV via globalThis to avoid transform-time replacement.
   const nodeEnv =
-    typeof globalThis !== 'undefined' && (globalThis as any)?.process?.env
-      ? String((globalThis as any).process.env.NODE_ENV || '')
+    typeof globalThis !== 'undefined' && (globalThis as unknown as { process?: { env?: Record<string, unknown> } })?.process?.env
+      ? String((globalThis as unknown as { process?: { env?: Record<string, unknown> } }).process?.env?.NODE_ENV || '')
       : ''
   return Boolean(import.meta.env.PROD) || mode === 'production' || nodeEnv.toLowerCase() === 'production'
 }
 
 function baseUrl(): string {
   // When using Vite proxy, keep base empty and call relative paths.
-  const envVal = (import.meta.env as any).VITE_API_BASE_URL
+  const envVal = (import.meta.env as unknown as Record<string, unknown>).VITE_API_BASE_URL
   const raw = (envVal === undefined || envVal === null ? DEFAULT_BASE : String(envVal)).trim()
   if (raw) return raw.replace(/\/$/, '')
 
@@ -363,12 +363,15 @@ export async function requestJson<T>(
     }
 
     let env: ApiEnvelope<T>
-    if (res.ok && parsed && typeof parsed === 'object' && 'success' in (parsed as any)) {
+    if (res.ok && parsed && typeof parsed === 'object' && 'success' in (parsed as Record<string, unknown>)) {
       env = parsed as ApiEnvelope<T>
     } else if (!res.ok) {
-      const msg = (parsed as any)?.error?.message || (parsed as any)?.message || `HTTP ${res.status}`
-      const code = (parsed as any)?.error?.code || (parsed as any)?.code || 'HTTP_ERROR'
-      const details = (parsed as any)?.error?.details || (parsed as any)?.details
+      const parsedObj = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+      const errorObj = parsedObj?.error && typeof parsedObj.error === 'object' ? (parsedObj.error as Record<string, unknown>) : undefined
+
+      const msg = String((errorObj?.message ?? parsedObj?.message ?? `HTTP ${res.status}`) as unknown)
+      const code = String((errorObj?.code ?? parsedObj?.code ?? 'HTTP_ERROR') as unknown)
+      const details = (errorObj?.details ?? parsedObj?.details) as unknown
       const statusText = (res.statusText || '').trim()
       const decorated = `${method} ${url} -> ${res.status}${statusText ? ` ${statusText}` : ''}: ${msg}`
       throw new ApiException({

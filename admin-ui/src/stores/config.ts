@@ -15,8 +15,8 @@ export const useConfigStore = defineStore('config', () => {
     error.value = null
     try {
       config.value = assertSuccess(await api.getConfig())
-    } catch (e: any) {
-      error.value = e?.message || 'Failed to load config'
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : 'Failed to load config'
     } finally {
       loading.value = false
     }
@@ -28,8 +28,8 @@ export const useConfigStore = defineStore('config', () => {
     try {
       assertSuccess(await api.patchConfig(patchObj))
       config.value = { ...config.value, ...patchObj }
-    } catch (e: any) {
-      error.value = e?.message || 'Failed to save config'
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : 'Failed to save config'
       throw e
     } finally {
       saving.value = false

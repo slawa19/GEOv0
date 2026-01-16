@@ -134,8 +134,9 @@ export function useGraphAnalytics(opts: {
       const res = await api.participantMetrics(pid, { equivalent: eqCode, threshold: thr })
       const m = assertSuccess(res) as ParticipantMetrics
       metricsCache.value.set(key, m)
-    } catch (e: any) {
-      metricsError.value = String(e?.message || e || 'Failed to load metrics')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      metricsError.value = msg || 'Failed to load metrics'
     } finally {
       metricsLoading.value = false
     }
@@ -596,8 +597,12 @@ export function useGraphAnalytics(opts: {
         const to = typeof payload.to === 'string' ? payload.to : ''
         involved = from === pid || to === pid
       } else {
-        const edges = Array.isArray(payload.edges) ? (payload.edges as any[]) : []
-        involved = edges.some((e) => e && (e.debtor === pid || e.creditor === pid))
+        const edges = Array.isArray(payload.edges) ? (payload.edges as unknown[]) : []
+        involved = edges.some((edge) => {
+          if (!edge || typeof edge !== 'object') return false
+          const e = edge as Record<string, unknown>
+          return e.debtor === pid || e.creditor === pid
+        })
         if (!involved) involved = String(tx.initiator_pid || '') === pid
       }
       if (!involved) continue

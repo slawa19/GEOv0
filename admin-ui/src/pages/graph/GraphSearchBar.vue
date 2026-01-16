@@ -48,6 +48,7 @@ const onSelect = (s: ParticipantSuggestion) => {
       size="small"
       clearable
       class="navRow__field"
+      data-testid="graph-search-input"
       @select="onSelect"
       @keyup.enter="onFocusSearch"
     />
