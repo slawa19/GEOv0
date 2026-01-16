@@ -26,7 +26,7 @@ describe('mockApi list endpoints', () => {
 
     const participants = [
       { pid: 'p1', display_name: 'Alice', type: 'person', status: 'active' },
-      { pid: 'p2', display_name: 'Bob', type: 'person', status: 'frozen' },
+      { pid: 'p2', display_name: 'Bob', type: 'person', status: 'suspended' },
       { pid: 'p3', display_name: 'ACME Coop', type: 'org', status: 'active' },
       { pid: 'p4', display_name: 'Carol', type: 'person', status: 'active' },
     ]

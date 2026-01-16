@@ -19,6 +19,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 from app.schemas.admin import (
+    AdminAuditLogItem,
     AdminAuditLogResponse,
     AdminAuditLogListResponse,
     AdminAbortTxRequest,
@@ -38,6 +39,7 @@ from app.schemas.admin import (
     AdminParticipantsListResponse,
     AdminIncidentsListResponse,
     AdminTrustLinesListResponse,
+    AdminWhoAmIResponse,
 )
 from app.schemas.equivalents import Equivalent as EquivalentSchema
 from app.schemas.equivalents import EquivalentsList
@@ -103,6 +105,102 @@ def _participant_status_db_values_for_filter(status: str | None) -> list[str] | 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _parse_include_csv(value: str | None) -> set[str]:
+    if value is None:
+        return set()
+    raw = str(value).strip()
+    if not raw:
+        return set()
+    out: set[str] = set()
+    for part in raw.split(","):
+        p = part.strip().lower()
+        if p:
+            out.add(p)
+    return out
+
+
+async def _graph_fetch_incidents(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
+    limit = max(0, int(limit))
+    if limit <= 0:
+        return []
+
+    sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
+    cutoff = _utc_now() - timedelta(seconds=sla_seconds)
+
+    stmt = (
+        select(Transaction, Participant.pid)
+        .join(Participant, Transaction.initiator_id == Participant.id)
+        .where(
+            Transaction.type == "PAYMENT",
+            Transaction.state.in_(_ACTIVE_PAYMENT_TX_STATES),
+            Transaction.updated_at < cutoff,
+        )
+        .order_by(Transaction.updated_at.asc())
+        .limit(limit)
+    )
+
+    rows = (await db.execute(stmt)).all()
+    now = _utc_now()
+    items: list[dict[str, Any]] = []
+    for tx, initiator_pid in rows:
+        payload = tx.payload or {}
+        equivalent = str(payload.get("equivalent") or "")
+        anchor = (tx.updated_at or tx.created_at) or now
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        age_seconds = max(0, int((now - anchor).total_seconds()))
+        items.append(
+            {
+                "tx_id": tx.tx_id,
+                "state": tx.state,
+                "initiator_pid": str(initiator_pid),
+                "equivalent": equivalent,
+                "age_seconds": age_seconds,
+                "sla_seconds": sla_seconds,
+                "created_at": tx.created_at,
+            }
+        )
+    return items
+
+
+async def _graph_fetch_audit_log(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
+    limit = max(0, int(limit))
+    if limit <= 0:
+        return []
+    stmt = select(AuditLog).order_by(desc(AuditLog.timestamp)).limit(limit)
+    items = (await db.execute(stmt)).scalars().all()
+    return [AdminAuditLogItem.model_validate(x).model_dump() for x in items]
+
+
+async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
+    limit = max(0, int(limit))
+    if limit <= 0:
+        return []
+    stmt = (
+        select(Transaction, Participant.pid)
+        .join(Participant, Transaction.initiator_id == Participant.id)
+        .order_by(desc(Transaction.updated_at))
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    out: list[dict[str, Any]] = []
+    for tx, initiator_pid in rows:
+        payload = tx.payload or {}
+        out.append(
+            {
+                "tx_id": tx.tx_id,
+                "type": tx.type,
+                "state": tx.state,
+                "initiator_pid": str(initiator_pid),
+                "created_at": tx.created_at,
+                "updated_at": tx.updated_at,
+                "equivalent": payload.get("equivalent"),
+                "error": tx.error,
+            }
+        )
+    return out
 
 
 def _runtime_config_items() -> list[tuple[str, bool]]:
@@ -198,6 +296,12 @@ async def patch_admin_config(
     return AdminConfigPatchResponse(updated=updated)
 
 
+@router.get("/whoami", response_model=AdminWhoAmIResponse, dependencies=[])
+async def admin_whoami() -> AdminWhoAmIResponse:
+    # For now, require_admin implies role=admin.
+    return AdminWhoAmIResponse(role="admin")
+
+
 @router.get("/feature-flags", response_model=AdminFeatureFlags, dependencies=[])
 async def get_feature_flags() -> AdminFeatureFlags:
     return AdminFeatureFlags(
@@ -219,9 +323,12 @@ async def patch_feature_flags(
         "clearing_enabled": settings.CLEARING_ENABLED,
     }
 
-    settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
-    settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
-    settings.CLEARING_ENABLED = body.clearing_enabled
+    if body.multipath_enabled is not None:
+        settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
+    if body.full_multipath_enabled is not None:
+        settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
+    if body.clearing_enabled is not None:
+        settings.CLEARING_ENABLED = body.clearing_enabled
 
     after = {
         "multipath_enabled": settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
@@ -530,10 +637,14 @@ async def abort_transaction(
 
 
 @router.get("/equivalents", response_model=EquivalentsList)
-async def admin_list_equivalents(db: AsyncSession = Depends(deps.get_db)) -> EquivalentsList:
-    items = (
-        await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
-    ).scalars().all()
+async def admin_list_equivalents(
+    include_inactive: bool = Query(False, description="Include inactive equivalents"),
+    db: AsyncSession = Depends(deps.get_db),
+) -> EquivalentsList:
+    stmt = select(EquivalentModel)
+    if not include_inactive:
+        stmt = stmt.where(EquivalentModel.is_active.is_(True))
+    items = (await db.execute(stmt.order_by(EquivalentModel.code.asc()))).scalars().all()
     return EquivalentsList(items=[EquivalentSchema.model_validate(x) for x in items])
 
 
@@ -772,6 +883,10 @@ async def admin_list_trustlines(
 
 @router.get("/graph/snapshot", response_model=AdminGraphSnapshotResponse)
 async def admin_graph_snapshot(
+    include: str | None = Query(
+        None,
+        description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
+    ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminGraphSnapshotResponse:
     """Return a GraphPage-compatible snapshot.
@@ -896,14 +1011,35 @@ async def admin_graph_snapshot(
         for eq, debtor, creditor, amount in debt_rows
     ]
 
+    include_set = _parse_include_csv(include)
+    incidents: list[Any] = []
+    audit_log: list[Any] = []
+    transactions: list[Any] = []
+    if include_set:
+        if "incidents" in include_set:
+            incidents = await _graph_fetch_incidents(
+                db,
+                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS", 50) or 50),
+            )
+        if "audit_log" in include_set:
+            audit_log = await _graph_fetch_audit_log(
+                db,
+                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS", 50) or 50),
+            )
+        if "transactions" in include_set:
+            transactions = await _graph_fetch_transactions(
+                db,
+                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS", 50) or 50),
+            )
+
     return AdminGraphSnapshotResponse(
         participants=participants,
         trustlines=trustlines,
-        incidents=[],
+        incidents=incidents,
         equivalents=equivalents,
         debts=debts,
-        audit_log=[],
-        transactions=[],
+        audit_log=audit_log,
+        transactions=transactions,
     )
 
 
@@ -913,6 +1049,10 @@ async def admin_graph_ego(
     depth: int = Query(1, ge=1, le=2, description="Neighborhood depth (1–2)"),
     equivalent: str | None = Query(None, description="Optional equivalent code filter"),
     status: list[str] | None = Query(None, description="Optional trustline statuses filter (repeatable)"),
+    include: str | None = Query(
+        None,
+        description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
+    ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminGraphEgoResponse:
     """Return a GraphPage-compatible ego snapshot around one participant.
@@ -1097,15 +1237,36 @@ async def admin_graph_ego(
         for eq, debtor, creditor, amount in debt_rows
     ]
 
+    include_set = _parse_include_csv(include)
+    incidents: list[Any] = []
+    audit_log: list[Any] = []
+    transactions: list[Any] = []
+    if include_set:
+        if "incidents" in include_set:
+            incidents = await _graph_fetch_incidents(
+                db,
+                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS", 50) or 50),
+            )
+        if "audit_log" in include_set:
+            audit_log = await _graph_fetch_audit_log(
+                db,
+                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS", 50) or 50),
+            )
+        if "transactions" in include_set:
+            transactions = await _graph_fetch_transactions(
+                db,
+                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS", 50) or 50),
+            )
+
     return AdminGraphEgoResponse(
         root_pid=root_pid,
         participants=participants,
         trustlines=trustlines,
         equivalents=equivalents,
         debts=debts,
-        incidents=[],
-        audit_log=[],
-        transactions=[],
+        incidents=incidents,
+        audit_log=audit_log,
+        transactions=transactions,
     )
 
 

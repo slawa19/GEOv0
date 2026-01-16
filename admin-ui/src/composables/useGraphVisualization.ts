@@ -531,10 +531,10 @@ export function useGraphVisualization(options: {
         },
       },
       { selector: 'node.p-active', style: { 'background-color': '#67c23a' } },
-      { selector: 'node.p-frozen', style: { 'background-color': '#e6a23c' } },
-      { selector: 'node.p-suspended', style: { 'background-color': '#e6a23c' } },
-      { selector: 'node.p-banned', style: { 'background-color': '#f56c6c' } },
-      { selector: 'node.p-deleted', style: { 'background-color': '#909399' } },
+      // Participant status (DB vocabulary). Keep legacy aliases for backward compatibility.
+      { selector: 'node.p-suspended, node.p-frozen', style: { 'background-color': '#e6a23c' } },
+      { selector: 'node.p-left', style: { 'background-color': '#909399' } },
+      { selector: 'node.p-deleted, node.p-banned', style: { 'background-color': '#606266' } },
 
       // Selection pulse as overlay glow (doesn't conflict with border-color based highlights).
       // Note: overlay color is keyed by status to feel consistent with the legend.
@@ -545,8 +545,8 @@ export function useGraphVisualization(options: {
           'node.selected-node.p-frozen, node.selected-pulse.p-frozen, node.selected-node.p-suspended, node.selected-pulse.p-suspended',
         style: { 'overlay-color': '#e6a23c' },
       },
-      { selector: 'node.selected-node.p-banned, node.selected-pulse.p-banned', style: { 'overlay-color': '#f56c6c' } },
-      { selector: 'node.selected-node.p-deleted, node.selected-pulse.p-deleted', style: { 'overlay-color': '#909399' } },
+      { selector: 'node.selected-node.p-left, node.selected-pulse.p-left', style: { 'overlay-color': '#909399' } },
+      { selector: 'node.selected-node.p-deleted, node.selected-pulse.p-deleted, node.selected-node.p-banned, node.selected-pulse.p-banned', style: { 'overlay-color': '#606266' } },
 
       { selector: 'node.type-person', style: { shape: 'ellipse', width: 16, height: 16 } },
       {

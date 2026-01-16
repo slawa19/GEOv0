@@ -154,7 +154,7 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
   },
   'participants.status': {
     title: 'Status',
-    body: ['Account status used for access/routing decisions.', 'Typical values: active, frozen, banned.'],
+    body: ['Account status used for access/routing decisions.', 'Typical values: active, suspended, left, deleted.'],
   },
 
   'trustlines.eq': {
@@ -414,7 +414,7 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
   },
   'participants.status': {
     title: 'Статус',
-    body: ['Статус аккаунта для доступа/маршрутизации.', 'Типичные значения: active, frozen, banned.'],
+    body: ['Статус аккаунта для доступа/маршрутизации.', 'Типичные значения: active, suspended, left, deleted.'],
   },
 
   'trustlines.eq': {

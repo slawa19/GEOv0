@@ -752,7 +752,7 @@ export const mockApi = {
       const p = all.find((x) => x.pid === pid)
       if (!p) return { success: false, error: { code: 'NOT_FOUND', message: 'participant not found' } }
       const before = { ...p }
-      p.status = 'frozen'
+      p.status = 'suspended'
       await appendAuditLog({
         actor_id: 'admin-ui',
         action: 'participant.freeze',

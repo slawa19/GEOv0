@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     DEBUG: bool = False
 
+    # Environment
+    # Used for guardrails (e.g. dev-only auth helpers). Suggested values: dev|staging|prod.
+    ENV: str = "dev"
+
     # Challenge
     AUTH_CHALLENGE_EXPIRE_SECONDS: int = 300
 
@@ -79,6 +83,18 @@ class Settings(BaseSettings):
     # NOTE: Shared secret to unblock Admin UI integration in MVP.
     # Replace with proper role-based auth in production.
     ADMIN_TOKEN: str = "dev-admin-token-change-me"
+
+    # Dev-only admin auth convenience (guarded)
+    # When enabled (ENV=dev AND ADMIN_DEV_MODE=True), allow calling admin endpoints
+    # without X-Admin-Token from trusted client IPs.
+    ADMIN_DEV_MODE: bool = False
+    # Comma-separated allowlist of client IPs.
+    ADMIN_DEV_ALLOWLIST: str = "127.0.0.1,::1"
+
+    # Graph extras include caps (for /admin/graph/*?include=...)
+    ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS: int = 50
+    ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS: int = 50
+    ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS: int = 50
 
     # Feature flags (runtime mutable via /admin/feature-flags)
     FEATURE_FLAGS_MULTIPATH_ENABLED: bool = True

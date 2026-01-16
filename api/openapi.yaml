@@ -133,6 +133,27 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
+  /admin/whoami:
+    get:
+      tags: [Admin]
+      summary: Who am I (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current admin role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminWhoAmIResponse'
+        '403':
+          $ref: '#/components/responses/Unauthorized'
+
   /admin/feature-flags:
     get:
       tags: [Admin]
@@ -398,6 +419,12 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: include_inactive
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Equivalents list
@@ -675,6 +702,12 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: include
+          required: false
+          schema:
+            type: string
+          description: Comma-separated extras to include (incidents,audit_log,transactions)
       responses:
         '200':
           description: Graph snapshot
@@ -721,6 +754,12 @@ paths:
               type: string
           style: form
           explode: true
+        - in: query
+          name: include
+          required: false
+          schema:
+            type: string
+          description: Comma-separated extras to include (incidents,audit_log,transactions)
       responses:
         '200':
           description: Ego snapshot
@@ -1504,6 +1543,46 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /integrity/repair/net-mutual-debts:
+    post:
+      tags: [Integrity]
+      summary: Repair net mutual debts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Repair result
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /integrity/repair/cap-debts-to-trust-limits:
+    post:
+      tags: [Integrity]
+      summary: Repair cap debts to trust limits
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Repair result
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /integrity/audit-log:
     get:
       tags: [Integrity]
@@ -1692,13 +1771,29 @@ components:
           type: boolean
 
     AdminFeatureFlagsPatchRequest:
-      allOf:
-        - $ref: '#/components/schemas/AdminFeatureFlags'
-        - type: object
-          properties:
-            reason:
-              type: string
-              nullable: true
+      type: object
+      description: Partial patch; only provided fields are updated.
+      properties:
+        multipath_enabled:
+          type: boolean
+          nullable: true
+        full_multipath_enabled:
+          type: boolean
+          nullable: true
+        clearing_enabled:
+          type: boolean
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+
+    AdminWhoAmIResponse:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [admin]
 
     AdminParticipantActionRequest:
       type: object

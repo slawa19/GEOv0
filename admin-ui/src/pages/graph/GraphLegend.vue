@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t } from '../../i18n'
+
 const props = defineProps<{
   open: boolean
 }>()
@@ -10,31 +12,37 @@ const props = defineProps<{
     class="legend"
   >
     <div class="legend__title">
-      Legend
+      {{ t('graph.legend.title') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--node-active" /> active participant
+      <span class="swatch swatch--node-active" /> {{ t('participant.status.active') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--node-frozen" /> frozen participant
+      <span class="swatch swatch--node-suspended" /> {{ t('participant.status.suspended') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--node-business" /> business (node shape)
+      <span class="swatch swatch--node-left" /> {{ t('participant.status.left') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--edge-active" /> active trustline
+      <span class="swatch swatch--node-deleted" /> {{ t('participant.status.deleted') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--edge-frozen" /> frozen trustline
+      <span class="swatch swatch--node-business" /> {{ t('graph.legend.businessNode') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--edge-closed" /> closed trustline
+      <span class="swatch swatch--edge-active" /> {{ t('trustlines.status.active') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--edge-bottleneck" /> bottleneck (thick)
+      <span class="swatch swatch--edge-frozen" /> {{ t('trustlines.status.frozen') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--edge-incident" /> incident initiator side (dashed)
+      <span class="swatch swatch--edge-closed" /> {{ t('trustlines.status.closed') }}
+    </div>
+    <div class="legend__row">
+      <span class="swatch swatch--edge-bottleneck" /> {{ t('graph.legend.bottleneck') }}
+    </div>
+    <div class="legend__row">
+      <span class="swatch swatch--edge-incident" /> {{ t('graph.legend.incidentEdge') }}
     </div>
   </div>
 </template>
@@ -82,11 +90,25 @@ const props = defineProps<{
   background: #67c23a;
 }
 
-.swatch--node-frozen {
+.swatch--node-suspended {
   width: 12px;
   height: 12px;
   border-radius: 6px;
   background: #e6a23c;
+}
+
+.swatch--node-left {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #909399;
+}
+
+.swatch--node-deleted {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #606266;
 }
 
 .swatch--node-business {

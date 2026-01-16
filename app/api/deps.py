@@ -140,7 +140,21 @@ async def require_participant_or_admin(
 
 
 async def require_admin(
+    request: Request,
     x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ) -> None:
-    if not x_admin_token or x_admin_token != settings.ADMIN_TOKEN:
-        raise ForbiddenException("Admin token required")
+    # Strict token path (preferred)
+    if x_admin_token is not None:
+        if x_admin_token != settings.ADMIN_TOKEN:
+            raise ForbiddenException("Admin token required")
+        return
+
+    # Dev-only convenience: allow missing token for trusted client IPs.
+    if getattr(settings, "ENV", "dev") == "dev" and bool(getattr(settings, "ADMIN_DEV_MODE", False)):
+        client_host = (request.client.host if request.client else None) or ""
+        allow_raw = str(getattr(settings, "ADMIN_DEV_ALLOWLIST", "") or "")
+        allow = {h.strip() for h in allow_raw.split(",") if h.strip()}
+        if client_host and client_host in allow:
+            return
+
+    raise ForbiddenException("Admin token required")

@@ -79,7 +79,7 @@ async function promptReason(title: string): Promise<string | null> {
 }
 
 async function freeze(row: Participant) {
-  const reason = await promptReason(`Freeze ${row.pid}`)
+  const reason = await promptReason(t('participant.prompt.freezeTitle', { pid: row.pid }))
   if (!reason) return
   try {
     assertSuccess(await api.freezeParticipant(row.pid, reason))
@@ -92,7 +92,7 @@ async function freeze(row: Participant) {
 }
 
 async function unfreeze(row: Participant) {
-  const reason = await promptReason(`Unfreeze ${row.pid}`)
+  const reason = await promptReason(t('participant.prompt.unfreezeTitle', { pid: row.pid }))
   if (!reason) return
   try {
     assertSuccess(await api.unfreezeParticipant(row.pid, reason))
@@ -141,9 +141,33 @@ watch([q, status, type], () => {
 const statusOptions = computed(() => [
   { label: t('participant.status.any'), value: '' },
   { label: t('participant.status.active'), value: 'active' },
-  { label: t('participant.status.frozen'), value: 'frozen' },
-  { label: t('participant.status.banned'), value: 'banned' },
+  { label: t('participant.status.suspended'), value: 'suspended' },
+  { label: t('participant.status.left'), value: 'left' },
+  { label: t('participant.status.deleted'), value: 'deleted' },
 ])
+
+function statusLabel(v: string | null | undefined): string {
+  const s = String(v || '').trim().toLowerCase()
+  if (!s) return ''
+  if (s === 'active') return t('participant.status.active')
+  if (s === 'suspended') return t('participant.status.suspended')
+  if (s === 'left') return t('participant.status.left')
+  if (s === 'deleted') return t('participant.status.deleted')
+  return s
+}
+
+function statusTagType(v: string | null | undefined): 'success' | 'warning' | 'info' | 'danger' {
+  const s = String(v || '').trim().toLowerCase()
+  if (s === 'active') return 'success'
+  if (s === 'suspended') return 'warning'
+  if (s === 'deleted') return 'danger'
+  return 'info'
+}
+
+function isLockedStatus(v: string | null | undefined): boolean {
+  const s = String(v || '').trim().toLowerCase()
+  return s === 'deleted' || s === 'left'
+}
 
 const typeOptions = computed(() => [
   { label: t('participant.type.any'), value: '' },
@@ -295,10 +319,10 @@ const typeOptions = computed(() => [
           </template>
           <template #default="scope">
             <el-tag
-              :type="scope.row.status === 'active' ? 'success' : scope.row.status === 'frozen' ? 'warning' : 'danger'"
+              :type="statusTagType(scope.row.status)"
               size="small"
             >
-              {{ scope.row.status }}
+              {{ statusLabel(scope.row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -318,7 +342,7 @@ const typeOptions = computed(() => [
               {{ t('participant.freeze') }}
             </el-button>
             <el-button
-              v-else-if="scope.row.status === 'frozen'"
+              v-else-if="scope.row.status === 'suspended'"
               size="small"
               type="success"
               :disabled="authStore.isReadOnly"
@@ -385,10 +409,10 @@ const typeOptions = computed(() => [
         </el-descriptions-item>
         <el-descriptions-item :label="t('participant.columns.status')">
           <el-tag
-            :type="selected.status === 'active' ? 'success' : selected.status === 'frozen' ? 'warning' : 'danger'"
+            :type="statusTagType(selected.status)"
             size="small"
           >
-            {{ selected.status }}
+            {{ statusLabel(selected.status) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item
@@ -430,12 +454,12 @@ const typeOptions = computed(() => [
         </el-button>
       </div>
 
-      <el-divider v-if="selected.status !== 'banned'">
+      <el-divider v-if="!isLockedStatus(selected.status)">
         {{ t('common.actions') }}
       </el-divider>
 
       <div
-        v-if="selected.status !== 'banned'"
+        v-if="!isLockedStatus(selected.status)"
         class="drawer-actions"
       >
         <el-button
@@ -447,7 +471,7 @@ const typeOptions = computed(() => [
           {{ t('participant.drawer.freezeParticipant') }}
         </el-button>
         <el-button
-          v-else-if="selected.status === 'frozen'"
+          v-else-if="selected.status === 'suspended'"
           type="success"
           :disabled="authStore.isReadOnly"
           @click="unfreeze(selected)"

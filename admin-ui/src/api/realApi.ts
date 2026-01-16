@@ -633,9 +633,13 @@ export const realApi = {
   },
 
   async listEquivalents(params: { include_inactive?: boolean }): Promise<ApiEnvelope<{ items: Equivalent[] }>> {
-    const payload = await requestJson<{ items: Equivalent[] }>('/api/v1/admin/equivalents', { admin: true })
-    const all = assertSuccess(payload).items || []
-    const items = params.include_inactive ? all : all.filter((e) => e?.is_active)
+    const payload = await requestJson<{ items: Equivalent[] }>(
+      buildQuery('/api/v1/admin/equivalents', {
+        include_inactive: params.include_inactive ? true : undefined,
+      }),
+      { admin: true },
+    )
+    const items = assertSuccess(payload).items || []
     return { success: true, data: { items } }
   },
 

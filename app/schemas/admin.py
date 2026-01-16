@@ -35,8 +35,16 @@ class AdminFeatureFlags(BaseModel):
     clearing_enabled: bool
 
 
-class AdminFeatureFlagsPatchRequest(AdminFeatureFlags):
+class AdminFeatureFlagsPatchRequest(BaseModel):
+    # Partial PATCH: all fields optional; only provided ones are updated.
+    multipath_enabled: Optional[bool] = None
+    full_multipath_enabled: Optional[bool] = None
+    clearing_enabled: Optional[bool] = None
     reason: Optional[str] = None
+
+
+class AdminWhoAmIResponse(BaseModel):
+    role: str = Field(..., pattern="^admin$")
 
 
 class AdminParticipantActionRequest(BaseModel):
