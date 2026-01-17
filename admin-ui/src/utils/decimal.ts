@@ -42,6 +42,38 @@ function formatBigIntFixed(i: bigint, scale: number): string {
   return (neg ? '-' : '') + head + '.' + frac
 }
 
+export function addDecimalStrings(a: string, b: string): string {
+  const da = parseDecimal(String(a ?? ''))
+  const db = parseDecimal(String(b ?? ''))
+  if (!da || !db) return String(a ?? '')
+  const [ai, bi, s] = align(da, db)
+  return formatBigIntFixed(ai + bi, s)
+}
+
+export function subDecimalStrings(a: string, b: string): string {
+  const da = parseDecimal(String(a ?? ''))
+  const db = parseDecimal(String(b ?? ''))
+  if (!da || !db) return String(a ?? '')
+  const [ai, bi, s] = align(da, db)
+  return formatBigIntFixed(ai - bi, s)
+}
+
+export function absDecimalString(v: string): string {
+  const d = parseDecimal(String(v ?? ''))
+  if (!d) return String(v ?? '')
+  const abs = d.i < 0n ? -d.i : d.i
+  return formatBigIntFixed(abs, d.scale)
+}
+
+export function compareDecimalStrings(a: string, b: string): number {
+  const da = parseDecimal(String(a ?? ''))
+  const db = parseDecimal(String(b ?? ''))
+  if (!da || !db) return 0
+  const [ai, bi] = align(da, db)
+  if (ai === bi) return 0
+  return ai < bi ? -1 : 1
+}
+
 // Formats a decimal string to exactly `digits` fraction digits (default 2).
 // Uses integer math and rounds half-up.
 export function formatDecimalFixed(input: string, digits = 2): string {

@@ -9,6 +9,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'dashboard.title' },
   },
   {
+    path: '/liquidity',
+    name: 'Liquidity',
+    component: () => import('../pages/LiquidityPage.vue'),
+    meta: { titleKey: 'liquidity.title' },
+  },
+  {
     path: '/integrity',
     name: 'Integrity',
     component: () => import('../pages/IntegrityPage.vue'),

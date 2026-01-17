@@ -14,6 +14,7 @@ import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
 import type { Participant } from '../types/domain'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 
 const router = useRouter()
 const route = useRoute()
@@ -34,10 +35,6 @@ const items = ref<Participant[]>([])
 
 const drawerOpen = ref(false)
 const selected = ref<Participant | null>(null)
-
-function readQueryString(v: unknown): string {
-  return typeof v === 'string' ? v : ''
-}
 
 function applyRouteQueryToFilters() {
   const nextQ = readQueryString(route.query.q).trim()
@@ -65,13 +62,13 @@ function syncFiltersToRouteQuery() {
   if (ty) query.type = ty
   else delete query.type
 
-  const curr = route.query as Record<string, unknown>
+  const curr = route.query as unknown as Record<string, unknown>
   const same =
     String(curr.q ?? '') === String(query.q ?? '') &&
     String(curr.status ?? '') === String(query.status ?? '') &&
     String(curr.type ?? '') === String(query.type ?? '')
 
-  if (!same) void router.replace({ query })
+  if (!same) void router.replace({ query: toLocationQueryRaw(query) })
 }
 
 async function load() {
@@ -150,15 +147,15 @@ function openRow(row: Participant) {
 }
 
 function goTrustlines(pid: string) {
-  void router.push({ path: '/trustlines', query: { ...route.query, creditor: pid } })
+  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, creditor: pid }) })
 }
 
 function goTrustlinesAsDebtor(pid: string) {
-  void router.push({ path: '/trustlines', query: { ...route.query, debtor: pid } })
+  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, debtor: pid }) })
 }
 
 function goAuditLog(pid: string) {
-  void router.push({ path: '/audit-log', query: { ...route.query, q: pid } })
+  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...route.query, q: pid }) })
 }
 
 onMounted(() => {

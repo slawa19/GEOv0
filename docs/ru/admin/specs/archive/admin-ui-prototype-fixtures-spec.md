@@ -1,3 +1,9 @@
+# ARCHIVED: GEO Hub Admin Console — Fixture Pack для статического прототипа (Variant B)
+
+Каноническая точка входа по Admin UI и фикстурам: [docs/ru/admin/README.md](../../README.md).
+
+---
+
 # GEO Hub Admin Console — Fixture Pack для статического прототипа (Variant B)
 
 **Версия:** 0.2
@@ -6,7 +12,7 @@
 
 Связано с:
 - `docs/ru/admin/specs/admin-ui-spec.md` (экраны/состояния/401/403)
-- `docs/ru/admin/specs/admin-console-minimal-spec.md` (MVP scope)
+- `docs/ru/admin/specs/archive/admin-console-minimal-spec.md` (MVP scope)
 - `api/openapi.yaml` (контракт — ориентир)
 
 ---
@@ -288,4 +294,3 @@ Guardrails:
 
 - **v0.2 (2026-01-13):** Добавлены секции 10 (debts.json, clearing-cycles.json, transactions.json), 11 (_meta.json), 12 (рабочий цикл).
 - **v0.1 (2026-01-11):** Начальная версия спецификации.
-

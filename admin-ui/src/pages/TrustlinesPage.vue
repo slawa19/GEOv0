@@ -9,12 +9,15 @@ import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
 import { t } from '../i18n'
 import { labelTrustlineStatus } from '../i18n/labels'
 import type { Trustline } from '../types/domain'
+import { buildTrustlinesAdvice } from '../advice/operatorAdvice'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 
 const router = useRouter()
 const route = useRoute()
@@ -38,10 +41,6 @@ const selected = ref<Trustline | null>(null)
 
 const configStore = useConfigStore()
 const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
-
-function readQueryString(v: unknown): string {
-  return typeof v === 'string' ? v : ''
-}
 
 function applyRouteQueryToFilters() {
   const nextEq = readQueryString(route.query.equivalent).trim()
@@ -81,7 +80,7 @@ function syncFiltersToRouteQuery() {
   if (thr && thr !== '0.10') query.threshold = thr
   else delete query.threshold
 
-  const curr = route.query as Record<string, unknown>
+  const curr = route.query as unknown as Record<string, unknown>
   const same =
     String(curr.equivalent ?? '') === String(query.equivalent ?? '') &&
     String(curr.creditor ?? '') === String(query.creditor ?? '') &&
@@ -89,7 +88,7 @@ function syncFiltersToRouteQuery() {
     String(curr.status ?? '') === String(query.status ?? '') &&
     String(curr.threshold ?? '') === String(query.threshold ?? '')
 
-  if (!same) void router.replace({ query })
+  if (!same) void router.replace({ query: toLocationQueryRaw(query) })
 }
 
 function isBottleneck(row: Trustline): boolean {
@@ -140,11 +139,11 @@ function openRow(row: Trustline) {
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: { ...route.query, q: pid } })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...route.query, q: pid }) })
 }
 
 function goEquivalent(eq: string) {
-  void router.push({ path: '/equivalents', query: { ...route.query, q: eq } })
+  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ ...route.query, q: eq }) })
 }
 
 onMounted(() => {
@@ -183,6 +182,20 @@ const statusOptions = computed(() => [
   { label: t('trustlines.status.frozen'), value: 'frozen' },
   { label: t('trustlines.status.closed'), value: 'closed' },
 ])
+
+const bottlenecksCount = computed(() =>
+  items.value.filter((row) => String(row.status || '').trim().toLowerCase() === 'active' && isBottleneck(row)).length,
+)
+
+const trustlinesAdviceItems = computed(() =>
+  buildTrustlinesAdvice({
+    summary: { threshold: threshold.value, total: items.value.length, bottlenecks: bottlenecksCount.value },
+    baseQuery: route.query,
+    equivalent: equivalent.value || undefined,
+    creditor: creditor.value || undefined,
+    debtor: debtor.value || undefined,
+  }),
+)
 </script>
 
 <template>
@@ -256,6 +269,7 @@ const statusOptions = computed(() => [
     />
 
     <div v-else>
+      <OperatorAdvicePanel :items="trustlinesAdviceItems" />
       <el-table
         :data="items"
         size="small"

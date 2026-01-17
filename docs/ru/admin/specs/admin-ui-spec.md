@@ -5,7 +5,8 @@
 **Стек (рекомендация):** Vue.js 3 (Vite), Element Plus, Pinia.  
 
 Документ согласован с:
-- `docs/ru/admin/specs/admin-console-minimal-spec.md`
+- `docs/ru/admin/README.md`
+- `docs/ru/admin/specs/archive/admin-console-minimal-spec.md`
 - `docs/ru/04-api-reference.md`
 - `api/openapi.yaml`
 
@@ -46,12 +47,13 @@
 - Тёмный режим по умолчанию допустим, но должен быть реализован средствами выбранного UI-слоя.
 
 См. также нормативный документ по типографике:
-- `docs/ru/admin/specs/admin-ui-typography.md`
+- `docs/ru/admin/typography.md`
 
 ### 3.2. Sidebar (основные разделы)
 
-Минимальный состав экранов (соответствует `admin-console-minimal-spec.md`):
+Минимальный состав экранов (соответствует `docs/ru/admin/specs/archive/admin-console-minimal-spec.md`):
 - `Dashboard`
+- `Liquidity analytics` (Snapshot triage)
 - `Integrity`
 - `Incidents`
 - `Trustlines`
@@ -66,8 +68,22 @@
 
 Phase 2:
 - `Events` (timeline)
-- `Liquidity analytics`
 - `Transactions` / `Clearing` (глобальные списки)
+
+#### Liquidity analytics (Snapshot triage)
+
+Цель: дать оператору «ситуационный центр» по ликвидности сети, чтобы быстро понять состояние и приоритизировать расследование.
+
+Позиционирование (чтобы не было дублирования):
+- `Liquidity analytics` = обзор + watchlist + советы.
+- `Trustlines`/`Graph` = drill-down и диагностика конкретных рёбер/узлов.
+
+MVP (без историчности):
+- Источник данных: `GraphSnapshot` (в mock режиме — fixtures).
+- Управляющие параметры: `equivalent` (или `ALL`), `threshold` (bottleneck).
+- KPI: active trustlines / bottlenecks / incidents over SLA / total limit-used-available (суммы decimal-safe).
+- Watchlist: top bottleneck edges, top net positions (из `debts`).
+- Operator Advice: детерминированные советы + быстрые переходы в `Trustlines`, `Incidents`, `Graph`, `Participants`.
 
 ### 3.3. Header
 - Breadcrumbs.
@@ -170,6 +186,11 @@ UI (MVP) — что должно быть на странице:
 - Двойной клик по узлу: центрирует/зуумит как `Find` и открывает `Drawer` с деталями участника.
 - Клик по ребру: открывает `Drawer` с деталями trustline (equivalent/from/to/status/limit/used/available/created_at).
 
+Operator Advice (MVP+; реализовать сейчас):
+- В `Drawer → Summary` должна быть панель **Operator advice**: контекстные рекомендации по bottlenecks/capacity/concentration.
+- Рекомендации детерминированы (фиксированные правила) и объясняют «почему» + дают быстрые переходы на существующие экраны.
+- Детальная спецификация правил и UX: `docs/ru/admin/specs/operator-advice-spec.md`.
+
 Расширения (для последующей модификации):
 - Добавить tooltip на hover по ребру (без внешних зависимостей можно реализовать через overlay div).
 - Добавить режимы представления (вкладки): `Overview`, `Equivalent Lens`, `Incidents Overlay`.
@@ -200,6 +221,9 @@ UI:
 - Поиск по PID.
 - Действия: Freeze/Unfreeze (с причиной).
 - Для `auditor` — только просмотр.
+
+Примечание:
+- Operator Advice может вести на `Participants` как на следующий шаг диагностики (например, открыть карточку участника после выявления bottleneck-ребра).
 
 ### 4.6. Config
 
@@ -237,7 +261,7 @@ UI:
 
 ### 4.10. Equivalents (MVP)
 
-Цель: управление справочником эквивалентов (входит в MVP согласно `admin-console-minimal-spec.md` §3.4).
+Цель: управление справочником эквивалентов (входит в MVP согласно `docs/ru/admin/specs/archive/admin-console-minimal-spec.md` §3.4).
 
 UI:
 - Таблица: `code`, `description`, `precision`, `is_active`.

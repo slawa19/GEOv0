@@ -7,6 +7,8 @@ import { useConfigStore } from '../stores/config'
 import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
 import { locale, setLocale, t } from '../i18n'
 import { getTooltipContent } from '../content/tooltips'
+import CopyIconButton from '../ui/CopyIconButton.vue'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 import type { TooltipKey } from '../content/tooltips'
 
 type NavItem = {
@@ -17,6 +19,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { path: '/dashboard', labelKey: 'nav.dashboard.label', tooltipKey: 'nav.dashboard' },
+  { path: '/liquidity', labelKey: 'nav.liquidity.label', tooltipKey: 'nav.liquidity' },
   { path: '/integrity', labelKey: 'nav.integrity.label', tooltipKey: 'nav.integrity' },
   { path: '/incidents', labelKey: 'nav.incidents.label', tooltipKey: 'nav.incidents' },
   { path: '/trustlines', labelKey: 'nav.trustlines.label', tooltipKey: 'nav.trustlines' },
@@ -67,9 +70,9 @@ if (import.meta.hot) {
 }
 
 const scenario = computed({
-  get: () => (route.query.scenario as string | undefined) || 'happy',
+  get: () => readQueryString(route.query.scenario) || 'happy',
   set: (v: string) => {
-    void router.replace({ query: { ...route.query, scenario: v } })
+    void router.replace({ query: toLocationQueryRaw({ ...route.query, scenario: v }) })
   },
 })
 
@@ -78,7 +81,7 @@ onMounted(() => {
   if (isMockMode.value) return
   if (!('scenario' in (route.query || {}))) return
   const { scenario: _ignored, ...rest } = route.query || {}
-  void router.replace({ query: rest })
+  void router.replace({ query: toLocationQueryRaw(rest) })
 })
 
 const THEME_KEY = 'admin-ui.theme'
@@ -117,6 +120,9 @@ const uiLocale = computed({
 
 const quickJump = ref('')
 
+const runLocalOpen = ref(false)
+const runLocalCommand = computed(() => '.\\scripts\\run_local.ps1 -Action start')
+
 function normQuickJump(v: unknown): string {
   return String(v ?? '').trim()
 }
@@ -124,29 +130,29 @@ function normQuickJump(v: unknown): string {
 function goParticipants() {
   const q = normQuickJump(quickJump.value)
   if (!q) return
-  void router.push({ path: '/participants', query: { ...route.query, q } })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...route.query, q }) })
 }
 
 function goTrustlinesCreditor() {
   const pid = normQuickJump(quickJump.value)
   if (!pid) return
-  void router.push({ path: '/trustlines', query: { ...route.query, creditor: pid } })
+  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, creditor: pid }) })
 }
 
 function goTrustlinesDebtor() {
   const pid = normQuickJump(quickJump.value)
   if (!pid) return
-  void router.push({ path: '/trustlines', query: { ...route.query, debtor: pid } })
+  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, debtor: pid }) })
 }
 
 function goAuditLog() {
   const q = normQuickJump(quickJump.value)
   if (!q) return
-  void router.push({ path: '/audit-log', query: { ...route.query, q } })
+  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...route.query, q }) })
 }
 
 function navigate(path: string) {
-  void router.push({ path, query: { ...route.query } })
+  void router.push({ path, query: toLocationQueryRaw({ ...route.query }) })
 }
 </script>
 
@@ -323,6 +329,46 @@ function navigate(path: string) {
             </el-button-group>
           </div>
 
+          <el-tooltip
+            placement="bottom"
+            effect="dark"
+            :show-after="700"
+          >
+            <template #content>
+              {{ t('app.runLocal.tooltip') }}
+            </template>
+            <el-button
+              size="small"
+              @click="runLocalOpen = true"
+            >
+              {{ t('app.runLocal.label') }}
+            </el-button>
+          </el-tooltip>
+
+          <el-dialog
+            v-model="runLocalOpen"
+            :title="t('app.runLocal.title')"
+            width="520px"
+          >
+            <div class="geoHint">
+              {{ t('app.runLocal.hint') }}
+            </div>
+            <div class="runLocalCmd">
+              <span class="runLocalCmd__text">{{ runLocalCommand }}</span>
+              <CopyIconButton
+                :text="runLocalCommand"
+                :label="t('app.runLocal.label')"
+              />
+            </div>
+            <template #footer>
+              <el-button
+                @click="runLocalOpen = false"
+              >
+                {{ t('common.close') }}
+              </el-button>
+            </template>
+          </el-dialog>
+
           <el-select
             v-model="uiLocale"
             size="small"
@@ -427,6 +473,26 @@ function navigate(path: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.runLocalCmd {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.runLocalCmd__text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
 }
 
 .brand {

@@ -178,4 +178,4 @@
 - [config-reference.md](config-reference.md) — полный реестр параметров с описанием
 - [02-protocol-spec.md](02-protocol-spec.md) — спецификация протокола
 - [03-architecture.md](03-architecture.md) — архитектура системы
-- [admin/specs/admin-console-minimal-spec.md](admin/specs/admin-console-minimal-spec.md) — спецификация админки
+- [admin/specs/archive/admin-console-minimal-spec.md](admin/specs/archive/admin-console-minimal-spec.md) — спецификация админки

@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import TooltipLabel from '../../ui/TooltipLabel.vue'
 import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../../ui/GraphAnalyticsTogglesCard.vue'
+import OperatorAdvicePanel from '../../ui/OperatorAdvicePanel.vue'
 import { t } from '../../i18n'
 import { labelTrustlineStatus } from '../../i18n/labels'
+import { buildGraphDrawerAdvice } from '../../advice/operatorAdvice'
 
 import type { DrawerTab, SelectedInfo } from '../../composables/useGraphVisualization'
 import type { ClearingCycles } from './graphTypes'
@@ -109,7 +113,7 @@ const analytics = defineModel<AnalyticsToggles>('analytics', { required: true })
 const connectionsIncomingPage = defineModel<number>('connectionsIncomingPage', { required: true })
 const connectionsOutgoingPage = defineModel<number>('connectionsOutgoingPage', { required: true })
 
-defineProps<{
+const props = defineProps<{
   selected: SelectedInfo | null
   showIncidents: boolean
   incidentRatioByPid: Map<string, number>
@@ -157,6 +161,40 @@ defineProps<{
   balanceToggleItems: AnalyticsToggleItem[]
   riskToggleItems: AnalyticsToggleItem[]
 }>()
+
+const route = useRoute()
+
+const adviceItems = computed(() => {
+  return buildGraphDrawerAdvice({
+    ctx: {
+      pid: props.selected && props.selected.kind === 'node' ? props.selected.pid : null,
+      eq: props.analyticsEq,
+      threshold: props.threshold,
+      concentration: {
+        outgoing: {
+          levelType: props.selectedConcentration.outgoing.level.type,
+          top1: props.selectedConcentration.outgoing.top1,
+          top5: props.selectedConcentration.outgoing.top5,
+          hhi: props.selectedConcentration.outgoing.hhi,
+        },
+        incoming: {
+          levelType: props.selectedConcentration.incoming.level.type,
+          top1: props.selectedConcentration.incoming.top1,
+          top5: props.selectedConcentration.incoming.top5,
+          hhi: props.selectedConcentration.incoming.hhi,
+        },
+      },
+      capacity: props.selectedCapacity
+        ? {
+            outPct: props.selectedCapacity.out.pct,
+            inPct: props.selectedCapacity.inc.pct,
+            bottlenecksCount: props.selectedCapacity.bottlenecks.length,
+          }
+        : null,
+    },
+    baseQuery: route.query,
+  })
+})
 </script>
 
 <template>
@@ -257,6 +295,8 @@ defineProps<{
             <div class="hint">
               {{ t('graph.hint.fixturesFirstDerivedFromDatasets') }}
             </div>
+
+            <OperatorAdvicePanel :items="adviceItems" />
 
             <GraphAnalyticsTogglesCard
               v-if="analyticsEq"

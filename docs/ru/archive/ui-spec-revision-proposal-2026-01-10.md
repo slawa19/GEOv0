@@ -85,7 +85,7 @@
 
 ---
 
-## 2. Admin Console Minimal ([admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md))
+## 2. Admin Console Minimal ([admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md))
 
 ### 2.1. Общая оценка
 
@@ -391,13 +391,13 @@ graph TB
 |----|----------|--------|----------|-----|
 | PWA-1 | [pwa-client-ui-spec.md](../../pwa/specs/pwa-client-ui-spec.md) | WebSocket → Phase 2 | SHOULD | Упростить |
 | PWA-2 | [pwa-client-ui-spec.md](../../pwa/specs/pwa-client-ui-spec.md) | Balance History — не использовать (через `/payments`) | MAY | Уточнить |
-| ADMIN-1 | [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) | Network Graph → Phase 2 | SHOULD | Упростить |
-| ADMIN-2 | [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) | Аналитика ликвидности — убрать | MUST | Убрать |
-| ADMIN-3 | [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) | Events timeline — убрать | SHOULD | Убрать |
-| ADMIN-4 | [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) | Admin Transactions — использовать user API | SHOULD | Упростить |
-| ADMIN-5 | [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) | Force Abort — добавить в API | MUST | Добавить в API |
-| ADMIN-6 | [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) | Integrity — использовать `/integrity/*` | SHOULD | Исправить |
-| ADMIN-7 | [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) | RBAC — подтвердить отсутствие | MAY | Нет изменений |
+| ADMIN-1 | [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) | Network Graph → Phase 2 | SHOULD | Упростить |
+| ADMIN-2 | [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) | Аналитика ликвидности — убрать | MUST | Убрать |
+| ADMIN-3 | [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) | Events timeline — убрать | SHOULD | Убрать |
+| ADMIN-4 | [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) | Admin Transactions — использовать user API | SHOULD | Упростить |
+| ADMIN-5 | [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) | Force Abort — добавить в API | MUST | Добавить в API |
+| ADMIN-6 | [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) | Integrity — использовать `/integrity/*` | SHOULD | Исправить |
+| ADMIN-7 | [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) | RBAC — подтвердить отсутствие | MAY | Нет изменений |
 | UI-1 | [admin-ui-spec.md](../specs/admin-ui-spec.md) | Синхронизировать с minimal | MUST | Синхронизация |
 | UI-2 | [admin-ui-spec.md](../specs/admin-ui-spec.md) | WebSocket — убрать | SHOULD | Упростить |
 | DOC-1 | [04-api-reference.md](../../04-api-reference.md) | Balance History — убрать, использовать `/payments` | SHOULD | Исправить |
@@ -468,7 +468,7 @@ graph TB
 После утверждения этого proposal:
 
 1. [ ] Создать issue для добавления `POST /admin/transactions/{tx_id}/abort` в API
-2. [ ] Обновить [admin-console-minimal-spec.md](../specs/admin-console-minimal-spec.md) согласно правкам ADMIN-1..7
+2. [ ] Обновить [admin-console-minimal-spec.md](../admin/specs/archive/admin-console-minimal-spec.md) согласно правкам ADMIN-1..7
 3. [ ] Обновить [admin-ui-spec.md](../specs/admin-ui-spec.md) согласно правке UI-1
 4. [ ] Обновить [pwa-client-ui-spec.md](../../pwa/specs/pwa-client-ui-spec.md) — пометить WebSocket как Phase 2
 5. [ ] Синхронизировать документацию: `GET /balance/history` не часть MVP (история через `/payments`)

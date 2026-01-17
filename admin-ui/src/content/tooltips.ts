@@ -1,5 +1,6 @@
 export type TooltipKey =
   | 'nav.dashboard'
+  | 'nav.liquidity'
   | 'nav.integrity'
   | 'nav.incidents'
   | 'nav.trustlines'
@@ -74,6 +75,13 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
   'nav.dashboard': {
     title: 'Dashboard',
     body: ['System health overview: API, DB, migrations status.', 'Shows trustline bottlenecks and incidents over SLA.'],
+  },
+  'nav.liquidity': {
+    title: 'Liquidity analytics',
+    body: [
+      'Snapshot triage: network-wide bottlenecks and net positions.',
+      'Includes operator advice and quick links to Trustlines/Graph/Participants.',
+    ],
   },
   'nav.integrity': {
     title: 'Integrity',
@@ -334,6 +342,10 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
   'nav.dashboard': {
     title: 'Дашборд',
     body: ['Обзор состояния системы: API, DB, статус миграций.', 'Показывает узкие места trustline и инциденты сверх SLA.'],
+  },
+  'nav.liquidity': {
+    title: 'Ликвидность',
+    body: ['Триаж по снимку сети: bottlenecks и net position.', 'Советы оператору и быстрые переходы в Trustlines/Graph/Participants.'],
   },
   'nav.integrity': {
     title: 'Целостность',

@@ -109,7 +109,7 @@
 - **Full multipath** (опционально; экспериментальный режим для бенчмарков, включается только через `feature_flags.full_multipath_enabled`, см. [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:1) и [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1))
 - Автоматический клиринг: **триггерный** поиск циклов 3–4 (по умолчанию) + **периодический** поиск 5–6 (опционально; параметры в [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1))
 - REST API + WebSocket уведомления
-- Базовая админка (операторские функции и доступ к конфигу/feature flags — см. [`docs/ru/admin/specs/admin-console-minimal-spec.md`](docs/ru/admin/specs/admin-console-minimal-spec.md:1))
+- Базовая админка (операторские функции и доступ к конфигу/feature flags — см. [`docs/ru/admin/README.md`](docs/ru/admin/README.md:1))
 - Web-клиент **PWA** (primary клиент для MVP)
 
 **Не включено (отложено):**

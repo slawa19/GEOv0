@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Core } from 'cytoscape'
+import { useRoute, useRouter } from 'vue-router'
 import { useGraphData } from '../composables/useGraphData'
 import { useGraphAnalytics } from '../composables/useGraphAnalytics'
 import { useGraphVisualization } from '../composables/useGraphVisualization'
@@ -41,6 +42,20 @@ import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS } from '../constants/timing'
 import { installGraphDevHooks } from './graph/graphDevHooks'
 import { useGraphPageOptions } from './graph/useGraphPageOptions'
 import { useGraphPageWatchers } from './graph/useGraphPageWatchers'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
+
+const route = useRoute()
+const router = useRouter()
+
+function updateRouteQuery(patch: Record<string, unknown>) {
+  const query: Record<string, unknown> = { ...route.query }
+  for (const [k, v] of Object.entries(patch)) {
+    const s = typeof v === 'string' ? v.trim() : v
+    if (s === '' || s === null || s === undefined) delete query[k]
+    else query[k] = v
+  }
+  void router.replace({ query: toLocationQueryRaw(query) })
+}
 
 const cyRoot = ref<HTMLElement | null>(null)
 let cy: Core | null = null
@@ -74,6 +89,22 @@ const seedLabel = computed(() => {
 const eq = ref<string>('ALL')
 const statusFilter = ref<string[]>(['active', 'frozen', 'closed'])
 const threshold = ref<string>(DEFAULT_THRESHOLD)
+
+function syncFromRouteQuery() {
+  const nextEq = readQueryString(route.query.equivalent).trim().toUpperCase()
+  const nextThr = readQueryString(route.query.threshold).trim()
+  if (nextEq) eq.value = nextEq
+  if (nextThr) threshold.value = nextThr
+}
+
+watch(
+  () => [route.query.equivalent, route.query.threshold],
+  () => syncFromRouteQuery(),
+  { immediate: true },
+)
+
+watch(eq, (v) => updateRouteQuery({ equivalent: v === 'ALL' ? '' : v }))
+watch(threshold, (v) => updateRouteQuery({ threshold: String(v || '').trim() }))
 
 const typeFilter = ref<string[]>(['person', 'business'])
 const minDegree = ref<number>(0)

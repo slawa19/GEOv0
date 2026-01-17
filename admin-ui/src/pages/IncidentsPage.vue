@@ -12,6 +12,7 @@ import { useConfigStore } from '../stores/config'
 import { useAuthStore } from '../stores/auth'
 import type { Incident } from '../types/domain'
 import { t } from '../i18n'
+import { toLocationQueryRaw } from '../router/query'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -110,15 +111,15 @@ function openRow(row: Incident) {
 }
 
 function goAudit(txId: string) {
-  void router.push({ path: '/audit-log', query: { ...route.query, q: txId } })
+  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...route.query, q: txId }) })
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: { ...route.query, q: pid } })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...route.query, q: pid }) })
 }
 
 function goEquivalent(eq: string) {
-  void router.push({ path: '/equivalents', query: { ...route.query, q: eq } })
+  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ ...route.query, q: eq }) })
 }
 
 onMounted(() => void load())

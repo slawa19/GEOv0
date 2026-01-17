@@ -78,7 +78,7 @@
 - `admin-fixtures/tools/seedlib.py` — общие утилиты и производные датасеты (debts/cycles/meta) для seed-генераторов.
 
 См. также:
-- Спека fixture-pack: `docs/ru/admin/specs/admin-ui-prototype-fixtures-spec.md`
+- Спека fixture-pack (архив): `docs/ru/admin/specs/archive/admin-ui-prototype-fixtures-spec.md`
 - Подход к seed-документам и генерации: `docs/ru/seeds/README.md`
 
 #### Guardrails валидатора (важно для демо)

@@ -112,7 +112,7 @@ export function useGraphVisualization(options: {
   applyStyle: () => void
   updateZoomStyles: () => void
   runLayout: () => void
-  rebuildGraph: (opts: { fit: boolean }) => void
+  rebuildGraph: (opts?: { fit?: boolean }) => void
   updateLabelsForZoom: () => void
   updateSearchHighlights: () => void
 
@@ -709,9 +709,11 @@ export function useGraphVisualization(options: {
     runLayout()
   }
 
-  function rebuildGraph({ fit }: { fit: boolean }) {
+  function rebuildGraph(opts?: { fit?: boolean }) {
     const cy = options.getCy()
     if (!cy) return
+
+    const fit = opts?.fit ?? false
 
     const { nodes, edges } = buildElements()
     clearCycleHighlight()

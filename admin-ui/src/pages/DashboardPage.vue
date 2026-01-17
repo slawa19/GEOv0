@@ -191,7 +191,7 @@ async function loadIncidents() {
 }
 
 function go(path: string) {
-  void router.push({ path, query: { ...route.query } })
+  void router.push({ path, query: toLocationQueryRaw({ ...route.query }) })
 }
 
 function goParticipantsWithFilter(filter: { status?: string; type?: string }) {
@@ -200,12 +200,12 @@ function goParticipantsWithFilter(filter: { status?: string; type?: string }) {
   else delete q.status
   if (filter.type) q.type = filter.type
   else delete q.type
-  void router.push({ path: '/participants', query: q })
+  void router.push({ path: '/participants', query: toLocationQueryRaw(q) })
 }
 
 function goTrustlinesWithThreshold() {
   const t = String(threshold.value || '').trim()
-  void router.push({ path: '/trustlines', query: { ...route.query, ...(t ? { threshold: t } : {}) } })
+  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, ...(t ? { threshold: t } : {}) }) })
 }
 
 onMounted(() => {
