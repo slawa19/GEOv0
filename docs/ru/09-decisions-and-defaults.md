@@ -70,6 +70,20 @@
 
 **Допустимые internal-состояния (ограничение в БД):** `NEW`, `ROUTED`, `PREPARE_IN_PROGRESS`, `PREPARED`, `COMMITTED`, `ABORTED`, `PROPOSED`, `WAITING`, `REJECTED`.
 
+#### 1.7.1. Таблица: `Transaction.type` → states → финальные → internal-only
+
+Важно: в текущей реализации **не все** значения `Transaction.type`, присутствующие в CHECK constraints, реально используются как записи в таблице `transactions`. Часть типов зарезервирована под будущее расширение.
+
+| `Transaction.type` | Ожидаемые `state` (MVP сейчас) | Финальные `state` | Internal-only | Комментарий |
+|---|---|---|---|---|
+| `PAYMENT` | `NEW → PREPARED → COMMITTED` или `NEW → PREPARED → ABORTED` | `COMMITTED`, `ABORTED` (зарезервировано: `REJECTED`) | `NEW`, `PREPARED` (зарезервировано: `ROUTED`, `PREPARE_IN_PROGRESS`, `PROPOSED`, `WAITING`) | Payment engine фактически выставляет `NEW`, затем `PREPARED`, далее `COMMITTED`/`ABORTED`. Остальные состояния присутствуют для операционной надёжности и будущих расширений, но в MVP не используются как переходы. |
+| `CLEARING` | `NEW → COMMITTED` | `COMMITTED` | `NEW` | Clearing выполняется в рамках одной DB-транзакции. В случае ошибки — rollback; запись `Transaction` может не сохраниться, поэтому `ABORTED` для clearing сейчас скорее «концептуально возможен», чем наблюдаем в БД. |
+| `TRUST_LINE_CREATE` | n/a (не создаётся `Transaction`) | n/a | n/a | TrustLine create/update/close в MVP пишут audit (`IntegrityAuditLog`), но не создают запись в `transactions`. Если позже потребуется унификация аудита через `Transaction`, ожидаемый поток будет single-phase: `NEW → COMMITTED/ABORTED`. |
+| `TRUST_LINE_UPDATE` | n/a (не создаётся `Transaction`) | n/a | n/a | См. `TRUST_LINE_CREATE`. |
+| `TRUST_LINE_CLOSE` | n/a (не создаётся `Transaction`) | n/a | n/a | См. `TRUST_LINE_CREATE`. |
+| `COMPENSATION` | n/a (зарезервировано) | n/a | n/a | Зарезервировано под операторские компенсирующие операции. При реализации, вероятнее всего, будет single-phase `NEW → COMMITTED/ABORTED`. |
+| `COMMODITY_REDEMPTION` | n/a (зарезервировано) | n/a | n/a | Зарезервировано под операции погашения товарных эквивалентов. При реализации, вероятнее всего, будет single-phase `NEW → COMMITTED/ABORTED`. |
+
 **PAYMENT (2PC-подобный поток, реализация MVP):**
 
 | Состояние | Смысл (MVP) |

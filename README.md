@@ -223,6 +223,24 @@ High‑level roadmap (subject to change):
 
 ## Getting Started
 
+### Local dev quickstart (Windows)
+
+Recommended: use the repo runner script (it starts **Backend + Admin UI**, manages ports, and writes `admin-ui/.env.local`).
+
+```powershell
+.\scripts\run_local.ps1 start
+```
+
+Common actions:
+
+```powershell
+.\scripts\run_local.ps1 status
+.\scripts\run_local.ps1 stop
+
+# (optional) Recreate SQLite DB and seed from canonical admin fixtures (richer demo data)
+.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures
+```
+
 ### Prerequisites
 
 - **Docker** & **Docker Compose** (Docker Desktop, or Docker Engine inside WSL2)

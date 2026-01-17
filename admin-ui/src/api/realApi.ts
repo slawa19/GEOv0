@@ -28,6 +28,23 @@ function safeJsonPreview(value: unknown, maxLen = 500): string | null {
   }
 }
 
+// Backend may serialize Decimal-like values as strings (preferred) but some environments
+// might emit numbers. Normalize to string to keep the UI stable.
+const DecimalString = z.union([z.string(), z.number()]).transform((v) => String(v))
+
+function isApiEnvelopeLike(value: unknown): value is ApiEnvelope<unknown> {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  if (typeof v.success !== 'boolean') return false
+  if (v.success === true) return 'data' in v
+
+  if (!('error' in v)) return false
+  const err = v.error
+  if (!err || typeof err !== 'object') return false
+  const e = err as Record<string, unknown>
+  return typeof e.message === 'string' || typeof e.code === 'string' || 'details' in e
+}
+
 const ParticipantSchema = z
   .object({
     pid: z.string(),
@@ -46,9 +63,9 @@ const TrustlineSchema = z
     to: z.string(),
     from_display_name: z.string().nullable().optional(),
     to_display_name: z.string().nullable().optional(),
-    limit: z.string(),
-    used: z.string(),
-    available: z.string(),
+    limit: DecimalString,
+    used: DecimalString,
+    available: DecimalString,
     status: z.string(),
     created_at: z.string(),
     policy: z.record(z.string(), z.unknown()).optional(),
@@ -81,7 +98,7 @@ const DebtSchema = z
     equivalent: z.string(),
     debtor: z.string(),
     creditor: z.string(),
-    amount: z.string(),
+    amount: DecimalString,
   })
   .passthrough()
 
@@ -135,7 +152,7 @@ const ClearingCycleEdgeSchema = z
     equivalent: z.string(),
     debtor: z.string(),
     creditor: z.string(),
-    amount: z.string(),
+    amount: DecimalString,
   })
   .passthrough()
 
@@ -155,13 +172,13 @@ const ClearingCyclesSchema = z
 const BalanceRowSchema = z
   .object({
     equivalent: z.string(),
-    outgoing_limit: z.string(),
-    outgoing_used: z.string(),
-    incoming_limit: z.string(),
-    incoming_used: z.string(),
-    total_debt: z.string(),
-    total_credit: z.string(),
-    net: z.string(),
+    outgoing_limit: DecimalString,
+    outgoing_used: DecimalString,
+    incoming_limit: DecimalString,
+    incoming_used: DecimalString,
+    total_debt: DecimalString,
+    total_credit: DecimalString,
+    net: DecimalString,
   })
   .passthrough()
 
@@ -337,6 +354,12 @@ export async function requestJson<T>(
       if (timeoutId) clearTimeout(timeoutId)
     }
 
+    // 204/205 are valid successful responses without a body.
+    // Some fetch implementations may throw on res.text() for these.
+    if (res.ok && (res.status === 204 || res.status === 205)) {
+      return { success: true, data: undefined as T }
+    }
+
     // The backend might already return ApiEnvelope. If not, adapt here.
     const text = await res.text()
     let parsed: unknown = undefined
@@ -363,7 +386,7 @@ export async function requestJson<T>(
     }
 
     let env: ApiEnvelope<T>
-    if (res.ok && parsed && typeof parsed === 'object' && 'success' in (parsed as Record<string, unknown>)) {
+    if (res.ok && isApiEnvelopeLike(parsed)) {
       env = parsed as ApiEnvelope<T>
     } else if (!res.ok) {
       const parsedObj = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
@@ -421,6 +444,17 @@ export async function requestJson<T>(
     }
     throw err
   }
+}
+
+let featureFlagsPatchQueue: Promise<unknown> = Promise.resolve()
+
+function enqueueFeatureFlagsPatch<T>(job: () => Promise<T>): Promise<T> {
+  const run = featureFlagsPatchQueue.then(job, job)
+  featureFlagsPatchQueue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
 }
 
 function bestEffortTotal(page: number, perPage: number, itemsLen: number): number {
@@ -494,9 +528,13 @@ export const realApi = {
 
   async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<Record<string, unknown>>> {
     // Backend expects full payload: { multipath_enabled, full_multipath_enabled, clearing_enabled, reason? }
-    const current = assertSuccess(await requestJson<Record<string, unknown>>('/api/v1/admin/feature-flags', { admin: true })) || {}
-    const body = { ...current, ...patch }
-    return requestJson('/api/v1/admin/feature-flags', { method: 'PATCH', body, admin: true })
+    // Serialize calls within the same UI instance to reduce local lost-updates.
+    return enqueueFeatureFlagsPatch(async () => {
+      const current =
+        assertSuccess(await requestJson<Record<string, unknown>>('/api/v1/admin/feature-flags', { admin: true })) || {}
+      const body = { ...current, ...patch }
+      return requestJson('/api/v1/admin/feature-flags', { method: 'PATCH', body, admin: true })
+    })
   },
 
   integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {

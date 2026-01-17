@@ -13,6 +13,7 @@ import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
 import { t } from '../i18n'
+import { labelTrustlineStatus } from '../i18n/labels'
 import type { Trustline } from '../types/domain'
 
 const router = useRouter()
@@ -37,6 +38,59 @@ const selected = ref<Trustline | null>(null)
 
 const configStore = useConfigStore()
 const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
+
+function readQueryString(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function applyRouteQueryToFilters() {
+  const nextEq = readQueryString(route.query.equivalent).trim()
+  const nextCreditor = readQueryString(route.query.creditor).trim()
+  const nextDebtor = readQueryString(route.query.debtor).trim()
+  const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
+  const nextThr = readQueryString(route.query.threshold).trim()
+
+  if (equivalent.value !== nextEq) equivalent.value = nextEq
+  if (creditor.value !== nextCreditor) creditor.value = nextCreditor
+  if (debtor.value !== nextDebtor) debtor.value = nextDebtor
+  if (status.value !== nextStatus) status.value = nextStatus
+  if (nextThr && threshold.value !== nextThr) threshold.value = nextThr
+}
+
+function syncFiltersToRouteQuery() {
+  const query: Record<string, unknown> = { ...route.query }
+
+  const eq = String(equivalent.value || '').trim()
+  const cr = String(creditor.value || '').trim()
+  const db = String(debtor.value || '').trim()
+  const st = String(status.value || '').trim()
+  const thr = String(threshold.value || '').trim()
+
+  if (eq) query.equivalent = eq
+  else delete query.equivalent
+
+  if (cr) query.creditor = cr
+  else delete query.creditor
+
+  if (db) query.debtor = db
+  else delete query.debtor
+
+  if (st) query.status = st
+  else delete query.status
+
+  if (thr && thr !== '0.10') query.threshold = thr
+  else delete query.threshold
+
+  const curr = route.query as Record<string, unknown>
+  const same =
+    String(curr.equivalent ?? '') === String(query.equivalent ?? '') &&
+    String(curr.creditor ?? '') === String(query.creditor ?? '') &&
+    String(curr.debtor ?? '') === String(query.debtor ?? '') &&
+    String(curr.status ?? '') === String(query.status ?? '') &&
+    String(curr.threshold ?? '') === String(query.threshold ?? '')
+
+  if (!same) void router.replace({ query })
+}
 
 function isBottleneck(row: Trustline): boolean {
   return isRatioBelowThreshold({ numerator: row.available, denominator: row.limit, threshold: threshold.value })
@@ -93,7 +147,10 @@ function goEquivalent(eq: string) {
   void router.push({ path: '/equivalents', query: { ...route.query, q: eq } })
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  applyRouteQueryToFilters()
+  void load()
+})
 watch(page, () => void load())
 watch(perPage, () => {
   page.value = 1
@@ -101,11 +158,8 @@ watch(perPage, () => {
 })
 
 watch(
-  () => route.query.threshold,
-  (v) => {
-    if (typeof v === 'string' && v.trim()) threshold.value = v
-  },
-  { immediate: true },
+  () => [route.query.equivalent, route.query.creditor, route.query.debtor, route.query.status, route.query.threshold],
+  () => applyRouteQueryToFilters(),
 )
 
 const debouncedReload = debounce(() => {
@@ -115,7 +169,12 @@ const debouncedReload = debounce(() => {
 
 // NOTE: threshold is a UI-only highlight knob; do not reload the list when it changes.
 watch([equivalent, creditor, debtor, status], () => {
+  syncFiltersToRouteQuery()
   debouncedReload()
+})
+
+watch(threshold, () => {
+  syncFiltersToRouteQuery()
 })
 
 const statusOptions = computed(() => [
@@ -425,7 +484,7 @@ const statusOptions = computed(() => [
             :type="selected.status === 'active' ? 'success' : selected.status === 'frozen' ? 'warning' : 'info'"
             size="small"
           >
-            {{ selected.status }}
+            {{ labelTrustlineStatus(selected.status) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item :label="t('trustlines.createdAt')">

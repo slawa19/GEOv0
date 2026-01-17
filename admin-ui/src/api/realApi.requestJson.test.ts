@@ -34,6 +34,37 @@ describe('realApi.requestJson', () => {
     })
   })
 
+  it('does not throw INVALID_JSON for 204 No Content', async () => {
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_API_BASE_URL = ''
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204, statusText: 'No Content' }))
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const env = await requestJson<unknown>('/api/v1/health', { toast: false })
+    expect(env).toEqual({ success: true, data: undefined })
+  })
+
+  it('wraps non-envelope payloads that merely contain a success field', async () => {
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_API_BASE_URL = ''
+
+    const payload = { success: true, value: 123 }
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        statusText: 'OK',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const env = await requestJson<typeof payload>('/api/v1/health', { toast: false })
+    expect(env.success).toBe(true)
+    if (!env.success) return
+    expect(env.data).toEqual(payload)
+  })
+
   it('throws ApiException(TIMEOUT) when fetch is aborted by timeoutMs', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''

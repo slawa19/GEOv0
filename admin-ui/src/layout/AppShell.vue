@@ -115,6 +115,36 @@ const uiLocale = computed({
   set: (v: 'en' | 'ru') => setLocale(v),
 })
 
+const quickJump = ref('')
+
+function normQuickJump(v: unknown): string {
+  return String(v ?? '').trim()
+}
+
+function goParticipants() {
+  const q = normQuickJump(quickJump.value)
+  if (!q) return
+  void router.push({ path: '/participants', query: { ...route.query, q } })
+}
+
+function goTrustlinesCreditor() {
+  const pid = normQuickJump(quickJump.value)
+  if (!pid) return
+  void router.push({ path: '/trustlines', query: { ...route.query, creditor: pid } })
+}
+
+function goTrustlinesDebtor() {
+  const pid = normQuickJump(quickJump.value)
+  if (!pid) return
+  void router.push({ path: '/trustlines', query: { ...route.query, debtor: pid } })
+}
+
+function goAuditLog() {
+  const q = normQuickJump(quickJump.value)
+  if (!q) return
+  void router.push({ path: '/audit-log', query: { ...route.query, q } })
+}
+
 function navigate(path: string) {
   void router.push({ path, query: { ...route.query } })
 }
@@ -217,6 +247,82 @@ function navigate(path: string) {
         </div>
 
         <div class="header__right">
+          <div class="quick">
+            <el-input
+              v-model="quickJump"
+              size="small"
+              clearable
+              :placeholder="t('app.quickJump.placeholder')"
+              style="width: 260px"
+              @keyup.enter="goParticipants"
+            />
+            <el-button-group>
+              <el-tooltip
+                placement="bottom"
+                effect="dark"
+                :show-after="700"
+              >
+                <template #content>
+                  {{ t('app.quickJump.participants') }}
+                </template>
+                <el-button
+                  size="small"
+                  @click="goParticipants"
+                >
+                  {{ t('nav.participants.label') }}
+                </el-button>
+              </el-tooltip>
+
+              <el-tooltip
+                placement="bottom"
+                effect="dark"
+                :show-after="700"
+              >
+                <template #content>
+                  {{ t('app.quickJump.trustlinesAsCreditor') }}
+                </template>
+                <el-button
+                  size="small"
+                  @click="goTrustlinesCreditor"
+                >
+                  {{ t('trustlines.fromCreditor') }}
+                </el-button>
+              </el-tooltip>
+
+              <el-tooltip
+                placement="bottom"
+                effect="dark"
+                :show-after="700"
+              >
+                <template #content>
+                  {{ t('app.quickJump.trustlinesAsDebtor') }}
+                </template>
+                <el-button
+                  size="small"
+                  @click="goTrustlinesDebtor"
+                >
+                  {{ t('trustlines.toDebtor') }}
+                </el-button>
+              </el-tooltip>
+
+              <el-tooltip
+                placement="bottom"
+                effect="dark"
+                :show-after="700"
+              >
+                <template #content>
+                  {{ t('app.quickJump.auditLog') }}
+                </template>
+                <el-button
+                  size="small"
+                  @click="goAuditLog"
+                >
+                  {{ t('nav.auditLog.label') }}
+                </el-button>
+              </el-tooltip>
+            </el-button-group>
+          </div>
+
           <el-select
             v-model="uiLocale"
             size="small"
@@ -360,6 +466,13 @@ function navigate(path: string) {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.quick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .main {

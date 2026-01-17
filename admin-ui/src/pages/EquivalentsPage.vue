@@ -209,7 +209,13 @@ async function deleteEq(row: Equivalent) {
 
     if ([tl, inc, debts, ic].some((v) => typeof v === 'number')) {
       ElMessage.error(
-        `${msg || t('equivalents.deleteFailed')} (trustlines: ${tl ?? 0}, incidents: ${inc ?? 0}, debts: ${debts ?? 0}, integrity_checkpoints: ${ic ?? 0})`,
+        t('equivalents.deleteFailedWithDetails', {
+          msg: msg || t('equivalents.deleteFailed'),
+          trustlines: Number(tl ?? 0),
+          incidents: Number(inc ?? 0),
+          debts: Number(debts ?? 0),
+          ic: Number(ic ?? 0),
+        }),
       )
     } else {
       ElMessage.error(msg || t('equivalents.deleteFailed'))

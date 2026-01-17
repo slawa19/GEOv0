@@ -12,6 +12,7 @@ import { useAuthStore } from '../stores/auth'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 import { t } from '../i18n'
+import { labelParticipantType } from '../i18n/labels'
 import type { Participant } from '../types/domain'
 
 const router = useRouter()
@@ -33,6 +34,45 @@ const items = ref<Participant[]>([])
 
 const drawerOpen = ref(false)
 const selected = ref<Participant | null>(null)
+
+function readQueryString(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function applyRouteQueryToFilters() {
+  const nextQ = readQueryString(route.query.q).trim()
+  const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
+  const nextType = readQueryString(route.query.type).trim().toLowerCase()
+
+  if (q.value !== nextQ) q.value = nextQ
+  if (status.value !== nextStatus) status.value = nextStatus
+  if (type.value !== nextType) type.value = nextType
+}
+
+function syncFiltersToRouteQuery() {
+  const query: Record<string, unknown> = { ...route.query }
+
+  const qq = String(q.value || '').trim()
+  const st = String(status.value || '').trim()
+  const ty = String(type.value || '').trim()
+
+  if (qq) query.q = qq
+  else delete query.q
+
+  if (st) query.status = st
+  else delete query.status
+
+  if (ty) query.type = ty
+  else delete query.type
+
+  const curr = route.query as Record<string, unknown>
+  const same =
+    String(curr.q ?? '') === String(query.q ?? '') &&
+    String(curr.status ?? '') === String(query.status ?? '') &&
+    String(curr.type ?? '') === String(query.type ?? '')
+
+  if (!same) void router.replace({ query })
+}
 
 async function load() {
   loading.value = true
@@ -121,7 +161,15 @@ function goAuditLog(pid: string) {
   void router.push({ path: '/audit-log', query: { ...route.query, q: pid } })
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  applyRouteQueryToFilters()
+  void load()
+})
+
+watch(
+  () => [route.query.q, route.query.status, route.query.type],
+  () => applyRouteQueryToFilters(),
+)
 
 watch(page, () => void load())
 watch(perPage, () => {
@@ -135,6 +183,7 @@ const debouncedReload = debounce(() => {
 }, DEBOUNCE_SEARCH_MS)
 
 watch([q, status, type], () => {
+  syncFiltersToRouteQuery()
   debouncedReload()
 })
 
@@ -303,7 +352,7 @@ const typeOptions = computed(() => [
               :type="scope.row.type === 'business' ? 'warning' : 'info'"
               size="small"
             >
-              {{ scope.row.type }}
+              {{ labelParticipantType(scope.row.type) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -404,7 +453,7 @@ const typeOptions = computed(() => [
             :type="selected.type === 'business' ? 'warning' : 'info'"
             size="small"
           >
-            {{ selected.type }}
+            {{ labelParticipantType(selected.type) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item :label="t('participant.columns.status')">

@@ -1,15 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Core } from 'cytoscape'
-
-import { api } from '../api'
-import { assertSuccess } from '../api/envelope'
 import { useGraphData } from '../composables/useGraphData'
 import { useGraphAnalytics } from '../composables/useGraphAnalytics'
 import { useGraphVisualization } from '../composables/useGraphVisualization'
 import type { DrawerTab, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
-import { throttle } from '../utils/throttle'
-import { THROTTLE_GRAPH_REBUILD_MS, THROTTLE_LAYOUT_SPACING_MS } from '../constants/timing'
 import {
   DEFAULT_FOCUS_DEPTH,
   DEFAULT_LAYOUT_SPACING,
@@ -22,7 +17,6 @@ import { t } from '../i18n'
 import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
 import GraphLegend from './graph/GraphLegend.vue'
 import GraphFiltersToolbar from './graph/GraphFiltersToolbar.vue'
-import type { ClearingCycles } from './graph/graphTypes'
 import {
   DEFAULT_ANALYTICS_TOGGLES,
   type AnalyticsToggles,
@@ -44,69 +38,22 @@ import { useGraphConnections } from './graph/useGraphConnections'
 import { useGraphFocusMode } from './graph/useGraphFocusMode'
 import { useGraphPageStorage } from './graph/useGraphPageStorage'
 import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS } from '../constants/timing'
-
-type Option = { label: string; value: string }
-
-type GeoDevHooks = {
-  __GEO_CY__?: Core | null
-  __GEO_TAP_NODE__?: (pid: string) => boolean
-  __GEO_TAP_EDGE__?: (from: string, to: string, eq: string) => boolean
-}
+import { installGraphDevHooks } from './graph/graphDevHooks'
+import { useGraphPageOptions } from './graph/useGraphPageOptions'
+import { useGraphPageWatchers } from './graph/useGraphPageWatchers'
 
 const cyRoot = ref<HTMLElement | null>(null)
 let cy: Core | null = null
 const getCy = () => cy
 
-const statuses = computed<Option[]>(() => [
-  { label: t('trustlines.status.active'), value: 'active' },
-  { label: t('trustlines.status.frozen'), value: 'frozen' },
-  { label: t('trustlines.status.closed'), value: 'closed' },
-])
-
-const layoutOptions = computed<Option[]>(() => [
-  { label: t('graph.display.layoutOption.fcose'), value: 'fcose' },
-  { label: t('graph.display.layoutOption.grid'), value: 'grid' },
-  { label: t('graph.display.layoutOption.circle'), value: 'circle' },
-])
+const { statuses, layoutOptions } = useGraphPageOptions()
 
 const setCy = (next: Core | null) => {
   cy = next
 
   // Dev-only E2E hook: lets Playwright tap a node deterministically.
   if (import.meta.env.DEV) {
-    const hooks = globalThis as unknown as GeoDevHooks
-    hooks.__GEO_CY__ = next
-    hooks.__GEO_TAP_NODE__ = (pid: string) => {
-      const inst = hooks.__GEO_CY__ || null
-      if (!inst) return false
-      const n = inst.getElementById(String(pid || '').trim())
-      if (!n || n.empty()) return false
-      // The app opens the drawer on *double* tap. Emit two taps within the
-      // threshold to exercise the real handler deterministically.
-      n.emit('tap')
-      window.setTimeout(() => n.emit('tap'), DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
-      return true
-    }
-
-    hooks.__GEO_TAP_EDGE__ = (from: string, to: string, eq: string) => {
-      const inst = hooks.__GEO_CY__ || null
-      if (!inst) return false
-      const src = String(from || '').trim()
-      const dst = String(to || '').trim()
-      const eeq = String(eq || '').trim().toUpperCase()
-      if (!src || !dst || !eeq) return false
-
-      const match = inst
-        .edges()
-        .filter((e) => String(e.data('source') || '') === src)
-        .filter((e) => String(e.data('target') || '') === dst)
-        .filter((e) => String(e.data('equivalent') || '').trim().toUpperCase() === eeq)
-        .first()
-
-      if (!match || match.empty()) return false
-      match.emit('tap')
-      return true
-    }
+    installGraphDevHooks(next, DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
   }
 }
 
@@ -349,73 +296,34 @@ onBeforeUnmount(() => {
   graphViz.destroyCy()
 })
 
-const throttledRebuild = throttle(() => {
-  graphViz.rebuildGraph({ fit: false })
-}, THROTTLE_GRAPH_REBUILD_MS)
-
-const throttledLayoutSpacing = throttle(() => {
-  graphViz.runLayout()
-}, THROTTLE_LAYOUT_SPACING_MS)
-
-watch([eq, statusFilter, threshold, showIncidents, hideIsolates], () => {
-  throttledRebuild()
-})
-
-watch([typeFilter, minDegree], () => {
-  throttledRebuild()
-})
-
-watch([focusMode, focusDepth, focusRootPid], () => {
-  if (focusMode.value) ensureFocusRootPid()
-  void (async () => {
-    await refreshForFocusMode()
-    graphViz.rebuildGraph({ fit: true })
-  })()
-})
-
-watch(
-  () => (selected.value && selected.value.kind === 'node' ? selected.value.pid : ''),
-  (pid) => {
-    graphViz.clearCycleHighlight()
-    graphViz.clearConnectionHighlight()
-    void (async () => {
-      if (isRealMode.value && !focusMode.value) {
-        const p = String(pid || '').trim()
-        if (p) {
-          try {
-            const cc = await api.clearingCycles({ participant_pid: p })
-            clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
-          } catch {
-            // keep previous
-          }
-        }
-      }
-      graphViz.applySelectedHighlight(pid)
-    })()
-  }
-)
-
-watch([showLabels, labelModeBusiness, labelModePerson, autoLabelsByZoom, minZoomLabelsAll, minZoomLabelsPerson], () => {
-  graphViz.applyStyle()
-  graphViz.updateLabelsForZoom()
-})
-
-watch(searchQuery, () => {
-  // If user edits the query manually, clear explicit selection.
-  focusPid.value = ''
-  graphViz.updateSearchHighlights()
-})
-
-watch(zoom, (z) => {
-  graphViz.syncZoomFromControl(z)
-})
-
-watch(layoutName, () => {
-  graphViz.runLayout()
-})
-
-watch(layoutSpacing, () => {
-  throttledLayoutSpacing()
+useGraphPageWatchers({
+  isRealMode,
+  eq,
+  statusFilter,
+  threshold,
+  showIncidents,
+  hideIsolates,
+  typeFilter,
+  minDegree,
+  focusMode,
+  focusDepth,
+  focusRootPid,
+  ensureFocusRootPid,
+  refreshForFocusMode,
+  selected,
+  clearingCycles,
+  showLabels,
+  labelModeBusiness,
+  labelModePerson,
+  autoLabelsByZoom,
+  minZoomLabelsAll,
+  minZoomLabelsPerson,
+  searchQuery,
+  focusPid,
+  zoom,
+  layoutName,
+  layoutSpacing,
+  graphViz,
 })
 
 const stats = computed(() => {

@@ -1,6 +1,7 @@
 import logging
 import heapq
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Set, Tuple, Iterable
 from uuid import UUID
@@ -568,10 +569,12 @@ class PaymentRouter:
         # For MVP, just listing edges on paths that have 0 remaining capacity in original direction?
         # Let's return empty bottlenecks for now or simple heuristic.
         
+        include_metadata = bool(getattr(settings, "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED", False))
+
         return MaxFlowResponse(
             max_amount=str(max_flow),
-            paths=paths,
+            paths=paths if include_metadata else [],
             bottlenecks=[],
             algorithm="Edmonds-Karp (BFS)",
-            computed_at="now"
+            computed_at=datetime.now(timezone.utc).isoformat(),
         )

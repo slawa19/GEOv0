@@ -9,6 +9,7 @@ import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
 import { t } from '../i18n'
+import { labelParticipantType } from '../i18n/labels'
 
 const router = useRouter()
 const route = useRoute()
@@ -33,6 +34,61 @@ const bottleneckItems = ref<Trustline[]>([])
 const incidentsLoading = ref(false)
 const incidentsError = ref<string | null>(null)
 const incidentsOverSla = ref<Incident[]>([])
+
+const participantsStatsLoading = ref(false)
+const participantsStatsError = ref<string | null>(null)
+const participantsByStatus = ref(new Map<string, number>())
+const participantsByType = ref(new Map<string, number>())
+
+function normKey(v: unknown): string {
+  return String(v ?? '').trim().toLowerCase()
+}
+
+function statusLabel(s: string): string {
+  const k = normKey(s)
+  if (!k) return t('common.unknown')
+  if (k === 'active') return t('participant.status.active')
+  if (k === 'suspended') return t('participant.status.suspended')
+  if (k === 'left') return t('participant.status.left')
+  if (k === 'deleted') return t('participant.status.deleted')
+  return k
+}
+
+async function loadParticipantStats() {
+  participantsStatsLoading.value = true
+  participantsStatsError.value = null
+  try {
+    const perPage = 200
+    const maxPages = 5
+    const byStatus = new Map<string, number>()
+    const byType = new Map<string, number>()
+
+    let seen = 0
+    let backendTotal = Number.NaN
+
+    for (let p = 1; p <= maxPages; p++) {
+      const page = assertSuccess(await api.listParticipants({ page: p, per_page: perPage }))
+      const items = (page.items || []) as Array<{ status?: unknown; type?: unknown }>
+      for (const it of items) {
+        const st = normKey(it.status) || 'unknown'
+        const ty = normKey(it.type) || 'unknown'
+        byStatus.set(st, (byStatus.get(st) || 0) + 1)
+        byType.set(ty, (byType.get(ty) || 0) + 1)
+      }
+      seen += items.length
+      backendTotal = Number((page as { total?: unknown }).total)
+      if ((Number.isFinite(backendTotal) && seen >= backendTotal) || items.length === 0) break
+    }
+
+    participantsByStatus.value = byStatus
+    participantsByType.value = byType
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    participantsStatsError.value = msg || t('dashboard.participantsStatsLoadFailed')
+  } finally {
+    participantsStatsLoading.value = false
+  }
+}
 
 async function load() {
   loading.value = true
@@ -138,6 +194,15 @@ function go(path: string) {
   void router.push({ path, query: { ...route.query } })
 }
 
+function goParticipantsWithFilter(filter: { status?: string; type?: string }) {
+  const q = { ...route.query } as Record<string, unknown>
+  if (filter.status) q.status = filter.status
+  else delete q.status
+  if (filter.type) q.type = filter.type
+  else delete q.type
+  void router.push({ path: '/participants', query: q })
+}
+
 function goTrustlinesWithThreshold() {
   const t = String(threshold.value || '').trim()
   void router.push({ path: '/trustlines', query: { ...route.query, ...(t ? { threshold: t } : {}) } })
@@ -148,6 +213,7 @@ onMounted(() => {
   void loadAudit()
   void loadBottlenecks()
   void loadIncidents()
+  void loadParticipantStats()
 })
 
 const statusText = computed(() => String(health.value?.status ?? t('common.unknown')))
@@ -177,6 +243,24 @@ const migrationsUpToDateLabel = computed(() => {
 const healthDbInfo = computed(() => {
   const db = healthDb.value?.db
   return db && typeof db === 'object' ? (db as Record<string, unknown>) : null
+})
+
+const statusRows = computed(() => {
+  const order = ['active', 'suspended', 'left', 'deleted', 'unknown']
+  const m = participantsByStatus.value
+  const extra = [...m.keys()].filter((k) => !order.includes(k)).sort()
+  return [...order, ...extra]
+    .filter((k) => (m.get(k) || 0) > 0)
+    .map((k) => ({ key: k, label: statusLabel(k), count: m.get(k) || 0 }))
+})
+
+const typeRows = computed(() => {
+  const order = ['person', 'business', 'hub', 'unknown']
+  const m = participantsByType.value
+  const extra = [...m.keys()].filter((k) => !order.includes(k)).sort()
+  return [...order, ...extra]
+    .filter((k) => (m.get(k) || 0) > 0)
+    .map((k) => ({ key: k, label: k === 'unknown' ? t('common.unknown') : labelParticipantType(k), count: m.get(k) || 0 }))
 })
 </script>
 
@@ -253,6 +337,137 @@ const healthDbInfo = computed(() => {
             <div><span class="geoLabel">{{ t('dashboard.field.upToDate') }}:</span> {{ migrationsUpToDateLabel }}</div>
             <div><span class="geoLabel">{{ t('dashboard.field.current') }}:</span> {{ migrationsCurrent }}</div>
             <div><span class="geoLabel">{{ t('dashboard.field.head') }}:</span> {{ migrationsHead }}</div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row
+      :gutter="12"
+      class="mb"
+    >
+      <el-col :span="12">
+        <el-card class="geoCard">
+          <template #header>
+            <div class="hdr">
+              <TooltipLabel
+                :label="t('dashboard.card.participantsByType')"
+                tooltip-key="nav.participants"
+              />
+              <div class="hdr__right">
+                <el-button
+                  size="small"
+                  @click="go('/participants')"
+                >
+                  {{ t('common.viewAll') }}
+                </el-button>
+              </div>
+            </div>
+          </template>
+
+          <el-alert
+            v-if="participantsStatsError"
+            :title="participantsStatsError"
+            type="warning"
+            show-icon
+            class="mb"
+          />
+          <el-skeleton
+            v-else-if="participantsStatsLoading"
+            animated
+            :rows="3"
+          />
+
+          <el-empty
+            v-else-if="typeRows.length === 0"
+            :description="t('dashboard.empty.noParticipantStats')"
+          />
+
+          <div
+            v-else
+            class="tags"
+          >
+            <el-tooltip
+              v-for="r in typeRows"
+              :key="r.key"
+              placement="top"
+              effect="dark"
+              :show-after="650"
+            >
+              <template #content>
+                {{ t('dashboard.participants.openFiltered') }}
+              </template>
+              <el-tag
+                class="tag"
+                effect="plain"
+                @click="goParticipantsWithFilter({ type: r.key === 'unknown' ? '' : r.key })"
+              >
+                {{ r.label }}: {{ r.count }}
+              </el-tag>
+            </el-tooltip>
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :span="12">
+        <el-card class="geoCard">
+          <template #header>
+            <div class="hdr">
+              <TooltipLabel
+                :label="t('dashboard.card.participantsByStatus')"
+                tooltip-key="nav.participants"
+              />
+              <div class="hdr__right">
+                <el-button
+                  size="small"
+                  @click="go('/participants')"
+                >
+                  {{ t('common.viewAll') }}
+                </el-button>
+              </div>
+            </div>
+          </template>
+
+          <el-alert
+            v-if="participantsStatsError"
+            :title="participantsStatsError"
+            type="warning"
+            show-icon
+            class="mb"
+          />
+          <el-skeleton
+            v-else-if="participantsStatsLoading"
+            animated
+            :rows="3"
+          />
+
+          <el-empty
+            v-else-if="statusRows.length === 0"
+            :description="t('dashboard.empty.noParticipantStats')"
+          />
+
+          <div
+            v-else
+            class="tags"
+          >
+            <el-tooltip
+              v-for="r in statusRows"
+              :key="r.key"
+              placement="top"
+              effect="dark"
+              :show-after="650"
+            >
+              <template #content>
+                {{ t('dashboard.participants.openFiltered') }}
+              </template>
+              <el-tag
+                class="tag"
+                effect="plain"
+                @click="goParticipantsWithFilter({ status: r.key === 'unknown' ? '' : r.key })"
+              >
+                {{ r.label }}: {{ r.count }}
+              </el-tag>
+            </el-tooltip>
           </div>
         </el-card>
       </el-col>
@@ -559,6 +774,16 @@ const healthDbInfo = computed(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  cursor: pointer;
 }
 
 .bad {

@@ -181,6 +181,12 @@ class TrustLineService:
             checkpoint_before = None
 
         if data.limit is not None:
+            used = await self._get_used_amount(trustline)
+            if data.limit < used:
+                raise BadRequestException(
+                    "Cannot reduce trustline limit below used amount",
+                    details={"used": str(used), "limit": str(data.limit)},
+                )
             trustline.limit = data.limit
         
         if data.policy is not None:

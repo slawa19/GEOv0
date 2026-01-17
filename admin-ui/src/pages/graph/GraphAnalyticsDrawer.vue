@@ -3,6 +3,7 @@ import TooltipLabel from '../../ui/TooltipLabel.vue'
 import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../../ui/GraphAnalyticsTogglesCard.vue'
 import { t } from '../../i18n'
+import { labelTrustlineStatus } from '../../i18n/labels'
 
 import type { DrawerTab, SelectedInfo } from '../../composables/useGraphVisualization'
 import type { ClearingCycles } from './graphTypes'
@@ -1352,7 +1353,7 @@ defineProps<{
             </span>
           </el-descriptions-item>
           <el-descriptions-item :label="t('common.status')">
-            {{ selected.status }}
+            {{ labelTrustlineStatus(selected.status) }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('trustlines.limit')">
             {{ money(selected.limit) }}
