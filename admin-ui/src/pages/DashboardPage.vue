@@ -10,6 +10,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
+import { carryScenarioQuery, toLocationQueryRaw } from '../router/query'
 
 const router = useRouter()
 const route = useRoute()
@@ -205,7 +206,10 @@ function goParticipantsWithFilter(filter: { status?: string; type?: string }) {
 
 function goTrustlinesWithThreshold() {
   const t = String(threshold.value || '').trim()
-  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, ...(t ? { threshold: t } : {}) }) })
+  void router.push({
+    path: '/trustlines',
+    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(t ? { threshold: t } : {}) }),
+  })
 }
 
 onMounted(() => {
@@ -486,12 +490,19 @@ const typeRows = computed(() => {
                 tooltip-key="dashboard.bottlenecks"
               />
               <div class="hdr__right">
-                <el-input
-                  v-model="threshold"
-                  size="small"
-                  style="width: 120px"
-                  placeholder="0.10"
-                />
+                <div class="hdr__threshold">
+                  <TooltipLabel
+                    :label="t('dashboard.controls.threshold.label')"
+                    :tooltip-text="t('dashboard.controls.threshold.help')"
+                    :max-lines="4"
+                  />
+                  <el-input
+                    v-model="threshold"
+                    size="small"
+                    style="width: 120px"
+                    :placeholder="t('dashboard.controls.threshold.placeholder')"
+                  />
+                </div>
                 <el-button
                   size="small"
                   @click="goTrustlinesWithThreshold()"
@@ -774,6 +785,12 @@ const typeRows = computed(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.hdr__threshold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .tags {

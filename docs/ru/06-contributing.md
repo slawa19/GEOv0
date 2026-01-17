@@ -25,10 +25,11 @@
 ### 1.1. Требования
 
 - Python 3.11+
-- PostgreSQL 15+
-- Redis 7+
+- PostgreSQL 16+ (для прод и для dev через Docker Compose)
+- Redis 7+ (опционально; используется в текущем dev-стеке через Docker Compose)
 - Git
-- Docker (рекомендуется)
+- Docker + Docker Compose (рекомендуется)
+- Node.js (только для Admin UI): см. `admin-ui/package.json` (требуется Node 20+)
 
 ### 1.2. Fork и клонирование
 
@@ -50,24 +51,38 @@ git remote add upstream https://github.com/geo-protocol/geo-hub.git
 python3.11 -m venv venv
 source venv/bin/activate
 
-# Установить зависимости (включая dev)
-pip install -e ".[dev]"
+# Установить зависимости (runtime + dev)
+python -m pip install -r requirements.txt -r requirements-dev.txt
 
-# Настроить pre-commit hooks
-pre-commit install
+# pre-commit (опционально)
+# Репозиторий использует линтеры/форматтеры, но pre-commit не обязателен для начала.
 ```
 
 ### 1.4. Запуск через Docker
 
 ```bash
 # Запустить БД и Redis
-docker compose up -d postgres redis
+docker compose up -d db redis
 
 # Применить миграции (через конфиг из репозитория)
-alembic -c migrations/alembic.ini upgrade head
+# По умолчанию миграции применяются автоматически при старте контейнера приложения.
+# При необходимости можно выполнить вручную:
+docker compose exec app alembic -c migrations/alembic.ini upgrade head
 
 # Запустить приложение
-uvicorn app.main:app --reload
+docker compose up -d --build
+```
+
+Запуск Admin UI (реальный режим, обращается к backend Admin API):
+
+```bash
+npm --prefix admin-ui install
+
+# В PowerShell:
+#   $env:VITE_API_MODE = 'real'
+#   $env:VITE_API_BASE_URL = 'http://localhost:8000'
+
+npm --prefix admin-ui run dev
 ```
 
 ### 1.5. Проверка установки
@@ -78,7 +93,9 @@ pytest
 
 # Проверить линтеры
 ruff check .
-mypy app/
+
+# (опционально)
+# mypy app/
 
 # Открыть документацию (Swagger UI)
 open http://localhost:8000/docs
@@ -89,7 +106,7 @@ open http://localhost:8000/docs
 ## 2. Структура проекта
 
 ```
-geo-hub/
+GEOv0-PROJECT/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py              # Точка входа FastAPI
@@ -103,7 +120,8 @@ geo-hub/
 │   │   │   ├── trustlines.py
 │   │   │   ├── payments.py
 │   │   │   └── websocket.py
-│   │   └── admin/           # Админ панель
+│   │   │
+│   │   └── v1/admin.py      # Admin API endpoints
 │   │
 │   ├── core/                # Бизнес-логика
 │   │   ├── auth/
@@ -113,27 +131,27 @@ geo-hub/
 │   │   ├── clearing/
 │   │   └── events/          # Event bus
 │   │
-│   ├── models/              # Pydantic модели
+│   ├── schemas/             # Pydantic схемы (API DTO)
 │   │   ├── participant.py
 │   │   ├── trustline.py
-│   │   ├── debt.py
-│   │   ├── transaction.py
-│   │   └── messages.py
+│   │   ├── balance.py
+│   │   └── ...
 │   │
 │   ├── db/                  # База данных
 │   │   ├── base.py
 │   │   ├── session.py
 │   │   └── models/          # SQLAlchemy модели
 │   │
-│   └── addons/              # Система аддонов
+│   └── utils/               # Утилиты (security, validation, observability)
 │
 ├── migrations/              # Alembic миграции
 ├── tests/                   # Тесты
+├── admin-ui/                # Admin UI (Vue 3 + TypeScript + Vite)
 ├── docs/                    # Документация
 ├── docker/                  # Docker файлы
 │
-├── pyproject.toml           # Зависимости и настройки
-├── alembic.ini              # Конфигурация Alembic
+├── requirements.txt         # Backend runtime deps (pinned)
+├── requirements-dev.txt     # Backend dev deps (pinned)
 └── README.md
 ```
 
@@ -215,12 +233,14 @@ alembic -c migrations/alembic.ini history
 Используем:
 - **Ruff** — линтер (замена flake8, isort, pyupgrade)
 - **Black** — форматирование (через ruff format)
-- **mypy** — статическая типизация
+- **mypy** — опционально (не закреплён в зависимостях репозитория)
 
 ```bash
 # Проверка
 ruff check .
-mypy app/
+
+# (опционально)
+# mypy app/
 
 # Автоисправление
 ruff check --fix .
@@ -232,7 +252,7 @@ ruff format .
 ```toml
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 88
 
 [tool.ruff.lint]
 select = [
@@ -500,7 +520,9 @@ class TestRoutingService:
 ```bash
 # Убедиться, что все проверки проходят
 ruff check .
-mypy app/
+
+# (опционально)
+# mypy app/
 pytest
 
 # Commit с понятным сообщением

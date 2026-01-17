@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { getTooltips, getTooltipContent, type TooltipKey } from '../content/tooltips'
+import { getTooltips, type TooltipKey } from '../content/tooltips'
 import { locale, t } from '../i18n'
 
 type Props = {
   label: string
   tooltipKey?: TooltipKey
   tooltipText?: string
+  maxLines?: 2 | 4
 }
 
 const props = defineProps<Props>()
@@ -18,11 +19,33 @@ const structured = computed(() => {
 
 const hasTooltip = computed(() => Boolean(structured.value || props.tooltipText))
 
-const tooltipContent = computed(() => {
-  if (props.tooltipText) return props.tooltipText
-  if (!props.tooltipKey) return ''
-  // Keep it short: two lines max via CSS clamp.
-  return getTooltipContent(props.tooltipKey, locale.value)
+const tooltipLines = computed((): string[] => {
+  if (props.tooltipText) {
+    return String(props.tooltipText)
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+  if (!props.tooltipKey) return []
+
+  const entry = structured.value
+  if (!entry) return []
+
+  const lines: string[] = []
+  const title = String(entry.title || '').trim()
+  if (title) lines.push(title)
+  for (const s of entry.body || []) {
+    const line = String(s || '').trim()
+    if (line) lines.push(line)
+  }
+  return lines
+})
+
+const tooltipTextNormalized = computed(() => tooltipLines.value.join('\n'))
+
+const clampClass = computed(() => {
+  const n = props.maxLines ?? 2
+  return n === 4 ? 'geoTooltipText--clamp4' : 'geoTooltipText--clamp2'
 })
 
 const ariaLabel = computed(() => {
@@ -46,7 +69,7 @@ const ariaLabel = computed(() => {
       popper-class="geoTooltip geoTooltip--label"
     >
       <template #content>
-        <span class="geoTooltipText geoTooltipText--clamp2">{{ tooltipContent }}</span>
+        <span class="geoTooltipText" :class="clampClass">{{ tooltipTextNormalized }}</span>
       </template>
       <button
         class="tl__icon"
@@ -82,6 +105,8 @@ const ariaLabel = computed(() => {
   font-size: 10px;
   line-height: 1;
   vertical-align: super;
+  position: relative;
+  top: -0.35em;
 }
 
 .tl__icon:focus-visible {

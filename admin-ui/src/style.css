@@ -46,9 +46,25 @@ body {
   color: var(--el-text-color-primary);
 }
 
+.geoTable {
+  font-size: var(--geo-font-size-label);
+}
+
 .geoTable .el-table__header .cell {
+  font-size: var(--geo-font-size-label);
   font-weight: var(--geo-font-weight-table-header);
   color: var(--el-text-color-primary);
+}
+
+.geoTable .el-table__body .cell {
+  font-size: var(--geo-font-size-label);
+}
+
+/* Keep interactive elements inside tables typography-consistent.
+   Preserve colors (primary links, danger/success values) but inherit size. */
+.geoTable :is(.el-button.is-link, .el-link, .el-text) {
+  font-size: inherit;
+  line-height: inherit;
 }
 
 /* Inline rows for "value + small icons" (copy buttons, etc.) */
@@ -67,7 +83,7 @@ body {
 
 /* Tooltip inner text */
 .geoTooltipText {
-  white-space: normal;
+  white-space: pre-line;
   line-height: 1.25;
 }
 
@@ -76,6 +92,15 @@ body {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 4-line clamp for tooltips that need a bit more explanation */
+.geoTooltipText--clamp4 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
   overflow: hidden;
   text-overflow: ellipsis;
 }

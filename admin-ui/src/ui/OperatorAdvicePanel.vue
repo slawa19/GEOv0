@@ -6,9 +6,11 @@ import type { AdviceItem } from '../advice/operatorAdvice'
 const props = defineProps<{
   items: AdviceItem[]
   titleKey?: string
+  showTitle?: boolean
 }>()
 
 const title = computed(() => (props.titleKey ? t(props.titleKey) : t('advice.panel.title')))
+const showTitle = computed(() => props.showTitle ?? true)
 
 function severityToAlertType(sev: AdviceItem['severity']): 'info' | 'warning' | 'error' {
   if (sev === 'danger') return 'error'
@@ -19,7 +21,7 @@ function severityToAlertType(sev: AdviceItem['severity']): 'info' | 'warning' | 
 
 <template>
   <div v-if="items.length" class="advicePanel">
-    <div class="advicePanel__title">{{ title }}</div>
+    <div v-if="showTitle" class="advicePanel__title">{{ title }}</div>
 
     <div class="advicePanel__items">
       <el-alert

@@ -402,14 +402,17 @@ onMounted(() => void load())
       <el-divider />
 
       <div class="sub">
-        {{ t('integrity.section.equivalents') }}
+        <TooltipLabel
+          :label="t('integrity.section.equivalents')"
+          :tooltip-text="t('integrity.help.equivalents')"
+        />
       </div>
       <el-table
         :data="Object.entries(equivalents)"
         size="small"
         border
         table-layout="fixed"
-        class="tbl"
+        class="tbl geoTable"
       >
         <el-table-column
           :label="t('common.code')"

@@ -14,28 +14,44 @@ import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 
 import { t } from '../i18n'
 import { formatDecimalFixed, isRatioBelowThreshold, addDecimalStrings, compareDecimalStrings, absDecimalString } from '../utils/decimal'
+import { formatIsoInTimeZone } from '../utils/datetime'
 import { buildLiquidityAdvice } from '../advice/operatorAdvice'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
+import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { useConfigStore } from '../stores/config'
+import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 
 const router = useRouter()
 const route = useRoute()
+
+const { isApplying: applyingRouteQuery, isActive: isLiquidityRoute, run: withRouteHydration } =
+  useRouteHydrationGuard(route, '/liquidity')
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 
 const snapshot = ref<GraphSnapshot | null>(null)
+const lastLoadedAt = ref<Date | null>(null)
+
+const configStore = useConfigStore()
+const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
 
 const eq = ref<string>('ALL')
 const threshold = ref<string>('0.10')
 
 function syncFromRoute() {
-  const nextEq = readQueryString(route.query.equivalent).trim().toUpperCase() || 'ALL'
-  const nextThr = readQueryString(route.query.threshold).trim()
-  if (nextEq) eq.value = nextEq
-  if (nextThr) threshold.value = nextThr
+  // Avoid mutating state / query when this component is in the process of being navigated away from.
+  if (!isLiquidityRoute.value) return
+  withRouteHydration(() => {
+    const nextEq = readQueryString(route.query.equivalent).trim().toUpperCase() || 'ALL'
+    const nextThr = readQueryString(route.query.threshold).trim()
+    if (nextEq) eq.value = nextEq
+    if (nextThr) threshold.value = nextThr
+  })
 }
 
 function updateRouteQuery(patch: Record<string, unknown>) {
+  // When leaving the page, route changes first; avoid calling router.replace on the next route.
+  if (!isLiquidityRoute.value) return
   const query: Record<string, unknown> = { ...route.query }
   for (const [k, v] of Object.entries(patch)) {
     const s = typeof v === 'string' ? v.trim() : v
@@ -51,14 +67,21 @@ watch(
   { immediate: true },
 )
 
-watch(eq, (v) => updateRouteQuery({ equivalent: v === 'ALL' ? '' : v }))
-watch(threshold, (v) => updateRouteQuery({ threshold: String(v || '').trim() }))
+watch(eq, (v) => {
+  if (applyingRouteQuery.value) return
+  updateRouteQuery({ equivalent: v === 'ALL' ? '' : v })
+})
+watch(threshold, (v) => {
+  if (applyingRouteQuery.value) return
+  updateRouteQuery({ threshold: String(v || '').trim() })
+})
 
 async function load() {
   loading.value = true
   error.value = null
   try {
     snapshot.value = assertSuccess(await api.graphSnapshot()) as GraphSnapshot
+    lastLoadedAt.value = new Date()
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('liquidity.loadFailed')
@@ -201,19 +224,24 @@ const adviceItems = computed(() => {
 function goTrustlinesEdge(row: Trustline) {
   void router.push({
     path: '/trustlines',
-    query: {
-      ...route.query,
+    query: toLocationQueryRaw({
+      ...carryScenarioQuery(route.query),
       equivalent: String(row.equivalent || '').toUpperCase(),
       creditor: row.from,
       debtor: row.to,
       threshold: String(threshold.value || '').trim(),
-    },
+    }),
   })
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: { ...route.query, q: pid } })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
 }
+
+const lastUpdatedLabel = computed(() => {
+  if (!lastLoadedAt.value) return ''
+  return formatIsoInTimeZone(lastLoadedAt.value.toISOString(), timeZone.value)
+})
 
 function money(v: string): string {
   return formatDecimalFixed(v, selectedPrecision.value)
@@ -230,42 +258,12 @@ function money(v: string): string {
         />
 
         <div class="hdr__right">
-          <el-button
-            size="small"
-            :loading="loading"
-            @click="load"
-          >
-            {{ t('common.refresh') }}
-          </el-button>
-        </div>
-      </div>
-    </template>
-
-    <OperatorAdvicePanel
-      v-if="adviceItems.length"
-      :items="adviceItems"
-      class="mb"
-    />
-
-    <el-alert
-      v-if="error"
-      :title="error"
-      type="error"
-      show-icon
-      class="mb"
-    />
-
-    <el-form
-      label-position="top"
-      class="controls"
-    >
-      <el-row :gutter="12">
-        <el-col :span="10">
-          <el-form-item :label="t('liquidity.controls.equivalent')">
+          <div class="toolbar">
             <el-select
               v-model="eq"
+              size="small"
               filterable
-              style="width: 100%"
+              style="width: 140px"
             >
               <el-option
                 value="ALL"
@@ -278,24 +276,52 @@ function money(v: string): string {
                 :label="String(e.code || '').toUpperCase()"
               />
             </el-select>
-          </el-form-item>
-        </el-col>
 
-        <el-col :span="6">
-          <el-form-item :label="t('liquidity.controls.threshold')">
-            <el-input v-model="threshold" />
-          </el-form-item>
-        </el-col>
+            <div class="toolbar__threshold">
+              <TooltipLabel
+                :label="t('liquidity.controls.threshold')"
+                :tooltip-text="t('liquidity.controls.thresholdHelp')"
+                :max-lines="4"
+              />
+              <el-input
+                v-model="threshold"
+                size="small"
+                style="width: 110px"
+                :placeholder="t('liquidity.controls.thresholdPlaceholder')"
+              />
+            </div>
 
-        <el-col :span="8">
-          <el-form-item :label="t('liquidity.controls.note')">
-            <el-text type="info">
-              {{ t('liquidity.controls.snapshotNote') }}
-            </el-text>
-          </el-form-item>
-        </el-col>
-      </el-row>
-    </el-form>
+            <el-button
+              size="small"
+              :loading="loading"
+              @click="load"
+            >
+              {{ t('common.refresh') }}
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="geoHint" style="margin-top: 6px">
+        <span>{{ t('liquidity.controls.snapshotNote') }}</span>
+        <span v-if="lastUpdatedLabel"> · {{ t('common.updated') }}: {{ lastUpdatedLabel }}</span>
+      </div>
+    </template>
+
+    <OperatorAdvicePanel
+      v-if="adviceItems.length"
+      :items="adviceItems"
+      :show-title="false"
+      class="mb"
+    />
+
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      class="mb"
+    />
 
     <el-divider />
 
@@ -350,11 +376,16 @@ function money(v: string): string {
         <el-card class="geoCard geoCard--inner">
           <template #header>
             <div class="hdr">
-              <div class="hdr__title">{{ t('liquidity.watchlist.topBottleneckEdges') }}</div>
+              <div class="hdr__title">
+                <TooltipLabel
+                  :label="t('liquidity.watchlist.topBottleneckEdges')"
+                  :tooltip-text="t('liquidity.help.topBottleneckEdges')"
+                />
+              </div>
               <div class="hdr__right">
                 <el-button
                   size="small"
-                  @click="router.push({ path: '/trustlines', query: { ...route.query, ...(selectedEq ? { equivalent: selectedEq } : {}), threshold } })"
+                  @click="router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(selectedEq ? { equivalent: selectedEq } : {}), threshold }) })"
                 >
                   {{ t('liquidity.actions.openTrustlines') }}
                 </el-button>
@@ -365,6 +396,7 @@ function money(v: string): string {
           <el-table
             :data="topBottleneckEdges"
             size="small"
+            class="geoTable"
           >
             <el-table-column
               prop="from"
@@ -442,11 +474,16 @@ function money(v: string): string {
         <el-card class="geoCard geoCard--inner">
           <template #header>
             <div class="hdr">
-              <div class="hdr__title">{{ t('liquidity.watchlist.topNetPositions') }}</div>
+              <div class="hdr__title">
+                <TooltipLabel
+                  :label="t('liquidity.watchlist.topNetPositions')"
+                  :tooltip-text="t('liquidity.help.topNetPositions')"
+                />
+              </div>
               <div class="hdr__right">
                 <el-button
                   size="small"
-                  @click="router.push({ path: '/graph', query: { ...route.query, ...(selectedEq ? { equivalent: selectedEq } : {}) } })"
+                  @click="router.push({ path: '/graph', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(selectedEq ? { equivalent: selectedEq } : {}) }) })"
                 >
                   {{ t('liquidity.actions.openGraph') }}
                 </el-button>
@@ -457,10 +494,11 @@ function money(v: string): string {
           <el-table
             :data="topByAbsNet"
             size="small"
+            class="geoTable"
           >
             <el-table-column
               prop="pid"
-              :label="t('participant.pid')"
+              :label="t('participant.columns.pid')"
               width="140"
             >
               <template #default="scope">
@@ -476,7 +514,7 @@ function money(v: string): string {
 
             <el-table-column
               prop="display_name"
-              :label="t('participant.displayName')"
+              :label="t('participant.drawer.displayName')"
             >
               <template #default="scope">
                 <TableCellEllipsis :text="scope.row.display_name || '—'" />
@@ -509,10 +547,11 @@ function money(v: string): string {
               <el-table
                 :data="topCreditors"
                 size="small"
+                class="geoTable"
               >
                 <el-table-column
                   prop="pid"
-                  :label="t('participant.pid')"
+                  :label="t('participant.columns.pid')"
                   width="140"
                 >
                   <template #default="scope">
@@ -540,10 +579,11 @@ function money(v: string): string {
               <el-table
                 :data="topDebtors"
                 size="small"
+                class="geoTable"
               >
                 <el-table-column
                   prop="pid"
-                  :label="t('participant.pid')"
+                  :label="t('participant.columns.pid')"
                   width="140"
                 >
                   <template #default="scope">
@@ -573,11 +613,61 @@ function money(v: string): string {
 </template>
 
 <style scoped>
-.controls {
-  margin-bottom: 8px;
-}
-
 .mb {
   margin-bottom: 12px;
+}
+
+.hdr {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hdr__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.hdr__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.toolbar__threshold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 720px) {
+  .hdr {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hdr__right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .toolbar {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .toolbar :deep(.el-input),
+  .toolbar :deep(.el-select) {
+    width: 100% !important;
+  }
 }
 </style>

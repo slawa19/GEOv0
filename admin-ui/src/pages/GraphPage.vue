@@ -43,11 +43,17 @@ import { installGraphDevHooks } from './graph/graphDevHooks'
 import { useGraphPageOptions } from './graph/useGraphPageOptions'
 import { useGraphPageWatchers } from './graph/useGraphPageWatchers'
 import { readQueryString, toLocationQueryRaw } from '../router/query'
+import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 
 const route = useRoute()
 const router = useRouter()
 
+const { isApplying: applyingRouteQuery, isActive: isGraphRoute, run: withRouteHydration } =
+  useRouteHydrationGuard(route, '/graph')
+
 function updateRouteQuery(patch: Record<string, unknown>) {
+  // Avoid calling router.replace after the user navigated away (prevents double navigation/flicker).
+  if (!isGraphRoute.value) return
   const query: Record<string, unknown> = { ...route.query }
   for (const [k, v] of Object.entries(patch)) {
     const s = typeof v === 'string' ? v.trim() : v
@@ -91,10 +97,14 @@ const statusFilter = ref<string[]>(['active', 'frozen', 'closed'])
 const threshold = ref<string>(DEFAULT_THRESHOLD)
 
 function syncFromRouteQuery() {
-  const nextEq = readQueryString(route.query.equivalent).trim().toUpperCase()
-  const nextThr = readQueryString(route.query.threshold).trim()
-  if (nextEq) eq.value = nextEq
-  if (nextThr) threshold.value = nextThr
+  // Avoid mutating state when this component is being navigated away from.
+  if (!isGraphRoute.value) return
+  withRouteHydration(() => {
+    const nextEq = readQueryString(route.query.equivalent).trim().toUpperCase()
+    const nextThr = readQueryString(route.query.threshold).trim()
+    if (nextEq) eq.value = nextEq
+    if (nextThr) threshold.value = nextThr
+  })
 }
 
 watch(
@@ -103,8 +113,14 @@ watch(
   { immediate: true },
 )
 
-watch(eq, (v) => updateRouteQuery({ equivalent: v === 'ALL' ? '' : v }))
-watch(threshold, (v) => updateRouteQuery({ threshold: String(v || '').trim() }))
+watch(eq, (v) => {
+  if (applyingRouteQuery.value) return
+  updateRouteQuery({ equivalent: v === 'ALL' ? '' : v })
+})
+watch(threshold, (v) => {
+  if (applyingRouteQuery.value) return
+  updateRouteQuery({ threshold: String(v || '').trim() })
+})
 
 const typeFilter = ref<string[]>(['person', 'business'])
 const minDegree = ref<number>(0)

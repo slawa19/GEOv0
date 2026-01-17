@@ -44,8 +44,9 @@
 - **Docker** 24.0+ и **Docker Compose** 2.20+
 - Или:
   - Python 3.11+
-  - PostgreSQL 15+
+  - PostgreSQL 16+
   - Redis 7+
+  - Node.js 20+ (только если вы запускаете Admin UI из `admin-ui/`)
 
 ---
 
@@ -82,7 +83,28 @@ docker compose ps
 docker compose logs -f app
 ```
 
-### 2.4. Инициализация базы данных
+### 2.4. Admin UI (опционально)
+
+Admin UI находится в `admin-ui/` и работает как отдельное приложение (Vue 3 + TypeScript + Vite).
+
+Режимы:
+
+- `real` — обращается к backend Admin API (`/api/v1/admin/*`)
+- `mock` — работает на фикстурах (для детерминированных демо-наборов)
+
+Запуск (real-mode):
+
+```bash
+npm --prefix admin-ui install
+
+# В PowerShell:
+#   $env:VITE_API_MODE = 'real'
+#   $env:VITE_API_BASE_URL = 'http://localhost:8000'
+
+npm --prefix admin-ui run dev
+```
+
+### 2.5. Инициализация базы данных
 
 Миграции выполняются автоматически при старте контейнера (см. `docker/docker-entrypoint.sh`).
 
@@ -98,7 +120,7 @@ docker compose exec app alembic -c migrations/alembic.ini upgrade head
 docker compose exec app python scripts/seed_db.py
 ```
 
-### 2.5. Проверка
+### 2.6. Проверка
 
 ```bash
 # Проверить API
@@ -111,7 +133,7 @@ curl http://localhost:8000/health/db
 
 Если запускали с `GEO_API_PORT=18000`, замените `8000` на `18000`.
 
-### 2.6. Остановка
+### 2.7. Остановка
 
 ```bash
 docker compose down
@@ -129,7 +151,7 @@ docker compose down -v
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install postgresql-15 postgresql-contrib-15
+sudo apt install postgresql-16 postgresql-contrib-16
 
 # Создать пользователя и базу
 sudo -u postgres psql
@@ -160,7 +182,7 @@ python3.11 -m venv venv
 source venv/bin/activate
 
 # Установить зависимости
-pip install -e ".[dev]"
+python -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ### 3.4. Применить миграции
@@ -647,7 +669,7 @@ git pull origin main
 
 # 2. Обновить зависимости
 source venv/bin/activate
-pip install -e ".[dev]"
+python -m pip install -r requirements.txt -r requirements-dev.txt
 
 # 3. Применить миграции
 alembic -c migrations/alembic.ini upgrade head

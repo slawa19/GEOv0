@@ -17,7 +17,8 @@ import { t } from '../i18n'
 import { labelTrustlineStatus } from '../i18n/labels'
 import type { Trustline } from '../types/domain'
 import { buildTrustlinesAdvice } from '../advice/operatorAdvice'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
+import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 
 const router = useRouter()
 const route = useRoute()
@@ -39,24 +40,47 @@ const items = ref<Trustline[]>([])
 const drawerOpen = ref(false)
 const selected = ref<Trustline | null>(null)
 
+const { isApplying: applyingRouteQuery, isActive: isTrustlinesRoute, run: withRouteHydration } =
+  useRouteHydrationGuard(route, '/trustlines')
+
 const configStore = useConfigStore()
 const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
 
-function applyRouteQueryToFilters() {
-  const nextEq = readQueryString(route.query.equivalent).trim()
-  const nextCreditor = readQueryString(route.query.creditor).trim()
-  const nextDebtor = readQueryString(route.query.debtor).trim()
-  const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
-  const nextThr = readQueryString(route.query.threshold).trim()
+function applyRouteQueryToFilters(): boolean {
+  const reloadChanged = withRouteHydration(() => {
+    const nextEq = readQueryString(route.query.equivalent).trim()
+    const nextCreditor = readQueryString(route.query.creditor).trim()
+    const nextDebtor = readQueryString(route.query.debtor).trim()
+    const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
+    const nextThr = readQueryString(route.query.threshold).trim()
 
-  if (equivalent.value !== nextEq) equivalent.value = nextEq
-  if (creditor.value !== nextCreditor) creditor.value = nextCreditor
-  if (debtor.value !== nextDebtor) debtor.value = nextDebtor
-  if (status.value !== nextStatus) status.value = nextStatus
-  if (nextThr && threshold.value !== nextThr) threshold.value = nextThr
+    let didChange = false
+    if (equivalent.value !== nextEq) {
+      equivalent.value = nextEq
+      didChange = true
+    }
+    if (creditor.value !== nextCreditor) {
+      creditor.value = nextCreditor
+      didChange = true
+    }
+    if (debtor.value !== nextDebtor) {
+      debtor.value = nextDebtor
+      didChange = true
+    }
+    if (status.value !== nextStatus) {
+      status.value = nextStatus
+      didChange = true
+    }
+    if (nextThr && threshold.value !== nextThr) threshold.value = nextThr
+    return didChange
+  })
+
+  return Boolean(reloadChanged)
 }
 
 function syncFiltersToRouteQuery() {
+  // When leaving the page, route changes first; avoid calling router.replace on the next route.
+  if (!isTrustlinesRoute.value) return
   const query: Record<string, unknown> = { ...route.query }
 
   const eq = String(equivalent.value || '').trim()
@@ -139,11 +163,11 @@ function openRow(row: Trustline) {
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...route.query, q: pid }) })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
 }
 
 function goEquivalent(eq: string) {
-  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ ...route.query, q: eq }) })
+  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: eq }) })
 }
 
 onMounted(() => {
@@ -158,7 +182,13 @@ watch(perPage, () => {
 
 watch(
   () => [route.query.equivalent, route.query.creditor, route.query.debtor, route.query.status, route.query.threshold],
-  () => applyRouteQueryToFilters(),
+  () => {
+    const reloadChanged = applyRouteQueryToFilters()
+    if (reloadChanged) {
+      page.value = 1
+      void load()
+    }
+  },
 )
 
 const debouncedReload = debounce(() => {
@@ -168,11 +198,13 @@ const debouncedReload = debounce(() => {
 
 // NOTE: threshold is a UI-only highlight knob; do not reload the list when it changes.
 watch([equivalent, creditor, debtor, status], () => {
+  if (applyingRouteQuery.value) return
   syncFiltersToRouteQuery()
   debouncedReload()
 })
 
 watch(threshold, () => {
+  if (applyingRouteQuery.value) return
   syncFiltersToRouteQuery()
 })
 

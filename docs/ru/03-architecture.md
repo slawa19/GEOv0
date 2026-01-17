@@ -38,7 +38,7 @@
 │                      Клиенты                                │
 │  ┌─────────────────────┐  ┌──────────────────────────────┐  │
 │  │   Web Client (PWA)  │  │   Admin Web Panel            │  │
-│  │   (Primary for MVP) │  │   (Jinja2+HTMX)              │  │
+│  │   (Primary for MVP) │  │   (Vue 3 + TS + Vite)        │  │
 │  └──────────┬──────────┘  └──────────┬───────────────────┘  │
 └─────────────┼────────────────────────┼──────────────────────┘
               │                        │
@@ -123,96 +123,38 @@
 ### 2.2. Компоненты MVP
 
 ```
-geo-hub/
-├── app/
+GEOv0-PROJECT/
+├── app/                        # Backend (FastAPI)
 │   ├── __init__.py
-│   ├── main.py                 # FastAPI application
-│   ├── config.py               # Configuration
+│   ├── main.py                 # FastAPI entry point
+│   ├── config.py               # Configuration (env)
 │   │
-│   ├── api/                    # API Layer
+│   ├── api/
 │   │   ├── __init__.py
 │   │   ├── deps.py             # Dependencies (auth, db session)
-│   │   ├── v1/
-│   │   │   ├── __init__.py
-│   │   │   ├── router.py       # Main router
-│   │   │   ├── auth.py         # Auth endpoints
-│   │   │   ├── participants.py # Participant CRUD
-│   │   │   ├── trustlines.py   # TrustLine operations
-│   │   │   ├── payments.py     # Payment operations
-│   │   │   ├── clearing.py     # Clearing operations
-│   │   │   └── websocket.py    # WebSocket handlers
-│   │   └── admin/
+│   │   └── v1/                 # API v1 (REST + WS)
 │   │       ├── __init__.py
-│   │       └── routes.py       # Admin panel routes
+│   │       ├── router.py       # Main router
+│   │       ├── auth.py
+│   │       ├── participants.py
+│   │       ├── trustlines.py
+│   │       ├── payments.py
+│   │       ├── clearing.py
+│   │       ├── integrity.py
+│   │       ├── admin.py        # Admin API endpoints
+│   │       └── websocket.py
 │   │
-│   ├── core/                   # Core Services
-│   │   ├── __init__.py
-│   │   ├── auth/
-│   │   │   ├── __init__.py
-│   │   │   ├── service.py      # AuthService
-│   │   │   └── crypto.py       # Ed25519 operations
-│   │   ├── participants/
-│   │   │   ├── __init__.py
-│   │   │   └── service.py      # ParticipantService
-│   │   ├── trustlines/
-│   │   │   ├── __init__.py
-│   │   │   └── service.py      # TrustLineService
-│   │   ├── payments/
-│   │   │   ├── __init__.py
-│   │   │   ├── service.py      # PaymentEngine
-│   │   │   └── routing.py      # RoutingService
-│   │   ├── clearing/
-│   │   │   ├── __init__.py
-│   │   │   ├── service.py      # ClearingEngine
-│   │   │   └── cycles.py       # Cycle detection
-│   │   ├── integrity/
-│   │   │   ├── __init__.py
-│   │   │   ├── service.py      # IntegrityChecker
-│   │   │   ├── invariants.py   # Invariant definitions
-│   │   │   ├── checksum.py     # State checksum calculations
-│   │   │   └── recovery.py     # Recovery procedures
-│   │   └── events/
-│   │       ├── __init__.py
-│   │       └── bus.py          # Internal event bus
-│   │
-│   ├── models/                 # Pydantic models
-│   │   ├── __init__.py
-│   │   ├── participant.py
-│   │   ├── trustline.py
-│   │   ├── debt.py
-│   │   ├── transaction.py
-│   │   └── messages.py         # Protocol messages
-│   │
-│   ├── db/                     # Database
-│   │   ├── __init__.py
-│   │   ├── base.py             # Base model
-│   │   ├── session.py          # Session management
-│   │   └── models/             # SQLAlchemy models
-│   │       ├── __init__.py
-│   │       ├── participant.py
-│   │       ├── trustline.py
-│   │       ├── debt.py
-│   │       └── transaction.py
-│   │
-│   └── templates/              # Jinja2 templates for admin
-│       ├── base.html
-│       ├── dashboard.html
-│       └── ...
+│   ├── core/                   # Business logic
+│   ├── db/                     # SQLAlchemy models + sessions
+│   └── schemas/                # Pydantic schemas (API DTO)
 │
+├── admin-ui/                   # Admin UI (Vue 3 + TypeScript + Vite)
 ├── migrations/                 # Alembic migrations
-│   ├── versions/
-│   └── env.py
-│
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── conftest.py
-│
-├── docker/
-│   ├── Dockerfile
-│   └── docker-compose.yml
-│
-├── pyproject.toml
+├── tests/                      # Unit + integration tests
+├── docker/                     # Docker image build
+├── docker-compose.yml          # Dev compose (Postgres + Redis + API)
+├── requirements.txt            # Backend runtime deps (pinned)
+├── requirements-dev.txt        # Backend dev deps (pinned)
 └── README.md
 ```
 
@@ -1092,9 +1034,9 @@ class HubConsensusService:
 | Framework | FastAPI | Async, OpenAPI, Pydantic |
 | ORM | SQLAlchemy 2.x | Надёжность, миграции |
 | Миграции | Alembic | Стандарт для SQLAlchemy |
-| База данных | PostgreSQL 15+ | ACID, JSONB, производительность |
+| База данных | PostgreSQL 16+ | ACID, JSONB, производительность |
 | Кэш | Redis 7+ | Скорость, pub/sub, locks |
-| Очереди | Redis/Arq | Простота, достаточно для MVP |
+| Очереди / фоновые задачи | (не внедрено в коде) | Опционально, будет добавлено при необходимости |
 | Тесты | pytest | Стандарт Python |
 
 ### 6.2. Клиенты
@@ -1103,7 +1045,7 @@ class HubConsensusService:
 |-----------|------------|-------------|
 | Mobile/Desktop | Flutter (Dart) | Кроссплатформенность (Native) |
 | PWA Client | Vue.js 3 (PWA) + Tailwind (опционально) | Легкость, отсутствие установки, минимализм |
-| Админка | Vue.js 3 + Element Plus | Отзывчивость, визуализация графов |
+| Админка | Vue.js 3 + TypeScript + Vite + Element Plus + Pinia | Отзывчивость, быстрое прототипирование, визуализация графов |
 | Криптография | libsodium / tweetnacl | Ed25519, проверенные библиотеки |
 
 ### 6.3. Инфраструктура
@@ -1116,39 +1058,40 @@ class HubConsensusService:
 | Мониторинг | Prometheus + Grafana | Стандарт индустрии |
 | Логи | Loki / ELK | Централизованные логи |
 
-### 6.4. Зависимости (pyproject.toml)
+### 6.4. Зависимости и версии (источник истины)
 
-```toml
-[project]
-name = "geo-hub"
-version = "0.1.0"
-requires-python = ">=3.11"
+Актуальные версии **фиксируются в манифестах репозитория**:
 
-dependencies = [
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "pydantic>=2.5.0",
-    "sqlalchemy>=2.0.0",
-    "alembic>=1.12.0",
-    "asyncpg>=0.29.0",
-    "redis>=5.0.0",
-    "pynacl>=1.5.0",          # Ed25519
-    "pyjwt>=2.8.0",
-    "python-multipart>=0.0.6",
-    "jinja2>=3.1.0",
-    "httpx>=0.25.0",
-    "arq>=0.25.0",            # Background tasks
-]
+- Backend runtime: `requirements.txt`
+- Backend dev: `requirements-dev.txt`
+- Admin UI: `admin-ui/package.json`
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.6.0",
-]
+Backend (runtime, excerpt):
+
+```text
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+sqlalchemy[asyncio]==2.0.25
+asyncpg==0.29.0
+alembic==1.13.1
+pydantic==2.5.3
+pydantic-settings==2.1.0
+pyjwt==2.8.0
+redis==5.0.1
+pynacl==1.5.0
+httpx==0.26.0
+```
+
+Admin UI (excerpt):
+
+```text
+vue, vue-router, vue-i18n
+pinia
+vite
+typescript
+element-plus
+cytoscape
+zod
 ```
 
 ---

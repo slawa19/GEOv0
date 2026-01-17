@@ -77,6 +77,12 @@ export const EN: Record<string, string> = {
   'liquidity.loadFailed': 'Failed to load liquidity snapshot',
   'liquidity.controls.equivalent': 'Equivalent',
   'liquidity.controls.threshold': 'Bottleneck threshold',
+  'liquidity.controls.thresholdPlaceholder': '0.10',
+  'liquidity.controls.thresholdHelp':
+    'What it is: how “tight” a trustline is (unused share = available / limit).\n'
+    + 'How it works: a trustline is a bottleneck when this ratio is below the threshold.\n'
+    + 'How to choose: start at 0.10 (balanced). Use 0.05 to catch early warning signs.\n'
+    + 'Use 0.20 if you want fewer, only severe bottlenecks.',
   'liquidity.controls.note': 'Mode',
   'liquidity.controls.snapshotNote': 'Snapshot (no history)',
   'liquidity.kpi.activeTrustlines': 'Active trustlines',
@@ -87,6 +93,8 @@ export const EN: Record<string, string> = {
   'liquidity.kpi.totalAvailable': 'Total available',
   'liquidity.watchlist.topBottleneckEdges': 'Top bottleneck edges (snapshot)',
   'liquidity.watchlist.topNetPositions': 'Top net positions (snapshot)',
+  'liquidity.help.topBottleneckEdges': 'Edges with the lowest remaining available capacity (Available = Limit − Used) for the current snapshot.',
+  'liquidity.help.topNetPositions': 'Participants with the largest absolute net balance in the current snapshot. Positive = net creditor, negative = net debtor.',
   'liquidity.actions.openTrustlines': 'Open Trustlines',
   'liquidity.actions.openGraph': 'Open Graph',
   'liquidity.actions.openEdge': 'Edge',
@@ -156,6 +164,13 @@ export const EN: Record<string, string> = {
   'dashboard.card.participantsByType': 'Participants by type',
   'dashboard.card.participantsByStatus': 'Participants by status',
   'dashboard.card.bottlenecks': 'Trustline bottlenecks',
+    'dashboard.controls.threshold.label': 'Threshold',
+    'dashboard.controls.threshold.placeholder': '0.10',
+    'dashboard.controls.threshold.help':
+      'What it is: how “tight” a trustline is (unused share = available / limit).\n'
+      + 'How it works: a trustline is shown as a bottleneck when this ratio is below the threshold.\n'
+      + 'How to choose: start at 0.10. Use 0.05 to see more potential issues earlier.\n'
+      + 'Use 0.20 to focus only on the most severe shortages.',
   'dashboard.card.incidentsOverSla': 'Incidents over SLA',
   'dashboard.card.recentAudit': 'Recent Audit Log',
   'dashboard.field.status': 'Status',
@@ -346,6 +361,7 @@ export const EN: Record<string, string> = {
   'integrity.help.caseZeroSum.step2': 'Run Verify again to confirm it is reproducible (not a transient write state).',
   'integrity.help.caseZeroSum.step3': 'Then proceed with controlled reconciliation (replay/rebuild) according to your operational playbook.',
   'integrity.section.equivalents': 'Equivalents',
+  'integrity.help.equivalents': 'Integrity status grouped by equivalent. Focus on failed invariants and violations counts.',
   'integrity.section.rawPayload': 'Raw Payload',
   'integrity.columns.debtSymmetry': 'Debt symmetry',
   'integrity.columns.zeroSum': 'Zero-sum',

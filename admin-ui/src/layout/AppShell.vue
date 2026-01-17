@@ -7,8 +7,7 @@ import { useConfigStore } from '../stores/config'
 import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
 import { locale, setLocale, t } from '../i18n'
 import { getTooltipContent } from '../content/tooltips'
-import CopyIconButton from '../ui/CopyIconButton.vue'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
+import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
 import type { TooltipKey } from '../content/tooltips'
 
 type NavItem = {
@@ -120,39 +119,36 @@ const uiLocale = computed({
 
 const quickJump = ref('')
 
-const runLocalOpen = ref(false)
-const runLocalCommand = computed(() => '.\\scripts\\run_local.ps1 -Action start')
-
 function normQuickJump(v: unknown): string {
   return String(v ?? '').trim()
+}
+
+function goQuickJumpDefault() {
+  const q = normQuickJump(quickJump.value)
+  if (!q) return
+  const upper = q.toUpperCase()
+  // Treat TX_* as TxID-like identifiers.
+  if (upper.startsWith('TX_') || upper.startsWith('TXID_')) {
+    goAuditLog()
+    return
+  }
+  goParticipants()
 }
 
 function goParticipants() {
   const q = normQuickJump(quickJump.value)
   if (!q) return
-  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...route.query, q }) })
-}
-
-function goTrustlinesCreditor() {
-  const pid = normQuickJump(quickJump.value)
-  if (!pid) return
-  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, creditor: pid }) })
-}
-
-function goTrustlinesDebtor() {
-  const pid = normQuickJump(quickJump.value)
-  if (!pid) return
-  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, debtor: pid }) })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q }) })
 }
 
 function goAuditLog() {
   const q = normQuickJump(quickJump.value)
   if (!q) return
-  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...route.query, q }) })
+  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q }) })
 }
 
 function navigate(path: string) {
-  void router.push({ path, query: toLocationQueryRaw({ ...route.query }) })
+  void router.push({ path, query: toLocationQueryRaw({ ...carryScenarioQuery(route.query) }) })
 }
 </script>
 
@@ -260,114 +256,9 @@ function navigate(path: string) {
               clearable
               :placeholder="t('app.quickJump.placeholder')"
               style="width: 260px"
-              @keyup.enter="goParticipants"
+              @keyup.enter="goQuickJumpDefault"
             />
-            <el-button-group>
-              <el-tooltip
-                placement="bottom"
-                effect="dark"
-                :show-after="700"
-              >
-                <template #content>
-                  {{ t('app.quickJump.participants') }}
-                </template>
-                <el-button
-                  size="small"
-                  @click="goParticipants"
-                >
-                  {{ t('nav.participants.label') }}
-                </el-button>
-              </el-tooltip>
-
-              <el-tooltip
-                placement="bottom"
-                effect="dark"
-                :show-after="700"
-              >
-                <template #content>
-                  {{ t('app.quickJump.trustlinesAsCreditor') }}
-                </template>
-                <el-button
-                  size="small"
-                  @click="goTrustlinesCreditor"
-                >
-                  {{ t('trustlines.fromCreditor') }}
-                </el-button>
-              </el-tooltip>
-
-              <el-tooltip
-                placement="bottom"
-                effect="dark"
-                :show-after="700"
-              >
-                <template #content>
-                  {{ t('app.quickJump.trustlinesAsDebtor') }}
-                </template>
-                <el-button
-                  size="small"
-                  @click="goTrustlinesDebtor"
-                >
-                  {{ t('trustlines.toDebtor') }}
-                </el-button>
-              </el-tooltip>
-
-              <el-tooltip
-                placement="bottom"
-                effect="dark"
-                :show-after="700"
-              >
-                <template #content>
-                  {{ t('app.quickJump.auditLog') }}
-                </template>
-                <el-button
-                  size="small"
-                  @click="goAuditLog"
-                >
-                  {{ t('nav.auditLog.label') }}
-                </el-button>
-              </el-tooltip>
-            </el-button-group>
           </div>
-
-          <el-tooltip
-            placement="bottom"
-            effect="dark"
-            :show-after="700"
-          >
-            <template #content>
-              {{ t('app.runLocal.tooltip') }}
-            </template>
-            <el-button
-              size="small"
-              @click="runLocalOpen = true"
-            >
-              {{ t('app.runLocal.label') }}
-            </el-button>
-          </el-tooltip>
-
-          <el-dialog
-            v-model="runLocalOpen"
-            :title="t('app.runLocal.title')"
-            width="520px"
-          >
-            <div class="geoHint">
-              {{ t('app.runLocal.hint') }}
-            </div>
-            <div class="runLocalCmd">
-              <span class="runLocalCmd__text">{{ runLocalCommand }}</span>
-              <CopyIconButton
-                :text="runLocalCommand"
-                :label="t('app.runLocal.label')"
-              />
-            </div>
-            <template #footer>
-              <el-button
-                @click="runLocalOpen = false"
-              >
-                {{ t('common.close') }}
-              </el-button>
-            </template>
-          </el-dialog>
 
           <el-select
             v-model="uiLocale"
@@ -473,26 +364,6 @@ function navigate(path: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.runLocalCmd {
-  margin-top: 10px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.runLocalCmd__text {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
 }
 
 .brand {

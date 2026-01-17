@@ -14,7 +14,8 @@ import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
 import type { Participant } from '../types/domain'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
+import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 
 const router = useRouter()
 const route = useRoute()
@@ -36,17 +37,36 @@ const items = ref<Participant[]>([])
 const drawerOpen = ref(false)
 const selected = ref<Participant | null>(null)
 
-function applyRouteQueryToFilters() {
-  const nextQ = readQueryString(route.query.q).trim()
-  const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
-  const nextType = readQueryString(route.query.type).trim().toLowerCase()
+const { isApplying: applyingRouteQuery, isActive: isParticipantsRoute, run: withRouteHydration } =
+  useRouteHydrationGuard(route, '/participants')
 
-  if (q.value !== nextQ) q.value = nextQ
-  if (status.value !== nextStatus) status.value = nextStatus
-  if (type.value !== nextType) type.value = nextType
+function applyRouteQueryToFilters(): boolean {
+  const changed = withRouteHydration(() => {
+    const nextQ = readQueryString(route.query.q).trim()
+    const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
+    const nextType = readQueryString(route.query.type).trim().toLowerCase()
+
+    let didChange = false
+    if (q.value !== nextQ) {
+      q.value = nextQ
+      didChange = true
+    }
+    if (status.value !== nextStatus) {
+      status.value = nextStatus
+      didChange = true
+    }
+    if (type.value !== nextType) {
+      type.value = nextType
+      didChange = true
+    }
+    return didChange
+  })
+  return Boolean(changed)
 }
 
 function syncFiltersToRouteQuery() {
+  // Avoid calling router.replace after the user navigated away (prevents double navigation/flicker).
+  if (!isParticipantsRoute.value) return
   const query: Record<string, unknown> = { ...route.query }
 
   const qq = String(q.value || '').trim()
@@ -147,15 +167,21 @@ function openRow(row: Participant) {
 }
 
 function goTrustlines(pid: string) {
-  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, creditor: pid }) })
+  void router.push({
+    path: '/trustlines',
+    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), creditor: pid, debtor: undefined }),
+  })
 }
 
 function goTrustlinesAsDebtor(pid: string) {
-  void router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...route.query, debtor: pid }) })
+  void router.push({
+    path: '/trustlines',
+    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), creditor: undefined, debtor: pid }),
+  })
 }
 
 function goAuditLog(pid: string) {
-  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...route.query, q: pid }) })
+  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
 }
 
 onMounted(() => {
@@ -165,7 +191,13 @@ onMounted(() => {
 
 watch(
   () => [route.query.q, route.query.status, route.query.type],
-  () => applyRouteQueryToFilters(),
+  () => {
+    const changed = applyRouteQueryToFilters()
+    if (changed) {
+      page.value = 1
+      void load()
+    }
+  },
 )
 
 watch(page, () => void load())
@@ -180,6 +212,7 @@ const debouncedReload = debounce(() => {
 }, DEBOUNCE_SEARCH_MS)
 
 watch([q, status, type], () => {
+  if (applyingRouteQuery.value) return
   syncFiltersToRouteQuery()
   debouncedReload()
 })

@@ -79,6 +79,12 @@ export const RU: Record<string, string> = {
   'liquidity.controls.threshold': 'Порог bottleneck',
   'liquidity.controls.note': 'Режим',
   'liquidity.controls.snapshotNote': 'Snapshot (без истории)',
+    'liquidity.controls.thresholdPlaceholder': '0.10',
+    'liquidity.controls.thresholdHelp':
+      'Что это: насколько «тугой» трастлайн (доля свободного лимита = available / limit).\n'
+      + 'Как работает: трастлайн считается bottleneck, когда это отношение ниже порога.\n'
+      + 'Как выбирать: начните с 0.10 (сбалансировано). 0.05 — показать больше потенциальных проблем раньше.\n'
+      + '0.20 — меньше результатов, только самые критичные узкие места.',
   'liquidity.kpi.activeTrustlines': 'Активные trustlines',
   'liquidity.kpi.bottlenecks': 'Bottlenecks',
   'liquidity.kpi.incidentsOverSla': 'Инциденты сверх SLA',
@@ -87,6 +93,8 @@ export const RU: Record<string, string> = {
   'liquidity.kpi.totalAvailable': 'Суммарно доступно',
   'liquidity.watchlist.topBottleneckEdges': 'Топ bottleneck-рёбер (snapshot)',
   'liquidity.watchlist.topNetPositions': 'Топ net position (snapshot)',
+  'liquidity.help.topBottleneckEdges': 'Рёбра с минимальной оставшейся доступной ёмкостью в текущем snapshot (Available = Limit − Used).',
+  'liquidity.help.topNetPositions': 'Участники с наибольшей абсолютной net-позицией в текущем snapshot. Плюс = чистый кредитор, минус = чистый должник.',
   'liquidity.actions.openTrustlines': 'Открыть Trustlines',
   'liquidity.actions.openGraph': 'Открыть Graph',
   'liquidity.actions.openEdge': 'Ребро',
@@ -153,6 +161,13 @@ export const RU: Record<string, string> = {
   'dashboard.card.bottlenecks': 'Узкие места trustline',
   'dashboard.card.incidentsOverSla': 'Инциденты сверх SLA',
   'dashboard.card.recentAudit': 'Последние действия',
+  'dashboard.controls.threshold.label': 'Порог',
+  'dashboard.controls.threshold.placeholder': '0.10',
+  'dashboard.controls.threshold.help':
+    'Что это: насколько «тугой» трастлайн (доля свободного лимита = available / limit).\n'
+    + 'Как работает: трастлайн показывается как bottleneck, когда это отношение ниже порога.\n'
+    + 'Как выбирать: начните с 0.10. 0.05 — увидеть больше потенциальных проблем раньше.\n'
+    + '0.20 — фокус только на самых критичных дефицитах.',
   'dashboard.field.status': 'Статус',
   'dashboard.field.version': 'Версия',
   'dashboard.field.uptime': 'Аптайм',
@@ -346,6 +361,7 @@ export const RU: Record<string, string> = {
   'integrity.help.caseZeroSum.step2': 'Запустите Verify ещё раз, чтобы подтвердить воспроизводимость.',
   'integrity.help.caseZeroSum.step3': 'Дальше действуйте по вашему операционному плейбуку reconciliation (replay/rebuild).',
   'integrity.section.equivalents': 'Эквиваленты',
+  'integrity.help.equivalents': 'Статус инвариантов по каждому эквиваленту. Сначала смотрите failed и число violations.',
   'integrity.section.rawPayload': 'Сырые данные',
   'integrity.columns.debtSymmetry': 'Симметрия долгов',
   'integrity.columns.zeroSum': 'Нулевой баланс',
