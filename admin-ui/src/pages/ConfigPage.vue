@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
@@ -23,42 +23,34 @@ const saving = ref(false)
 const error = ref<string | null>(null)
 
 const route = useRoute()
+const router = useRouter()
 const filterKey = ref('')
 
 const authStore = useAuthStore()
 
-type ScopeTag = 'runtime' | 'restart' | 'readonly'
+type ScopeTag = 'runtime'
 
-function scopeForKey(key: string): ScopeTag[] {
-  const raw = String(key || '').trim()
-  const upper = raw.toUpperCase()
-  const out: ScopeTag[] = []
-
-  // Backend currently exposes config keys as env-style UPPER_SNAKE_CASE.
-  // Support both formats (env-style + dotted) so Scope doesn't look empty.
-  if (raw.startsWith('feature_flags.') || upper.startsWith('FEATURE_FLAGS_')) out.push('runtime')
-  if (raw.startsWith('routing.') || upper.startsWith('ROUTING_')) out.push('runtime')
-  if (raw.startsWith('observability.') || upper.startsWith('OBSERVABILITY_') || upper.startsWith('METRICS_')) out.push('runtime')
-  if (upper === 'LOG_LEVEL') out.push('runtime')
-  if (upper.startsWith('RATE_LIMIT_')) out.push('runtime')
-
-  // Background loops are wired on startup in the backend.
-  if (upper.startsWith('RECOVERY_')) out.push('restart')
-  if (upper.startsWith('INTEGRITY_CHECKPOINT_')) out.push('restart')
-  if (raw.startsWith('limits.') || upper.startsWith('LIMITS_')) out.push('restart')
-
-  // Prototype rule: clearing.* keys are treated as read-only.
-  if (raw.startsWith('clearing.') || upper.startsWith('CLEARING_')) out.push('readonly')
-  return out
-}
-
-function isKeyReadOnly(key: string): boolean {
-  if (authStore.isReadOnly) return true
-  return scopeForKey(key).includes('readonly')
+function isKeyReadOnly(_key: string): boolean {
+  return authStore.isReadOnly
 }
 
 const original = ref<Record<string, unknown>>({})
 const rows = ref<Row[]>([])
+
+type SectionId =
+  | 'featureFlags'
+  | 'logging'
+  | 'rateLimit'
+  | 'routing'
+  | 'recovery'
+  | 'integrity'
+  | 'other'
+
+type Section = {
+  id: SectionId
+  title: string
+  rows: Row[]
+}
 
 function kindOf(value: unknown): RowKind {
   if (typeof value === 'boolean') return 'boolean'
@@ -108,7 +100,12 @@ const focusKey = computed(() => {
 const visibleRows = computed(() => {
   const needle = String(filterKey.value || '').trim().toLowerCase()
   if (!needle) return rows.value
-  return rows.value.filter((r) => r.key.toLowerCase().includes(needle))
+
+  return rows.value.filter((r) => {
+    const key = r.key.toLowerCase()
+    const label = configLabel(r.key).toLowerCase()
+    return key.includes(needle) || label.includes(needle)
+  })
 })
 
 const dirtyKeys = computed(() => {
@@ -118,6 +115,67 @@ const dirtyKeys = computed(() => {
     if (original.value[k] !== v) dirty.push(k)
   }
   return dirty
+})
+
+function configLabel(key: string): string {
+  const k = String(key || '').trim()
+  const dictKey = `config.labels.${k}`
+  const translated = t(dictKey as never)
+  if (translated && translated !== dictKey) return translated
+  return k
+}
+
+function configTooltipText(key: string): string | undefined {
+  const k = String(key || '').trim()
+  const dictKey = `config.help.${k}`
+  const translated = t(dictKey as never)
+  if (translated && translated !== dictKey) return translated
+  return undefined
+}
+
+function appliesForKey(key: string): ScopeTag[] {
+  // /admin/config currently only exposes runtime-mutable items.
+  // Keep the function for future expansion and UI consistency.
+  void key
+  return ['runtime']
+}
+
+function sectionForKey(key: string): SectionId {
+  const k = String(key || '').trim().toUpperCase()
+  if (k.startsWith('FEATURE_FLAGS_') || k === 'CLEARING_ENABLED') return 'featureFlags'
+  if (k === 'LOG_LEVEL') return 'logging'
+  if (k.startsWith('RATE_LIMIT_')) return 'rateLimit'
+  if (k.startsWith('ROUTING_')) return 'routing'
+  if (k.startsWith('RECOVERY_') || k.startsWith('PAYMENT_TX_')) return 'recovery'
+  if (k.startsWith('INTEGRITY_CHECKPOINT_')) return 'integrity'
+  return 'other'
+}
+
+const sections = computed((): Section[] => {
+  const byId = new Map<SectionId, Row[]>()
+  for (const r of visibleRows.value) {
+    const id = sectionForKey(r.key)
+    const arr = byId.get(id) ?? []
+    arr.push(r)
+    byId.set(id, arr)
+  }
+
+  const mk = (id: SectionId, titleKey: string): Section => ({
+    id,
+    title: t(titleKey),
+    rows: (byId.get(id) ?? []).sort((a, b) => a.key.localeCompare(b.key)),
+  })
+
+  const ordered: Section[] = [
+    mk('featureFlags', 'config.sections.featureFlags'),
+    mk('logging', 'config.sections.logging'),
+    mk('rateLimit', 'config.sections.rateLimit'),
+    mk('routing', 'config.sections.routing'),
+    mk('recovery', 'config.sections.recovery'),
+    mk('integrity', 'config.sections.integrity'),
+    mk('other', 'config.sections.other'),
+  ]
+  return ordered.filter((s) => s.rows.length > 0)
 })
 
 async function save() {
@@ -164,14 +222,28 @@ async function save() {
   }
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  void load()
+})
 
 watch(
   () => route.query.key,
   (v) => {
-    if (typeof v === 'string' && v.trim()) filterKey.value = v.trim()
+    filterKey.value = typeof v === 'string' ? v : ''
   },
   { immediate: true },
+)
+
+watch(
+  filterKey,
+  (v) => {
+    const key = String(v || '').trim()
+    const nextQuery = { ...route.query } as Record<string, any>
+    if (key) nextQuery.key = key
+    else delete nextQuery.key
+    void router.replace({ query: nextQuery as any })
+  },
+  { flush: 'post' },
 )
 </script>
 
@@ -220,132 +292,157 @@ watch(
     />
 
     <div v-else>
-      <el-table
-        :data="visibleRows"
-        size="small"
-        table-layout="fixed"
-        class="geoTable"
-      >
-        <el-table-column
-          prop="key"
-          :label="t('config.columns.key')"
-          width="420"
-          show-overflow-tooltip
+      <el-empty
+        v-if="sections.length === 0"
+        :description="t('common.noData')"
+      />
+
+      <template v-else>
+        <section
+          v-for="section in sections"
+          :key="section.id"
+          class="cfgSection"
         >
-          <template #default="scope">
-            <span :class="{ focus: focusKey && scope.row.key === focusKey }">
-              <TableCellEllipsis :text="scope.row.key" />
-            </span>
-          </template>
-        </el-table-column>
+          <div class="cfgSection__title">
+            {{ section.title }}
+          </div>
 
-        <el-table-column
-          :label="t('config.columns.scope')"
-          width="140"
-        >
-          <template #default="scope">
-            <template v-if="scopeForKey(scope.row.key).length">
-              <el-tag
-                v-for="tag in scopeForKey(scope.row.key)"
-                :key="tag"
-                size="small"
-                :type="tag === 'readonly' ? 'info' : tag === 'restart' ? 'warning' : 'success'"
-                style="margin-right: 6px"
-              >
-                {{ tag }}
-              </el-tag>
-            </template>
-            <span
-              v-else
-              class="geoHint"
-            >{{ t('common.na') }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          :label="t('common.value')"
-          min-width="420"
-        >
-          <template #default="scope">
-            <div class="cfgValueRow">
-              <template v-if="scope.row.kind === 'boolean'">
-                <span
-                  class="cfgBoolLabel"
-                  :class="{ 'cfgBoolLabel--active': scope.row.value === false }"
-                >{{ t('common.false') }}</span>
-                <el-switch
-                  v-model="scope.row.value"
-                  :disabled="isKeyReadOnly(scope.row.key)"
-                />
-                <span
-                  class="cfgBoolLabel"
-                  :class="{ 'cfgBoolLabel--active': scope.row.value === true }"
-                >{{ t('common.true') }}</span>
-              </template>
-
-              <el-input-number
-                v-else-if="scope.row.kind === 'number'"
-                v-model="scope.row.value"
-                :disabled="isKeyReadOnly(scope.row.key)"
-                controls-position="right"
-                class="cfgNumber"
-                style="width: 160px"
-              />
-
-              <template v-else-if="scope.row.kind === 'string'">
-                <el-select
-                  v-if="isLogLevelKey(scope.row.key)"
-                  v-model="scope.row.value"
-                  :disabled="isKeyReadOnly(scope.row.key)"
-                  filterable
-                  allow-create
-                  default-first-option
-                  class="cfgSelect"
-                  :placeholder="t('config.logLevelPlaceholder')"
-                >
-                  <el-option
-                    v-for="opt in LOG_LEVEL_OPTIONS"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
+          <el-table
+            :data="section.rows"
+            size="small"
+            table-layout="fixed"
+            class="geoTable"
+          >
+            <el-table-column
+              :label="t('config.columns.key')"
+              min-width="420"
+              show-overflow-tooltip
+            >
+              <template #default="scope">
+                <div class="cfgName">
+                  <TooltipLabel
+                    :label="configLabel(scope.row.key)"
+                    :tooltip-text="configTooltipText(scope.row.key)"
                   />
-                </el-select>
-
-                <el-input
-                  v-else
-                  v-model="scope.row.value"
-                  :disabled="isKeyReadOnly(scope.row.key)"
-                  size="small"
-                  :placeholder="t('common.valuePlaceholder')"
-                  class="cfgText"
-                />
+                  <div class="cfgKey geoHint">
+                    <span :class="{ focus: focusKey && scope.row.key === focusKey }">
+                      <TableCellEllipsis :text="scope.row.key" />
+                    </span>
+                  </div>
+                </div>
               </template>
+            </el-table-column>
 
-              <el-input
-                v-else
-                v-model="scope.row.value"
-                :disabled="isKeyReadOnly(scope.row.key)"
-                size="small"
-                type="textarea"
-                :rows="2"
-                :placeholder="t('config.jsonStringifiedPlaceholder')"
-                class="cfgJson"
-              />
+            <el-table-column
+              :label="t('config.columns.scope')"
+              width="160"
+            >
+              <template #default="scope">
+                <template v-if="appliesForKey(scope.row.key).length">
+                  <el-tag
+                    v-for="tag in appliesForKey(scope.row.key)"
+                    :key="tag"
+                    size="small"
+                    type="success"
+                    style="margin-right: 6px"
+                  >
+                    {{ t(`config.applies.${tag}`) }}
+                  </el-tag>
+                </template>
+                <span
+                  v-else
+                  class="geoHint"
+                >{{ t('common.na') }}</span>
+              </template>
+            </el-table-column>
 
-              <el-tag
-                v-if="isKeyReadOnly(scope.row.key)"
-                size="small"
-                type="info"
-              >
-                {{ t('common.readOnly') }}
-              </el-tag>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="count">
-        {{ t('config.showingKeys', { shown: visibleRows.length, total: rows.length }) }}
-      </div>
+            <el-table-column
+              :label="t('common.value')"
+              min-width="420"
+            >
+              <template #default="scope">
+                <div class="cfgValueRow">
+                  <template v-if="scope.row.kind === 'boolean'">
+                    <span
+                      class="cfgBoolLabel"
+                      :class="{ 'cfgBoolLabel--active': scope.row.value === false }"
+                    >{{ t('common.false') }}</span>
+                    <el-switch
+                      v-model="scope.row.value"
+                      :disabled="isKeyReadOnly(scope.row.key)"
+                    />
+                    <span
+                      class="cfgBoolLabel"
+                      :class="{ 'cfgBoolLabel--active': scope.row.value === true }"
+                    >{{ t('common.true') }}</span>
+                  </template>
+
+                  <el-input-number
+                    v-else-if="scope.row.kind === 'number'"
+                    v-model="scope.row.value"
+                    :disabled="isKeyReadOnly(scope.row.key)"
+                    controls-position="right"
+                    class="cfgNumber"
+                    style="width: 160px"
+                  />
+
+                  <template v-else-if="scope.row.kind === 'string'">
+                    <el-select
+                      v-if="isLogLevelKey(scope.row.key)"
+                      v-model="scope.row.value"
+                      :disabled="isKeyReadOnly(scope.row.key)"
+                      filterable
+                      allow-create
+                      default-first-option
+                      class="cfgSelect"
+                      :placeholder="t('config.logLevelPlaceholder')"
+                    >
+                      <el-option
+                        v-for="opt in LOG_LEVEL_OPTIONS"
+                        :key="opt"
+                        :label="opt"
+                        :value="opt"
+                      />
+                    </el-select>
+
+                    <el-input
+                      v-else
+                      v-model="scope.row.value"
+                      :disabled="isKeyReadOnly(scope.row.key)"
+                      size="small"
+                      :placeholder="t('common.valuePlaceholder')"
+                      class="cfgText"
+                    />
+                  </template>
+
+                  <el-input
+                    v-else
+                    v-model="scope.row.value"
+                    :disabled="isKeyReadOnly(scope.row.key)"
+                    size="small"
+                    type="textarea"
+                    :rows="2"
+                    :placeholder="t('config.jsonStringifiedPlaceholder')"
+                    class="cfgJson"
+                  />
+
+                  <el-tag
+                    v-if="isKeyReadOnly(scope.row.key)"
+                    size="small"
+                    type="info"
+                  >
+                    {{ t('common.readOnly') }}
+                  </el-tag>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <div class="count geoHint">
+          {{ t('config.showingKeys', { shown: visibleRows.length, total: rows.length }) }}
+        </div>
+      </template>
     </div>
   </el-card>
 </template>
@@ -367,7 +464,24 @@ watch(
 .count {
   margin-top: 10px;
   color: var(--el-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
+}
+
+.cfgSection {
+  margin-bottom: 18px;
+}
+.cfgSection__title {
+  font-weight: 700;
+  margin: 6px 0 10px 0;
+}
+
+.cfgName {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cfgKey {
+  margin-top: 2px;
 }
 
 .cfgValueRow {
@@ -378,9 +492,12 @@ watch(
 }
 
 .cfgBoolLabel {
-  font-size: 12px;
+  font-size: var(--geo-font-size-label);
   color: var(--el-text-color-secondary);
   font-weight: 500;
+  width: 44px;
+  text-align: center;
+  flex: 0 0 44px;
 }
 
 .cfgBoolLabel--active {

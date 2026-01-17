@@ -64,7 +64,7 @@ function severityToAlertType(sev: AdviceItem['severity']): 'info' | 'warning' | 
 }
 
 .advicePanel__title {
-  font-size: 12px;
+  font-size: var(--geo-font-size-label);
   opacity: 0.85;
   margin-bottom: 8px;
 }
@@ -81,7 +81,7 @@ function severityToAlertType(sev: AdviceItem['severity']): 'info' | 'warning' | 
 
 .advicePanel__body {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--geo-font-size-label);
   line-height: 1.35;
   opacity: 0.9;
 }

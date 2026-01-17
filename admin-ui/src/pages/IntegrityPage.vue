@@ -380,6 +380,7 @@ onMounted(() => void load())
       </el-alert>
 
       <el-descriptions
+        class="geoDescriptions"
         :column="2"
         border
       >
@@ -401,7 +402,7 @@ onMounted(() => void load())
 
       <el-divider />
 
-      <div class="sub">
+      <div class="sub geoLabel">
         <TooltipLabel
           :label="t('integrity.section.equivalents')"
           :tooltip-text="t('integrity.help.equivalents')"
@@ -489,7 +490,7 @@ onMounted(() => void load())
 
       <el-divider />
 
-      <div class="sub">
+      <div class="sub geoLabel">
         {{ t('integrity.section.rawPayload') }}
       </div>
       <pre class="json">{{ JSON.stringify(status, null, 2) }}</pre>
@@ -507,8 +508,6 @@ onMounted(() => void load())
   margin-bottom: 12px;
 }
 .sub {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
   margin-bottom: 6px;
 }
 .helpTitle {
@@ -547,26 +546,26 @@ onMounted(() => void load())
   margin-top: 8px;
 }
 .helpHdr {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--geo-font-size-title);
+  font-weight: var(--geo-font-weight-title);
   margin-top: 6px;
   margin-bottom: 4px;
 }
 .helpText {
-  font-size: 13px;
+  font-size: var(--geo-font-size-label);
   color: var(--el-text-color-primary);
 }
 .helpList {
   margin: 0;
   padding-left: 18px;
-  font-size: 13px;
+  font-size: var(--geo-font-size-label);
 }
 .helpList li {
   margin: 3px 0;
 }
 .helpNote {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
   color: var(--el-text-color-secondary);
 }
 .tbl {
@@ -579,7 +578,7 @@ onMounted(() => void load())
   gap: 8px;
 }
 .muted {
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
   color: var(--el-text-color-secondary);
 }
 .mono {
@@ -587,6 +586,6 @@ onMounted(() => void load())
 }
 .json {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 </style>

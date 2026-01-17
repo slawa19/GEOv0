@@ -46,9 +46,10 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/feature-flags',
-    name: 'Feature Flags',
-    component: () => import('../pages/FeatureFlagsPage.vue'),
-    meta: { titleKey: 'featureFlags.title' },
+    redirect: (to) => {
+      const scenario = typeof to.query.scenario === 'string' ? to.query.scenario : undefined
+      return { path: '/config', query: { ...(scenario ? { scenario } : {}), tab: 'featureFlags' } }
+    },
   },
   {
     path: '/audit-log',

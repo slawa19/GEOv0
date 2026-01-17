@@ -457,6 +457,7 @@ const trustlinesAdviceItems = computed(() =>
   >
     <div v-if="selected">
       <el-descriptions
+        class="geoDescriptions"
         :column="1"
         border
       >
@@ -606,7 +607,7 @@ const trustlinesAdviceItems = computed(() =>
 }
 .pager__hint {
   color: var(--el-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 .bottleneck {
   color: var(--el-color-danger);
@@ -614,7 +615,7 @@ const trustlinesAdviceItems = computed(() =>
 }
 .json {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 .display-name {
   color: var(--el-text-color-secondary);

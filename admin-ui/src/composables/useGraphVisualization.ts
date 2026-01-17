@@ -925,6 +925,30 @@ export function useGraphVisualization(options: {
     const cy = options.getCy()
     if (!cy) return
 
+    const cy0 = cy
+
+    function selectNode(n: NodeSingular): string {
+      const pid = String(n.data('pid') || n.id())
+      const displayName = String(n.data('display_name') || '').trim()
+      options.selected.value = {
+        kind: 'node',
+        pid,
+        display_name: displayName || undefined,
+        status: String(n.data('status') || '') || undefined,
+        type: String(n.data('type') || '') || undefined,
+        degree: n.degree(false),
+        inDegree: n.indegree(false),
+        outDegree: n.outdegree(false),
+      }
+      return pid
+    }
+
+    function centerAndFlash(n: NodeSingular) {
+      cy0.animate({ center: { eles: n }, zoom: Math.max(1.2, cy0.zoom()) }, { duration: 300 })
+      n.addClass('search-hit')
+      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+    }
+
     const q = String(options.searchQuery.value || '').trim()
     const pidInQuery = options.extractPidFromText(q)
 
@@ -940,9 +964,9 @@ export function useGraphVisualization(options: {
         ElMessage.warning(t('graph.search.notFoundInGraph', { pid }))
         return
       }
-      cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
-      n.addClass('search-hit')
-      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+      options.focusPid.value = pid
+      selectNode(n)
+      centerAndFlash(n)
       return
     }
 
@@ -953,9 +977,8 @@ export function useGraphVisualization(options: {
         ElMessage.warning(t('graph.search.notFoundInGraph', { pid: options.focusPid.value }))
         return
       }
-      cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
-      n.addClass('search-hit')
-      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+      selectNode(n)
+      centerAndFlash(n)
       return
     }
 
@@ -963,9 +986,9 @@ export function useGraphVisualization(options: {
     if (pidInQuery) {
       const n = cy.getElementById(pidInQuery)
       if (n && !n.empty()) {
-        cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
-        n.addClass('search-hit')
-        setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+        options.focusPid.value = pidInQuery
+        selectNode(n)
+        centerAndFlash(n)
         return
       }
     }
@@ -973,9 +996,9 @@ export function useGraphVisualization(options: {
     // Exact PID match.
     const exact = cy.getElementById(q)
     if (exact && !exact.empty()) {
-      cy.animate({ center: { eles: exact }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
-      exact.addClass('search-hit')
-      setTimeout(() => exact.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+      options.focusPid.value = String(exact.data('pid') || exact.id())
+      selectNode(exact)
+      centerAndFlash(exact)
       return
     }
 
@@ -986,9 +1009,8 @@ export function useGraphVisualization(options: {
       if (fallbackPid) {
         const n = cy.getElementById(fallbackPid)
         if (n && !n.empty()) {
-          cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
-          n.addClass('search-hit')
-          setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+          selectNode(n)
+          centerAndFlash(n)
           ElMessage.info(t('graph.search.queryDidNotMatchCentered'))
           return
         }
@@ -1001,9 +1023,9 @@ export function useGraphVisualization(options: {
       const pid = matches[0]
       if (!pid) return
       const n = cy.getElementById(pid)
-      cy.animate({ center: { eles: n }, zoom: Math.max(1.2, cy.zoom()) }, { duration: 300 })
-      n.addClass('search-hit')
-      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+      options.focusPid.value = pid
+      selectNode(n)
+      centerAndFlash(n)
       return
     }
 

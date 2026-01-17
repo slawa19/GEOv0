@@ -82,7 +82,7 @@ async function onClick(e: MouseEvent) {
   cursor: pointer;
   user-select: none;
   font: inherit;
-  font-size: 10px;
+  font-size: 0.8em;
   line-height: 1;
 }
 

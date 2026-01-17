@@ -32,8 +32,6 @@ const tooltipLines = computed((): string[] => {
   if (!entry) return []
 
   const lines: string[] = []
-  const title = String(entry.title || '').trim()
-  if (title) lines.push(title)
   for (const s of entry.body || []) {
     const line = String(s || '').trim()
     if (line) lines.push(line)
@@ -44,7 +42,7 @@ const tooltipLines = computed((): string[] => {
 const tooltipTextNormalized = computed(() => tooltipLines.value.join('\n'))
 
 const clampClass = computed(() => {
-  const n = props.maxLines ?? 2
+  const n = props.maxLines ?? 4
   return n === 4 ? 'geoTooltipText--clamp4' : 'geoTooltipText--clamp2'
 })
 
@@ -102,7 +100,7 @@ const ariaLabel = computed(() => {
   margin-left: 2px;
   font: inherit;
   font-weight: 600;
-  font-size: 10px;
+  font-size: 0.75em;
   line-height: 1;
   vertical-align: super;
   position: relative;

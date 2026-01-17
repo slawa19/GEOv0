@@ -57,7 +57,7 @@ const props = defineProps<{
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: var(--geo-font-size-label);
   color: var(--el-text-color-primary);
   min-width: 240px;
   backdrop-filter: blur(4px);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { toastApiError } from '../api/errorToast'
@@ -13,7 +13,7 @@ type FlagRow = { key: string; value: boolean; original: boolean }
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-const savingKey = ref<string | null>(null)
+const saving = ref(false)
 
 const rows = ref<FlagRow[]>([])
 
@@ -40,39 +40,30 @@ const dirtyCount = computed(() => rows.value.filter((r) => r.value !== r.origina
 
 const fullMultipathEnabled = computed(() => rows.value.find((r) => r.key === 'full_multipath_enabled')?.value === true)
 
-async function persistRow(row: FlagRow) {
+async function save() {
   if (authStore.isReadOnly) {
-    // Revert any UI toggle attempt.
-    row.value = row.original
     ElMessage.error(t('common.readOnlyUpdatesDisabled'))
     return
   }
-  if (row.value === row.original) return
-
-  const previous = row.original
-
-  try {
-    await ElMessageBox.confirm(t('featureFlags.confirmSet', { key: row.key, value: String(row.value) }), t('common.confirm'), {
-      type: 'warning',
-      confirmButtonText: t('common.apply'),
-      cancelButtonText: t('common.cancel'),
-    })
-  } catch {
-    row.value = previous
+  const dirty = rows.value.filter((r) => r.value !== r.original)
+  if (dirty.length === 0) {
+    ElMessage.info(t('common.noChanges'))
     return
   }
 
-  savingKey.value = row.key
+  saving.value = true
   try {
-    assertSuccess(await api.patchFeatureFlags({ [row.key]: row.value }))
-    row.original = row.value
-    ElMessage.success(t('common.updated'))
+    const patch: Record<string, boolean> = {}
+    for (const r of dirty) patch[r.key] = r.value
+
+    assertSuccess(await api.patchFeatureFlags(patch))
+    ElMessage.success(t('config.savedKeys', { n: dirty.length }))
+    await load()
   } catch (e: unknown) {
-    row.value = row.original
     const msg = e instanceof Error ? e.message : String(e)
     void toastApiError(e, { fallbackTitle: msg || t('featureFlags.updateFailed') })
   } finally {
-    savingKey.value = null
+    saving.value = false
   }
 }
 
@@ -87,9 +78,19 @@ onMounted(() => void load())
           :label="t('featureFlags.title')"
           tooltip-key="nav.featureFlags"
         />
-        <el-tag type="info">
-          {{ t('common.dirtyCount', { n: dirtyCount }) }}
-        </el-tag>
+        <div class="hdr__actions">
+          <el-tag type="info">
+            {{ t('common.dirtyCount', { n: dirtyCount }) }}
+          </el-tag>
+          <el-button
+            :disabled="authStore.isReadOnly || dirtyCount === 0"
+            :loading="saving"
+            type="primary"
+            @click="save"
+          >
+            {{ t('common.save') }}
+          </el-button>
+        </div>
       </div>
     </template>
 
@@ -144,8 +145,7 @@ onMounted(() => void load())
           <template #default="scope">
             <el-switch
               v-model="scope.row.value"
-              :disabled="authStore.isReadOnly"
-              @change="persistRow(scope.row)"
+              :disabled="authStore.isReadOnly || saving"
             />
           </template>
         </el-table-column>
@@ -157,13 +157,7 @@ onMounted(() => void load())
         >
           <template #default="scope">
             <el-tag
-              v-if="savingKey === scope.row.key"
-              type="info"
-            >
-              {{ t('common.saving') }}
-            </el-tag>
-            <el-tag
-              v-else-if="scope.row.value !== scope.row.original"
+              v-if="scope.row.value !== scope.row.original"
               type="warning"
             >
               {{ t('common.pending') }}
@@ -186,6 +180,11 @@ onMounted(() => void load())
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+.hdr__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 .mb {
   margin-bottom: 12px;

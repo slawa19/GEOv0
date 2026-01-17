@@ -25,7 +25,6 @@ const navItems: NavItem[] = [
   { path: '/graph', labelKey: 'nav.graph.label', tooltipKey: 'nav.graph' },
   { path: '/participants', labelKey: 'nav.participants.label', tooltipKey: 'nav.participants' },
   { path: '/config', labelKey: 'nav.config.label', tooltipKey: 'nav.config' },
-  { path: '/feature-flags', labelKey: 'nav.featureFlags.label', tooltipKey: 'nav.featureFlags' },
   { path: '/audit-log', labelKey: 'nav.auditLog.label', tooltipKey: 'nav.auditLog' },
   { path: '/equivalents', labelKey: 'nav.equivalents.label', tooltipKey: 'nav.equivalents' },
 ]
@@ -184,7 +183,7 @@ function navigate(path: string) {
           popper-class="geoTooltip geoTooltip--menu"
         >
           <template #content>
-            <span class="geoTooltipText geoTooltipText--clamp2">{{ getTooltipContent(item.tooltipKey, locale) }}</span>
+            <span class="geoTooltipText geoTooltipText--clamp4">{{ getTooltipContent(item.tooltipKey, locale) }}</span>
           </template>
           <el-menu-item
             :index="item.path"
@@ -375,7 +374,7 @@ function navigate(path: string) {
   font-weight: 700;
 }
 .brand__subtitle {
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
   color: var(--el-text-color-secondary);
 }
 

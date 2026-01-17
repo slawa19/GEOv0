@@ -13,6 +13,7 @@ type FetchSuggestionsFn = (query: string, cb: (results: ParticipantSuggestion[])
 type Props = {
   searchQuery: string
   focusPid: string
+  canFind?: boolean
   fetchSuggestions: FetchSuggestionsFn
   onFocusSearch: () => void
 }
@@ -40,18 +41,28 @@ const onSelect = (s: ParticipantSuggestion) => {
       class="toolbarLabel navRow__label"
       :label="t('graph.search.label')"
       tooltip-key="graph.search"
+        :max-lines="4"
     />
-    <el-autocomplete
-      v-model="searchQueryModel"
-      :fetch-suggestions="fetchSuggestions"
-      :placeholder="t('graph.search.placeholder')"
-      size="small"
-      clearable
-      class="navRow__field"
-      data-testid="graph-search-input"
-      @select="onSelect"
-      @keyup.enter="onFocusSearch"
-    />
+    <div class="navRow__fieldGroup">
+      <el-autocomplete
+        v-model="searchQueryModel"
+        :fetch-suggestions="fetchSuggestions"
+        :placeholder="t('graph.search.placeholder')"
+        size="small"
+        clearable
+        class="navRow__field"
+        data-testid="graph-search-input"
+        @select="onSelect"
+        @keyup.enter="onFocusSearch"
+      />
+      <el-button
+        size="small"
+        :disabled="props.canFind === false"
+        @click="onFocusSearch"
+      >
+        {{ t('graph.navigate.find') }}
+      </el-button>
+    </div>
   </div>
 </template>
 
@@ -73,6 +84,18 @@ const onSelect = (s: ParticipantSuggestion) => {
   min-width: 76px;
 }
 
+.navRow__fieldGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.navRow__field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .navRow__field :deep(.el-autocomplete),
 .navRow__field :deep(.el-input),
 .navRow__field :deep(.el-input__wrapper) {
@@ -87,6 +110,10 @@ const onSelect = (s: ParticipantSuggestion) => {
 
   .navRow__label {
     min-width: 0;
+  }
+
+  .navRow__fieldGroup {
+    flex-wrap: wrap;
   }
 }
 </style>

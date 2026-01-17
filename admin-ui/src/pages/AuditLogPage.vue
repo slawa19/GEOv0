@@ -255,7 +255,7 @@ watch(q, () => {
       </el-table>
 
       <div class="pager">
-        <div class="pager__hint">
+        <div class="pager__hint geoHint">
           {{ t('auditLog.pager.hint', { count: items.length, perPage }) }}
         </div>
         <el-pagination
@@ -279,6 +279,7 @@ watch(q, () => {
       <el-tabs>
         <el-tab-pane :label="t('auditLog.details')">
           <el-descriptions
+            class="geoDescriptions"
             :column="1"
             border
           >
@@ -362,10 +363,10 @@ watch(q, () => {
 }
 .pager__hint {
   color: var(--el-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 .json {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 </style>

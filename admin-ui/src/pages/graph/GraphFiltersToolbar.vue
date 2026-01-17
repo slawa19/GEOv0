@@ -447,6 +447,7 @@ const focusDepthModel = computed({
           <GraphSearchBar
             v-model:search-query="searchQueryModel"
             v-model:focus-pid="focusPidModel"
+            :can-find="canFind"
             :fetch-suggestions="fetchSuggestions"
             :on-focus-search="onFocusSearch"
           />
@@ -456,15 +457,9 @@ const focusDepthModel = computed({
               class="toolbarLabel navRow__label"
               :label="t('graph.navigate.actions')"
               tooltip-key="graph.actions"
+              :max-lines="4"
             />
             <div class="navActions">
-              <el-button
-                size="small"
-                :disabled="!canFind"
-                @click="onFocusSearch"
-              >
-                {{ t('graph.navigate.find') }}
-              </el-button>
               <el-button
                 size="small"
                 @click="onFit"
@@ -678,7 +673,7 @@ const focusDepthModel = computed({
 }
 
 .zoomrow__label {
-  font-size: 12px;
+  font-size: var(--geo-font-size-label);
   font-weight: 600;
   color: var(--el-text-color-regular);
 }

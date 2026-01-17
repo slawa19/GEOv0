@@ -73,6 +73,10 @@ npm --prefix admin-ui run validate:fixtures
 
 Нормативный гайд по ролям текста и UI-copy: [docs/ru/admin/typography.md](typography.md)
 
+## Роутинг и query-фильтры
+
+Правило для двухсторонней синхронизации `route.query ↔ refs` (без двойных `load()`/"мелькания"): [docs/ru/admin/docs/route-query-sync.md](docs/route-query-sync.md)
+
 ## Спецификации и архив
 
 Рабочие спеки для доработок UI находятся в [docs/ru/admin/specs/README.md](specs/README.md).

@@ -3,7 +3,20 @@ body {
   height: 100%;
 }
 
+/* Element Plus uses .el-main as the primary scroll container. Keep its gutter stable
+   to prevent horizontal layout shift when switching tabs/pages with different height. */
+.el-main {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
+}
+
 :root {
+  /* Global font stack (keep Admin UI sans-serif across browsers/OS). */
+  --geo-font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+
+  /* Element Plus uses this variable in many components. */
+  --el-font-family: var(--geo-font-family);
+
   /* GEO Admin UI typography scale (roles)
      - title (card/section): visually stronger than labels
      - label: secondary, not equal to headings
@@ -58,6 +71,30 @@ body {
 
 .geoTable .el-table__body .cell {
   font-size: var(--geo-font-size-label);
+}
+
+/* Element Plus Descriptions: make drawers/details match table typography roles */
+.geoDescriptions .el-descriptions__title {
+  font-size: var(--geo-font-size-title);
+  font-weight: var(--geo-font-weight-title);
+  color: var(--el-text-color-primary);
+}
+
+.geoDescriptions .el-descriptions__label,
+.geoDescriptions .el-descriptions__label.is-bordered-label,
+.geoDescriptions .el-descriptions__cell.el-descriptions__label,
+.geoDescriptions .el-descriptions__cell.el-descriptions__label.is-bordered-label {
+  font-size: var(--geo-font-size-label);
+  font-weight: var(--geo-font-weight-label);
+  color: var(--el-text-color-secondary);
+}
+
+.geoDescriptions .el-descriptions__content,
+.geoDescriptions .el-descriptions__content.is-bordered-content,
+.geoDescriptions .el-descriptions__cell.el-descriptions__content,
+.geoDescriptions .el-descriptions__cell.el-descriptions__content.is-bordered-content {
+  font-size: var(--geo-font-size-label);
+  color: var(--el-text-color-primary);
 }
 
 /* Keep interactive elements inside tables typography-consistent.
@@ -163,7 +200,7 @@ body {
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-family: var(--geo-font-family);
 }
 
 #app {

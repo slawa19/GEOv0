@@ -207,6 +207,7 @@ const adviceItems = computed(() => {
     <div data-testid="graph-drawer-content">
       <div v-if="selected && selected.kind === 'node'">
         <el-descriptions
+          class="geoDescriptions"
           :column="1"
           border
         >
@@ -1366,6 +1367,7 @@ const adviceItems = computed(() => {
         data-testid="graph-drawer-edge"
       >
         <el-descriptions
+          class="geoDescriptions"
           :column="1"
           border
         >
@@ -1607,7 +1609,7 @@ const adviceItems = computed(() => {
 }
 
 .capRow__value {
-  font-size: 12px;
+  font-size: var(--geo-font-size-label);
   font-weight: 600;
   text-align: right;
   color: var(--el-text-color-primary);
@@ -1629,7 +1631,7 @@ const adviceItems = computed(() => {
 .hist__labels {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
   margin-top: 6px;
 }
 
@@ -1639,7 +1641,7 @@ const adviceItems = computed(() => {
 
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 
 .pidLink {
@@ -1675,7 +1677,7 @@ const adviceItems = computed(() => {
 }
 
 .cycleTitle {
-  font-size: 12px;
+  font-size: var(--geo-font-size-label);
   font-weight: 600;
 }
 

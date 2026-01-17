@@ -463,6 +463,7 @@ const typeOptions = computed(() => [
   >
     <div v-if="selected">
       <el-descriptions
+        class="geoDescriptions"
         :column="1"
         border
       >
@@ -544,6 +545,7 @@ const typeOptions = computed(() => [
         <el-button
           v-if="selected.status === 'active'"
           type="warning"
+          size="small"
           :disabled="authStore.isReadOnly"
           @click="freeze(selected)"
         >
@@ -552,6 +554,7 @@ const typeOptions = computed(() => [
         <el-button
           v-else-if="selected.status === 'suspended'"
           type="success"
+          size="small"
           :disabled="authStore.isReadOnly"
           @click="unfreeze(selected)"
         >
@@ -584,14 +587,14 @@ const typeOptions = computed(() => [
 }
 .pager__hint {
   color: var(--el-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 .clickable-table :deep(tr) {
   cursor: pointer;
 }
 .json {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 .drawer-actions {
   display: flex;

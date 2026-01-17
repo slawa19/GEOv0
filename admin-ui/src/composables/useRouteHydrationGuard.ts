@@ -16,19 +16,23 @@ export function useRouteHydrationGuard(route: RouteLocationNormalizedLoaded, exp
   const isApplying = ref(false)
   const isActive = computed(() => route.path === expectedPath)
 
+  let depth = 0
+
   function run<T>(fn: () => T): T | undefined {
     if (!isActive.value) return undefined
 
+    depth += 1
     isApplying.value = true
-    const result = fn()
-
-    // Keep the guard for the next microtask so watchers triggered by assignments
-    // don't interpret them as user-driven edits.
-    Promise.resolve().then(() => {
-      isApplying.value = false
-    })
-
-    return result
+    try {
+      return fn()
+    } finally {
+      // Keep the guard for the next microtask so watchers triggered by assignments
+      // don't interpret them as user-driven edits.
+      Promise.resolve().then(() => {
+        depth = Math.max(0, depth - 1)
+        if (depth === 0) isApplying.value = false
+      })
+    }
   }
 
   return { isApplying, isActive, run }

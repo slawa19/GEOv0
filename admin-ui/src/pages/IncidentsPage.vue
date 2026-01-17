@@ -147,7 +147,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
           popper-class="geoTooltip geoTooltip--menu"
         >
           <template #content>
-            <span class="geoTooltipText geoTooltipText--clamp2">
+            <span class="geoTooltipText geoTooltipText--clamp4">
               {{ t('incidents.slaTooltip') }}
             </span>
           </template>
@@ -348,6 +348,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
   >
     <div v-if="selected">
       <el-descriptions
+        class="geoDescriptions"
         :column="1"
         border
       >
@@ -464,7 +465,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
 }
 .pager__hint {
   color: var(--el-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 .bad {
   color: var(--el-color-danger);
@@ -472,7 +473,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
 }
 .sla-warn {
   color: var(--el-color-danger);
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
 }
 .clickable-table :deep(tr) {
   cursor: pointer;

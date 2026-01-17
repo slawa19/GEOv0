@@ -289,7 +289,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
         <el-table-column
           prop="code"
           :label="t('common.code')"
-          width="200"
+          width="240"
         >
           <template #default="scope">
             <div class="code">
@@ -330,14 +330,14 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
         <el-table-column
           prop="precision"
           :label="t('common.precision')"
-          width="90"
+          width="80"
           align="center"
           header-align="center"
         />
         <el-table-column
           prop="description"
           :label="t('common.description')"
-          min-width="280"
+          min-width="300"
           show-overflow-tooltip
         />
         <el-table-column
@@ -364,49 +364,51 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
         </el-table-column>
         <el-table-column
           :label="t('equivalents.columns.actions')"
-          width="280"
+          width="340"
         >
           <template #default="scope">
-            <el-button
-              size="small"
-              :disabled="authStore.isReadOnly"
-              @click="openEdit(scope.row)"
-            >
-              {{ t('common.edit') }}
-            </el-button>
-            <el-button
-              v-if="scope.row.is_active"
-              size="small"
-              type="warning"
-              :disabled="authStore.isReadOnly"
-              @click="setActive(scope.row, false)"
-            >
-              {{ t('common.deactivate') }}
-            </el-button>
-            <el-button
-              v-else
-              size="small"
-              type="success"
-              :disabled="authStore.isReadOnly"
-              @click="setActive(scope.row, true)"
-            >
-              {{ t('common.activate') }}
-            </el-button>
-            <el-button
-              v-if="!scope.row.is_active"
-              size="small"
-              type="danger"
-              :disabled="authStore.isReadOnly"
-              @click="deleteEq(scope.row)"
-            >
-              {{ t('common.delete') }}
-            </el-button>
-            <el-button
-              size="small"
-              @click="goAudit(scope.row)"
-            >
-              {{ t('common.audit') }}
-            </el-button>
+            <div class="eqActions">
+              <el-button
+                size="small"
+                :disabled="authStore.isReadOnly"
+                @click="openEdit(scope.row)"
+              >
+                {{ t('common.edit') }}
+              </el-button>
+              <el-button
+                v-if="scope.row.is_active"
+                size="small"
+                type="warning"
+                :disabled="authStore.isReadOnly"
+                @click="setActive(scope.row, false)"
+              >
+                {{ t('common.deactivate') }}
+              </el-button>
+              <el-button
+                v-else
+                size="small"
+                type="success"
+                :disabled="authStore.isReadOnly"
+                @click="setActive(scope.row, true)"
+              >
+                {{ t('common.activate') }}
+              </el-button>
+              <el-button
+                v-if="!scope.row.is_active"
+                size="small"
+                type="danger"
+                :disabled="authStore.isReadOnly"
+                @click="deleteEq(scope.row)"
+              >
+                {{ t('common.delete') }}
+              </el-button>
+              <el-button
+                size="small"
+                @click="goAudit(scope.row)"
+              >
+                {{ t('common.audit') }}
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -506,13 +508,14 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 .mb {
   margin-bottom: 12px;
 }
 .muted {
   color: var(--el-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--geo-font-size-sub);
   margin-bottom: 10px;
 }
 
@@ -526,7 +529,13 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
 
 .code__sub {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: var(--geo-font-size-sub);
   color: var(--el-text-color-secondary);
+}
+
+.eqActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 </style>
