@@ -61,13 +61,11 @@ pre-commit install
 
 ```bash
 # Uruchom bazę danych i Redis
-docker compose up -d postgres redis
-
-# Zastosuj migracje (z konfiguracją z repozytorium)
-alembic -c migrations/alembic.ini upgrade head
+docker compose up -d db redis
 
 # Uruchom aplikację
-uvicorn app.main:app --reload
+# Uwaga: migracje są uruchamiane automatycznie przy starcie kontenera.
+docker compose up -d --build
 ```
 
 ### 1.5. Weryfikacja instalacji
@@ -82,6 +80,7 @@ mypy app/
 
 # Otwórz dokumentację (Swagger UI)
 open http://localhost:8000/docs
+# (lub http://127.0.0.1:18000/docs przy uruchomieniu lokalnym przez scripts/run_local.ps1)
 ```
 
 ---
@@ -184,10 +183,10 @@ git checkout -b feature/my-feature
 
 ```bash
 # Uruchom z hot reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 
 # Logowanie w trybie debug
-DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload
+DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 ```
 
 ### 3.4. Praca z bazą danych

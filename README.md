@@ -287,7 +287,7 @@ python scripts/init_sqlite_db.py
 python scripts/seed_db.py
 
 # 3) Run API
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 18000
 ```
 
 Health endpoints (also available as `/api/v1/*` aliases):
@@ -381,7 +381,8 @@ Always use a dedicated test database (like `geov0_test`).
 
 This repo includes a minimal Admin API under the normal API base path:
 
-- Base URL: `http://localhost:8000/api/v1`
+- Base URL (Docker default): `http://localhost:8000/api/v1`
+- Base URL (repo runner default): `http://127.0.0.1:18000/api/v1`
 - Admin prefix: `/admin/*`
 
 **Auth (MVP):** admin endpoints are guarded by a shared secret header:
@@ -394,6 +395,8 @@ Examples:
 ```bash
 curl -H "X-Admin-Token: dev-admin-token-change-me" http://localhost:8000/api/v1/admin/config
 curl -H "X-Admin-Token: dev-admin-token-change-me" http://localhost:8000/api/v1/admin/feature-flags
+# (repo runner default)
+curl -H "X-Admin-Token: dev-admin-token-change-me" http://127.0.0.1:18000/api/v1/admin/config
 ```
 
 For the canonical contract, see `api/openapi.yaml`.
@@ -469,14 +472,16 @@ node scripts/validate-fixtures.mjs --only-pack --v1-dir ..\.local-run\fixture-pa
 # Legacy small seed set:
 # python scripts/seed_db.py --source seeds
 
-python -m uvicorn app.main:app --reload --port 8000
-# If 8000 is unavailable on Windows, use --port 18000 and update VITE_API_BASE_URL accordingly.
+python -m uvicorn app.main:app --reload --port 18000
 
 npm --prefix admin-ui install
 $env:VITE_API_MODE = 'real'
-$env:VITE_API_BASE_URL = 'http://localhost:8000'
+$env:VITE_API_BASE_URL = 'http://127.0.0.1:18000'
 npm --prefix admin-ui run dev
 ```
+
+Note: the Admin UI role selector (`admin/operator/auditor`) is a **UI-only** convenience (stored in localStorage) that hides/disables some actions.
+It is not an authorization boundary; the backend must enforce permissions.
 
 Then open:
 

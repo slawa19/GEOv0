@@ -24,7 +24,8 @@
 
 ```
 Production:  https://hub.example.com/api/v1
-Development: http://localhost:8000/api/v1
+Development (Docker):       http://localhost:8000/api/v1
+Development (local runner): http://127.0.0.1:18000/api/v1
 ```
 
 ### 1.2. Формат запросов/ответов

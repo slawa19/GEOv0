@@ -15,5 +15,9 @@
 ## Swagger UI / ReDoc
 
 При запущенном локально сервере документация доступна по адресам:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- Docker (дефолт):
+	- Swagger UI: `http://localhost:8000/docs`
+	- ReDoc: `http://localhost:8000/redoc`
+- Локальный runner (`scripts/run_local.ps1`, дефолт):
+	- Swagger UI: `http://127.0.0.1:18000/docs`
+	- ReDoc: `http://127.0.0.1:18000/redoc`

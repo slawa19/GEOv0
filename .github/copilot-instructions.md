@@ -9,7 +9,7 @@
 ## Admin UI conventions
 
 - Typography & text styles (must-follow):
-  - `docs/ru/admin/typography.md`
+  - `docs/ru/admin-ui/typography.md`
 
 ## Seed communities and fixtures
 

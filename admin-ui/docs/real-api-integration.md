@@ -16,7 +16,10 @@ As of 2026-01-12, pages/stores no longer import `mockApi` directly.
 ### Option B: direct base URL (recommended in this repo)
 Set a direct API base URL:
 
-- `VITE_API_BASE_URL=http://localhost:8000`
+- If you start the backend via `scripts/run_local.ps1`, the default is:
+  - `VITE_API_BASE_URL=http://127.0.0.1:18000`
+- If you start the backend via Docker Compose (default port mapping), use:
+  - `VITE_API_BASE_URL=http://127.0.0.1:8000`
 
 Why this is the recommended path here:
 - Dev proxy is **not configured** in `admin-ui/vite.config.ts` right now.
@@ -26,7 +29,8 @@ Why this is the recommended path here:
 If you prefer proxy-based dev (to avoid CORS), you must add `server.proxy` in `admin-ui/vite.config.ts`.
 
 After that, you can set:
-- `VITE_API_PROXY_TARGET=http://localhost:8000`
+- `VITE_API_PROXY_TARGET=http://127.0.0.1:18000` (runner default)
+- or `VITE_API_PROXY_TARGET=http://127.0.0.1:8000` (Docker default)
 
 and run:
 - `npm run dev`
@@ -40,6 +44,11 @@ Recommended approach for UI:
 
 Keys:
 - `admin-ui.adminToken` (string)
+
+UI role note (not auth):
+- The role selector in the header (`admin/operator/auditor`) is a **UI-only** convenience stored in `localStorage` (`admin-ui.role`).
+- It may hide/disable some actions, but it is not a security boundary.
+- Real permissions must be enforced by the backend.
 
 Dev convenience (intentional):
 - In `real` mode, when running the UI in dev (`import.meta.env.DEV`), if no token is set yet the UI auto-seeds localStorage with the backend default token: `dev-admin-token-change-me`.
@@ -99,7 +108,7 @@ Audit log note:
 - `GET /api/v1/admin/audit-log` supports server-side `q` search (needle) so the UI search box is not a misleading single-page filter.
 
 ## 6) Development checklist
-- Start backend at `http://localhost:8000` (or adjust proxy target)
+- Start backend at `http://127.0.0.1:18000` (runner default) or `http://127.0.0.1:8000` (Docker default)
 - Ensure admin token is configured (if required by endpoint)
 - Switch `VITE_API_MODE=real`
 - Verify pages:
@@ -115,6 +124,10 @@ If you see `ERR_CONNECTION_REFUSED` on `http://localhost:5173/`, use the repo ru
 ```powershell
 .\scripts\run_local.ps1 start
 ```
+
+Note: `run_local.ps1 start` writes/updates `admin-ui/.env.local` with:
+- `VITE_API_MODE=real`
+- `VITE_API_BASE_URL=http://127.0.0.1:<backendPort>` (default `18000`)
 
 Pick a full community dataset (recommended for graph testing):
 
@@ -159,14 +172,15 @@ Quick DB sanity check:
 - From repo root: `.\.venv\Scripts\python.exe scripts\check_sqlite_db.py`
 - Or via the repo runner: `.\scripts\run_local.ps1 check-db`
 - Run API:
-  - `python -m uvicorn app.main:app --reload --port 8000`
-  - If `8000` is unavailable on Windows, use `--port 18000`.
+  - `python -m uvicorn app.main:app --reload --port 18000`
+  - If `18000` is unavailable on Windows, use another port and set `VITE_API_BASE_URL` accordingly.
 
 ### 7.2 Configure Admin UI for real-mode
 Create `admin-ui/.env.local` (or copy from `admin-ui/.env.local.example`) with:
 
 - `VITE_API_MODE=real`
-- `VITE_API_BASE_URL=http://localhost:8000`
+- `VITE_API_BASE_URL=http://127.0.0.1:18000` (runner default)
+  - or `VITE_API_BASE_URL=http://127.0.0.1:8000` (Docker default)
 
 Optional (if backend `ADMIN_TOKEN` is not the default):
 

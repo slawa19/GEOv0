@@ -184,7 +184,7 @@ python scripts/seed_db.py
 ### 3.5. Launch application
 
 ```bash
-# Development
+# Development (manual run; local runner typically uses :18000)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Production

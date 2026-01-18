@@ -80,7 +80,9 @@ npm --prefix admin-ui install
 
 # В PowerShell:
 #   $env:VITE_API_MODE = 'real'
-#   $env:VITE_API_BASE_URL = 'http://localhost:8000'
+#   $env:VITE_API_BASE_URL = 'http://localhost:8000'   # Docker default
+#   # Если вы меняли GEO_API_PORT (например 18000), используйте его здесь.
+#   # Если запускаете локально через scripts/run_local.ps1, дефолт: http://127.0.0.1:18000
 
 npm --prefix admin-ui run dev
 ```
@@ -99,6 +101,7 @@ ruff check .
 
 # Открыть документацию (Swagger UI)
 open http://localhost:8000/docs
+# (или http://127.0.0.1:18000/docs при запуске через scripts/run_local.ps1)
 ```
 
 ---
@@ -202,10 +205,10 @@ git checkout -b feature/my-feature
 
 ```bash
 # Запустить с hot reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 
 # Логирование в debug режиме
-DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload
+DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 ```
 
 ### 3.4. Работа с базой данных

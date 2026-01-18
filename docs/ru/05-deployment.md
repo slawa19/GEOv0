@@ -99,7 +99,9 @@ npm --prefix admin-ui install
 
 # В PowerShell:
 #   $env:VITE_API_MODE = 'real'
-#   $env:VITE_API_BASE_URL = 'http://localhost:8000'
+#   $env:VITE_API_BASE_URL = 'http://localhost:8000'   # Docker default
+#   # Если вы меняли GEO_API_PORT (например 18000), используйте его здесь.
+#   # Если запускаете локально через scripts/run_local.ps1, дефолт: http://127.0.0.1:18000
 
 npm --prefix admin-ui run dev
 ```
@@ -203,7 +205,7 @@ python scripts/seed_db.py
 ### 3.5. Запуск приложения
 
 ```bash
-# Development
+# Development (manual run; локальный runner обычно использует :18000)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Production

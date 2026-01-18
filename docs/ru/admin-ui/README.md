@@ -23,6 +23,23 @@ Admin UI — отдельное приложение в каталоге `admin-
 
 - Рекомендуемый способ запуска на Windows: `scripts/run_local.ps1` (поднимает backend + Admin UI, управляет портами и записывает `admin-ui/.env.local`).
 
+## Режимы API (mock vs real)
+
+Admin UI поддерживает два режима:
+
+- **mock** (по умолчанию) — UI работает через mock API слой и читает детерминированные JSON фикстуры из `admin-ui/public/admin-fixtures/v1/...`.
+- **real** — UI обращается к backend по HTTP.
+
+Переключение управляется env-переменными Vite:
+
+- `VITE_API_MODE=mock|real`
+- `VITE_API_BASE_URL=http://127.0.0.1:18000` (дефолт локального runner-а)
+- `VITE_API_BASE_URL=http://127.0.0.1:8000` (дефолт Docker Compose)
+
+Важно: `scripts/run_local.ps1 start` автоматически пишет/обновляет `admin-ui/.env.local` и включает **real** режим.
+
+Техническая заметка (EN) по интеграции с реальным API: `admin-ui/docs/real-api-integration.md`.
+
 ## Навигация (ключевые экраны)
 
 - `Dashboard` — здоровье системы + базовые операционные списки.
@@ -81,6 +98,15 @@ npm --prefix admin-ui run validate:fixtures
 ## Роутинг и query-фильтры
 
 Правило для двухсторонней синхронизации `route.query ↔ refs` (без двойных `load()`/"мелькания"): [docs/route-query-sync.md](docs/route-query-sync.md)
+
+## Роли в UI (важно)
+
+В шапке UI есть переключатель роли (`admin` / `operator` / `auditor`). Это **режим отображения/UX** (хранится в `localStorage` под ключом `admin-ui.role`):
+
+- роль может скрывать/дизейблить некоторые «опасные» действия (например verify/repair в Integrity, freeze/unfreeze),
+- **но это не авторизация** и не security boundary.
+
+При работе в `real` режиме права и доступ должны enforce-иться на backend (например через `X-Admin-Token` и серверные проверки), даже если UI что-то «запрещает».
 
 ## Спецификации и архив
 
