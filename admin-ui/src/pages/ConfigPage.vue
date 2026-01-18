@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
-import { t } from '../i18n'
+import { t, te } from '../i18n'
 
 type RowKind = 'boolean' | 'number' | 'string' | 'json'
 type Row = { key: string; kind: RowKind; value: unknown }
@@ -121,16 +121,14 @@ const dirtyKeys = computed(() => {
 function configLabel(key: string): string {
   const k = String(key || '').trim()
   const dictKey = `config.labels.${k}`
-  const translated = t(dictKey as never)
-  if (translated && translated !== dictKey) return translated
+  if (te(dictKey)) return t(dictKey as never)
   return k
 }
 
 function configTooltipText(key: string): string | undefined {
   const k = String(key || '').trim()
   const dictKey = `config.help.${k}`
-  const translated = t(dictKey as never)
-  if (translated && translated !== dictKey) return translated
+  if (te(dictKey)) return t(dictKey as never)
   return undefined
 }
 

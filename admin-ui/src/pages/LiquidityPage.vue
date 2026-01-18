@@ -302,19 +302,22 @@ function money(v: string): string {
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.totalLimit')"
-          :value="money(totalLimit)"
+          :value="Number(totalLimit)"
+          :precision="selectedPrecision"
         />
       </el-col>
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.totalUsed')"
-          :value="money(totalUsed)"
+          :value="Number(totalUsed)"
+          :precision="selectedPrecision"
         />
       </el-col>
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.totalAvailable')"
-          :value="money(totalAvailable)"
+          :value="Number(totalAvailable)"
+          :precision="selectedPrecision"
         />
       </el-col>
     </el-row>

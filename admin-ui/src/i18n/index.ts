@@ -46,3 +46,7 @@ export function t(key: string, params?: Record<string, string | number>): string
   void locale.value
   return i18n.global.t(key, params ?? {}) as string
 }
+
+export function te(key: string): boolean {
+  return i18n.global.te(key)
+}

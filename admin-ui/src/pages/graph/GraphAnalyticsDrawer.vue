@@ -604,7 +604,7 @@ const adviceItems = computed(() => {
                   v-model:current-page="connectionsIncomingPage"
                   :page-size="connectionsPageSize"
                   :total="selectedConnectionsIncoming.length"
-                  small
+                  size="small"
                   background
                   layout="prev, pager, next, total"
                 />
@@ -673,7 +673,7 @@ const adviceItems = computed(() => {
                   v-model:current-page="connectionsOutgoingPage"
                   :page-size="connectionsPageSize"
                   :total="selectedConnectionsOutgoing.length"
-                  small
+                  size="small"
                   background
                   layout="prev, pager, next, total"
                 />

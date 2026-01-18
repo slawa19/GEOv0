@@ -281,7 +281,7 @@ function adminToken(): string | null {
       if (!warnedDefaultDevToken) {
         warnedDefaultDevToken = true
         // eslint-disable-next-line no-console
-        console.warn('Using DEFAULT_DEV_ADMIN_TOKEN (dev-only). Do not use in production.')
+        console.info('Using DEFAULT_DEV_ADMIN_TOKEN (dev-only). Do not use in production.')
       }
     }
     return envTok
@@ -297,7 +297,7 @@ function adminToken(): string | null {
         if (!warnedDefaultDevToken) {
           warnedDefaultDevToken = true
           // eslint-disable-next-line no-console
-          console.warn('Using DEFAULT_DEV_ADMIN_TOKEN from localStorage (dev-only). Do not use in production.')
+          console.info('Using DEFAULT_DEV_ADMIN_TOKEN from localStorage (dev-only). Do not use in production.')
         }
       }
       return v
@@ -315,7 +315,7 @@ function adminToken(): string | null {
       if (!warnedDefaultDevToken) {
         warnedDefaultDevToken = true
         // eslint-disable-next-line no-console
-        console.warn('Seeding DEFAULT_DEV_ADMIN_TOKEN into localStorage (dev-only). Do not use in production.')
+        console.info('Seeding DEFAULT_DEV_ADMIN_TOKEN into localStorage (dev-only). Do not use in production.')
       }
       return DEFAULT_DEV_ADMIN_TOKEN
     }

@@ -1126,7 +1126,6 @@ export function useGraphVisualization(options: {
       elements: [],
       minZoom: 0.1,
       maxZoom: 3,
-      wheelSensitivity: 0.15,
     })
 
     options.setCy(cy)
