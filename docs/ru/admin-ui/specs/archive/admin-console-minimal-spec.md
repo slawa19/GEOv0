@@ -1,6 +1,6 @@
 # ARCHIVED: GEO Hub — минимальная спецификация админки (Admin Console)
 
-Этот документ зафиксирован как исторический «минимальный scope». Каноническая точка входа по Admin UI: [docs/ru/admin/README.md](../../README.md).
+Этот документ зафиксирован как исторический «минимальный scope». Каноническая точка входа по Admin UI: [docs/ru/admin-ui/README.md](../../README.md).
 
 ---
 

@@ -1,6 +1,6 @@
 # ARCHIVED: GEO Hub Admin Console — Fixture Pack для статического прототипа (Variant B)
 
-Каноническая точка входа по Admin UI и фикстурам: [docs/ru/admin/README.md](../../README.md).
+Каноническая точка входа по Admin UI и фикстурам: [docs/ru/admin-ui/README.md](../../README.md).
 
 ---
 
@@ -11,8 +11,8 @@
 **Статус:** рабочая спецификация для прототипирования UI без backend
 
 Связано с:
-- `docs/ru/admin/specs/admin-ui-spec.md` (экраны/состояния/401/403)
-- `docs/ru/admin/specs/archive/admin-console-minimal-spec.md` (MVP scope)
+- `docs/ru/admin-ui/specs/admin-ui-spec.md` (экраны/состояния/401/403)
+- `docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md` (MVP scope)
 - `api/openapi.yaml` (контракт — ориентир)
 
 ---

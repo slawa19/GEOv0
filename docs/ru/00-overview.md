@@ -185,13 +185,17 @@ Hub — это **координатор и индексатор**, а не ба�
 
 | Документ | Описание |
 |----------|----------|
+| [documentation-rules.md](documentation-rules.md) | Канонические правила RU-документации (структура, статусы, ссылки) |
+| [admin-ui/README.md](admin-ui/README.md) | Домен: Admin UI (спеки, операторские сценарии, архив) |
+| [backend/README.md](backend/README.md) | Домен: Backend (реализация hub, эксплуатация, API-нюансы) |
+| [simulator/README.md](simulator/README.md) | Домен: Simulator (спеки приложения симуляции/визуализации) |
 | [01-concepts.md](01-concepts.md) | Ключевые концепции |
 | [02-protocol-spec.md](02-protocol-spec.md) | Спецификация протокола |
 | [03-architecture.md](03-architecture.md) | Архитектура системы |
 | [04-api-reference.md](04-api-reference.md) | Справочник API |
 | [05-deployment.md](05-deployment.md) | Развёртывание |
 | [config-reference.md](config-reference.md) | Реестр параметров конфигурации (дефолты, диапазоны, runtime vs restart) |
-| [admin/specs/archive/admin-console-minimal-spec.md](admin/specs/archive/admin-console-minimal-spec.md) | Минимальная спецификация админки (конфиг/флаги/операторские действия/аудит) |
+| [admin-ui/specs/archive/admin-console-minimal-spec.md](admin-ui/specs/archive/admin-console-minimal-spec.md) | Минимальная спецификация админки (конфиг/флаги/операторские действия/аудит) |
 | [archive/07-clarifications-and-gaps.md](archive/07-clarifications-and-gaps.md) | Уточнения и пробелы (архив; история вопросов/пробелов) |
 | [09-decisions-and-defaults.md](09-decisions-and-defaults.md) | Ключевые решения и дефолты MVP |
 | [06-contributing.md](06-contributing.md) | Участие в разработке |

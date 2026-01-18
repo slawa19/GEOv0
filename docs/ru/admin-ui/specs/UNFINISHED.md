@@ -1,10 +1,10 @@
 # Незавершённые спеки (RU)
 
-Этот список фиксирует **незавершённые** элементы из активных спецификаций в `docs/ru/admin/specs/`.
+Этот список фиксирует **незавершённые** элементы из активных спецификаций в `docs/ru/admin-ui/specs/`.
 
 ## Admin UI
 
-Источник: [docs/ru/admin/specs/admin-ui-spec.md](admin-ui-spec.md)
+Источник: [docs/ru/admin-ui/specs/admin-ui-spec.md](admin-ui-spec.md)
 
 Незавершённые элементы (Phase 2 / optional):
 - `Events` (timeline)

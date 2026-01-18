@@ -38,14 +38,14 @@ test('participants: can freeze/unfreeze and filter by status', async ({ page }) 
   const unfreezeBtn = rowForPid.getByTestId('participants-unfreeze-btn')
   await expect(unfreezeBtn).toBeVisible()
 
-  // Filter by frozen status.
+  // Filter by suspended status (freeze).
   const statusSelect = page.getByTestId('participants-filter-status')
   await statusSelect.click()
-  await page.getByRole('option', { name: 'frozen', exact: true }).click()
+  await page.getByRole('option', { name: 'suspended', exact: true }).click()
 
-  // Expect our PID still visible and status frozen (scope to the table body).
+  // Expect our PID still visible and status suspended (scope to the table body).
   await expect(rowForPid).toBeVisible()
-  await expect(rowForPid).toContainText('frozen')
+  await expect(rowForPid).toContainText('suspended')
 
   // Clear filter back to Any status so the row remains visible after unfreeze.
   await statusSelect.click()

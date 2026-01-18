@@ -10,7 +10,7 @@
 Связанные документы:
 - Канонический API контракт: [`docs/ru/04-api-reference.md`](docs/ru/04-api-reference.md:1)
 - Сценарии для e2e: [`docs/ru/08-test-scenarios.md`](docs/ru/08-test-scenarios.md:1)
-- Admin UI (каноническая точка входа): [`docs/ru/admin/README.md`](docs/ru/admin/README.md:1)
+- Admin UI (каноническая точка входа): [`docs/ru/admin-ui/README.md`](docs/ru/admin-ui/README.md:1)
 - Реестр конфигурации (runtime vs restart): [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)
 - OpenAPI (должен быть согласован с каноном): [`api/openapi.yaml`](api/openapi.yaml:1)
 
@@ -328,7 +328,7 @@ pytest -k TS_12
 
 ## 9. SSR Admin Console: Domain Events Timeline
 
-На базе [`docs/ru/admin/specs/archive/admin-console-minimal-spec.md`](docs/ru/admin/specs/archive/admin-console-minimal-spec.md:1) добавить экран:
+На базе [`docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md`](docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md:1) добавить экран:
 
 **Domain Events / Timeline**
 - Фильтры:

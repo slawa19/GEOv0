@@ -1,6 +1,6 @@
 # ARCHIVED: GEO Hub Admin UI — Типографика и правила текстовых стилей
 
-Этот документ перенесён в каноническую документацию: [docs/ru/admin/typography.md](../../typography.md).
+Этот документ перенесён в каноническую документацию: [docs/ru/admin-ui/typography.md](../../typography.md).
 
 ---
 

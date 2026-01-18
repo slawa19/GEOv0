@@ -78,7 +78,7 @@
 - `admin-fixtures/tools/seedlib.py` — общие утилиты и производные датасеты (debts/cycles/meta) для seed-генераторов.
 
 См. также:
-- Спека fixture-pack (архив): `docs/ru/admin/specs/archive/admin-ui-prototype-fixtures-spec.md`
+- Спека fixture-pack (архив): `docs/ru/admin-ui/specs/archive/admin-ui-prototype-fixtures-spec.md`
 - Подход к seed-документам и генерации: `docs/ru/seeds/README.md`
 
 #### Guardrails валидатора (важно для демо)
@@ -115,7 +115,7 @@
 
 В VS Code:
 
-- откройте файл `docs/ru/admin/admin-ui-prototype-demo-script.md`
+- откройте файл `docs/ru/admin-ui/admin-ui-prototype-demo-script.md`
 - нажмите `Ctrl+Shift+V` (Preview)
 - или команду: “Markdown: Open Preview to the Side”
 

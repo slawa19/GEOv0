@@ -5,8 +5,8 @@
 **Стек (рекомендация):** Vue.js 3 (Vite), Element Plus, Pinia.  
 
 Документ согласован с:
-- `docs/ru/admin/README.md`
-- `docs/ru/admin/specs/archive/admin-console-minimal-spec.md`
+- `docs/ru/admin-ui/README.md`
+- `docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md`
 - `docs/ru/04-api-reference.md`
 - `api/openapi.yaml`
 
@@ -47,11 +47,11 @@
 - Тёмный режим по умолчанию допустим, но должен быть реализован средствами выбранного UI-слоя.
 
 См. также нормативный документ по типографике:
-- `docs/ru/admin/typography.md`
+- `docs/ru/admin-ui/typography.md`
 
 ### 3.2. Sidebar (основные разделы)
 
-Минимальный состав экранов (соответствует `docs/ru/admin/specs/archive/admin-console-minimal-spec.md`):
+Минимальный состав экранов (соответствует `docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md`):
 - `Dashboard`
 - `Liquidity analytics` (Snapshot triage)
 - `Integrity`
@@ -189,7 +189,7 @@ UI (MVP) — что должно быть на странице:
 Operator Advice (MVP+; реализовать сейчас):
 - В `Drawer → Summary` должна быть панель **Operator advice**: контекстные рекомендации по bottlenecks/capacity/concentration.
 - Рекомендации детерминированы (фиксированные правила) и объясняют «почему» + дают быстрые переходы на существующие экраны.
-- Детальная спецификация правил и UX: `docs/ru/admin/specs/operator-advice-spec.md`.
+- Детальная спецификация правил и UX: `docs/ru/admin-ui/specs/operator-advice-spec.md`.
 
 Расширения (для последующей модификации):
 - Добавить tooltip на hover по ребру (без внешних зависимостей можно реализовать через overlay div).
@@ -261,7 +261,7 @@ UI:
 
 ### 4.10. Equivalents (MVP)
 
-Цель: управление справочником эквивалентов (входит в MVP согласно `docs/ru/admin/specs/archive/admin-console-minimal-spec.md` §3.4).
+Цель: управление справочником эквивалентов (входит в MVP согласно `docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md` §3.4).
 
 UI:
 - Таблица: `code`, `description`, `precision`, `is_active`.
@@ -450,4 +450,3 @@ UI правила:
 ## 8. Prompts для генерации (ИИ)
 
 > "Создай Vue 3 компонент для админки GEO Hub на Element Plus (script setup). Компонент: [Название экрана]. Реализуй loading/empty/error, извлечение данных из envelope {success,data}, обработку 401/403. Эндпоинт(ы): [список]."
-

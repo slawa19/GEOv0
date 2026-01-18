@@ -17,7 +17,7 @@ Admin UI — отдельное приложение в каталоге `admin-
 
 Каноническое описание стека проекта целиком (backend + Admin UI):
 
-- [`docs/ru/03-architecture.md`](../03-architecture.md:1)
+- [../03-architecture.md](../03-architecture.md)
 
 ## Быстрый старт (локально)
 
@@ -32,12 +32,15 @@ Admin UI — отдельное приложение в каталоге `admin-
 ## Fixtures (fixtures-first режим)
 
 Admin UI в режиме моков читает JSON фикстуры из:
+
 - `admin-ui/public/admin-fixtures/v1/…`
 
 Источник истины (каноничные фикстуры):
+
 - `admin-fixtures/v1/datasets/*.json`
 
 Синхронизация и валидация:
+
 - sync: `admin-ui/scripts/sync-fixtures.mjs`
 - validate: `admin-ui/scripts/validate-fixtures.mjs`
 
@@ -62,22 +65,27 @@ npm --prefix admin-ui run validate:fixtures
 ```
 
 Важные инварианты данных:
+
 - TrustLine direction: `from → to` = creditor → debtor (risk limit), *не наоборот*.
 - Направление долгов обратное: debt = debtor → creditor.
 - `policy.daily_limit` в MVP: informational-only (не enforced) до отдельного решения/задачи.
 
 Конвенции представления чисел:
+
 - Денежные значения в фикстурах и API предпочтительно передавать как **decimal string** (UI не должен зависеть от float).
 
 ## Типографика и текстовые стили
 
-Нормативный гайд по ролям текста и UI-copy: [docs/ru/admin/typography.md](typography.md)
+Нормативный гайд по ролям текста и UI-copy: [typography.md](typography.md)
 
 ## Роутинг и query-фильтры
 
-Правило для двухсторонней синхронизации `route.query ↔ refs` (без двойных `load()`/"мелькания"): [docs/ru/admin/docs/route-query-sync.md](docs/route-query-sync.md)
+Правило для двухсторонней синхронизации `route.query ↔ refs` (без двойных `load()`/"мелькания"): [docs/route-query-sync.md](docs/route-query-sync.md)
 
 ## Спецификации и архив
 
-Рабочие спеки для доработок UI находятся в [docs/ru/admin/specs/README.md](specs/README.md).
+Рабочие спеки для доработок UI находятся в [specs/README.md](specs/README.md).
 
+---
+
+Примечание: материалы админки были перенесены из исторического пути `docs/ru/admin/*` в домен `docs/ru/admin-ui/*`.

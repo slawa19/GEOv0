@@ -56,6 +56,7 @@ const onSelect = (s: ParticipantSuggestion) => {
         @keyup.enter="onFocusSearch"
       />
       <el-button
+        class="navRow__button"
         size="small"
         :disabled="props.canFind === false"
         @click="onFocusSearch"
@@ -75,7 +76,9 @@ const onSelect = (s: ParticipantSuggestion) => {
 
 .navRow {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: max-content max-content;
+  justify-content: start;
+  justify-items: start;
   gap: 10px;
   align-items: center;
 }
@@ -89,11 +92,19 @@ const onSelect = (s: ParticipantSuggestion) => {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .navRow__field {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  width: clamp(34ch, 52vw, 90ch);
+}
+
+.navRow__button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .navRow__field :deep(.el-autocomplete),
@@ -114,6 +125,11 @@ const onSelect = (s: ParticipantSuggestion) => {
 
   .navRow__fieldGroup {
     flex-wrap: wrap;
+  }
+
+  .navRow__field {
+    flex: 1 1 auto;
+    width: 100%;
   }
 }
 </style>
