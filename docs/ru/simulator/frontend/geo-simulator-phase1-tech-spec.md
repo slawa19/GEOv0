@@ -20,9 +20,170 @@
 - процесс транзакции как поток по связи;
 - процесс клиринга как схлопывание долгов (визуальная симуляция).
 
-Визуальный стиль должен **кардинально отличаться** от Admin UI: упор на иммерсивность, визуальные эффекты (glow/bloom, частицы), плавную физику и HUD.
+Визуальный стиль должен **кардинально отличаться** от Admin UI, но оставаться **читаемым и консервативным** (это финансовые операции, а не катастрофа): аккуратный glow/bloom, искры/частицы, плавная физика и минималистичный HUD.
 
 ---
+
+## 0.5. Промпты для генерации скриншотов (AI image prompts)
+
+Ниже — набор промптов для генерации скриншотов (например, Nano Banana и аналогичные инструменты). Цель — быстро получить согласуемые изображения UI/VFX, по которым затем корректируем спецификацию и/или функционал.
+
+Контекст проекта GEO (важно для корректных скриншотов):
+
+- **Линии доверия** образуют кредитную сеть, где движение обязательств может идти **по маршруту из нескольких ребер** (multi-hop), а не только по одной прямой связи.
+- **Транзакция (payment)** на уровне протокола может проходить по маршруту A → B → C → ... → Z (в Этапе 1 допускается упрощение, но UI-метафора не должна «запирать» нас на A→B).
+- **Клиринг (netting)** по смыслу работает с **циклами долгов** и может затрагивать **3 узла и более** (длина цикла не фиксирована). В Этапе 1 можно начинать с треугольников, но визуальный язык должен масштабироваться на 4–6+ узлов.
+
+### 0.5.0. Общие требования ко всем скриншотам
+
+- формат: 16:9, 1920×1080 (или 2560×1440)
+- стиль: игровая тактическая карта, deep space фон, читаемый и консервативный финансовый интерфейс (без «катастрофы»)
+- граф: 35–50 узлов, 2–4 связи на узел
+- типы узлов:
+  - `business`: квадрат, базовый цвет emerald
+  - `person`: круг, базовый цвет blue
+- линии доверия: тонкие, полупрозрачные (idle), **без чисел** на ребрах
+- при выборе узла: подсветка только инцидентных связей, остальные связи затемнены
+- индикация баланса (только на выбранном/фокусном узле): дополнительный glow
+  - credit (balance > 0): cyan glow
+  - debt (balance < 0): orange glow
+  - около 0: нейтральный бело-slate glow
+- HUD:
+  - карточка участника рядом с выбранным узлом: Тип (иконка) + Имя + Баланс (signed)
+  - панель управления внизу: две кнопки `Single Tx`, `Run Clearing`
+
+Полезные элементы интерфейса (желательно показать хотя бы на 1–2 скриншотах):
+
+- компактная верхняя строка статуса (как «HUD» в игре): `Nodes`, `Links`, `Active Tx`, `Clearing` (idle/running)
+- небольшая легенда цветов (credit cyan / debt orange) в углу, чтобы зритель сразу считал семантику glow
+
+Если инструмент поддерживает уточнения, добавлять:
+
+- clean UI
+- no minimap
+- no camera controls UI
+- no admin dashboard aesthetics
+- no extra labels on edges
+
+### 0.5.1. Скриншот A — общий вид сети (idle)
+
+```text
+Game UI screenshot, deep space tactical map background, dark blue-black with subtle starfield and faint nebula haze.
+
+Show an interactive trust network graph centered on screen:
+- 40 nodes total, mixed types: 20% business nodes as small emerald squares, 80% person nodes as small blue circles.
+- Each node has soft bloom, readable and conservative.
+- Trustlines are thin slate lines with very low opacity, no numbers on lines.
+
+HUD overlay:
+- Bottom center minimal HUD panel with two buttons: Single Tx and Run Clearing.
+- No active effects, no sparks.
+
+Overall look: clean, game-like, financial network visualization, high readability.
+```
+
+### 0.5.2. Скриншот B — выбранный узел + карточка участника
+
+```text
+Game UI screenshot of a deep space tactical network map.
+
+Select one node near the center-right.
+- The selected node has a stronger glow that indicates balance sign:
+  - positive balance: cyan glow
+  - negative balance: orange glow
+- Keep node base color and shape by type (business emerald square, person blue circle).
+
+Highlight only the selected node incident trustlines (brighter), dim all other trustlines to near invisible.
+
+Show a glassmorphism HUD card near the selected node (not blocking the graph):
+- Type icon (business or person)
+- Name: Aurora Market
+- Balance: +1250 GC
+
+Bottom HUD controls panel with Single Tx and Run Clearing.
+```
+
+### 0.5.3. Скриншот C — транзакция (Tx) по линии доверия
+
+```text
+Game UI screenshot of a trust network during a transaction.
+
+Show a transaction from node A to node B along a single trustline.
+- The trustline becomes bright and shimmering while the transaction is active.
+- A single spark (white core with cyan trail) moves slowly along the trustline from A to B.
+- When the spark reaches node B, node B flashes briefly (not an explosion).
+- A floating amount label appears near node B and moves upward while fading out: 125 GC.
+
+Keep the rest of the network visible but slightly subdued.
+HUD:
+- Bottom panel with Single Tx and Run Clearing.
+```
+
+### 0.5.4. Скриншот D — транзакция (Tx) по маршруту из нескольких узлов (multi-hop)
+
+Этот экран нужен, чтобы заранее согласовать визуальную метафору маршрутизации по нескольким линиям доверия.
+
+```text
+Game UI screenshot of a trust network during a multi-hop transaction.
+
+Highlight a route of 4 nodes (A -> B -> C -> D).
+- The route consists of 3 trustlines.
+- A single transaction spark moves along the route step-by-step:
+  - first along A->B, then B->C, then C->D
+- The currently active trustline is bright and shimmering; the remaining route trustlines are moderately highlighted.
+- When the spark reaches the final node D, node D flashes briefly.
+- A floating amount label appears near node D and moves upward while fading out: 125 GC.
+
+HUD:
+- Bottom panel with Single Tx and Run Clearing.
+- Optional top status line: Nodes 40, Links 90, Active Tx 1.
+No edge numbers.
+```
+
+### 0.5.5. Скриншот E — клиринг (Clearing) по линии доверия (локальный случай)
+
+```text
+Game UI screenshot of a trust network during clearing (netting).
+
+Show a clearing event on one trustline:
+- Two sparks move toward each other along the same trustline:
+  - cyan spark represents credit
+  - orange spark represents debt
+- The trustline becomes bright and shimmering while sparks move.
+- Sparks meet at the midpoint: a compact flash and a small burst of tiny sparks (particle dust), no violent explosion.
+- A floating amount label appears near the midpoint and moves upward while fading out: 300 GC.
+- After the event, the trustline returns to normal faint idle state.
+
+HUD:
+- Bottom panel with Single Tx and Run Clearing (Run Clearing disabled).
+```
+
+### 0.5.6. Скриншот F — клиринг по циклу из 4–6 узлов (cycle clearing)
+
+Этот экран нужен, чтобы визуально зафиксировать, что клиринг в GEO может охватывать несколько узлов и связей, а не один сегмент.
+
+```text
+Game UI screenshot of a trust network during cycle clearing (netting across multiple nodes).
+
+Highlight a cycle of 5 nodes (A-B-C-D-E-A) in the graph.
+- All cycle trustlines are highlighted; non-cycle trustlines are dimmed.
+
+Clearing visualization:
+- On each cycle trustline, two sparks move toward each other:
+  - cyan spark represents credit
+  - orange spark represents debt
+- Each active trustline becomes bright and shimmering while sparks move.
+- Sparks meet near the midpoint of each trustline with compact flashes and tiny particle dust.
+
+Add one floating amount label near the cycle center that moves upward while fading out: 300 GC.
+After the event, all cycle trustlines return to normal faint idle state.
+
+HUD:
+- Bottom panel with Single Tx and Run Clearing (Run Clearing disabled).
+- Optional top status line: Clearing running.
+Conservative, readable, not explosive.
+```
+
 
 ## 1. Термины и маппинг на GEO
 
@@ -39,10 +200,16 @@
 - визуально связь может быть «пассивной» или «активной».
 
 ### 1.3. Транзакция (Transaction)
-Процесс передачи обязательства/стоимости между участниками. В Этапе 1 транзакция **не обязана** строго соответствовать реальной маршрутизации протокола; важна наглядная визуализация «потока» по сети.
+Процесс передачи обязательства/стоимости между участниками.
+
+Контекст GEO: транзакция может проходить **по маршруту из нескольких линий доверия** (multi-hop). В Этапе 1 транзакция **не обязана** строго соответствовать реальной маршрутизации протокола; важна наглядная визуализация «потока» по сети.
 
 ### 1.4. Клиринг (Clearing)
-Схлопывание взаимных долгов (netting) по циклам/цепочкам. В Этапе 1 допускается упрощенная эвристика (например, поиск треугольников) с обязательным визуальным эффектом схлопывания и последующим изменением отображаемых балансов (демо).
+Схлопывание взаимных долгов (netting) по циклам/цепочкам.
+
+Контекст GEO: клиринг может происходить по **циклам длиной 3 узла и более** (длина цикла не фиксирована).
+
+В Этапе 1 допускается упрощенная эвристика (например, поиск треугольников) с обязательным визуальным эффектом схлопывания и последующим изменением отображаемых балансов (демо), но UI/визуализация должны поддерживать идею «цикл может быть длиннее».
 
 ---
 
@@ -66,8 +233,8 @@
 
 4) Анимации процессов:
 
-- транзакция: частица/комета летит от A к B;
-- клиринг: визуализация схлопывания (встречные частицы + вспышка/взрыв).
+- транзакция: искра (световой импульс) медленно идет по линии доверия от A к B, при достижении — вспышка узла получателя и «улетающий» вверх лейбл суммы;
+- клиринг: две искры разных цветов (debt/credit) идут навстречу по линии доверия и встречаются в центре, после чего происходит вспышка и рассыпание искрами, а лейбл суммы долга улетает вверх.
 
 5) Источник данных:
 
@@ -157,7 +324,7 @@ flowchart TD
 - Physics: координаты/скорости узлов, интеграция force simulation, drag.
 - Renderer: рисование кадра из текущего состояния.
 - Interaction: pointer события, hit-test, drag state.
-- VFX: частицы, вспышки, «шоквейв».
+- VFX: искры/частицы, вспышки, кольцевой импульс (мягкий, без «взрывной» метафоры).
 
 ---
 
@@ -379,18 +546,49 @@ API:
 
 Сущности:
 
-- `ParticleTx` (комета)
-- `ParticleDust` (искра/обломки)
-- `Shockwave` (кольцо)
+- `ParticleTx` (искра транзакции)
+- `ParticleDust` (мелкие искры/шлейф)
+- `Shockwave` (кольцевой импульс / pulse ring, опционально)
 
 Поведение и ориентиры:
 
-- транзакция: «комета» (голова + trail), см. идеи из [docs/ru/simulator/frontend/archive/SPEC-GEO-Simulator-Phase1.md](docs/ru/simulator/frontend/archive/SPEC-GEO-Simulator-Phase1.md:118)
-- взрывы и шоквейв — как концепт в [docs/ru/simulator/frontend/archive/MAIN Spec GEO Simulator Implementation (Vue 3 Stack).md](docs/ru/simulator/frontend/archive/MAIN%20Spec%20GEO%20Simulator%20Implementation%20(Vue%203%20Stack).md:52)
+- транзакция: **искра** медленно проходит по линии доверия от отправителя к получателю; при достижении получателя — короткая вспышка узла и появление лейбла суммы (например `125 GC`), который улетает вверх и растворяется.
+- клиринг: **две искры** (debt/credit) идут навстречу друг другу по активной линии; в точке встречи — вспышка + рассыпание мелкими искрами; лейбл суммы долга улетает вверх и растворяется. Кольцевой импульс допускается как мягкий визуальный акцент (без ощущения «взрыва»).
 
 ---
 
 ## 9. UI/UX и визуальные требования (Game Mode)
+
+### 9.0. Минимально необходимый набор элементов интерфейса (MVP)
+
+Фокус Этапа 1 — показать **сеть доверия** и **две финансовые операции** (Tx и Clearing) максимально наглядно и без визуального шума.
+
+Минимальный состав:
+
+1) **Граф (Canvas)**
+
+- узлы-участники:
+  - различение типа `business/person` (форма + базовый цвет);
+  - подписи имени на холсте по умолчанию **не рисуем** (имя показываем в карточке при выборе), чтобы не перегружать сцену.
+- линии доверия (ребра):
+  - числовые значения на ребре **не показываем**;
+  - `trustLimit/strength` могут влиять на визуал (толщина/альфа) для ощущения «важности» связи.
+
+2) **Интерактивность (Canvas + HUD)**
+
+- клик по узлу → выбор узла и открытие карточки участника;
+- подсветка связей выбранного узла + затемнение остальных;
+- drag узлов.
+
+3) **HUD (HTML overlay)**
+
+- карточка участника: **Тип + Имя + Баланс** (signed);
+- панель управления: `Single Tx` и `Run Clearing`.
+
+4) **VFX (Canvas)**
+
+- Tx как искра по линии + вспышка узла-получателя + «улетающий» лейбл суммы `N GC`;
+- Clearing как встречные искры + вспышка в центре + рассыпание искрами + «улетающий» лейбл суммы долга.
 
 ### 9.1. Визуальная метафора
 Стилистика: космическая тактическая карта (референсы и палитра описаны в [docs/ru/simulator/frontend/Игровой интерфейс симулятора GEO.md](docs/ru/simulator/frontend/%D0%98%D0%B3%D1%80%D0%BE%D0%B2%D0%BE%D0%B9%20%D0%B8%D0%BD%D1%82%D0%B5%D1%80%D1%84%D0%B5%D0%B9%D1%81%20%D1%81%D0%B8%D0%BC%D1%83%D0%BB%D1%8F%D1%82%D0%BE%D1%80%D0%B0%20GEO.md:83)).
@@ -403,10 +601,15 @@ API:
 - `nodeBusiness`: `#10b981`
 - `nodePerson`: `#3b82f6`
 - `linkIdle`: `rgba(148, 163, 184, 0.1)`
-- `linkActive`: gradient `Blue -> White -> Emerald` + glow
-- `txCore`: `#ffffff`
-- `txTrail`: `#22d3ee`
-- `clearingSpark`: `#fbbf24`
+- `linkActive`: градиент по направлению искры (цвет искры -> белый -> цвет искры) + мягкий glow
+- `sparkTxCore`: `#ffffff`
+- `sparkTxTrail`: `#22d3ee`
+- `sparkCredit`: `#22d3ee` (cyan)
+- `sparkDebt`: `#fb923c` (orange)
+- `balanceGlowCredit`: `rgba(34, 211, 238, 0.55)`
+- `balanceGlowDebt`: `rgba(251, 146, 60, 0.55)`
+- `balanceGlowNeutral`: `rgba(248, 250, 252, 0.25)`
+- `amountLabel`: `rgba(248, 250, 252, 0.9)`
 
 ### 9.3. Правила подсветки
 
@@ -416,12 +619,25 @@ API:
 - все прочие связи затемняются до opacity около `0.05` (ориентир [docs/ru/simulator/frontend/archive/MAIN Spec GEO Simulator Implementation (Vue 3 Stack).md](docs/ru/simulator/frontend/archive/MAIN%20Spec%20GEO%20Simulator%20Implementation%20(Vue%203%20Stack).md:40));
 - невыбранные узлы могут слегка снижать bloom/яркость (опционально).
 
+Дополнительная индикация «кредитор/дебитор» (по балансу):
+
+- при выборе/фокусе узла поверх базового bloom появляется **дополнительный glow**, показывающий знак баланса:
+  - `balance > 0` → **credit** (cyan);
+  - `balance < 0` → **debt** (orange);
+  - `balance ≈ 0` → нейтральный (slate/white).
+- интенсивность glow может зависеть от `abs(balance)` (мягкая нелинейная шкала), чтобы «сильные» балансы читались быстрее.
+
 ### 9.4. HUD
 
 HUD должен выглядеть «как в игре», но быть функциональным:
 
-- карточка участника: тип, имя, баланс, trust limit/score (если есть)
-- панель управления: две кнопки, состояние прогресса clearing
+- карточка участника: **тип (иконка business/person), имя, баланс (signed)**
+- панель управления: две кнопки (`Single Tx`, `Run Clearing`), состояние `disabled` на время clearing
+
+Числа и подписи:
+
+- числовые значения `trustLimit/strength` на ребрах **не выводим**;
+- сумма операции визуализируется только как лейбл в эффекте: `N GC` (округление до 0 знаков), который улетает вверх и растворяется.
 
 ---
 
@@ -437,27 +653,36 @@ HUD должен выглядеть «как в игре», но быть фун
 
 ### 10.2. Транзакция (Tx)
 
-Требование: частица летит A→B, оставляет след, при достижении цели — вспышка.
+Требование: показать финансовую транзакцию как понятный, «консервативный» сигнал по линии доверия.
 
 - выбор узлов:
   - если выбран узел: брать соседнюю связь (link) от него;
   - иначе: случайная связь.
-- визуал:
-  - «голова» белая
-  - trail cyan
-  - аддитивное смешивание для свечения
+- визуал (Canvas):
+  - по выбранной линии доверия A→B движется **искра** (ядро `sparkTxCore` + мягкий шлейф `sparkTxTrail`), скорость движения ниже «кометы», чтобы эффект читался;
+  - во время движения ребро становится **ярким и мерцающим** (active link), подсвечиваясь цветом искры;
+  - при достижении узла B:
+    - узел B коротко **вспыхивает** (не «взрыв»);
+    - появляется лейбл суммы `N GC`, который улетает вверх и растворяется.
 
 ### 10.3. Клиринг
 
-Требование: показать «схлопывание долга» как энергетический процесс.
+Требование: показать «схлопывание долга» как взаимозачёт (netting) без агрессивной «взрывной» метафоры.
 
 - эвристика Этапа 1:
   - попытаться найти треугольник (A-B-C-A) в текущем графе;
   - если не найден — использовать локальную эвристику вокруг выбранного узла.
-- визуал:
-  - встречные частицы к midpoint
-  - вспышка/взрыв + шоквейв
-  - демо-обновление баланса (например, уменьшение абсолютного значения) с отражением в карточке
+- визуал (Canvas):
+  - по выбранной линии доверия запускаются **две искры разных цветов**:
+    - `sparkDebt` (orange) и `sparkCredit` (cyan);
+  - искры движутся **навстречу** и встречаются в центре (midpoint);
+  - в точке встречи:
+    - короткая **вспышка**;
+    - **рассыпание** мелкими искрами (`ParticleDust`);
+    - (опционально) мягкий кольцевой импульс (`Shockwave` как pulse ring);
+    - появляется лейбл суммы долга `N GC`, который улетает вверх и растворяется.
+  - во время прохождения искр линия доверия становится яркой/мерцающей; после эффекта возвращается в обычный `linkIdle`.
+  - демо-обновление баланса (например, уменьшение `abs(balance)`) с отражением в карточке.
 
 ### 10.4. Конкуренция эффектов
 
@@ -538,7 +763,7 @@ HUD должен выглядеть «как в игре», но быть фун
 Критерии приемки:
 
 - эффекты читаемы, работают стабильно
-- clearing имеет «взрыв/шоквейв»
+- clearing имеет встречные искры + вспышку в центре + рассыпание искрами + «улетающий» лейбл суммы
 
 ### 12.6. Производительность и debug
 
