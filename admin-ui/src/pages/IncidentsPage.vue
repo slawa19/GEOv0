@@ -7,6 +7,7 @@ import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { useConfigStore } from '../stores/config'
 import { useAuthStore } from '../stores/auth'
@@ -63,7 +64,6 @@ async function load() {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('incidents.loadFailed')
-    ElMessage.error(error.value || t('incidents.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -158,12 +158,11 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="load"
     />
     <el-alert
       v-else-if="lastAbortTxId"

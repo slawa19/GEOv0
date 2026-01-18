@@ -536,41 +536,43 @@ const adviceItems = computed(() => {
                     :tooltip-text="t('graph.analytics.activity.summaryTooltip')"
                   />
                 </template>
-                <div
-                  v-if="selectedActivity"
-                  class="metricRows"
-                >
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      :label="t('graph.analytics.activity.trustlinesCreated')"
-                      :tooltip-text="t('graph.analytics.activity.trustlinesCreatedTooltip')"
-                    />
-                    <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
+                <div v-if="selectedActivity">
+                  <div class="activityGridActivityHeader">
+                    <span class="geoHint">{{ t('graph.analytics.activity.columnWindow') }}</span>
                   </div>
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      :label="t('graph.analytics.activity.trustlinesClosedNow')"
-                      :tooltip-text="t('graph.analytics.activity.trustlinesClosedNowTooltip')"
-                    />
-                    <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      :label="t('graph.analytics.activity.incidentsInitiator')"
-                      :tooltip-text="t('graph.analytics.activity.incidentsInitiatorTooltip')"
-                    />
-                    <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
-                  </div>
-                  <div class="metricRow">
-                    <TooltipLabel
-                      class="metricRow__label"
-                      :label="t('graph.analytics.activity.participantOps')"
-                      :tooltip-text="t('graph.analytics.activity.participantOpsTooltip')"
-                    />
-                    <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+                  <div class="metricRows">
+                    <div class="metricRow">
+                      <TooltipLabel
+                        class="metricRow__label"
+                        :label="t('graph.analytics.activity.trustlinesCreated')"
+                        :tooltip-text="t('graph.analytics.activity.trustlinesCreatedTooltip')"
+                      />
+                      <span class="metricRow__value">{{ selectedActivity.trustlineCreated[7] }} / {{ selectedActivity.trustlineCreated[30] }} / {{ selectedActivity.trustlineCreated[90] }}</span>
+                    </div>
+                    <div class="metricRow">
+                      <TooltipLabel
+                        class="metricRow__label"
+                        :label="t('graph.analytics.activity.trustlinesClosedNow')"
+                        :tooltip-text="t('graph.analytics.activity.trustlinesClosedNowTooltip')"
+                      />
+                      <span class="metricRow__value">{{ selectedActivity.trustlineClosed[7] }} / {{ selectedActivity.trustlineClosed[30] }} / {{ selectedActivity.trustlineClosed[90] }}</span>
+                    </div>
+                    <div class="metricRow">
+                      <TooltipLabel
+                        class="metricRow__label"
+                        :label="t('graph.analytics.activity.incidentsInitiator')"
+                        :tooltip-text="t('graph.analytics.activity.incidentsInitiatorTooltip')"
+                      />
+                      <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+                    </div>
+                    <div class="metricRow">
+                      <TooltipLabel
+                        class="metricRow__label"
+                        :label="t('graph.analytics.activity.participantOps')"
+                        :tooltip-text="t('graph.analytics.activity.participantOpsTooltip')"
+                      />
+                      <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+                    </div>
                   </div>
                 </div>
                 <div
@@ -1524,6 +1526,13 @@ const adviceItems = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.activityGridActivityHeader {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+  padding-right: 2px;
 }
 
 .metricRow {

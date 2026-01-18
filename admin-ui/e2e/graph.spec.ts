@@ -13,6 +13,14 @@ test('graph: loads, supports equivalent filter, and opens drawer on node click',
 
   await expect(page.getByText('Network Graph', { exact: true })).toBeVisible()
 
+  // UI layout sanity (regression insurance): ensure the toolbar uses the intended grid structure.
+  await page.getByRole('tab', { name: 'Filters', exact: true }).click()
+  await expect(page.locator('.filtersGrid')).toBeVisible()
+  await page.getByRole('tab', { name: 'Display', exact: true }).click()
+  await expect(page.locator('.displayGrid')).toBeVisible()
+  await page.getByRole('tab', { name: 'Navigate', exact: true }).click()
+  await expect(page.locator('.navMainRow')).toBeVisible()
+
   const cy = page.getByTestId('graph-cy')
   await expect(cy).toBeVisible()
 

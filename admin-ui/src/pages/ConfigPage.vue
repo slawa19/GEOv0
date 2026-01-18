@@ -7,6 +7,7 @@ import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 
 type RowKind = 'boolean' | 'number' | 'string' | 'json'
@@ -278,12 +279,11 @@ watch(
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="load"
     />
     <el-skeleton
       v-if="loading"
@@ -312,10 +312,11 @@ watch(
             size="small"
             table-layout="fixed"
             class="geoTable"
+            :show-header="sections.indexOf(section) === 0"
           >
             <el-table-column
               :label="t('config.columns.key')"
-              min-width="420"
+              min-width="300"
               show-overflow-tooltip
             >
               <template #default="scope">
@@ -358,7 +359,7 @@ watch(
 
             <el-table-column
               :label="t('common.value')"
-              min-width="420"
+              min-width="300"
             >
               <template #default="scope">
                 <div class="cfgValueRow">
@@ -468,41 +469,55 @@ watch(
 }
 
 .cfgSection {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 .cfgSection__title {
   font-weight: 700;
-  margin: 6px 0 10px 0;
+  font-size: 13px;
+  margin: 4px 0 4px 0;
+  color: var(--el-text-color-primary);
 }
 
 .cfgName {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  line-height: 1.2;
 }
 .cfgKey {
-  margin-top: 2px;
+  margin-top: 1px;
+  font-size: 10px;
+  opacity: 0.8;
 }
 
 .cfgValueRow {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .cfgBoolLabel {
-  font-size: var(--geo-font-size-label);
+  font-size: 11px;
   color: var(--el-text-color-secondary);
-  font-weight: 500;
-  width: 44px;
+  font-weight: 400;
+  width: 32px;
   text-align: center;
-  flex: 0 0 44px;
+  flex: 0 0 32px;
 }
 
 .cfgBoolLabel--active {
   color: var(--el-text-color-primary);
-  font-weight: 700;
+  font-weight: 600;
+}
+
+.geoTable :deep(.el-table__cell) {
+  padding: 4px 0;
+}
+
+.geoTable :deep(.el-table__header) th {
+  padding: 4px 0;
+  background-color: var(--el-fill-color-lighter);
 }
 
 .cfgNumber {

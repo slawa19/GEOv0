@@ -14,6 +14,7 @@ import {
   MIN_ZOOM_LABELS_PERSON,
 } from '../constants/graph'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
 import GraphLegend from './graph/GraphLegend.vue'
@@ -143,6 +144,12 @@ const toolbarTab = ref<'filters' | 'display' | 'navigate'>('filters')
 
 const isRealMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toString().toLowerCase() === 'real')
 const selected = ref<SelectedInfo | null>(null)
+
+const MAX_AUTO_RENDER_NODES = 1500
+const MAX_AUTO_RENDER_EDGES = 8000
+
+const renderOverride = ref(false)
+const cyInitialized = ref(false)
 
 const zoom = ref<number>(1)
 
@@ -334,14 +341,39 @@ const {
 onMounted(async () => {
   restoreStorage()
 
-  await loadData()
-
-  graphViz.initCy()
+  await reloadAll()
 })
 
 onBeforeUnmount(() => {
   graphViz.destroyCy()
 })
+
+const rawNodesCount = computed(() => (participants.value || []).length)
+const rawEdgesCount = computed(() => (filteredTrustlines.value || []).length)
+
+const isTooLargeToAutoRender = computed(() => {
+  return rawNodesCount.value > MAX_AUTO_RENDER_NODES || rawEdgesCount.value > MAX_AUTO_RENDER_EDGES
+})
+
+function ensureCyInitialized() {
+  if (cyInitialized.value) return
+  if (isTooLargeToAutoRender.value && !renderOverride.value) return
+  graphViz.initCy()
+  cyInitialized.value = true
+}
+
+function renderAnyway() {
+  renderOverride.value = true
+  ensureCyInitialized()
+}
+
+async function reloadAll() {
+  await loadData()
+  // If data got smaller after filters/focus changes, auto-init.
+  ensureCyInitialized()
+  // If graph is already initialized, just rebuild it.
+  graphViz.rebuildGraph({ fit: true })
+}
 
 useGraphPageWatchers({
   isRealMode,
@@ -374,6 +406,9 @@ useGraphPageWatchers({
 })
 
 const stats = computed(() => {
+  if (isTooLargeToAutoRender.value && !renderOverride.value) {
+    return { nodes: rawNodesCount.value, edges: rawEdgesCount.value, bottlenecks: 0 }
+  }
   const { nodes, edges } = graphViz.buildElements()
   const bottlenecks = edges.filter((e) => e.data?.bottleneck === 1).length
   return { nodes: nodes.length, edges: edges.length, bottlenecks }
@@ -408,13 +443,34 @@ const stats = computed(() => {
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="reloadAll"
     />
+
+    <el-alert
+      v-else-if="isTooLargeToAutoRender && !renderOverride"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="mb"
+      :title="t('graph.guard.title', { nodes: rawNodesCount, edges: rawEdgesCount })"
+    >
+      <template #default>
+        <div class="guardRow">
+          <div class="guardHint">{{ t('graph.guard.hint', { maxNodes: MAX_AUTO_RENDER_NODES, maxEdges: MAX_AUTO_RENDER_EDGES }) }}</div>
+          <el-button
+            size="small"
+            type="primary"
+            @click="renderAnyway"
+          >
+            {{ t('graph.guard.renderAnyway') }}
+          </el-button>
+        </div>
+      </template>
+    </el-alert>
 
     <GraphFiltersToolbar
       v-model:toolbar-tab="toolbarTab"
@@ -526,6 +582,18 @@ const stats = computed(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.guardRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.guardHint {
+  color: var(--el-text-color-secondary);
+  font-size: var(--geo-font-size-sub);
 }
 
 .cy-wrap {

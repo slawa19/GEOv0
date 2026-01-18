@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { debounce } from '../utils/debounce'
 import { t } from '../i18n'
 import type { AuditLogEntry } from '../types/domain'
@@ -45,7 +45,6 @@ async function load() {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('auditLog.loadFailed')
-    ElMessage.error(error.value || t('auditLog.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -99,12 +98,11 @@ watch(q, () => {
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="load"
     />
     <el-skeleton
       v-if="loading"

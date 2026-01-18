@@ -43,27 +43,25 @@ const onSelect = (s: ParticipantSuggestion) => {
       tooltip-key="graph.search"
         :max-lines="4"
     />
-    <div class="navRow__fieldGroup">
-      <el-autocomplete
-        v-model="searchQueryModel"
-        :fetch-suggestions="fetchSuggestions"
-        :placeholder="t('graph.search.placeholder')"
-        size="small"
-        clearable
-        class="navRow__field"
-        data-testid="graph-search-input"
-        @select="onSelect"
-        @keyup.enter="onFocusSearch"
-      />
-      <el-button
-        class="navRow__button"
-        size="small"
-        :disabled="props.canFind === false"
-        @click="onFocusSearch"
-      >
-        {{ t('graph.navigate.find') }}
-      </el-button>
-    </div>
+    <el-autocomplete
+      v-model="searchQueryModel"
+      :fetch-suggestions="fetchSuggestions"
+      :placeholder="t('graph.search.placeholder')"
+      size="small"
+      clearable
+      class="navRow__field"
+      data-testid="graph-search-input"
+      @select="onSelect"
+      @keyup.enter="onFocusSearch"
+    />
+    <el-button
+      class="navRow__button"
+      size="small"
+      :disabled="props.canFind === false"
+      @click="onFocusSearch"
+    >
+      {{ t('graph.navigate.find') }}
+    </el-button>
   </div>
 </template>
 
@@ -75,39 +73,27 @@ const onSelect = (s: ParticipantSuggestion) => {
 }
 
 .navRow {
-  display: grid;
-  grid-template-columns: max-content max-content;
-  justify-content: start;
-  justify-items: start;
-  gap: 10px;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
+  gap: 8px;
 }
 
 .navRow__label {
-  min-width: 76px;
-}
-
-.navRow__fieldGroup {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  width: fit-content;
-  max-width: 100%;
+  width: var(--geo-nav-label-w, 84px);
+  flex: 0 0 auto;
 }
 
 .navRow__field {
-  flex: 0 1 auto;
-  min-width: 0;
-  width: clamp(34ch, 52vw, 90ch);
+  width: 320px;
+  flex: 0 0 auto;
 }
 
 .navRow__button {
-  flex: 0 0 auto;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
-.navRow__field :deep(.el-autocomplete),
 .navRow__field :deep(.el-input),
 .navRow__field :deep(.el-input__wrapper) {
   width: 100%;
@@ -115,21 +101,20 @@ const onSelect = (s: ParticipantSuggestion) => {
 
 @media (max-width: 768px) {
   .navRow {
-    grid-template-columns: 1fr;
-    align-items: start;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .navRow__label {
-    min-width: 0;
-  }
-
-  .navRow__fieldGroup {
-    flex-wrap: wrap;
+    width: auto;
   }
 
   .navRow__field {
-    flex: 1 1 auto;
-    width: 100%;
+    width: 100% !important;
+  }
+
+  .navRow__button {
+    align-self: flex-start;
   }
 }
 </style>

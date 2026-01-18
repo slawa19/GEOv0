@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 test('participants page loads and shows table', async ({ page }) => {
   await page.goto('/participants')
 
-  await expect(page.getByText('Participants', { exact: true })).toBeVisible()
+  await expect(page.getByRole('main').getByText('Participants', { exact: true })).toBeVisible()
 
   const table = page.locator('.el-table')
   await expect(table).toBeVisible()

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import String, cast, desc, func, select, and_
+from sqlalchemy import String, cast, desc, func, select, and_, case, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -38,6 +38,10 @@ from app.schemas.admin import (
     AdminParticipantActionRequest,
     AdminParticipantsListResponse,
     AdminIncidentsListResponse,
+    AdminLiquiditySummaryResponse,
+    AdminLiquidityNetRow,
+    AdminParticipantsStatsResponse,
+    AdminTrustLinesBottlenecksResponse,
     AdminTrustLinesListResponse,
     AdminWhoAmIResponse,
 )
@@ -398,6 +402,278 @@ async def list_admin_participants(
         page=page,
         per_page=per_page,
         total=int(total),
+    )
+
+
+@router.get("/participants/stats", response_model=AdminParticipantsStatsResponse)
+async def admin_participants_stats(
+    db: AsyncSession = Depends(deps.get_db),
+) -> AdminParticipantsStatsResponse:
+    status_rows = (
+        await db.execute(
+            select(Participant.status, func.count())
+            .group_by(Participant.status)
+        )
+    ).all()
+    type_rows = (
+        await db.execute(
+            select(Participant.type, func.count())
+            .group_by(Participant.type)
+        )
+    ).all()
+
+    by_status: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+
+    for status, n in status_rows:
+        k = str(status or "").strip().lower() or "unknown"
+        by_status[k] = int(n or 0)
+    for type_, n in type_rows:
+        k = str(type_ or "").strip().lower() or "unknown"
+        by_type[k] = int(n or 0)
+
+    total = sum(by_status.values())
+    return AdminParticipantsStatsResponse(
+        participants_by_status=by_status,
+        participants_by_type=by_type,
+        total_participants=int(total),
+    )
+
+
+@router.get("/trustlines/bottlenecks", response_model=AdminTrustLinesBottlenecksResponse)
+async def admin_trustlines_bottlenecks(
+    threshold: float = Query(0.10, ge=0.0, le=1.0),
+    limit: int = Query(10, ge=1, le=50),
+    equivalent: str | None = Query(None, description="Equivalent code (optional)"),
+    db: AsyncSession = Depends(deps.get_db),
+) -> AdminTrustLinesBottlenecksResponse:
+    eq_code = str(equivalent or "").strip().upper() or None
+
+    p_from = aliased(Participant)
+    p_to = aliased(Participant)
+    used_expr = func.coalesce(Debt.amount, 0)
+    available_expr = TrustLine.limit - used_expr
+
+    stmt = (
+        select(
+            TrustLine.id,
+            TrustLine.limit,
+            TrustLine.status,
+            TrustLine.created_at,
+            TrustLine.updated_at,
+            TrustLine.policy,
+            EquivalentModel.code.label("equivalent"),
+            p_from.pid.label("from_pid"),
+            p_from.display_name.label("from_display_name"),
+            p_to.pid.label("to_pid"),
+            p_to.display_name.label("to_display_name"),
+            used_expr.label("used"),
+            available_expr.label("available"),
+        )
+        .select_from(TrustLine)
+        .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
+        .join(p_from, TrustLine.from_participant_id == p_from.id)
+        .join(p_to, TrustLine.to_participant_id == p_to.id)
+        .outerjoin(
+            Debt,
+            and_(
+                Debt.debtor_id == TrustLine.to_participant_id,
+                Debt.creditor_id == TrustLine.from_participant_id,
+                Debt.equivalent_id == TrustLine.equivalent_id,
+            ),
+        )
+        .where(
+            TrustLine.status == "active",
+            TrustLine.limit > 0,
+            (available_expr / TrustLine.limit) < float(threshold),
+        )
+        .order_by(available_expr.asc(), TrustLine.created_at.asc())
+        .limit(limit)
+    )
+
+    if eq_code:
+        stmt = stmt.where(EquivalentModel.code == eq_code)
+
+    rows = (await db.execute(stmt)).all()
+    items: list[TrustLineSchema] = []
+    for (
+        tl_id,
+        limit_value,
+        status,
+        created_at,
+        updated_at,
+        policy,
+        equivalent_code,
+        from_pid,
+        from_display_name,
+        to_pid,
+        to_display_name,
+        used,
+        available,
+    ) in rows:
+        items.append(
+            TrustLineSchema.model_validate(
+                {
+                    "id": tl_id,
+                    "from_pid": from_pid,
+                    "to_pid": to_pid,
+                    "from_display_name": from_display_name,
+                    "to_display_name": to_display_name,
+                    "equivalent_code": equivalent_code,
+                    "limit": limit_value,
+                    "used": used,
+                    "available": available,
+                    "status": status,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "policy": policy,
+                }
+            )
+        )
+
+    return AdminTrustLinesBottlenecksResponse(threshold=float(threshold), items=items)
+
+
+@router.get("/liquidity/summary", response_model=AdminLiquiditySummaryResponse)
+async def admin_liquidity_summary(
+    equivalent: str | None = Query(None, description="Equivalent code (optional; omit for ALL)"),
+    threshold: float = Query(0.10, ge=0.0, le=1.0),
+    limit: int = Query(10, ge=1, le=50, description="Top-N size for ranked lists"),
+    db: AsyncSession = Depends(deps.get_db),
+) -> AdminLiquiditySummaryResponse:
+    eq_code = str(equivalent or "").strip().upper() or None
+    now = _utc_now()
+
+    used_expr = func.coalesce(Debt.amount, 0)
+    available_expr = TrustLine.limit - used_expr
+
+    totals_stmt = (
+        select(
+            func.count().label("active_trustlines"),
+            func.coalesce(func.sum(TrustLine.limit), 0).label("total_limit"),
+            func.coalesce(func.sum(used_expr), 0).label("total_used"),
+            func.coalesce(func.sum(available_expr), 0).label("total_available"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(TrustLine.limit > 0, (available_expr / TrustLine.limit) < float(threshold)),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("bottlenecks"),
+        )
+        .select_from(TrustLine)
+        .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
+        .outerjoin(
+            Debt,
+            and_(
+                Debt.debtor_id == TrustLine.to_participant_id,
+                Debt.creditor_id == TrustLine.from_participant_id,
+                Debt.equivalent_id == TrustLine.equivalent_id,
+            ),
+        )
+        .where(TrustLine.status == "active")
+    )
+    if eq_code:
+        totals_stmt = totals_stmt.where(EquivalentModel.code == eq_code)
+
+    totals = (await db.execute(totals_stmt)).one()
+    active_trustlines = int(totals.active_trustlines or 0)
+    total_limit = totals.total_limit
+    total_used = totals.total_used
+    total_available = totals.total_available
+    bottlenecks = int(totals.bottlenecks or 0)
+
+    # Incidents over SLA ("stuck" payments). Filter by equivalent in Python to keep it portable.
+    sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
+    cutoff = now - timedelta(seconds=sla_seconds)
+    inc_payloads = (
+        await db.execute(
+            select(Transaction.payload)
+            .where(
+                Transaction.type == "PAYMENT",
+                Transaction.state.in_(_ACTIVE_PAYMENT_TX_STATES),
+                Transaction.updated_at < cutoff,
+            )
+        )
+    ).scalars().all()
+    if eq_code:
+        incidents_over_sla = sum(
+            1
+            for p in inc_payloads
+            if str((p or {}).get("equivalent") or "").strip().upper() == eq_code
+        )
+    else:
+        incidents_over_sla = len(inc_payloads)
+
+    # Net positions (Debt direction: debtor -> creditor).
+    debt_base = (
+        select(Debt)
+        .join(EquivalentModel, Debt.equivalent_id == EquivalentModel.id)
+        .where(Debt.amount > 0)
+    )
+    if eq_code:
+        debt_base = debt_base.where(EquivalentModel.code == eq_code)
+    debt_subq = debt_base.subquery()
+
+    pos = select(debt_subq.c.creditor_id.label("participant_id"), debt_subq.c.amount.label("delta"))
+    neg = select(debt_subq.c.debtor_id.label("participant_id"), (-debt_subq.c.amount).label("delta"))
+    delta = union_all(pos, neg).subquery()
+
+    net_stmt = (
+        select(
+            Participant.pid.label("pid"),
+            Participant.display_name.label("display_name"),
+            func.coalesce(func.sum(delta.c.delta), 0).label("net"),
+        )
+        .select_from(delta)
+        .join(Participant, Participant.id == delta.c.participant_id)
+        .group_by(Participant.pid, Participant.display_name)
+    )
+
+    net = net_stmt.subquery()
+    net_base = select(net.c.pid, net.c.display_name, net.c.net)
+
+    top_creditors_rows = (
+        await db.execute(net_base.where(net.c.net > 0).order_by(net.c.net.desc()).limit(limit))
+    ).all()
+    top_debtors_rows = (
+        await db.execute(net_base.where(net.c.net < 0).order_by(net.c.net.asc()).limit(limit))
+    ).all()
+    top_abs_rows = (
+        await db.execute(net_base.order_by(func.abs(net.c.net).desc()).limit(limit))
+    ).all()
+
+    top_creditors = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_creditors_rows]
+    top_debtors = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_debtors_rows]
+    top_by_abs_net = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_abs_rows]
+
+    # Top bottleneck edges with computed used/available.
+    bottlenecks_env = await admin_trustlines_bottlenecks(
+        threshold=threshold,
+        limit=limit,
+        equivalent=eq_code,
+        db=db,
+    )
+
+    return AdminLiquiditySummaryResponse(
+        equivalent=eq_code,
+        threshold=float(threshold),
+        updated_at=now,
+        active_trustlines=active_trustlines,
+        bottlenecks=bottlenecks,
+        incidents_over_sla=int(incidents_over_sla),
+        total_limit=total_limit,
+        total_used=total_used,
+        total_available=total_available,
+        top_creditors=top_creditors,
+        top_debtors=top_debtors,
+        top_by_abs_net=top_by_abs_net,
+        top_bottleneck_edges=bottlenecks_env.items,
     )
 
 

@@ -80,13 +80,12 @@ const ariaLabel = computed(() => {
 
 <style scoped>
 .tl {
-  display: inline-flex;
-  align-items: baseline;
-  flex-wrap: nowrap;
+  display: inline-block;
+  vertical-align: baseline;
 }
 
 .tl__label {
-  min-width: 0;
+  display: inline;
 }
 
 .tl__icon {

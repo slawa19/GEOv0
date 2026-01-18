@@ -7,6 +7,7 @@ import { toastApiError } from '../api/errorToast'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 
 type FlagRow = { key: string; value: boolean; original: boolean }
@@ -94,12 +95,11 @@ onMounted(() => void load())
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="load"
     />
     <el-alert
       v-else-if="fullMultipathEnabled"

@@ -192,6 +192,23 @@ const focusDepthModel = computed({
   get: () => props.focusDepth,
   set: (v) => emit('update:focusDepth', v),
 })
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n))
+}
+
+function widthChFromLabels(labels: string[], minCh: number, maxCh: number, extraCh = 4): string {
+  const longest = Math.max(0, ...labels.map((s) => (s ?? '').length))
+  return `${clamp(longest + extraCh, minCh, maxCh)}ch`
+}
+
+const eqFieldWidth = computed(() => widthChFromLabels(props.availableEquivalents, 10, 18, 2))
+const statusFieldWidth = computed(() => widthChFromLabels(props.statuses.map((s) => s.label), 14, 26, 6))
+const thresholdFieldWidth = computed(() => '18ch')
+const minDegreeFieldWidth = computed(() => '12ch')
+
+const layoutFieldWidth = computed(() => widthChFromLabels(props.layoutOptions.map((o) => o.label), 12, 22, 6))
+const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate.depth1'), t('graph.navigate.depth2')], 10, 18, 4))
 </script>
 
 <template>
@@ -205,8 +222,8 @@ const focusDepthModel = computed({
         :label="t('graph.toolbar.filtersTab')"
         name="filters"
       >
-        <div class="paneGrid">
-          <div class="ctl ctl--eq">
+        <div class="filtersGrid">
+          <div class="ctl filtersGrid__eq">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.equivalent')"
@@ -215,7 +232,8 @@ const focusDepthModel = computed({
             <el-select
               v-model="eqModel"
               size="small"
-              class="ctl__field"
+              class="ctl__field ctl__field--compact"
+              :style="{ '--geo-ctl-width': eqFieldWidth }"
               data-testid="graph-filter-eq"
             >
               <el-option
@@ -227,7 +245,7 @@ const focusDepthModel = computed({
             </el-select>
           </div>
 
-          <div class="ctl ctl--status">
+          <div class="ctl filtersGrid__status">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.status')"
@@ -239,7 +257,8 @@ const focusDepthModel = computed({
               collapse-tags
               collapse-tags-tooltip
               size="small"
-              class="ctl__field"
+              class="ctl__field ctl__field--compact"
+              :style="{ '--geo-ctl-width': statusFieldWidth }"
             >
               <el-option
                 v-for="s in statuses"
@@ -250,7 +269,7 @@ const focusDepthModel = computed({
             </el-select>
           </div>
 
-          <div class="ctl ctl--threshold">
+          <div class="ctl filtersGrid__threshold">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.bottleneck')"
@@ -259,12 +278,13 @@ const focusDepthModel = computed({
             <el-input
               v-model="thresholdModel"
               size="small"
-              class="ctl__field"
+              class="ctl__field ctl__field--compact"
+              :style="{ '--geo-ctl-width': thresholdFieldWidth }"
               :placeholder="t('graph.filters.bottleneckPlaceholder')"
             />
           </div>
 
-          <div class="ctl">
+          <div class="ctl filtersGrid__type">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.type')"
@@ -274,16 +294,16 @@ const focusDepthModel = computed({
               v-model="typeFilterModel"
               size="small"
             >
-              <el-checkbox-button label="person">
+              <el-checkbox-button value="person">
                 {{ t('participant.type.person') }}
               </el-checkbox-button>
-              <el-checkbox-button label="business">
+              <el-checkbox-button value="business">
                 {{ t('participant.type.business') }}
               </el-checkbox-button>
             </el-checkbox-group>
           </div>
 
-          <div class="ctl ctl--degree">
+          <div class="ctl filtersGrid__degree">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.minDegree')"
@@ -295,7 +315,8 @@ const focusDepthModel = computed({
               :min="0"
               :max="20"
               controls-position="right"
-              class="ctl__field"
+              class="ctl__field ctl__field--compact"
+              :style="{ '--geo-ctl-width': minDegreeFieldWidth }"
             />
           </div>
         </div>
@@ -305,8 +326,8 @@ const focusDepthModel = computed({
         :label="t('graph.toolbar.displayTab')"
         name="display"
       >
-        <div class="paneGrid">
-          <div class="ctl ctl--layout">
+        <div class="displayGrid">
+          <div class="ctl displayGrid__layout">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.display.layout')"
@@ -315,7 +336,8 @@ const focusDepthModel = computed({
             <el-select
               v-model="layoutNameModel"
               size="small"
-              class="ctl__field"
+              class="ctl__field ctl__field--compact"
+              :style="{ '--geo-ctl-width': layoutFieldWidth }"
             >
               <el-option
                 v-for="o in layoutOptions"
@@ -326,7 +348,7 @@ const focusDepthModel = computed({
             </el-select>
           </div>
 
-          <div class="ctl">
+          <div class="ctl displayGrid__spacing">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.display.layoutSpacing')"
@@ -341,99 +363,109 @@ const focusDepthModel = computed({
             />
           </div>
 
-          <div class="ctl">
-            <TooltipLabel
-              class="toolbarLabel ctl__label"
-              :label="t('graph.display.businessLabels')"
-              tooltip-key="graph.labels"
-            />
-            <el-checkbox-group
-              v-model="businessLabelPartsModel"
-              size="small"
-            >
-              <el-checkbox-button label="name">
-                {{ t('graph.display.labelPart.name') }}
-              </el-checkbox-button>
-              <el-checkbox-button label="pid">
-                {{ t('graph.display.labelPart.pid') }}
-              </el-checkbox-button>
-            </el-checkbox-group>
-          </div>
-
-          <div class="ctl">
-            <TooltipLabel
-              class="toolbarLabel ctl__label"
-              :label="t('graph.display.personLabels')"
-              tooltip-key="graph.labels"
-            />
-            <el-checkbox-group
-              v-model="personLabelPartsModel"
-              size="small"
-            >
-              <el-checkbox-button label="name">
-                {{ t('graph.display.labelPart.name') }}
-              </el-checkbox-button>
-              <el-checkbox-button label="pid">
-                {{ t('graph.display.labelPart.pid') }}
-              </el-checkbox-button>
-            </el-checkbox-group>
-          </div>
-
-          <div class="geoToggleGrid">
-            <div class="geoToggleLine">
+          <div class="displayGrid__labels ctlGroup ctlGroup--labels">
+            <div class="ctl">
               <TooltipLabel
-                class="toolbarLabel"
-                :label="t('graph.display.labels')"
+                class="toolbarLabel ctl__label"
+                :label="t('graph.display.businessLabels')"
                 tooltip-key="graph.labels"
               />
-              <el-switch
-                v-model="showLabelsModel"
+              <el-checkbox-group
+                v-model="businessLabelPartsModel"
                 size="small"
-              />
+              >
+                <el-checkbox-button value="name">
+                  {{ t('graph.display.labelPart.name') }}
+                </el-checkbox-button>
+                <el-checkbox-button value="pid">
+                  {{ t('graph.display.labelPart.pid') }}
+                </el-checkbox-button>
+              </el-checkbox-group>
             </div>
-            <div class="geoToggleLine">
+
+            <div class="ctl">
               <TooltipLabel
-                class="toolbarLabel"
-                :label="t('graph.display.autoLabels')"
+                class="toolbarLabel ctl__label"
+                :label="t('graph.display.personLabels')"
                 tooltip-key="graph.labels"
               />
-              <el-switch
-                v-model="autoLabelsByZoomModel"
+              <el-checkbox-group
+                v-model="personLabelPartsModel"
                 size="small"
-              />
+              >
+                <el-checkbox-button value="name">
+                  {{ t('graph.display.labelPart.name') }}
+                </el-checkbox-button>
+                <el-checkbox-button value="pid">
+                  {{ t('graph.display.labelPart.pid') }}
+                </el-checkbox-button>
+              </el-checkbox-group>
             </div>
-            <div class="geoToggleLine">
-              <TooltipLabel
-                class="toolbarLabel"
-                :label="t('graph.display.incidents')"
-                tooltip-key="graph.incidents"
-              />
-              <el-switch
-                v-model="showIncidentsModel"
-                size="small"
-              />
+          </div>
+
+          <div class="displayGrid__toggles displayToggleRow">
+            <div class="displayToggleGroup">
+              <div class="displayToggle">
+                <TooltipLabel
+                  class="toolbarLabel"
+                  :label="t('graph.display.labels')"
+                  tooltip-key="graph.labels"
+                />
+                <el-switch
+                  v-model="showLabelsModel"
+                  size="small"
+                />
+              </div>
+              <div class="displayToggle">
+                <TooltipLabel
+                  class="toolbarLabel"
+                  :label="t('graph.display.autoLabels')"
+                  tooltip-key="graph.labels"
+                />
+                <el-switch
+                  v-model="autoLabelsByZoomModel"
+                  size="small"
+                />
+              </div>
             </div>
-            <div class="geoToggleLine">
-              <TooltipLabel
-                class="toolbarLabel"
-                :label="t('graph.display.hideIsolates')"
-                tooltip-key="graph.hideIsolates"
-              />
-              <el-switch
-                v-model="hideIsolatesModel"
-                size="small"
-              />
+
+            <div class="displayToggleGroup">
+              <div class="displayToggle">
+                <TooltipLabel
+                  class="toolbarLabel"
+                  :label="t('graph.display.incidents')"
+                  tooltip-key="graph.incidents"
+                />
+                <el-switch
+                  v-model="showIncidentsModel"
+                  size="small"
+                />
+              </div>
+              <div class="displayToggle">
+                <TooltipLabel
+                  class="toolbarLabel"
+                  :label="t('graph.display.hideIsolates')"
+                  tooltip-key="graph.hideIsolates"
+                />
+                <el-switch
+                  v-model="hideIsolatesModel"
+                  size="small"
+                />
+              </div>
             </div>
-            <div class="geoToggleLine">
-              <TooltipLabel
-                class="toolbarLabel"
-                :label="t('graph.display.legend')"
-                tooltip-key="graph.legend"
-              />
-              <el-switch
-                v-model="showLegendModel"
-                size="small"
-              />
+
+            <div class="displayToggleGroup">
+              <div class="displayToggle">
+                <TooltipLabel
+                  class="toolbarLabel"
+                  :label="t('graph.display.legend')"
+                  tooltip-key="graph.legend"
+                />
+                <el-switch
+                  v-model="showLegendModel"
+                  size="small"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -452,93 +484,99 @@ const focusDepthModel = computed({
             :on-focus-search="onFocusSearch"
           />
 
-          <div class="navRow navRow--actions">
-            <TooltipLabel
-              class="toolbarLabel navRow__label"
-              :label="t('graph.navigate.actions')"
-              tooltip-key="graph.actions"
-              :max-lines="4"
-            />
-            <div class="navActions">
-              <el-button
-                size="small"
-                @click="onFit"
-              >
-                {{ t('graph.navigate.fit') }}
-              </el-button>
-              <el-button
-                size="small"
-                @click="onRelayout"
-              >
-                {{ t('graph.navigate.relayout') }}
-              </el-button>
+          <div class="navMainRow">
+            <div class="navMainGroup navMainGroup--actions">
+              <TooltipLabel
+                class="toolbarLabel navMainGroup__label"
+                :label="t('graph.navigate.actions')"
+                tooltip-key="graph.actions"
+                :max-lines="4"
+              />
+              <div class="navMainGroup__content navActions">
+                <el-button
+                  size="small"
+                  @click="onFit"
+                >
+                  {{ t('graph.navigate.fit') }}
+                </el-button>
+                <el-button
+                  size="small"
+                  @click="onRelayout"
+                >
+                  {{ t('graph.navigate.relayout') }}
+                </el-button>
 
-              <div class="zoomrow">
-                <TooltipLabel
-                  class="toolbarLabel zoomrow__label"
-                  :label="t('graph.navigate.zoom')"
-                  tooltip-key="graph.zoom"
-                />
-                <el-slider
-                  v-model="zoomModel"
-                  :min="0.1"
-                  :max="3"
-                  :step="0.05"
-                  class="zoomrow__slider"
-                />
+                <div class="zoomrow">
+                  <TooltipLabel
+                    class="toolbarLabel zoomrow__label"
+                    :label="t('graph.navigate.zoom')"
+                    tooltip-key="graph.zoom"
+                  />
+                  <el-slider
+                    v-model="zoomModel"
+                    :min="0.1"
+                    :max="3"
+                    :step="0.05"
+                    class="zoomrow__slider"
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="navRow navRow--focus">
-            <TooltipLabel
-              class="toolbarLabel navRow__label"
-              :label="t('graph.navigate.focus')"
-              :tooltip-text="t('graph.navigate.focusMode.tooltip')"
-            />
-            <div class="navFocus">
-              <el-switch
-                v-model="focusModeModel"
-                size="small"
-              />
-              <el-select
-                v-model="focusDepthModel"
-                size="small"
-                class="navFocus__depth"
-                :disabled="!focusMode"
-              >
-                <el-option
-                  :label="t('graph.navigate.depth1')"
-                  :value="1"
+            <div class="navMainGroup navMainGroup--focus">
+              <div class="navToggle">
+                <TooltipLabel
+                  class="toolbarLabel"
+                  :label="t('graph.navigate.focus')"
+                  :tooltip-text="t('graph.navigate.focusMode.tooltip')"
                 />
-                <el-option
-                  :label="t('graph.navigate.depth2')"
-                  :value="2"
+                <el-switch
+                  v-model="focusModeModel"
+                  size="small"
                 />
-              </el-select>
+              </div>
 
-              <el-tag
-                v-if="focusMode && focusRootPid"
-                type="info"
-                class="navFocus__tag"
-              >
-                {{ focusRootPid }}
-              </el-tag>
+              <div class="navMainGroup__content navFocusControls">
+                <el-select
+                  v-model="focusDepthModel"
+                  size="small"
+                  class="ctl__field ctl__field--compact navFocus__depth"
+                  :disabled="!focusMode"
+                  :style="{ '--geo-ctl-width': focusDepthFieldWidth }"
+                >
+                  <el-option
+                    :label="t('graph.navigate.depth1')"
+                    :value="1"
+                  />
+                  <el-option
+                    :label="t('graph.navigate.depth2')"
+                    :value="2"
+                  />
+                </el-select>
 
-              <el-button
-                size="small"
-                :disabled="!canUseSelectedForFocus"
-                @click="onUseSelectedForFocus"
-              >
-                {{ t('graph.navigate.useSelected') }}
-              </el-button>
-              <el-button
-                size="small"
-                :disabled="!focusMode"
-                @click="onClearFocusMode"
-              >
-                {{ t('graph.navigate.clear') }}
-              </el-button>
+                <el-tag
+                  v-if="focusMode && focusRootPid"
+                  type="info"
+                  class="navFocus__tag"
+                >
+                  {{ focusRootPid }}
+                </el-tag>
+
+                <el-button
+                  size="small"
+                  :disabled="!canUseSelectedForFocus"
+                  @click="onUseSelectedForFocus"
+                >
+                  {{ t('graph.navigate.useSelected') }}
+                </el-button>
+                <el-button
+                  size="small"
+                  :disabled="!focusMode"
+                  @click="onClearFocusMode"
+                >
+                  {{ t('graph.navigate.clear') }}
+                </el-button>
+              </div>
             </div>
           </div>
         </div>
@@ -560,15 +598,33 @@ const focusDepthModel = computed({
   padding: 0;
 }
 
-.paneGrid {
+.filtersGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-areas: 'eq status threshold type degree';
+  grid-template-columns: max-content max-content max-content max-content max-content;
   gap: 10px 12px;
   align-items: start;
+  justify-content: start;
 }
 
-.paneGrid > .geoToggleGrid {
-  grid-column: 1 / -1;
+.filtersGrid__eq {
+  grid-area: eq;
+}
+
+.filtersGrid__status {
+  grid-area: status;
+}
+
+.filtersGrid__threshold {
+  grid-area: threshold;
+}
+
+.filtersGrid__type {
+  grid-area: type;
+}
+
+.filtersGrid__degree {
+  grid-area: degree;
 }
 
 .ctl {
@@ -590,31 +646,86 @@ const focusDepthModel = computed({
 
 .ctl__field {
   width: 100%;
+  min-width: 0;
 }
+
+.ctl__field--compact {
+  width: var(--geo-ctl-width, 180px);
+}
+
+.ctl__field--compact :deep(.el-autocomplete),
+.ctl__field--compact :deep(.el-input),
+.ctl__field--compact :deep(.el-input__wrapper),
+.ctl__field--compact :deep(.el-select),
+.ctl__field--compact :deep(.el-select__wrapper),
+.ctl__field--compact :deep(.el-input-number) {
+  width: 100%;
+}
+
+.ctl__field--compact :deep(.el-input-number .el-input),
+.ctl__field--compact :deep(.el-input-number .el-input__wrapper) {
+  width: 100%;
+}
+
 
 .sliderField {
-  width: 100%;
-  min-width: 220px;
+  width: clamp(220px, 22vw, 360px);
 }
 
-.ctl--eq {
-  min-width: 160px;
+.displayGrid {
+  display: grid;
+  grid-template-areas:
+    'layout spacing labels'
+    'toggles toggles toggles';
+  grid-template-columns: max-content minmax(240px, 1fr) max-content;
+  gap: 10px 18px;
+  align-items: start;
 }
 
-.ctl--status {
-  min-width: 220px;
+.displayGrid__layout {
+  grid-area: layout;
+  min-width: 0;
 }
 
-.ctl--threshold {
-  min-width: 160px;
+.displayGrid__spacing {
+  grid-area: spacing;
+  min-width: 0;
 }
 
-.ctl--degree {
-  min-width: 160px;
+.displayGrid__labels {
+  grid-area: labels;
 }
 
-.ctl--layout {
-  min-width: 200px;
+.displayGrid__toggles {
+  grid-area: toggles;
+}
+
+.ctlGroup--labels {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 10px 18px;
+  align-items: start;
+}
+
+.displayToggleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 28px;
+}
+
+.displayToggleGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+
+.displayToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
 }
 
 
@@ -623,41 +734,61 @@ const focusDepthModel = computed({
   display: flex;
   flex-direction: column;
   gap: 10px;
+  --geo-nav-label-w: 84px;
 }
 
-.navRow {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
+.navMainRow {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 10px 18px;
 }
 
-.navRow__label {
-  min-width: 76px;
+.navMainGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
-.navRow__field :deep(.el-autocomplete),
-.navRow__field :deep(.el-input),
-.navRow__field :deep(.el-input__wrapper) {
-  width: 100%;
+.navMainGroup--focus {
+  margin-left: 12px;
+}
+
+.navMainGroup__label {
+  width: var(--geo-nav-label-w);
+}
+
+.navMainGroup__content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.navToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .navActions {
+  flex-wrap: nowrap;
+  width: max-content;
+}
+
+.navFocusControls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 
-.navFocus {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
 
 .navFocus__depth {
-  width: 120px;
+  width: var(--geo-ctl-width, 120px);
 }
 
 .navFocus__tag {
@@ -670,6 +801,7 @@ const focusDepthModel = computed({
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 .zoomrow__label {
@@ -679,26 +811,57 @@ const focusDepthModel = computed({
 }
 
 .zoomrow__slider {
-  width: clamp(160px, 18vw, 260px);
+  flex: 0 0 auto !important;
+  width: clamp(160px, 18vw, 260px) !important;
 }
 
 @media (max-width: 992px) {
-  .paneGrid {
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  .filtersGrid {
+    grid-template-areas:
+      'eq status'
+      'threshold type'
+      'degree .';
+    grid-template-columns: max-content max-content;
+  }
+  .navActions {
+    flex-wrap: wrap;
+    width: 100%;
   }
 
-  .sliderField {
-    min-width: 200px;
+  .navMainGroup--focus {
+    margin-left: 0;
   }
 }
 
 @media (max-width: 768px) {
-  .navRow {
+  .filtersGrid {
+    grid-template-areas:
+      'eq'
+      'status'
+      'threshold'
+      'type'
+      'degree';
     grid-template-columns: 1fr;
+  }
+
+  .displayGrid {
+    grid-template-areas:
+      'layout'
+      'spacing'
+      'labels'
+      'toggles';
+    grid-template-columns: 1fr;
+  }
+
+  .ctlGroup--labels {
+    grid-template-columns: 1fr;
+  }
+
+  .navMainRow {
     align-items: start;
   }
 
-  .navRow__label {
+  .navGroup__label {
     min-width: 0;
   }
 

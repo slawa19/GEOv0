@@ -8,9 +8,11 @@ import type {
   Equivalent,
   GraphSnapshot,
   Incident,
+  LiquiditySummary,
   Paginated,
   Participant,
   ParticipantMetrics,
+  ParticipantsStats,
   Trustline,
 } from '../types/domain'
 
@@ -193,6 +195,47 @@ const ParticipantMetricsSchema = z
     rank: z.unknown().nullable().optional(),
     capacity: z.unknown().nullable().optional(),
     activity: z.unknown().nullable().optional(),
+  })
+  .passthrough()
+
+const ParticipantsStatsSchema = z
+  .object({
+    participants_by_status: z.record(z.string(), z.number()),
+    participants_by_type: z.record(z.string(), z.number()),
+    total_participants: z.number(),
+  })
+  .passthrough()
+
+const TrustlineBottlenecksSchema = z
+  .object({
+    threshold: z.number(),
+    items: z.array(TrustlineSchema),
+  })
+  .passthrough()
+
+const LiquidityNetRowSchema = z
+  .object({
+    pid: z.string(),
+    display_name: z.string(),
+    net: DecimalString,
+  })
+  .passthrough()
+
+const LiquiditySummarySchema = z
+  .object({
+    equivalent: z.string().nullable(),
+    threshold: z.number(),
+    updated_at: z.string(),
+    active_trustlines: z.number(),
+    bottlenecks: z.number(),
+    incidents_over_sla: z.number(),
+    total_limit: DecimalString,
+    total_used: DecimalString,
+    total_available: DecimalString,
+    top_creditors: z.array(LiquidityNetRowSchema),
+    top_debtors: z.array(LiquidityNetRowSchema),
+    top_by_abs_net: z.array(LiquidityNetRowSchema),
+    top_bottleneck_edges: z.array(TrustlineSchema),
   })
   .passthrough()
 
@@ -585,6 +628,31 @@ export const realApi = {
         total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
       },
     }
+  },
+
+  participantsStats(): Promise<ApiEnvelope<ParticipantsStats>> {
+    return requestJson<ParticipantsStats>('/api/v1/admin/participants/stats', { admin: true, schema: ParticipantsStatsSchema })
+  },
+
+  trustlineBottlenecks(params: { threshold?: string; limit?: number; equivalent?: string }): Promise<ApiEnvelope<{ threshold: number; items: Trustline[] }>> {
+    const threshold = String(params.threshold ?? '').trim() || undefined
+    const limit = params.limit ?? 10
+    const equivalent = String(params.equivalent ?? '').trim() || undefined
+    return requestJson<{ threshold: number; items: Trustline[] }>(
+      buildQuery('/api/v1/admin/trustlines/bottlenecks', { threshold, limit, equivalent }),
+      { admin: true, schema: TrustlineBottlenecksSchema },
+    )
+  },
+
+  liquiditySummary(params: { equivalent?: string; threshold?: string; limit?: number }): Promise<ApiEnvelope<LiquiditySummary>> {
+    const threshold = String(params.threshold ?? '').trim() || undefined
+    const limit = params.limit ?? 10
+    const equivalentRaw = String(params.equivalent ?? '').trim().toUpperCase()
+    const equivalent = equivalentRaw && equivalentRaw !== 'ALL' ? equivalentRaw : undefined
+    return requestJson<LiquiditySummary>(
+      buildQuery('/api/v1/admin/liquidity/summary', { equivalent, threshold, limit }),
+      { admin: true, schema: LiquiditySummarySchema },
+    )
   },
 
   async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {

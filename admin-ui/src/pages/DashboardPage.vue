@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiException, assertSuccess } from '../api/envelope'
 import { api } from '../api'
-import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
+import { formatDecimalFixed } from '../utils/decimal'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
 import { carryScenarioQuery, toLocationQueryRaw } from '../router/query'
+import { labelParticipantStatus, normalizeParticipantStatusKey } from '../ui/participantStatus'
 
 const router = useRouter()
 const route = useRoute()
@@ -42,43 +42,25 @@ const participantsByStatus = ref(new Map<string, number>())
 const participantsByType = ref(new Map<string, number>())
 
 function normKey(v: unknown): string {
-  return String(v ?? '').trim().toLowerCase()
-}
-
-function statusLabel(s: string): string {
-  const k = normKey(s)
-  if (!k) return t('common.unknown')
-  if (k === 'active') return t('participant.status.active')
-  if (k === 'suspended') return t('participant.status.suspended')
-  if (k === 'left') return t('participant.status.left')
-  if (k === 'deleted') return t('participant.status.deleted')
-  return k
+  return normalizeParticipantStatusKey(v)
 }
 
 async function loadParticipantStats() {
   participantsStatsLoading.value = true
   participantsStatsError.value = null
   try {
-    const perPage = 200
-    const maxPages = 5
+    const stats = assertSuccess(await api.participantsStats())
+
     const byStatus = new Map<string, number>()
+    for (const [k, v] of Object.entries(stats.participants_by_status || {})) {
+      const key = normKey(k) || 'unknown'
+      byStatus.set(key, Number(v) || 0)
+    }
+
     const byType = new Map<string, number>()
-
-    let seen = 0
-    let backendTotal = Number.NaN
-
-    for (let p = 1; p <= maxPages; p++) {
-      const page = assertSuccess(await api.listParticipants({ page: p, per_page: perPage }))
-      const items = (page.items || []) as Array<{ status?: unknown; type?: unknown }>
-      for (const it of items) {
-        const st = normKey(it.status) || 'unknown'
-        const ty = normKey(it.type) || 'unknown'
-        byStatus.set(st, (byStatus.get(st) || 0) + 1)
-        byType.set(ty, (byType.get(ty) || 0) + 1)
-      }
-      seen += items.length
-      backendTotal = Number((page as { total?: unknown }).total)
-      if ((Number.isFinite(backendTotal) && seen >= backendTotal) || items.length === 0) break
+    for (const [k, v] of Object.entries(stats.participants_by_type || {})) {
+      const key = String(k || '').trim().toLowerCase() || 'unknown'
+      byType.set(key, Number(v) || 0)
     }
 
     participantsByStatus.value = byStatus
@@ -101,7 +83,6 @@ async function load() {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('dashboard.loadFailed')
-    ElMessage.error(error.value || t('dashboard.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -121,10 +102,6 @@ async function loadAudit() {
   }
 }
 
-function isBottleneck(t: Trustline): boolean {
-  return isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: threshold.value })
-}
-
 function money(v: string): string {
   return formatDecimalFixed(v, 2)
 }
@@ -133,31 +110,8 @@ async function loadBottlenecks() {
   bottlenecksLoading.value = true
   bottlenecksError.value = null
   try {
-    // TODO(backend): this is intentionally naive for mock/fixtures.
-    // In real mode, replace with a thin endpoint like:
-    //   GET /admin/trustlines/bottlenecks?threshold=&limit=
-    // so we don't fetch hundreds of trustlines and sort client-side.
-    // Backend enforces per_page <= 200. Fetch a few pages (bounded) to find bottlenecks.
-    const perPage = 200
-    const maxPages = 5
-    const all: Trustline[] = []
-
-    for (let p = 1; p <= maxPages; p++) {
-      const page = assertSuccess(await api.listTrustlines({ page: p, per_page: perPage }))
-      all.push(...(page.items as Trustline[]))
-      const total = Number((page as { total?: unknown }).total)
-      if ((Number.isFinite(total) && all.length >= total) || (page.items || []).length === 0) break
-    }
-
-    const candidates = all.filter((t) => t.status === 'active' && isBottleneck(t))
-    // naive ranking: lower available first
-    candidates.sort((a, b) => {
-      const avA = Number(a.available)
-      const avB = Number(b.available)
-      if (Number.isFinite(avA) && Number.isFinite(avB) && avA !== avB) return avA - avB
-      return a.created_at.localeCompare(b.created_at)
-    })
-    bottleneckItems.value = candidates.slice(0, 10)
+    const r = assertSuccess(await api.trustlineBottlenecks({ threshold: threshold.value, limit: 10 }))
+    bottleneckItems.value = (r.items || []) as Trustline[]
   } catch (e: unknown) {
     if (e instanceof ApiException) {
       bottlenecksError.value = `${e.message} (${e.status} ${e.code})`
@@ -255,7 +209,7 @@ const statusRows = computed(() => {
   const extra = [...m.keys()].filter((k) => !order.includes(k)).sort()
   return [...order, ...extra]
     .filter((k) => (m.get(k) || 0) > 0)
-    .map((k) => ({ key: k, label: statusLabel(k), count: m.get(k) || 0 }))
+    .map((k) => ({ key: k, label: labelParticipantStatus(k) || t('common.unknown'), count: m.get(k) || 0 }))
 })
 
 const typeRows = computed(() => {
@@ -275,8 +229,19 @@ const typeRows = computed(() => {
       :title="error"
       type="error"
       show-icon
+      :closable="false"
       class="mb"
-    />
+    >
+      <template #default>
+        <el-button
+          size="small"
+          type="primary"
+          @click="load"
+        >
+          {{ t('common.refresh') }}
+        </el-button>
+      </template>
+    </el-alert>
 
     <el-row
       :gutter="12"
@@ -374,8 +339,19 @@ const typeRows = computed(() => {
             :title="participantsStatsError"
             type="warning"
             show-icon
+            :closable="false"
             class="mb"
-          />
+          >
+            <template #default>
+              <el-button
+                size="small"
+                type="primary"
+                @click="loadParticipantStats"
+              >
+                {{ t('common.refresh') }}
+              </el-button>
+            </template>
+          </el-alert>
           <el-skeleton
             v-else-if="participantsStatsLoading"
             animated
@@ -518,10 +494,21 @@ const typeRows = computed(() => {
             :title="bottlenecksError"
             type="warning"
             show-icon
+            :closable="false"
             class="mb"
-          />
+          >
+            <template #default>
+              <el-button
+                size="small"
+                type="primary"
+                @click="loadBottlenecks"
+              >
+                {{ t('common.refresh') }}
+              </el-button>
+            </template>
+          </el-alert>
           <el-skeleton
-            v-if="bottlenecksLoading"
+            v-else-if="bottlenecksLoading"
             animated
             :rows="6"
           />

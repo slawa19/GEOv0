@@ -6,6 +6,7 @@ import { api } from '../api'
 import { formatApiError } from '../api/errorFormat'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 
 const authStore = useAuthStore()
@@ -213,12 +214,11 @@ onMounted(() => void load())
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="load"
     />
     <el-skeleton
       v-if="loading"

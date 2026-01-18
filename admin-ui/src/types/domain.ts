@@ -1,5 +1,11 @@
 export type Paginated<T> = { items: T[]; page: number; per_page: number; total: number }
 
+export type ParticipantsStats = {
+  participants_by_status: Record<string, number>
+  participants_by_type: Record<string, number>
+  total_participants: number
+}
+
 export type Participant = {
   pid: string
   display_name: string
@@ -60,6 +66,28 @@ export type Debt = {
   debtor: string
   creditor: string
   amount: string
+}
+
+export type LiquidityNetRow = {
+  pid: string
+  display_name: string
+  net: string
+}
+
+export type LiquiditySummary = {
+  equivalent: string | null
+  threshold: number
+  updated_at: string
+  active_trustlines: number
+  bottlenecks: number
+  incidents_over_sla: number
+  total_limit: string
+  total_used: string
+  total_available: string
+  top_creditors: LiquidityNetRow[]
+  top_debtors: LiquidityNetRow[]
+  top_by_abs_net: LiquidityNetRow[]
+  top_bottleneck_edges: Trustline[]
 }
 
 export type Transaction = {

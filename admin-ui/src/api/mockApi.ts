@@ -1,6 +1,6 @@
 import { ApiException, type ApiEnvelope } from './envelope'
 import { TOAST_DEDUPE_MS } from '../constants/timing'
-import { isRatioBelowThreshold } from '../utils/decimal'
+import { absDecimalString, addDecimalStrings, compareDecimalStrings, isRatioBelowThreshold } from '../utils/decimal'
 import { t } from '../i18n'
 import type {
   AuditLogEntry,
@@ -11,9 +11,11 @@ import type {
   Equivalent,
   GraphSnapshot,
   Incident,
+  LiquiditySummary,
   Paginated,
   Participant,
   ParticipantMetrics,
+  ParticipantsStats,
   Trustline,
   Transaction,
 } from '../types/domain'
@@ -741,6 +743,141 @@ export const mockApi = {
       return {
         success: true,
         data: paginate(filtered, params.page ?? 1, params.per_page ?? 20),
+      }
+    })
+  },
+
+  async participantsStats(): Promise<ApiEnvelope<ParticipantsStats>> {
+    return withScenario('/api/v1/admin/participants/stats', async () => {
+      const all = await getParticipantsDataset()
+      const byStatus: Record<string, number> = {}
+      const byType: Record<string, number> = {}
+      for (const p of all) {
+        const st = String(p.status || '').trim().toLowerCase() || 'unknown'
+        const ty = String(p.type || '').trim().toLowerCase() || 'unknown'
+        byStatus[st] = (byStatus[st] || 0) + 1
+        byType[ty] = (byType[ty] || 0) + 1
+      }
+      return { success: true, data: { participants_by_status: byStatus, participants_by_type: byType, total_participants: all.length } }
+    })
+  },
+
+  async trustlineBottlenecks(params: {
+    threshold?: string
+    limit?: number
+    equivalent?: string
+  }): Promise<ApiEnvelope<{ threshold: number; items: Trustline[] }>> {
+    return withScenario('/api/v1/admin/trustlines/bottlenecks', async () => {
+      const thr = String(params.threshold ?? '').trim() || '0.10'
+      const limit = Math.max(1, Math.min(50, Number(params.limit ?? 10) || 10))
+      const eq = String(params.equivalent || '').trim().toUpperCase()
+
+      const all = await loadJson<Trustline[]>('datasets/trustlines.json')
+      const candidates = all.filter((t) => {
+        if (String(t.status || '').trim().toLowerCase() !== 'active') return false
+        if (eq && String(t.equivalent || '').trim().toUpperCase() !== eq) return false
+        return isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: thr })
+      })
+
+      candidates.sort((a, b) => {
+        const c = compareDecimalStrings(String(a.available || '0'), String(b.available || '0'))
+        if (c !== 0) return c
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''))
+      })
+
+      return { success: true, data: { threshold: Number(thr), items: candidates.slice(0, limit) } }
+    })
+  },
+
+  async liquiditySummary(params: { equivalent?: string; threshold?: string; limit?: number }): Promise<ApiEnvelope<LiquiditySummary>> {
+    return withScenario('/api/v1/admin/liquidity/summary', async () => {
+      const threshold = String(params.threshold ?? '').trim() || '0.10'
+      const limit = Math.max(1, Math.min(50, Number(params.limit ?? 10) || 10))
+      const eqRaw = String(params.equivalent ?? '').trim().toUpperCase()
+      const eq = eqRaw && eqRaw !== 'ALL' ? eqRaw : ''
+
+      const [participants, trustlines, debts, incidents] = await Promise.all([
+        getParticipantsDataset(),
+        loadJson<Trustline[]>('datasets/trustlines.json'),
+        loadOptionalJson<Debt[]>('datasets/debts.json', []),
+        loadJson<{ items: Incident[] }>('datasets/incidents.json').then((r) => r.items || []),
+      ])
+
+      const byPid = new Map(participants.map((p) => [p.pid, p]))
+
+      const activeTrustlines = trustlines.filter((t) => {
+        if (String(t.status || '').trim().toLowerCase() !== 'active') return false
+        if (eq && String(t.equivalent || '').trim().toUpperCase() !== eq) return false
+        return true
+      })
+
+      const bottleneckEdges = activeTrustlines.filter((t) =>
+        isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold }),
+      )
+
+      const incidentsOverSla = incidents.filter((i) => {
+        if (eq && String(i.equivalent || '').trim().toUpperCase() !== eq) return false
+        return i.age_seconds > i.sla_seconds
+      })
+
+      let totalLimit = '0'
+      let totalUsed = '0'
+      let totalAvailable = '0'
+      for (const t of activeTrustlines) {
+        totalLimit = addDecimalStrings(totalLimit, String(t.limit || '0'))
+        totalUsed = addDecimalStrings(totalUsed, String(t.used || '0'))
+        totalAvailable = addDecimalStrings(totalAvailable, String(t.available || '0'))
+      }
+
+      const netByPid = new Map<string, string>()
+      for (const d of debts) {
+        if (eq && String(d.equivalent || '').trim().toUpperCase() !== eq) continue
+        const debtor = String(d.debtor || '').trim()
+        const creditor = String(d.creditor || '').trim()
+        const amt = String(d.amount || '0')
+        if (debtor) netByPid.set(debtor, addDecimalStrings(netByPid.get(debtor) || '0', '-' + amt))
+        if (creditor) netByPid.set(creditor, addDecimalStrings(netByPid.get(creditor) || '0', amt))
+      }
+
+      const netRows = [...netByPid.entries()].map(([pid, net]) => ({
+        pid,
+        display_name: byPid.get(pid)?.display_name || '',
+        net,
+      }))
+
+      const topCreditors = netRows.filter((r) => compareDecimalStrings(r.net, '0') > 0)
+      topCreditors.sort((a, b) => compareDecimalStrings(b.net, a.net))
+
+      const topDebtors = netRows.filter((r) => compareDecimalStrings(r.net, '0') < 0)
+      topDebtors.sort((a, b) => compareDecimalStrings(a.net, b.net))
+
+      const topByAbsNet = [...netRows]
+      topByAbsNet.sort((a, b) => compareDecimalStrings(absDecimalString(b.net), absDecimalString(a.net)))
+
+      const topBottleneckEdges = [...bottleneckEdges]
+      topBottleneckEdges.sort((a, b) => {
+        const c = compareDecimalStrings(String(a.available || '0'), String(b.available || '0'))
+        if (c !== 0) return c
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''))
+      })
+
+      return {
+        success: true,
+        data: {
+          equivalent: eq || null,
+          threshold: Number(threshold),
+          updated_at: new Date().toISOString(),
+          active_trustlines: activeTrustlines.length,
+          bottlenecks: bottleneckEdges.length,
+          incidents_over_sla: incidentsOverSla.length,
+          total_limit: totalLimit,
+          total_used: totalUsed,
+          total_available: totalAvailable,
+          top_creditors: topCreditors.slice(0, limit),
+          top_debtors: topDebtors.slice(0, limit),
+          top_by_abs_net: topByAbsNet.slice(0, limit),
+          top_bottleneck_edges: topBottleneckEdges.slice(0, limit),
+        },
       }
     })
   },

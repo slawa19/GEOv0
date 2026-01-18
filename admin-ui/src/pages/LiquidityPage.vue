@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
 
-import type { Debt, GraphSnapshot, Participant, Trustline } from '../types/domain'
+import type { Equivalent, LiquiditySummary, Trustline } from '../types/domain'
 
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 
 import { t } from '../i18n'
-import { formatDecimalFixed, isRatioBelowThreshold, addDecimalStrings, compareDecimalStrings, absDecimalString } from '../utils/decimal'
+import { compareDecimalStrings, formatDecimalFixed } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { buildLiquidityAdvice } from '../advice/operatorAdvice'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
 import { useConfigStore } from '../stores/config'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import { debounce } from '../utils/debounce'
+import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 
 const router = useRouter()
 const route = useRoute()
@@ -29,7 +30,8 @@ const { isApplying: applyingRouteQuery, isActive: isLiquidityRoute, run: withRou
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-const snapshot = ref<GraphSnapshot | null>(null)
+const equivalentsList = ref<Equivalent[]>([])
+const summary = ref<LiquiditySummary | null>(null)
 const lastLoadedAt = ref<Date | null>(null)
 
 const configStore = useConfigStore()
@@ -37,6 +39,9 @@ const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC
 
 const eq = ref<string>('ALL')
 const threshold = ref<string>('0.10')
+
+let routeSyncInitialized = false
+const debouncedLoad = debounce(() => void load(), DEBOUNCE_SEARCH_MS)
 
 function syncFromRoute() {
   // Avoid mutating state / query when this component is in the process of being navigated away from.
@@ -63,7 +68,17 @@ function updateRouteQuery(patch: Record<string, unknown>) {
 
 watch(
   () => [route.query.equivalent, route.query.threshold],
-  () => syncFromRoute(),
+  () => {
+    syncFromRoute()
+    if (!isLiquidityRoute.value) return
+    if (!routeSyncInitialized) {
+      routeSyncInitialized = true
+      void load()
+      return
+    }
+    if (applyingRouteQuery.value) return
+    debouncedLoad()
+  },
   { immediate: true },
 )
 
@@ -80,24 +95,28 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    snapshot.value = assertSuccess(await api.graphSnapshot()) as GraphSnapshot
-    lastLoadedAt.value = new Date()
+    const eqRes = assertSuccess(await api.listEquivalents({ include_inactive: false }))
+    equivalentsList.value = (eqRes.items || []) as Equivalent[]
+
+    summary.value = assertSuccess(
+      await api.liquiditySummary({ equivalent: eq.value, threshold: threshold.value, limit: 10 }),
+    ) as LiquiditySummary
+
+    const ts = String(summary.value.updated_at || '').trim()
+    lastLoadedAt.value = ts ? new Date(ts) : new Date()
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('liquidity.loadFailed')
-    ElMessage.error(error.value || t('liquidity.loadFailed'))
   } finally {
     loading.value = false
   }
 }
 
-onMounted(() => void load())
-
-const equivalents = computed(() => (snapshot.value?.equivalents || []).filter((e) => e.is_active))
+const equivalents = computed(() => (equivalentsList.value || []).filter((e) => e.is_active))
 
 const precisionByEq = computed(() => {
   const m = new Map<string, number>()
-  for (const e of snapshot.value?.equivalents || []) {
+  for (const e of equivalentsList.value || []) {
     m.set(String(e.code || '').toUpperCase(), Number(e.precision ?? 2) || 2)
   }
   return m
@@ -108,33 +127,9 @@ const selectedEq = computed(() => {
   return k === 'ALL' ? null : k
 })
 
-function isActiveTrustline(tl: Trustline): boolean {
-  return String(tl.status || '').trim().toLowerCase() === 'active'
-}
-
-function isBottleneck(tl: Trustline): boolean {
-  return isRatioBelowThreshold({ numerator: tl.available, denominator: tl.limit, threshold: threshold.value })
-}
-
-const activeTrustlines = computed(() => {
-  const all = snapshot.value?.trustlines || []
-  const eqKey = selectedEq.value
-  return all.filter((t) => isActiveTrustline(t) && (!eqKey || String(t.equivalent || '').toUpperCase() === eqKey))
-})
-
-const bottleneckTrustlines = computed(() => activeTrustlines.value.filter(isBottleneck))
-
-const incidentsOverSla = computed(() => {
-  const all = snapshot.value?.incidents || []
-  const eqKey = selectedEq.value
-  return all.filter((i) => (!eqKey || String(i.equivalent || '').toUpperCase() === eqKey) && i.age_seconds > i.sla_seconds)
-})
-
-function sumTrustlinesDecimal(items: Trustline[], field: keyof Pick<Trustline, 'limit' | 'used' | 'available'>): string {
-  let acc = '0'
-  for (const t of items) acc = addDecimalStrings(acc, String(t[field] || '0'))
-  return acc
-}
+const activeTrustlinesCount = computed(() => summary.value?.active_trustlines ?? 0)
+const bottlenecksCount = computed(() => summary.value?.bottlenecks ?? 0)
+const incidentsOverSlaCount = computed(() => summary.value?.incidents_over_sla ?? 0)
 
 const selectedPrecision = computed(() => {
   const k = selectedEq.value
@@ -142,80 +137,24 @@ const selectedPrecision = computed(() => {
   return precisionByEq.value.get(k) ?? 2
 })
 
-const totalLimit = computed(() => sumTrustlinesDecimal(activeTrustlines.value, 'limit'))
-const totalUsed = computed(() => sumTrustlinesDecimal(activeTrustlines.value, 'used'))
-const totalAvailable = computed(() => sumTrustlinesDecimal(activeTrustlines.value, 'available'))
+const totalLimit = computed(() => String(summary.value?.total_limit ?? '0'))
+const totalUsed = computed(() => String(summary.value?.total_used ?? '0'))
+const totalAvailable = computed(() => String(summary.value?.total_available ?? '0'))
 
-type NetRow = { pid: string; display_name: string; net: string }
-
-function computeNetPositions(debts: Debt[], participants: Participant[]): NetRow[] {
-  const byPid = new Map<string, Participant>()
-  for (const p of participants) byPid.set(p.pid, p)
-
-  const m = new Map<string, string>()
-
-  const eqKey = selectedEq.value
-  for (const d of debts) {
-    if (eqKey && String(d.equivalent || '').toUpperCase() !== eqKey) continue
-
-    const debtor = String(d.debtor || '').trim()
-    const creditor = String(d.creditor || '').trim()
-    const amt = String(d.amount || '0')
-
-    if (debtor) m.set(debtor, addDecimalStrings(m.get(debtor) || '0', '-' + amt))
-    if (creditor) m.set(creditor, addDecimalStrings(m.get(creditor) || '0', amt))
-  }
-
-  const rows: NetRow[] = []
-  for (const [pid, net] of m.entries()) {
-    const dn = byPid.get(pid)?.display_name || ''
-    rows.push({ pid, display_name: dn, net })
-  }
-  return rows
-}
-
-const netRows = computed(() => {
-  return computeNetPositions(snapshot.value?.debts || [], snapshot.value?.participants || [])
-})
-
-const topCreditors = computed(() => {
-  const rows = netRows.value.filter((r) => compareDecimalStrings(r.net, '0') > 0)
-  rows.sort((a, b) => compareDecimalStrings(b.net, a.net))
-  return rows.slice(0, 10)
-})
-
-const topDebtors = computed(() => {
-  const rows = netRows.value.filter((r) => compareDecimalStrings(r.net, '0') < 0)
-  rows.sort((a, b) => compareDecimalStrings(a.net, b.net))
-  return rows.slice(0, 10)
-})
-
-const topByAbsNet = computed(() => {
-  const rows = [...netRows.value]
-  rows.sort((a, b) => compareDecimalStrings(absDecimalString(b.net), absDecimalString(a.net)))
-  return rows.slice(0, 10)
-})
-
-const topBottleneckEdges = computed(() => {
-  const rows = [...bottleneckTrustlines.value]
-  rows.sort((a, b) => {
-    // smaller available first; fallback: older first
-    const c = compareDecimalStrings(a.available, b.available)
-    if (c !== 0) return c
-    return String(a.created_at || '').localeCompare(String(b.created_at || ''))
-  })
-  return rows.slice(0, 10)
-})
+const topCreditors = computed(() => summary.value?.top_creditors ?? [])
+const topDebtors = computed(() => summary.value?.top_debtors ?? [])
+const topByAbsNet = computed(() => summary.value?.top_by_abs_net ?? [])
+const topBottleneckEdges = computed(() => (summary.value?.top_bottleneck_edges ?? []) as Trustline[])
 
 const adviceItems = computed(() => {
-  if (!snapshot.value) return []
+  if (!summary.value) return []
   return buildLiquidityAdvice({
     ctx: {
       eq: selectedEq.value,
       threshold: threshold.value,
-      trustlinesTotal: activeTrustlines.value.length,
-      bottlenecks: bottleneckTrustlines.value.length,
-      incidentsOverSla: incidentsOverSla.value.length,
+      trustlinesTotal: activeTrustlinesCount.value,
+      bottlenecks: bottlenecksCount.value,
+      incidentsOverSla: incidentsOverSlaCount.value,
     },
     baseQuery: route.query,
   })
@@ -320,8 +259,19 @@ function money(v: string): string {
       :title="error"
       type="error"
       show-icon
+      :closable="false"
       class="mb"
-    />
+    >
+      <template #default>
+        <el-button
+          size="small"
+          type="primary"
+          @click="load"
+        >
+          {{ t('common.refresh') }}
+        </el-button>
+      </template>
+    </el-alert>
 
     <el-divider />
 
@@ -329,19 +279,19 @@ function money(v: string): string {
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.activeTrustlines')"
-          :value="activeTrustlines.length"
+          :value="activeTrustlinesCount"
         />
       </el-col>
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.bottlenecks')"
-          :value="bottleneckTrustlines.length"
+          :value="bottlenecksCount"
         />
       </el-col>
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.incidentsOverSla')"
-          :value="incidentsOverSla.length"
+          :value="incidentsOverSlaCount"
         />
       </el-col>
     </el-row>

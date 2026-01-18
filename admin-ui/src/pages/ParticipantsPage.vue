@@ -16,6 +16,12 @@ import { labelParticipantType } from '../i18n/labels'
 import type { Participant } from '../types/domain'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import {
+  isLockedParticipantStatus,
+  labelParticipantStatus,
+  participantStatusOptions,
+  participantStatusTagType,
+} from '../ui/participantStatus'
 
 const router = useRouter()
 const route = useRoute()
@@ -114,7 +120,6 @@ async function load() {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('participant.loadFailed')
-    void toastApiError(e, { fallbackTitle: error.value || t('participant.loadFailed') })
   } finally {
     loading.value = false
   }
@@ -217,36 +222,7 @@ watch([q, status, type], () => {
   debouncedReload()
 })
 
-const statusOptions = computed(() => [
-  { label: t('participant.status.any'), value: '' },
-  { label: t('participant.status.active'), value: 'active' },
-  { label: t('participant.status.suspended'), value: 'suspended' },
-  { label: t('participant.status.left'), value: 'left' },
-  { label: t('participant.status.deleted'), value: 'deleted' },
-])
-
-function statusLabel(v: string | null | undefined): string {
-  const s = String(v || '').trim().toLowerCase()
-  if (!s) return ''
-  if (s === 'active') return t('participant.status.active')
-  if (s === 'suspended') return t('participant.status.suspended')
-  if (s === 'left') return t('participant.status.left')
-  if (s === 'deleted') return t('participant.status.deleted')
-  return s
-}
-
-function statusTagType(v: string | null | undefined): 'success' | 'warning' | 'info' | 'danger' {
-  const s = String(v || '').trim().toLowerCase()
-  if (s === 'active') return 'success'
-  if (s === 'suspended') return 'warning'
-  if (s === 'deleted') return 'danger'
-  return 'info'
-}
-
-function isLockedStatus(v: string | null | undefined): boolean {
-  const s = String(v || '').trim().toLowerCase()
-  return s === 'deleted' || s === 'left'
-}
+const statusOptions = computed(() => participantStatusOptions())
 
 const typeOptions = computed(() => [
   { label: t('participant.type.any'), value: '' },
@@ -310,8 +286,19 @@ const typeOptions = computed(() => [
       :title="error"
       type="error"
       show-icon
+      :closable="false"
       class="mb"
-    />
+    >
+      <template #default>
+        <el-button
+          size="small"
+          type="primary"
+          @click="load"
+        >
+          {{ t('common.refresh') }}
+        </el-button>
+      </template>
+    </el-alert>
     <el-skeleton
       v-if="loading"
       animated
@@ -398,10 +385,10 @@ const typeOptions = computed(() => [
           </template>
           <template #default="scope">
             <el-tag
-              :type="statusTagType(scope.row.status)"
+              :type="participantStatusTagType(scope.row.status)"
               size="small"
             >
-              {{ statusLabel(scope.row.status) }}
+              {{ labelParticipantStatus(scope.row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -489,10 +476,10 @@ const typeOptions = computed(() => [
         </el-descriptions-item>
         <el-descriptions-item :label="t('participant.columns.status')">
           <el-tag
-            :type="statusTagType(selected.status)"
+            :type="participantStatusTagType(selected.status)"
             size="small"
           >
-            {{ statusLabel(selected.status) }}
+            {{ labelParticipantStatus(selected.status) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item
@@ -534,12 +521,12 @@ const typeOptions = computed(() => [
         </el-button>
       </div>
 
-      <el-divider v-if="!isLockedStatus(selected.status)">
+      <el-divider v-if="!isLockedParticipantStatus(selected.status)">
         {{ t('common.actions') }}
       </el-divider>
 
       <div
-        v-if="!isLockedStatus(selected.status)"
+        v-if="!isLockedParticipantStatus(selected.status)"
         class="drawer-actions"
       >
         <el-button

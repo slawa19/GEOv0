@@ -26,7 +26,9 @@ If you run the UI without the runner:
 	- `VITE_API_BASE_URL=http://127.0.0.1:18000` (runner default)
 	- or `VITE_API_BASE_URL=http://127.0.0.1:8000` (Docker Compose default)
 
-See `admin-ui/docs/real-api-integration.md` for details (auth token, endpoint mapping, proxy notes).
+Canonical docs (RU): `docs/ru/admin-ui/README.md`.
+
+Technical note (EN) on real API integration: `admin-ui/docs/real-api-integration.md` (auth token, endpoint mapping, proxy notes).
 
 ## Fixtures
 

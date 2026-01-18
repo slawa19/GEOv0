@@ -3,12 +3,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
-import { toastApiError } from '../api/errorToast'
 import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
@@ -151,7 +151,6 @@ async function load() {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('trustlines.loadFailed')
-    void toastApiError(e, { fallbackTitle: error.value || t('trustlines.loadFailed') })
   } finally {
     loading.value = false
   }
@@ -282,12 +281,11 @@ const trustlinesAdviceItems = computed(() =>
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="load"
     />
     <el-skeleton
       v-if="loading"

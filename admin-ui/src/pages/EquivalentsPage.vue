@@ -6,6 +6,7 @@ import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
@@ -67,7 +68,6 @@ async function load() {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('equivalents.loadFailed')
-    ElMessage.error(error.value || t('equivalents.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -260,12 +260,11 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </div>
     </template>
 
-    <el-alert
+    <LoadErrorAlert
       v-if="error"
       :title="error"
-      type="error"
-      show-icon
-      class="mb"
+      :busy="loading"
+      @retry="load"
     />
     <el-skeleton
       v-if="loading"

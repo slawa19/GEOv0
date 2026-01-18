@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
@@ -121,6 +122,42 @@ class AdminIncidentItem(BaseModel):
 
 class AdminIncidentsListResponse(AdminPaginatedMeta):
     items: list[AdminIncidentItem]
+
+
+class AdminParticipantsStatsResponse(BaseModel):
+    participants_by_status: dict[str, StrictInt] = Field(default_factory=dict)
+    participants_by_type: dict[str, StrictInt] = Field(default_factory=dict)
+    total_participants: StrictInt = Field(0, ge=0)
+
+
+class AdminTrustLinesBottlenecksResponse(BaseModel):
+    threshold: float = Field(..., ge=0.0)
+    items: list[TrustLineSchema]
+
+
+class AdminLiquidityNetRow(BaseModel):
+    pid: str
+    display_name: str
+    net: Decimal
+
+
+class AdminLiquiditySummaryResponse(BaseModel):
+    equivalent: Optional[str] = None
+    threshold: float = Field(..., ge=0.0)
+    updated_at: datetime
+
+    active_trustlines: StrictInt = Field(0, ge=0)
+    bottlenecks: StrictInt = Field(0, ge=0)
+    incidents_over_sla: StrictInt = Field(0, ge=0)
+
+    total_limit: Decimal = Decimal("0")
+    total_used: Decimal = Decimal("0")
+    total_available: Decimal = Decimal("0")
+
+    top_creditors: list[AdminLiquidityNetRow] = Field(default_factory=list)
+    top_debtors: list[AdminLiquidityNetRow] = Field(default_factory=list)
+    top_by_abs_net: list[AdminLiquidityNetRow] = Field(default_factory=list)
+    top_bottleneck_edges: list[TrustLineSchema] = Field(default_factory=list)
 
 
 class AdminMigrationsStatus(BaseModel):

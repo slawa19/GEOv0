@@ -54,6 +54,7 @@ const configStore = useConfigStore()
 onMounted(() => {
   healthStore.startPolling(HEALTH_POLL_INTERVAL_MS)
   authStore.load()
+  if (!isMockMode.value) authStore.role = 'admin'
   void configStore.load()
 })
 
@@ -275,6 +276,7 @@ function navigate(path: string) {
           </el-select>
 
           <el-select
+            v-if="isMockMode"
             v-model="authStore.role"
             size="small"
             style="width: 150px"
@@ -292,6 +294,24 @@ function navigate(path: string) {
               value="auditor"
             />
           </el-select>
+
+          <el-tooltip
+            v-else
+            placement="bottom"
+            effect="dark"
+            :show-after="850"
+            popper-class="geoTooltip geoTooltip--menu"
+          >
+            <template #content>
+              <span class="geoTooltipText geoTooltipText--clamp3">{{ t('app.role.realModeDisclaimer') }}</span>
+            </template>
+            <el-tag
+              type="info"
+              effect="plain"
+            >
+              {{ t('app.role.realModeLocked', { role: t('app.role.admin') }) }}
+            </el-tag>
+          </el-tooltip>
 
           <el-select
             v-if="isMockMode"

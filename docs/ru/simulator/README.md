@@ -5,10 +5,9 @@
 ## Навигация
 
 - Спецификации: `docs/ru/simulator/specs/*`
-- Дизайн/архитектура: `docs/ru/simulator/design/*`
-- Эксплуатация: `docs/ru/simulator/operations/*`
+- Frontend (игровой интерфейс): `docs/ru/simulator/frontend/*`
 
 ## Спецификация
 
-- Основной документ: [specs/09-behavior-simulator-application.md](specs/09-behavior-simulator-application.md)
+- Основной документ: [specs/GENERAL-simulator-application.md](specs/GENERAL-simulator-application.md)
 
