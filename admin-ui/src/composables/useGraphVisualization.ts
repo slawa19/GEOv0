@@ -319,9 +319,9 @@ export function useGraphVisualization(options: {
       const typeKey = String(p?.type || '').toLowerCase()
       const baseW = typeKey === 'business' ? 26 : 16
       const baseH = typeKey === 'business' ? 22 : 16
-      const vizW = typeof (p as any)?.viz_size?.w === 'number' ? (p as any).viz_size.w : baseW
-      const vizH = typeof (p as any)?.viz_size?.h === 'number' ? (p as any).viz_size.h : baseH
-      const vizColorKey = String((p as any)?.viz_color_key || '').toLowerCase()
+      const vizW = typeof p?.viz_size?.w === 'number' ? p.viz_size.w : baseW
+      const vizH = typeof p?.viz_size?.h === 'number' ? p.viz_size.h : baseH
+      const vizColorKey = String(p?.viz_color_key || '').toLowerCase()
       return {
         data: {
           id: pid,
@@ -516,6 +516,9 @@ export function useGraphVisualization(options: {
     const cy = options.getCy()
     if (!cy) return
 
+    const SUSPENDED_PATTERN =
+      'url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%278%27%20height%3D%278%27%3E%3Ccircle%20cx%3D%272%27%20cy%3D%272%27%20r%3D%271%27%20fill%3D%27%23000000%27%20fill-opacity%3D%270.18%27/%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%271%27%20fill%3D%27%23000000%27%20fill-opacity%3D%270.18%27/%3E%3C/svg%3E")'
+
     cy.style([
       {
         selector: 'node',
@@ -541,11 +544,26 @@ export function useGraphVisualization(options: {
           height: 'data(viz_h)',
         },
       },
+      // Default palette by type (no backend viz_* required). Backend viz_color_key may
+      // override this via viz-* classes.
+      { selector: 'node.type-person', style: { 'background-color': '#3b82f6' } },
+      { selector: 'node.type-business', style: { 'background-color': '#10b981' } },
       // Net-based (backend-provided) node colors. Status colors remain in legend and can be
       // applied via viz_color_key to avoid frontend-side precedence logic.
       { selector: 'node.viz-person', style: { 'background-color': '#3b82f6' } },
       { selector: 'node.viz-business', style: { 'background-color': '#10b981' } },
+      // Debtor gradient bins (light yellow -> red). Keep viz-debt for backwards compatibility.
       { selector: 'node.viz-debt', style: { 'background-color': '#f97316' } },
+      // Softer palette to avoid overly bright nodes.
+      { selector: 'node.viz-debt-0', style: { 'background-color': '#f2e8c4' } },
+      { selector: 'node.viz-debt-1', style: { 'background-color': '#eadca8' } },
+      { selector: 'node.viz-debt-2', style: { 'background-color': '#e2cf8d' } },
+      { selector: 'node.viz-debt-3', style: { 'background-color': '#d8c073' } },
+      { selector: 'node.viz-debt-4', style: { 'background-color': '#cfae62' } },
+      { selector: 'node.viz-debt-5', style: { 'background-color': '#c79459' } },
+      { selector: 'node.viz-debt-6', style: { 'background-color': '#be7a52' } },
+      { selector: 'node.viz-debt-7', style: { 'background-color': '#b05f4b' } },
+      { selector: 'node.viz-debt-8', style: { 'background-color': '#9a4444' } },
       { selector: 'node.viz-suspended', style: { 'background-color': '#e6a23c' } },
       { selector: 'node.viz-left', style: { 'background-color': '#909399' } },
       { selector: 'node.viz-deleted', style: { 'background-color': '#606266' } },
@@ -566,14 +584,24 @@ export function useGraphVisualization(options: {
       { selector: 'node.selected-node.p-left, node.selected-pulse.p-left', style: { 'overlay-color': '#909399' } },
       { selector: 'node.selected-node.p-deleted, node.selected-pulse.p-deleted, node.selected-node.p-banned, node.selected-pulse.p-banned', style: { 'overlay-color': '#606266' } },
 
-      { selector: 'node.type-person', style: { shape: 'ellipse', width: 16, height: 16 } },
+      // Type shapes only; size comes from backend-provided viz_w/viz_h.
+      { selector: 'node.type-person', style: { shape: 'ellipse' } },
       {
         selector: 'node.type-business',
         style: {
           shape: 'round-rectangle',
-          width: 26,
-          height: 22,
           'border-width': 0,
+        },
+      },
+
+      // Suspended: add a subtle fill pattern (dots) instead of a border-only cue.
+      {
+        selector: 'node.viz-suspended, node.p-suspended, node.p-frozen',
+        style: {
+          'background-image': SUSPENDED_PATTERN,
+          'background-repeat': 'repeat',
+          'background-width': 8,
+          'background-height': 8,
         },
       },
 
@@ -1059,6 +1087,72 @@ export function useGraphVisualization(options: {
     const cy = options.getCy()
     if (!cy) return
 
+    function getDrawerClientRect(): DOMRect | null {
+      // GraphAnalyticsDrawer sets data-testid on <el-drawer>.
+      const byTestId = document.querySelector('[data-testid="graph-drawer"]') as HTMLElement | null
+      if (byTestId) return byTestId.getBoundingClientRect()
+
+      // Fallback (should rarely be needed): best-effort lookup.
+      const generic = document.querySelector('.el-drawer') as HTMLElement | null
+      if (generic) return generic.getBoundingClientRect()
+
+      return null
+    }
+
+    function rectsIntersect(a: { x1: number; y1: number; x2: number; y2: number }, b: DOMRect, pad = 0): boolean {
+      const bx1 = b.left - pad
+      const by1 = b.top - pad
+      const bx2 = b.right + pad
+      const by2 = b.bottom + pad
+      return a.x1 < bx2 && a.x2 > bx1 && a.y1 < by2 && a.y2 > by1
+    }
+
+    function nodeClientRect(n: NodeSingular): { x1: number; y1: number; x2: number; y2: number } | null {
+      const cy2 = options.getCy()
+      const container = cy2?.container()
+      if (!cy2 || !container) return null
+      const c = container.getBoundingClientRect()
+      const bb = n.renderedBoundingBox({ includeLabels: false })
+      return {
+        x1: c.left + bb.x1,
+        y1: c.top + bb.y1,
+        x2: c.left + bb.x2,
+        y2: c.top + bb.y2,
+      }
+    }
+
+    function panIfCoveredByDrawer(pid: string) {
+      const cy2 = options.getCy()
+      if (!cy2) return
+      if (!options.drawerOpen.value) return
+
+      const drawerRect = getDrawerClientRect()
+      if (!drawerRect) return
+
+      const n = cy2.getElementById(pid)
+      if (!n || n.empty()) return
+
+      const nr = nodeClientRect(n)
+      if (!nr) return
+
+      const pad = 14
+      if (!rectsIntersect(nr, drawerRect, pad)) return
+
+      const viewportW = window.innerWidth || document.documentElement.clientWidth || 0
+      const isRightDrawer = viewportW ? drawerRect.left > viewportW / 2 : true
+
+      if (isRightDrawer) {
+        // Move node left, just enough to clear the drawer.
+        const overflow = nr.x2 - (drawerRect.left - pad)
+        if (overflow > 1) cy2.panBy({ x: -overflow, y: 0 })
+        return
+      }
+
+      // Left drawer: move node right.
+      const overflow = (drawerRect.right + pad) - nr.x1
+      if (overflow > 1) cy2.panBy({ x: overflow, y: 0 })
+    }
+
     cy.on('tap', 'node', (ev) => {
       const n = ev.target as NodeSingular
       const pid = String(n.data('pid') || n.id())
@@ -1094,12 +1188,16 @@ export function useGraphVisualization(options: {
         // Cancel any pending single-click action (prevents re-layout between clicks).
         stopPendingNodeTap()
 
-        // Center/zoom like Find (also adds a short search-hit highlight).
+        // Do NOT auto-center/zoom on open: preserve the current viewport.
+        // Only pan if the drawer would cover the selected node.
         options.focusPid.value = pid
-        focusSearch()
 
         options.drawerTab.value = 'summary'
         options.drawerOpen.value = true
+
+        // Drawer is mounted/animated; check coverage after it appears.
+        window.setTimeout(() => panIfCoveredByDrawer(pid), 0)
+        window.setTimeout(() => panIfCoveredByDrawer(pid), 250)
         return
       }
 

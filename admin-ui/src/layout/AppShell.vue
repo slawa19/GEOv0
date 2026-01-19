@@ -9,6 +9,7 @@ import { locale, setLocale, t } from '../i18n'
 import { getTooltipContent } from '../content/tooltips'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
 import type { TooltipKey } from '../content/tooltips'
+import { apiModeFromEnv, apiModeFromOverride, effectiveApiMode, setApiModeOverride, type ApiMode } from '../api/apiMode'
 
 type NavItem = {
   path: string
@@ -32,7 +33,20 @@ const navItems: NavItem[] = [
 const route = useRoute()
 const router = useRouter()
 
-const isMockMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toString().toLowerCase() !== 'real')
+const apiMode = computed(() => effectiveApiMode())
+const isMockMode = computed(() => apiMode.value !== 'real')
+const isApiModeOverridden = computed(() => apiModeFromOverride() !== null)
+
+type ApiModeCommand = ApiMode | 'reset'
+
+function applyApiModeCommand(cmd: ApiModeCommand) {
+  if (cmd === 'reset') {
+    setApiModeOverride(null)
+  } else {
+    setApiModeOverride(cmd)
+  }
+  window.location.reload()
+}
 
 const apiBaseLabel = computed(() => {
   if (isMockMode.value) return t('app.apiBase.fixtures', { path: '/admin-fixtures/v1' })
@@ -45,7 +59,12 @@ const apiBaseLabel = computed(() => {
 })
 
 const apiModeBadge = computed(() => (isMockMode.value ? t('app.apiMode.mock') : t('app.apiMode.real')))
-const apiModeBadgeType = computed(() => (isMockMode.value ? 'warning' : 'success'))
+const apiModeBadgeType = computed(() => {
+  if (isApiModeOverridden.value) return 'info'
+  return isMockMode.value ? 'warning' : 'success'
+})
+
+const apiModeDefault = computed(() => apiModeFromEnv())
 
 const healthStore = useHealthStore()
 const authStore = useAuthStore()
@@ -229,14 +248,33 @@ function navigate(path: string) {
               popper-class="geoTooltip geoTooltip--menu"
             >
               <template #content>
-                <span class="geoTooltipText geoTooltipText--clamp2">{{ t('app.status.apiSource', { label: apiBaseLabel }) }}</span>
+                <div class="geoTooltipText geoTooltipText--clamp2">{{ t('app.status.apiSource', { label: apiBaseLabel }) }}</div>
+                <div class="geoTooltipText geoTooltipText--clamp2">{{ t('app.apiMode.switch.defaultLabel', { label: apiModeDefault === 'real' ? t('app.apiMode.real') : t('app.apiMode.mock') }) }}</div>
               </template>
-              <el-tag
-                :type="apiModeBadgeType"
-                effect="plain"
+              <el-dropdown
+                trigger="click"
+                @command="applyApiModeCommand"
               >
-                {{ apiModeBadge }}
-              </el-tag>
+                <el-tag
+                  :type="apiModeBadgeType"
+                  effect="plain"
+                  class="apiModeTag"
+                >
+                  {{ apiModeBadge }}<span v-if="isApiModeOverridden" class="apiModeTag__override">*</span>
+                </el-tag>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="mock">{{ t('app.apiMode.switch.useMock') }}</el-dropdown-item>
+                    <el-dropdown-item command="real">{{ t('app.apiMode.switch.useReal') }}</el-dropdown-item>
+                    <el-dropdown-item
+                      divided
+                      command="reset"
+                    >
+                      {{ t('app.apiMode.switch.reset') }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </el-tooltip>
 
             <el-tag
@@ -396,6 +434,15 @@ function navigate(path: string) {
 .brand__subtitle {
   font-size: var(--geo-font-size-sub);
   color: var(--el-text-color-secondary);
+}
+
+.apiModeTag {
+  cursor: pointer;
+}
+
+.apiModeTag__override {
+  margin-left: 4px;
+  opacity: 0.8;
 }
 
 .header {

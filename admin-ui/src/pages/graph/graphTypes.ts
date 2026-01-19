@@ -7,7 +7,15 @@ export type Participant = {
   // Backend-provided net visualization fields (present only when equivalent is specified).
   net_balance_atoms?: string | null
   net_sign?: -1 | 0 | 1 | null
-  viz_color_key?: 'person' | 'business' | 'debt' | 'suspended' | 'left' | 'deleted' | null
+  viz_color_key?:
+    | 'person'
+    | 'business'
+    | 'debt'
+    | `debt-${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`
+    | 'suspended'
+    | 'left'
+    | 'deleted'
+    | null
   viz_size?: { w: number; h: number } | null
 }
 

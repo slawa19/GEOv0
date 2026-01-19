@@ -479,6 +479,7 @@ export const EN: Record<string, string> = {
   'graph.toolbar.navigateTab': 'Navigate',
 
   'graph.filters.equivalent': 'Equivalent',
+  'graph.filters.equivalentNetVizHint': 'Pick an equivalent (not ALL) to enable net-based size & debtor coloring.',
   'graph.filters.status': 'Status',
   'graph.filters.bottleneck': 'Bottleneck',
   'graph.filters.bottleneckPlaceholder': '0.10',
@@ -504,7 +505,7 @@ export const EN: Record<string, string> = {
   'graph.legend.personNode': 'Person (net ≥ 0)',
   'graph.legend.businessNode': 'Business node',
   'graph.legend.debtNode': 'Debtor (net < 0)',
-  'graph.legend.sizeByAbsNet': 'Size ∝ |net| (capped)',
+  'graph.legend.sizeByAbsNet': 'Size ∝ |net| (capped), for selected equivalent (not ALL)',
   'graph.legend.bottleneck': 'Bottleneck',
   'graph.legend.incidentEdge': 'Incident edge',
 
@@ -664,6 +665,10 @@ export const EN: Record<string, string> = {
   'app.status.scenario': 'scenario: {scenario}',
   'app.apiMode.mock': 'MOCK DATA',
   'app.apiMode.real': 'REAL API',
+  'app.apiMode.switch.useMock': 'Use MOCK DATA',
+  'app.apiMode.switch.useReal': 'Use REAL API',
+  'app.apiMode.switch.reset': 'Reset to env default',
+  'app.apiMode.switch.defaultLabel': 'Default: {label}',
   'app.apiBase.fixtures': 'fixtures: {path}',
   'app.apiBase.defaultDev': '{url} (default)',
   'app.apiBase.sameOrigin': '(same origin)',

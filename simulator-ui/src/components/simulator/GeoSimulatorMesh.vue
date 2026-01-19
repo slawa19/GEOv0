@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   forceCenter,
   forceCollide,
@@ -91,31 +91,41 @@ const RENDER = {
     bokehSpots: 6,
   },
   colors: {
-    nodeBusiness: '#10b981',
-    nodePerson: '#3b82f6',
+    nodeBusiness: '#10fb81', // More saturated green
+    nodePerson: '#00d2ff', // More saturated cyan/blue
+    nodeDebtorLow: '#fbbf24', // Light yellow for low debt
+    nodeDebtorHigh: '#f43f5e', // Pinkish/red for high debt
+    nodeDebtor: '#f97316', // Fallback/base debtor orange
     gold: '#fbbf24',
     cyan: '#22d3ee',
     danger: '#ef4444',
     violet: '#a78bfa',
     slateLineRgb: '148, 163, 184',
+    nebula1: 'rgba(34, 211, 238, 0.05)',
+    nebula2: 'rgba(167, 139, 250, 0.04)',
   },
   links: {
-    baseAlpha: 0.12,
+    baseAlpha: 0.2,
     dimAlpha: 0.05,
-    activeAlpha: 0.65,
-    width: 0.8,
-    activeWidth: 1.15,
-    glowBlur: 10,
+    activeAlpha: 0.9,
+    width: 0.6,
+    activeWidth: 1.5,
+    glowBlur: 6,
   },
   nodes: {
-    jitterPx: 2,
-    selectedScale: 2.15,
-    hoverScale: 1.35,
+    jitterPx: 0, // Disabled jitter for stability
+    selectedScale: 1.6,
+    hoverScale: 1.25,
+    bloomIntensity: 0.3, // Reduced bloom significantly
+    minSize: 6,
+    maxSize: 28,
   },
   vfx: {
-    maxParticles: 36,
-    maxDust: 160,
-    cometTailPx: 46,
+    maxParticles: 48,
+    maxDust: 180,
+    cometTailPx: 80, // Longer tail
+    txSpeed: 3.5, // Slower sparks
+    clearingSpeed: 5.0,
   },
 } as const
 
@@ -137,8 +147,23 @@ const selectedNode = computed<GeoNode | null>(() => {
   return nodeById.value.get(id) ?? null
 })
 
-const cardX = ref(0)
-const cardY = ref(0)
+const cardRef = ref<InstanceType<typeof GeoNodeCard> | null>(null)
+const connectedNodes = shallowRef<Set<string>>(new Set())
+
+watch(() => store.selectedNodeId, (id) => {
+  const connected = new Set<string>()
+  if (id) {
+    connected.add(id)
+    const currentLinks = links.value
+    for (const l of currentLinks) {
+      const s = typeof l.source === 'string' ? l.source : l.source.id
+      const d = typeof l.target === 'string' ? l.target : l.target.id
+      if (s === id) connected.add(d)
+      else if (d === id) connected.add(s)
+    }
+  }
+  connectedNodes.value = connected
+}, { immediate: true })
 
 let sim: Simulation<GeoNode, GeoLink> | null = null
 let rafId: number | null = null
@@ -205,6 +230,15 @@ function hexToRgb(hex: string): string {
   return `${r}, ${g}, ${b}`
 }
 
+function interpolateRgb(rgb1: string, rgb2: string, factor: number): string {
+  const [r1, g1, b1] = rgb1.split(',').map(Number)
+  const [r2, g2, b2] = rgb2.split(',').map(Number)
+  const r = Math.round(r1 + (r2 - r1) * factor)
+  const g = Math.round(g1 + (g2 - g1) * factor)
+  const b = Math.round(b1 + (b2 - b1) * factor)
+  return `${r}, ${g}, ${b}`
+}
+
 function resolveNode(refLike: string | GeoNode): GeoNode | null {
   if (typeof refLike === 'string') return nodeById.value.get(refLike) ?? null
   return refLike
@@ -248,17 +282,31 @@ function getGlowSprite(colorRgb: string, radius: number): HTMLCanvasElement {
   return c
 }
 
-function getNodeSprite(type: NodeType, radius: number, intensity: number): HTMLCanvasElement {
+function getNodeSprite(type: NodeType, radius: number, intensity: number, balance: number): HTMLCanvasElement {
   const r = quantize(radius, 2, 6, 28)
-  const inten = quantize(intensity, 0.1, 0.6, 1.4)
-  const key = `node:${type}:${r}:${inten}`
+  const inten = quantize(intensity, 0.1, 0.4, 2.5)
+  // Quantize balance for caching: 0, -10, -50, -100, -500, etc. (logarithmic-ish)
+  const balKey = balance >= 0 ? 0 : -Math.round(Math.log10(Math.abs(balance) + 1) * 10)
+  const key = `node:${type}:${r}:${inten}:${balKey}`
   const cached = nodeSpriteCache.get(key)
   if (cached) return cached
 
-  const color = type === 'business' ? RENDER.colors.nodeBusiness : RENDER.colors.nodePerson
-  const colorRgb = hexToRgb(color)
+  const startCache = performance.now()
+  const baseColor = type === 'business' ? RENDER.colors.nodeBusiness : RENDER.colors.nodePerson
+  let colorRgb = hexToRgb(baseColor)
 
-  const size = r * 10
+  if (balance < 0) {
+    const lowDebtRgb = hexToRgb(RENDER.colors.nodeDebtorLow)
+    const highDebtRgb = hexToRgb(RENDER.colors.nodeDebtorHigh)
+    // Interpolate: small debt => yellow, large debt => pinkish/red
+    // Assume 2000 is a "large" debt for full color transition
+    const factor = clamp(Math.abs(balance) / 2000, 0, 1)
+    colorRgb = interpolateRgb(lowDebtRgb, highDebtRgb, factor)
+  }
+  
+  const color = `rgb(${colorRgb})`
+
+  const size = r * 12
   const c = createOffscreenCanvas(size, size)
   const ctx = c.getContext('2d')
   if (!ctx) return c
@@ -266,48 +314,80 @@ function getNodeSprite(type: NodeType, radius: number, intensity: number): HTMLC
   const cx = size / 2
   const cy = size / 2
 
-  // Outer glow
-  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 4.2)
-  glow.addColorStop(0, `rgba(${colorRgb}, ${0.42 * inten})`)
-  glow.addColorStop(0.5, `rgba(${colorRgb}, ${0.14 * inten})`)
-  glow.addColorStop(1, 'transparent')
-  ctx.fillStyle = glow
-  ctx.fillRect(0, 0, size, size)
+  // Multi-layer Bloom - reduced for cleaner look
+  const isHighIntensity = inten > 1.2
+  const bloomBase = isHighIntensity ? 0.15 : 0.05
+  const bloomLayers = isHighIntensity ? 2 : 1
+  for (let i = 0; i < bloomLayers; i++) {
+    const layerR = r * (2.0 + i * 1.5)
+    const layerAlpha = (bloomBase / (i + 1)) * inten
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, layerR)
+    glow.addColorStop(0, `rgba(${colorRgb}, ${layerAlpha})`)
+    glow.addColorStop(1, 'transparent')
+    ctx.fillStyle = glow
+    ctx.fillRect(0, 0, size, size)
+  }
 
   // Core
   ctx.save()
   ctx.translate(cx, cy)
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.shadowColor = `rgba(${colorRgb}, 0.85)`
-  ctx.shadowBlur = r * 1.6
+  ctx.shadowColor = `rgba(${colorRgb}, 0.8)`
+  ctx.shadowBlur = r * (isHighIntensity ? 1.5 : 0.5)
   ctx.fillStyle = color
+  
+  const coreSize = r * 1.25
+  ctx.beginPath()
   if (type === 'business') {
-    const s = r * 1.55
-    ctx.fillRect(-s / 2, -s / 2, s, s)
+    const s = coreSize * 1.25
+    const corner = s * 0.15
+    ctx.moveTo(-s / 2 + corner, -s / 2)
+    ctx.lineTo(s / 2 - corner, -s / 2)
+    ctx.quadraticCurveTo(s / 2, -s / 2, s / 2, -s / 2 + corner)
+    ctx.lineTo(s / 2, s / 2 - corner)
+    ctx.quadraticCurveTo(s / 2, s / 2, s / 2 - corner, s / 2)
+    ctx.lineTo(-s / 2 + corner, s / 2)
+    ctx.quadraticCurveTo(-s / 2, s / 2, -s / 2, s / 2 - corner)
+    ctx.lineTo(-s / 2, -s / 2 + corner)
+    ctx.quadraticCurveTo(-s / 2, -s / 2, -s / 2 + corner, -s / 2)
   } else {
-    ctx.beginPath()
-    ctx.arc(0, 0, r * 1.2, 0, Math.PI * 2)
-    ctx.fill()
+    ctx.arc(0, 0, coreSize, 0, Math.PI * 2)
   }
+  ctx.fill()
   ctx.restore()
 
-  // Thin neon rim
+  // High-intensity rim (Sharp Border)
   ctx.save()
   ctx.translate(cx, cy)
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.strokeStyle = `rgba(${colorRgb}, ${0.9 * inten})`
-  ctx.lineWidth = 1
+  // White/light rim for clarity
+  ctx.strokeStyle = `rgba(255, 255, 255, ${isHighIntensity ? 1.0 : 0.4})`
+  ctx.lineWidth = isHighIntensity ? 1.8 : 1.0
+  ctx.shadowColor = '#ffffff'
+  ctx.shadowBlur = isHighIntensity ? 3 : 0
+  
+  ctx.beginPath()
   if (type === 'business') {
-    const s = r * 1.55
-    ctx.strokeRect(-s / 2 - 0.5, -s / 2 - 0.5, s + 1, s + 1)
+    const s = coreSize * 1.25
+    const corner = s * 0.15
+    ctx.moveTo(-s / 2 + corner, -s / 2)
+    ctx.lineTo(s / 2 - corner, -s / 2)
+    ctx.quadraticCurveTo(s / 2, -s / 2, s / 2, -s / 2 + corner)
+    ctx.lineTo(s / 2, s / 2 - corner)
+    ctx.quadraticCurveTo(s / 2, s / 2, s / 2 - corner, s / 2)
+    ctx.lineTo(-s / 2 + corner, s / 2)
+    ctx.quadraticCurveTo(-s / 2, s / 2, -s / 2, s / 2 - corner)
+    ctx.lineTo(-s / 2, -s / 2 + corner)
+    ctx.quadraticCurveTo(-s / 2, -s / 2, -s / 2 + corner, -s / 2)
   } else {
-    ctx.beginPath()
-    ctx.arc(0, 0, r * 1.2 + 0.5, 0, Math.PI * 2)
-    ctx.stroke()
+    ctx.arc(0, 0, coreSize, 0, Math.PI * 2)
   }
+  ctx.stroke()
   ctx.restore()
 
   nodeSpriteCache.set(key, c)
+  const endCache = performance.now()
+  if (endCache - startCache > 2) {
+    console.debug(`[PERF] Node sprite generated: ${key} in ${Math.round(endCache - startCache)}ms. Cache size: ${nodeSpriteCache.size}`)
+  }
   return c
 }
 
@@ -322,31 +402,47 @@ function buildBackground() {
   if (!bctx) return
   bctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  // Base fill
+  // Base fill (deep space)
   bctx.fillStyle = RENDER.bg.base
   bctx.fillRect(0, 0, canvasW, canvasH)
 
-  // Soft bokeh spots (few, but large)
+  // Starfield Noise / Deep Dust
+  for (let i = 0; i < 400; i++) {
+    const x = Math.random() * canvasW
+    const y = Math.random() * canvasH
+    const a = Math.random() * 0.04
+    bctx.fillStyle = `rgba(255, 255, 255, ${a})`
+    bctx.fillRect(x, y, 1, 1)
+  }
+
+  // Soft nebula/bokeh spots (few, but large)
   const rnd = (min: number, max: number) => min + Math.random() * (max - min)
   for (let i = 0; i < RENDER.bg.bokehSpots; i++) {
     const x = rnd(0.05, 0.95) * canvasW
     const y = rnd(0.05, 0.95) * canvasH
-    const r = rnd(0.28, 0.62) * Math.min(canvasW, canvasH)
-    const hue = i % 3 === 0 ? '34, 211, 238' : i % 3 === 1 ? '16, 185, 129' : '167, 139, 250'
-    const a = rnd(0.04, 0.085)
+    const r = rnd(0.35, 0.75) * Math.min(canvasW, canvasH)
+    const color = i % 2 === 0 ? RENDER.colors.nebula1 : RENDER.colors.nebula2
+    
     const g = bctx.createRadialGradient(x, y, 0, x, y, r)
-    g.addColorStop(0, `rgba(${hue}, ${a})`)
+    g.addColorStop(0, color)
     g.addColorStop(1, 'transparent')
     bctx.fillStyle = g
     bctx.fillRect(0, 0, canvasW, canvasH)
   }
 
-  // Vignette
+  // Deep Space Vignette
   {
-    const vg = bctx.createRadialGradient(canvasW * 0.5, canvasH * 0.52, Math.min(canvasW, canvasH) * 0.12, canvasW * 0.5, canvasH * 0.52, Math.max(canvasW, canvasH) * 0.7)
-    vg.addColorStop(0, 'rgba(0, 0, 0, 0.0)')
-    vg.addColorStop(0.65, 'rgba(0, 0, 0, 0.12)')
-    vg.addColorStop(1, 'rgba(0, 0, 0, 0.55)')
+    const vg = bctx.createRadialGradient(
+      canvasW * 0.5, 
+      canvasH * 0.5, 
+      Math.min(canvasW, canvasH) * 0.1, 
+      canvasW * 0.5, 
+      canvasH * 0.5, 
+      Math.max(canvasW, canvasH) * 0.8
+    )
+    vg.addColorStop(0, 'rgba(0, 0, 0, 0)')
+    vg.addColorStop(0.7, 'rgba(2, 4, 8, 0.3)')
+    vg.addColorStop(1, 'rgba(0, 0, 0, 0.85)')
     bctx.fillStyle = vg
     bctx.fillRect(0, 0, canvasW, canvasH)
   }
@@ -363,24 +459,34 @@ function buildBackground() {
     sctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
     // distribution: many tiny, few bigger
-    const layerMul = layer === 1 ? 1.35 : layer === 2 ? 1.0 : 0.75
+    const layerMul = layer === 1 ? 1.5 : layer === 2 ? 0.9 : 0.5
     const count = Math.floor(total * layerMul)
     for (let i = 0; i < count; i++) {
       const x = Math.random() * canvasW
       const y = Math.random() * canvasH
       const p = Math.random()
-      const r = p < 0.86 ? 1 : p < 0.97 ? 1.5 : 2.25
-      const a = layer === 1 ? 0.28 : layer === 2 ? 0.22 : 0.18
+      
+      // Variable star sizes and brightness
+      const r = p < 0.92 ? 0.8 : p < 0.98 ? 1.2 : 2.0
+      const alpha = rnd(0.1, 0.4) / layer
 
-      if (r <= 1.1) {
-        // Fast path: no arc
-        sctx.fillStyle = `rgba(255, 255, 255, ${a})`
+      sctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
+      if (r < 1.0) {
         sctx.fillRect(x, y, 1, 1)
       } else {
-        sctx.fillStyle = `rgba(255, 255, 255, ${a})`
         sctx.beginPath()
         sctx.arc(x, y, r, 0, Math.PI * 2)
         sctx.fill()
+        
+        // Star bloom for larger stars
+        if (r > 1.5) {
+          const sg = sctx.createRadialGradient(x, y, 0, x, y, r * 4)
+          sg.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.5})`)
+          sg.addColorStop(1, 'transparent')
+          sctx.fillStyle = sg
+          sctx.arc(x, y, r * 4, 0, Math.PI * 2)
+          sctx.fill()
+        }
       }
     }
 
@@ -558,24 +664,17 @@ function resizeCanvas() {
 
 function spawnExplosion(x: number, y: number, colorHex: string, isBig: boolean) {
   const colorRgb = hexToRgb(colorHex)
-  const count = isBig ? 30 : 15
-  for (let i = 0; i < count; i++) {
-    if (dust.length >= RENDER.vfx.maxDust) break
-    const angle = Math.random() * Math.PI * 2
-    const speed = Math.random() * (isBig ? 3 : 1.5) + 0.5
-    dust.push({
-      type: 'dust',
-      x,
-      y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: 1.0,
-      decay: Math.random() * 0.02 + 0.01,
-      size: Math.random() * 3 + 1,
-      colorRgb,
+  // Shockwave effect
+  if (dust.length < RENDER.vfx.maxDust) {
+    dust.push({ 
+      type: 'shockwave', 
+      x, 
+      y, 
+      life: 1.0, 
+      size: isBig ? 10 : 5, 
+      colorRgb 
     })
   }
-  if (dust.length < RENDER.vfx.maxDust) dust.push({ type: 'shockwave', x, y, life: 1.0, size: 2, colorRgb })
 }
 
 function pickRelevantLink(): GeoLink | null {
@@ -620,43 +719,136 @@ function triggerTransaction() {
   })
 }
 
+function findClearingGroup(): GeoNode[] {
+  const allNodes = nodes.value
+  const allLinks = links.value
+  if (allNodes.length < 3) return []
+
+  // Начинаем от выбранного узла или случайного
+  const startNode = selectedNode.value || allNodes[Math.floor(Math.random() * allNodes.length)]
+  if (!startNode) return []
+
+  const group: GeoNode[] = [startNode]
+  const visited = new Set<string>([startNode.id])
+
+  const getNeighbors = (nodeId: string) => {
+    return allLinks
+      .filter((l) => {
+        const s = typeof l.source === 'string' ? l.source : l.source.id
+        const d = typeof l.target === 'string' ? l.target : l.target.id
+        return s === nodeId || d === nodeId
+      })
+      .map((l) => {
+        const s = typeof l.source === 'string' ? l.source : l.source.id
+        const d = typeof l.target === 'string' ? l.target : l.target.id
+        return s === nodeId ? d : s
+      })
+  }
+
+  let currentId = startNode.id
+  // Ищем цепочку из 3-4 узлов
+  const targetSize = Math.floor(Math.random() * 2) + 3 // 3 или 4
+  for (let i = 0; i < targetSize - 1; i++) {
+    const neighbors = getNeighbors(currentId).filter((id) => !visited.has(id))
+    if (neighbors.length === 0) break
+
+    const nextId = neighbors[Math.floor(Math.random() * neighbors.length)]
+    const nextNode = nodeById.value.get(nextId)
+    if (nextNode) {
+      group.push(nextNode)
+      visited.add(nextId)
+      currentId = nextId
+    } else {
+      break
+    }
+  }
+
+  return group
+}
+
 function triggerClearing() {
   if (store.isClearing) return
+  const group = findClearingGroup()
+  if (group.length < 2) return
+
   store.setClearing(true)
 
-  let cycles = 0
-  clearingIntervalId = window.setInterval(() => {
-    cycles++
+  // Вычисляем визуальный центр группы для эффекта столкновения
+  const centerX = group.reduce((sum, n) => sum + n.renderX, 0) / group.length
+  const centerY = group.reduce((sum, n) => sum + n.renderY, 0) / group.length
+  const clearingSum = Math.floor(Math.random() * 800 + 200)
 
-    const ls = links.value
-    if (ls.length < 1) return
+  // Запуск взаимных искр между узлами группы
+  for (let i = 0; i < group.length; i++) {
+    const a = group[i]
+    const nextIdx = (i + 1) % group.length
+    const b = group[nextIdx]
 
-    for (let k = 0; k < 2; k++) {
-      const link = ls[Math.floor(Math.random() * ls.length)]
-      if (!link) continue
-      const a = resolveNode(link.source)
-      const b = resolveNode(link.target)
-      if (!a || !b) continue
+    // Если это конец цепочки и она не замкнута в цикле в графе, 
+    // можем либо пропустить, либо форсировать визуальный цикл.
+    // Для эффекта клиринга лучше визуально замыкать или делать "все ко всем" к центру.
+    
+    // Искры к следующему узлу
+    if (particles.length >= RENDER.vfx.maxParticles) particles.shift()
+    particles.push({
+      type: 'clearing',
+      from: { kind: 'node', id: a.id },
+      to: { kind: 'node', id: b.id },
+      progress: 0,
+      speedPx: RENDER.vfx.clearingSpeed,
+      color: RENDER.colors.cyan,
+    })
 
-      const midX = (a.renderX + b.renderX) / 2
-      const midY = (a.renderY + b.renderY) / 2
-      if (particles.length >= RENDER.vfx.maxParticles) particles.shift()
-      particles.push({ type: 'clearing', from: { kind: 'node', id: a.id }, to: { kind: 'point', x: midX, y: midY }, progress: 0, speedPx: 10, color: RENDER.colors.danger })
-      if (particles.length >= RENDER.vfx.maxParticles) particles.shift()
-      particles.push({ type: 'clearing', from: { kind: 'node', id: b.id }, to: { kind: 'point', x: midX, y: midY }, progress: 0, speedPx: 10, color: RENDER.colors.gold })
-    }
+    // Встречные искры другого цвета
+    if (particles.length >= RENDER.vfx.maxParticles) particles.shift()
+    particles.push({
+      type: 'clearing',
+      from: { kind: 'node', id: b.id },
+      to: { kind: 'node', id: a.id },
+      progress: 0,
+      speedPx: RENDER.vfx.clearingSpeed,
+      color: RENDER.colors.nodeDebtor,
+    })
 
-    if (cycles >= 12) {
-      if (clearingIntervalId !== null) window.clearInterval(clearingIntervalId)
-      clearingIntervalId = null
+    // Искры к центру для усиления эффекта столкновения
+    if (particles.length >= RENDER.vfx.maxParticles) particles.shift()
+    particles.push({
+      type: 'clearing',
+      from: { kind: 'node', id: a.id },
+      to: { kind: 'point', x: centerX, y: centerY },
+      progress: 0,
+      speedPx: RENDER.vfx.clearingSpeed * 0.8,
+      color: i % 2 === 0 ? RENDER.colors.cyan : RENDER.colors.nodeDebtor,
+    })
+  }
 
-      window.setTimeout(() => {
-        store.setClearing(false)
-        const sn = selectedNode.value
-        if (sn) sn.balance = Math.trunc(sn.balance / 2)
-      }, 650)
-    }
-  }, 120)
+  // Завершение анимации через 1.5 секунды
+  window.setTimeout(() => {
+    // Эффект взрыва в центре
+    spawnExplosion(centerX, centerY, RENDER.colors.gold, true)
+    
+    // Вылет итоговой суммы
+    particles.push({
+      type: 'tx',
+      from: { kind: 'point', x: centerX, y: centerY },
+      to: { kind: 'point', x: centerX, y: centerY - 40 },
+      progress: 1.0,
+      speedPx: 0,
+      color: RENDER.colors.gold,
+      labelText: `CLEARED: ${clearingSum}`,
+      labelRgb: hexToRgb(RENDER.colors.gold),
+      labelLife: 2.0,
+    })
+
+    // Визуальное обновление балансов
+    group.forEach((n) => {
+      // Имитируем уменьшение долга/баланса после клиринга
+      n.balance = Math.trunc(n.balance * 0.6)
+      spawnExplosion(n.renderX, n.renderY, RENDER.colors.cyan, false)
+    })
+
+    store.setClearing(false)
+  }, 1500)
 }
 
 function initSimulation() {
@@ -667,18 +859,18 @@ function initSimulation() {
 
   sim = forceSimulation<GeoNode>(ns)
     .alpha(1)
-    .alphaMin(0.03)
-    .alphaDecay(0.06)
+    .alphaMin(0.02) // lower min alpha
+    .alphaDecay(0.04) // slower decay for smoother settling
     .force('charge', forceManyBody().strength(-70))
     .force('center', forceCenter(canvasW / 2, canvasH / 2))
     .force(
       'link',
       forceLink<GeoNode, GeoLink>(ls)
         .id((d: GeoNode) => d.id)
-        .distance(92)
+        .distance(100) // slightly more space
         .strength(0.65),
     )
-    .force('collide', forceCollide<GeoNode>().radius((d: GeoNode) => d.baseSize * 2.4).strength(0.7))
+    .force('collide', forceCollide<GeoNode>().radius((d: GeoNode) => d.baseSize * 3).strength(0.8))
 
   // We drive simulation manually (tick in RAF) to keep a single render loop.
   sim.stop()
@@ -711,9 +903,18 @@ function onPointerDown(e: PointerEvent) {
 
   const { x, y } = getPointerPos(e)
   const node = hitTestNode(x, y)
-  if (!node) return
+  
+  if (!node) {
+    store.selectNode(null)
+    return
+  }
 
+  e.preventDefault()
   canvas.setPointerCapture(e.pointerId)
+  
+  // Immediately select node to provide instant visual feedback (highlight)
+  store.selectNode(node.id)
+
   drag.value = { dragging: true, node, pointerId: e.pointerId, startX: x, startY: y, moved: false }
   node.fx = x
   node.fy = y
@@ -727,8 +928,11 @@ function onPointerMove(e: PointerEvent) {
     if (!node) return
 
     const { x, y } = getPointerPos(e)
-    const moved = Math.hypot(x - drag.value.startX, y - drag.value.startY) > 3
-    if (moved) drag.value.moved = true
+    const dist = Math.hypot(x - drag.value.startX, y - drag.value.startY)
+    const moved = dist > 3
+    if (moved && !drag.value.moved) {
+      drag.value.moved = true
+    }
     node.fx = x
     node.fy = y
   }
@@ -757,7 +961,9 @@ function onPointerUp(e: PointerEvent) {
 }
 
 function onClick(e: MouseEvent) {
+  // If we moved significantly, it's a drag, not a click
   if (drag.value.moved) return
+  
   const canvas = canvasRef.value
   if (!canvas) return
 
@@ -765,8 +971,13 @@ function onClick(e: MouseEvent) {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
   const node = hitTestNode(x, y)
-  if (node) store.selectNode(node.id)
-  else store.selectNode(null)
+  
+  // Selection is already handled in onPointerDown for nodes.
+  // We only need to handle clicking on empty space here if needed,
+  // but onPointerDown already handles store.selectNode(null) when hitTestNode fails.
+  if (!node) {
+    store.selectNode(null)
+  }
 }
 
 function renderFrame() {
@@ -809,27 +1020,23 @@ function renderFrame() {
     const hot = drag.value.dragging || s.alpha() > 0.12
     const warm = s.alpha() > 0.045
     const ticks = hot ? 2 : warm ? 1 : (t % 3 < 0.01 ? 1 : 0)
+    
     for (let i = 0; i < ticks; i++) s.tick()
   }
 
   t += 0.008
 
-  // 1) Background
+  // 1) Background (STATIC)
   ctx.globalCompositeOperation = 'source-over'
-  ctx.fillStyle = RENDER.bg.base
-  ctx.fillRect(0, 0, canvasW, canvasH)
-
-  // Cached background + star layers with subtle parallax
   if (bgBaseCanvas) ctx.drawImage(bgBaseCanvas, 0, 0, canvasW, canvasH)
+  // Dynamic star layers removed to avoid "twitching" and maintain absolute stability
+  /*
   if (bgStarLayers.length) {
     for (let i = 0; i < bgStarLayers.length; i++) {
-      const layer = bgStarLayers[i]
-      const par = i === 0 ? 0.18 : i === 1 ? 0.32 : 0.48
-      const dx = Math.sin(t * 0.55 + i) * par
-      const dy = Math.cos(t * 0.48 + i) * par
-      ctx.drawImage(layer, dx, dy, canvasW, canvasH)
+      ctx.drawImage(bgStarLayers[i], 0, 0, canvasW, canvasH)
     }
   }
+  */
 
   const sn = selectedNode.value
   const activeId = store.selectedNodeId
@@ -838,11 +1045,19 @@ function renderFrame() {
   for (const n of nodes.value) {
     const isSelected = sn?.id === n.id
     const isActive = !!activeId && n.id === activeId
+    
+    // Nonlinear scaling based on balance
+    // Sizes of nodes with positive and negative balance should be the same for equal absolute values
+    const absBalance = Math.abs(n.balance)
+    const balanceSizeAdd = Math.sqrt(absBalance) * 0.4
+    
+    const baseWithBalance = clamp(n.baseSize + balanceSizeAdd, RENDER.nodes.minSize, RENDER.nodes.maxSize)
+    
     const targetSize = isSelected
-      ? n.baseSize * RENDER.nodes.selectedScale
+      ? baseWithBalance * RENDER.nodes.selectedScale
       : isActive
-        ? n.baseSize * RENDER.nodes.hoverScale
-        : n.baseSize
+        ? baseWithBalance * RENDER.nodes.hoverScale
+        : baseWithBalance
     n.currentSize += (targetSize - n.currentSize) * 0.11
 
     const x = n.x ?? 0
@@ -861,31 +1076,62 @@ function renderFrame() {
     const a = resolveNode(l.source)
     const b = resolveNode(l.target)
     if (!a || !b) continue
-    ctx.moveTo(a.renderX, a.renderY)
-    ctx.lineTo(b.renderX, b.renderY)
+
+    const dx = b.renderX - a.renderX
+    const dy = b.renderY - a.renderY
+    const dist = Math.hypot(dx, dy)
+    if (dist < 20) continue
+
+    const nx = dx / dist
+    const ny = dy / dist
+
+    // Gap calculation based on current node sizes
+    // In getNodeSprite, coreSize = r * 1.25. We add a small extra margin.
+    const gapA = a.currentSize * 1.25 + 2
+    const gapB = b.currentSize * 1.25 + 2
+
+    if (dist <= gapA + gapB) continue
+
+    ctx.moveTo(a.renderX + nx * gapA, a.renderY + ny * gapA)
+    ctx.lineTo(b.renderX - nx * gapB, b.renderY - ny * gapB)
   }
   ctx.lineWidth = RENDER.links.width
   ctx.strokeStyle = `rgba(${RENDER.colors.slateLineRgb}, ${activeId ? RENDER.links.dimAlpha : RENDER.links.baseAlpha})`
   ctx.stroke()
   ctx.restore()
 
-  // Active links (glow)
+  // Active links (glow + flicker)
   if (activeId) {
     ctx.save()
     ctx.globalCompositeOperation = 'lighter'
     ctx.lineWidth = RENDER.links.activeWidth
     ctx.shadowColor = RENDER.colors.cyan
-    ctx.shadowBlur = RENDER.links.glowBlur
-    ctx.strokeStyle = `rgba(${hexToRgb(RENDER.colors.cyan)}, ${RENDER.links.activeAlpha})`
+    ctx.shadowBlur = RENDER.links.glowBlur + Math.sin(t * 8) * 4
+    const flicker = 0.5 + Math.random() * 0.3
+    ctx.strokeStyle = `rgba(${hexToRgb(RENDER.colors.cyan)}, ${RENDER.links.activeAlpha * flicker})`
     for (const l of links.value) {
       const a = resolveNode(l.source)
       const b = resolveNode(l.target)
       if (!a || !b) continue
       const isConnected = a.id === activeId || b.id === activeId
       if (!isConnected) continue
+
+      const dx = b.renderX - a.renderX
+      const dy = b.renderY - a.renderY
+      const dist = Math.hypot(dx, dy)
+      if (dist < 20) continue
+
+      const nx = dx / dist
+      const ny = dy / dist
+
+      const gapA = a.currentSize * 1.25 + 2
+      const gapB = b.currentSize * 1.25 + 2
+
+      if (dist <= gapA + gapB) continue
+
       ctx.beginPath()
-      ctx.moveTo(a.renderX, a.renderY)
-      ctx.lineTo(b.renderX, b.renderY)
+      ctx.moveTo(a.renderX + nx * gapA, a.renderY + ny * gapA)
+      ctx.lineTo(b.renderX - nx * gapB, b.renderY - ny * gapB)
       ctx.stroke()
     }
     ctx.restore()
@@ -893,38 +1139,39 @@ function renderFrame() {
 
   // 4) Nodes
   ctx.save()
-  ctx.globalCompositeOperation = 'lighter'
+  const currentSnId = sn?.id
+  const currentConnectedNodes = connectedNodes.value
+
   for (const n of nodes.value) {
-    const isSelected = sn?.id === n.id
-    const intensity = isSelected ? 1.25 : 1.0
-    const sprite = getNodeSprite(n.type, n.currentSize, intensity)
+    const isSelected = currentSnId === n.id
+    const isActiveNode = activeId && (n.id === activeId || currentConnectedNodes.has(n.id))
+    
+    // Define a "resting" intensity when nothing is selected
+    const baseIntensity = 0.85
+    const intensity = activeId 
+      ? (isSelected ? 1.5 : (isActiveNode ? 1.1 : 0.35))
+      : baseIntensity
+    
+    const r = quantize(n.currentSize, 2, 6, 28)
+    const inten = quantize(intensity, 0.1, 0.4, 2.5)
+    // Quantize balance for caching: 0, -10, -50, -100, -500, etc. (logarithmic-ish)
+    const balKey = n.balance >= 0 ? 0 : -Math.round(Math.log10(Math.abs(n.balance) + 1) * 10)
+    const key = `node:${n.type}:${r}:${inten}:${balKey}`
+    
+    let sprite = nodeSpriteCache.get(key)
+    if (!sprite) {
+        sprite = getNodeSprite(n.type, n.currentSize, intensity, n.balance)
+    }
+
     const dw = sprite.width / dpr
     const dh = sprite.height / dpr
+    
+    const isGhosted = activeId && !isActiveNode
+    ctx.globalAlpha = isGhosted ? 0.3 : 1.0
+    ctx.globalCompositeOperation = isGhosted ? 'source-over' : 'lighter'
     ctx.drawImage(sprite, n.renderX - dw / 2, n.renderY - dh / 2, dw, dh)
   }
   ctx.restore()
-
-  // Selected node rings / orbits
-  if (sn) {
-    const colorRgb = hexToRgb(sn.type === 'business' ? RENDER.colors.nodeBusiness : RENDER.colors.nodePerson)
-    ctx.save()
-    ctx.globalCompositeOperation = 'lighter'
-    ctx.shadowColor = `rgba(${colorRgb}, 0.9)`
-    ctx.shadowBlur = 18
-    ctx.lineWidth = 1.15
-    for (let k = 0; k < 3; k++) {
-      const phase = t * (0.9 + k * 0.18)
-      const baseR = sn.currentSize * (3.0 + k * 0.95)
-      const puls = (Math.sin(phase) * 0.5 + 0.5) * 10
-      const rr = baseR + puls
-      const a = 0.24 - k * 0.06
-      ctx.strokeStyle = `rgba(${colorRgb}, ${a})`
-      ctx.beginPath()
-      ctx.arc(sn.renderX, sn.renderY, rr, 0, Math.PI * 2)
-      ctx.stroke()
-    }
-    ctx.restore()
-  }
 
   // 5) Particles
   ctx.save()
@@ -948,49 +1195,110 @@ function renderFrame() {
     const dx = b.x - a.x
     const dy = b.y - a.y
     const dist = Math.max(1, Math.hypot(dx, dy))
-    p.progress += p.speedPx / dist
-    if (p.progress >= 1) {
+    const nx = dx / dist
+    const ny = dy / dist
+
+    // Calculate node gaps for particles
+    const srcNode = p.from.kind === 'node' ? nodeById.value.get(p.from.id) : null
+    const dstNode = p.to.kind === 'node' ? nodeById.value.get(p.to.id) : null
+    const gapStart = srcNode ? srcNode.currentSize * 1.25 + 5 : 0
+    const gapEnd = dstNode ? dstNode.currentSize * 1.25 + 5 : 0
+
+    // Slow down spark movement
+    const speed = p.type === 'clearing' ? RENDER.vfx.clearingSpeed : RENDER.vfx.txSpeed
+    const effectiveDist = Math.max(1, dist - gapStart - gapEnd)
+    p.progress += speed / effectiveDist
+  if (p.progress >= 1) {
+    // If it's a tx, we keep it for a bit longer to show the "flying out" label if it hasn't finished
+    if (p.type === 'tx' && (p.labelLife ?? 0) > 0) {
+      // Just keep progress at 1 and don't splice yet
+    } else {
       particles.splice(i, 1)
-      spawnExplosion(b.x, b.y, p.type === 'clearing' ? RENDER.colors.gold : p.color, p.type === 'clearing')
+      const explosionColor = p.type === 'clearing' ? RENDER.colors.cyan : p.color
+      spawnExplosion(b.x, b.y, explosionColor, p.type === 'clearing')
+      
+      // Floating text for clearing collision
+      if (p.type === 'clearing') {
+        particles.push({
+          type: 'tx', // reused tx type for label
+          from: { kind: 'point', x: b.x, y: b.y },
+          to: { kind: 'point', x: b.x, y: b.y - 10 },
+          progress: 1.0,
+          speedPx: 0,
+          color: RENDER.colors.gold,
+          labelText: `-${Math.floor(Math.random() * 50 + 10)}`,
+          labelRgb: hexToRgb(RENDER.colors.gold),
+          labelLife: 0.8
+        })
+      }
       continue
     }
+  }
 
-    const px = a.x + dx * p.progress
-    const py = a.y + dy * p.progress
-    const nx = -dy / dist
-    const ny = dx / dist
+    const srcNode = p.from.kind === 'node' ? nodeById.value.get(p.from.id) : null
+    const dstNode = p.to.kind === 'node' ? nodeById.value.get(p.to.id) : null
+    const gapStart = srcNode ? srcNode.currentSize * 1.25 + 5 : 0
+    const gapEnd = dstNode ? dstNode.currentSize * 1.25 + 5 : 0
 
-    // comet tail
-    const tail = Math.min(RENDER.vfx.cometTailPx, dist * 0.35)
-    const tx = px - (dx / dist) * tail
-    const ty = py - (dy / dist) * tail
+    const px = a.x + nx * gapStart + (dx - nx * (gapStart + gapEnd)) * Math.min(1, p.progress)
+    const py = a.y + ny * gapStart + (dy - ny * (gapStart + gapEnd)) * Math.min(1, p.progress)
 
-    ctx.shadowColor = p.color
-    ctx.shadowBlur = p.type === 'clearing' ? 18 : 20
-    ctx.strokeStyle = p.color
-    ctx.lineWidth = p.type === 'clearing' ? 2.2 : 2.6
-    ctx.beginPath()
-    ctx.moveTo(tx, ty)
-    ctx.lineTo(px, py)
-    ctx.stroke()
+    // Dynamic Spark + Long Tail (Schleif)
+    if (p.progress < 1.0) {
+      const remainingDist = dist - gapStart - gapEnd
+      const tailLen = Math.min(RENDER.vfx.cometTailPx, remainingDist * 0.45)
+      const segments = 8
+      const colorRgb = hexToRgb(p.color)
 
-    // bright head
-    ctx.fillStyle = '#ffffff'
-    ctx.beginPath()
-    ctx.arc(px, py, 2.4, 0, Math.PI * 2)
-    ctx.fill()
+      for (let s = 0; s < segments; s++) {
+        const s0 = s / segments
+        const s1 = (s + 1) / segments
+        const alpha = (1 - s0) * 0.8
+        const width = (1 - s0) * (p.type === 'clearing' ? 3.5 : 4.0)
+        
+        const x0 = px - nx * tailLen * s0
+        const y0 = py - ny * tailLen * s0
+        const x1 = px - nx * tailLen * s1
+        const y1 = py - ny * tailLen * s1
 
-    // minimal label (tx only)
-    if (p.type === 'tx' && p.labelText && p.labelRgb && (p.labelLife ?? 0) > 0) {
+        ctx.strokeStyle = `rgba(${colorRgb}, ${alpha})`
+        ctx.lineWidth = width
+        ctx.beginPath()
+        ctx.moveTo(x0, y0)
+        ctx.lineTo(x1, y1)
+        ctx.stroke()
+      }
+
+      // Spark Head Bloom
+      const headGlow = getGlowSprite(colorRgb, 8)
+      const hgw = headGlow.width / dpr
+      const hgh = headGlow.height / dpr
+      ctx.drawImage(headGlow, px - hgw / 2, py - hgh / 2, hgw, hgh)
+
+      // Intense Core
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath()
+      ctx.arc(px, py, 1.8, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // label (tx only) - appears only at destination
+    if (p.type === 'tx' && p.labelText && p.labelRgb && p.progress >= 1 && (p.labelLife ?? 0) > 0) {
       const life = (p.labelLife ?? 0) - 0.016
       p.labelLife = life
       const alpha = clamp(life / 0.9, 0, 1)
-      const lx = a.x + dx * 0.55 + nx * 14
-      const ly = a.y + dy * 0.55 + ny * 14
-      ctx.shadowBlur = 14
-      ctx.shadowColor = `rgba(${p.labelRgb}, 0.85)`
-      ctx.fillStyle = `rgba(${p.labelRgb}, ${0.85 * alpha})`
-      ctx.fillText(p.labelText, lx, ly)
+      
+      // Fly up from node B
+      const totalLife = 0.9
+      const flyProgress = 1 - (life / totalLife)
+      const lx = b.x
+      const ly = b.y - 15 - flyProgress * 50
+
+      ctx.save()
+      ctx.fillStyle = `rgba(${p.labelRgb}, ${alpha})`
+      ctx.font = '600 15px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial'
+      ctx.fillText(p.labelText + ' GC', lx, ly)
+      ctx.restore()
     }
   }
   ctx.restore()
@@ -1002,17 +1310,32 @@ function renderFrame() {
     const p = dust[i]
     if (!p) continue
     if (p.type === 'shockwave') {
-      p.life -= 0.04
-      p.size += 1.5
+      p.life -= 0.045
+      p.size += 1.8
       if (p.life <= 0) {
         dust.splice(i, 1)
         continue
       }
-      ctx.strokeStyle = `rgba(${p.colorRgb}, ${p.life})`
-      ctx.lineWidth = 1
+      
+      const alpha = p.life * 0.6
+      ctx.save()
       ctx.beginPath()
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
+      
+      // Compact pulse ring
+      ctx.strokeStyle = `rgba(${p.colorRgb}, ${alpha})`
+      ctx.lineWidth = 1.2
       ctx.stroke()
+      
+      // Second slightly larger and fainter ring
+      if (p.life > 0.4) {
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, p.size * 1.25, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(${p.colorRgb}, ${alpha * 0.35})`
+        ctx.lineWidth = 0.8
+        ctx.stroke()
+      }
+      ctx.restore()
       continue
     }
 
@@ -1039,23 +1362,32 @@ function renderFrame() {
   // 7) Line to card
   ctx.globalCompositeOperation = 'source-over'
   if (sn) {
-    const cardTop = cardY.value
+    const cx = clamp(sn.renderX - 110, 10, canvasW - 230)
+    const cy = clamp(sn.renderY - 180, 10, canvasH - 220)
+    
     ctx.beginPath()
     ctx.moveTo(sn.renderX, sn.renderY - (sn.currentSize + 5))
-    ctx.lineTo(sn.renderX, cardTop + 80)
-    const color = sn.type === 'business' ? RENDER.colors.nodeBusiness : RENDER.colors.nodePerson
-    ctx.strokeStyle = `rgba(${hexToRgb(color)}, 0.35)`
-    ctx.lineWidth = 1.1
+    ctx.lineTo(sn.renderX, cy + 100)
+    let color = sn.type === 'business' ? RENDER.colors.nodeBusiness : RENDER.colors.nodePerson
+    if (sn.balance < 0) color = RENDER.colors.nodeDebtor
+    ctx.strokeStyle = `rgba(${hexToRgb(color)}, 0.25)`
+    ctx.lineWidth = 1.0
     ctx.stroke()
   }
 
+  // DUPLICATE REMOVED BY DIAGNOSIS
+  /*
   if (sn) {
     cardX.value = clamp(sn.renderX - 120, 12, canvasW - 252)
-    cardY.value = clamp(sn.renderY - 220, 12, canvasH - 240)
+    cardY.value = clamp(sn.renderY - 260, 12, canvasH - 320)
   }
+  */
 
   rafId = window.requestAnimationFrame(renderFrame)
 }
+
+// Global debug flag to toggle logs from console
+(window as any).SIM_DEBUG = false;
 
 const NodeTypeIcon = computed(() => (selectedNode.value?.type === 'business' ? ShieldCheck : Users))
 
@@ -1111,10 +1443,8 @@ onBeforeUnmount(() => {
 
     <GeoNodeCard
       v-if="selectedNode"
+      ref="cardRef"
       :node="selectedNode"
-      :icon="NodeTypeIcon"
-      :x="cardX"
-      :y="cardY"
       @close="closeCard"
     />
 

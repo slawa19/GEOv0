@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -1262,10 +1262,11 @@ async def admin_graph_snapshot(
         # Compute atoms + magnitudes for percentile-based sizing.
         net_atoms_by_pid: dict[str, int] = {}
         mags: list[int] = []
+        debt_mags: list[int] = []
 
         def _to_atoms(amount: Decimal) -> int:
             # amount is Decimal in major units; convert to integer atoms.
-            return int((amount * scale10).to_integral_value(rounding="ROUND_HALF_UP"))
+            return int((amount * scale10).to_integral_value(rounding=ROUND_HALF_UP))
 
         for p in participants_list:
             deb = debt_by_pid.get(p.pid, Decimal(0))
@@ -1274,9 +1275,13 @@ async def admin_graph_snapshot(
             atoms = _to_atoms(net_dec)
             net_atoms_by_pid[p.pid] = atoms
             mags.append(abs(atoms))
+            if atoms < 0:
+                debt_mags.append(abs(atoms))
 
         mags_sorted = sorted(mags)
         n = len(mags_sorted)
+        debt_mags_sorted = sorted(debt_mags)
+        dn = len(debt_mags_sorted)
 
         def _percentile(mag: int) -> float:
             if n <= 1:
@@ -1287,6 +1292,19 @@ async def admin_graph_snapshot(
             i = bisect.bisect_right(mags_sorted, mag) - 1
             i = max(0, min(i, n - 1))
             return i / (n - 1)
+
+        DEBT_BINS = 9
+
+        def _debt_bin(mag: int) -> int:
+            if dn <= 1:
+                return 0
+            import bisect
+
+            i = bisect.bisect_right(debt_mags_sorted, mag) - 1
+            i = max(0, min(i, dn - 1))
+            pct = i / (dn - 1)
+            b = int(round(pct * (DEBT_BINS - 1)))
+            return max(0, min(b, DEBT_BINS - 1))
 
         max_scale = 1.90
         gamma = 0.75
@@ -1314,7 +1332,7 @@ async def admin_graph_snapshot(
                 p.viz_color_key = "deleted"
             else:
                 if p.net_sign == -1:
-                    p.viz_color_key = "debt"
+                    p.viz_color_key = f"debt-{_debt_bin(abs(atoms))}"
                 else:
                     p.viz_color_key = "business" if type_key == "business" else "person"
 
@@ -1619,9 +1637,10 @@ async def admin_graph_ego(
             credit_by_pid[str(pid0)] = s
 
         def _to_atoms(amount: Decimal) -> int:
-            return int((amount * scale10).to_integral_value(rounding="ROUND_HALF_UP"))
+            return int((amount * scale10).to_integral_value(rounding=ROUND_HALF_UP))
 
         mags: list[int] = []
+        debt_mags: list[int] = []
         net_atoms_by_pid: dict[str, int] = {}
         for p in participants_list:
             deb = debt_by_pid.get(p.pid, Decimal(0))
@@ -1629,9 +1648,13 @@ async def admin_graph_ego(
             atoms = _to_atoms(cre - deb)
             net_atoms_by_pid[p.pid] = atoms
             mags.append(abs(atoms))
+            if atoms < 0:
+                debt_mags.append(abs(atoms))
 
         mags_sorted = sorted(mags)
         n = len(mags_sorted)
+        debt_mags_sorted = sorted(debt_mags)
+        dn = len(debt_mags_sorted)
 
         def _percentile(mag: int) -> float:
             if n <= 1:
@@ -1641,6 +1664,19 @@ async def admin_graph_ego(
             i = bisect.bisect_right(mags_sorted, mag) - 1
             i = max(0, min(i, n - 1))
             return i / (n - 1)
+
+        DEBT_BINS = 9
+
+        def _debt_bin(mag: int) -> int:
+            if dn <= 1:
+                return 0
+            import bisect
+
+            i = bisect.bisect_right(debt_mags_sorted, mag) - 1
+            i = max(0, min(i, dn - 1))
+            pct = i / (dn - 1)
+            b = int(round(pct * (DEBT_BINS - 1)))
+            return max(0, min(b, DEBT_BINS - 1))
 
         max_scale = 1.90
         gamma = 0.75
@@ -1668,7 +1704,7 @@ async def admin_graph_ego(
                 p.viz_color_key = "deleted"
             else:
                 if p.net_sign == -1:
-                    p.viz_color_key = "debt"
+                    p.viz_color_key = f"debt-{_debt_bin(abs(atoms))}"
                 else:
                     p.viz_color_key = "business" if type_key == "business" else "person"
 

@@ -134,5 +134,5 @@ async def test_admin_graph_snapshot_equivalent_enables_net_viz(client, db_sessio
 
     assert participants_by_pid['bob']['net_balance_atoms'] == '-725'
     assert participants_by_pid['bob']['net_sign'] == -1
-    assert participants_by_pid['bob']['viz_color_key'] == 'debt'
+    assert participants_by_pid['bob']['viz_color_key'] == 'debt-0'
     assert participants_by_pid['bob']['viz_size'] == {'w': 30, 'h': 30}

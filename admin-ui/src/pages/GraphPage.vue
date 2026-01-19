@@ -45,6 +45,7 @@ import { useGraphPageOptions } from './graph/useGraphPageOptions'
 import { useGraphPageWatchers } from './graph/useGraphPageWatchers'
 import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import { effectiveApiMode } from '../api/apiMode'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,7 +143,7 @@ const layoutSpacing = ref<number>(DEFAULT_LAYOUT_SPACING)
 
 const toolbarTab = ref<'filters' | 'display' | 'navigate'>('filters')
 
-const isRealMode = computed(() => (import.meta.env.VITE_API_MODE || 'mock').toString().toLowerCase() === 'real')
+const isRealMode = computed(() => effectiveApiMode() === 'real')
 const selected = ref<SelectedInfo | null>(null)
 
 const MAX_AUTO_RENDER_NODES = 1500

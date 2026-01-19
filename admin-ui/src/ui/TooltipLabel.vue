@@ -80,8 +80,9 @@ const ariaLabel = computed(() => {
 
 <style scoped>
 .tl {
-  display: inline-block;
-  vertical-align: baseline;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
 }
 
 .tl__label {
@@ -101,9 +102,7 @@ const ariaLabel = computed(() => {
   font-weight: 600;
   font-size: 0.75em;
   line-height: 1;
-  vertical-align: super;
-  position: relative;
-  top: -0.35em;
+  vertical-align: middle;
 }
 
 .tl__icon:focus-visible {

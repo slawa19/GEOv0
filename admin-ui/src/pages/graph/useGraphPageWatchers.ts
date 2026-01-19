@@ -73,7 +73,7 @@ export function useGraphPageWatchers(opts: {
 
   watch(opts.eq, () => {
     void (async () => {
-      if (opts.isRealMode.value && !opts.focusMode.value) {
+      if (!opts.focusMode.value) {
         await opts.refreshSnapshotForEq()
       }
       opts.graphViz.rebuildGraph({ fit: false })

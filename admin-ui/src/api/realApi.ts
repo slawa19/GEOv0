@@ -63,6 +63,7 @@ const ParticipantSchema = z
         z.literal('person'),
         z.literal('business'),
         z.literal('debt'),
+        z.string().regex(/^debt-[0-8]$/),
         z.literal('suspended'),
         z.literal('left'),
         z.literal('deleted'),

@@ -105,13 +105,15 @@ const props = defineProps<{
   height: 12px;
   border-radius: 6px;
   background: #e6a23c;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.22) 1px, transparent 1px);
+  background-size: 4px 4px;
 }
 
 .swatch--node-debt {
-  width: 12px;
+  width: 28px;
   height: 12px;
   border-radius: 6px;
-  background: #f97316;
+  background: linear-gradient(90deg, #f2e8c4 0%, #eadca8 20%, #e2cf8d 35%, #cfae62 55%, #c79459 70%, #b05f4b 85%, #9a4444 100%);
 }
 
 .swatch--node-left {

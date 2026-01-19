@@ -479,6 +479,7 @@ export const RU: Record<string, string> = {
   'graph.toolbar.navigateTab': 'Навигация',
 
   'graph.filters.equivalent': 'Эквивалент',
+  'graph.filters.equivalentNetVizHint': 'Выбери эквивалент (не ALL), чтобы включить размер ∝ |net| и подсветку должников.',
   'graph.filters.status': 'Статус',
   'graph.filters.bottleneck': 'Узкое место',
   'graph.filters.bottleneckPlaceholder': '0.10',
@@ -504,7 +505,7 @@ export const RU: Record<string, string> = {
   'graph.legend.personNode': 'Физлицо (net ≥ 0)',
   'graph.legend.businessNode': 'Бизнес-узел',
   'graph.legend.debtNode': 'Должник (net < 0)',
-  'graph.legend.sizeByAbsNet': 'Размер ∝ |net| (с ограничением сверху)',
+  'graph.legend.sizeByAbsNet': 'Размер ∝ |net| (с ограничением сверху), для выбранного эквивалента (не ALL)',
   'graph.legend.bottleneck': 'Узкое место',
   'graph.legend.incidentEdge': 'Инцидент (ребро)',
 
@@ -664,6 +665,10 @@ export const RU: Record<string, string> = {
   'app.status.scenario': 'сценарий: {scenario}',
   'app.apiMode.mock': 'MOCK DATA',
   'app.apiMode.real': 'REAL API',
+  'app.apiMode.switch.useMock': 'Использовать MOCK DATA',
+  'app.apiMode.switch.useReal': 'Использовать REAL API',
+  'app.apiMode.switch.reset': 'Сбросить на env по умолчанию',
+  'app.apiMode.switch.defaultLabel': 'По умолчанию: {label}',
   'app.apiBase.fixtures': 'fixtures: {path}',
   'app.apiBase.defaultDev': '{url} (по умолчанию)',
   'app.apiBase.sameOrigin': '(same origin)',

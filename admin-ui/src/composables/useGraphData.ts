@@ -161,7 +161,6 @@ export function useGraphData(opts: {
   }
 
   async function refreshSnapshotForEq() {
-    if (!opts.isRealMode.value) return
     if (opts.focusMode.value) return
     try {
       const snapEq = normalizeEqCode(opts.eq.value)

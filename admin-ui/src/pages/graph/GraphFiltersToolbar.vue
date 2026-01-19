@@ -243,6 +243,12 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
                 :value="c"
               />
             </el-select>
+            <div
+              v-if="eqModel === 'ALL'"
+              class="ctl__hint"
+            >
+              {{ t('graph.filters.equivalentNetVizHint') }}
+            </div>
           </div>
 
           <div class="ctl filtersGrid__status">
@@ -665,6 +671,14 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
 .ctl__field--compact :deep(.el-input-number .el-input),
 .ctl__field--compact :deep(.el-input-number .el-input__wrapper) {
   width: 100%;
+}
+
+.ctl__hint {
+  max-width: var(--geo-ctl-width, 180px);
+  margin-top: 4px;
+  font-size: var(--geo-font-size-sub);
+  line-height: 1.2;
+  color: var(--el-text-color-secondary);
 }
 
 

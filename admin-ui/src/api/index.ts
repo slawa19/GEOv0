@@ -1,16 +1,14 @@
 import { mockApi } from './mockApi'
 import { realApi } from './realApi'
 
-export type ApiMode = 'mock' | 'real'
+import {
+  type ApiMode,
+  apiModeFromEnv,
+  effectiveApiMode,
+  resolveApiMode,
+} from './apiMode'
 
-export function resolveApiMode(raw: unknown): ApiMode {
-  const val = (raw ?? 'mock').toString().toLowerCase()
-  return val === 'real' ? 'real' : 'mock'
-}
+export type { ApiMode }
+export { resolveApiMode, apiModeFromEnv, effectiveApiMode }
 
-export function apiModeFromEnv(env: unknown = import.meta.env): ApiMode {
-  const rec = (env && typeof env === 'object') ? (env as Record<string, unknown>) : {}
-  return resolveApiMode(rec.VITE_API_MODE)
-}
-
-export const api = apiModeFromEnv() === 'real' ? realApi : mockApi
+export const api = effectiveApiMode() === 'real' ? realApi : mockApi

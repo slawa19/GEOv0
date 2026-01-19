@@ -66,12 +66,12 @@ function scenarioNameFromUrl(): string {
   return (u.searchParams.get('scenario') || 'happy').trim() || 'happy'
 }
 
-async function loadJson<T>(relPath: string): Promise<T> {
+async function loadJson<T>(relPath: string, opts?: { silent?: boolean }): Promise<T> {
   const key = relPath
   if (cache.has(key)) return cache.get(key) as T
 
   const url = `${FIXTURES_BASE}/${relPath}`
-  const attempts = 3
+  const attempts = opts?.silent ? 1 : 3
 
   let lastErr: unknown = null
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -105,7 +105,9 @@ async function loadJson<T>(relPath: string): Promise<T> {
     }
   }
 
-  await notifyLoadError(t('fixtures.loadFailedMany', { path: relPath }))
+  if (!opts?.silent) {
+    await notifyLoadError(t('fixtures.loadFailedMany', { path: relPath }))
+  }
 
   if (lastErr instanceof ApiException) throw lastErr
   throw new ApiException({
@@ -118,7 +120,7 @@ async function loadJson<T>(relPath: string): Promise<T> {
 
 async function loadOptionalJson<T>(relPath: string, fallback: T): Promise<T> {
   try {
-    return await loadJson<T>(relPath)
+    return await loadJson<T>(relPath, { silent: true })
   } catch {
     return fallback
   }
@@ -1146,10 +1148,15 @@ export const mockApi = {
     })
   },
 
-  async graphSnapshot(_params?: { equivalent?: string }): Promise<ApiEnvelope<GraphSnapshot>> {
+  async graphSnapshot(params?: { equivalent?: string }): Promise<ApiEnvelope<GraphSnapshot>> {
     return withScenario('/api/v1/admin/graph/snapshot', async () => {
-      const [participants, trustlines, incidents, equivalents, debts, auditLog, transactions] = await Promise.all([
-        loadJson<Participant[]>('datasets/participants.json'),
+      const eq = String(params?.equivalent || '').trim().toUpperCase()
+      const participantsPath = eq ? `datasets/participants.viz-${eq}.json` : ''
+
+      const baseParticipants = await loadJson<Participant[]>('datasets/participants.json')
+      const participants = eq ? await loadOptionalJson<Participant[]>(participantsPath, baseParticipants) : baseParticipants
+
+      const [trustlines, incidents, equivalents, debts, auditLog, transactions] = await Promise.all([
         loadJson<Trustline[]>('datasets/trustlines.json'),
         loadJson<{ items: Incident[] }>('datasets/incidents.json').then((r) => r.items || []),
         loadJson<Equivalent[]>('datasets/equivalents.json'),

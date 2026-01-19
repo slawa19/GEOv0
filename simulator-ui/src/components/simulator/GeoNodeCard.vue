@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import type { Component } from 'vue'
-import { X } from 'lucide-vue-next'
+import { X, ShieldCheck, Users, Target, Zap } from 'lucide-vue-next'
 
 type NodeType = 'business' | 'person'
 
@@ -13,7 +12,7 @@ type GeoNodeUi = {
   trustScore: number
 }
 
-const props = defineProps<{ node: GeoNodeUi; icon: Component; x: number; y: number }>()
+const props = defineProps<{ node: GeoNodeUi }>()
 const emit = defineEmits<{ close: [] }>()
 
 function close() {
@@ -22,288 +21,171 @@ function close() {
 </script>
 
 <template>
-  <div
-    class="card"
-    :style="{ left: `${props.x}px`, top: `${props.y}px` }"
-  >
-    <div class="card__wrap">
-      <div class="card__bg"></div>
-      <div class="card__glow"></div>
-      <div class="card__border"></div>
-      <div
-        class="card__accent"
-        :class="props.node.type === 'business' ? 'card__accent--business' : 'card__accent--person'"
-      ></div>
+  <div class="node-card" :class="{ 'node-card--debt': props.node.balance < 0 }">
+    <div class="node-card__header">
+      <div class="node-card__title">
+        <component 
+          :is="props.node.type === 'business' ? ShieldCheck : Users" 
+          size="14" 
+          class="node-card__type-icon" 
+        />
+        <span class="node-card__name">{{ props.node.name }}</span>
+      </div>
+      <button class="node-card__close" @click="close">
+        <X size="14" />
+      </button>
+    </div>
 
-      <div class="card__content">
-        <div class="card__header">
-          <div>
-            <div class="card__kicker">Node Identity</div>
-            <div class="card__title">{{ props.node.name }}</div>
-          </div>
-
-          <component
-            :is="props.icon"
-            class="card__typeIcon"
-            :class="props.node.type === 'business' ? 'card__typeIcon--business' : 'card__typeIcon--person'"
-          />
+    <div class="node-card__body">
+      <div class="node-card__metrics">
+        <div class="node-card__metric">
+          <div class="node-card__label"><Target size="10" /> LIMIT</div>
+          <div class="node-card__value mono">{{ props.node.trustLimit.toLocaleString() }}</div>
         </div>
-
-        <div class="card__sep"></div>
-
-        <div class="card__rows">
-          <div class="card__row">
-            <span class="card__label">Total Trust Limit</span>
-            <span class="card__mono">{{ props.node.trustLimit }} GC</span>
-          </div>
-          <div class="card__row">
-            <span class="card__label">Net Position</span>
-            <span
-              class="card__balance"
-              :class="props.node.balance < 0 ? 'card__balance--neg' : 'card__balance--pos'"
-            >
-              {{ props.node.balance > 0 ? '+' : '' }}{{ props.node.balance }}
-            </span>
-          </div>
-
-          <div class="card__score">
-            <div class="card__scoreTop">
-              <span>Trust Score</span>
-              <span>{{ props.node.trustScore }}/100</span>
-            </div>
-            <div class="card__bar">
-              <div
-                class="card__barFill"
-                :class="props.node.type === 'business' ? 'card__barFill--business' : 'card__barFill--person'"
-                :style="{ width: `${props.node.trustScore}%` }"
-              ></div>
-            </div>
+        <div class="node-card__metric">
+          <div class="node-card__label"><Zap size="10" /> BALANCE</div>
+          <div class="node-card__value mono" :class="props.node.balance < 0 ? 'text-debt' : 'text-ok'">
+            {{ props.node.balance > 0 ? '+' : '' }}{{ props.node.balance.toLocaleString() }}
           </div>
         </div>
+      </div>
 
-        <button
-          class="card__close"
-          type="button"
-          @click="close"
-        >
-          <X class="card__closeIcon" />
-        </button>
+      <div class="node-card__integrity">
+        <div class="node-card__integrity-label">INTEGRITY {{ props.node.trustScore }}%</div>
+        <div class="node-card__bar">
+          <div class="node-card__bar-fill" :style="{ width: `${props.node.trustScore}%` }"></div>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.card {
+.node-card {
   position: absolute;
   z-index: 30;
-  width: 240px;
-  pointer-events: none;
+  width: 220px;
+  background: rgba(10, 15, 28, 0.95);
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  color: #c0caf5;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  pointer-events: auto;
+  user-select: none;
 }
 
-.card__wrap {
-  position: relative;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow:
-    0 30px 80px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(148, 163, 184, 0.14);
+.node-card--debt {
+  border-color: rgba(244, 63, 94, 0.4);
 }
 
-.card__bg {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(120% 120% at 30% 0%, rgba(34, 211, 238, 0.12), transparent 55%),
-    radial-gradient(120% 120% at 95% 20%, rgba(167, 139, 250, 0.12), transparent 55%),
-    radial-gradient(140% 140% at 20% 100%, rgba(16, 185, 129, 0.10), transparent 60%),
-    rgba(2, 6, 23, 0.62);
-}
-
-.card__glow {
-  position: absolute;
-  inset: -2px;
-  border-radius: 14px;
-  background:
-    linear-gradient(135deg, rgba(34, 211, 238, 0.55), rgba(16, 185, 129, 0.40), rgba(167, 139, 250, 0.55));
-  opacity: 0.75;
-  filter: blur(10px);
-  pointer-events: none;
-}
-
-.card__border {
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-}
-
-.card__border::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.85), rgba(16, 185, 129, 0.65), rgba(167, 139, 250, 0.85));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0.55;
-}
-
-.card__accent {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-}
-
-.card__accent--business {
-  background: #10b981;
-  box-shadow: 0 0 18px rgba(16, 185, 129, 0.9);
-}
-
-.card__accent--person {
-  background: #3b82f6;
-  box-shadow: 0 0 18px rgba(59, 130, 246, 0.9);
-}
-
-.card__content {
-  position: relative;
-  padding: 14px 14px 12px;
-  color: rgba(248, 250, 252, 0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-
-.card__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.card__kicker {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-weight: 800;
-  color: rgba(148, 163, 184, 0.9);
-  margin-bottom: 2px;
-}
-
-.card__title {
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-}
-
-.card__typeIcon {
-  width: 18px;
-  height: 18px;
-}
-
-.card__typeIcon--business {
-  color: rgba(16, 185, 129, 0.9);
-}
-
-.card__typeIcon--person {
-  color: rgba(59, 130, 246, 0.9);
-}
-
-.card__sep {
-  height: 1px;
-  margin: 12px 0;
-  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.28), transparent);
-}
-
-.card__rows {
-  display: grid;
-  gap: 10px;
-}
-
-.card__row {
+.node-card__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.card__label {
-  font-size: 12px;
-  color: rgba(148, 163, 184, 0.92);
-}
-
-.card__mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  color: rgba(226, 232, 240, 0.92);
-}
-
-.card__balance {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 18px;
-  font-weight: 900;
-}
-
-.card__balance--neg {
-  color: rgba(248, 113, 113, 0.95);
-}
-
-.card__balance--pos {
-  color: rgba(16, 185, 129, 0.95);
-}
-
-.card__scoreTop {
+.node-card__title {
   display: flex;
-  justify-content: space-between;
-  color: rgba(100, 116, 139, 0.95);
-  font-size: 10px;
-  margin-bottom: 6px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.card__bar {
+.node-card__type-icon {
+  color: #00d2ff;
+  flex-shrink: 0;
+}
+
+.node-card--debt .node-card__type-icon {
+  color: #f43f5e;
+}
+
+.node-card__name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+
+.node-card__close {
+  background: transparent;
+  border: none;
+  color: #c0caf5;
+  opacity: 0.5;
+  cursor: pointer;
+  padding: 2px;
+  transition: opacity 0.2s;
+  display: flex;
+}
+
+.node-card__close:hover {
+  opacity: 1;
+}
+
+.node-card__body {
+  padding: 10px;
+}
+
+.node-card__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.node-card__label {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(192, 202, 245, 0.5);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.node-card__value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.node-card__integrity {
+  margin-top: 8px;
+}
+
+.node-card__integrity-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(192, 202, 245, 0.5);
+  margin-bottom: 4px;
+}
+
+.node-card__bar {
   height: 4px;
-  border-radius: 999px;
-  background: rgba(51, 65, 85, 0.8);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
   overflow: hidden;
 }
 
-.card__barFill {
+.node-card__bar-fill {
   height: 100%;
+  background: #00d2ff;
+  transition: width 0.3s ease;
 }
 
-.card__barFill--business {
-  background: #10b981;
+.node-card--debt .node-card__bar-fill {
+  background: #f43f5e;
 }
 
-.card__barFill--person {
-  background: #3b82f6;
-}
+.text-ok { color: #10fb81; }
+.text-debt { color: #f43f5e; }
 
-.card__close {
-  pointer-events: auto;
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(2, 6, 23, 0.35);
-  color: rgba(148, 163, 184, 0.95);
-  cursor: pointer;
-}
-
-.card__close:hover {
-  border-color: rgba(34, 211, 238, 0.45);
-  color: rgba(34, 211, 238, 0.95);
-}
-
-.card__closeIcon {
-  width: 16px;
-  height: 16px;
+.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 </style>
-
