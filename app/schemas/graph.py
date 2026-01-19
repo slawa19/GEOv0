@@ -16,6 +16,12 @@ class AdminGraphParticipant(BaseModel):
     type: str
     status: str
 
+    # Optional net-visualization fields (populated only when an equivalent is provided).
+    net_balance_atoms: Optional[str] = None
+    net_sign: Optional[int] = None
+    viz_color_key: Optional[str] = None
+    viz_size: Optional[dict[str, int]] = None
+
 
 class AdminGraphDebt(BaseModel):
     equivalent: str

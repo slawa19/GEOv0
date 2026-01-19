@@ -25,6 +25,7 @@ export function useGraphPageWatchers(opts: {
   focusRootPid: Ref<string>
   ensureFocusRootPid: () => void
   refreshForFocusMode: () => Promise<void>
+  refreshSnapshotForEq: () => Promise<void>
 
   selected: Ref<SelectedInfo | null>
   clearingCycles: Ref<ClearingCycles | null>
@@ -66,8 +67,17 @@ export function useGraphPageWatchers(opts: {
     opts.graphViz.runLayout()
   }, THROTTLE_LAYOUT_SPACING_MS)
 
-  watch([opts.eq, opts.statusFilter, opts.threshold, opts.showIncidents, opts.hideIsolates], () => {
+  watch([opts.statusFilter, opts.threshold, opts.showIncidents, opts.hideIsolates], () => {
     throttledRebuild()
+  })
+
+  watch(opts.eq, () => {
+    void (async () => {
+      if (opts.isRealMode.value && !opts.focusMode.value) {
+        await opts.refreshSnapshotForEq()
+      }
+      opts.graphViz.rebuildGraph({ fit: false })
+    })()
   })
 
   watch([opts.typeFilter, opts.minDegree], () => {

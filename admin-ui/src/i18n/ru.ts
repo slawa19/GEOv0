@@ -501,7 +501,10 @@ export const RU: Record<string, string> = {
   'graph.display.labelPart.pid': 'pid',
 
   'graph.legend.title': 'Легенда',
+  'graph.legend.personNode': 'Физлицо (net ≥ 0)',
   'graph.legend.businessNode': 'Бизнес-узел',
+  'graph.legend.debtNode': 'Должник (net < 0)',
+  'graph.legend.sizeByAbsNet': 'Размер ∝ |net| (с ограничением сверху)',
   'graph.legend.bottleneck': 'Узкое место',
   'graph.legend.incidentEdge': 'Инцидент (ребро)',
 

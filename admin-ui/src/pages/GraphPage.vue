@@ -190,6 +190,7 @@ const {
   incidentRatioByPid: incidentRatioByPidAll,
   participantByPid,
   loadData,
+  refreshSnapshotForEq,
   refreshForFocusMode,
 } = useGraphData({
   eq,
@@ -389,6 +390,7 @@ useGraphPageWatchers({
   focusRootPid,
   ensureFocusRootPid,
   refreshForFocusMode,
+  refreshSnapshotForEq,
   selected,
   clearingCycles,
   showLabels,

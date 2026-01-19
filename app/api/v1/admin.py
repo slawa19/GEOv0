@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -1159,6 +1160,7 @@ async def admin_list_trustlines(
 
 @router.get("/graph/snapshot", response_model=AdminGraphSnapshotResponse)
 async def admin_graph_snapshot(
+    equivalent: str | None = Query(None, description="Optional equivalent code for net visualization"),
     include: str | None = Query(
         None,
         description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
@@ -1170,6 +1172,9 @@ async def admin_graph_snapshot(
     Guardrail: TrustLine direction in output is from→to = creditor→debtor.
     """
 
+    if equivalent is not None:
+        validate_equivalent_code(equivalent)
+
     # Participants
     participants_rows = (
         await db.execute(
@@ -1177,21 +1182,159 @@ async def admin_graph_snapshot(
             .order_by(Participant.pid.asc())
         )
     ).all()
-    participants = [
-        AdminGraphParticipant(
-            pid=pid,
-            display_name=display_name,
-            type=type_,
-            status=str(status or "").strip().lower(),
+    participants = []
+    for pid, display_name, type_, status in participants_rows:
+        participants.append(
+            AdminGraphParticipant(
+                pid=pid,
+                display_name=display_name,
+                type=type_,
+                status=str(status or "").strip().lower(),
+                net_balance_atoms=None,
+                net_sign=None,
+                viz_color_key=None,
+                viz_size=None,
+            )
         )
-        for pid, display_name, type_, status in participants_rows
-    ]
 
     # Equivalents
     eq_models = (
         await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
     ).scalars().all()
     equivalents = [EquivalentSchema.model_validate(e) for e in eq_models]
+
+    def _eq_precision(code: str) -> int:
+        c = str(code or "").strip().upper()
+        for e in equivalents:
+            if str(e.code).strip().upper() == c:
+                try:
+                    return int(e.precision)
+                except Exception:
+                    return 0
+        return 0
+
+    async def _attach_net_viz(participants_list: list[AdminGraphParticipant], eq_code: str | None) -> None:
+        # Variant A: if no equivalent, keep viz fields null.
+        eqc = str(eq_code or "").strip().upper()
+        if not eqc:
+            return
+
+        precision = _eq_precision(eqc)
+        scale10 = Decimal(10) ** precision
+
+        # Build participant id map for aggregation.
+        pid_list = [p.pid for p in participants_list if p.pid]
+        if not pid_list:
+            return
+
+        # Aggregate credits/debts for the selected equivalent.
+        eq_id = (await db.execute(select(EquivalentModel.id).where(EquivalentModel.code == eqc))).scalar_one_or_none()
+        if not eq_id:
+            return
+
+        debt_by_pid: dict[str, Decimal] = {}
+        credit_by_pid: dict[str, Decimal] = {}
+
+        d_rows = (
+            await db.execute(
+                select(p_debtor.pid, func.coalesce(func.sum(Debt.amount), 0))
+                .select_from(Debt)
+                .join(p_debtor, Debt.debtor_id == p_debtor.id)
+                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_debtor.pid.in_(pid_list))
+                .group_by(p_debtor.pid)
+            )
+        ).all()
+        for pid0, s in d_rows:
+            debt_by_pid[str(pid0)] = s
+
+        c_rows = (
+            await db.execute(
+                select(p_creditor.pid, func.coalesce(func.sum(Debt.amount), 0))
+                .select_from(Debt)
+                .join(p_creditor, Debt.creditor_id == p_creditor.id)
+                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_creditor.pid.in_(pid_list))
+                .group_by(p_creditor.pid)
+            )
+        ).all()
+        for pid0, s in c_rows:
+            credit_by_pid[str(pid0)] = s
+
+        # Compute atoms + magnitudes for percentile-based sizing.
+        net_atoms_by_pid: dict[str, int] = {}
+        mags: list[int] = []
+
+        def _to_atoms(amount: Decimal) -> int:
+            # amount is Decimal in major units; convert to integer atoms.
+            return int((amount * scale10).to_integral_value(rounding="ROUND_HALF_UP"))
+
+        for p in participants_list:
+            deb = debt_by_pid.get(p.pid, Decimal(0))
+            cre = credit_by_pid.get(p.pid, Decimal(0))
+            net_dec = cre - deb
+            atoms = _to_atoms(net_dec)
+            net_atoms_by_pid[p.pid] = atoms
+            mags.append(abs(atoms))
+
+        mags_sorted = sorted(mags)
+        n = len(mags_sorted)
+
+        def _percentile(mag: int) -> float:
+            if n <= 1:
+                return 0.0
+            # Use bisect-right so equal magnitudes share percentile towards the right.
+            import bisect
+
+            i = bisect.bisect_right(mags_sorted, mag) - 1
+            i = max(0, min(i, n - 1))
+            return i / (n - 1)
+
+        max_scale = 1.90
+        gamma = 0.75
+
+        def _scale_from_pct(pct: float) -> float:
+            if pct <= 0:
+                return 1.0
+            if pct >= 1:
+                return max_scale
+            return 1.0 + (max_scale - 1.0) * (pct**gamma)
+
+        for p in participants_list:
+            atoms = net_atoms_by_pid.get(p.pid, 0)
+            p.net_balance_atoms = str(atoms)
+            p.net_sign = -1 if atoms < 0 else (1 if atoms > 0 else 0)
+
+            status_key = str(p.status or "").strip().lower()
+            type_key = str(p.type or "").strip().lower()
+
+            if status_key in {"suspended", "frozen"}:
+                p.viz_color_key = "suspended"
+            elif status_key == "left":
+                p.viz_color_key = "left"
+            elif status_key in {"deleted", "banned"}:
+                p.viz_color_key = "deleted"
+            else:
+                if p.net_sign == -1:
+                    p.viz_color_key = "debt"
+                else:
+                    p.viz_color_key = "business" if type_key == "business" else "person"
+
+            pct = _percentile(abs(atoms))
+            s = _scale_from_pct(pct)
+
+            # Base sizes align with current Cytoscape styling.
+            if type_key == "business":
+                w0, h0 = 26, 22
+            else:
+                w0, h0 = 16, 16
+
+            p.viz_size = {"w": int(round(w0 * s)), "h": int(round(h0 * s))}
+
+    # Net visualization (backend-only) for selected equivalent
+    if equivalent:
+        # Reuse aliased Participants declared later in function.
+        p_debtor = aliased(Participant)
+        p_creditor = aliased(Participant)
+        await _attach_net_viz(participants, equivalent)
 
     # Trustlines + used/available (no N+1)
     p_from = aliased(Participant)
@@ -1345,6 +1488,8 @@ async def admin_graph_ego(
     if equivalent is not None:
         validate_equivalent_code(equivalent)
 
+    status_filter = status
+
     root = (
         await db.execute(select(Participant).where(Participant.pid == root_pid))
     ).scalar_one_or_none()
@@ -1394,21 +1539,150 @@ async def admin_graph_ego(
             .order_by(Participant.pid.asc())
         )
     ).all()
-    participants = [
-        AdminGraphParticipant(
-            pid=pid,
-            display_name=display_name,
-            type=type_,
-            status=str(status or "").strip().lower(),
+    participants = []
+    for pid, display_name, type_, participant_status in participants_rows:
+        participants.append(
+            AdminGraphParticipant(
+                pid=pid,
+                display_name=display_name,
+                type=type_,
+                status=str(participant_status or "").strip().lower(),
+                net_balance_atoms=None,
+                net_sign=None,
+                viz_color_key=None,
+                viz_size=None,
+            )
         )
-        for pid, display_name, type_, status in participants_rows
-    ]
 
     # Equivalents (keep full list for UI dropdown)
     eq_models = (
         await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
     ).scalars().all()
     equivalents = [EquivalentSchema.model_validate(e) for e in eq_models]
+
+    def _eq_precision_ego(code: str) -> int:
+        c = str(code or "").strip().upper()
+        for e in equivalents:
+            if str(e.code).strip().upper() == c:
+                try:
+                    return int(e.precision)
+                except Exception:
+                    return 0
+        return 0
+
+    async def _attach_net_viz_ego(participants_list: list[AdminGraphParticipant], eq_code: str | None) -> None:
+        eqc = str(eq_code or "").strip().upper()
+        if not eqc:
+            return
+
+        precision = _eq_precision_ego(eqc)
+        scale10 = Decimal(10) ** precision
+
+        pid_list = [p.pid for p in participants_list if p.pid]
+        if not pid_list:
+            return
+
+        eq_id = (
+            await db.execute(select(EquivalentModel.id).where(EquivalentModel.code == eqc))
+        ).scalar_one_or_none()
+        if not eq_id:
+            return
+
+        p_debtor = aliased(Participant)
+        p_creditor = aliased(Participant)
+
+        debt_by_pid: dict[str, Decimal] = {}
+        credit_by_pid: dict[str, Decimal] = {}
+
+        d_rows = (
+            await db.execute(
+                select(p_debtor.pid, func.coalesce(func.sum(Debt.amount), 0))
+                .select_from(Debt)
+                .join(p_debtor, Debt.debtor_id == p_debtor.id)
+                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_debtor.pid.in_(pid_list))
+                .group_by(p_debtor.pid)
+            )
+        ).all()
+        for pid0, s in d_rows:
+            debt_by_pid[str(pid0)] = s
+
+        c_rows = (
+            await db.execute(
+                select(p_creditor.pid, func.coalesce(func.sum(Debt.amount), 0))
+                .select_from(Debt)
+                .join(p_creditor, Debt.creditor_id == p_creditor.id)
+                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_creditor.pid.in_(pid_list))
+                .group_by(p_creditor.pid)
+            )
+        ).all()
+        for pid0, s in c_rows:
+            credit_by_pid[str(pid0)] = s
+
+        def _to_atoms(amount: Decimal) -> int:
+            return int((amount * scale10).to_integral_value(rounding="ROUND_HALF_UP"))
+
+        mags: list[int] = []
+        net_atoms_by_pid: dict[str, int] = {}
+        for p in participants_list:
+            deb = debt_by_pid.get(p.pid, Decimal(0))
+            cre = credit_by_pid.get(p.pid, Decimal(0))
+            atoms = _to_atoms(cre - deb)
+            net_atoms_by_pid[p.pid] = atoms
+            mags.append(abs(atoms))
+
+        mags_sorted = sorted(mags)
+        n = len(mags_sorted)
+
+        def _percentile(mag: int) -> float:
+            if n <= 1:
+                return 0.0
+            import bisect
+
+            i = bisect.bisect_right(mags_sorted, mag) - 1
+            i = max(0, min(i, n - 1))
+            return i / (n - 1)
+
+        max_scale = 1.90
+        gamma = 0.75
+
+        def _scale_from_pct(pct: float) -> float:
+            if pct <= 0:
+                return 1.0
+            if pct >= 1:
+                return max_scale
+            return 1.0 + (max_scale - 1.0) * (pct**gamma)
+
+        for p in participants_list:
+            atoms = net_atoms_by_pid.get(p.pid, 0)
+            p.net_balance_atoms = str(atoms)
+            p.net_sign = -1 if atoms < 0 else (1 if atoms > 0 else 0)
+
+            status_key = str(p.status or "").strip().lower()
+            type_key = str(p.type or "").strip().lower()
+
+            if status_key in {"suspended", "frozen"}:
+                p.viz_color_key = "suspended"
+            elif status_key == "left":
+                p.viz_color_key = "left"
+            elif status_key in {"deleted", "banned"}:
+                p.viz_color_key = "deleted"
+            else:
+                if p.net_sign == -1:
+                    p.viz_color_key = "debt"
+                else:
+                    p.viz_color_key = "business" if type_key == "business" else "person"
+
+            pct = _percentile(abs(atoms))
+            s = _scale_from_pct(pct)
+
+            if type_key == "business":
+                w0, h0 = 26, 22
+            else:
+                w0, h0 = 16, 16
+            p.viz_size = {"w": int(round(w0 * s)), "h": int(round(h0 * s))}
+
+    if equivalent:
+        await _attach_net_viz_ego(participants, equivalent)
 
     # Trustlines + used/available (no N+1)
     p_from = aliased(Participant)
@@ -1444,16 +1718,19 @@ async def admin_graph_ego(
             TrustLine.from_participant_id.in_(list(visited_ids)),
             TrustLine.to_participant_id.in_(list(visited_ids)),
         )
-        .where(EquivalentModel.code == equivalent if equivalent else True)
-        .where(TrustLine.status.in_(list(status)) if status else True)
         .order_by(EquivalentModel.code.asc(), p_from.pid.asc(), p_to.pid.asc())
     )
+
+    if equivalent:
+        tl_stmt = tl_stmt.where(EquivalentModel.code == equivalent)
+    if status_filter:
+        tl_stmt = tl_stmt.where(TrustLine.status.in_(list(status_filter)))
     tl_rows = (await db.execute(tl_stmt)).all()
     trustlines: list[TrustLineSchema] = []
     for (
         tl_id,
         limit,
-        status,
+        tl_status,
         created_at,
         updated_at,
         policy,
@@ -1477,7 +1754,7 @@ async def admin_graph_ego(
                     "limit": limit,
                     "used": used,
                     "available": available,
-                    "status": status,
+                    "status": tl_status,
                     "created_at": created_at,
                     "updated_at": updated_at,
                     "policy": policy,
@@ -1504,9 +1781,11 @@ async def admin_graph_ego(
             Debt.debtor_id.in_(list(visited_ids)),
             Debt.creditor_id.in_(list(visited_ids)),
         )
-        .where(EquivalentModel.code == equivalent if equivalent else True)
         .order_by(EquivalentModel.code.asc(), p_debtor.pid.asc(), p_creditor.pid.asc())
     )
+
+    if equivalent:
+        debt_stmt = debt_stmt.where(EquivalentModel.code == equivalent)
     debt_rows = (await db.execute(debt_stmt)).all()
     debts = [
         AdminGraphDebt(equivalent=eq, debtor=debtor, creditor=creditor, amount=amount)

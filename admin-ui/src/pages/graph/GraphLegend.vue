@@ -15,7 +15,13 @@ const props = defineProps<{
       {{ t('graph.legend.title') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--node-active" /> {{ t('participant.status.active') }}
+      <span class="swatch swatch--node-person" /> {{ t('graph.legend.personNode') }}
+    </div>
+    <div class="legend__row">
+      <span class="swatch swatch--node-business" /> {{ t('graph.legend.businessNode') }}
+    </div>
+    <div class="legend__row">
+      <span class="swatch swatch--node-debt" /> {{ t('graph.legend.debtNode') }}
     </div>
     <div class="legend__row">
       <span class="swatch swatch--node-suspended" /> {{ t('participant.status.suspended') }}
@@ -26,8 +32,8 @@ const props = defineProps<{
     <div class="legend__row">
       <span class="swatch swatch--node-deleted" /> {{ t('participant.status.deleted') }}
     </div>
-    <div class="legend__row">
-      <span class="swatch swatch--node-business" /> {{ t('graph.legend.businessNode') }}
+    <div class="legend__row legend__row--hint">
+      <span class="swatch swatch--hint" /> {{ t('graph.legend.sizeByAbsNet') }}
     </div>
     <div class="legend__row">
       <span class="swatch swatch--edge-active" /> {{ t('trustlines.status.active') }}
@@ -84,10 +90,14 @@ const props = defineProps<{
 }
 
 .swatch--node-active {
+  display: none;
+}
+
+.swatch--node-person {
   width: 12px;
   height: 12px;
   border-radius: 6px;
-  background: #67c23a;
+  background: #3b82f6;
 }
 
 .swatch--node-suspended {
@@ -95,6 +105,13 @@ const props = defineProps<{
   height: 12px;
   border-radius: 6px;
   background: #e6a23c;
+}
+
+.swatch--node-debt {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #f97316;
 }
 
 .swatch--node-left {
@@ -113,10 +130,20 @@ const props = defineProps<{
 
 .swatch--node-business {
   width: 14px;
+  height: 12px;
+  border-radius: 4px;
+  background: #10b981;
+}
+
+.swatch--hint {
+  width: 14px;
   height: 10px;
   border-radius: 4px;
-  background: #1f2d3d;
-  border: 2px solid #409eff;
+  background: rgba(148, 163, 184, 0.65);
+}
+
+.legend__row--hint {
+  margin-top: 8px;
 }
 
 .swatch--edge-active {

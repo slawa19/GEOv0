@@ -82,3 +82,57 @@ async def test_admin_graph_snapshot_hydrates_trustlines_and_debts(client, db_ses
     assert d['debtor'] == 'bob'
     assert d['creditor'] == 'alice'
     assert d['amount'] in ('7.25', '7.25000000')
+
+
+@pytest.mark.asyncio
+async def test_admin_graph_snapshot_equivalent_enables_net_viz(client, db_session):
+    # Arrange
+    alice = Participant(pid='alice', display_name='Alice', public_key='A' * 64, type='person', status='active')
+    bob = Participant(pid='bob', display_name='Bob', public_key='B' * 64, type='person', status='active')
+    db_session.add_all([alice, bob])
+
+    uah = Equivalent(code='UAH', symbol='₴', description='Hryvnia', precision=2, metadata_={}, is_active=True)
+    db_session.add(uah)
+    await db_session.flush()
+
+    db_session.add(
+        TrustLine(
+            from_participant_id=alice.id,
+            to_participant_id=bob.id,
+            equivalent_id=uah.id,
+            limit=Decimal('100.00'),
+            policy={'auto_clearing': True, 'can_be_intermediate': True},
+            status='active',
+        )
+    )
+    db_session.add(
+        Debt(
+            debtor_id=bob.id,
+            creditor_id=alice.id,
+            equivalent_id=uah.id,
+            amount=Decimal('7.25'),
+        )
+    )
+    await db_session.commit()
+
+    headers = {'X-Admin-Token': settings.ADMIN_TOKEN}
+
+    # Act
+    r = await client.get('/api/v1/admin/graph/snapshot', headers=headers, params={'equivalent': 'UAH'})
+    assert r.status_code == 200
+    payload = r.json()
+
+    # Assert: viz fields present and deterministic for this tiny case.
+    participants_by_pid = {p['pid']: p for p in payload['participants']}
+    assert set(participants_by_pid.keys()) == {'alice', 'bob'}
+
+    # 7.25 with precision=2 => 725 atoms
+    assert participants_by_pid['alice']['net_balance_atoms'] == '725'
+    assert participants_by_pid['alice']['net_sign'] == 1
+    assert participants_by_pid['alice']['viz_color_key'] == 'person'
+    assert participants_by_pid['alice']['viz_size'] == {'w': 30, 'h': 30}
+
+    assert participants_by_pid['bob']['net_balance_atoms'] == '-725'
+    assert participants_by_pid['bob']['net_sign'] == -1
+    assert participants_by_pid['bob']['viz_color_key'] == 'debt'
+    assert participants_by_pid['bob']['viz_size'] == {'w': 30, 'h': 30}

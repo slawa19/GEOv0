@@ -55,6 +55,27 @@ const ParticipantSchema = z
     status: z.string(),
     created_at: z.string().optional(),
     meta: z.record(z.string(), z.unknown()).optional(),
+
+    net_balance_atoms: z.string().nullable().optional(),
+    net_sign: z.union([z.literal(-1), z.literal(0), z.literal(1)]).nullable().optional(),
+    viz_color_key: z
+      .union([
+        z.literal('person'),
+        z.literal('business'),
+        z.literal('debt'),
+        z.literal('suspended'),
+        z.literal('left'),
+        z.literal('deleted'),
+      ])
+      .nullable()
+      .optional(),
+    viz_size: z
+      .object({
+        w: z.number(),
+        h: z.number(),
+      })
+      .nullable()
+      .optional(),
   })
   .passthrough()
 
@@ -820,8 +841,10 @@ export const realApi = {
     )
   },
 
-  graphSnapshot(): Promise<ApiEnvelope<GraphSnapshot>> {
-    return requestJson<GraphSnapshot>('/api/v1/admin/graph/snapshot', { admin: true, schema: GraphSnapshotSchema }).then((r) => {
+  graphSnapshot(params?: { equivalent?: string }): Promise<ApiEnvelope<GraphSnapshot>> {
+    const equivalent = String(params?.equivalent || '').trim().toUpperCase()
+    const url = buildQuery('/api/v1/admin/graph/snapshot', { equivalent: equivalent || undefined })
+    return requestJson<GraphSnapshot>(url, { admin: true, schema: GraphSnapshotSchema }).then((r) => {
       const s = assertSuccess(r)
       const participants = (s.participants || []).map((p) => ({
         ...p,

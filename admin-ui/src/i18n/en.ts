@@ -501,7 +501,10 @@ export const EN: Record<string, string> = {
   'graph.display.labelPart.pid': 'pid',
 
   'graph.legend.title': 'Legend',
+  'graph.legend.personNode': 'Person (net ≥ 0)',
   'graph.legend.businessNode': 'Business node',
+  'graph.legend.debtNode': 'Debtor (net < 0)',
+  'graph.legend.sizeByAbsNet': 'Size ∝ |net| (capped)',
   'graph.legend.bottleneck': 'Bottleneck',
   'graph.legend.incidentEdge': 'Incident edge',
 

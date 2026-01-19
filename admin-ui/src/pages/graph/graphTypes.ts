@@ -1,4 +1,15 @@
-export type Participant = { pid: string; display_name?: string; type?: string; status?: string }
+export type Participant = {
+  pid: string
+  display_name?: string
+  type?: string
+  status?: string
+
+  // Backend-provided net visualization fields (present only when equivalent is specified).
+  net_balance_atoms?: string | null
+  net_sign?: -1 | 0 | 1 | null
+  viz_color_key?: 'person' | 'business' | 'debt' | 'suspended' | 'left' | 'deleted' | null
+  viz_size?: { w: number; h: number } | null
+}
 
 export type Trustline = {
   equivalent: string

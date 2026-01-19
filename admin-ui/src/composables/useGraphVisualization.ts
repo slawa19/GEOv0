@@ -316,6 +316,12 @@ export function useGraphVisualization(options: {
       const p = pIndex.get(pid)
       const ratio = options.incidentRatioByPid.value.get(pid)
       const name = (p?.display_name || '').trim()
+      const typeKey = String(p?.type || '').toLowerCase()
+      const baseW = typeKey === 'business' ? 26 : 16
+      const baseH = typeKey === 'business' ? 22 : 16
+      const vizW = typeof (p as any)?.viz_size?.w === 'number' ? (p as any).viz_size.w : baseW
+      const vizH = typeof (p as any)?.viz_size?.h === 'number' ? (p as any).viz_size.h : baseH
+      const vizColorKey = String((p as any)?.viz_color_key || '').toLowerCase()
       return {
         data: {
           id: pid,
@@ -325,10 +331,15 @@ export function useGraphVisualization(options: {
           status: (p?.status || '').toLowerCase(),
           type: (p?.type || '').toLowerCase(),
           incident_ratio: typeof ratio === 'number' ? ratio : 0,
+
+          viz_w: vizW,
+          viz_h: vizH,
+          viz_color_key: vizColorKey,
         },
         classes: [
           (p?.status || '').toLowerCase() ? `p-${(p?.status || '').toLowerCase()}` : '',
           (p?.type || '').toLowerCase() ? `type-${(p?.type || '').toLowerCase()}` : '',
+          vizColorKey ? `viz-${vizColorKey}` : '',
           options.showIncidents.value && (options.incidentRatioByPid.value.get(pid) || 0) > 0 ? 'has-incident' : '',
         ]
           .filter(Boolean)
@@ -526,11 +537,18 @@ export function useGraphVisualization(options: {
           'text-margin-y': 6,
           'border-width': 1,
           'border-color': '#2b2f36',
-          width: 18,
-          height: 18,
+          width: 'data(viz_w)',
+          height: 'data(viz_h)',
         },
       },
-      { selector: 'node.p-active', style: { 'background-color': '#67c23a' } },
+      // Net-based (backend-provided) node colors. Status colors remain in legend and can be
+      // applied via viz_color_key to avoid frontend-side precedence logic.
+      { selector: 'node.viz-person', style: { 'background-color': '#3b82f6' } },
+      { selector: 'node.viz-business', style: { 'background-color': '#10b981' } },
+      { selector: 'node.viz-debt', style: { 'background-color': '#f97316' } },
+      { selector: 'node.viz-suspended', style: { 'background-color': '#e6a23c' } },
+      { selector: 'node.viz-left', style: { 'background-color': '#909399' } },
+      { selector: 'node.viz-deleted', style: { 'background-color': '#606266' } },
       // Participant status (DB vocabulary). Keep legacy aliases for backward compatibility.
       { selector: 'node.p-suspended, node.p-frozen', style: { 'background-color': '#e6a23c' } },
       { selector: 'node.p-left', style: { 'background-color': '#909399' } },

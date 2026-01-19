@@ -1146,7 +1146,7 @@ export const mockApi = {
     })
   },
 
-  async graphSnapshot(): Promise<ApiEnvelope<GraphSnapshot>> {
+  async graphSnapshot(_params?: { equivalent?: string }): Promise<ApiEnvelope<GraphSnapshot>> {
     return withScenario('/api/v1/admin/graph/snapshot', async () => {
       const [participants, trustlines, incidents, equivalents, debts, auditLog, transactions] = await Promise.all([
         loadJson<Participant[]>('datasets/participants.json'),

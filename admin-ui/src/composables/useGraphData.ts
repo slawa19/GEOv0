@@ -127,7 +127,11 @@ export function useGraphData(opts: {
     loading.value = true
     error.value = null
     try {
-      const [snap, cc] = await Promise.all([api.graphSnapshot(), api.clearingCycles()])
+      const snapEq = normalizeEqCode(opts.eq.value)
+      const [snap, cc] = await Promise.all([
+        api.graphSnapshot({ equivalent: snapEq !== 'ALL' ? snapEq : undefined }),
+        api.clearingCycles(),
+      ])
 
       const s = assertSuccess(snap)
       const payload: GraphSnapshotPayload = {
@@ -153,6 +157,29 @@ export function useGraphData(opts: {
       error.value = msg || t('graph.data.loadFailed')
     } finally {
       loading.value = false
+    }
+  }
+
+  async function refreshSnapshotForEq() {
+    if (!opts.isRealMode.value) return
+    if (opts.focusMode.value) return
+    try {
+      const snapEq = normalizeEqCode(opts.eq.value)
+      const snap = await api.graphSnapshot({ equivalent: snapEq !== 'ALL' ? snapEq : undefined })
+      const s = assertSuccess(snap)
+      const payload: GraphSnapshotPayload = {
+        participants: (s.participants || []) as Participant[],
+        trustlines: (s.trustlines || []) as Trustline[],
+        incidents: (s.incidents || []) as Incident[],
+        equivalents: (s.equivalents || []) as Equivalent[],
+        debts: (s.debts || []) as Debt[],
+        audit_log: (s.audit_log || []) as AuditLogEntry[],
+        transactions: (s.transactions || []) as Transaction[],
+      }
+      applySnapshotPayload(payload)
+      fullSnapshot = payload
+    } catch {
+      // keep previous snapshot
     }
   }
 
@@ -224,6 +251,7 @@ export function useGraphData(opts: {
     incidentRatioByPid,
 
     loadData,
+    refreshSnapshotForEq,
     refreshForFocusMode,
   }
 }
