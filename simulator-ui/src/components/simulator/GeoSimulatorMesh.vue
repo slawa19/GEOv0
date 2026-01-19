@@ -1076,24 +1076,8 @@ function renderFrame() {
     const a = resolveNode(l.source)
     const b = resolveNode(l.target)
     if (!a || !b) continue
-
-    const dx = b.renderX - a.renderX
-    const dy = b.renderY - a.renderY
-    const dist = Math.hypot(dx, dy)
-    if (dist < 20) continue
-
-    const nx = dx / dist
-    const ny = dy / dist
-
-    // Gap calculation based on current node sizes
-    // In getNodeSprite, coreSize = r * 1.25. We add a small extra margin.
-    const gapA = a.currentSize * 1.25 + 2
-    const gapB = b.currentSize * 1.25 + 2
-
-    if (dist <= gapA + gapB) continue
-
-    ctx.moveTo(a.renderX + nx * gapA, a.renderY + ny * gapA)
-    ctx.lineTo(b.renderX - nx * gapB, b.renderY - ny * gapB)
+    ctx.moveTo(a.renderX, a.renderY)
+    ctx.lineTo(b.renderX, b.renderY)
   }
   ctx.lineWidth = RENDER.links.width
   ctx.strokeStyle = `rgba(${RENDER.colors.slateLineRgb}, ${activeId ? RENDER.links.dimAlpha : RENDER.links.baseAlpha})`
@@ -1115,23 +1099,9 @@ function renderFrame() {
       if (!a || !b) continue
       const isConnected = a.id === activeId || b.id === activeId
       if (!isConnected) continue
-
-      const dx = b.renderX - a.renderX
-      const dy = b.renderY - a.renderY
-      const dist = Math.hypot(dx, dy)
-      if (dist < 20) continue
-
-      const nx = dx / dist
-      const ny = dy / dist
-
-      const gapA = a.currentSize * 1.25 + 2
-      const gapB = b.currentSize * 1.25 + 2
-
-      if (dist <= gapA + gapB) continue
-
       ctx.beginPath()
-      ctx.moveTo(a.renderX + nx * gapA, a.renderY + ny * gapA)
-      ctx.lineTo(b.renderX - nx * gapB, b.renderY - ny * gapB)
+      ctx.moveTo(a.renderX, a.renderY)
+      ctx.lineTo(b.renderX, b.renderY)
       ctx.stroke()
     }
     ctx.restore()
@@ -1195,19 +1165,10 @@ function renderFrame() {
     const dx = b.x - a.x
     const dy = b.y - a.y
     const dist = Math.max(1, Math.hypot(dx, dy))
-    const nx = dx / dist
-    const ny = dy / dist
-
-    // Calculate node gaps for particles
-    const srcNode = p.from.kind === 'node' ? nodeById.value.get(p.from.id) : null
-    const dstNode = p.to.kind === 'node' ? nodeById.value.get(p.to.id) : null
-    const gapStart = srcNode ? srcNode.currentSize * 1.25 + 5 : 0
-    const gapEnd = dstNode ? dstNode.currentSize * 1.25 + 5 : 0
-
+    
     // Slow down spark movement
     const speed = p.type === 'clearing' ? RENDER.vfx.clearingSpeed : RENDER.vfx.txSpeed
-    const effectiveDist = Math.max(1, dist - gapStart - gapEnd)
-    p.progress += speed / effectiveDist
+    p.progress += speed / dist
   if (p.progress >= 1) {
     // If it's a tx, we keep it for a bit longer to show the "flying out" label if it hasn't finished
     if (p.type === 'tx' && (p.labelLife ?? 0) > 0) {
@@ -1235,18 +1196,14 @@ function renderFrame() {
     }
   }
 
-    const srcNode = p.from.kind === 'node' ? nodeById.value.get(p.from.id) : null
-    const dstNode = p.to.kind === 'node' ? nodeById.value.get(p.to.id) : null
-    const gapStart = srcNode ? srcNode.currentSize * 1.25 + 5 : 0
-    const gapEnd = dstNode ? dstNode.currentSize * 1.25 + 5 : 0
-
-    const px = a.x + nx * gapStart + (dx - nx * (gapStart + gapEnd)) * Math.min(1, p.progress)
-    const py = a.y + ny * gapStart + (dy - ny * (gapStart + gapEnd)) * Math.min(1, p.progress)
+    const px = a.x + dx * Math.min(1, p.progress)
+    const py = a.y + dy * Math.min(1, p.progress)
+    const nx = -dy / dist
+    const ny = dx / dist
 
     // Dynamic Spark + Long Tail (Schleif)
     if (p.progress < 1.0) {
-      const remainingDist = dist - gapStart - gapEnd
-      const tailLen = Math.min(RENDER.vfx.cometTailPx, remainingDist * 0.45)
+      const tailLen = Math.min(RENDER.vfx.cometTailPx, dist * 0.45)
       const segments = 8
       const colorRgb = hexToRgb(p.color)
 
@@ -1256,10 +1213,10 @@ function renderFrame() {
         const alpha = (1 - s0) * 0.8
         const width = (1 - s0) * (p.type === 'clearing' ? 3.5 : 4.0)
         
-        const x0 = px - nx * tailLen * s0
-        const y0 = py - ny * tailLen * s0
-        const x1 = px - nx * tailLen * s1
-        const y1 = py - ny * tailLen * s1
+        const x0 = px - (dx / dist) * tailLen * s0
+        const y0 = py - (dy / dist) * tailLen * s0
+        const x1 = px - (dx / dist) * tailLen * s1
+        const y1 = py - (dy / dist) * tailLen * s1
 
         ctx.strokeStyle = `rgba(${colorRgb}, ${alpha})`
         ctx.lineWidth = width
