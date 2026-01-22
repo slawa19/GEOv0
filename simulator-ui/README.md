@@ -1,26 +1,23 @@
-# GEO Simulator UI (Prototype)
+# GEO Simulator UI
 
-Отдельное фронтенд-приложение для прототипа симулятора GEO (Этап 1: интерактивная визуализация графа).
+This folder contains two versions:
 
-Документация и ТЗ: [docs/ru/simulator/frontend/geo-simulator-phase1-tech-spec.md](../docs/ru/simulator/frontend/geo-simulator-phase1-tech-spec.md:1)
+- `v2/` — **current** demo-fast-mock v2 (active development)
+- `v1/` — legacy prototype (archived, outdated)
 
-## Команды
+## Run v2 (Windows)
+
+From repo root:
+
+- PowerShell: `./scripts/run_simulator_ui.ps1`
+- cmd.exe: `scripts\\run_simulator_ui.cmd`
+
+Or manually:
 
 ```bash
-cd simulator-ui
+cd simulator-ui/v2
 npm install
 npm run dev
 ```
 
-## Быстрый запуск (Windows)
-
-- PowerShell: [scripts/run_simulator_ui.ps1](../scripts/run_simulator_ui.ps1:1)
-- cmd.exe: [scripts/run_simulator_ui.cmd](../scripts/run_simulator_ui.cmd:1)
-
-Открыть в браузере: http://localhost:5176/
-
-### Примечание
-
-Если порт 5176 занят, Vite может выбрать следующий свободный порт и напечатает точный URL в консоль.
-
-
+Open: http://localhost:5176/

@@ -5,10 +5,10 @@ $ErrorActionPreference = 'Stop'
 #   ./scripts/run_simulator_ui.ps1
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
-$appDir = Join-Path $repoRoot 'simulator-ui'
+$appDir = Join-Path $repoRoot 'simulator-ui/v2'
 
 if (-not (Test-Path $appDir)) {
-  throw "simulator-ui directory not found: $appDir"
+  throw "simulator-ui/v2 directory not found: $appDir"
 }
 
 Set-Location $appDir

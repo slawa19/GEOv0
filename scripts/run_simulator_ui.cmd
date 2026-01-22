@@ -8,7 +8,7 @@ rem Runs GEO Simulator UI prototype (standalone Vite app).
 rem Usage (cmd.exe):
 rem   scripts\run_simulator_ui.cmd
 
-set "APP_DIR=%~dp0..\simulator-ui"
+set "APP_DIR=%~dp0..\simulator-ui\v2"
 
 if not exist "%APP_DIR%" goto :ERR_NO_DIR
 if not exist "%APP_DIR%\package.json" goto :ERR_NO_PKG

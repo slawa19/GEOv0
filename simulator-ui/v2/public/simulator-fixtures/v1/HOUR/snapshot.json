@@ -1,0 +1,119 @@
+{
+  "equivalent": "HOUR",
+  "generated_at": "2026-01-22T00:00:00Z",
+  "nodes": [
+    {
+      "id": "biz_aurora",
+      "name": "Aurora Market",
+      "type": "business",
+      "status": "active",
+      "links_count": 3,
+      "net_balance_atoms": "125000",
+      "net_sign": 1,
+      "viz_color_key": "business",
+      "viz_size": { "w": 14, "h": 14 },
+      "viz_badge_key": null
+    },
+    {
+      "id": "p_ivan",
+      "name": "Ivan Petrov",
+      "type": "person",
+      "status": "active",
+      "links_count": 2,
+      "net_balance_atoms": "-30000",
+      "net_sign": -1,
+      "viz_color_key": "debt-3",
+      "viz_size": { "w": 10, "h": 10 },
+      "viz_badge_key": null
+    },
+    {
+      "id": "p_sasha",
+      "name": "Sasha Lee",
+      "type": "person",
+      "status": "suspended",
+      "links_count": 1,
+      "net_balance_atoms": null,
+      "net_sign": null,
+      "viz_color_key": "suspended",
+      "viz_size": { "w": 10, "h": 10 },
+      "viz_badge_key": null
+    },
+    {
+      "id": "biz_delta",
+      "name": "Delta Workshop",
+      "type": "business",
+      "status": "left",
+      "links_count": 1,
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "left",
+      "viz_size": { "w": 12, "h": 12 },
+      "viz_badge_key": null
+    },
+    {
+      "id": "p_deleted",
+      "name": "Deleted User",
+      "type": "person",
+      "status": "deleted",
+      "links_count": 0,
+      "net_balance_atoms": null,
+      "net_sign": null,
+      "viz_color_key": "deleted",
+      "viz_size": { "w": 10, "h": 10 },
+      "viz_badge_key": null
+    }
+  ],
+  "links": [
+    {
+      "id": "tl_aurora_ivan",
+      "source": "biz_aurora",
+      "target": "p_ivan",
+      "trust_limit": "1000",
+      "used": "300",
+      "available": "700",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": "thin",
+      "viz_alpha_key": "muted"
+    },
+    {
+      "id": "tl_ivan_sasha",
+      "source": "p_ivan",
+      "target": "p_sasha",
+      "trust_limit": "200",
+      "used": "50",
+      "available": "150",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": "hairline",
+      "viz_alpha_key": "bg"
+    },
+    {
+      "id": "tl_aurora_delta",
+      "source": "biz_aurora",
+      "target": "biz_delta",
+      "trust_limit": "500",
+      "used": "0",
+      "available": "500",
+      "status": "inactive",
+      "viz_color_key": null,
+      "viz_width_key": "hairline",
+      "viz_alpha_key": "bg"
+    }
+  ],
+  "palette": {
+    "business": { "color": "#10b981", "label": "Business" },
+    "person": { "color": "#3b82f6", "label": "Person" },
+    "suspended": { "color": "#94a3b8", "label": "Suspended" },
+    "left": { "color": "#64748b", "label": "Left" },
+    "deleted": { "color": "#475569", "label": "Deleted" },
+    "debt-0": { "color": "#84cc16", "label": "Debt bin 0" },
+    "debt-3": { "color": "#f59e0b", "label": "Debt bin 3" },
+    "debt-8": { "color": "#ef4444", "label": "Debt bin 8" }
+  },
+  "limits": {
+    "max_nodes": 150,
+    "max_links": 400,
+    "max_particles": 300
+  }
+}

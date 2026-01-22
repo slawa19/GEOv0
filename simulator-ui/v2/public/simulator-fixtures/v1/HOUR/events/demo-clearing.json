@@ -1,0 +1,29 @@
+[
+  {
+    "event_id": "evt_clr_plan_0001",
+    "ts": "2026-01-22T00:00:10Z",
+    "type": "clearing.plan",
+    "equivalent": "HOUR",
+    "plan_id": "clr_2026_01_22_0001",
+    "steps": [
+      {
+        "at_ms": 0,
+        "highlight_edges": [{ "from": "biz_aurora", "to": "p_ivan" }],
+        "intensity_key": "hi"
+      },
+      {
+        "at_ms": 250,
+        "particles_edges": [{ "from": "p_ivan", "to": "p_sasha" }],
+        "intensity_key": "mid"
+      },
+      { "at_ms": 600, "flash": { "kind": "clearing" } }
+    ]
+  },
+  {
+    "event_id": "evt_clr_done_0001",
+    "ts": "2026-01-22T00:00:11Z",
+    "type": "clearing.done",
+    "equivalent": "HOUR",
+    "plan_id": "clr_2026_01_22_0001"
+  }
+]

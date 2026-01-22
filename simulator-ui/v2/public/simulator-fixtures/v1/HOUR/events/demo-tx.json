@@ -1,0 +1,21 @@
+[
+  {
+    "event_id": "evt_tx_0001",
+    "ts": "2026-01-22T00:00:01Z",
+    "type": "tx.updated",
+    "equivalent": "HOUR",
+    "ttl_ms": 1200,
+    "intensity_key": "mid",
+    "edges": [
+      {
+        "from": "biz_aurora",
+        "to": "p_ivan",
+        "style": { "viz_width_key": "highlight", "viz_alpha_key": "hi" }
+      }
+    ],
+    "node_badges": [
+      { "id": "biz_aurora", "viz_badge_key": "tx" },
+      { "id": "p_ivan", "viz_badge_key": "tx" }
+    ]
+  }
+]

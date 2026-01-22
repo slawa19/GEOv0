@@ -89,3 +89,11 @@ admin-ui/test-results/
 simulator-ui/node_modules/
 simulator-ui/dist/
 simulator-ui/.vite/
+
+# simulator-ui versions
+simulator-ui/v1/node_modules/
+simulator-ui/v1/dist/
+simulator-ui/v1/.vite/
+simulator-ui/v2/node_modules/
+simulator-ui/v2/dist/
+simulator-ui/v2/.vite/
