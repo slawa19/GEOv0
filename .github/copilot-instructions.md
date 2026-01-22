@@ -45,5 +45,5 @@
 
 ## Local DB sanity checks
 
-- Preferred: run [scripts/check_sqlite_db.py](../scripts/check_sqlite_db.py) using `.venv\Scripts\python.exe`.
+- Preferred: run `scripts/check_sqlite_db.py` using `.venv\Scripts\python.exe`.
 - Or use the runner action: `.\scripts\run_local.ps1 check-db`.

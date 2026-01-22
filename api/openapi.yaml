@@ -16,6 +16,7 @@ tags:
   - name: Equivalents
   - name: Health
   - name: Admin
+  - name: Simulator
 security:
   - BearerAuth: []
 
@@ -768,6 +769,110 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+
+  /simulator/graph/snapshot:
+    get:
+      tags: [Simulator]
+      summary: Graph snapshot (simulator)
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+      responses:
+        '200':
+          description: Graph snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorGraphSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /simulator/graph/ego:
+    get:
+      tags: [Simulator]
+      summary: Ego graph snapshot (simulator)
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+        - in: query
+          name: pid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: depth
+          required: false
+          schema:
+            type: integer
+            enum: [1, 2]
+            default: 1
+      responses:
+        '200':
+          description: Ego snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorGraphSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /simulator/events:
+    get:
+      tags: [Simulator]
+      summary: Events stream (SSE)
+      description: |
+        Server-Sent Events stream. Each message contains one JSON event.
+
+        This endpoint is modeled as `text/event-stream` in OpenAPI.
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /simulator/events/poll:
+    get:
+      tags: [Simulator]
+      summary: Events poll (fallback)
+      parameters:
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+        - in: query
+          name: after
+          required: false
+          schema:
+            type: string
+          description: Return events strictly after this event_id
+      responses:
+        '200':
+          description: Array of events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SimulatorEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /admin/clearing/cycles:
     get:
@@ -2629,3 +2734,278 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IntegrityAuditLogItem'
+
+    SimulatorVizSize:
+      type: object
+      required: [w, h]
+      properties:
+        w:
+          type: number
+        h:
+          type: number
+      additionalProperties: false
+
+    SimulatorGraphNode:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        links_count:
+          type: integer
+          nullable: true
+        net_balance_atoms:
+          type: string
+          nullable: true
+        net_sign:
+          type: integer
+          nullable: true
+          enum: [-1, 0, 1]
+        viz_color_key:
+          type: string
+          nullable: true
+        viz_size:
+          $ref: '#/components/schemas/SimulatorVizSize'
+        viz_badge_key:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    SimulatorGraphLink:
+      type: object
+      required: [source, target]
+      properties:
+        id:
+          type: string
+          nullable: true
+        source:
+          type: string
+        target:
+          type: string
+        trust_limit:
+          oneOf:
+            - type: string
+            - type: number
+          nullable: true
+        used:
+          oneOf:
+            - type: string
+            - type: number
+          nullable: true
+        available:
+          oneOf:
+            - type: string
+            - type: number
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        viz_color_key:
+          type: string
+          nullable: true
+        viz_width_key:
+          type: string
+          nullable: true
+        viz_alpha_key:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    SimulatorPaletteEntry:
+      type: object
+      required: [color]
+      properties:
+        color:
+          type: string
+        label:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    SimulatorGraphLimits:
+      type: object
+      properties:
+        max_nodes:
+          type: integer
+          nullable: true
+        max_links:
+          type: integer
+          nullable: true
+        max_particles:
+          type: integer
+          nullable: true
+      additionalProperties: false
+
+    SimulatorGraphSnapshot:
+      type: object
+      required: [equivalent, generated_at, nodes, links]
+      properties:
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        generated_at:
+          type: string
+          format: date-time
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorGraphNode'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorGraphLink'
+        palette:
+          type: object
+          nullable: true
+          additionalProperties:
+            $ref: '#/components/schemas/SimulatorPaletteEntry'
+        limits:
+          $ref: '#/components/schemas/SimulatorGraphLimits'
+      additionalProperties: true
+
+    SimulatorEventEdgeRef:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+      additionalProperties: false
+
+    SimulatorEventEdgeStyle:
+      type: object
+      properties:
+        viz_width_key:
+          type: string
+          nullable: true
+        viz_alpha_key:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    SimulatorTxUpdatedEvent:
+      type: object
+      required: [event_id, ts, type, equivalent]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [tx.updated]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        ttl_ms:
+          type: integer
+          nullable: true
+        intensity_key:
+          type: string
+          nullable: true
+        edges:
+          type: array
+          nullable: true
+          items:
+            type: object
+            required: [from, to]
+            properties:
+              from:
+                type: string
+              to:
+                type: string
+              style:
+                $ref: '#/components/schemas/SimulatorEventEdgeStyle'
+            additionalProperties: true
+        node_badges:
+          type: array
+          nullable: true
+          items:
+            type: object
+            required: [id]
+            properties:
+              id:
+                type: string
+              viz_badge_key:
+                type: string
+                nullable: true
+            additionalProperties: true
+      additionalProperties: true
+
+    SimulatorClearingPlanStep:
+      type: object
+      required: [at_ms]
+      properties:
+        at_ms:
+          type: integer
+        intensity_key:
+          type: string
+          nullable: true
+        highlight_edges:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimulatorEventEdgeRef'
+        particles_edges:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimulatorEventEdgeRef'
+        flash:
+          type: object
+          nullable: true
+          additionalProperties: true
+      additionalProperties: true
+
+    SimulatorClearingPlanEvent:
+      type: object
+      required: [event_id, ts, type, equivalent, plan_id, steps]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [clearing.plan]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        plan_id:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorClearingPlanStep'
+      additionalProperties: true
+
+    SimulatorClearingDoneEvent:
+      type: object
+      required: [event_id, ts, type, equivalent]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [clearing.done]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+      additionalProperties: true
+
+    SimulatorEvent:
+      oneOf:
+        - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
+        - $ref: '#/components/schemas/SimulatorClearingPlanEvent'
+        - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
