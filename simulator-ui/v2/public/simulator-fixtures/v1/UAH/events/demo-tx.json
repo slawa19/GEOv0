@@ -1,0 +1,15 @@
+[
+  {
+    "event_id": "f552643e-4371-5e14-a151-55feb058fcef",
+    "ts": "2026-01-11T00:00:00Z",
+    "type": "tx.updated",
+    "equivalent": "UAH",
+    "ttl_ms": 1200,
+    "edges": [
+      {
+        "from": "PID_U0004_78dde6c4",
+        "to": "PID_U0018_1fe68e72"
+      }
+    ]
+  }
+]

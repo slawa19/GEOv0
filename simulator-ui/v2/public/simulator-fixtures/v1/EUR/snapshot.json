@@ -1,0 +1,1461 @@
+{
+  "equivalent": "EUR",
+  "generated_at": "2026-01-11T00:00:00Z",
+  "nodes": [
+    {
+      "id": "PID_U0001_9e3779b1",
+      "name": "GreenField Cooperative (Co-op)",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "-7250",
+      "net_sign": -1,
+      "viz_color_key": "debt-0",
+      "viz_size": {
+        "w": 49,
+        "h": 42
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0002_3c6ef362",
+      "name": "GreenField Warehouse",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0003_daa66d13",
+      "name": "GreenField Procurement Desk",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0004_78dde6c4",
+      "name": "Riverside Market Hall",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0005_17156075",
+      "name": "Village Transport Co-op",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0006_b54cda26",
+      "name": "SunnyHarvest Bakery",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0007_538453d7",
+      "name": "MeadowDairy Collective",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0008_f1bbcd88",
+      "name": "Hilltop Greenhouses",
+      "type": "business",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0009_8ff34739",
+      "name": "Oak & Iron Workshop",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0010_2e2ac0ea",
+      "name": "Community Energy & Water Team",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0011_cc623a9b",
+      "name": "Anton Petrenko (Grain Farmer)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0012_6a99b44c",
+      "name": "Maria Shevchenko (Vegetable Farmer)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0013_08d12dfd",
+      "name": "Oksana Hrytsenko (Berry Farm)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0014_a708a7ae",
+      "name": "Dmytro Kovalenko (Honey & Apiary)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0015_4540215f",
+      "name": "Iryna Bondar (Eggs & Poultry)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0016_e3779b10",
+      "name": "Serhii Melnyk (Goat Cheese)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0017_81af14c1",
+      "name": "Yulia Tkachenko (Herbal Tea)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0018_1fe68e72",
+      "name": "Viktor Koval (Sunflower Oil Press)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0019_be1e0823",
+      "name": "Kateryna Marchenko (Flour Milling)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0020_5c5581d4",
+      "name": "Oleh Savchenko (Meat Processing)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0021_fa8cfb85",
+      "name": "Nina Romanenko (Canning & Pickles)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0022_98c47536",
+      "name": "Taras Klymenko (Carpentry)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0023_36fbeee7",
+      "name": "Alina Moroz (Sewing & Alterations)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0024_d5336898",
+      "name": "Bohdan Kravets (Shoemaker)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0025_736ae249",
+      "name": "Svitlana Poliakova (Pottery)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0026_11a25bfa",
+      "name": "Denys Lysenko (Welding)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0027_afd9d5ab",
+      "name": "Hanna Sydorenko (Tailor Workshop)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0028_4e114f5c",
+      "name": "Roman Zadorozhnyi (Firewood & Timber)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0029_ec48c90d",
+      "name": "Pavlo Rudenko (Farm Equipment Rental)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0030_8a8042be",
+      "name": "Olena Fedorova (Seedlings & Plants)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0031_28b7bc6f",
+      "name": "Maksym Horbach (Compost & Soil)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0032_c6ef3620",
+      "name": "Tetiana Kovalchuk (Bread Supplies)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0033_6526afd1",
+      "name": "Andrii Boiko (Fishing & Smoked Fish)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0034_035e2982",
+      "name": "Larysa Ivashchenko (Handmade Soap)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0035_a195a333",
+      "name": "Ihor Chernenko (Metal Parts)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0036_3fcd1ce4",
+      "name": "Riverside Grocery",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0037_de049695",
+      "name": "Village Butcher Shop",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0038_7c3c1046",
+      "name": "Morning Coffee Corner",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0039_1a7389f7",
+      "name": "Family Canteen",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0040_b8ab03a8",
+      "name": "Farmers’ Corner Shop",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0041_56e27d59",
+      "name": "HomeGoods Mini-Mart",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0042_f519f70a",
+      "name": "Pharmacy & Health Kiosk",
+      "type": "business",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0043_935170bb",
+      "name": "School Cafeteria",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0044_3188ea6c",
+      "name": "Weekend Street Food Stall",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0045_cfc0641d",
+      "name": "Cooperative Storefront",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 49,
+        "h": 41
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0046_6df7ddce",
+      "name": "Alex Turner (General Builder)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0047_0c2f577f",
+      "name": "Ethan Brooks (Electrician)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0048_aa66d130",
+      "name": "Liam Carter (Plumber)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0049_489e4ae1",
+      "name": "Noah Bennett (Mechanic)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0050_e6d5c492",
+      "name": "Chloe Evans (Bicycle Repair)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0051_850d3e43",
+      "name": "Grace Collins (Accountant)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0052_2344b7f4",
+      "name": "Ava Reed (Legal Advisor)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0053_c17c31a5",
+      "name": "Mason Wright (IT Support)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "4000",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0054_5fb3ab56",
+      "name": "Ella Morgan (Nurse)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0055_fdeb2507",
+      "name": "Lucas Hayes (Tutor)",
+      "type": "person",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0056_9c229eb8",
+      "name": "Mia Foster (Childcare)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0057_3a5a1869",
+      "name": "Jack Russell (Courier)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0058_d891921a",
+      "name": "Amelia Scott (Hairdresser)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0059_76c90bcb",
+      "name": "Henry Ward (Photographer)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0060_1500857c",
+      "name": "Sophia Kim (Translator)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "3250",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0061_b337ff2d",
+      "name": "The Adams Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0062_516f78de",
+      "name": "The Baker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0063_efa6f28f",
+      "name": "The Carter Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0064_8dde6c40",
+      "name": "The Davis Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0065_2c15e5f1",
+      "name": "The Edwards Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0066_ca4d5fa2",
+      "name": "The Foster Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0067_6884d953",
+      "name": "The Garcia Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0068_06bc5304",
+      "name": "The Harris Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0069_a4f3ccb5",
+      "name": "The Ivanov Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0070_432b4666",
+      "name": "The Johnson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0071_e162c017",
+      "name": "The King Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0072_7f9a39c8",
+      "name": "The Lewis Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0073_1dd1b379",
+      "name": "The Miller Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0074_bc092d2a",
+      "name": "The Nelson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0075_5a40a6db",
+      "name": "The Owens Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0076_f878208c",
+      "name": "The Parker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0077_96af9a3d",
+      "name": "The Quinn Family (Household)",
+      "type": "person",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0078_34e713ee",
+      "name": "The Robinson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0079_d31e8d9f",
+      "name": "The Smith Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0080_71560750",
+      "name": "The Taylor Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0081_0f8d8101",
+      "name": "The Walker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0082_adc4fab2",
+      "name": "The Young Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0083_4bfc7463",
+      "name": "Oliver Price (Odd Jobs)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0084_ea33ee14",
+      "name": "Emily Price (Home Baking)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0085_886b67c5",
+      "name": "Daniel Hughes (Garden Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0086_26a2e176",
+      "name": "Lily Hughes (Babysitting)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0087_c4da5b27",
+      "name": "Benjamin Lee (Repairs)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0088_6311d4d8",
+      "name": "Isabella Lee (Sewing Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0089_01494e89",
+      "name": "James Hill (Driving Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0090_9f80c83a",
+      "name": "Charlotte Hill (Cooking Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0091_3db841eb",
+      "name": "William Green (Harvest Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0092_dbefbb9c",
+      "name": "Harper Green (Crafts)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0093_7a27354d",
+      "name": "Michael Wood (Handyman)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0094_185eaefe",
+      "name": "Evelyn Wood (Care Visits)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0095_b69628af",
+      "name": "Samuel Clark (Errands)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0096_54cda260",
+      "name": "Olivia Bennett (Community Coordinator)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0097_f3051c11",
+      "name": "Daniel Stone (Trustline Officer)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0098_913c95c2",
+      "name": "Emma Wright (Dispute Mediator)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0099_2f740f73",
+      "name": "Ryan Cooper (Operations Lead)",
+      "type": "person",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0100_cdab8924",
+      "name": "Sophia Turner (Tech Steward)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    }
+  ],
+  "links": [
+    {
+      "id": "PID_U0053_c17c31a5→PID_U0001_9e3779b1",
+      "source": "PID_U0053_c17c31a5",
+      "target": "PID_U0001_9e3779b1",
+      "trust_limit": "700.00",
+      "used": "315.00",
+      "available": "385.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0001_9e3779b1→PID_U0053_c17c31a5",
+      "source": "PID_U0001_9e3779b1",
+      "target": "PID_U0053_c17c31a5",
+      "trust_limit": "550.00",
+      "used": "275.00",
+      "available": "275.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0060_1500857c→PID_U0001_9e3779b1",
+      "source": "PID_U0060_1500857c",
+      "target": "PID_U0001_9e3779b1",
+      "trust_limit": "700.00",
+      "used": "280.00",
+      "available": "420.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0001_9e3779b1→PID_U0060_1500857c",
+      "source": "PID_U0001_9e3779b1",
+      "target": "PID_U0060_1500857c",
+      "trust_limit": "550.00",
+      "used": "247.50",
+      "available": "302.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    }
+  ],
+  "limits": {
+    "max_nodes": 100,
+    "max_links": 4,
+    "max_particles": 300
+  }
+}

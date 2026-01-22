@@ -1,21 +1,15 @@
 [
   {
-    "event_id": "evt_tx_0001",
-    "ts": "2026-01-22T00:00:01Z",
+    "event_id": "be7600bd-823d-5975-8f9e-0ee85ed9f200",
+    "ts": "2026-01-08T21:34:00Z",
     "type": "tx.updated",
     "equivalent": "HOUR",
     "ttl_ms": 1200,
-    "intensity_key": "mid",
     "edges": [
       {
-        "from": "biz_aurora",
-        "to": "p_ivan",
-        "style": { "viz_width_key": "highlight", "viz_alpha_key": "hi" }
+        "from": "PID_U0006_b54cda26",
+        "to": "PID_U0020_5c5581d4"
       }
-    ],
-    "node_badges": [
-      { "id": "biz_aurora", "viz_badge_key": "tx" },
-      { "id": "p_ivan", "viz_badge_key": "tx" }
     ]
   }
 ]

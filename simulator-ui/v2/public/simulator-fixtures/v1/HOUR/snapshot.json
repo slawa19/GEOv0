@@ -1,119 +1,2457 @@
 {
   "equivalent": "HOUR",
-  "generated_at": "2026-01-22T00:00:00Z",
+  "generated_at": "2026-01-11T00:00:00Z",
   "nodes": [
     {
-      "id": "biz_aurora",
-      "name": "Aurora Market",
+      "id": "PID_U0001_9e3779b1",
+      "name": "GreenField Cooperative (Co-op)",
       "type": "business",
       "status": "active",
-      "links_count": 3,
-      "net_balance_atoms": "125000",
-      "net_sign": 1,
-      "viz_color_key": "business",
-      "viz_size": { "w": 14, "h": 14 },
-      "viz_badge_key": null
-    },
-    {
-      "id": "p_ivan",
-      "name": "Ivan Petrov",
-      "type": "person",
-      "status": "active",
-      "links_count": 2,
-      "net_balance_atoms": "-30000",
+      "net_balance_atoms": "-150",
       "net_sign": -1,
-      "viz_color_key": "debt-3",
-      "viz_size": { "w": 10, "h": 10 },
+      "viz_color_key": "debt-2",
+      "viz_size": {
+        "w": 43,
+        "h": 36
+      },
       "viz_badge_key": null
     },
     {
-      "id": "p_sasha",
-      "name": "Sasha Lee",
-      "type": "person",
-      "status": "suspended",
-      "links_count": 1,
-      "net_balance_atoms": null,
-      "net_sign": null,
-      "viz_color_key": "suspended",
-      "viz_size": { "w": 10, "h": 10 },
-      "viz_badge_key": null
-    },
-    {
-      "id": "biz_delta",
-      "name": "Delta Workshop",
+      "id": "PID_U0002_3c6ef362",
+      "name": "GreenField Warehouse",
       "type": "business",
-      "status": "left",
-      "links_count": 1,
+      "status": "active",
       "net_balance_atoms": "0",
       "net_sign": 0,
-      "viz_color_key": "left",
-      "viz_size": { "w": 12, "h": 12 },
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
       "viz_badge_key": null
     },
     {
-      "id": "p_deleted",
-      "name": "Deleted User",
+      "id": "PID_U0003_daa66d13",
+      "name": "GreenField Procurement Desk",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0004_78dde6c4",
+      "name": "Riverside Market Hall",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0005_17156075",
+      "name": "Village Transport Co-op",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0006_b54cda26",
+      "name": "SunnyHarvest Bakery",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0007_538453d7",
+      "name": "MeadowDairy Collective",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0008_f1bbcd88",
+      "name": "Hilltop Greenhouses",
+      "type": "business",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0009_8ff34739",
+      "name": "Oak & Iron Workshop",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0010_2e2ac0ea",
+      "name": "Community Energy & Water Team",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0011_cc623a9b",
+      "name": "Anton Petrenko (Grain Farmer)",
       "type": "person",
-      "status": "deleted",
-      "links_count": 0,
-      "net_balance_atoms": null,
-      "net_sign": null,
-      "viz_color_key": "deleted",
-      "viz_size": { "w": 10, "h": 10 },
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0012_6a99b44c",
+      "name": "Maria Shevchenko (Vegetable Farmer)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0013_08d12dfd",
+      "name": "Oksana Hrytsenko (Berry Farm)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0014_a708a7ae",
+      "name": "Dmytro Kovalenko (Honey & Apiary)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0015_4540215f",
+      "name": "Iryna Bondar (Eggs & Poultry)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0016_e3779b10",
+      "name": "Serhii Melnyk (Goat Cheese)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0017_81af14c1",
+      "name": "Yulia Tkachenko (Herbal Tea)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0018_1fe68e72",
+      "name": "Viktor Koval (Sunflower Oil Press)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0019_be1e0823",
+      "name": "Kateryna Marchenko (Flour Milling)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0020_5c5581d4",
+      "name": "Oleh Savchenko (Meat Processing)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0021_fa8cfb85",
+      "name": "Nina Romanenko (Canning & Pickles)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0022_98c47536",
+      "name": "Taras Klymenko (Carpentry)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0023_36fbeee7",
+      "name": "Alina Moroz (Sewing & Alterations)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0024_d5336898",
+      "name": "Bohdan Kravets (Shoemaker)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0025_736ae249",
+      "name": "Svitlana Poliakova (Pottery)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0026_11a25bfa",
+      "name": "Denys Lysenko (Welding)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0027_afd9d5ab",
+      "name": "Hanna Sydorenko (Tailor Workshop)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0028_4e114f5c",
+      "name": "Roman Zadorozhnyi (Firewood & Timber)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0029_ec48c90d",
+      "name": "Pavlo Rudenko (Farm Equipment Rental)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0030_8a8042be",
+      "name": "Olena Fedorova (Seedlings & Plants)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0031_28b7bc6f",
+      "name": "Maksym Horbach (Compost & Soil)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0032_c6ef3620",
+      "name": "Tetiana Kovalchuk (Bread Supplies)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0033_6526afd1",
+      "name": "Andrii Boiko (Fishing & Smoked Fish)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0034_035e2982",
+      "name": "Larysa Ivashchenko (Handmade Soap)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0035_a195a333",
+      "name": "Ihor Chernenko (Metal Parts)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0036_3fcd1ce4",
+      "name": "Riverside Grocery",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0037_de049695",
+      "name": "Village Butcher Shop",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0038_7c3c1046",
+      "name": "Morning Coffee Corner",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0039_1a7389f7",
+      "name": "Family Canteen",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0040_b8ab03a8",
+      "name": "Farmers’ Corner Shop",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0041_56e27d59",
+      "name": "HomeGoods Mini-Mart",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0042_f519f70a",
+      "name": "Pharmacy & Health Kiosk",
+      "type": "business",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0043_935170bb",
+      "name": "School Cafeteria",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0044_3188ea6c",
+      "name": "Weekend Street Food Stall",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0045_cfc0641d",
+      "name": "Cooperative Storefront",
+      "type": "business",
+      "status": "active",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "business",
+      "viz_size": {
+        "w": 39,
+        "h": 33
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0046_6df7ddce",
+      "name": "Alex Turner (General Builder)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "65",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0047_0c2f577f",
+      "name": "Ethan Brooks (Electrician)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "950",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0048_aa66d130",
+      "name": "Liam Carter (Plumber)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "800",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0049_489e4ae1",
+      "name": "Noah Bennett (Mechanic)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "625",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0050_e6d5c492",
+      "name": "Chloe Evans (Bicycle Repair)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "475",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0051_850d3e43",
+      "name": "Grace Collins (Accountant)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-217",
+      "net_sign": -1,
+      "viz_color_key": "debt-4",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0052_2344b7f4",
+      "name": "Ava Reed (Legal Advisor)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "600",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0053_c17c31a5",
+      "name": "Mason Wright (IT Support)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "350",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0054_5fb3ab56",
+      "name": "Ella Morgan (Nurse)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "525",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0055_fdeb2507",
+      "name": "Lucas Hayes (Tutor)",
+      "type": "person",
+      "status": "frozen",
+      "net_balance_atoms": "0",
+      "net_sign": 0,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0056_9c229eb8",
+      "name": "Mia Foster (Childcare)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "50",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0057_3a5a1869",
+      "name": "Jack Russell (Courier)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "675",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0058_d891921a",
+      "name": "Amelia Scott (Hairdresser)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "425",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0059_76c90bcb",
+      "name": "Henry Ward (Photographer)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "175",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0060_1500857c",
+      "name": "Sophia Kim (Translator)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "350",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0061_b337ff2d",
+      "name": "The Adams Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "60",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0062_516f78de",
+      "name": "The Baker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-140",
+      "net_sign": -1,
+      "viz_color_key": "debt-2",
+      "viz_size": {
+        "w": 26,
+        "h": 26
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0063_efa6f28f",
+      "name": "The Carter Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-180",
+      "net_sign": -1,
+      "viz_color_key": "debt-3",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0064_8dde6c40",
+      "name": "The Davis Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-595",
+      "net_sign": -1,
+      "viz_color_key": "debt-7",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0065_2c15e5f1",
+      "name": "The Edwards Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-270",
+      "net_sign": -1,
+      "viz_color_key": "debt-6",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0066_ca4d5fa2",
+      "name": "The Foster Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "367",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0067_6884d953",
+      "name": "The Garcia Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-130",
+      "net_sign": -1,
+      "viz_color_key": "debt-2",
+      "viz_size": {
+        "w": 26,
+        "h": 26
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0068_06bc5304",
+      "name": "The Harris Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-205",
+      "net_sign": -1,
+      "viz_color_key": "debt-4",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0069_a4f3ccb5",
+      "name": "The Ivanov Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-305",
+      "net_sign": -1,
+      "viz_color_key": "debt-6",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0070_432b4666",
+      "name": "The Johnson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-220",
+      "net_sign": -1,
+      "viz_color_key": "debt-4",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0071_e162c017",
+      "name": "The King Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-235",
+      "net_sign": -1,
+      "viz_color_key": "debt-5",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0072_7f9a39c8",
+      "name": "The Lewis Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-155",
+      "net_sign": -1,
+      "viz_color_key": "debt-3",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0073_1dd1b379",
+      "name": "The Miller Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-255",
+      "net_sign": -1,
+      "viz_color_key": "debt-5",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0074_bc092d2a",
+      "name": "The Nelson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "95",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 26,
+        "h": 26
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0075_5a40a6db",
+      "name": "The Owens Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-345",
+      "net_sign": -1,
+      "viz_color_key": "debt-7",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0076_f878208c",
+      "name": "The Parker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-240",
+      "net_sign": -1,
+      "viz_color_key": "debt-5",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0077_96af9a3d",
+      "name": "The Quinn Family (Household)",
+      "type": "person",
+      "status": "frozen",
+      "net_balance_atoms": "-205",
+      "net_sign": -1,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0078_34e713ee",
+      "name": "The Robinson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-280",
+      "net_sign": -1,
+      "viz_color_key": "debt-6",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0079_d31e8d9f",
+      "name": "The Smith Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "45",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0080_71560750",
+      "name": "The Taylor Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-30",
+      "net_sign": -1,
+      "viz_color_key": "debt-1",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0081_0f8d8101",
+      "name": "The Walker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-250",
+      "net_sign": -1,
+      "viz_color_key": "debt-5",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0082_adc4fab2",
+      "name": "The Young Family (Household)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-570",
+      "net_sign": -1,
+      "viz_color_key": "debt-7",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0083_4bfc7463",
+      "name": "Oliver Price (Odd Jobs)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "95",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 26,
+        "h": 26
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0084_ea33ee14",
+      "name": "Emily Price (Home Baking)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "20",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0085_886b67c5",
+      "name": "Daniel Hughes (Garden Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "120",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 26,
+        "h": 26
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0086_26a2e176",
+      "name": "Lily Hughes (Babysitting)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "85",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 26,
+        "h": 26
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0087_c4da5b27",
+      "name": "Benjamin Lee (Repairs)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-620",
+      "net_sign": -1,
+      "viz_color_key": "debt-8",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0088_6311d4d8",
+      "name": "Isabella Lee (Sewing Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-270",
+      "net_sign": -1,
+      "viz_color_key": "debt-6",
+      "viz_size": {
+        "w": 28,
+        "h": 28
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0089_01494e89",
+      "name": "James Hill (Driving Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-30",
+      "net_sign": -1,
+      "viz_color_key": "debt-1",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0090_9f80c83a",
+      "name": "Charlotte Hill (Cooking Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-105",
+      "net_sign": -1,
+      "viz_color_key": "debt-2",
+      "viz_size": {
+        "w": 26,
+        "h": 26
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0091_3db841eb",
+      "name": "William Green (Harvest Help)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "75",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0092_dbefbb9c",
+      "name": "Harper Green (Crafts)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-645",
+      "net_sign": -1,
+      "viz_color_key": "debt-8",
+      "viz_size": {
+        "w": 30,
+        "h": 30
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0093_7a27354d",
+      "name": "Michael Wood (Handyman)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-320",
+      "net_sign": -1,
+      "viz_color_key": "debt-7",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0094_185eaefe",
+      "name": "Evelyn Wood (Care Visits)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-55",
+      "net_sign": -1,
+      "viz_color_key": "debt-1",
+      "viz_size": {
+        "w": 25,
+        "h": 25
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0095_b69628af",
+      "name": "Samuel Clark (Errands)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-155",
+      "net_sign": -1,
+      "viz_color_key": "debt-3",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0096_54cda260",
+      "name": "Olivia Bennett (Community Coordinator)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-25",
+      "net_sign": -1,
+      "viz_color_key": "debt-1",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0097_f3051c11",
+      "name": "Daniel Stone (Trustline Officer)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "400",
+      "net_sign": 1,
+      "viz_color_key": "person",
+      "viz_size": {
+        "w": 29,
+        "h": 29
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0098_913c95c2",
+      "name": "Emma Wright (Dispute Mediator)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-25",
+      "net_sign": -1,
+      "viz_color_key": "debt-1",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0099_2f740f73",
+      "name": "Ryan Cooper (Operations Lead)",
+      "type": "person",
+      "status": "frozen",
+      "net_balance_atoms": "-175",
+      "net_sign": -1,
+      "viz_color_key": "suspended",
+      "viz_size": {
+        "w": 27,
+        "h": 27
+      },
+      "viz_badge_key": null
+    },
+    {
+      "id": "PID_U0100_cdab8924",
+      "name": "Sophia Turner (Tech Steward)",
+      "type": "person",
+      "status": "active",
+      "net_balance_atoms": "-25",
+      "net_sign": -1,
+      "viz_color_key": "debt-1",
+      "viz_size": {
+        "w": 24,
+        "h": 24
+      },
       "viz_badge_key": null
     }
   ],
   "links": [
     {
-      "id": "tl_aurora_ivan",
-      "source": "biz_aurora",
-      "target": "p_ivan",
-      "trust_limit": "1000",
-      "used": "300",
-      "available": "700",
+      "id": "PID_U0046_6df7ddce→PID_U0061_b337ff2d",
+      "source": "PID_U0046_6df7ddce",
+      "target": "PID_U0061_b337ff2d",
+      "trust_limit": "5.00",
+      "used": "1.00",
+      "available": "4.00",
       "status": "active",
       "viz_color_key": null,
-      "viz_width_key": "thin",
-      "viz_alpha_key": "muted"
+      "viz_width_key": null,
+      "viz_alpha_key": null
     },
     {
-      "id": "tl_ivan_sasha",
-      "source": "p_ivan",
-      "target": "p_sasha",
-      "trust_limit": "200",
-      "used": "50",
-      "available": "150",
+      "id": "PID_U0061_b337ff2d→PID_U0046_6df7ddce",
+      "source": "PID_U0061_b337ff2d",
+      "target": "PID_U0046_6df7ddce",
+      "trust_limit": "4.00",
+      "used": "1.00",
+      "available": "3.00",
       "status": "active",
       "viz_color_key": null,
-      "viz_width_key": "hairline",
-      "viz_alpha_key": "bg"
+      "viz_width_key": null,
+      "viz_alpha_key": null
     },
     {
-      "id": "tl_aurora_delta",
-      "source": "biz_aurora",
-      "target": "biz_delta",
-      "trust_limit": "500",
-      "used": "0",
-      "available": "500",
-      "status": "inactive",
+      "id": "PID_U0047_0c2f577f→PID_U0062_516f78de",
+      "source": "PID_U0047_0c2f577f",
+      "target": "PID_U0062_516f78de",
+      "trust_limit": "5.00",
+      "used": "2.00",
+      "available": "3.00",
+      "status": "active",
       "viz_color_key": null,
-      "viz_width_key": "hairline",
-      "viz_alpha_key": "bg"
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0048_aa66d130→PID_U0063_efa6f28f",
+      "source": "PID_U0048_aa66d130",
+      "target": "PID_U0063_efa6f28f",
+      "trust_limit": "5.00",
+      "used": "3.00",
+      "available": "2.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0049_489e4ae1→PID_U0064_8dde6c40",
+      "source": "PID_U0049_489e4ae1",
+      "target": "PID_U0064_8dde6c40",
+      "trust_limit": "5.00",
+      "used": "3.75",
+      "available": "1.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0050_e6d5c492→PID_U0065_2c15e5f1",
+      "source": "PID_U0050_e6d5c492",
+      "target": "PID_U0065_2c15e5f1",
+      "trust_limit": "5.00",
+      "used": "0.50",
+      "available": "4.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0051_850d3e43→PID_U0066_ca4d5fa2",
+      "source": "PID_U0051_850d3e43",
+      "target": "PID_U0066_ca4d5fa2",
+      "trust_limit": "5.00",
+      "used": "1.25",
+      "available": "3.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0066_ca4d5fa2→PID_U0051_850d3e43",
+      "source": "PID_U0066_ca4d5fa2",
+      "target": "PID_U0051_850d3e43",
+      "trust_limit": "4.00",
+      "used": "3.72",
+      "available": "0.28",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0052_2344b7f4→PID_U0067_6884d953",
+      "source": "PID_U0052_2344b7f4",
+      "target": "PID_U0067_6884d953",
+      "trust_limit": "5.00",
+      "used": "2.50",
+      "available": "2.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0053_c17c31a5→PID_U0068_06bc5304",
+      "source": "PID_U0053_c17c31a5",
+      "target": "PID_U0068_06bc5304",
+      "trust_limit": "5.00",
+      "used": "3.25",
+      "available": "1.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0054_5fb3ab56→PID_U0069_a4f3ccb5",
+      "source": "PID_U0054_5fb3ab56",
+      "target": "PID_U0069_a4f3ccb5",
+      "trust_limit": "5.00",
+      "used": "4.25",
+      "available": "0.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0055_fdeb2507→PID_U0070_432b4666",
+      "source": "PID_U0055_fdeb2507",
+      "target": "PID_U0070_432b4666",
+      "trust_limit": "5.00",
+      "used": "0.75",
+      "available": "4.25",
+      "status": "frozen",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0056_9c229eb8→PID_U0071_e162c017",
+      "source": "PID_U0056_9c229eb8",
+      "target": "PID_U0071_e162c017",
+      "trust_limit": "5.00",
+      "used": "1.75",
+      "available": "3.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0071_e162c017→PID_U0056_9c229eb8",
+      "source": "PID_U0071_e162c017",
+      "target": "PID_U0056_9c229eb8",
+      "trust_limit": "4.00",
+      "used": "1.60",
+      "available": "2.40",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0057_3a5a1869→PID_U0072_7f9a39c8",
+      "source": "PID_U0057_3a5a1869",
+      "target": "PID_U0072_7f9a39c8",
+      "trust_limit": "5.00",
+      "used": "2.75",
+      "available": "2.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0058_d891921a→PID_U0073_1dd1b379",
+      "source": "PID_U0058_d891921a",
+      "target": "PID_U0073_1dd1b379",
+      "trust_limit": "5.00",
+      "used": "3.75",
+      "available": "1.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0059_76c90bcb→PID_U0074_bc092d2a",
+      "source": "PID_U0059_76c90bcb",
+      "target": "PID_U0074_bc092d2a",
+      "trust_limit": "5.00",
+      "used": "0.25",
+      "available": "4.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0060_1500857c→PID_U0075_5a40a6db",
+      "source": "PID_U0060_1500857c",
+      "target": "PID_U0075_5a40a6db",
+      "trust_limit": "5.00",
+      "used": "1.25",
+      "available": "3.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0046_6df7ddce→PID_U0076_f878208c",
+      "source": "PID_U0046_6df7ddce",
+      "target": "PID_U0076_f878208c",
+      "trust_limit": "5.00",
+      "used": "2.00",
+      "available": "3.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0076_f878208c→PID_U0046_6df7ddce",
+      "source": "PID_U0076_f878208c",
+      "target": "PID_U0046_6df7ddce",
+      "trust_limit": "4.00",
+      "used": "1.80",
+      "available": "2.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0047_0c2f577f→PID_U0077_96af9a3d",
+      "source": "PID_U0047_0c2f577f",
+      "target": "PID_U0077_96af9a3d",
+      "trust_limit": "5.00",
+      "used": "3.25",
+      "available": "1.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0048_aa66d130→PID_U0078_34e713ee",
+      "source": "PID_U0048_aa66d130",
+      "target": "PID_U0078_34e713ee",
+      "trust_limit": "5.00",
+      "used": "4.00",
+      "available": "1.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0049_489e4ae1→PID_U0079_d31e8d9f",
+      "source": "PID_U0049_489e4ae1",
+      "target": "PID_U0079_d31e8d9f",
+      "trust_limit": "5.00",
+      "used": "0.75",
+      "available": "4.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0050_e6d5c492→PID_U0080_71560750",
+      "source": "PID_U0050_e6d5c492",
+      "target": "PID_U0080_71560750",
+      "trust_limit": "5.00",
+      "used": "1.50",
+      "available": "3.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0051_850d3e43→PID_U0081_0f8d8101",
+      "source": "PID_U0051_850d3e43",
+      "target": "PID_U0081_0f8d8101",
+      "trust_limit": "5.00",
+      "used": "2.50",
+      "available": "2.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0081_0f8d8101→PID_U0051_850d3e43",
+      "source": "PID_U0081_0f8d8101",
+      "target": "PID_U0051_850d3e43",
+      "trust_limit": "4.00",
+      "used": "2.20",
+      "available": "1.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0052_2344b7f4→PID_U0082_adc4fab2",
+      "source": "PID_U0052_2344b7f4",
+      "target": "PID_U0082_adc4fab2",
+      "trust_limit": "5.00",
+      "used": "3.50",
+      "available": "1.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0053_c17c31a5→PID_U0083_4bfc7463",
+      "source": "PID_U0053_c17c31a5",
+      "target": "PID_U0083_4bfc7463",
+      "trust_limit": "5.00",
+      "used": "0.25",
+      "available": "4.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0054_5fb3ab56→PID_U0084_ea33ee14",
+      "source": "PID_U0054_5fb3ab56",
+      "target": "PID_U0084_ea33ee14",
+      "trust_limit": "5.00",
+      "used": "1.00",
+      "available": "4.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0055_fdeb2507→PID_U0085_886b67c5",
+      "source": "PID_U0055_fdeb2507",
+      "target": "PID_U0085_886b67c5",
+      "trust_limit": "5.00",
+      "used": "2.00",
+      "available": "3.00",
+      "status": "frozen",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0056_9c229eb8→PID_U0086_26a2e176",
+      "source": "PID_U0056_9c229eb8",
+      "target": "PID_U0086_26a2e176",
+      "trust_limit": "5.00",
+      "used": "2.75",
+      "available": "2.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0086_26a2e176→PID_U0056_9c229eb8",
+      "source": "PID_U0086_26a2e176",
+      "target": "PID_U0056_9c229eb8",
+      "trust_limit": "4.00",
+      "used": "2.40",
+      "available": "1.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0057_3a5a1869→PID_U0087_c4da5b27",
+      "source": "PID_U0057_3a5a1869",
+      "target": "PID_U0087_c4da5b27",
+      "trust_limit": "5.00",
+      "used": "4.00",
+      "available": "1.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0058_d891921a→PID_U0088_6311d4d8",
+      "source": "PID_U0058_d891921a",
+      "target": "PID_U0088_6311d4d8",
+      "trust_limit": "5.00",
+      "used": "0.50",
+      "available": "4.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0059_76c90bcb→PID_U0089_01494e89",
+      "source": "PID_U0059_76c90bcb",
+      "target": "PID_U0089_01494e89",
+      "trust_limit": "5.00",
+      "used": "1.50",
+      "available": "3.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0060_1500857c→PID_U0090_9f80c83a",
+      "source": "PID_U0060_1500857c",
+      "target": "PID_U0090_9f80c83a",
+      "trust_limit": "5.00",
+      "used": "2.25",
+      "available": "2.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0046_6df7ddce→PID_U0091_3db841eb",
+      "source": "PID_U0046_6df7ddce",
+      "target": "PID_U0091_3db841eb",
+      "trust_limit": "5.00",
+      "used": "3.25",
+      "available": "1.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0091_3db841eb→PID_U0046_6df7ddce",
+      "source": "PID_U0091_3db841eb",
+      "target": "PID_U0046_6df7ddce",
+      "trust_limit": "4.00",
+      "used": "2.80",
+      "available": "1.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0047_0c2f577f→PID_U0092_dbefbb9c",
+      "source": "PID_U0047_0c2f577f",
+      "target": "PID_U0092_dbefbb9c",
+      "trust_limit": "5.00",
+      "used": "4.25",
+      "available": "0.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0048_aa66d130→PID_U0093_7a27354d",
+      "source": "PID_U0048_aa66d130",
+      "target": "PID_U0093_7a27354d",
+      "trust_limit": "5.00",
+      "used": "1.00",
+      "available": "4.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0049_489e4ae1→PID_U0094_185eaefe",
+      "source": "PID_U0049_489e4ae1",
+      "target": "PID_U0094_185eaefe",
+      "trust_limit": "5.00",
+      "used": "1.75",
+      "available": "3.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0050_e6d5c492→PID_U0095_b69628af",
+      "source": "PID_U0050_e6d5c492",
+      "target": "PID_U0095_b69628af",
+      "trust_limit": "5.00",
+      "used": "2.75",
+      "available": "2.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0061_b337ff2d→PID_U0063_efa6f28f",
+      "source": "PID_U0061_b337ff2d",
+      "target": "PID_U0063_efa6f28f",
+      "trust_limit": "4.00",
+      "used": "2.00",
+      "available": "2.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0062_516f78de→PID_U0064_8dde6c40",
+      "source": "PID_U0062_516f78de",
+      "target": "PID_U0064_8dde6c40",
+      "trust_limit": "4.00",
+      "used": "2.60",
+      "available": "1.40",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0063_efa6f28f→PID_U0065_2c15e5f1",
+      "source": "PID_U0063_efa6f28f",
+      "target": "PID_U0065_2c15e5f1",
+      "trust_limit": "4.00",
+      "used": "3.20",
+      "available": "0.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0064_8dde6c40→PID_U0066_ca4d5fa2",
+      "source": "PID_U0064_8dde6c40",
+      "target": "PID_U0066_ca4d5fa2",
+      "trust_limit": "4.00",
+      "used": "0.40",
+      "available": "3.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0065_2c15e5f1→PID_U0067_6884d953",
+      "source": "PID_U0065_2c15e5f1",
+      "target": "PID_U0067_6884d953",
+      "trust_limit": "4.00",
+      "used": "1.00",
+      "available": "3.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0066_ca4d5fa2→PID_U0068_06bc5304",
+      "source": "PID_U0066_ca4d5fa2",
+      "target": "PID_U0068_06bc5304",
+      "trust_limit": "4.00",
+      "used": "1.60",
+      "available": "2.40",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0067_6884d953→PID_U0069_a4f3ccb5",
+      "source": "PID_U0067_6884d953",
+      "target": "PID_U0069_a4f3ccb5",
+      "trust_limit": "4.00",
+      "used": "2.20",
+      "available": "1.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0068_06bc5304→PID_U0070_432b4666",
+      "source": "PID_U0068_06bc5304",
+      "target": "PID_U0070_432b4666",
+      "trust_limit": "4.00",
+      "used": "2.80",
+      "available": "1.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0069_a4f3ccb5→PID_U0071_e162c017",
+      "source": "PID_U0069_a4f3ccb5",
+      "target": "PID_U0071_e162c017",
+      "trust_limit": "4.00",
+      "used": "3.40",
+      "available": "0.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0070_432b4666→PID_U0072_7f9a39c8",
+      "source": "PID_U0070_432b4666",
+      "target": "PID_U0072_7f9a39c8",
+      "trust_limit": "4.00",
+      "used": "0.60",
+      "available": "3.40",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0071_e162c017→PID_U0073_1dd1b379",
+      "source": "PID_U0071_e162c017",
+      "target": "PID_U0073_1dd1b379",
+      "trust_limit": "4.00",
+      "used": "1.20",
+      "available": "2.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0072_7f9a39c8→PID_U0074_bc092d2a",
+      "source": "PID_U0072_7f9a39c8",
+      "target": "PID_U0074_bc092d2a",
+      "trust_limit": "4.00",
+      "used": "1.80",
+      "available": "2.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0073_1dd1b379→PID_U0075_5a40a6db",
+      "source": "PID_U0073_1dd1b379",
+      "target": "PID_U0075_5a40a6db",
+      "trust_limit": "4.00",
+      "used": "2.40",
+      "available": "1.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0074_bc092d2a→PID_U0076_f878208c",
+      "source": "PID_U0074_bc092d2a",
+      "target": "PID_U0076_f878208c",
+      "trust_limit": "4.00",
+      "used": "3.00",
+      "available": "1.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0075_5a40a6db→PID_U0077_96af9a3d",
+      "source": "PID_U0075_5a40a6db",
+      "target": "PID_U0077_96af9a3d",
+      "trust_limit": "4.00",
+      "used": "0.20",
+      "available": "3.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0076_f878208c→PID_U0078_34e713ee",
+      "source": "PID_U0076_f878208c",
+      "target": "PID_U0078_34e713ee",
+      "trust_limit": "4.00",
+      "used": "0.80",
+      "available": "3.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0077_96af9a3d→PID_U0079_d31e8d9f",
+      "source": "PID_U0077_96af9a3d",
+      "target": "PID_U0079_d31e8d9f",
+      "trust_limit": "4.00",
+      "used": "1.40",
+      "available": "2.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0078_34e713ee→PID_U0080_71560750",
+      "source": "PID_U0078_34e713ee",
+      "target": "PID_U0080_71560750",
+      "trust_limit": "4.00",
+      "used": "2.00",
+      "available": "2.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0079_d31e8d9f→PID_U0081_0f8d8101",
+      "source": "PID_U0079_d31e8d9f",
+      "target": "PID_U0081_0f8d8101",
+      "trust_limit": "4.00",
+      "used": "2.60",
+      "available": "1.40",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0080_71560750→PID_U0082_adc4fab2",
+      "source": "PID_U0080_71560750",
+      "target": "PID_U0082_adc4fab2",
+      "trust_limit": "4.00",
+      "used": "3.20",
+      "available": "0.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0081_0f8d8101→PID_U0083_4bfc7463",
+      "source": "PID_U0081_0f8d8101",
+      "target": "PID_U0083_4bfc7463",
+      "trust_limit": "4.00",
+      "used": "0.40",
+      "available": "3.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0082_adc4fab2→PID_U0084_ea33ee14",
+      "source": "PID_U0082_adc4fab2",
+      "target": "PID_U0084_ea33ee14",
+      "trust_limit": "4.00",
+      "used": "1.00",
+      "available": "3.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0083_4bfc7463→PID_U0085_886b67c5",
+      "source": "PID_U0083_4bfc7463",
+      "target": "PID_U0085_886b67c5",
+      "trust_limit": "4.00",
+      "used": "1.60",
+      "available": "2.40",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0084_ea33ee14→PID_U0086_26a2e176",
+      "source": "PID_U0084_ea33ee14",
+      "target": "PID_U0086_26a2e176",
+      "trust_limit": "4.00",
+      "used": "2.20",
+      "available": "1.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0085_886b67c5→PID_U0087_c4da5b27",
+      "source": "PID_U0085_886b67c5",
+      "target": "PID_U0087_c4da5b27",
+      "trust_limit": "4.00",
+      "used": "2.80",
+      "available": "1.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0086_26a2e176→PID_U0088_6311d4d8",
+      "source": "PID_U0086_26a2e176",
+      "target": "PID_U0088_6311d4d8",
+      "trust_limit": "4.00",
+      "used": "3.40",
+      "available": "0.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0087_c4da5b27→PID_U0089_01494e89",
+      "source": "PID_U0087_c4da5b27",
+      "target": "PID_U0089_01494e89",
+      "trust_limit": "4.00",
+      "used": "0.60",
+      "available": "3.40",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0088_6311d4d8→PID_U0090_9f80c83a",
+      "source": "PID_U0088_6311d4d8",
+      "target": "PID_U0090_9f80c83a",
+      "trust_limit": "4.00",
+      "used": "1.20",
+      "available": "2.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0089_01494e89→PID_U0091_3db841eb",
+      "source": "PID_U0089_01494e89",
+      "target": "PID_U0091_3db841eb",
+      "trust_limit": "4.00",
+      "used": "1.80",
+      "available": "2.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0090_9f80c83a→PID_U0092_dbefbb9c",
+      "source": "PID_U0090_9f80c83a",
+      "target": "PID_U0092_dbefbb9c",
+      "trust_limit": "4.00",
+      "used": "2.40",
+      "available": "1.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0091_3db841eb→PID_U0093_7a27354d",
+      "source": "PID_U0091_3db841eb",
+      "target": "PID_U0093_7a27354d",
+      "trust_limit": "4.00",
+      "used": "3.00",
+      "available": "1.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0092_dbefbb9c→PID_U0094_185eaefe",
+      "source": "PID_U0092_dbefbb9c",
+      "target": "PID_U0094_185eaefe",
+      "trust_limit": "4.00",
+      "used": "0.20",
+      "available": "3.80",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0093_7a27354d→PID_U0095_b69628af",
+      "source": "PID_U0093_7a27354d",
+      "target": "PID_U0095_b69628af",
+      "trust_limit": "4.00",
+      "used": "0.80",
+      "available": "3.20",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0094_185eaefe→PID_U0061_b337ff2d",
+      "source": "PID_U0094_185eaefe",
+      "target": "PID_U0061_b337ff2d",
+      "trust_limit": "4.00",
+      "used": "1.40",
+      "available": "2.60",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0095_b69628af→PID_U0062_516f78de",
+      "source": "PID_U0095_b69628af",
+      "target": "PID_U0062_516f78de",
+      "trust_limit": "4.00",
+      "used": "2.00",
+      "available": "2.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0096_54cda260→PID_U0001_9e3779b1",
+      "source": "PID_U0096_54cda260",
+      "target": "PID_U0001_9e3779b1",
+      "trust_limit": "5.00",
+      "used": "3.50",
+      "available": "1.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0001_9e3779b1→PID_U0096_54cda260",
+      "source": "PID_U0001_9e3779b1",
+      "target": "PID_U0096_54cda260",
+      "trust_limit": "5.00",
+      "used": "3.75",
+      "available": "1.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0097_f3051c11→PID_U0001_9e3779b1",
+      "source": "PID_U0097_f3051c11",
+      "target": "PID_U0001_9e3779b1",
+      "trust_limit": "5.00",
+      "used": "4.25",
+      "available": "0.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0001_9e3779b1→PID_U0097_f3051c11",
+      "source": "PID_U0001_9e3779b1",
+      "target": "PID_U0097_f3051c11",
+      "trust_limit": "5.00",
+      "used": "0.25",
+      "available": "4.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0098_913c95c2→PID_U0001_9e3779b1",
+      "source": "PID_U0098_913c95c2",
+      "target": "PID_U0001_9e3779b1",
+      "trust_limit": "5.00",
+      "used": "0.75",
+      "available": "4.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0001_9e3779b1→PID_U0098_913c95c2",
+      "source": "PID_U0001_9e3779b1",
+      "target": "PID_U0098_913c95c2",
+      "trust_limit": "5.00",
+      "used": "1.00",
+      "available": "4.00",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0099_2f740f73→PID_U0001_9e3779b1",
+      "source": "PID_U0099_2f740f73",
+      "target": "PID_U0001_9e3779b1",
+      "trust_limit": "5.00",
+      "used": "1.50",
+      "available": "3.50",
+      "status": "frozen",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0001_9e3779b1→PID_U0099_2f740f73",
+      "source": "PID_U0001_9e3779b1",
+      "target": "PID_U0099_2f740f73",
+      "trust_limit": "5.00",
+      "used": "1.75",
+      "available": "3.25",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0100_cdab8924→PID_U0001_9e3779b1",
+      "source": "PID_U0100_cdab8924",
+      "target": "PID_U0001_9e3779b1",
+      "trust_limit": "5.00",
+      "used": "2.25",
+      "available": "2.75",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
+    },
+    {
+      "id": "PID_U0001_9e3779b1→PID_U0100_cdab8924",
+      "source": "PID_U0001_9e3779b1",
+      "target": "PID_U0100_cdab8924",
+      "trust_limit": "5.00",
+      "used": "2.50",
+      "available": "2.50",
+      "status": "active",
+      "viz_color_key": null,
+      "viz_width_key": null,
+      "viz_alpha_key": null
     }
   ],
-  "palette": {
-    "business": { "color": "#10b981", "label": "Business" },
-    "person": { "color": "#3b82f6", "label": "Person" },
-    "suspended": { "color": "#94a3b8", "label": "Suspended" },
-    "left": { "color": "#64748b", "label": "Left" },
-    "deleted": { "color": "#475569", "label": "Deleted" },
-    "debt-0": { "color": "#84cc16", "label": "Debt bin 0" },
-    "debt-3": { "color": "#f59e0b", "label": "Debt bin 3" },
-    "debt-8": { "color": "#ef4444", "label": "Debt bin 8" }
-  },
   "limits": {
-    "max_nodes": 150,
-    "max_links": 400,
+    "max_nodes": 100,
+    "max_links": 87,
     "max_particles": 300
   }
 }

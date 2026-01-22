@@ -1,0 +1,58 @@
+[
+  {
+    "event_id": "clearing-demo-UAH-PID_U0039_1a.plan",
+    "ts": "2026-01-22T11:45:37Z",
+    "type": "clearing.plan",
+    "equivalent": "UAH",
+    "plan_id": "clearing-demo-UAH-PID_U0039_1a",
+    "steps": [
+      {
+        "at_ms": 0,
+        "highlight_edges": [
+          {
+            "from": "PID_U0039_1a7389f7",
+            "to": "PID_U0001_9e3779b1"
+          },
+          {
+            "from": "PID_U0006_b54cda26",
+            "to": "PID_U0039_1a7389f7"
+          },
+          {
+            "from": "PID_U0001_9e3779b1",
+            "to": "PID_U0006_b54cda26"
+          }
+        ]
+      },
+      {
+        "at_ms": 380,
+        "flash": {
+          "kind": "clearing"
+        }
+      },
+      {
+        "at_ms": 720,
+        "highlight_edges": [
+          {
+            "from": "PID_U0039_1a7389f7",
+            "to": "PID_U0001_9e3779b1"
+          },
+          {
+            "from": "PID_U0006_b54cda26",
+            "to": "PID_U0039_1a7389f7"
+          },
+          {
+            "from": "PID_U0001_9e3779b1",
+            "to": "PID_U0006_b54cda26"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "event_id": "clearing-demo-UAH-PID_U0039_1a.done",
+    "ts": "2026-01-22T11:45:37Z",
+    "type": "clearing.done",
+    "equivalent": "UAH",
+    "plan_id": "clearing-demo-UAH-PID_U0039_1a"
+  }
+]

@@ -20,7 +20,7 @@ if (-not (Test-Path (Join-Path $appDir 'node_modules'))) {
 
 Write-Host ''
 Write-Host 'Starting GEO Simulator UI (Vite dev server)...'
-Write-Host 'Open in browser: http://localhost:5176/'
+Write-Host 'Open in browser: http://127.0.0.1:5176/'
 Write-Host ''
 
 npm run dev

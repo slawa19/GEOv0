@@ -1,0 +1,15 @@
+[
+  {
+    "event_id": "aed71fda-8b0f-532c-a3e9-2698c7a2b77f",
+    "ts": "2026-01-09T22:47:00Z",
+    "type": "tx.updated",
+    "equivalent": "EUR",
+    "ttl_ms": 1200,
+    "edges": [
+      {
+        "from": "PID_U0005_17156075",
+        "to": "PID_U0019_be1e0823"
+      }
+    ]
+  }
+]
