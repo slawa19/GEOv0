@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import type { DemoEvent, GraphLink, GraphNode, GraphSnapshot } from './types'
+import type { DemoEvent, EdgePatch, GraphLink, GraphNode, GraphSnapshot, NodePatch } from './types'
 import { loadEvents, loadSnapshot } from './fixtures'
 import { VIZ_MAPPING } from './vizMapping'
 import { drawBaseGraph, type LayoutLink as RenderLayoutLink } from './render/baseGraph'
 import { sizeForNode, type LayoutNode as RenderLayoutNode } from './render/nodePainter'
-import { createFxState, renderFxFrame, resetFxState, spawnSparks } from './render/fxRenderer'
+import { createFxState, renderFxFrame, resetFxState, spawnEdgePulses, spawnNodeBursts, spawnSparks } from './render/fxRenderer'
 
 type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
 type LayoutMode = 'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'
@@ -637,6 +637,82 @@ function resetOverlays() {
   resetFxState(fxState)
 }
 
+function applyNodePatches(patches: NodePatch[] | undefined) {
+  if (!patches?.length || !state.snapshot) return
+
+  const snapIdx = new Map(state.snapshot.nodes.map((n, i) => [n.id, i]))
+  const layoutIdx = new Map(layout.nodes.map((n, i) => [n.id, i]))
+
+  for (const p of patches) {
+    const si = snapIdx.get(p.id)
+    if (si !== undefined) {
+      const cur = state.snapshot.nodes[si]!
+      state.snapshot.nodes[si] = {
+        ...cur,
+        net_balance_atoms: p.net_balance_atoms !== undefined ? p.net_balance_atoms : cur.net_balance_atoms,
+        net_sign: p.net_sign !== undefined ? p.net_sign : cur.net_sign,
+        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
+        viz_size: p.viz_size !== undefined ? p.viz_size : cur.viz_size,
+      }
+    }
+
+    const li = layoutIdx.get(p.id)
+    if (li !== undefined) {
+      const cur = layout.nodes[li]!
+      layout.nodes[li] = {
+        ...cur,
+        net_balance_atoms: p.net_balance_atoms !== undefined ? p.net_balance_atoms : cur.net_balance_atoms,
+        net_sign: p.net_sign !== undefined ? p.net_sign : cur.net_sign,
+        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
+        viz_size: p.viz_size !== undefined ? p.viz_size : cur.viz_size,
+      }
+    }
+  }
+}
+
+function applyEdgePatches(patches: EdgePatch[] | undefined) {
+  if (!patches?.length || !state.snapshot) return
+
+  const snapIdx = new Map(state.snapshot.links.map((l, i) => [keyEdge(l.source, l.target), i]))
+  const layoutIdx = new Map(layout.links.map((l, i) => [keyEdge(l.source, l.target), i]))
+
+  for (const p of patches) {
+    const k = keyEdge(p.source, p.target)
+
+    const si = snapIdx.get(k)
+    if (si !== undefined) {
+      const cur = state.snapshot.links[si]!
+      state.snapshot.links[si] = {
+        ...cur,
+        used: p.used !== undefined ? p.used : cur.used,
+        available: p.available !== undefined ? p.available : cur.available,
+        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
+        viz_width_key: p.viz_width_key !== undefined ? p.viz_width_key : cur.viz_width_key,
+        viz_alpha_key: p.viz_alpha_key !== undefined ? p.viz_alpha_key : cur.viz_alpha_key,
+      }
+    }
+
+    const li = layoutIdx.get(k)
+    if (li !== undefined) {
+      const cur = layout.links[li]!
+      layout.links[li] = {
+        ...cur,
+        used: p.used !== undefined ? p.used : cur.used,
+        available: p.available !== undefined ? p.available : cur.available,
+        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
+        viz_width_key: p.viz_width_key !== undefined ? p.viz_width_key : cur.viz_width_key,
+        viz_alpha_key: p.viz_alpha_key !== undefined ? p.viz_alpha_key : cur.viz_alpha_key,
+      }
+    }
+  }
+}
+
+function applyPatchesFromEvent(evt: DemoEvent) {
+  if (evt.type !== 'tx.updated' && evt.type !== 'clearing.done') return
+  applyNodePatches(evt.node_patch)
+  applyEdgePatches(evt.edge_patch)
+}
+
 async function loadScene() {
   state.loading = true
   state.error = ''
@@ -845,6 +921,7 @@ async function runTxOnce() {
   if (isTestMode.value) return
 
   window.setTimeout(() => {
+    applyPatchesFromEvent(evt)
     resetOverlays()
   }, Math.max(200, evt.ttl_ms || 1200))
 }
@@ -855,6 +932,7 @@ async function runClearingOnce() {
 
   const { events } = await loadEvents(effectiveEq.value, 'demo-clearing')
   const plan = events.find((e) => e.type === 'clearing.plan')
+  const done = events.find((e) => e.type === 'clearing.done')
   if (!plan || plan.type !== 'clearing.plan') return
 
   if (isTestMode.value) {
@@ -867,21 +945,69 @@ async function runClearingOnce() {
   const t0 = performance.now()
   for (const step of plan.steps) {
     window.setTimeout(() => {
+      const clearingColor = (() => {
+        // Interpret only explicit keys; default to credit color.
+        const k = String(step.intensity_key ?? '').toLowerCase()
+        if (k === 'debt' || k === 'debit') return VIZ_MAPPING.fx.clearing_debt
+        return VIZ_MAPPING.fx.clearing_credit
+      })()
+
       if (step.highlight_edges) {
         for (const e of step.highlight_edges) state.activeEdges.add(keyEdge(e.from, e.to))
+
+        spawnEdgePulses(fxState, {
+          edges: step.highlight_edges,
+          nowMs: performance.now(),
+          durationMs: 780,
+          color: clearingColor,
+          thickness: 1.2,
+          seedPrefix: `clearing:highlight:${effectiveEq.value}:${step.at_ms}`,
+          countPerEdge: 1,
+          keyEdge,
+          seedFn: fnv1a,
+          isTestMode: isTestMode.value,
+        })
+
+        const nodeIds = new Set<string>()
+        for (const e of step.highlight_edges) {
+          nodeIds.add(e.from)
+          nodeIds.add(e.to)
+        }
+        spawnNodeBursts(fxState, {
+          nodeIds: [...nodeIds].sort((a, b) => a.localeCompare(b)),
+          nowMs: performance.now(),
+          durationMs: 650,
+          color: clearingColor,
+          seedPrefix: `clearing:burst:${effectiveEq.value}:${step.at_ms}`,
+          seedFn: fnv1a,
+          isTestMode: isTestMode.value,
+        })
       }
       if (step.particles_edges) {
         for (const e of step.particles_edges) state.activeEdges.add(keyEdge(e.from, e.to))
 
+        spawnEdgePulses(fxState, {
+          edges: step.particles_edges,
+          nowMs: performance.now(),
+          durationMs: 920,
+          color: clearingColor,
+          thickness: 1.4,
+          seedPrefix: `clearing:pulse:${effectiveEq.value}:${step.at_ms}`,
+          countPerEdge: 1,
+          keyEdge,
+          seedFn: fnv1a,
+          isTestMode: isTestMode.value,
+        })
+
         spawnSparks(fxState, {
           edges: step.particles_edges,
           nowMs: performance.now(),
-          ttlMs: 900,
-          colorCore: VIZ_MAPPING.fx.clearing_credit,
-          colorTrail: VIZ_MAPPING.fx.clearing_credit,
-          thickness: 1.0,
+          ttlMs: 780,
+          colorCore: '#ffffff',
+          colorTrail: clearingColor,
+          thickness: 1.35,
           seedPrefix: `clearing:${effectiveEq.value}:${step.at_ms}`,
-          countPerEdge: 2,
+          countPerEdge: 1,
           keyEdge,
           seedFn: fnv1a,
           isTestMode: isTestMode.value,
@@ -895,6 +1021,7 @@ async function runClearingOnce() {
 
   const doneAt = Math.max(...plan.steps.map((s) => s.at_ms)) + 600
   window.setTimeout(() => {
+    if (done && done.type === 'clearing.done') applyPatchesFromEvent(done)
     resetOverlays()
   }, Math.max(0, doneAt) + (performance.now() - t0 >= 0 ? 0 : 0))
 }

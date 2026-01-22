@@ -37,6 +37,24 @@ export type GraphLink = {
   viz_alpha_key?: string | null
 }
 
+export type NodePatch = {
+  id: string
+  net_balance_atoms?: string | null
+  net_sign?: -1 | 0 | 1 | null
+  viz_color_key?: string | null
+  viz_size?: { w: number; h: number } | null
+}
+
+export type EdgePatch = {
+  source: string
+  target: string
+  used?: string | number
+  available?: string | number
+  viz_color_key?: string | null
+  viz_width_key?: string | null
+  viz_alpha_key?: string | null
+}
+
 export type TxUpdatedEvent = {
   event_id: string
   ts: string
@@ -46,6 +64,8 @@ export type TxUpdatedEvent = {
   intensity_key?: string
   edges: Array<{ from: string; to: string; style?: { viz_width_key?: string; viz_alpha_key?: string } }>
   node_badges?: Array<{ id: string; viz_badge_key: string | null }>
+  node_patch?: NodePatch[]
+  edge_patch?: EdgePatch[]
 }
 
 export type ClearingPlanEvent = {
@@ -69,6 +89,8 @@ export type ClearingDoneEvent = {
   type: 'clearing.done'
   equivalent: string
   plan_id: string
+  node_patch?: NodePatch[]
+  edge_patch?: EdgePatch[]
 }
 
 export type DemoEvent = TxUpdatedEvent | ClearingPlanEvent | ClearingDoneEvent

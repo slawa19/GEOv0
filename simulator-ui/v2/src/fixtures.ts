@@ -1,4 +1,4 @@
-import type { DemoEvent, GraphLink, GraphNode, GraphSnapshot } from './types'
+import type { DemoEvent, EdgePatch, GraphLink, GraphNode, GraphSnapshot, NodePatch } from './types'
 import { VIZ_MAPPING } from './vizMapping'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -28,6 +28,94 @@ function asOptionalNumber(value: unknown): number | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'number' || Number.isNaN(value)) return undefined
   return value
+}
+
+function asFiniteNumber(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be a finite number`)
+  return value
+}
+
+function asEdgeArray(value: unknown, label: string): Array<{ from: string; to: string }> {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
+  return value.map((e, idx) => {
+    if (!isRecord(e)) throw new Error(`${label}[${idx}] must be object`)
+    return {
+      from: asString(e.from, `${label}[${idx}].from`),
+      to: asString(e.to, `${label}[${idx}].to`),
+    }
+  })
+}
+
+function asOptionalAnyNumberOrString(value: unknown): string | number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  return undefined
+}
+
+function asNodePatchArray(value: unknown, label: string): NodePatch[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
+  return value.map((p, idx) => {
+    if (!isRecord(p)) throw new Error(`${label}[${idx}] must be object`)
+    const id = asString(p.id, `${label}[${idx}].id`)
+
+    const vizColorKey = asOptionalNullableString(p.viz_color_key)
+    if (vizColorKey) assertVizKeyKnown('viz_color_key', vizColorKey, `${label}[${idx}] node:${id}`)
+
+    let viz_size: NodePatch['viz_size'] = undefined
+    if (p.viz_size !== undefined && p.viz_size !== null) {
+      if (!isRecord(p.viz_size)) throw new Error(`${label}[${idx}].viz_size must be object`)
+      const w = asOptionalNumber(p.viz_size.w)
+      const h = asOptionalNumber(p.viz_size.h)
+      if (w === undefined || h === undefined) throw new Error(`${label}[${idx}].viz_size.w/h must be numbers`)
+      viz_size = { w, h }
+    } else if (p.viz_size === null) {
+      viz_size = null
+    }
+
+    const netSign = (p.net_sign === -1 || p.net_sign === 0 || p.net_sign === 1 || p.net_sign === null) ? p.net_sign : undefined
+    const netBal = (typeof p.net_balance_atoms === 'string' || p.net_balance_atoms === null) ? p.net_balance_atoms : undefined
+
+    return {
+      id,
+      net_balance_atoms: netBal,
+      net_sign: netSign,
+      viz_color_key: vizColorKey,
+      viz_size,
+    }
+  })
+}
+
+function asEdgePatchArray(value: unknown, label: string): EdgePatch[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
+  return value.map((p, idx) => {
+    if (!isRecord(p)) throw new Error(`${label}[${idx}] must be object`)
+    const source = asString(p.source, `${label}[${idx}].source`)
+    const target = asString(p.target, `${label}[${idx}].target`)
+
+    const vw = asOptionalNullableString(p.viz_width_key)
+    const va = asOptionalNullableString(p.viz_alpha_key)
+    const vc = asOptionalNullableString(p.viz_color_key)
+    if (vw) assertVizKeyKnown('viz_width_key', vw, `${label}[${idx}] link:${source}->${target}`)
+    if (va) assertVizKeyKnown('viz_alpha_key', va, `${label}[${idx}] link:${source}->${target}`)
+    if (vc) assertVizKeyKnown('viz_color_key', vc, `${label}[${idx}] link:${source}->${target}`)
+
+    const used = asOptionalAnyNumberOrString(p.used)
+    const available = asOptionalAnyNumberOrString(p.available)
+
+    return {
+      source,
+      target,
+      used,
+      available,
+      viz_color_key: vc,
+      viz_width_key: vw,
+      viz_alpha_key: va,
+    }
+  })
 }
 
 function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_width_key' | 'viz_alpha_key', key: string, context: string) {
@@ -161,12 +249,13 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
 
     if (type === 'tx.updated') {
       if (!Array.isArray(evt.edges)) throw new Error(`tx.updated.edges must be array (${sourcePath})`)
+      const ttl = asFiniteNumber(evt.ttl_ms, `events[${idx}].ttl_ms (${sourcePath})`)
       return {
         event_id: asString(evt.event_id, `events[${idx}].event_id (${sourcePath})`),
         ts: asString(evt.ts, `events[${idx}].ts (${sourcePath})`),
         type: 'tx.updated',
         equivalent: asString(evt.equivalent, `events[${idx}].equivalent (${sourcePath})`),
-        ttl_ms: Number(evt.ttl_ms),
+        ttl_ms: ttl,
         intensity_key: asOptionalString(evt.intensity_key),
         edges: evt.edges.map((e: any, eidx: number) => {
           if (!isRecord(e)) throw new Error(`tx.updated.edges[${eidx}] must be object (${sourcePath})`)
@@ -180,6 +269,8 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
           return { from, to, style: style ? { viz_width_key: vw, viz_alpha_key: va } : undefined }
         }),
         node_badges: Array.isArray(evt.node_badges) ? (evt.node_badges as any) : undefined,
+        node_patch: asNodePatchArray((evt as any).node_patch, `tx.updated.node_patch (${sourcePath})`),
+        edge_patch: asEdgePatchArray((evt as any).edge_patch, `tx.updated.edge_patch (${sourcePath})`),
       }
     }
 
@@ -193,12 +284,16 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
         plan_id: asString(evt.plan_id, `events[${idx}].plan_id (${sourcePath})`),
         steps: (evt.steps as any).map((s: any, sidx: number) => {
           if (!isRecord(s)) throw new Error(`clearing.plan.steps[${sidx}] must be object (${sourcePath})`)
+          const atMs = asFiniteNumber(s.at_ms, `clearing.plan.steps[${sidx}].at_ms (${sourcePath})`)
+          const highlight = s.highlight_edges === undefined ? undefined : asEdgeArray(s.highlight_edges, `clearing.plan.steps[${sidx}].highlight_edges (${sourcePath})`)
+          const particles = s.particles_edges === undefined ? undefined : asEdgeArray(s.particles_edges, `clearing.plan.steps[${sidx}].particles_edges (${sourcePath})`)
+          const flash = isRecord(s.flash) ? { kind: asString(s.flash.kind, `clearing.plan.steps[${sidx}].flash.kind (${sourcePath})`) } : undefined
           return {
-            at_ms: Number(s.at_ms),
+            at_ms: atMs,
             intensity_key: asOptionalString(s.intensity_key),
-            highlight_edges: Array.isArray(s.highlight_edges) ? (s.highlight_edges as any) : undefined,
-            particles_edges: Array.isArray(s.particles_edges) ? (s.particles_edges as any) : undefined,
-            flash: isRecord(s.flash) ? (s.flash as any) : undefined,
+            highlight_edges: highlight,
+            particles_edges: particles,
+            flash,
           }
         }),
       }
@@ -211,6 +306,8 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
         type: 'clearing.done',
         equivalent: asString(evt.equivalent, `events[${idx}].equivalent (${sourcePath})`),
         plan_id: asString(evt.plan_id, `events[${idx}].plan_id (${sourcePath})`),
+        node_patch: asNodePatchArray((evt as any).node_patch, `clearing.done.node_patch (${sourcePath})`),
+        edge_patch: asEdgePatchArray((evt as any).edge_patch, `clearing.done.edge_patch (${sourcePath})`),
       }
     }
 

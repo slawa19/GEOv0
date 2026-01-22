@@ -69,7 +69,7 @@ export type GraphNode = {
 
   // Визуальные поля (источник правды для рендера).
   viz_color_key?: string | null
-  viz_size?: { w: number; h: number } | null
+  viz_size?: { w: number; h: number } | null // размер примитива (UI применяет как есть)
   viz_badge_key?: string | null
 }
 ```
@@ -181,6 +181,9 @@ export type GraphLink = {
 Если snapshot большой, обновление после клиринга можно делать патчами:
 - `node_patch`: `{ id, net_balance_atoms, net_sign, viz_color_key, viz_size }`
 - `edge_patch`: `{ source, target, used/available, viz_*_key }`
+
+Примечание: `viz_size` в `node_patch` — это тот же размер примитива (w/h). Если баланс/класс изменился,
+backend может одновременно обновить и `viz_color_key`, и `viz_size`, а клиент просто применит их (без локальных расчётов).
 
 ---
 
