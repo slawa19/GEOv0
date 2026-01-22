@@ -3,6 +3,9 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import type { DemoEvent, GraphLink, GraphNode, GraphSnapshot } from './types'
 import { loadEvents, loadSnapshot } from './fixtures'
 import { VIZ_MAPPING } from './vizMapping'
+import { drawBaseGraph, type LayoutLink as RenderLayoutLink } from './render/baseGraph'
+import { sizeForNode, type LayoutNode as RenderLayoutNode } from './render/nodePainter'
+import { createFxState, renderFxFrame, resetFxState, spawnSparks } from './render/fxRenderer'
 
 type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
 type LayoutMode = 'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'
@@ -35,6 +38,7 @@ const state = reactive({
 })
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
+const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
 const hostEl = ref<HTMLDivElement | null>(null)
 
 let rafId: number | null = null
@@ -59,6 +63,8 @@ const layout = reactive({
   w: 0,
   h: 0,
 })
+
+const fxState = createFxState()
 
 const fnv1a = (s: string) => {
   let h = 2166136261
@@ -624,36 +630,11 @@ function computeLayout(snapshot: GraphSnapshot, w: number, h: number, mode: Layo
   return computeLayoutCommunityClusters(snapshot, w, h)
 }
 
-function sizeForNode(n: GraphNode): { w: number; h: number } {
-  const s = n.viz_size
-  const w = Math.max(6, Number(s?.w ?? (n.type === 'business' ? 14 : 10)))
-  const h = Math.max(6, Number(s?.h ?? (n.type === 'business' ? 14 : 10)))
-  return { w, h }
-}
-
-function fillForNode(n: GraphNode): string {
-  const key = String(n.viz_color_key ?? (n.type === 'business' ? 'business' : 'person'))
-  const hit = VIZ_MAPPING.node.color[key]
-  return hit ? hit.fill : VIZ_MAPPING.node.color.person.fill
-}
-
-function linkWidthPx(l: GraphLink): number {
-  const k = String(l.viz_width_key ?? 'hairline')
-  return VIZ_MAPPING.link.width_px[k] ?? VIZ_MAPPING.link.width_px.hairline
-}
-
-function linkAlpha(l: GraphLink): number {
-  const k = String(l.viz_alpha_key ?? 'bg')
-  return VIZ_MAPPING.link.alpha[k] ?? VIZ_MAPPING.link.alpha.bg
-}
-
-function isIncident(link: LayoutLink, nodeId: string) {
-  return link.source === nodeId || link.target === nodeId
-}
-
 function resetOverlays() {
   state.activeEdges = new Set()
   state.flash = 0
+
+  resetFxState(fxState)
 }
 
 async function loadScene() {
@@ -690,8 +671,9 @@ async function loadScene() {
 
 function resizeAndLayout() {
   const canvas = canvasEl.value
+  const fxCanvas = fxCanvasEl.value
   const host = hostEl.value
-  if (!canvas || !host || !state.snapshot) return
+  if (!canvas || !fxCanvas || !host || !state.snapshot) return
 
   const rect = host.getBoundingClientRect()
   const dpr = isTestMode.value ? 1 : Math.min(2, window.devicePixelRatio || 1)
@@ -700,6 +682,11 @@ function resizeAndLayout() {
   canvas.height = Math.max(1, Math.floor(rect.height * dpr))
   canvas.style.width = `${Math.floor(rect.width)}px`
   canvas.style.height = `${Math.floor(rect.height)}px`
+
+  fxCanvas.width = canvas.width
+  fxCanvas.height = canvas.height
+  fxCanvas.style.width = canvas.style.width
+  fxCanvas.style.height = canvas.style.height
 
   layout.w = rect.width
   layout.h = rect.height
@@ -733,96 +720,43 @@ watch(layoutMode, () => {
 
 function renderFrame(nowMs: number) {
   const canvas = canvasEl.value
-  if (!canvas || !state.snapshot) return
+  const fxCanvas = fxCanvasEl.value
+  if (!canvas || !fxCanvas || !state.snapshot) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
+  const fx = fxCanvas.getContext('2d')
+  if (!fx) return
 
   const dpr = canvas.width / Math.max(1, layout.w)
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
+  fx.setTransform(dpr, 0, 0, dpr, 0, 0)
+
   ctx.clearRect(0, 0, layout.w, layout.h)
+  fx.clearRect(0, 0, layout.w, layout.h)
 
-  // Background (deep space).
-  ctx.fillStyle = '#020617'
-  ctx.fillRect(0, 0, layout.w, layout.h)
+  const pos = drawBaseGraph(ctx, {
+    w: layout.w,
+    h: layout.h,
+    nodes: layout.nodes as unknown as RenderLayoutNode[],
+    links: layout.links as unknown as RenderLayoutLink[],
+    mapping: VIZ_MAPPING,
+    selectedNodeId: state.selectedNodeId,
+    activeEdges: state.activeEdges,
+  })
 
-  const pos = new Map(layout.nodes.map((n) => [n.id, n]))
-
-  // Links (very faint in idle; brighter on focus/active edges).
-  for (const link of layout.links) {
-    const a = pos.get(link.source)!
-    const b = pos.get(link.target)!
-
-    let alpha = linkAlpha(link)
-    let width = linkWidthPx(link)
-
-    const selected = state.selectedNodeId
-    const active = state.activeEdges.has(link.__key)
-
-    if (active) {
-      alpha = VIZ_MAPPING.link.alpha.hi
-      width = VIZ_MAPPING.link.width_px.highlight
-    } else if (selected) {
-      // Focus mode: show incident links, dim the rest.
-      if (isIncident(link, selected)) {
-        alpha = Math.max(alpha, VIZ_MAPPING.link.alpha.active)
-        width = Math.max(width, VIZ_MAPPING.link.width_px.thin)
-      } else {
-        alpha = Math.min(alpha, VIZ_MAPPING.link.alpha.bg)
-        width = VIZ_MAPPING.link.width_px.hairline
-      }
-    }
-
-    ctx.strokeStyle = `rgba(100,116,139,${alpha})`
-    ctx.lineWidth = width
-    ctx.beginPath()
-    ctx.moveTo(a.__x, a.__y)
-    ctx.lineTo(b.__x, b.__y)
-    ctx.stroke()
-  }
-
-  // Nodes
-  for (const n of layout.nodes) {
-    const fill = fillForNode(n)
-    const { w, h } = sizeForNode(n)
-    const isBusiness = String(n.type) === 'business'
-    const isSelected = state.selectedNodeId === n.id
-
-    if (isSelected) {
-      // Conservative glow ring (focus) per screen-prototypes.
-      ctx.save()
-      ctx.globalAlpha = 0.35
-      ctx.fillStyle = '#22d3ee'
-      ctx.beginPath()
-      ctx.arc(n.__x, n.__y, Math.max(w, h) * 1.2, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.restore()
-    }
-
-    ctx.fillStyle = fill
-    if (isBusiness) {
-      ctx.fillRect(n.__x - w / 2, n.__y - h / 2, w, h)
-    } else {
-      ctx.beginPath()
-      ctx.arc(n.__x, n.__y, Math.min(w, h) / 2, 0, Math.PI * 2)
-      ctx.fill()
-    }
-  }
-
-  // Flash overlay (clearing)
-  if (!isTestMode.value && state.flash > 0) {
-    const t = Math.max(0, Math.min(1, state.flash))
-    ctx.save()
-    ctx.globalAlpha = t
-    const grad = ctx.createRadialGradient(layout.w / 2, layout.h / 2, 0, layout.w / 2, layout.h / 2, Math.max(layout.w, layout.h) * 0.7)
-    grad.addColorStop(0, VIZ_MAPPING.fx.flash.clearing.from)
-    grad.addColorStop(1, VIZ_MAPPING.fx.flash.clearing.to)
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, layout.w, layout.h)
-    ctx.restore()
-
-    state.flash = Math.max(0, state.flash - 0.03)
-  }
+  const r = renderFxFrame({
+    nowMs,
+    ctx: fx,
+    pos,
+    w: layout.w,
+    h: layout.h,
+    mapping: VIZ_MAPPING,
+    fxState,
+    flash: state.flash,
+    isTestMode: isTestMode.value,
+  })
+  state.flash = r.flash
 }
 
 function ensureRenderLoop() {
@@ -894,6 +828,20 @@ async function runTxOnce() {
     state.activeEdges.add(keyEdge(e.from, e.to))
   }
 
+  spawnSparks(fxState, {
+    edges: evt.edges,
+    nowMs: performance.now(),
+    ttlMs: Math.max(250, evt.ttl_ms || 1200),
+    colorCore: VIZ_MAPPING.fx.tx_spark.core,
+    colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
+    thickness: 1.2,
+    seedPrefix: `tx:${effectiveEq.value}`,
+    countPerEdge: 3,
+    keyEdge,
+    seedFn: fnv1a,
+    isTestMode: isTestMode.value,
+  })
+
   if (isTestMode.value) return
 
   window.setTimeout(() => {
@@ -924,6 +872,20 @@ async function runClearingOnce() {
       }
       if (step.particles_edges) {
         for (const e of step.particles_edges) state.activeEdges.add(keyEdge(e.from, e.to))
+
+        spawnSparks(fxState, {
+          edges: step.particles_edges,
+          nowMs: performance.now(),
+          ttlMs: 900,
+          colorCore: VIZ_MAPPING.fx.clearing_credit,
+          colorTrail: VIZ_MAPPING.fx.clearing_credit,
+          thickness: 1.0,
+          seedPrefix: `clearing:${effectiveEq.value}:${step.at_ms}`,
+          countPerEdge: 2,
+          keyEdge,
+          seedFn: fnv1a,
+          isTestMode: isTestMode.value,
+        })
       }
       if (step.flash?.kind === 'clearing') {
         state.flash = 1
@@ -942,6 +904,23 @@ watch([eq, scene], () => {
 })
 
 onMounted(() => {
+  // Allow deterministic deep-links for e2e/visual tests.
+  try {
+    const params = new URLSearchParams(window.location.search)
+
+    const s = String(params.get('scene') ?? '')
+    if (s === 'A' || s === 'B' || s === 'C' || s === 'D' || s === 'E') {
+      scene.value = s
+    }
+
+    const lm = String(params.get('layout') ?? '')
+    if (lm === 'admin-force' || lm === 'community-clusters' || lm === 'balance-split' || lm === 'type-split' || lm === 'status-split') {
+      layoutMode.value = lm
+    }
+  } catch {
+    // ignore
+  }
+
   loadScene()
   window.addEventListener('resize', resizeAndLayout)
 })
@@ -953,8 +932,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="hostEl" class="root">
+  <div
+    ref="hostEl"
+    class="root"
+    :data-ready="!state.loading && !state.error && state.snapshot ? '1' : '0'"
+    :data-scene="scene"
+    :data-layout="layoutMode"
+  >
     <canvas ref="canvasEl" class="canvas" @click="onCanvasClick" />
+    <canvas ref="fxCanvasEl" class="canvas canvas-fx" />
 
     <!-- Minimal top HUD (controls + small status) -->
     <div class="hud-top">
@@ -1051,6 +1037,10 @@ onUnmounted(() => {
 .canvas {
   position: absolute;
   inset: 0;
+}
+
+.canvas-fx {
+  pointer-events: none;
 }
 
 .hud-top {
