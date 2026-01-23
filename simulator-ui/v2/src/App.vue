@@ -68,6 +68,7 @@ const layout = reactive({
 const fxState = createFxState()
 
 let txRunSeq = 0
+let clearingRunSeq = 0
 
 const fnv1a = (s: string) => {
   let h = 2166136261
@@ -985,6 +986,8 @@ async function runClearingOnce() {
   if (!state.snapshot) return
   resetOverlays()
 
+  const runId = ++clearingRunSeq
+
   const { events } = await loadEvents(effectiveEq.value, 'demo-clearing')
   const plan = events.find((e) => e.type === 'clearing.plan')
   const done = events.find((e) => e.type === 'clearing.done')
@@ -998,84 +1001,120 @@ async function runClearingOnce() {
   }
 
   const t0 = performance.now()
+
+  // Demo clearing animation (hardcoded look until real-mode):
+  // - Same spark flight as Single Tx (beam)
+  // - Golden color
+  // - Only node flashes (NO full-screen flash)
+  // - Floating amounts per closed edge
+  // - Edge glow via FX layer (not activeEdges which is cyan)
+  const clearingGold = '#fbbf24'
+  // Rhythm tuning: slightly faster cadence, slightly longer flight
+  // so the cycle reads as an exchange, but uses the same beam shape.
+  const microTtlMs = 780 // flight duration (ms)
+  const microGapMs = 110 // delay between micro-txs (ms)
+  const labelLifeMs = 2200
+
+  const formatDemoDebtAmount = (from: string, to: string, atMs: number) => {
+    const h = fnv1a(`clearing:amt:${effectiveEq.value}:${atMs}:${keyEdge(from, to)}`)
+    // 10..990, step 5 (stable + readable)
+    const amt = 10 + (h % 197) * 5
+    return `${amt} GC`
+  }
+
+  // Helper: animate single edge (beam spark + node glows)
+  // NOTE: beam spark already renders the full edge glow, no need for separate edgePulse
+  const animateEdge = (
+    e: { from: string; to: string },
+    delayMs: number,
+    stepAtMs: number,
+    idx: number,
+  ) => {
+    // 1. Start: source glow + spawn beam spark (beam renders edge glow internally)
+    window.setTimeout(() => {
+      if (runId !== clearingRunSeq) return
+
+      spawnNodeBursts(fxState, {
+        nodeIds: [e.from],
+        nowMs: performance.now(),
+        durationMs: 360,
+        color: clearingGold,
+        kind: 'glow',
+        seedPrefix: `clearing:fromGlow:${effectiveEq.value}:${stepAtMs}:${idx}`,
+        seedFn: fnv1a,
+        isTestMode: false,
+      })
+
+      spawnSparks(fxState, {
+        edges: [e],
+        nowMs: performance.now(),
+        ttlMs: microTtlMs,
+        colorCore: '#ffffff',
+        colorTrail: clearingGold,
+        thickness: 1.1,
+        kind: 'beam',
+        seedPrefix: `clearing:micro:${effectiveEq.value}:${stepAtMs}:${idx}`,
+        countPerEdge: 1,
+        keyEdge,
+        seedFn: fnv1a,
+        isTestMode: isTestMode.value,
+      })
+    }, delayMs)
+
+    // 2. Spark arrives → target glow + label
+    window.setTimeout(() => {
+      if (runId !== clearingRunSeq) return
+
+      spawnNodeBursts(fxState, {
+        nodeIds: [e.to],
+        nowMs: performance.now(),
+        durationMs: 520,
+        color: clearingGold,
+        kind: 'glow',
+        seedPrefix: `clearing:impact:${effectiveEq.value}:${stepAtMs}:${idx}`,
+        seedFn: fnv1a,
+        isTestMode: false,
+      })
+
+      const ln = layout.nodes.find((n) => n.id === e.to)
+      if (ln) {
+        state.floatingLabels.push({
+          id: Math.floor(performance.now()) + fnv1a(`lbl:${stepAtMs}:${idx}:${keyEdge(e.from, e.to)}`),
+          x: ln.__x,
+          y: ln.__y - 20,
+          text: formatDemoDebtAmount(e.from, e.to, stepAtMs),
+          color: clearingGold,
+          expiresAtMs: performance.now() + labelLifeMs,
+        })
+      }
+    }, delayMs + microTtlMs)
+  }
+
   for (const step of plan.steps) {
     window.setTimeout(() => {
-      const clearingColor = (() => {
-        // Interpret only explicit keys; default to credit color.
-        const k = String(step.intensity_key ?? '').toLowerCase()
-        if (k === 'debt' || k === 'debit') return VIZ_MAPPING.fx.clearing_debt
-        return VIZ_MAPPING.fx.clearing_credit
-      })()
+      if (runId !== clearingRunSeq) return
 
-      if (step.highlight_edges) {
-        for (const e of step.highlight_edges) state.activeEdges.add(keyEdge(e.from, e.to))
-
-        spawnEdgePulses(fxState, {
-          edges: step.highlight_edges,
-          nowMs: performance.now(),
-          durationMs: 780,
-          color: clearingColor,
-          thickness: 1.2,
-          seedPrefix: `clearing:highlight:${effectiveEq.value}:${step.at_ms}`,
-          countPerEdge: 1,
-          keyEdge,
-          seedFn: fnv1a,
-          isTestMode: isTestMode.value,
-        })
-
-        const nodeIds = new Set<string>()
-        for (const e of step.highlight_edges) {
-          nodeIds.add(e.from)
-          nodeIds.add(e.to)
-        }
-        spawnNodeBursts(fxState, {
-          nodeIds: [...nodeIds].sort((a, b) => a.localeCompare(b)),
-          nowMs: performance.now(),
-          durationMs: 650,
-          color: clearingColor,
-          seedPrefix: `clearing:burst:${effectiveEq.value}:${step.at_ms}`,
-          seedFn: fnv1a,
-          isTestMode: isTestMode.value,
-        })
-      }
+      // Particles step: sequential micro-transactions along the cycle
       if (step.particles_edges) {
-        for (const e of step.particles_edges) state.activeEdges.add(keyEdge(e.from, e.to))
-
-        spawnEdgePulses(fxState, {
-          edges: step.particles_edges,
-          nowMs: performance.now(),
-          durationMs: 920,
-          color: clearingColor,
-          thickness: 1.4,
-          seedPrefix: `clearing:pulse:${effectiveEq.value}:${step.at_ms}`,
-          countPerEdge: 1,
-          keyEdge,
-          seedFn: fnv1a,
-          isTestMode: isTestMode.value,
-        })
-
-        spawnSparks(fxState, {
-          edges: step.particles_edges,
-          nowMs: performance.now(),
-          ttlMs: 780,
-          colorCore: '#ffffff',
-          colorTrail: clearingColor,
-          thickness: 1.35,
-          seedPrefix: `clearing:${effectiveEq.value}:${step.at_ms}`,
-          countPerEdge: 1,
-          keyEdge,
-          seedFn: fnv1a,
-          isTestMode: isTestMode.value,
-        })
-      }
-      if (step.flash?.kind === 'clearing') {
-        state.flash = 1
+        const edges = step.particles_edges
+        for (let i = 0; i < edges.length; i++) {
+          animateEdge(edges[i]!, i * microGapMs, step.at_ms, i)
+        }
       }
     }, Math.max(0, step.at_ms))
   }
 
-  const doneAt = Math.max(...plan.steps.map((s) => s.at_ms)) + 600
+  // IMPORTANT: the clearing demo schedules extra timers (micro txs).
+  // If we reset overlays too early, sparks get wiped mid-flight.
+  let doneAt = 0
+  for (const s of plan.steps) {
+    const base = Math.max(0, s.at_ms)
+    const count = s.particles_edges?.length ?? 0
+    const microSpan = count > 0 ? (count - 1) * microGapMs + microTtlMs : 0
+    doneAt = Math.max(doneAt, base + 650, base + microSpan + 80)
+  }
   window.setTimeout(() => {
+    if (runId !== clearingRunSeq) return
     if (done && done.type === 'clearing.done') applyPatchesFromEvent(done)
     resetOverlays()
   }, Math.max(0, doneAt) + (performance.now() - t0 >= 0 ? 0 : 0))

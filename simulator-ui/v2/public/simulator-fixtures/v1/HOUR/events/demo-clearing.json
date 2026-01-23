@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "event_id": "clearing-demo-HOUR-cycle1.plan",
+    "ts": "2026-01-22T12:00:00Z",
+    "type": "clearing.plan",
+    "equivalent": "HOUR",
+    "plan_id": "clearing-demo-HOUR-cycle1",
+    "steps": [
+      {
+        "at_ms": 0,
+        "particles_edges": [
+          { "from": "PID_U0005_17156075", "to": "PID_U0019_be1e0823" },
+          { "from": "PID_U0019_be1e0823", "to": "PID_U0001_9e3779b1" },
+          { "from": "PID_U0001_9e3779b1", "to": "PID_U0005_17156075" }
+        ]
+      }
+    ]
+  },
+  {
+    "event_id": "clearing-demo-HOUR-cycle1.done",
+    "ts": "2026-01-22T12:00:01Z",
+    "type": "clearing.done",
+    "equivalent": "HOUR",
+    "plan_id": "clearing-demo-HOUR-cycle1"
+  }
+]

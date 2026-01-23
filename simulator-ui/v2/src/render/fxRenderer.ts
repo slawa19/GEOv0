@@ -1,3 +1,44 @@
+/**
+ * FX Renderer — Visual Effects Layer for Graph Animations
+ * ========================================================
+ *
+ * This module provides a particle/effect system rendered on a separate canvas
+ * layer above the base graph. It supports three types of effects:
+ *
+ * 1. **Sparks** (`FxSpark`, `spawnSparks`)
+ *    - Moving particles that travel along edges from source to target
+ *    - Two styles: 'comet' (wobbly trail) and 'beam' (straight line + star head)
+ *    - Use for: transaction animations, clearing micro-transactions
+ *    - NOTE: 'beam' style already renders full-edge glow, no need for separate edgePulse
+ *
+ * 2. **Edge Pulses** (`FxEdgePulse`, `spawnEdgePulses`)
+ *    - Soft glow traveling along an edge with fading trail
+ *    - Use for: highlighting cycle paths, showing routes (without spark head)
+ *    - NOTE: Do NOT combine with 'beam' sparks on same edge — causes double animation
+ *
+ * 3. **Node Bursts** (`FxNodeBurst`, `spawnNodeBursts`)
+ *    - Expanding/fading effects centered on nodes
+ *    - Styles: 'glow' (soft circle), 'tx-impact' (rim + shockwave), 'clearing' (bloom + ring)
+ *    - Use for: impact flashes when spark arrives, highlighting nodes
+ *
+ * Animation Pattern for Edge Transactions:
+ * ----------------------------------------
+ * For a single edge animation (tx or clearing micro-tx):
+ *   1. spawnNodeBursts(source, 'glow') — optional source highlight
+ *   2. spawnSparks(edge, 'beam') — spark flies, beam renders edge glow
+ *   3. After ttlMs: spawnNodeBursts(target, 'glow'/'tx-impact') — impact flash
+ *
+ * DO NOT add spawnEdgePulses when using 'beam' sparks — the beam already
+ * renders the edge glow internally. EdgePulses are for standalone edge
+ * highlighting (e.g., showing a cycle path before animation starts).
+ *
+ * Color Conventions:
+ * ------------------
+ * - Cyan (#22d3ee): Single transactions (tx.updated)
+ * - Gold (#fbbf24): Clearing operations
+ * - Use colorCore for spark head, colorTrail for beam/trail
+ */
+
 import type { VizMapping } from '../vizMapping'
 import type { LayoutNode } from './nodePainter'
 import { sizeForNode } from './nodePainter'
@@ -135,7 +176,7 @@ export type FxNodeBurst = {
   durationMs: number
   color: string
   seed: number
-  kind: 'clearing' | 'tx-impact'
+  kind: 'clearing' | 'tx-impact' | 'glow'
 }
 
 export type FxState = {
@@ -655,6 +696,32 @@ export function renderFxFrame(opts: {
           ctx.arc(n.__x, n.__y, nodeR * 0.55, 0, Math.PI * 2)
           ctx.fill()
         }
+
+        ctx.restore()
+      } else if (b.kind === 'glow') {
+        // Soft blurred circle glow (no rim, no hard ring).
+        const { w: nw, h: nh } = sizeForNode(n)
+        const nodeR = Math.max(nw, nh) / 2
+
+        const life = Math.max(0, 1 - t0)
+        const a = Math.max(0, Math.min(1, life * life))
+        const r = nodeR * (0.75 + Math.pow(t0, 0.6) * 2.0)
+
+        ctx.save()
+        ctx.globalCompositeOperation = 'screen'
+        ctx.globalAlpha = 1
+
+        const grad = ctx.createRadialGradient(n.__x, n.__y, 0, n.__x, n.__y, r)
+        grad.addColorStop(0, withAlpha(b.color, 0.55 * a))
+        grad.addColorStop(0.35, withAlpha(b.color, 0.22 * a))
+        grad.addColorStop(1, withAlpha(b.color, 0))
+
+        ctx.fillStyle = grad
+        ctx.shadowBlur = Math.max(18, nodeR * 1.4) * a
+        ctx.shadowColor = withAlpha(b.color, 0.9)
+        ctx.beginPath()
+        ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
+        ctx.fill()
 
         ctx.restore()
       } else {
