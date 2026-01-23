@@ -18,6 +18,13 @@ function isIncident(link: LayoutLink, nodeId: string) {
   return link.source === nodeId || link.target === nodeId
 }
 
+function focusGlowColor(n: GraphNode) {
+  const s = Number(n.net_sign ?? 0)
+  if (s > 0) return '#22d3ee' // credit
+  if (s < 0) return '#f97316' // debt
+  return '#e2e8f0' // near-zero (neutral white/slate)
+}
+
 export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   w: number
   h: number
@@ -74,12 +81,24 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     if (isSelected) {
       // Conservative glow ring (focus) per screen-prototypes.
       const { w: nw, h: nh } = sizeForNode(n as GraphNode)
+      const glow = focusGlowColor(n as GraphNode)
+      const baseR = Math.max(nw, nh)
+
       ctx.save()
-      ctx.globalAlpha = 0.35
-      ctx.fillStyle = '#22d3ee'
+      // Two-layer soft glow: outer faint + inner slightly stronger.
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.fillStyle = glow
+
+      ctx.globalAlpha = 0.14
       ctx.beginPath()
-      ctx.arc(n.__x, n.__y, Math.max(nw, nh) * 1.2, 0, Math.PI * 2)
+      ctx.arc(n.__x, n.__y, baseR * 1.85, 0, Math.PI * 2)
       ctx.fill()
+
+      ctx.globalAlpha = 0.22
+      ctx.beginPath()
+      ctx.arc(n.__x, n.__y, baseR * 1.35, 0, Math.PI * 2)
+      ctx.fill()
+
       ctx.restore()
     }
 

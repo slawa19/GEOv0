@@ -7,15 +7,6 @@ function clamp01(v: number) {
   return Math.max(0, Math.min(1, v))
 }
 
-function hash32(s: string) {
-  let h = 2166136261
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
-}
-
 function withAlpha(color: string, alpha: number) {
   const a = clamp01(alpha)
   const c = String(color || '').trim()
@@ -61,61 +52,100 @@ export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, o
   // Additional semantics (debt bins, statuses) are still fixtures/backend-driven via viz_color_key.
   const r = Math.max(4, Math.min(w, h) / 2)
 
+  const x = node.__x - w / 2
+  const y = node.__y - h / 2
+  const rr = Math.max(0, Math.min(4, Math.min(w, h) * 0.18))
+
+  const roundedRectPath = (ctx2: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number, rad: number) => {
+    const r2 = Math.max(0, Math.min(rad, Math.min(rw, rh) / 2))
+    ctx2.beginPath()
+    if (r2 <= 0.01) {
+      ctx2.rect(rx, ry, rw, rh)
+      return
+    }
+    ctx2.moveTo(rx + r2, ry)
+    ctx2.lineTo(rx + rw - r2, ry)
+    ctx2.quadraticCurveTo(rx + rw, ry, rx + rw, ry + r2)
+    ctx2.lineTo(rx + rw, ry + rh - r2)
+    ctx2.quadraticCurveTo(rx + rw, ry + rh, rx + rw - r2, ry + rh)
+    ctx2.lineTo(rx + r2, ry + rh)
+    ctx2.quadraticCurveTo(rx, ry + rh, rx, ry + rh - r2)
+    ctx2.lineTo(rx, ry + r2)
+    ctx2.quadraticCurveTo(rx, ry, rx + r2, ry)
+    ctx2.closePath()
+  }
+
   ctx.save()
 
-  // Conservative “soft bloom” only (no invented skins). Fully deterministic.
-  ctx.globalCompositeOperation = 'source-over'
-  ctx.globalAlpha = 0.35
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'
-  if (isBusiness) {
-    ctx.fillRect(node.__x - w / 2 + r * 0.10, node.__y - h / 2 + r * 0.16, w, h)
-  } else {
-    ctx.beginPath()
-    ctx.arc(node.__x + r * 0.10, node.__y + r * 0.16, r * 1.05, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.globalAlpha = 1
-
+  // 1) Soft bloom (very subtle, deterministic; no pulsing)
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.globalAlpha = 0.10
   ctx.fillStyle = fill
   if (isBusiness) {
-    // Square (optionally with tiny rounding to avoid pixel shimmer).
-    const x = node.__x - w / 2
-    const y = node.__y - h / 2
-    const rr = Math.max(0, Math.min(3, Math.min(w, h) * 0.18))
-    if (rr <= 0.01) {
-      ctx.fillRect(x, y, w, h)
-    } else {
-      const r2 = rr
-      ctx.beginPath()
-      ctx.moveTo(x + r2, y)
-      ctx.lineTo(x + w - r2, y)
-      ctx.quadraticCurveTo(x + w, y, x + w, y + r2)
-      ctx.lineTo(x + w, y + h - r2)
-      ctx.quadraticCurveTo(x + w, y + h, x + w - r2, y + h)
-      ctx.lineTo(x + r2, y + h)
-      ctx.quadraticCurveTo(x, y + h, x, y + h - r2)
-      ctx.lineTo(x, y + r2)
-      ctx.quadraticCurveTo(x, y, x + r2, y)
-      ctx.closePath()
-      ctx.fill()
-    }
+    roundedRectPath(ctx, x - r * 0.55, y - r * 0.55, w + r * 1.1, h + r * 1.1, rr + r * 0.35)
+    ctx.fill()
   } else {
-    // Circle.
+    ctx.beginPath()
+    ctx.arc(node.__x, node.__y, r * 1.85, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+
+  // 2) Drop shadow (kept tight to avoid looking like planets)
+  ctx.save()
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'
+  ctx.shadowBlur = Math.max(4, r * 0.95)
+  ctx.shadowOffsetX = Math.max(1, r * 0.10)
+  ctx.shadowOffsetY = Math.max(1, r * 0.14)
+  ctx.fillStyle = withAlpha('#000000', 0.18)
+  if (isBusiness) {
+    roundedRectPath(ctx, x, y, w, h, rr)
+    ctx.fill()
+  } else {
+    ctx.beginPath()
+    ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+
+  // 3) Body with gentle shading
+  if (isBusiness) {
+    const grad = ctx.createLinearGradient(x, y, x + w, y + h)
+    grad.addColorStop(0, withAlpha('#ffffff', 0.22))
+    grad.addColorStop(0.22, fill)
+    grad.addColorStop(1, withAlpha('#000000', 0.22))
+    ctx.fillStyle = grad
+    roundedRectPath(ctx, x, y, w, h, rr)
+    ctx.fill()
+  } else {
+    const gx = node.__x - r * 0.25
+    const gy = node.__y - r * 0.30
+    const grad = ctx.createRadialGradient(gx, gy, Math.max(1, r * 0.10), node.__x, node.__y, r * 1.10)
+    grad.addColorStop(0, withAlpha('#ffffff', 0.28))
+    grad.addColorStop(0.25, fill)
+    grad.addColorStop(1, withAlpha('#000000', 0.18))
+    ctx.fillStyle = grad
     ctx.beginPath()
     ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
     ctx.fill()
   }
 
-  // Gentle edge highlight.
-  ctx.strokeStyle = withAlpha('#ffffff', 0.18)
-  ctx.lineWidth = Math.max(0.8, r * 0.10)
+  // 4) Crisp rim
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.strokeStyle = withAlpha('#ffffff', 0.22)
+  ctx.lineWidth = Math.max(0.9, r * 0.11)
   if (isBusiness) {
-    ctx.strokeRect(node.__x - w / 2, node.__y - h / 2, w, h)
+    roundedRectPath(ctx, x + 0.5, y + 0.5, w - 1, h - 1, rr)
+    ctx.stroke()
   } else {
     ctx.beginPath()
     ctx.arc(node.__x, node.__y, r * 0.98, 0, Math.PI * 2)
     ctx.stroke()
   }
+  ctx.restore()
 
   // Optional badge pip if viz_badge_key is present (no semantics, just presence).
   if (node.viz_badge_key !== undefined && node.viz_badge_key !== null) {
