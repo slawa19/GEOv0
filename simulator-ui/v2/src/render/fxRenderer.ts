@@ -1,5 +1,108 @@
 import type { VizMapping } from '../vizMapping'
 import type { LayoutNode } from './nodePainter'
+import { sizeForNode } from './nodePainter'
+
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
+
+type Rgb = { r: number; g: number; b: number }
+const rgbCache = new Map<string, Rgb | null>()
+
+function parseHexRgb(color: string): Rgb | null {
+  const c = String(color || '').trim()
+  if (!c.startsWith('#')) return null
+  const hex = c.slice(1)
+  const isShort = hex.length === 3
+  const isLong = hex.length === 6
+  if (!isShort && !isLong) return null
+  const r = parseInt(isShort ? hex[0]! + hex[0]! : hex.slice(0, 2), 16)
+  const g = parseInt(isShort ? hex[1]! + hex[1]! : hex.slice(2, 4), 16)
+  const b = parseInt(isShort ? hex[2]! + hex[2]! : hex.slice(4, 6), 16)
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null
+  return { r, g, b }
+}
+
+function withAlpha(color: string, alpha: number) {
+  const a = clamp01(alpha)
+  const c = String(color || '').trim()
+  if (c.startsWith('rgba(') || c.startsWith('hsla(')) return c
+  if (!c.startsWith('#')) return c
+
+  let rgb = rgbCache.get(c)
+  if (rgb === undefined) {
+    rgb = parseHexRgb(c)
+    rgbCache.set(c, rgb)
+  }
+  if (!rgb) return c
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`
+}
+
+function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, rad: number) {
+  const r = Math.max(0, Math.min(rad, Math.min(w, h) / 2))
+  ctx.beginPath()
+  if (r <= 0.01) {
+    ctx.rect(x, y, w, h)
+    return
+  }
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + w - r, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+  ctx.lineTo(x + w, y + h - r)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+  ctx.lineTo(x + r, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+  ctx.lineTo(x, y + r)
+  ctx.quadraticCurveTo(x, y, x + r, y)
+  ctx.closePath()
+}
+
+function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1) {
+  const { w, h } = sizeForNode(n)
+  const isBusiness = String(n.type) === 'business'
+  const rr = Math.max(0, Math.min(4, Math.min(w, h) * 0.18))
+  const ww = w * scale
+  const hh = h * scale
+  const x = n.__x - ww / 2
+  const y = n.__y - hh / 2
+
+  if (isBusiness) {
+    roundedRectPath(ctx, x, y, ww, hh, rr * scale)
+    return
+  }
+
+  const r = Math.max(ww, hh) / 2
+  ctx.beginPath()
+  ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
+}
+
+function linkTermination(n: LayoutNode, target: LayoutNode) {
+  const dx = target.__x - n.__x
+  const dy = target.__y - n.__y
+  if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return { x: n.__x, y: n.__y }
+
+  const angle = Math.atan2(dy, dx)
+  const { w, h } = sizeForNode(n)
+
+  // Person = circle
+  if (String(n.type) !== 'business') {
+    const r = Math.max(w, h) / 2
+    return { x: n.__x + Math.cos(angle) * r, y: n.__y + Math.sin(angle) * r }
+  }
+
+  // Business = rounded-rect approximation via ray-box intersection
+  const hw = w / 2
+  const hh = h / 2
+  const absCos = Math.abs(Math.cos(angle))
+  const absSin = Math.abs(Math.sin(angle))
+  const xDist = absCos > 0.001 ? hw / absCos : Infinity
+  const yDist = absSin > 0.001 ? hh / absSin : Infinity
+  const dist = Math.min(xDist, yDist)
+  return { x: n.__x + Math.cos(angle) * dist, y: n.__y + Math.sin(angle) * dist }
+}
+
+function easeOutCubic(t: number) {
+  const x = clamp01(t)
+  return 1 - Math.pow(1 - x, 3)
+}
 
 export type FxSpark = {
   key: string
@@ -11,6 +114,7 @@ export type FxSpark = {
   colorTrail: string
   thickness: number
   seed: number
+  kind: 'comet' | 'beam'
 }
 
 export type FxEdgePulse = {
@@ -31,6 +135,7 @@ export type FxNodeBurst = {
   durationMs: number
   color: string
   seed: number
+  kind: 'clearing' | 'tx-impact'
 }
 
 export type FxState = {
@@ -92,6 +197,7 @@ export function spawnNodeBursts(
     nowMs: number
     durationMs: number
     color: string
+    kind?: FxNodeBurst['kind']
     seedPrefix: string
     seedFn: (s: string) => number
     isTestMode: boolean
@@ -100,6 +206,7 @@ export function spawnNodeBursts(
   if (opts.isTestMode) return
 
   const { nodeIds, nowMs, durationMs, color, seedPrefix, seedFn } = opts
+  const kind = opts.kind ?? 'clearing'
   for (const id of nodeIds) {
     const seed = seedFn(`${seedPrefix}:${id}`)
     fxState.nodeBursts.push({
@@ -109,6 +216,7 @@ export function spawnNodeBursts(
       durationMs,
       color,
       seed,
+      kind,
     })
   }
 }
@@ -122,6 +230,7 @@ export function spawnSparks(
     colorCore: string
     colorTrail: string
     thickness: number
+    kind?: FxSpark['kind']
     seedPrefix: string
     countPerEdge: number
     keyEdge: (a: string, b: string) => string
@@ -132,6 +241,7 @@ export function spawnSparks(
   if (opts.isTestMode) return
 
   const { edges, nowMs, ttlMs, colorCore, colorTrail, thickness, seedPrefix, countPerEdge, keyEdge, seedFn } = opts
+  const kind = opts.kind ?? 'comet'
   for (const e of edges) {
     const k = keyEdge(e.from, e.to)
     for (let i = 0; i < Math.max(1, countPerEdge); i++) {
@@ -146,6 +256,7 @@ export function spawnSparks(
         colorTrail,
         thickness,
         seed,
+        kind,
       })
     }
   }
@@ -167,27 +278,7 @@ export function renderFxFrame(opts: {
 
   if (isTestMode) return { flash }
 
-  const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
-
-  const withAlpha = (color: string, alpha: number) => {
-    const a = clamp01(alpha)
-    const c = String(color || '').trim()
-    if (c.startsWith('rgba(') || c.startsWith('hsla(')) return c
-    if (c.startsWith('#')) {
-      const hex = c.slice(1)
-      const isShort = hex.length === 3
-      const isLong = hex.length === 6
-      if (isShort || isLong) {
-        const r = parseInt(isShort ? hex[0]! + hex[0]! : hex.slice(0, 2), 16)
-        const g = parseInt(isShort ? hex[1]! + hex[1]! : hex.slice(2, 4), 16)
-        const b = parseInt(isShort ? hex[2]! + hex[2]! : hex.slice(4, 6), 16)
-        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
-          return `rgba(${r},${g},${b},${a})`
-        }
-      }
-    }
-    return c
-  }
+  // NOTE: `withAlpha` and helpers are module-scoped with caching (perf).
 
   // Flash overlay (clearing)
   if (flash > 0) {
@@ -222,14 +313,115 @@ export function renderFxFrame(opts: {
       if (!a || !b) continue
 
       const t0 = clamp01(age / s.ttlMs)
-      const phase = ((s.seed % 1000) / 1000) * 0.35
-      const t = clamp01(t0 + phase)
 
-      const dx = b.__x - a.__x
-      const dy = b.__y - a.__y
+      const start = linkTermination(a, b)
+      const end = linkTermination(b, a)
+
+      const dx = end.x - start.x
+      const dy = end.y - start.y
       const len = Math.max(1e-6, Math.hypot(dx, dy))
       const ux = dx / len
       const uy = dy / len
+
+      if (s.kind === 'beam') {
+        const t = easeOutCubic(t0)
+        const life = 1 - t0
+        const alpha = clamp01(life)
+
+        const headX = start.x + dx * t
+        const headY = start.y + dy * t
+
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+
+        // Base beam (full segment) — thin core + soft halo
+        {
+          const baseAlpha = Math.max(0, Math.min(1, alpha * 0.55))
+
+          // Halo pass
+          ctx.globalAlpha = baseAlpha * 0.55
+          ctx.strokeStyle = s.colorTrail
+          ctx.lineWidth = Math.max(1.2, s.thickness * 3.2)
+          ctx.shadowBlur = Math.max(10, s.thickness * 18)
+          ctx.shadowColor = withAlpha(s.colorTrail, 0.85)
+          ctx.beginPath()
+          ctx.moveTo(start.x, start.y)
+          ctx.lineTo(end.x, end.y)
+          ctx.stroke()
+
+          // Core pass
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = baseAlpha
+          ctx.strokeStyle = withAlpha(s.colorTrail, 0.9)
+          ctx.lineWidth = Math.max(0.9, s.thickness * 1.25)
+          ctx.beginPath()
+          ctx.moveTo(start.x, start.y)
+          ctx.lineTo(end.x, end.y)
+          ctx.stroke()
+        }
+
+        // Moving bright “packet” segment near the head
+        {
+          const segLen = Math.max(18, Math.min(54, len * 0.22))
+          const tailX = headX - ux * segLen
+          const tailY = headY - uy * segLen
+          const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
+          grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
+          grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * 0.55))
+          grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = grad
+          ctx.lineWidth = Math.max(1.4, s.thickness * 4.2)
+          ctx.shadowBlur = Math.max(12, s.thickness * 20)
+          ctx.shadowColor = withAlpha(s.colorTrail, 0.9)
+          ctx.beginPath()
+          ctx.moveTo(tailX, tailY)
+          ctx.lineTo(headX, headY)
+          ctx.stroke()
+        }
+
+        // Head: star-like spark (tiny cross) + bloom
+        {
+          const r = Math.max(1.8, s.thickness * 2.8)
+          const arm = Math.max(6, r * 3.2)
+          const px = -uy
+          const py = ux
+
+          ctx.shadowBlur = Math.max(10, r * 6)
+          ctx.shadowColor = withAlpha(s.colorCore, 0.95)
+          ctx.globalAlpha = 1
+          ctx.fillStyle = withAlpha(s.colorCore, alpha)
+          ctx.beginPath()
+          ctx.arc(headX, headY, r, 0, Math.PI * 2)
+          ctx.fill()
+
+          ctx.shadowBlur = Math.max(12, r * 7)
+          ctx.shadowColor = withAlpha(s.colorTrail, 0.9)
+          ctx.strokeStyle = withAlpha(s.colorCore, alpha)
+          ctx.lineWidth = Math.max(1.0, s.thickness * 1.1)
+
+          // Along direction
+          ctx.beginPath()
+          ctx.moveTo(headX - ux * arm, headY - uy * arm)
+          ctx.lineTo(headX + ux * arm, headY + uy * arm)
+          ctx.stroke()
+
+          // Perpendicular
+          ctx.beginPath()
+          ctx.moveTo(headX - px * arm * 0.65, headY - py * arm * 0.65)
+          ctx.lineTo(headX + px * arm * 0.65, headY + py * arm * 0.65)
+          ctx.stroke()
+        }
+
+        ctx.restore()
+        continue
+      }
+
+      const phase = ((s.seed % 1000) / 1000) * 0.35
+      const t = clamp01(t0 + phase)
 
       // Comet-like spark: trail length depends on edge length and ttl.
       // Small ttl => faster head => longer trail.
@@ -244,8 +436,8 @@ export function renderFxFrame(opts: {
       const py = ux
       const wobble = Math.sin((t * Math.PI * 2 * wobbleFreq) + seed01 * 11.3) * wobbleAmp
 
-      const x = a.__x + (b.__x - a.__x) * t + px * wobble
-      const y = a.__y + (b.__y - a.__y) * t + py * wobble
+      const x = start.x + dx * t + px * wobble
+      const y = start.y + dy * t + py * wobble
 
       const tailX = x - ux * trailLen
       const tailY = y - uy * trailLen
@@ -419,24 +611,78 @@ export function renderFxFrame(opts: {
       if (!n) continue
 
       const t0 = clamp01(age / b.durationMs)
-      const life = 1 - t0
-      const seed01 = ((b.seed % 4096) / 4096)
+      const alpha = Math.max(0, 1 - t0)
 
-      const base = 8 + seed01 * 5
-      const r = base + t0 * (36 + seed01 * 10)
-      const alpha = Math.max(0, Math.min(1, life * 0.65))
+      if (b.kind === 'tx-impact') {
+        const { w: nw, h: nh } = sizeForNode(n)
+        const nodeR = Math.max(nw, nh) / 2
 
-      ctx.save()
-      ctx.globalCompositeOperation = 'lighter'
-      ctx.globalAlpha = alpha
-      ctx.strokeStyle = b.color
-      ctx.lineWidth = Math.max(1.2, 2.4 - t0 * 1.6)
-      ctx.shadowBlur = Math.max(6, 18 * life)
-      ctx.shadowColor = withAlpha(b.color, 0.85)
-      ctx.beginPath()
-      ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.restore()
+        const ringR = nodeR * (1.05 + Math.pow(t0, 0.55) * 1.65)
+        const ringW = Math.max(1, (1 - t0) * 3.0)
+
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+
+        // Rim flash (outline glow)
+        {
+          ctx.globalAlpha = alpha
+          ctx.shadowBlur = Math.max(12, nodeR * 1.1) * alpha
+          ctx.shadowColor = withAlpha(b.color, 0.95)
+          ctx.strokeStyle = withAlpha(b.color, 0.95)
+          ctx.lineWidth = Math.max(1.2, nodeR * 0.12)
+          nodeOutlinePath(ctx, n, 1)
+          ctx.stroke()
+        }
+
+        // Shockwave ring
+        {
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = alpha * 0.85
+          ctx.strokeStyle = withAlpha(b.color, 0.9)
+          ctx.lineWidth = ringW
+          ctx.beginPath()
+          ctx.arc(n.__x, n.__y, ringR, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+
+        // Small center bloom (subtle)
+        {
+          ctx.globalAlpha = alpha * 0.45
+          ctx.shadowBlur = 24 * alpha
+          ctx.shadowColor = withAlpha(b.color, 0.9)
+          ctx.fillStyle = withAlpha(b.color, 0.25)
+          ctx.beginPath()
+          ctx.arc(n.__x, n.__y, nodeR * 0.55, 0, Math.PI * 2)
+          ctx.fill()
+        }
+
+        ctx.restore()
+      } else {
+        // Default (clearing) burst: bloom + ring
+        const r = 10 + Math.pow(t0, 0.4) * 35
+
+        ctx.save()
+        ctx.globalCompositeOperation = 'screen'
+
+        // 1. Core bloom
+        ctx.globalAlpha = alpha
+        ctx.fillStyle = withAlpha(b.color, 0.5)
+        ctx.shadowBlur = 30 * alpha
+        ctx.shadowColor = b.color
+        ctx.beginPath()
+        ctx.arc(n.__x, n.__y, r * 0.5, 0, Math.PI * 2)
+        ctx.fill()
+
+        // 2. Shockwave
+        ctx.globalAlpha = alpha * 0.7
+        ctx.strokeStyle = b.color
+        ctx.lineWidth = 3 * (1 - t0)
+        ctx.beginPath()
+        ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
+        ctx.stroke()
+
+        ctx.restore()
+      }
     }
     fxState.nodeBursts.length = write
   }

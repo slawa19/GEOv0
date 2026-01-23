@@ -35,6 +35,7 @@ const state = reactive({
   selectedNodeId: null as string | null,
   activeEdges: new Set<string>(),
   flash: 0 as number,
+  floatingLabels: [] as Array<{ id: number; x: number; y: number; text: string; color: string; expiresAtMs: number }>,
 })
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
@@ -65,6 +66,8 @@ const layout = reactive({
 })
 
 const fxState = createFxState()
+
+let txRunSeq = 0
 
 const fnv1a = (s: string) => {
   let h = 2166136261
@@ -811,6 +814,17 @@ function renderFrame(nowMs: number) {
   ctx.clearRect(0, 0, layout.w, layout.h)
   fx.clearRect(0, 0, layout.w, layout.h)
 
+  // Prevent unbounded DOM growth (labels are transient).
+  if (state.floatingLabels.length > 0) {
+    let write = 0
+    for (let read = 0; read < state.floatingLabels.length; read++) {
+      const fl = state.floatingLabels[read]!
+      if (nowMs >= fl.expiresAtMs) continue
+      state.floatingLabels[write++] = fl
+    }
+    state.floatingLabels.length = write
+  }
+
   const pos = drawBaseGraph(ctx, {
     w: layout.w,
     h: layout.h,
@@ -896,6 +910,8 @@ async function runTxOnce() {
   if (!state.snapshot) return
   resetOverlays()
 
+  const runId = ++txRunSeq
+
   const { events } = await loadEvents(effectiveEq.value, 'demo-tx')
   const evt = events.find((e) => e.type === 'tx.updated')
   if (!evt || evt.type !== 'tx.updated') return
@@ -904,26 +920,65 @@ async function runTxOnce() {
     state.activeEdges.add(keyEdge(e.from, e.to))
   }
 
+  const ttl = Math.max(250, evt.ttl_ms || 1200)
+
   spawnSparks(fxState, {
     edges: evt.edges,
     nowMs: performance.now(),
-    ttlMs: Math.max(250, evt.ttl_ms || 1200),
+    ttlMs: ttl,
     colorCore: VIZ_MAPPING.fx.tx_spark.core,
     colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
-    thickness: 1.2,
+    thickness: 1.0,
+    kind: 'beam',
     seedPrefix: `tx:${effectiveEq.value}`,
-    countPerEdge: 3,
+    countPerEdge: 1,
     keyEdge,
     seedFn: fnv1a,
     isTestMode: isTestMode.value,
   })
 
+  // Flash and Label at destination
+  if (!isTestMode.value && evt.edges.length > 0) {
+    const lastEdge = evt.edges[evt.edges.length - 1]!
+    const targetId = lastEdge.to
+    
+    window.setTimeout(() => {
+      if (runId !== txRunSeq) return
+      // 1. Flash Burst on target
+      spawnNodeBursts(fxState, {
+        nodeIds: [targetId],
+        nowMs: performance.now(),
+        durationMs: 520,
+        color: VIZ_MAPPING.fx.tx_spark.trail,
+        kind: 'tx-impact',
+        seedPrefix: 'burst',
+        seedFn: fnv1a,
+        isTestMode: false,
+      })
+
+      // 2. Floating Label
+      const ln = layout.nodes.find((n) => n.id === targetId)
+      if (ln) {
+        state.floatingLabels.push({
+          id: Math.floor(performance.now()),
+          x: ln.__x,
+          y: ln.__y - 20,
+          text: '+125 GC',
+          color: '#22d3ee',
+          // Keep in DOM slightly longer than CSS animation (prevents growth without visual change).
+          expiresAtMs: performance.now() + 2200,
+        })
+      }
+    }, ttl)
+  }
+
   if (isTestMode.value) return
 
   window.setTimeout(() => {
+    if (runId !== txRunSeq) return
     applyPatchesFromEvent(evt)
     resetOverlays()
-  }, Math.max(200, evt.ttl_ms || 1200))
+  }, Math.max(200, ttl))
 }
 
 async function runClearingOnce() {
@@ -1136,6 +1191,16 @@ onUnmounted(() => {
       <div class="overlay-title">Fixtures error</div>
       <div class="overlay-text mono">{{ state.error }}</div>
     </div>
+
+    <!-- Floating Labels -->
+    <div
+      v-for="fl in state.floatingLabels"
+      :key="fl.id"
+      class="floating-label"
+      :style="{ left: fl.x + 'px', top: fl.y + 'px', color: fl.color }"
+    >
+      {{ fl.text }}
+    </div>
   </div>
 </template>
 
@@ -1315,5 +1380,31 @@ onUnmounted(() => {
 
 .overlay-error {
   border-color: rgba(248, 113, 113, 0.35);
+}
+
+.floating-label {
+  position: absolute;
+  pointer-events: none;
+  font-size: 15px;
+  font-weight: 700;
+  text-shadow: 0 0 10px currentColor; /* Glow */
+  animation: floatUpFade 1.8s ease-out forwards;
+  z-index: 50;
+  transform: translate(-50%, -50%); /* Centered on spawn point */
+}
+
+@keyframes floatUpFade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -40%) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -120%) scale(1.0);
+  }
 }
 </style>
