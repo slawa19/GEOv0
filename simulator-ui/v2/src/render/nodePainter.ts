@@ -77,29 +77,34 @@ export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, o
 
   ctx.save()
 
-  // 1) Soft bloom (very subtle, deterministic; no pulsing)
+  // 1) Soft bloom (underlay) - "Holographic" glow
   ctx.save()
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.globalAlpha = 0.10
-  ctx.fillStyle = fill
+  // Use screen blending for "light" effect against dark background
+  ctx.globalCompositeOperation = 'screen'
+  ctx.shadowColor = fill
+  ctx.shadowBlur = r * 1.5 // Wide soft glow
+  ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
+  
   if (isBusiness) {
-    roundedRectPath(ctx, x - r * 0.55, y - r * 0.55, w + r * 1.1, h + r * 1.1, rr + r * 0.35)
+    roundedRectPath(ctx, x + 2, y + 2, w - 4, h - 4, rr)
     ctx.fill()
   } else {
     ctx.beginPath()
-    ctx.arc(node.__x, node.__y, r * 1.85, 0, Math.PI * 2)
+    ctx.arc(node.__x, node.__y, r * 0.8, 0, Math.PI * 2)
     ctx.fill()
   }
   ctx.restore()
 
-  // 2) Drop shadow (kept tight to avoid looking like planets)
+  // 2) Body fill - Semi-transparent glass (Darker/More Solid now)
   ctx.save()
   ctx.globalCompositeOperation = 'source-over'
-  ctx.shadowColor = 'rgba(0,0,0,0.55)'
-  ctx.shadowBlur = Math.max(4, r * 0.95)
-  ctx.shadowOffsetX = Math.max(1, r * 0.10)
-  ctx.shadowOffsetY = Math.max(1, r * 0.14)
-  ctx.fillStyle = withAlpha('#000000', 0.18)
+  // Linear gradient for "deep holographic" look
+  // From moderately opaque at top-left to darker at bottom-right, but visible enough to hide stars behind it.
+  const glassGrad = ctx.createLinearGradient(x, y, x + w, y + h)
+  glassGrad.addColorStop(0, withAlpha(fill, 0.55)) 
+  glassGrad.addColorStop(1, withAlpha(fill, 0.25))
+  
+  ctx.fillStyle = glassGrad
   if (isBusiness) {
     roundedRectPath(ctx, x, y, w, h, rr)
     ctx.fill()
@@ -110,40 +115,92 @@ export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, o
   }
   ctx.restore()
 
-  // 3) Body with gentle shading
+  // 3) Neon Rim - The define feature
+  ctx.save()
+  ctx.globalCompositeOperation = 'screen'
+  // Double stroke for "core + glow" effect
+  
+  // Outer glowy stroke
+  ctx.strokeStyle = withAlpha(fill, 0.6)
+  ctx.lineWidth = Math.max(2, r * 0.15)
+  ctx.shadowColor = fill
+  ctx.shadowBlur = Math.max(2, r * 0.3)
+  
   if (isBusiness) {
-    const grad = ctx.createLinearGradient(x, y, x + w, y + h)
-    grad.addColorStop(0, withAlpha('#ffffff', 0.22))
-    grad.addColorStop(0.22, fill)
-    grad.addColorStop(1, withAlpha('#000000', 0.22))
-    ctx.fillStyle = grad
     roundedRectPath(ctx, x, y, w, h, rr)
-    ctx.fill()
+    ctx.stroke()
   } else {
-    const gx = node.__x - r * 0.25
-    const gy = node.__y - r * 0.30
-    const grad = ctx.createRadialGradient(gx, gy, Math.max(1, r * 0.10), node.__x, node.__y, r * 1.10)
-    grad.addColorStop(0, withAlpha('#ffffff', 0.28))
-    grad.addColorStop(0.25, fill)
-    grad.addColorStop(1, withAlpha('#000000', 0.18))
-    ctx.fillStyle = grad
     ctx.beginPath()
     ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
-    ctx.fill()
+    ctx.stroke()
   }
 
-  // 4) Crisp rim
-  ctx.save()
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.strokeStyle = withAlpha('#ffffff', 0.22)
-  ctx.lineWidth = Math.max(0.9, r * 0.11)
+  // Inner bright core stroke (white-ish)
+  ctx.strokeStyle = withAlpha('#ffffff', 0.9)
+  ctx.lineWidth = Math.max(1, r * 0.05)
+  ctx.shadowBlur = 0 // Sharp core
+  
   if (isBusiness) {
-    roundedRectPath(ctx, x + 0.5, y + 0.5, w - 1, h - 1, rr)
+    roundedRectPath(ctx, x, y, w, h, rr)
     ctx.stroke()
   } else {
     ctx.beginPath()
-    ctx.arc(node.__x, node.__y, r * 0.98, 0, Math.PI * 2)
+    ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
     ctx.stroke()
+  }
+  ctx.restore()
+
+  // 4) Icons (Holographic Projections inside)
+  ctx.save()
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.fillStyle = withAlpha(fill, 0.95) // Solid bright core for the icon
+
+  if (!isBusiness) {
+    // PERSON: "Pawn" / User silhouette
+    const s = r * 0.045
+    ctx.translate(node.__x, node.__y + r * 0.08)
+    
+    ctx.beginPath()
+    // Head
+    ctx.arc(0, -9 * s, 5.5 * s, 0, Math.PI * 2)
+    // Body (Shoulders)
+    ctx.moveTo(-8 * s, 1 * s)
+    ctx.quadraticCurveTo(0, -4 * s, 8 * s, 1 * s)
+    ctx.quadraticCurveTo(9 * s, 11 * s, 0, 11 * s)
+    ctx.quadraticCurveTo(-9 * s, 11 * s, -8 * s, 1 * s)
+    ctx.closePath()
+    ctx.fill()
+  } else {
+    // BUSINESS: "Building" / Briefcase silhouette
+    // Let's draw a stylized high-rise building
+    const s = Math.min(w, h) * 0.024
+    ctx.translate(node.__x, node.__y + h * 0.05)
+    
+    ctx.beginPath()
+    // Main tower
+    const bw = 12 * s
+    const bh = 16 * s
+    ctx.rect(-bw / 2, -bh / 2, bw, bh)
+    
+    // Roof detail (antenna or stepped)
+    ctx.rect(-bw / 2 + 2 * s, -bh / 2 - 2 * s, bw - 4 * s, 2 * s) // Top block
+    ctx.rect(-1 * s, -bh / 2 - 5 * s, 2 * s, 3 * s) // Antenna
+    
+    // Windows (cutout effect by drawing transparent/dark over fill? 
+    // No, simpler is just solid shape acting as the "core")
+    ctx.fill()
+    
+    // Window lines (cutouts)
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.fillStyle = '#000000'
+    const winW = 2.5 * s
+    const winH = 2.5 * s
+    const gap = 1.5 * s
+    // 2 columns of windows
+    for (let row = -1; row <= 1; row++) {
+      ctx.fillRect(-bw / 2 + gap + 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
+      ctx.fillRect(0 + gap - 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
+    }
   }
   ctx.restore()
 
