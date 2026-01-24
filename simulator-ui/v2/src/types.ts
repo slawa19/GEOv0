@@ -79,7 +79,6 @@ export type ClearingPlanEvent = {
     intensity_key?: string
     highlight_edges?: Array<{ from: string; to: string }>
     particles_edges?: Array<{ from: string; to: string }>
-    flash?: { kind: string }
   }>
 }
 

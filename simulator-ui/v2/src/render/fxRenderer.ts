@@ -115,6 +115,43 @@ function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1
   ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
 }
 
+function roundedRectPath2D(x: number, y: number, w: number, h: number, rad: number) {
+  const p = new Path2D()
+  const r = Math.max(0, Math.min(rad, Math.min(w, h) / 2))
+  if (r <= 0.01) {
+    p.rect(x, y, w, h)
+    return p
+  }
+  p.moveTo(x + r, y)
+  p.lineTo(x + w - r, y)
+  p.quadraticCurveTo(x + w, y, x + w, y + r)
+  p.lineTo(x + w, y + h - r)
+  p.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+  p.lineTo(x + r, y + h)
+  p.quadraticCurveTo(x, y + h, x, y + h - r)
+  p.lineTo(x, y + r)
+  p.quadraticCurveTo(x, y, x + r, y)
+  p.closePath()
+  return p
+}
+
+function nodeOutlinePath2D(n: LayoutNode, scale = 1) {
+  const { w, h } = sizeForNode(n)
+  const isBusiness = String(n.type) === 'business'
+  const rr = Math.max(0, Math.min(4, Math.min(w, h) * 0.18))
+  const ww = w * scale
+  const hh = h * scale
+  const x = n.__x - ww / 2
+  const y = n.__y - hh / 2
+
+  if (isBusiness) return roundedRectPath2D(x, y, ww, hh, rr * scale)
+
+  const p = new Path2D()
+  const r = Math.max(ww, hh) / 2
+  p.arc(n.__x, n.__y, r, 0, Math.PI * 2)
+  return p
+}
+
 function linkTermination(n: LayoutNode, target: LayoutNode) {
   const dx = target.__x - n.__x
   const dy = target.__y - n.__y
@@ -317,7 +354,8 @@ export function renderFxFrame(opts: {
   const { nowMs, ctx, pos, w, h, mapping, fxState, isTestMode } = opts
   let flash = opts.flash
 
-  if (isTestMode) return { flash }
+  // NOTE: Test mode primarily aims to make screenshot tests stable by not spawning FX.
+  // Rendering stays enabled so manual interaction in test mode doesn't feel "dead".
 
   // NOTE: `withAlpha` and helpers are module-scoped with caching (perf).
 
@@ -652,50 +690,50 @@ export function renderFxFrame(opts: {
       if (!n) continue
 
       const t0 = clamp01(age / b.durationMs)
-      const alpha = Math.max(0, 1 - t0)
+      const alpha = Math.pow(1 - t0, 1.2) // Smooth decay
 
       if (b.kind === 'tx-impact') {
+        // Uniform contour glow: the outline itself glows evenly around the perimeter.
+        // We draw multiple strokes with increasing blur/thickness to create a soft aura.
         const { w: nw, h: nh } = sizeForNode(n)
         const nodeR = Math.max(nw, nh) / 2
-
-        const ringR = nodeR * (1.05 + Math.pow(t0, 0.55) * 1.65)
-        const ringW = Math.max(1, (1 - t0) * 3.0)
 
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
 
-        // Rim flash (outline glow)
-        {
-          ctx.globalAlpha = alpha
-          ctx.shadowBlur = Math.max(12, nodeR * 1.1) * alpha
-          ctx.shadowColor = withAlpha(b.color, 0.95)
-          ctx.strokeStyle = withAlpha(b.color, 0.95)
-          ctx.lineWidth = Math.max(1.2, nodeR * 0.12)
-          nodeOutlinePath(ctx, n, 1)
-          ctx.stroke()
-        }
+        // Clip to outside of node so interior stays dark.
+        const outside = new Path2D()
+        outside.rect(0, 0, w, h)
+        outside.addPath(nodeOutlinePath2D(n, 1.0))
+        ctx.clip(outside, 'evenodd')
 
-        // Shockwave ring
-        {
-          ctx.shadowBlur = 0
-          ctx.globalAlpha = alpha * 0.85
-          ctx.strokeStyle = withAlpha(b.color, 0.9)
-          ctx.lineWidth = ringW
-          ctx.beginPath()
-          ctx.arc(n.__x, n.__y, ringR, 0, Math.PI * 2)
-          ctx.stroke()
-        }
+        const outline = nodeOutlinePath2D(n, 1.0)
+        const baseWidth = Math.max(2, nodeR * 0.15)
 
-        // Small center bloom (subtle)
-        {
-          ctx.globalAlpha = alpha * 0.45
-          ctx.shadowBlur = 24 * alpha
-          ctx.shadowColor = withAlpha(b.color, 0.9)
-          ctx.fillStyle = withAlpha(b.color, 0.25)
-          ctx.beginPath()
-          ctx.arc(n.__x, n.__y, nodeR * 0.55, 0, Math.PI * 2)
-          ctx.fill()
-        }
+        // Layer 1: Wide outer glow (largest blur, lowest alpha)
+        ctx.shadowColor = b.color
+        ctx.shadowBlur = Math.max(12, nodeR * 0.8) * alpha
+        ctx.strokeStyle = withAlpha(b.color, 0.4 * alpha)
+        ctx.lineWidth = baseWidth * 3
+        ctx.stroke(outline)
+
+        // Layer 2: Medium glow
+        ctx.shadowBlur = Math.max(8, nodeR * 0.5) * alpha
+        ctx.strokeStyle = withAlpha(b.color, 0.6 * alpha)
+        ctx.lineWidth = baseWidth * 1.8
+        ctx.stroke(outline)
+
+        // Layer 3: Bright inner stroke (crisp edge)
+        ctx.shadowBlur = Math.max(4, nodeR * 0.25) * alpha
+        ctx.strokeStyle = withAlpha(b.color, 0.9 * alpha)
+        ctx.lineWidth = baseWidth
+        ctx.stroke(outline)
+
+        // Layer 4: Hot white core (very thin, bright)
+        ctx.shadowBlur = 0
+        ctx.strokeStyle = withAlpha('#ffffff', 0.7 * alpha)
+        ctx.lineWidth = Math.max(1, baseWidth * 0.4)
+        ctx.stroke(outline)
 
         ctx.restore()
       } else if (b.kind === 'glow') {

@@ -287,13 +287,11 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
           const atMs = asFiniteNumber(s.at_ms, `clearing.plan.steps[${sidx}].at_ms (${sourcePath})`)
           const highlight = s.highlight_edges === undefined ? undefined : asEdgeArray(s.highlight_edges, `clearing.plan.steps[${sidx}].highlight_edges (${sourcePath})`)
           const particles = s.particles_edges === undefined ? undefined : asEdgeArray(s.particles_edges, `clearing.plan.steps[${sidx}].particles_edges (${sourcePath})`)
-          const flash = isRecord(s.flash) ? { kind: asString(s.flash.kind, `clearing.plan.steps[${sidx}].flash.kind (${sourcePath})`) } : undefined
           return {
             at_ms: atMs,
             intensity_key: asOptionalString(s.intensity_key),
             highlight_edges: highlight,
             particles_edges: particles,
-            flash,
           }
         }),
       }

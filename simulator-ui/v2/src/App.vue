@@ -4,7 +4,7 @@ import type { DemoEvent, EdgePatch, GraphLink, GraphNode, GraphSnapshot, NodePat
 import { loadEvents, loadSnapshot } from './fixtures'
 import { VIZ_MAPPING } from './vizMapping'
 import { drawBaseGraph, type LayoutLink as RenderLayoutLink } from './render/baseGraph'
-import { sizeForNode, type LayoutNode as RenderLayoutNode } from './render/nodePainter'
+import { fillForNode, sizeForNode, type LayoutNode as RenderLayoutNode } from './render/nodePainter'
 import { createFxState, renderFxFrame, resetFxState, spawnEdgePulses, spawnNodeBursts, spawnSparks } from './render/fxRenderer'
 
 type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
@@ -17,6 +17,10 @@ const layoutMode = ref<LayoutMode>('admin-force')
 
 const isDemoFixtures = computed(() => String(import.meta.env.VITE_DEMO_FIXTURES ?? '1') === '1')
 const isTestMode = computed(() => String(import.meta.env.VITE_TEST_MODE ?? '0') === '1')
+
+// Playwright sets navigator.webdriver=true. Use it to keep screenshot tests stable even if
+// someone runs the dev server with VITE_TEST_MODE=1.
+const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
 
 const effectiveEq = computed(() => {
   // Demo (fixtures) mode: only UAH. Other equivalents are reserved for future real-mode.
@@ -53,6 +57,12 @@ function getNodeById(id: string | null): GraphNode | null {
   return state.snapshot.nodes.find((n) => n.id === id) ?? null
 }
 
+function fxColorForNode(nodeId: string, fallback: string): string {
+  const n = getNodeById(nodeId)
+  if (!n) return fallback
+  return fillForNode(n, VIZ_MAPPING)
+}
+
 const selectedNode = computed(() => getNodeById(state.selectedNodeId))
 
 type LayoutNode = GraphNode & { __x: number; __y: number }
@@ -70,10 +80,10 @@ const fxState = createFxState()
 let txRunSeq = 0
 let clearingRunSeq = 0
 
-let activeTimeouts: number[] = []
+const activeTimeouts: number[] = []
 
 function scheduleTimeout(fn: () => void, delayMs: number) {
-  const id = window.setTimeout(fn, Math.max(0, delayMs))
+  const id = window.setTimeout(fn, delayMs)
   activeTimeouts.push(id)
   return id
 }
@@ -846,6 +856,31 @@ onMounted(() => {
   }
 })
 
+onMounted(() => {
+  // Dev-only hook for quick runtime sanity checks (does not affect rendering).
+  if (!import.meta.env.DEV) return
+  ;(window as any).__geoSim = {
+    get isTestMode() {
+      return isTestMode.value
+    },
+    get isWebDriver() {
+      return isWebDriver
+    },
+    get loading() {
+      return state.loading
+    },
+    get error() {
+      return state.error
+    },
+    get hasSnapshot() {
+      return !!state.snapshot
+    },
+    fxState,
+    runTxOnce,
+    runClearingOnce,
+  }
+})
+
 watch(layoutMode, () => {
   try {
     localStorage.setItem('geo.sim.layoutMode', layoutMode.value)
@@ -966,83 +1001,138 @@ function nodeCardStyle() {
 async function runTxOnce() {
   if (!state.snapshot) return
 
-  clearScheduledTimeouts()
-  resetOverlays()
+  state.error = ''
 
-  const runId = ++txRunSeq
-
-  const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-tx')
-  assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
-  const evt = events.find((e) => e.type === 'tx.updated')
-  if (!evt || evt.type !== 'tx.updated') return
-
-  for (const e of evt.edges) {
-    state.activeEdges.add(keyEdge(e.from, e.to))
+  if (import.meta.env.DEV) {
+    ;(window as any).__geoSimTxCalls = ((window as any).__geoSimTxCalls ?? 0) + 1
   }
 
-  const ttl = Math.max(250, evt.ttl_ms || 1200)
+  try {
+    ensureRenderLoop()
 
-  spawnSparks(fxState, {
-    edges: evt.edges,
-    nowMs: performance.now(),
-    ttlMs: ttl,
-    colorCore: VIZ_MAPPING.fx.tx_spark.core,
-    colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
-    thickness: 1.0,
-    kind: 'beam',
-    seedPrefix: `tx:${effectiveEq.value}`,
-    countPerEdge: 1,
-    keyEdge,
-    seedFn: fnv1a,
-    isTestMode: isTestMode.value,
-  })
+    clearScheduledTimeouts()
+    resetOverlays()
 
-  // Flash and Label at destination
-  if (!isTestMode.value && evt.edges.length > 0) {
-    const lastEdge = evt.edges[evt.edges.length - 1]!
-    const targetId = lastEdge.to
-    
+    const runId = ++txRunSeq
+
+    const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-tx')
+    assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
+    const evt = events.find((e) => e.type === 'tx.updated')
+    if (!evt || evt.type !== 'tx.updated') return
+
+    for (const e of evt.edges) {
+      state.activeEdges.add(keyEdge(e.from, e.to))
+    }
+
+    const ttl = Math.max(250, evt.ttl_ms || 1200)
+
+    const fxTestMode = isTestMode.value && isWebDriver
+
+    spawnSparks(fxState, {
+      edges: evt.edges,
+      nowMs: performance.now(),
+      ttlMs: ttl,
+      colorCore: VIZ_MAPPING.fx.tx_spark.core,
+      colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
+      thickness: 1.0,
+      kind: 'beam',
+      seedPrefix: `tx:${effectiveEq.value}`,
+      countPerEdge: 1,
+      keyEdge,
+      seedFn: fnv1a,
+      isTestMode: fxTestMode,
+    })
+
+    // Flash at source
+    if (!fxTestMode && evt.edges.length > 0) {
+      const sourceId = evt.edges[0]!.from
+      spawnNodeBursts(fxState, {
+        nodeIds: [sourceId],
+        nowMs: performance.now(),
+        durationMs: 360,
+        color: fxColorForNode(sourceId, VIZ_MAPPING.fx.tx_spark.trail),
+        kind: 'tx-impact',
+        seedPrefix: 'burst-src',
+        seedFn: fnv1a,
+        isTestMode: fxTestMode,
+      })
+    }
+
+    if (import.meta.env.DEV) {
+      ;(window as any).__geoSimLastTxSpawn = {
+        t: Date.now(),
+        sparks: fxState.sparks.length,
+        edges: evt.edges.length,
+        fxTestMode,
+      }
+    }
+
+    // Flash and Label at destination
+    if (!fxTestMode && evt.edges.length > 0) {
+      const lastEdge = evt.edges[evt.edges.length - 1]!
+      const targetId = lastEdge.to
+
+      scheduleTimeout(() => {
+        if (runId !== txRunSeq) return
+        // 1. Flash Burst on target
+        spawnNodeBursts(fxState, {
+          nodeIds: [targetId],
+          nowMs: performance.now(),
+          durationMs: 520,
+          color: fxColorForNode(targetId, VIZ_MAPPING.fx.tx_spark.trail),
+          kind: 'tx-impact',
+          seedPrefix: 'burst',
+          seedFn: fnv1a,
+          isTestMode: fxTestMode,
+        })
+
+        // 2. Floating Label
+        const ln = layout.nodes.find((n) => n.id === targetId)
+        if (ln) {
+          state.floatingLabels.push({
+            id: Math.floor(performance.now()),
+            x: ln.__x,
+            y: ln.__y - 20,
+            text: '+125 GC',
+            color: fxColorForNode(targetId, '#22d3ee'),
+            // Keep in DOM slightly longer than CSS animation (prevents growth without visual change).
+            expiresAtMs: performance.now() + 2200,
+          })
+        }
+      }, ttl)
+    }
+
+    if (fxTestMode) return
+
+    // Reset after all effects complete:
+    // - spark flight takes `ttl` ms
+    // - target burst starts at ttl and lasts 520ms
+    // - add small buffer (50ms)
+    const burstDurationMs = 520
+    const cleanupDelayMs = ttl + burstDurationMs + 50
+
     scheduleTimeout(() => {
       if (runId !== txRunSeq) return
-      // 1. Flash Burst on target
-      spawnNodeBursts(fxState, {
-        nodeIds: [targetId],
-        nowMs: performance.now(),
-        durationMs: 520,
-        color: VIZ_MAPPING.fx.tx_spark.trail,
-        kind: 'tx-impact',
-        seedPrefix: 'burst',
-        seedFn: fnv1a,
-        isTestMode: false,
-      })
-
-      // 2. Floating Label
-      const ln = layout.nodes.find((n) => n.id === targetId)
-      if (ln) {
-        state.floatingLabels.push({
-          id: Math.floor(performance.now()),
-          x: ln.__x,
-          y: ln.__y - 20,
-          text: '+125 GC',
-          color: '#22d3ee',
-          // Keep in DOM slightly longer than CSS animation (prevents growth without visual change).
-          expiresAtMs: performance.now() + 2200,
-        })
-      }
-    }, ttl)
+      applyPatchesFromEvent(evt)
+      resetOverlays()
+    }, cleanupDelayMs)
+  } catch (e: any) {
+    const msg = String(e?.message ?? e)
+    state.error = msg
+    if (import.meta.env.DEV) {
+      ;(window as any).__geoSimLastTxError = msg
+    }
+    // eslint-disable-next-line no-console
+    console.error(e)
   }
-
-  if (isTestMode.value) return
-
-  scheduleTimeout(() => {
-    if (runId !== txRunSeq) return
-    applyPatchesFromEvent(evt)
-    resetOverlays()
-  }, Math.max(200, ttl))
 }
 
 async function runClearingOnce() {
   if (!state.snapshot) return
+
+  state.error = ''
+
+  try {
 
   clearScheduledTimeouts()
   resetOverlays()
@@ -1100,8 +1190,8 @@ async function runClearingOnce() {
         nodeIds: [e.from],
         nowMs: performance.now(),
         durationMs: 360,
-        color: clearingGold,
-        kind: 'glow',
+        color: fxColorForNode(e.from, clearingGold),
+        kind: 'tx-impact',
         seedPrefix: `clearing:fromGlow:${effectiveEq.value}:${stepAtMs}:${idx}`,
         seedFn: fnv1a,
         isTestMode: false,
@@ -1131,8 +1221,8 @@ async function runClearingOnce() {
         nodeIds: [e.to],
         nowMs: performance.now(),
         durationMs: 520,
-        color: clearingGold,
-        kind: 'glow',
+        color: fxColorForNode(e.to, clearingGold),
+        kind: 'tx-impact',
         seedPrefix: `clearing:impact:${effectiveEq.value}:${stepAtMs}:${idx}`,
         seedFn: fnv1a,
         isTestMode: false,
@@ -1145,7 +1235,7 @@ async function runClearingOnce() {
           x: ln.__x,
           y: ln.__y - 20,
           text: formatDemoDebtAmount(e.from, e.to, stepAtMs),
-          color: clearingGold,
+          color: fxColorForNode(e.to, clearingGold),
           expiresAtMs: performance.now() + labelLifeMs,
         })
       }
@@ -1155,10 +1245,6 @@ async function runClearingOnce() {
   for (const step of plan.steps) {
     scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
-
-      if (step.flash?.kind === 'clearing') {
-        state.flash = 1
-      }
 
       if (step.highlight_edges && step.highlight_edges.length > 0) {
         spawnEdgePulses(fxState, {
@@ -1187,18 +1273,40 @@ async function runClearingOnce() {
 
   // IMPORTANT: the clearing demo schedules extra timers (micro txs).
   // If we reset overlays too early, sparks get wiped mid-flight.
+  // Timeline for each edge in particles_edges:
+  // - spark starts at: step.at_ms + idx * microGapMs
+  // - spark arrives at: step.at_ms + idx * microGapMs + microTtlMs
+  // - target burst starts at arrival and lasts 520ms
+  // So the last effect ends at: step.at_ms + (count-1)*microGapMs + microTtlMs + 520ms
+  const targetBurstDurationMs = 520
   let doneAt = 0
   for (const s of plan.steps) {
     const base = Math.max(0, s.at_ms)
     const count = s.particles_edges?.length ?? 0
-    const microSpan = count > 0 ? (count - 1) * microGapMs + microTtlMs : 0
-    doneAt = Math.max(doneAt, base + 650, base + microSpan + 80)
+    // Time when last spark arrives + burst duration
+    const lastBurstEndsAt = count > 0
+      ? (count - 1) * microGapMs + microTtlMs + targetBurstDurationMs
+      : 0
+    // highlight_edges pulse lasts 650ms
+    doneAt = Math.max(doneAt, base + 650, base + lastBurstEndsAt)
   }
+  // Add small buffer
+  const cleanupDelayMs = doneAt + 50
+
   scheduleTimeout(() => {
     if (runId !== clearingRunSeq) return
     if (done && done.type === 'clearing.done') applyPatchesFromEvent(done)
     resetOverlays()
-  }, Math.max(0, doneAt) + (performance.now() - t0 >= 0 ? 0 : 0))
+  }, cleanupDelayMs)
+  } catch (e: any) {
+    const msg = String(e?.message ?? e)
+    state.error = msg
+    if (import.meta.env.DEV) {
+      ;(window as any).__geoSimLastClearingError = msg
+    }
+    // eslint-disable-next-line no-console
+    console.error(e)
+  }
 }
 
 watch([eq, scene], () => {

@@ -45,14 +45,16 @@ class DirectedCycle:
         return pairs
 
 
-def find_directed_cycle(edges: Iterable[tuple[str, str]], *, max_len: int = 10) -> DirectedCycle:
-    """Deterministically find a directed simple cycle up to max_len.
+def find_directed_cycle(edges: Iterable[tuple[str, str]], *, min_len: int = 3, max_len: int = 10) -> DirectedCycle:
+    """Deterministically find a directed simple cycle with length in [min_len, max_len].
 
     The choice is deterministic: nodes and adjacency are iterated in lexicographic order.
     """
 
-    if max_len < 3:
-        raise ValueError("max_len must be >= 3")
+    if min_len < 3:
+        raise ValueError("min_len must be >= 3")
+    if max_len < min_len:
+        raise ValueError("max_len must be >= min_len")
 
     adj: dict[str, list[str]] = defaultdict(list)
     for s, t in edges:
@@ -67,7 +69,7 @@ def find_directed_cycle(edges: Iterable[tuple[str, str]], *, max_len: int = 10) 
             return None
 
         for nxt in adj.get(current, []):
-            if nxt == start and len(path) >= 3:
+            if nxt == start and len(path) >= min_len:
                 return path
 
             if nxt in visited:
@@ -87,7 +89,7 @@ def find_directed_cycle(edges: Iterable[tuple[str, str]], *, max_len: int = 10) 
             # dfs returns the path without repeating the start at the end
             return DirectedCycle(nodes=tuple(found))
 
-    raise RuntimeError(f"No directed cycle found in trustlines graph (max_len={max_len})")
+    raise RuntimeError(f"No directed cycle found in trustlines graph (min_len={min_len}, max_len={max_len})")
 
 
 def build_snapshot(
@@ -170,13 +172,20 @@ def build_snapshot(
     return snapshot
 
 
-def build_demo_tx_events(*, datasets_root: Path, eq: str, snapshot_node_ids: set[str]) -> list[dict[str, Any]]:
+def build_demo_tx_events(
+    *,
+    datasets_root: Path,
+    eq: str,
+    generated_at: str,
+    snapshot_node_ids: set[str],
+    snapshot_link_keys: set[str],
+) -> list[dict[str, Any]]:
     tx_path = datasets_root / "transactions.json"
     txs = read_json(tx_path)
     if not isinstance(txs, list):
         raise TypeError(f"Expected list in {tx_path}")
 
-    chosen: dict[str, Any] | None = None
+    candidates: list[tuple[str, str, list[str]]] = []
     for tx in txs:
         if not isinstance(tx, dict):
             continue
@@ -194,37 +203,137 @@ def build_demo_tx_events(*, datasets_root: Path, eq: str, snapshot_node_ids: set
         path = route0.get("path")
         if not isinstance(path, list) or len(path) < 2:
             continue
+
         path_ids = [str(x) for x in path]
         if any(pid not in snapshot_node_ids for pid in path_ids):
             continue
-        chosen = tx
-        break
 
-    if not chosen:
-        raise RuntimeError(f"No suitable transaction found for eq={eq} in {tx_path}")
+        # Demo playlists are validated against snapshot.links at runtime.
+        # Only keep routes whose hop-by-hop edges exist in the trustline snapshot.
+        hop_keys = [f"{a}→{b}" for a, b in zip(path_ids, path_ids[1:])]
+        if any(k not in snapshot_link_keys for k in hop_keys):
+            continue
 
-    payload = chosen["payload"]
-    routes = payload["routes"]
-    path_ids = [str(x) for x in routes[0]["path"]]
-    edges = []
-    for a, b in zip(path_ids, path_ids[1:]):
-        edges.append({"from": a, "to": b})
+        tx_id = str(tx.get("id") or tx.get("tx_id") or "tx.demo")
+        ts = str(tx.get("created_at") or generated_at)
+        candidates.append((tx_id, ts, path_ids))
 
-    event = {
-        "event_id": str(chosen.get("id") or chosen.get("tx_id") or "tx.demo"),
-        "ts": str(chosen.get("created_at") or iso_now()),
-        "type": "tx.updated",
-        "equivalent": eq,
-        "ttl_ms": 1200,
-        "edges": edges,
-    }
-    return [event]
+    # If the canonical transactions dataset has no snapshot-consistent routes,
+    # we will synthesize demo transactions from the trustlines graph below.
+
+    single = [c for c in candidates if len(c[2]) == 2]
+    multi = [c for c in candidates if len(c[2]) >= 3]
+
+    picked: list[tuple[str, str, list[str]]] = []
+    picked_ids: set[str] = set()
+
+    # Keep the first event single-edge when possible (helps keep existing visuals stable).
+    if candidates:
+        first = single[0] if single else candidates[0]
+        picked.append(first)
+        picked_ids.add(first[0])
+
+    # Ensure at least 1–2 multi-hop events exist in the playlist.
+    for c in multi:
+        if c[0] in picked_ids:
+            continue
+        picked.append(c)
+        picked_ids.add(c[0])
+        if len([x for x in picked if len(x[2]) >= 3]) >= 2:
+            break
+
+    # Fill up to a compact “rail” playlist size.
+    target = 20
+    for c in candidates:
+        if len(picked) >= target:
+            break
+        if c[0] in picked_ids:
+            continue
+        picked.append(c)
+        picked_ids.add(c[0])
+
+    # Synthesize missing events from the trustlines graph (snapshot-consistent by definition).
+    trustlines_path = datasets_root / "trustlines.json"
+    trustlines = read_json(trustlines_path)
+    tl_edges: list[tuple[str, str]] = []
+    if isinstance(trustlines, list):
+        for tl in trustlines:
+            if not isinstance(tl, dict):
+                continue
+            if tl.get("equivalent") != eq:
+                continue
+            s = str(tl.get("from"))
+            t = str(tl.get("to"))
+            if s in snapshot_node_ids and t in snapshot_node_ids:
+                tl_edges.append((s, t))
+
+    # Deterministic edge order.
+    tl_edges = sorted(set(tl_edges))
+
+    # Ensure the playlist is non-empty.
+    if not picked and tl_edges:
+        s, t = tl_edges[0]
+        picked.append(("tx.demo.edge.1", generated_at, [s, t]))
+        picked_ids.add("tx.demo.edge.1")
+
+    # Ensure at least 2 multi-hop events exist (when possible).
+    need_multi = 2 - len([x for x in picked if len(x[2]) >= 3])
+    if need_multi > 0 and tl_edges:
+        cyc: DirectedCycle | None = None
+        for mx in (6, 8, 10):
+            try:
+                cyc = find_directed_cycle(tl_edges, min_len=4, max_len=mx)
+                break
+            except Exception:
+                cyc = None
+
+        if cyc is not None:
+            nodes = list(cyc.nodes)
+            path = nodes[: min(len(nodes), 6)]
+            if len(path) >= 3:
+                for i in range(need_multi):
+                    tx_id = f"tx.demo.multi-hop.{i+1}"
+                    if tx_id in picked_ids:
+                        continue
+                    picked.append((tx_id, generated_at, path))
+                    picked_ids.add(tx_id)
+
+    # Top up with deterministic single-edge events.
+    if tl_edges:
+        synth_idx = 0
+        while len(picked) < target and synth_idx < len(tl_edges):
+            s, t = tl_edges[synth_idx]
+            synth_idx += 1
+            tx_id = f"tx.demo.edge.{synth_idx}"
+            if tx_id in picked_ids:
+                continue
+            picked.append((tx_id, generated_at, [s, t]))
+            picked_ids.add(tx_id)
+
+    events: list[dict[str, Any]] = []
+    for tx_id, ts, path_ids in picked:
+        edges: list[dict[str, str]] = []
+        for a, b in zip(path_ids, path_ids[1:]):
+            edges.append({"from": a, "to": b})
+        events.append(
+            {
+                "event_id": tx_id,
+                "ts": ts,
+                "type": "tx.updated",
+                "equivalent": eq,
+                "ttl_ms": 1200,
+                "edges": edges,
+            }
+        )
+
+    return events
 
 
 def build_demo_clearing_events_from_clearing_cycles(
     *,
     datasets_root: Path,
     eq: str,
+    generated_at: str,
     snapshot_node_ids: set[str],
 ) -> list[dict[str, Any]]:
     """Build clearing demo playlist from canonical clearing-cycles dataset.
@@ -252,48 +361,74 @@ def build_demo_clearing_events_from_clearing_cycles(
     if not isinstance(cycles, list) or len(cycles) == 0:
         return []
 
-    # Deterministic: take the first cycle.
-    cycle0 = cycles[0]
-    if not isinstance(cycle0, list) or len(cycle0) < 2:
+    def cycle_to_edges(cycle: Any) -> list[dict[str, str]] | None:
+        if not isinstance(cycle, list) or len(cycle) < 3:
+            return None
+        edges: list[dict[str, str]] = []
+        for seg in cycle:
+            if not isinstance(seg, dict):
+                return None
+            debtor = seg.get("debtor")
+            creditor = seg.get("creditor")
+            if not isinstance(debtor, str) or not isinstance(creditor, str):
+                return None
+            if debtor not in snapshot_node_ids or creditor not in snapshot_node_ids:
+                return None
+            # TrustLine direction: creditor -> debtor
+            edges.append({"from": creditor, "to": debtor})
+        return edges
+
+    # Deterministic playlist selection.
+    # We prefer multiple distinct cycles over repeating the same cycle multiple times.
+    all_cycles_edges: list[list[dict[str, str]]] = []
+    for cycle in cycles:
+        edges = cycle_to_edges(cycle)
+        if edges:
+            all_cycles_edges.append(edges)
+
+    if not all_cycles_edges:
         return []
 
-    highlight_edges: list[dict[str, str]] = []
-    for seg in cycle0:
-        if not isinstance(seg, dict):
-            continue
-        debtor = seg.get("debtor")
-        creditor = seg.get("creditor")
-        if not isinstance(debtor, str) or not isinstance(creditor, str):
-            continue
-        if debtor not in snapshot_node_ids or creditor not in snapshot_node_ids:
-            # Skip segments that do not exist in the snapshot.
-            continue
-        # TrustLine direction: creditor -> debtor
-        highlight_edges.append({"from": creditor, "to": debtor})
+    # Avoid repeating the same directed edge across steps: it makes the demo look like
+    # we're "sending" the same mutual-debt closure multiple times between the same nodes.
+    used_edge_keys: set[str] = set()
+    picked_cycles: list[list[dict[str, str]]] = []
 
-    if not highlight_edges:
-        return []
+    def edge_key(e: dict[str, str]) -> str:
+        return f"{e['from']}→{e['to']}"
 
-    plan_id = f"clearing-demo-{eq}-{highlight_edges[0]['from'][:12]}"
+    max_steps = 8
+    for edges in all_cycles_edges:
+        keys = [edge_key(e) for e in edges]
+        if any(k in used_edge_keys for k in keys):
+            continue
+        picked_cycles.append(edges)
+        used_edge_keys.update(keys)
+        if len(picked_cycles) >= max_steps:
+            break
 
-    steps = [
-        {
-            "at_ms": 0,
-            "highlight_edges": highlight_edges,
-        },
-        {
-            "at_ms": 380,
-            "flash": {"kind": "clearing"},
-        },
-        {
-            "at_ms": 720,
-            "highlight_edges": highlight_edges,
-        },
-    ]
+    # If the dataset is small or very overlapping, allow fewer steps (but keep it meaningful).
+    # We require at least 3 steps to actually demonstrate "clearing as a process".
+    if len(picked_cycles) < 3:
+        # Fall back to the first 3 valid cycles, even if they overlap.
+        picked_cycles = all_cycles_edges[: min(3, len(all_cycles_edges))]
+
+    plan_id = f"clearing-demo-{eq}"
+
+    step_gap_ms = 900
+    steps: list[dict[str, Any]] = []
+    for idx, edges in enumerate(picked_cycles):
+        steps.append(
+            {
+                "at_ms": idx * step_gap_ms,
+                "highlight_edges": edges,
+                "particles_edges": edges,
+            }
+        )
 
     plan_evt = {
         "event_id": f"{plan_id}.plan",
-        "ts": iso_now(),
+        "ts": generated_at,
         "type": "clearing.plan",
         "equivalent": eq,
         "plan_id": plan_id,
@@ -302,7 +437,7 @@ def build_demo_clearing_events_from_clearing_cycles(
 
     done_evt = {
         "event_id": f"{plan_id}.done",
-        "ts": iso_now(),
+        "ts": generated_at,
         "type": "clearing.done",
         "equivalent": eq,
         "plan_id": plan_id,
@@ -354,12 +489,20 @@ def main() -> int:
     write_json(eq_out / "snapshot.json", snapshot)
 
     node_ids = {n["id"] for n in snapshot["nodes"]}
-    tx_events = build_demo_tx_events(datasets_root=datasets_root, eq=args.eq, snapshot_node_ids=node_ids)
+    link_keys = {l["id"] for l in snapshot["links"]}
+    tx_events = build_demo_tx_events(
+        datasets_root=datasets_root,
+        eq=args.eq,
+        generated_at=generated_at,
+        snapshot_node_ids=node_ids,
+        snapshot_link_keys=link_keys,
+    )
     write_json(eq_out / "events" / "demo-tx.json", tx_events)
 
     clearing_events = build_demo_clearing_events_from_clearing_cycles(
         datasets_root=datasets_root,
         eq=args.eq,
+        generated_at=generated_at,
         snapshot_node_ids=node_ids,
     )
     write_json(eq_out / "events" / "demo-clearing.json", clearing_events)

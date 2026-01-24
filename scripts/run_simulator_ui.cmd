@@ -8,25 +8,16 @@ rem Runs GEO Simulator UI prototype (standalone Vite app).
 rem Usage (cmd.exe):
 rem   scripts\run_simulator_ui.cmd
 
-set "APP_DIR=%~dp0..\simulator-ui\v2"
+set "REPO_ROOT=%~dp0.."
+set "APP_DIR=%REPO_ROOT%\simulator-ui\v2"
 
 if not exist "%APP_DIR%" goto :ERR_NO_DIR
 if not exist "%APP_DIR%\package.json" goto :ERR_NO_PKG
 
-cd /d "%APP_DIR%" || goto :ERR_CD
-
-if exist "node_modules\" goto :RUN
-echo Installing dependencies (npm install)...
-call npm install
-if errorlevel 1 goto :ERR_NPM
-
-echo.
-echo Starting GEO Simulator UI (Vite dev server)...
-echo Open in browser: http://localhost:5176/
-echo.
-
-:RUN
-call npm run dev
+rem Prefer PowerShell script: it detects an already-running server on the port,
+rem and if the port is occupied by something else it picks the next free port.
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\run_simulator_ui.ps1"
+if errorlevel 1 goto :ERR_PWSH
 goto :EOF
 
 :ERR_NO_DIR
@@ -43,6 +34,10 @@ exit /b 1
 
 :ERR_NPM
 echo npm install failed
+exit /b 1
+
+:ERR_PWSH
+echo Failed to start Simulator UI via PowerShell script.
 exit /b 1
 
 
