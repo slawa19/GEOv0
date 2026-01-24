@@ -1,6 +1,6 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { VizMapping } from '../vizMapping'
-import { drawNodeShape, sizeForNode, type LayoutNode } from './nodePainter'
+import { drawNodeShape, fillForNode, sizeForNode, type LayoutNode } from './nodePainter'
 
 export type LayoutLink = GraphLink & { __key: string }
 
@@ -18,11 +18,48 @@ function isIncident(link: LayoutLink, nodeId: string) {
   return link.source === nodeId || link.target === nodeId
 }
 
-function focusGlowColor(n: GraphNode) {
-  const s = Number(n.net_sign ?? 0)
-  if (s > 0) return '#22d3ee' // credit
-  if (s < 0) return '#f97316' // debt
-  return '#e2e8f0' // near-zero (neutral white/slate)
+function clamp01(v: number) {
+  return Math.max(0, Math.min(1, v))
+}
+
+type Rgb = { r: number; g: number; b: number }
+const rgbCache = new Map<string, Rgb | null>()
+
+function parseHexRgb(color: string): Rgb | null {
+  const c = String(color || '').trim()
+  if (!c.startsWith('#')) return null
+  const hex = c.slice(1)
+  const isShort = hex.length === 3
+  const isLong = hex.length === 6
+  if (!isShort && !isLong) return null
+  const r = parseInt(isShort ? hex[0]! + hex[0]! : hex.slice(0, 2), 16)
+  const g = parseInt(isShort ? hex[1]! + hex[1]! : hex.slice(2, 4), 16)
+  const b = parseInt(isShort ? hex[2]! + hex[2]! : hex.slice(4, 6), 16)
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null
+  return { r, g, b }
+}
+
+function withAlpha(color: string, alpha: number) {
+  const a = clamp01(alpha)
+  const c = String(color || '').trim()
+  if (c.startsWith('rgba(') || c.startsWith('hsla(')) return c
+  if (!c.startsWith('#')) return c
+
+  let rgb = rgbCache.get(c)
+  if (rgb === undefined) {
+    rgb = parseHexRgb(c)
+    rgbCache.set(c, rgb)
+  }
+  if (!rgb) return c
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`
+}
+
+type Palette = Record<string, { color: string; label?: string }>
+
+function linkColor(l: GraphLink, mapping: VizMapping, palette?: Palette) {
+  const k = String(l.viz_color_key ?? '')
+  const p = k && palette ? palette[k] : undefined
+  return p?.color ?? mapping.link.color.default
 }
 
 function getLinkTermination(n: LayoutNode, target: { __x: number; __y: number }) {
@@ -69,10 +106,11 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   nodes: LayoutNode[]
   links: LayoutLink[]
   mapping: VizMapping
+  palette?: Palette
   selectedNodeId: string | null
   activeEdges: Set<string>
 }) {
-  const { w, h, nodes, links, mapping, selectedNodeId, activeEdges } = opts
+  const { w, h, nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
 
   // Background (deep space).
   ctx.fillStyle = '#020617'
@@ -80,48 +118,67 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 
   const pos = new Map(nodes.map((n) => [n.id, n]))
 
-  // Links (very faint in idle; brighter on focus/active edges).
+  // Links: base pass = strictly semantic viz_* (no focus/active overrides).
   for (const link of links) {
     const a = pos.get(link.source)!
     const b = pos.get(link.target)!
 
-    // Calculate termination points at contours
     const start = getLinkTermination(a, b)
     const end = getLinkTermination(b, a)
 
-    let alpha = linkAlpha(link, mapping)
-    let width = linkWidthPx(link, mapping)
+    const alpha = linkAlpha(link, mapping)
+    const width = linkWidthPx(link, mapping)
+    const color = linkColor(link, mapping, palette)
 
-    const active = activeEdges.has(link.__key)
-
-    if (active) {
-      alpha = 1.0 // Active = Fully visible
-      width = mapping.link.width_px.highlight
-      // Active edges are Electric Cyan (to match sparks)
-      ctx.strokeStyle = `rgba(34, 211, 238, ${alpha})` 
-    } else if (selectedNodeId) {
-      // Focus mode
-      if (isIncident(link, selectedNodeId)) {
-        alpha = 0.5 // Clearly visible but not blinding
-        width = mapping.link.width_px.thin
-        // Incident edges are Lighter Slate
-        ctx.strokeStyle = `rgba(148, 163, 184, ${alpha})`
-      } else {
-        alpha = 0.03 // Almost invisible
-        width = mapping.link.width_px.hairline
-        // Non-incident are dark
-        ctx.strokeStyle = `rgba(71, 85, 105, ${alpha})`
-      }
-    } else {
-      // Idle mode
-      ctx.strokeStyle = `rgba(100,116,139,${alpha})`
-    }
-
+    ctx.strokeStyle = withAlpha(color, alpha)
     ctx.lineWidth = width
     ctx.beginPath()
     ctx.moveTo(start.x, start.y)
     ctx.lineTo(end.x, end.y)
     ctx.stroke()
+  }
+
+  // Links: overlay pass = UX highlight for focus/active without overwriting base style.
+  if (selectedNodeId || activeEdges.size > 0) {
+    for (const link of links) {
+      const isActive = activeEdges.has(link.__key)
+      const isFocusIncident = !!selectedNodeId && isIncident(link, selectedNodeId)
+      if (!isActive && !isFocusIncident) continue
+
+      const a = pos.get(link.source)!
+      const b = pos.get(link.target)!
+      const start = getLinkTermination(a, b)
+      const end = getLinkTermination(b, a)
+
+      const baseAlpha = linkAlpha(link, mapping)
+      const baseWidth = linkWidthPx(link, mapping)
+      const baseColor = linkColor(link, mapping, palette)
+
+      // Focus overlay: boost visibility but keep semantic color.
+      if (isFocusIncident && !isActive) {
+        const alpha = clamp01(baseAlpha * 3.0)
+        const width = Math.max(baseWidth, mapping.link.width_px.thin)
+        ctx.strokeStyle = withAlpha(baseColor, alpha)
+        ctx.lineWidth = width
+        ctx.beginPath()
+        ctx.moveTo(start.x, start.y)
+        ctx.lineTo(end.x, end.y)
+        ctx.stroke()
+        continue
+      }
+
+      // Active overlay: explicit UX color policy (matches tx sparks) but stays as a separate layer.
+      if (isActive) {
+        const alpha = clamp01(Math.max(mapping.link.alpha.hi, baseAlpha * 4.0))
+        const width = Math.max(baseWidth, mapping.link.width_px.highlight)
+        ctx.strokeStyle = withAlpha('#22d3ee', alpha)
+        ctx.lineWidth = width
+        ctx.beginPath()
+        ctx.moveTo(start.x, start.y)
+        ctx.lineTo(end.x, end.y)
+        ctx.stroke()
+      }
+    }
   }
 
   // Nodes
@@ -133,7 +190,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       // Stronger but diffuse (not a sharp second contour)
       
       const { w: nw, h: nh } = sizeForNode(n as GraphNode)
-      const glow = focusGlowColor(n as GraphNode)
+      const glow = fillForNode(n as GraphNode, mapping)
       const isBusiness = n.type === 'business'
       
       const r = Math.max(nw, nh) / 2

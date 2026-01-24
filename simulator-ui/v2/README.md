@@ -2,7 +2,7 @@
 
 This folder is the *current* home for the demo-fast-mock v2 implementation.
 
-Legacy / previous prototype was archived to `simulator-ui/v2/` and should be treated as outdated reference.
+Legacy / previous prototype was archived to `simulator-ui/v1/` and should be treated as outdated reference.
 
 ## Run (Windows)
 
@@ -14,7 +14,7 @@ From repo root:
 Or manually:
 
 ```bash
-cd simulator-ui
+cd simulator-ui/v2
 npm install
 npm run dev
 ```

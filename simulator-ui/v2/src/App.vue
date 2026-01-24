@@ -800,10 +800,12 @@ async function loadScene() {
     if (scene.value === 'D') {
       const r = await loadEvents(effectiveEq.value, 'demo-tx')
       state.eventsPath = r.sourcePath
+      assertPlaylistEdgesExistInSnapshot({ snapshot, events: r.events, eventsPath: r.sourcePath })
     }
     if (scene.value === 'E') {
       const r = await loadEvents(effectiveEq.value, 'demo-clearing')
       state.eventsPath = r.sourcePath
+      assertPlaylistEdgesExistInSnapshot({ snapshot, events: r.events, eventsPath: r.sourcePath })
     }
 
     resizeAndLayout()
@@ -848,7 +850,13 @@ watch(layoutMode, () => {
 onMounted(() => {
   try {
     const v = String(localStorage.getItem('geo.sim.layoutMode') ?? '')
-    if (v === 'admin-force' || v === 'community-clusters' || v === 'balance-split') {
+    if (
+      v === 'admin-force' ||
+      v === 'community-clusters' ||
+      v === 'balance-split' ||
+      v === 'type-split' ||
+      v === 'status-split'
+    ) {
       layoutMode.value = v
     }
   } catch {
@@ -915,6 +923,12 @@ function renderFrame(nowMs: number) {
       state.floatingLabels[write++] = fl
     }
     state.floatingLabels.length = write
+
+    const maxFloatingLabels = 60
+    if (state.floatingLabels.length > maxFloatingLabels) {
+      // Drop oldest labels first.
+      state.floatingLabels.splice(0, state.floatingLabels.length - maxFloatingLabels)
+    }
   }
 
   const pos = drawBaseGraph(ctx, {
@@ -923,6 +937,7 @@ function renderFrame(nowMs: number) {
     nodes: layout.nodes as unknown as RenderLayoutNode[],
     links: layout.links as unknown as RenderLayoutLink[],
     mapping: VIZ_MAPPING,
+    palette: state.snapshot?.palette,
     selectedNodeId: state.selectedNodeId,
     activeEdges: state.activeEdges,
   })
@@ -1020,13 +1035,17 @@ async function runTxOnce() {
     const evt = events.find((e) => e.type === 'tx.updated')
     if (!evt || evt.type !== 'tx.updated') return
 
-    for (const e of evt.edges) {
-      state.activeEdges.add(keyEdge(e.from, e.to))
+    const fxTestMode = isTestMode.value && isWebDriver
+
+    // In screenshot tests (test-mode + webdriver) we keep a deterministic, non-FX visual signal.
+    // In normal mode, edge glow must come from the spark/beam (so it fades with the flight).
+    if (fxTestMode) {
+      for (const e of evt.edges) {
+        state.activeEdges.add(keyEdge(e.from, e.to))
+      }
     }
 
     const ttl = Math.max(250, evt.ttl_ms || 1200)
-
-    const fxTestMode = isTestMode.value && isWebDriver
 
     spawnSparks(fxState, {
       edges: evt.edges,
@@ -1421,14 +1440,16 @@ onUnmounted(() => {
       <div class="overlay-text mono">{{ state.error }}</div>
     </div>
 
-    <!-- Floating Labels -->
-    <div
-      v-for="fl in state.floatingLabels"
-      :key="fl.id"
-      class="floating-label"
-      :style="{ left: fl.x + 'px', top: fl.y + 'px', color: fl.color }"
-    >
-      {{ fl.text }}
+    <!-- Floating Labels (isolated layer for perf) -->
+    <div class="floating-layer">
+      <div
+        v-for="fl in state.floatingLabels"
+        :key="fl.id"
+        class="floating-label"
+        :style="{ transform: `translate3d(${fl.x}px, ${fl.y}px, 0)` }"
+      >
+        <div class="floating-label-inner" :style="{ color: fl.color }">{{ fl.text }}</div>
+      </div>
     </div>
   </div>
 </template>
@@ -1611,29 +1632,46 @@ onUnmounted(() => {
   border-color: rgba(248, 113, 113, 0.35);
 }
 
+.floating-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  /* Isolate layout/paint of transient labels from the rest of the UI. */
+  contain: layout paint;
+}
+
 .floating-label {
   position: absolute;
+  left: 0;
+  top: 0;
   pointer-events: none;
+  will-change: transform;
+}
+
+.floating-label-inner {
   font-size: 15px;
   font-weight: 700;
   text-shadow: 0 0 10px currentColor; /* Glow */
-  animation: floatUpFade 1.8s ease-out forwards;
-  z-index: 50;
-  transform: translate(-50%, -50%); /* Centered on spawn point */
+  animation: floatUpFade 1.8s linear forwards;
+  /* Keep centering constant; animate only a pixel offset for smooth motion. */
+  transform: translate3d(-50%, -50%, 0) translate3d(0, 0, 0);
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 @keyframes floatUpFade {
   0% {
     opacity: 0;
-    transform: translate(-50%, -40%) scale(0.8);
+    transform: translate3d(-50%, -50%, 0) translate3d(0, 0, 0);
   }
-  15% {
+  1% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1.1);
+    transform: translate3d(-50%, -50%, 0) translate3d(0, -1px, 0);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -120%) scale(1.0);
+    transform: translate3d(-50%, -50%, 0) translate3d(0, -72px, 0);
   }
 }
 </style>
