@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import type { DemoEvent, EdgePatch, GraphLink, GraphNode, GraphSnapshot, NodePatch } from './types'
+import type {
+  ClearingDoneEvent,
+  ClearingPlanEvent,
+  DemoEvent,
+  EdgePatch,
+  GraphLink,
+  GraphNode,
+  GraphSnapshot,
+  NodePatch,
+  TxUpdatedEvent,
+} from './types'
 import { loadEvents, loadSnapshot } from './fixtures'
 import { VIZ_MAPPING } from './vizMapping'
 import { drawBaseGraph, type LayoutLink as RenderLayoutLink } from './render/baseGraph'
@@ -36,6 +46,9 @@ const state = reactive({
   sourcePath: '' as string,
   eventsPath: '' as string,
   snapshot: null as GraphSnapshot | null,
+  demoTxEvents: [] as TxUpdatedEvent[],
+  demoClearingPlan: null as ClearingPlanEvent | null,
+  demoClearingDone: null as ClearingDoneEvent | null,
   selectedNodeId: null as string | null,
   activeEdges: new Set<string>(),
   flash: 0 as number,
@@ -65,6 +78,21 @@ function fxColorForNode(nodeId: string, fallback: string): string {
 
 const selectedNode = computed(() => getNodeById(state.selectedNodeId))
 
+type LabelsLod = 'off' | 'selection' | 'neighbors'
+type Quality = 'low' | 'med' | 'high'
+
+const labelsLod = ref<LabelsLod>('selection')
+const quality = ref<Quality>('high')
+
+const dprClamp = computed(() => {
+  if (isTestMode.value) return 1
+  if (quality.value === 'low') return 1
+  if (quality.value === 'med') return 1.5
+  return 2
+})
+
+const showDemoControls = computed(() => !isTestMode.value && (scene.value === 'D' || scene.value === 'E'))
+
 type LayoutNode = GraphNode & { __x: number; __y: number }
 type LayoutLink = GraphLink & { __key: string }
 
@@ -83,7 +111,11 @@ let clearingRunSeq = 0
 const activeTimeouts: number[] = []
 
 function scheduleTimeout(fn: () => void, delayMs: number) {
-  const id = window.setTimeout(fn, delayMs)
+  const id = window.setTimeout(() => {
+    const i = activeTimeouts.indexOf(id)
+    if (i >= 0) activeTimeouts.splice(i, 1)
+    fn()
+  }, delayMs)
   activeTimeouts.push(id)
   return id
 }
@@ -706,6 +738,64 @@ function resetOverlays() {
   resetFxState(fxState)
 }
 
+const playlist = reactive({
+  playing: false,
+  txIndex: 0,
+  clearingStepIndex: 0,
+})
+
+function stopPlaylistPlayback() {
+  playlist.playing = false
+  clearScheduledTimeouts()
+}
+
+function resetPlaylistPointers() {
+  playlist.playing = false
+  playlist.txIndex = 0
+  playlist.clearingStepIndex = 0
+}
+
+function resetDemoState() {
+  stopPlaylistPlayback()
+  resetPlaylistPointers()
+  resetOverlays()
+  state.selectedNodeId = null
+}
+
+const labelNodes = computed(() => {
+  if (isTestMode.value) return []
+  if (labelsLod.value === 'off') return []
+  if (!state.snapshot || !state.selectedNodeId) return []
+
+  const ids = new Set<string>()
+  ids.add(state.selectedNodeId)
+
+  if (labelsLod.value === 'neighbors') {
+    const center = state.selectedNodeId
+    for (const l of layout.links) {
+      if (l.source === center) ids.add(l.target)
+      else if (l.target === center) ids.add(l.source)
+    }
+  }
+
+  const max = 28
+  const out: Array<{ id: string; x: number; y: number; text: string; color: string }> = []
+  for (const id of Array.from(ids)) {
+    if (out.length >= max) break
+    const ln = layout.nodes.find((n) => n.id === id)
+    if (!ln) continue
+    const gn = getNodeById(id)
+    out.push({
+      id,
+      x: ln.__x,
+      y: ln.__y,
+      text: gn?.name ? String(gn.name) : id,
+      color: fxColorForNode(id, '#e2e8f0'),
+    })
+  }
+  return out
+})
+
 function applyNodePatches(patches: NodePatch[] | undefined) {
   if (!patches?.length || !state.snapshot) return
 
@@ -784,11 +874,15 @@ function applyPatchesFromEvent(evt: DemoEvent) {
 
 async function loadScene() {
   clearScheduledTimeouts()
+  resetPlaylistPointers()
   state.loading = true
   state.error = ''
   state.sourcePath = ''
   state.eventsPath = ''
   state.snapshot = null
+  state.demoTxEvents = []
+  state.demoClearingPlan = null
+  state.demoClearingDone = null
   state.selectedNodeId = null
   resetOverlays()
 
@@ -801,11 +895,14 @@ async function loadScene() {
       const r = await loadEvents(effectiveEq.value, 'demo-tx')
       state.eventsPath = r.sourcePath
       assertPlaylistEdgesExistInSnapshot({ snapshot, events: r.events, eventsPath: r.sourcePath })
+      state.demoTxEvents = r.events.filter((e): e is TxUpdatedEvent => e.type === 'tx.updated')
     }
     if (scene.value === 'E') {
       const r = await loadEvents(effectiveEq.value, 'demo-clearing')
       state.eventsPath = r.sourcePath
       assertPlaylistEdgesExistInSnapshot({ snapshot, events: r.events, eventsPath: r.sourcePath })
+      state.demoClearingPlan = r.events.find((e): e is ClearingPlanEvent => e.type === 'clearing.plan') ?? null
+      state.demoClearingDone = r.events.find((e): e is ClearingDoneEvent => e.type === 'clearing.done') ?? null
     }
 
     resizeAndLayout()
@@ -824,7 +921,7 @@ function resizeAndLayout() {
   if (!canvas || !fxCanvas || !host || !state.snapshot) return
 
   const rect = host.getBoundingClientRect()
-  const dpr = isTestMode.value ? 1 : Math.min(2, window.devicePixelRatio || 1)
+  const dpr = Math.min(dprClamp.value, window.devicePixelRatio || 1)
 
   canvas.width = Math.max(1, Math.floor(rect.width * dpr))
   canvas.height = Math.max(1, Math.floor(rect.height * dpr))
@@ -865,6 +962,21 @@ onMounted(() => {
 })
 
 onMounted(() => {
+  try {
+    const q = String(localStorage.getItem('geo.sim.quality') ?? '')
+    if (q === 'low' || q === 'med' || q === 'high') quality.value = q
+  } catch {
+    // ignore
+  }
+  try {
+    const l = String(localStorage.getItem('geo.sim.labelsLod') ?? '')
+    if (l === 'off' || l === 'selection' || l === 'neighbors') labelsLod.value = l
+  } catch {
+    // ignore
+  }
+})
+
+onMounted(() => {
   // Dev-only hook for quick runtime sanity checks (does not affect rendering).
   if (!import.meta.env.DEV) return
   ;(window as any).__geoSim = {
@@ -892,6 +1004,23 @@ onMounted(() => {
 watch(layoutMode, () => {
   try {
     localStorage.setItem('geo.sim.layoutMode', layoutMode.value)
+  } catch {
+    // ignore
+  }
+})
+
+watch(quality, () => {
+  try {
+    localStorage.setItem('geo.sim.quality', quality.value)
+  } catch {
+    // ignore
+  }
+  resizeAndLayout()
+})
+
+watch(labelsLod, () => {
+  try {
+    localStorage.setItem('geo.sim.labelsLod', labelsLod.value)
   } catch {
     // ignore
   }
@@ -1013,8 +1142,101 @@ function nodeCardStyle() {
   return { left: `${x}px`, top: `${y}px` }
 }
 
+function runTxEvent(evt: TxUpdatedEvent, opts?: { onFinished?: () => void }) {
+  if (!state.snapshot) return
+
+  const fxTestMode = isTestMode.value && isWebDriver
+  const runId = ++txRunSeq
+
+  // In screenshot tests (test-mode + webdriver) we keep a deterministic, non-FX visual signal.
+  // In normal mode, edge glow must come from the spark/beam (so it fades with the flight).
+  if (fxTestMode) {
+    for (const e of evt.edges) state.activeEdges.add(keyEdge(e.from, e.to))
+  }
+
+  const ttl = Math.max(250, evt.ttl_ms || 1200)
+
+  spawnSparks(fxState, {
+    edges: evt.edges,
+    nowMs: performance.now(),
+    ttlMs: ttl,
+    colorCore: VIZ_MAPPING.fx.tx_spark.core,
+    colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
+    thickness: 1.0,
+    kind: 'beam',
+    seedPrefix: `tx:${effectiveEq.value}`,
+    countPerEdge: 1,
+    keyEdge,
+    seedFn: fnv1a,
+    isTestMode: fxTestMode,
+  })
+
+  // Flash at source
+  if (!fxTestMode && evt.edges.length > 0) {
+    const sourceId = evt.edges[0]!.from
+    spawnNodeBursts(fxState, {
+      nodeIds: [sourceId],
+      nowMs: performance.now(),
+      durationMs: 360,
+      color: fxColorForNode(sourceId, VIZ_MAPPING.fx.tx_spark.trail),
+      kind: 'tx-impact',
+      seedPrefix: 'burst-src',
+      seedFn: fnv1a,
+      isTestMode: fxTestMode,
+    })
+  }
+
+  // Flash + label at destination
+  if (!fxTestMode && evt.edges.length > 0) {
+    const lastEdge = evt.edges[evt.edges.length - 1]!
+    const targetId = lastEdge.to
+
+    scheduleTimeout(() => {
+      if (runId !== txRunSeq) return
+
+      spawnNodeBursts(fxState, {
+        nodeIds: [targetId],
+        nowMs: performance.now(),
+        durationMs: 520,
+        color: fxColorForNode(targetId, VIZ_MAPPING.fx.tx_spark.trail),
+        kind: 'tx-impact',
+        seedPrefix: 'burst',
+        seedFn: fnv1a,
+        isTestMode: fxTestMode,
+      })
+
+      const ln = layout.nodes.find((n) => n.id === targetId)
+      if (ln) {
+        state.floatingLabels.push({
+          id: Math.floor(performance.now()),
+          x: ln.__x,
+          y: ln.__y - 20,
+          text: '+125 GC',
+          color: fxColorForNode(targetId, '#22d3ee'),
+          // Keep in DOM slightly longer than CSS animation (prevents growth without visual change).
+          expiresAtMs: performance.now() + 2200,
+        })
+      }
+    }, ttl)
+  }
+
+  if (fxTestMode) return
+
+  const burstDurationMs = 520
+  const cleanupDelayMs = ttl + burstDurationMs + 50
+
+  scheduleTimeout(() => {
+    if (runId !== txRunSeq) return
+    applyPatchesFromEvent(evt)
+    resetOverlays()
+    opts?.onFinished?.()
+  }, cleanupDelayMs)
+}
+
 async function runTxOnce() {
   if (!state.snapshot) return
+
+  stopPlaylistPlayback()
 
   state.error = ''
 
@@ -1028,113 +1250,15 @@ async function runTxOnce() {
     clearScheduledTimeouts()
     resetOverlays()
 
-    const runId = ++txRunSeq
-
-    const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-tx')
-    assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
-    const evt = events.find((e) => e.type === 'tx.updated')
-    if (!evt || evt.type !== 'tx.updated') return
-
-    const fxTestMode = isTestMode.value && isWebDriver
-
-    // In screenshot tests (test-mode + webdriver) we keep a deterministic, non-FX visual signal.
-    // In normal mode, edge glow must come from the spark/beam (so it fades with the flight).
-    if (fxTestMode) {
-      for (const e of evt.edges) {
-        state.activeEdges.add(keyEdge(e.from, e.to))
-      }
+    let evt: TxUpdatedEvent | undefined = state.demoTxEvents[0]
+    if (!evt) {
+      const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-tx')
+      assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
+      evt = events.find((e): e is TxUpdatedEvent => e.type === 'tx.updated')
     }
+    if (!evt) return
 
-    const ttl = Math.max(250, evt.ttl_ms || 1200)
-
-    spawnSparks(fxState, {
-      edges: evt.edges,
-      nowMs: performance.now(),
-      ttlMs: ttl,
-      colorCore: VIZ_MAPPING.fx.tx_spark.core,
-      colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
-      thickness: 1.0,
-      kind: 'beam',
-      seedPrefix: `tx:${effectiveEq.value}`,
-      countPerEdge: 1,
-      keyEdge,
-      seedFn: fnv1a,
-      isTestMode: fxTestMode,
-    })
-
-    // Flash at source
-    if (!fxTestMode && evt.edges.length > 0) {
-      const sourceId = evt.edges[0]!.from
-      spawnNodeBursts(fxState, {
-        nodeIds: [sourceId],
-        nowMs: performance.now(),
-        durationMs: 360,
-        color: fxColorForNode(sourceId, VIZ_MAPPING.fx.tx_spark.trail),
-        kind: 'tx-impact',
-        seedPrefix: 'burst-src',
-        seedFn: fnv1a,
-        isTestMode: fxTestMode,
-      })
-    }
-
-    if (import.meta.env.DEV) {
-      ;(window as any).__geoSimLastTxSpawn = {
-        t: Date.now(),
-        sparks: fxState.sparks.length,
-        edges: evt.edges.length,
-        fxTestMode,
-      }
-    }
-
-    // Flash and Label at destination
-    if (!fxTestMode && evt.edges.length > 0) {
-      const lastEdge = evt.edges[evt.edges.length - 1]!
-      const targetId = lastEdge.to
-
-      scheduleTimeout(() => {
-        if (runId !== txRunSeq) return
-        // 1. Flash Burst on target
-        spawnNodeBursts(fxState, {
-          nodeIds: [targetId],
-          nowMs: performance.now(),
-          durationMs: 520,
-          color: fxColorForNode(targetId, VIZ_MAPPING.fx.tx_spark.trail),
-          kind: 'tx-impact',
-          seedPrefix: 'burst',
-          seedFn: fnv1a,
-          isTestMode: fxTestMode,
-        })
-
-        // 2. Floating Label
-        const ln = layout.nodes.find((n) => n.id === targetId)
-        if (ln) {
-          state.floatingLabels.push({
-            id: Math.floor(performance.now()),
-            x: ln.__x,
-            y: ln.__y - 20,
-            text: '+125 GC',
-            color: fxColorForNode(targetId, '#22d3ee'),
-            // Keep in DOM slightly longer than CSS animation (prevents growth without visual change).
-            expiresAtMs: performance.now() + 2200,
-          })
-        }
-      }, ttl)
-    }
-
-    if (fxTestMode) return
-
-    // Reset after all effects complete:
-    // - spark flight takes `ttl` ms
-    // - target burst starts at ttl and lasts 520ms
-    // - add small buffer (50ms)
-    const burstDurationMs = 520
-    const cleanupDelayMs = ttl + burstDurationMs + 50
-
-    scheduleTimeout(() => {
-      if (runId !== txRunSeq) return
-      applyPatchesFromEvent(evt)
-      resetOverlays()
-    }, cleanupDelayMs)
+    runTxEvent(evt)
   } catch (e: any) {
     const msg = String(e?.message ?? e)
     state.error = msg
@@ -1328,6 +1452,212 @@ async function runClearingOnce() {
   }
 }
 
+const canDemoPlay = computed(() => {
+  if (scene.value === 'D') return state.demoTxEvents.length > 0
+  if (scene.value === 'E') return !!state.demoClearingPlan
+  return false
+})
+
+const demoPlayLabel = computed(() => (playlist.playing ? 'Pause' : 'Play'))
+
+function runClearingStep(stepIndex: number, opts?: { onFinished?: () => void }) {
+  const plan = state.demoClearingPlan
+  if (!plan) return
+  if (!state.snapshot) return
+
+  const step = plan.steps[stepIndex]
+  if (!step) return
+
+  const runId = ++clearingRunSeq
+  const clearingGold = '#fbbf24'
+  const microTtlMs = 780
+  const microGapMs = 110
+  const labelLifeMs = 2200
+
+  const formatDemoDebtAmount = (from: string, to: string, seedAtMs: number) => {
+    const h = fnv1a(`clearing:amt:${effectiveEq.value}:${seedAtMs}:${keyEdge(from, to)}`)
+    const amt = 10 + (h % 197) * 5
+    return `${amt} GC`
+  }
+
+  if (step.highlight_edges && step.highlight_edges.length > 0) {
+    spawnEdgePulses(fxState, {
+      edges: step.highlight_edges,
+      nowMs: performance.now(),
+      durationMs: 650,
+      color: clearingGold,
+      thickness: 1.0,
+      seedPrefix: `clearing:highlight:${effectiveEq.value}:${step.at_ms}`,
+      countPerEdge: 1,
+      keyEdge,
+      seedFn: fnv1a,
+      isTestMode: false,
+    })
+  }
+
+  const edges = step.particles_edges ?? []
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i]!
+    const delayMs = i * microGapMs
+
+    scheduleTimeout(() => {
+      if (runId !== clearingRunSeq) return
+      spawnNodeBursts(fxState, {
+        nodeIds: [e.from],
+        nowMs: performance.now(),
+        durationMs: 360,
+        color: fxColorForNode(e.from, clearingGold),
+        kind: 'tx-impact',
+        seedPrefix: `clearing:fromGlow:${effectiveEq.value}:${step.at_ms}:${i}`,
+        seedFn: fnv1a,
+        isTestMode: false,
+      })
+
+      spawnSparks(fxState, {
+        edges: [e],
+        nowMs: performance.now(),
+        ttlMs: microTtlMs,
+        colorCore: '#ffffff',
+        colorTrail: clearingGold,
+        thickness: 1.1,
+        kind: 'beam',
+        seedPrefix: `clearing:micro:${effectiveEq.value}:${step.at_ms}:${i}`,
+        countPerEdge: 1,
+        keyEdge,
+        seedFn: fnv1a,
+        isTestMode: isTestMode.value,
+      })
+    }, delayMs)
+
+    scheduleTimeout(() => {
+      if (runId !== clearingRunSeq) return
+
+      spawnNodeBursts(fxState, {
+        nodeIds: [e.to],
+        nowMs: performance.now(),
+        durationMs: 520,
+        color: fxColorForNode(e.to, clearingGold),
+        kind: 'tx-impact',
+        seedPrefix: `clearing:impact:${effectiveEq.value}:${step.at_ms}:${i}`,
+        seedFn: fnv1a,
+        isTestMode: false,
+      })
+
+      const ln = layout.nodes.find((n) => n.id === e.to)
+      if (ln) {
+        state.floatingLabels.push({
+          id: Math.floor(performance.now()) + fnv1a(`lbl:${step.at_ms}:${i}:${keyEdge(e.from, e.to)}`),
+          x: ln.__x,
+          y: ln.__y - 20,
+          text: formatDemoDebtAmount(e.from, e.to, step.at_ms),
+          color: fxColorForNode(e.to, clearingGold),
+          expiresAtMs: performance.now() + labelLifeMs,
+        })
+      }
+    }, delayMs + microTtlMs)
+  }
+
+  const isLast = stepIndex >= plan.steps.length - 1
+  const targetBurstDurationMs = 520
+  const particlesEndsAt = edges.length > 0 ? (edges.length - 1) * microGapMs + microTtlMs + targetBurstDurationMs : 0
+  const cleanupDelayMs = Math.max(650, particlesEndsAt) + 50
+
+  scheduleTimeout(() => {
+    if (runId !== clearingRunSeq) return
+    if (isLast && state.demoClearingDone) applyPatchesFromEvent(state.demoClearingDone)
+    resetOverlays()
+    opts?.onFinished?.()
+  }, cleanupDelayMs)
+}
+
+function demoStepOnce() {
+  if (!state.snapshot) return
+  if (!canDemoPlay.value) return
+
+  stopPlaylistPlayback()
+  resetOverlays()
+
+  if (scene.value === 'D') {
+    const n = Math.max(1, state.demoTxEvents.length)
+    const i = ((playlist.txIndex % n) + n) % n
+    const evt = state.demoTxEvents[i]
+    if (!evt) return
+    playlist.txIndex = (i + 1) % n
+    runTxEvent(evt)
+    return
+  }
+
+  if (scene.value === 'E') {
+    const plan = state.demoClearingPlan
+    if (!plan || plan.steps.length === 0) return
+    const n = plan.steps.length
+    const i = ((playlist.clearingStepIndex % n) + n) % n
+    playlist.clearingStepIndex = (i + 1) % n
+    runClearingStep(i)
+  }
+}
+
+function demoTogglePlay() {
+  if (!state.snapshot) return
+  if (!canDemoPlay.value) return
+
+  if (playlist.playing) {
+    stopPlaylistPlayback()
+    return
+  }
+
+  clearScheduledTimeouts()
+  resetOverlays()
+  playlist.playing = true
+
+  const playNext = () => {
+    if (!playlist.playing) return
+
+    if (scene.value === 'D') {
+      const n = Math.max(1, state.demoTxEvents.length)
+      const i = ((playlist.txIndex % n) + n) % n
+      const evt = state.demoTxEvents[i]
+      if (!evt) {
+        playlist.playing = false
+        return
+      }
+
+      runTxEvent(evt, {
+        onFinished: () => {
+          if (!playlist.playing) return
+          playlist.txIndex = (i + 1) % n
+          scheduleTimeout(playNext, 120)
+        },
+      })
+      return
+    }
+
+    if (scene.value === 'E') {
+      const plan = state.demoClearingPlan
+      if (!plan || plan.steps.length === 0) {
+        playlist.playing = false
+        return
+      }
+      const n = plan.steps.length
+      const i = ((playlist.clearingStepIndex % n) + n) % n
+      runClearingStep(i, {
+        onFinished: () => {
+          if (!playlist.playing) return
+          playlist.clearingStepIndex = (i + 1) % n
+          scheduleTimeout(playNext, 120)
+        },
+      })
+      return
+    }
+  }
+
+  playNext()
+}
+
+function demoReset() {
+  resetDemoState()
+}
+
 watch([eq, scene], () => {
   loadScene()
 })
@@ -1431,6 +1761,31 @@ onUnmounted(() => {
     <div class="hud-bottom">
       <button class="btn" type="button" @click="runTxOnce">Single Tx</button>
       <button class="btn" type="button" @click="runClearingOnce">Run Clearing</button>
+
+      <template v-if="showDemoControls">
+        <div class="hud-divider" />
+        <button class="btn btn-ghost" type="button" :disabled="playlist.playing" @click="demoStepOnce">Step</button>
+        <button class="btn" type="button" :disabled="!canDemoPlay" @click="demoTogglePlay">{{ demoPlayLabel }}</button>
+        <button class="btn btn-ghost" type="button" @click="demoReset">Reset</button>
+
+        <div class="pill subtle">
+          <span class="label">Quality</span>
+          <select v-model="quality" class="select select-compact" aria-label="Quality">
+            <option value="low">Low</option>
+            <option value="med">Med</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+
+        <div class="pill subtle">
+          <span class="label">Labels</span>
+          <select v-model="labelsLod" class="select select-compact" aria-label="Labels">
+            <option value="off">Off</option>
+            <option value="selection">Selection</option>
+            <option value="neighbors">Neighbors</option>
+          </select>
+        </div>
+      </template>
     </div>
 
     <!-- Loading / error overlay (fail-fast, but non-intrusive) -->
@@ -1441,6 +1796,17 @@ onUnmounted(() => {
     </div>
 
     <!-- Floating Labels (isolated layer for perf) -->
+    <div v-if="labelNodes.length" class="labels-layer">
+      <div
+        v-for="n in labelNodes"
+        :key="n.id"
+        class="node-label"
+        :style="{ transform: `translate3d(${n.x}px, ${n.y}px, 0)` }"
+      >
+        <div class="node-label-inner" :style="{ borderColor: n.color, color: n.color }">{{ n.text }}</div>
+      </div>
+    </div>
+
     <div class="floating-layer">
       <div
         v-for="fl in state.floatingLabels"
@@ -1573,12 +1939,21 @@ onUnmounted(() => {
   bottom: 16px;
   transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 12px;
   padding: 10px 12px;
   border-radius: 16px;
   background: rgba(15, 23, 42, 0.72);
   border: 1px solid rgba(148, 163, 184, 0.16);
   backdrop-filter: blur(10px);
+}
+
+.hud-divider {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(148, 163, 184, 0.16);
+  margin: 2px 2px;
 }
 
 .btn {
@@ -1590,6 +1965,19 @@ onUnmounted(() => {
   padding: 10px 14px;
   font-size: 12px;
   cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.btn-ghost {
+  background: rgba(15, 23, 42, 0.3);
+}
+
+.select.select-compact {
+  font-size: 12px;
 }
 
 .btn:hover {
@@ -1639,6 +2027,33 @@ onUnmounted(() => {
   z-index: 50;
   /* Isolate layout/paint of transient labels from the rest of the UI. */
   contain: layout paint;
+}
+
+.labels-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 45;
+  contain: layout paint;
+}
+
+.node-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.node-label-inner {
+  transform: translate3d(-50%, -135%, 0);
+  font-size: 11px;
+  font-weight: 650;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(2, 6, 23, 0.62);
+  text-shadow: 0 0 10px currentColor;
+  white-space: nowrap;
 }
 
 .floating-label {
