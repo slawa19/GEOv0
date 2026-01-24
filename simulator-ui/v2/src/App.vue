@@ -70,6 +70,61 @@ const fxState = createFxState()
 let txRunSeq = 0
 let clearingRunSeq = 0
 
+let activeTimeouts: number[] = []
+
+function scheduleTimeout(fn: () => void, delayMs: number) {
+  const id = window.setTimeout(fn, Math.max(0, delayMs))
+  activeTimeouts.push(id)
+  return id
+}
+
+function clearScheduledTimeouts() {
+  if (activeTimeouts.length === 0) return
+  for (const id of activeTimeouts) window.clearTimeout(id)
+  activeTimeouts.length = 0
+}
+
+function assertPlaylistEdgesExistInSnapshot(opts: { snapshot: GraphSnapshot; events: DemoEvent[]; eventsPath: string }) {
+  const { snapshot, events, eventsPath } = opts
+  const ok = new Set(snapshot.links.map((l) => keyEdge(l.source, l.target)))
+
+  const assertEdge = (from: string, to: string, ctx: string) => {
+    const k = keyEdge(from, to)
+    if (!ok.has(k)) {
+      throw new Error(`Unknown edge '${k}' referenced by ${ctx} (${eventsPath})`)
+    }
+  }
+
+  for (let ei = 0; ei < events.length; ei++) {
+    const evt = events[ei]!
+    const baseCtx = `event[${ei}] ${evt.type} ${'event_id' in evt ? String((evt as any).event_id ?? '') : ''}`.trim()
+
+    if (evt.type === 'tx.updated') {
+      for (let i = 0; i < evt.edges.length; i++) {
+        const e = evt.edges[i]!
+        assertEdge(e.from, e.to, `${baseCtx} edges[${i}]`)
+      }
+      continue
+    }
+
+    if (evt.type === 'clearing.plan') {
+      for (let si = 0; si < evt.steps.length; si++) {
+        const step = evt.steps[si]!
+        const he = step.highlight_edges ?? []
+        const pe = step.particles_edges ?? []
+        for (let i = 0; i < he.length; i++) {
+          const e = he[i]!
+          assertEdge(e.from, e.to, `${baseCtx} steps[${si}].highlight_edges[${i}]`)
+        }
+        for (let i = 0; i < pe.length; i++) {
+          const e = pe[i]!
+          assertEdge(e.from, e.to, `${baseCtx} steps[${si}].particles_edges[${i}]`)
+        }
+      }
+    }
+  }
+}
+
 const fnv1a = (s: string) => {
   let h = 2166136261
   for (let i = 0; i < s.length; i++) {
@@ -718,6 +773,7 @@ function applyPatchesFromEvent(evt: DemoEvent) {
 }
 
 async function loadScene() {
+  clearScheduledTimeouts()
   state.loading = true
   state.error = ''
   state.sourcePath = ''
@@ -909,11 +965,14 @@ function nodeCardStyle() {
 
 async function runTxOnce() {
   if (!state.snapshot) return
+
+  clearScheduledTimeouts()
   resetOverlays()
 
   const runId = ++txRunSeq
 
-  const { events } = await loadEvents(effectiveEq.value, 'demo-tx')
+  const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-tx')
+  assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
   const evt = events.find((e) => e.type === 'tx.updated')
   if (!evt || evt.type !== 'tx.updated') return
 
@@ -943,7 +1002,7 @@ async function runTxOnce() {
     const lastEdge = evt.edges[evt.edges.length - 1]!
     const targetId = lastEdge.to
     
-    window.setTimeout(() => {
+    scheduleTimeout(() => {
       if (runId !== txRunSeq) return
       // 1. Flash Burst on target
       spawnNodeBursts(fxState, {
@@ -975,7 +1034,7 @@ async function runTxOnce() {
 
   if (isTestMode.value) return
 
-  window.setTimeout(() => {
+  scheduleTimeout(() => {
     if (runId !== txRunSeq) return
     applyPatchesFromEvent(evt)
     resetOverlays()
@@ -984,11 +1043,14 @@ async function runTxOnce() {
 
 async function runClearingOnce() {
   if (!state.snapshot) return
+
+  clearScheduledTimeouts()
   resetOverlays()
 
   const runId = ++clearingRunSeq
 
-  const { events } = await loadEvents(effectiveEq.value, 'demo-clearing')
+  const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-clearing')
+  assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
   const plan = events.find((e) => e.type === 'clearing.plan')
   const done = events.find((e) => e.type === 'clearing.done')
   if (!plan || plan.type !== 'clearing.plan') return
@@ -1031,7 +1093,7 @@ async function runClearingOnce() {
     idx: number,
   ) => {
     // 1. Start: source glow + spawn beam spark (beam renders edge glow internally)
-    window.setTimeout(() => {
+    scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
 
       spawnNodeBursts(fxState, {
@@ -1062,7 +1124,7 @@ async function runClearingOnce() {
     }, delayMs)
 
     // 2. Spark arrives → target glow + label
-    window.setTimeout(() => {
+    scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
 
       spawnNodeBursts(fxState, {
@@ -1091,8 +1153,27 @@ async function runClearingOnce() {
   }
 
   for (const step of plan.steps) {
-    window.setTimeout(() => {
+    scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
+
+      if (step.flash?.kind === 'clearing') {
+        state.flash = 1
+      }
+
+      if (step.highlight_edges && step.highlight_edges.length > 0) {
+        spawnEdgePulses(fxState, {
+          edges: step.highlight_edges,
+          nowMs: performance.now(),
+          durationMs: 650,
+          color: clearingGold,
+          thickness: 1.0,
+          seedPrefix: `clearing:highlight:${effectiveEq.value}:${step.at_ms}`,
+          countPerEdge: 1,
+          keyEdge,
+          seedFn: fnv1a,
+          isTestMode: false,
+        })
+      }
 
       // Particles step: sequential micro-transactions along the cycle
       if (step.particles_edges) {
@@ -1113,7 +1194,7 @@ async function runClearingOnce() {
     const microSpan = count > 0 ? (count - 1) * microGapMs + microTtlMs : 0
     doneAt = Math.max(doneAt, base + 650, base + microSpan + 80)
   }
-  window.setTimeout(() => {
+  scheduleTimeout(() => {
     if (runId !== clearingRunSeq) return
     if (done && done.type === 'clearing.done') applyPatchesFromEvent(done)
     resetOverlays()
@@ -1148,6 +1229,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', resizeAndLayout)
+  clearScheduledTimeouts()
   stopRenderLoop()
 })
 </script>
