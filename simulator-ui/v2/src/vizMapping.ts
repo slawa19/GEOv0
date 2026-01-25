@@ -40,16 +40,16 @@ export const VIZ_MAPPING: VizMapping = {
   link: {
     width_px: {
       hairline: 0.6,
-      thin: 1.0,
-      mid: 1.8,
-      thick: 2.6,
-      highlight: 2.4,
+      thin: 0.9,
+      mid: 1.1,
+      thick: 1.25,
+      highlight: 2.2,
     },
     alpha: {
-      bg: 0.1,
-      muted: 0.22,
-      active: 0.45,
-      hi: 0.85,
+      bg: 0.06,
+      muted: 0.12,
+      active: 0.20,
+      hi: 0.32,
     },
     color: {
       default: '#64748b',

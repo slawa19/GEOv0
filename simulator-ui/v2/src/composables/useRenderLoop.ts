@@ -1,0 +1,143 @@
+import type { Ref } from 'vue'
+
+type Quality = 'low' | 'med' | 'high'
+
+type UseRenderLoopDeps = {
+  canvasEl: Ref<HTMLCanvasElement | null>
+  fxCanvasEl: Ref<HTMLCanvasElement | null>
+
+  getSnapshot: () => { palette?: any } | null
+  getLayout: () => { w: number; h: number; nodes: any[]; links: any[] }
+  getCamera: () => { panX: number; panY: number; zoom: number }
+
+  isTestMode: () => boolean
+  getQuality: () => Quality
+
+  getFlash: () => number
+  setFlash: (v: number) => void
+
+  pruneFloatingLabels: (nowMs: number) => void
+
+  drawBaseGraph: (ctx: CanvasRenderingContext2D, opts: any) => any
+  renderFxFrame: (opts: any) => void
+  mapping: any
+  fxState: any
+
+  getSelectedNodeId: () => string | null
+  activeEdges: Set<string>
+}
+
+type UseRenderLoopReturn = {
+  ensureRenderLoop: () => void
+  stopRenderLoop: () => void
+}
+
+export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
+  let rafId: number | null = null
+
+  function clamp01(v: number) {
+    return Math.max(0, Math.min(1, v))
+  }
+
+  function renderFrame(nowMs: number) {
+    const canvas = deps.canvasEl.value
+    const fxCanvas = deps.fxCanvasEl.value
+    const layout = deps.getLayout()
+    const snap = deps.getSnapshot()
+
+    if (!canvas || !fxCanvas || !snap) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const fx = fxCanvas.getContext('2d')
+    if (!fx) return
+
+    const camera = deps.getCamera()
+    const dpr = canvas.width / Math.max(1, layout.w)
+    const renderQuality: Quality = deps.isTestMode() ? 'high' : deps.getQuality()
+
+    // Clear in screen-space (pan/zoom must not affect clearing).
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, layout.w, layout.h)
+
+    // Screen-space background fill (must happen before camera transform).
+    ctx.fillStyle = '#020617'
+    ctx.fillRect(0, 0, layout.w, layout.h)
+
+    fx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    fx.clearRect(0, 0, layout.w, layout.h)
+
+    // Screen-space flash overlay (clearing) — must not move with camera.
+    const flash = deps.getFlash()
+    if (flash > 0) {
+      const t = clamp01(flash)
+      fx.save()
+      fx.globalAlpha = t
+      const grad = fx.createRadialGradient(
+        layout.w / 2,
+        layout.h / 2,
+        0,
+        layout.w / 2,
+        layout.h / 2,
+        Math.max(layout.w, layout.h) * 0.7,
+      )
+      grad.addColorStop(0, deps.mapping.fx.flash.clearing.from)
+      grad.addColorStop(1, deps.mapping.fx.flash.clearing.to)
+      fx.fillStyle = grad
+      fx.fillRect(0, 0, layout.w, layout.h)
+      fx.restore()
+      deps.setFlash(Math.max(0, flash - 0.03))
+    }
+
+    // Apply camera transform for drawing.
+    ctx.translate(camera.panX, camera.panY)
+    ctx.scale(camera.zoom, camera.zoom)
+    fx.translate(camera.panX, camera.panY)
+    fx.scale(camera.zoom, camera.zoom)
+
+    deps.pruneFloatingLabels(nowMs)
+
+    const pos = deps.drawBaseGraph(ctx, {
+      w: layout.w,
+      h: layout.h,
+      nodes: layout.nodes,
+      links: layout.links,
+      mapping: deps.mapping,
+      palette: snap.palette,
+      selectedNodeId: deps.getSelectedNodeId(),
+      activeEdges: deps.activeEdges,
+      cameraZoom: camera.zoom,
+      quality: renderQuality,
+    })
+
+    deps.renderFxFrame({
+      nowMs,
+      ctx: fx,
+      pos,
+      w: layout.w,
+      h: layout.h,
+      mapping: deps.mapping,
+      fxState: deps.fxState,
+      isTestMode: deps.isTestMode(),
+      cameraZoom: camera.zoom,
+      quality: renderQuality,
+    })
+  }
+
+  function ensureRenderLoop() {
+    if (rafId !== null) return
+    const loop = (t: number) => {
+      renderFrame(t)
+      rafId = window.requestAnimationFrame(loop)
+    }
+    rafId = window.requestAnimationFrame(loop)
+  }
+
+  function stopRenderLoop() {
+    if (rafId !== null) {
+      window.cancelAnimationFrame(rafId)
+      rafId = null
+    }
+  }
+
+  return { ensureRenderLoop, stopRenderLoop }
+}

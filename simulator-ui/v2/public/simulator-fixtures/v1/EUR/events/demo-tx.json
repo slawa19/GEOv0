@@ -1,14 +1,53 @@
 [
   {
-    "event_id": "aed71fda-8b0f-532c-a3e9-2698c7a2b77f",
-    "ts": "2026-01-09T22:47:00Z",
+    "event_id": "tx.demo.edge.1",
+    "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",
     "equivalent": "EUR",
     "ttl_ms": 1200,
     "edges": [
       {
-        "from": "PID_U0005_17156075",
-        "to": "PID_U0019_be1e0823"
+        "from": "PID_U0001_9e3779b1",
+        "to": "PID_U0053_c17c31a5"
+      }
+    ]
+  },
+  {
+    "event_id": "tx.demo.edge.2",
+    "ts": "2026-01-11T00:00:00Z",
+    "type": "tx.updated",
+    "equivalent": "EUR",
+    "ttl_ms": 1200,
+    "edges": [
+      {
+        "from": "PID_U0001_9e3779b1",
+        "to": "PID_U0060_1500857c"
+      }
+    ]
+  },
+  {
+    "event_id": "tx.demo.edge.3",
+    "ts": "2026-01-11T00:00:00Z",
+    "type": "tx.updated",
+    "equivalent": "EUR",
+    "ttl_ms": 1200,
+    "edges": [
+      {
+        "from": "PID_U0053_c17c31a5",
+        "to": "PID_U0001_9e3779b1"
+      }
+    ]
+  },
+  {
+    "event_id": "tx.demo.edge.4",
+    "ts": "2026-01-11T00:00:00Z",
+    "type": "tx.updated",
+    "equivalent": "EUR",
+    "ttl_ms": 1200,
+    "edges": [
+      {
+        "from": "PID_U0060_1500857c",
+        "to": "PID_U0001_9e3779b1"
       }
     ]
   }

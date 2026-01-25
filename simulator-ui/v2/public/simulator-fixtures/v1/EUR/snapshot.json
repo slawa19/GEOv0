@@ -1413,8 +1413,8 @@
       "available": "385.00",
       "status": "active",
       "viz_color_key": null,
-      "viz_width_key": null,
-      "viz_alpha_key": null
+      "viz_width_key": "thick",
+      "viz_alpha_key": "active"
     },
     {
       "id": "PID_U0001_9e3779b1→PID_U0053_c17c31a5",
@@ -1425,8 +1425,8 @@
       "available": "275.00",
       "status": "active",
       "viz_color_key": null,
-      "viz_width_key": null,
-      "viz_alpha_key": null
+      "viz_width_key": "thin",
+      "viz_alpha_key": "active"
     },
     {
       "id": "PID_U0060_1500857c→PID_U0001_9e3779b1",
@@ -1437,8 +1437,8 @@
       "available": "420.00",
       "status": "active",
       "viz_color_key": null,
-      "viz_width_key": null,
-      "viz_alpha_key": null
+      "viz_width_key": "thick",
+      "viz_alpha_key": "active"
     },
     {
       "id": "PID_U0001_9e3779b1→PID_U0060_1500857c",
@@ -1449,8 +1449,8 @@
       "available": "302.50",
       "status": "active",
       "viz_color_key": null,
-      "viz_width_key": null,
-      "viz_alpha_key": null
+      "viz_width_key": "thin",
+      "viz_alpha_key": "active"
     }
   ],
   "limits": {

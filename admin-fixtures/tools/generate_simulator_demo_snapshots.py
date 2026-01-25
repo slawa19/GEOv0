@@ -31,6 +31,60 @@ def safe_get(d: dict[str, Any], key: str) -> Any:
     return d[key]
 
 
+def parse_amount(v: Any) -> float | None:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        x = float(v)
+        return x if x == x else None
+    if isinstance(v, str):
+        s = v.strip().replace(",", "")
+        if not s:
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    return None
+
+
+def quantile(values_sorted: list[float], p: float) -> float:
+    if not values_sorted:
+        raise ValueError("values_sorted must be non-empty")
+    if p <= 0:
+        return values_sorted[0]
+    if p >= 1:
+        return values_sorted[-1]
+    n = len(values_sorted)
+    i = int(p * (n - 1))
+    return values_sorted[i]
+
+
+def link_width_key(limit: float | None, *, q33: float | None, q66: float | None) -> str:
+    if limit is None or q33 is None or q66 is None:
+        return "hairline"
+    if limit <= q33:
+        return "thin"
+    if limit <= q66:
+        return "mid"
+    return "thick"
+
+
+def link_alpha_key(status: str | None, used: float | None, limit: float | None) -> str:
+    if status and status != "active":
+        return "muted"
+    if used is None or limit is None or limit <= 0:
+        return "bg"
+    r = abs(used) / limit
+    if r >= 0.75:
+        return "hi"
+    if r >= 0.40:
+        return "active"
+    if r >= 0.15:
+        return "muted"
+    return "bg"
+
+
 @dataclass(frozen=True)
 class DirectedCycle:
     nodes: tuple[str, ...]
@@ -132,6 +186,7 @@ def build_snapshot(
         )
 
     links: list[dict[str, Any]] = []
+    link_stats: list[tuple[dict[str, Any], float | None, float | None]] = []
     for tl in trustlines:
         if not isinstance(tl, dict):
             continue
@@ -143,20 +198,34 @@ def build_snapshot(
             # Fail-fast: the snapshot must be internally consistent.
             raise RuntimeError(f"Dangling trustline in datasets: {source}->{target} ({eq})")
 
-        links.append(
-            {
-                "id": f"{source}→{target}",
-                "source": source,
-                "target": target,
-                "trust_limit": tl.get("limit"),
-                "used": tl.get("used"),
-                "available": tl.get("available"),
-                "status": tl.get("status"),
-                "viz_color_key": None,
-                "viz_width_key": None,
-                "viz_alpha_key": None,
-            }
-        )
+        link = {
+            "id": f"{source}→{target}",
+            "source": source,
+            "target": target,
+            "trust_limit": tl.get("limit"),
+            "used": tl.get("used"),
+            "available": tl.get("available"),
+            "status": tl.get("status"),
+            "viz_color_key": None,
+            "viz_width_key": None,
+            "viz_alpha_key": None,
+        }
+        links.append(link)
+
+        limit_num = parse_amount(tl.get("limit"))
+        used_num = parse_amount(tl.get("used"))
+        link_stats.append((link, limit_num, used_num))
+
+    limits = sorted([x for _, x, _ in link_stats if x is not None])
+    q33 = quantile(limits, 0.33) if limits else None
+    q66 = quantile(limits, 0.66) if limits else None
+
+    for link, limit_num, used_num in link_stats:
+        status = link.get("status")
+        if not isinstance(status, str):
+            status = None
+        link["viz_width_key"] = link_width_key(limit_num, q33=q33, q66=q66)
+        link["viz_alpha_key"] = link_alpha_key(status, used=used_num, limit=limit_num)
 
     snapshot: dict[str, Any] = {
         "equivalent": eq,

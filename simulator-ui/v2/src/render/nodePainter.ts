@@ -1,6 +1,7 @@
 import type { GraphNode } from '../types'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
+import { roundedRectPath } from './roundedRect'
 
 export type LayoutNode = GraphNode & { __x: number; __y: number }
 
@@ -51,25 +52,6 @@ export function drawNodeShape(
   const x = node.__x - w / 2
   const y = node.__y - h / 2
   const rr = Math.max(0, Math.min(px(4), Math.min(w, h) * 0.18))
-
-  const roundedRectPath = (ctx2: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number, rad: number) => {
-    const r2 = Math.max(0, Math.min(rad, Math.min(rw, rh) / 2))
-    ctx2.beginPath()
-    if (r2 <= 0.01) {
-      ctx2.rect(rx, ry, rw, rh)
-      return
-    }
-    ctx2.moveTo(rx + r2, ry)
-    ctx2.lineTo(rx + rw - r2, ry)
-    ctx2.quadraticCurveTo(rx + rw, ry, rx + rw, ry + r2)
-    ctx2.lineTo(rx + rw, ry + rh - r2)
-    ctx2.quadraticCurveTo(rx + rw, ry + rh, rx + rw - r2, ry + rh)
-    ctx2.lineTo(rx + r2, ry + rh)
-    ctx2.quadraticCurveTo(rx, ry + rh, rx, ry + rh - r2)
-    ctx2.lineTo(rx, ry + r2)
-    ctx2.quadraticCurveTo(rx, ry, rx + r2, ry)
-    ctx2.closePath()
-  }
 
   ctx.save()
 

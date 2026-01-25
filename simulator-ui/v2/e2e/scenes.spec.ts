@@ -13,7 +13,8 @@ test.describe('Simulator demo scenes (fixtures, test-mode)', () => {
   })
 
   test('Scene B — Focus', async ({ page }) => {
-    await page.goto('/?scene=B')
+    // Ensure focus is actually visible (node glow + incident edges + node card)
+    await page.goto('/?scene=B&focus=PID_U0002_3c6ef362')
     await waitReady(page)
     await expect(page).toHaveScreenshot('scene-B.png', { animations: 'disabled' })
   })
