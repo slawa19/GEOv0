@@ -1,5 +1,6 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { VizMapping } from '../vizMapping'
+import { withAlpha } from './color'
 import { drawNodeShape, fillForNode, sizeForNode, type LayoutNode } from './nodePainter'
 
 export type LayoutLink = GraphLink & { __key: string }
@@ -22,38 +23,6 @@ function clamp01(v: number) {
   return Math.max(0, Math.min(1, v))
 }
 
-type Rgb = { r: number; g: number; b: number }
-const rgbCache = new Map<string, Rgb | null>()
-
-function parseHexRgb(color: string): Rgb | null {
-  const c = String(color || '').trim()
-  if (!c.startsWith('#')) return null
-  const hex = c.slice(1)
-  const isShort = hex.length === 3
-  const isLong = hex.length === 6
-  if (!isShort && !isLong) return null
-  const r = parseInt(isShort ? hex[0]! + hex[0]! : hex.slice(0, 2), 16)
-  const g = parseInt(isShort ? hex[1]! + hex[1]! : hex.slice(2, 4), 16)
-  const b = parseInt(isShort ? hex[2]! + hex[2]! : hex.slice(4, 6), 16)
-  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null
-  return { r, g, b }
-}
-
-function withAlpha(color: string, alpha: number) {
-  const a = clamp01(alpha)
-  const c = String(color || '').trim()
-  if (c.startsWith('rgba(') || c.startsWith('hsla(')) return c
-  if (!c.startsWith('#')) return c
-
-  let rgb = rgbCache.get(c)
-  if (rgb === undefined) {
-    rgb = parseHexRgb(c)
-    rgbCache.set(c, rgb)
-  }
-  if (!rgb) return c
-  return `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`
-}
-
 type Palette = Record<string, { color: string; label?: string }>
 
 function linkColor(l: GraphLink, mapping: VizMapping, palette?: Palette) {
@@ -62,13 +31,15 @@ function linkColor(l: GraphLink, mapping: VizMapping, palette?: Palette) {
   return p?.color ?? mapping.link.color.default
 }
 
-function getLinkTermination(n: LayoutNode, target: { __x: number; __y: number }) {
+function getLinkTermination(n: LayoutNode, target: { __x: number; __y: number }, invZoom: number) {
   const dx = target.__x - n.__x
   const dy = target.__y - n.__y
   if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return { x: n.__x, y: n.__y }
 
   const angle = Math.atan2(dy, dx)
-  const { w, h } = sizeForNode(n as GraphNode)
+  const { w: w0, h: h0 } = sizeForNode(n as GraphNode)
+  const w = w0 * invZoom
+  const h = h0 * invZoom
   
   // Person = Circle
   if (n.type !== 'business') {
@@ -109,12 +80,14 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   palette?: Palette
   selectedNodeId: string | null
   activeEdges: Set<string>
+  cameraZoom?: number
+  quality?: 'low' | 'med' | 'high'
 }) {
   const { w, h, nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
-
-  // Background (deep space).
-  ctx.fillStyle = '#020617'
-  ctx.fillRect(0, 0, w, h)
+  const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
+  const invZ = 1 / z
+  const q = opts.quality ?? 'high'
+  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
 
   const pos = new Map(nodes.map((n) => [n.id, n]))
 
@@ -123,15 +96,15 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     const a = pos.get(link.source)!
     const b = pos.get(link.target)!
 
-    const start = getLinkTermination(a, b)
-    const end = getLinkTermination(b, a)
+    const start = getLinkTermination(a, b, invZ)
+    const end = getLinkTermination(b, a, invZ)
 
     const alpha = linkAlpha(link, mapping)
     const width = linkWidthPx(link, mapping)
     const color = linkColor(link, mapping, palette)
 
     ctx.strokeStyle = withAlpha(color, alpha)
-    ctx.lineWidth = width
+    ctx.lineWidth = width * invZ
     ctx.beginPath()
     ctx.moveTo(start.x, start.y)
     ctx.lineTo(end.x, end.y)
@@ -147,8 +120,8 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 
       const a = pos.get(link.source)!
       const b = pos.get(link.target)!
-      const start = getLinkTermination(a, b)
-      const end = getLinkTermination(b, a)
+      const start = getLinkTermination(a, b, invZ)
+      const end = getLinkTermination(b, a, invZ)
 
       const baseAlpha = linkAlpha(link, mapping)
       const baseWidth = linkWidthPx(link, mapping)
@@ -159,7 +132,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
         const alpha = clamp01(baseAlpha * 3.0)
         const width = Math.max(baseWidth, mapping.link.width_px.thin)
         ctx.strokeStyle = withAlpha(baseColor, alpha)
-        ctx.lineWidth = width
+        ctx.lineWidth = width * invZ
         ctx.beginPath()
         ctx.moveTo(start.x, start.y)
         ctx.lineTo(end.x, end.y)
@@ -172,7 +145,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
         const alpha = clamp01(Math.max(mapping.link.alpha.hi, baseAlpha * 4.0))
         const width = Math.max(baseWidth, mapping.link.width_px.highlight)
         ctx.strokeStyle = withAlpha('#22d3ee', alpha)
-        ctx.lineWidth = width
+        ctx.lineWidth = width * invZ
         ctx.beginPath()
         ctx.moveTo(start.x, start.y)
         ctx.lineTo(end.x, end.y)
@@ -189,22 +162,24 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       // Focus Glow: "Light glow around the node"
       // Stronger but diffuse (not a sharp second contour)
       
-      const { w: nw, h: nh } = sizeForNode(n as GraphNode)
+      const { w: nw0, h: nh0 } = sizeForNode(n as GraphNode)
+      const nw = nw0 * invZ
+      const nh = nh0 * invZ
       const glow = fillForNode(n as GraphNode, mapping)
       const isBusiness = n.type === 'business'
       
       const r = Math.max(nw, nh) / 2
-      const rr = Math.max(0, Math.min(4, Math.min(nw, nh) * 0.18))
+      const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
       
       ctx.save()
       ctx.globalCompositeOperation = 'screen' // Black stroke will disappear, only colored shadow remains
       
       ctx.shadowColor = glow
-      ctx.shadowBlur = r * 1.2 
+      ctx.shadowBlur = r * 1.2 * blurK
       // Trick: Stroke is black (invisible in Screen mode), so we don't see a "hard" contour.
       // But the shadow (glow) is drawn.
       ctx.strokeStyle = '#000000' 
-      ctx.lineWidth = Math.max(4, r * 0.25) // Thicker stroke generates more glow intensity
+      ctx.lineWidth = Math.max(4 * invZ, r * 0.25) // keep minimum in screen-space
       ctx.globalAlpha = 1.0
       
       ctx.beginPath()
@@ -218,13 +193,13 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       ctx.stroke()
       
       // Optional: Second pass for "core" intensity closer to the node
-      ctx.shadowBlur = r * 0.4
+      ctx.shadowBlur = r * 0.4 * blurK
       ctx.stroke()
 
       ctx.restore()
     }
 
-    drawNodeShape(ctx, n, { mapping })
+    drawNodeShape(ctx, n, { mapping, cameraZoom: z, quality: q })
   }
 
   return pos

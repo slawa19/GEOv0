@@ -19,7 +19,8 @@
  * 3. **Node Bursts** (`FxNodeBurst`, `spawnNodeBursts`)
  *    - Expanding/fading effects centered on nodes
  *    - Styles: 'glow' (soft circle), 'tx-impact' (rim + shockwave), 'clearing' (bloom + ring)
- *    - Use for: impact flashes when spark arrives, highlighting nodes
+ *    - Use for: impact bursts when spark arrives, highlighting nodes
+ *    - NOTE: Global (screen-space) flash overlay is handled in App.vue, not here.
  *
  * Animation Pattern for Edge Transactions:
  * ----------------------------------------
@@ -41,40 +42,40 @@
 
 import type { VizMapping } from '../vizMapping'
 import type { LayoutNode } from './nodePainter'
+import { withAlpha } from './color'
 import { sizeForNode } from './nodePainter'
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 
-type Rgb = { r: number; g: number; b: number }
-const rgbCache = new Map<string, Rgb | null>()
+function worldRectForCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, padPx = 96) {
+  // Current transform includes camera pan/zoom. Invert it to convert screen-space canvas bounds
+  // into world-space coordinates for stable clip paths.
+  const m = ctx.getTransform()
+  const inv = m.inverse()
 
-function parseHexRgb(color: string): Rgb | null {
-  const c = String(color || '').trim()
-  if (!c.startsWith('#')) return null
-  const hex = c.slice(1)
-  const isShort = hex.length === 3
-  const isLong = hex.length === 6
-  if (!isShort && !isLong) return null
-  const r = parseInt(isShort ? hex[0]! + hex[0]! : hex.slice(0, 2), 16)
-  const g = parseInt(isShort ? hex[1]! + hex[1]! : hex.slice(2, 4), 16)
-  const b = parseInt(isShort ? hex[2]! + hex[2]! : hex.slice(4, 6), 16)
-  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null
-  return { r, g, b }
-}
+  const corners = [
+    new DOMPoint(-padPx, -padPx),
+    new DOMPoint(w + padPx, -padPx),
+    new DOMPoint(-padPx, h + padPx),
+    new DOMPoint(w + padPx, h + padPx),
+  ].map((p) => p.matrixTransform(inv))
 
-function withAlpha(color: string, alpha: number) {
-  const a = clamp01(alpha)
-  const c = String(color || '').trim()
-  if (c.startsWith('rgba(') || c.startsWith('hsla(')) return c
-  if (!c.startsWith('#')) return c
-
-  let rgb = rgbCache.get(c)
-  if (rgb === undefined) {
-    rgb = parseHexRgb(c)
-    rgbCache.set(c, rgb)
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of corners) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
   }
-  if (!rgb) return c
-  return `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return { x: -1e6, y: -1e6, w: 2e6, h: 2e6 }
+  }
+
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
 }
 
 function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, rad: number) {
@@ -96,10 +97,12 @@ function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.closePath()
 }
 
-function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1) {
-  const { w, h } = sizeForNode(n)
+function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1, invZoom = 1) {
+  const { w: w0, h: h0 } = sizeForNode(n)
+  const w = w0 * invZoom
+  const h = h0 * invZoom
   const isBusiness = String(n.type) === 'business'
-  const rr = Math.max(0, Math.min(4, Math.min(w, h) * 0.18))
+  const rr = Math.max(0, Math.min(4 * invZoom, Math.min(w, h) * 0.18))
   const ww = w * scale
   const hh = h * scale
   const x = n.__x - ww / 2
@@ -135,10 +138,12 @@ function roundedRectPath2D(x: number, y: number, w: number, h: number, rad: numb
   return p
 }
 
-function nodeOutlinePath2D(n: LayoutNode, scale = 1) {
-  const { w, h } = sizeForNode(n)
+function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
+  const { w: w0, h: h0 } = sizeForNode(n)
+  const w = w0 * invZoom
+  const h = h0 * invZoom
   const isBusiness = String(n.type) === 'business'
-  const rr = Math.max(0, Math.min(4, Math.min(w, h) * 0.18))
+  const rr = Math.max(0, Math.min(4 * invZoom, Math.min(w, h) * 0.18))
   const ww = w * scale
   const hh = h * scale
   const x = n.__x - ww / 2
@@ -152,13 +157,15 @@ function nodeOutlinePath2D(n: LayoutNode, scale = 1) {
   return p
 }
 
-function linkTermination(n: LayoutNode, target: LayoutNode) {
+function linkTermination(n: LayoutNode, target: LayoutNode, invZoom: number) {
   const dx = target.__x - n.__x
   const dy = target.__y - n.__y
   if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return { x: n.__x, y: n.__y }
 
   const angle = Math.atan2(dy, dx)
-  const { w, h } = sizeForNode(n)
+  const { w: w0, h: h0 } = sizeForNode(n)
+  const w = w0 * invZoom
+  const h = h0 * invZoom
 
   // Person = circle
   if (String(n.type) !== 'business') {
@@ -348,33 +355,23 @@ export function renderFxFrame(opts: {
   h: number
   mapping: VizMapping
   fxState: FxState
-  flash: number
   isTestMode: boolean
-}): { flash: number } {
+  cameraZoom?: number
+  quality?: 'low' | 'med' | 'high'
+}): void {
   const { nowMs, ctx, pos, w, h, mapping, fxState, isTestMode } = opts
-  let flash = opts.flash
+  const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
+  const invZ = 1 / z
+  const spx = (v: number) => v * invZ
+  const q = opts.quality ?? 'high'
+  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
 
   // NOTE: Test mode primarily aims to make screenshot tests stable by not spawning FX.
   // Rendering stays enabled so manual interaction in test mode doesn't feel "dead".
 
   // NOTE: `withAlpha` and helpers are module-scoped with caching (perf).
 
-  // Flash overlay (clearing)
-  if (flash > 0) {
-    const t = Math.max(0, Math.min(1, flash))
-    ctx.save()
-    ctx.globalAlpha = t
-    const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7)
-    grad.addColorStop(0, mapping.fx.flash.clearing.from)
-    grad.addColorStop(1, mapping.fx.flash.clearing.to)
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, w, h)
-    ctx.restore()
-
-    flash = Math.max(0, flash - 0.03)
-  }
-
-  if (fxState.sparks.length === 0 && fxState.edgePulses.length === 0 && fxState.nodeBursts.length === 0) return { flash }
+  if (fxState.sparks.length === 0 && fxState.edgePulses.length === 0 && fxState.nodeBursts.length === 0) return
 
   // Tx sparks / comets
   if (fxState.sparks.length > 0) {
@@ -393,8 +390,8 @@ export function renderFxFrame(opts: {
 
       const t0 = clamp01(age / s.ttlMs)
 
-      const start = linkTermination(a, b)
-      const end = linkTermination(b, a)
+      const start = linkTermination(a, b, invZ)
+      const end = linkTermination(b, a, invZ)
 
       const dx = end.x - start.x
       const dy = end.y - start.y
@@ -407,6 +404,8 @@ export function renderFxFrame(opts: {
         const life = 1 - t0
         const alpha = clamp01(life)
 
+        const th = s.thickness * invZ
+
         const headX = start.x + dx * t
         const headY = start.y + dy * t
 
@@ -418,12 +417,13 @@ export function renderFxFrame(opts: {
         // Base beam (full segment) — thin core + soft halo
         {
           const baseAlpha = Math.max(0, Math.min(1, alpha * 0.55))
+          const th = s.thickness * invZ
 
           // Halo pass
           ctx.globalAlpha = baseAlpha * 0.55
           ctx.strokeStyle = s.colorTrail
-          ctx.lineWidth = Math.max(1.2, s.thickness * 3.2)
-          ctx.shadowBlur = Math.max(10, s.thickness * 18)
+          ctx.lineWidth = Math.max(spx(1.2), th * 3.2)
+          ctx.shadowBlur = Math.max(spx(10), th * 18) * blurK
           ctx.shadowColor = withAlpha(s.colorTrail, 0.85)
           ctx.beginPath()
           ctx.moveTo(start.x, start.y)
@@ -434,7 +434,7 @@ export function renderFxFrame(opts: {
           ctx.shadowBlur = 0
           ctx.globalAlpha = baseAlpha
           ctx.strokeStyle = withAlpha(s.colorTrail, 0.9)
-          ctx.lineWidth = Math.max(0.9, s.thickness * 1.25)
+          ctx.lineWidth = Math.max(spx(0.9), th * 1.25)
           ctx.beginPath()
           ctx.moveTo(start.x, start.y)
           ctx.lineTo(end.x, end.y)
@@ -453,8 +453,8 @@ export function renderFxFrame(opts: {
 
           ctx.globalAlpha = 1
           ctx.strokeStyle = grad
-          ctx.lineWidth = Math.max(1.4, s.thickness * 4.2)
-          ctx.shadowBlur = Math.max(12, s.thickness * 20)
+          ctx.lineWidth = Math.max(spx(1.4), th * 4.2)
+          ctx.shadowBlur = Math.max(spx(12), th * 20) * blurK
           ctx.shadowColor = withAlpha(s.colorTrail, 0.9)
           ctx.beginPath()
           ctx.moveTo(tailX, tailY)
@@ -464,12 +464,12 @@ export function renderFxFrame(opts: {
 
         // Head: star-like spark (tiny cross) + bloom
         {
-          const r = Math.max(1.8, s.thickness * 2.8)
-          const arm = Math.max(6, r * 3.2)
-          const px = -uy
-          const py = ux
+          const r = Math.max(spx(1.8), th * 2.8)
+          const arm = Math.max(spx(6), r * 3.2)
+          const perpX = -uy
+          const perpY = ux
 
-          ctx.shadowBlur = Math.max(10, r * 6)
+          ctx.shadowBlur = Math.max(spx(10), r * 6) * blurK
           ctx.shadowColor = withAlpha(s.colorCore, 0.95)
           ctx.globalAlpha = 1
           ctx.fillStyle = withAlpha(s.colorCore, alpha)
@@ -477,10 +477,10 @@ export function renderFxFrame(opts: {
           ctx.arc(headX, headY, r, 0, Math.PI * 2)
           ctx.fill()
 
-          ctx.shadowBlur = Math.max(12, r * 7)
+          ctx.shadowBlur = Math.max(spx(12), r * 7) * blurK
           ctx.shadowColor = withAlpha(s.colorTrail, 0.9)
           ctx.strokeStyle = withAlpha(s.colorCore, alpha)
-          ctx.lineWidth = Math.max(1.0, s.thickness * 1.1)
+          ctx.lineWidth = Math.max(spx(1.0), th * 1.1)
 
           // Along direction
           ctx.beginPath()
@@ -490,8 +490,8 @@ export function renderFxFrame(opts: {
 
           // Perpendicular
           ctx.beginPath()
-          ctx.moveTo(headX - px * arm * 0.65, headY - py * arm * 0.65)
-          ctx.lineTo(headX + px * arm * 0.65, headY + py * arm * 0.65)
+          ctx.moveTo(headX - perpX * arm * 0.65, headY - perpY * arm * 0.65)
+          ctx.lineTo(headX + perpX * arm * 0.65, headY + perpY * arm * 0.65)
           ctx.stroke()
         }
 
@@ -510,13 +510,13 @@ export function renderFxFrame(opts: {
 
       const seed01 = ((s.seed % 4096) / 4096)
       const wobbleFreq = 2.5 + (seed01 * 4.0)
-      const wobbleAmp = (2.0 + s.thickness * 2.5) * (1 - t0)
-      const px = -uy
-      const py = ux
+      const wobbleAmp = (spx(2.0) + (s.thickness * invZ) * 2.5) * (1 - t0)
+      const perpX = -uy
+      const perpY = ux
       const wobble = Math.sin((t * Math.PI * 2 * wobbleFreq) + seed01 * 11.3) * wobbleAmp
 
-      const x = start.x + dx * t + px * wobble
-      const y = start.y + dy * t + py * wobble
+      const x = start.x + dx * t + perpX * wobble
+      const y = start.y + dy * t + perpY * wobble
 
       const tailX = x - ux * trailLen
       const tailY = y - uy * trailLen
@@ -530,6 +530,7 @@ export function renderFxFrame(opts: {
 
       // Trail (glow pass)
       {
+        const th = s.thickness * invZ
         const grad = ctx.createLinearGradient(x, y, tailX, tailY)
         grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail * 0.9))
         grad.addColorStop(0.25, withAlpha(s.colorTrail, alphaTrail * 0.55))
@@ -539,8 +540,8 @@ export function renderFxFrame(opts: {
         ctx.strokeStyle = grad
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
-        ctx.lineWidth = Math.max(1.2, s.thickness * 3.0)
-        ctx.shadowBlur = Math.max(6, s.thickness * 10)
+        ctx.lineWidth = Math.max(spx(1.2), th * 3.0)
+        ctx.shadowBlur = Math.max(spx(6), th * 10) * blurK
         ctx.shadowColor = withAlpha(s.colorTrail, 0.85)
         ctx.beginPath()
         ctx.moveTo(tailX, tailY)
@@ -550,6 +551,7 @@ export function renderFxFrame(opts: {
 
       // Trail (core pass)
       {
+        const th = s.thickness * invZ
         const grad = ctx.createLinearGradient(x, y, tailX, tailY)
         grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail))
         grad.addColorStop(0.35, withAlpha(s.colorTrail, alphaTrail * 0.35))
@@ -558,7 +560,7 @@ export function renderFxFrame(opts: {
         ctx.shadowBlur = 0
         ctx.globalAlpha = 1
         ctx.strokeStyle = grad
-        ctx.lineWidth = Math.max(0.9, s.thickness * 1.9)
+        ctx.lineWidth = Math.max(spx(0.9), th * 1.9)
         ctx.beginPath()
         ctx.moveTo(tailX, tailY)
         ctx.lineTo(x, y)
@@ -567,9 +569,10 @@ export function renderFxFrame(opts: {
 
       // Head core with soft bloom
       {
-        const r = Math.max(1.6, s.thickness * 2.4)
+        const th = s.thickness * invZ
+        const r = Math.max(spx(1.6), th * 2.4)
         ctx.globalAlpha = 1
-        ctx.shadowBlur = Math.max(10, r * 6)
+        ctx.shadowBlur = Math.max(spx(10), r * 6) * blurK
         ctx.shadowColor = withAlpha(s.colorCore, 0.9)
         ctx.fillStyle = withAlpha(s.colorCore, alphaCore)
         ctx.beginPath()
@@ -579,13 +582,14 @@ export function renderFxFrame(opts: {
 
       // Small embers behind the head
       {
+        const th = s.thickness * invZ
         ctx.shadowBlur = 0
         ctx.fillStyle = withAlpha(s.colorTrail, alphaTrail * 0.55)
         for (let j = 1; j <= 3; j++) {
           const tt = j / 4
           const ex = x - ux * trailLen * tt
           const ey = y - uy * trailLen * tt
-          const rr = Math.max(0.8, s.thickness * (1.25 - tt * 0.7))
+          const rr = Math.max(spx(0.8), th * (1.25 - tt * 0.7))
           ctx.globalAlpha = Math.max(0, alphaTrail * (1 - tt) * 0.9)
           ctx.beginPath()
           ctx.arc(ex, ey, rr, 0, Math.PI * 2)
@@ -643,7 +647,7 @@ export function renderFxFrame(opts: {
       // Soft whole-edge presence so the route reads as a loop.
       ctx.globalAlpha = alpha * 0.10
       ctx.strokeStyle = p.color
-      ctx.lineWidth = Math.max(1.0, p.thickness * 1.1)
+      ctx.lineWidth = Math.max(spx(1.0), (p.thickness * invZ) * 1.1)
       ctx.beginPath()
       ctx.moveTo(a.__x, a.__y)
       ctx.lineTo(b.__x, b.__y)
@@ -657,8 +661,8 @@ export function renderFxFrame(opts: {
 
       ctx.globalAlpha = 1
       ctx.strokeStyle = grad
-      ctx.lineWidth = Math.max(1.2, p.thickness * 2.8)
-      ctx.shadowBlur = Math.max(10, p.thickness * 14)
+      ctx.lineWidth = Math.max(spx(1.2), (p.thickness * invZ) * 2.8)
+      ctx.shadowBlur = Math.max(spx(10), (p.thickness * invZ) * 14) * blurK
       ctx.shadowColor = withAlpha(p.color, 0.9)
       ctx.beginPath()
       ctx.moveTo(tailX, tailY)
@@ -669,7 +673,7 @@ export function renderFxFrame(opts: {
       ctx.globalAlpha = alpha
       ctx.fillStyle = p.color
       ctx.beginPath()
-      ctx.arc(x, y, Math.max(1.5, p.thickness * 2.2), 0, Math.PI * 2)
+      ctx.arc(x, y, Math.max(spx(1.5), (p.thickness * invZ) * 2.2), 0, Math.PI * 2)
       ctx.fill()
 
       ctx.restore()
@@ -695,7 +699,9 @@ export function renderFxFrame(opts: {
       if (b.kind === 'tx-impact') {
         // Uniform contour glow: the outline itself glows evenly around the perimeter.
         // We draw multiple strokes with increasing blur/thickness to create a soft aura.
-        const { w: nw, h: nh } = sizeForNode(n)
+        const { w: nw0, h: nh0 } = sizeForNode(n)
+        const nw = nw0 * invZ
+        const nh = nh0 * invZ
         const nodeR = Math.max(nw, nh) / 2
 
         ctx.save()
@@ -703,28 +709,29 @@ export function renderFxFrame(opts: {
 
         // Clip to outside of node so interior stays dark.
         const outside = new Path2D()
-        outside.rect(0, 0, w, h)
-        outside.addPath(nodeOutlinePath2D(n, 1.0))
+        const view = worldRectForCanvas(ctx, w, h)
+        outside.rect(view.x, view.y, view.w, view.h)
+        outside.addPath(nodeOutlinePath2D(n, 1.0, invZ))
         ctx.clip(outside, 'evenodd')
 
-        const outline = nodeOutlinePath2D(n, 1.0)
-        const baseWidth = Math.max(2, nodeR * 0.15)
+        const outline = nodeOutlinePath2D(n, 1.0, invZ)
+        const baseWidth = Math.max(spx(2), nodeR * 0.15)
 
         // Layer 1: Wide outer glow (largest blur, lowest alpha)
         ctx.shadowColor = b.color
-        ctx.shadowBlur = Math.max(12, nodeR * 0.8) * alpha
+        ctx.shadowBlur = Math.max(spx(12), nodeR * 0.8) * alpha * blurK
         ctx.strokeStyle = withAlpha(b.color, 0.4 * alpha)
         ctx.lineWidth = baseWidth * 3
         ctx.stroke(outline)
 
         // Layer 2: Medium glow
-        ctx.shadowBlur = Math.max(8, nodeR * 0.5) * alpha
+        ctx.shadowBlur = Math.max(spx(8), nodeR * 0.5) * alpha * blurK
         ctx.strokeStyle = withAlpha(b.color, 0.6 * alpha)
         ctx.lineWidth = baseWidth * 1.8
         ctx.stroke(outline)
 
         // Layer 3: Bright inner stroke (crisp edge)
-        ctx.shadowBlur = Math.max(4, nodeR * 0.25) * alpha
+        ctx.shadowBlur = Math.max(spx(4), nodeR * 0.25) * alpha * blurK
         ctx.strokeStyle = withAlpha(b.color, 0.9 * alpha)
         ctx.lineWidth = baseWidth
         ctx.stroke(outline)
@@ -732,13 +739,15 @@ export function renderFxFrame(opts: {
         // Layer 4: Hot white core (very thin, bright)
         ctx.shadowBlur = 0
         ctx.strokeStyle = withAlpha('#ffffff', 0.7 * alpha)
-        ctx.lineWidth = Math.max(1, baseWidth * 0.4)
+        ctx.lineWidth = Math.max(spx(1), baseWidth * 0.4)
         ctx.stroke(outline)
 
         ctx.restore()
       } else if (b.kind === 'glow') {
         // Soft blurred circle glow (no rim, no hard ring).
-        const { w: nw, h: nh } = sizeForNode(n)
+        const { w: nw0, h: nh0 } = sizeForNode(n)
+        const nw = nw0 * invZ
+        const nh = nh0 * invZ
         const nodeR = Math.max(nw, nh) / 2
 
         const life = Math.max(0, 1 - t0)
@@ -755,7 +764,7 @@ export function renderFxFrame(opts: {
         grad.addColorStop(1, withAlpha(b.color, 0))
 
         ctx.fillStyle = grad
-        ctx.shadowBlur = Math.max(18, nodeR * 1.4) * a
+        ctx.shadowBlur = Math.max(spx(18), nodeR * 1.4) * a * blurK
         ctx.shadowColor = withAlpha(b.color, 0.9)
         ctx.beginPath()
         ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
@@ -764,7 +773,7 @@ export function renderFxFrame(opts: {
         ctx.restore()
       } else {
         // Default (clearing) burst: bloom + ring
-        const r = 10 + Math.pow(t0, 0.4) * 35
+        const r = spx(10) + Math.pow(t0, 0.4) * spx(35)
 
         ctx.save()
         ctx.globalCompositeOperation = 'screen'
@@ -772,7 +781,7 @@ export function renderFxFrame(opts: {
         // 1. Core bloom
         ctx.globalAlpha = alpha
         ctx.fillStyle = withAlpha(b.color, 0.5)
-        ctx.shadowBlur = 30 * alpha
+        ctx.shadowBlur = spx(30) * alpha * blurK
         ctx.shadowColor = b.color
         ctx.beginPath()
         ctx.arc(n.__x, n.__y, r * 0.5, 0, Math.PI * 2)
@@ -781,7 +790,7 @@ export function renderFxFrame(opts: {
         // 2. Shockwave
         ctx.globalAlpha = alpha * 0.7
         ctx.strokeStyle = b.color
-        ctx.lineWidth = 3 * (1 - t0)
+        ctx.lineWidth = spx(3) * (1 - t0)
         ctx.beginPath()
         ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
         ctx.stroke()
@@ -792,5 +801,4 @@ export function renderFxFrame(opts: {
     fxState.nodeBursts.length = write
   }
 
-  return { flash }
 }

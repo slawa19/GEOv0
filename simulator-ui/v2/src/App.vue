@@ -33,7 +33,7 @@ const isTestMode = computed(() => String(import.meta.env.VITE_TEST_MODE ?? '0') 
 const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
 
 const effectiveEq = computed(() => {
-  // Demo (fixtures) mode: only UAH. Other equivalents are reserved for future real-mode.
+  // Demo (fixtures) mode: only UAH. Other equivalents are reserved for future API-backed mode.
   if (isDemoFixtures.value) return 'UAH'
   // Scene E must use canonical clearing cycles (UAH) per spec.
   if (scene.value === 'E') return 'UAH'
@@ -52,7 +52,15 @@ const state = reactive({
   selectedNodeId: null as string | null,
   activeEdges: new Set<string>(),
   flash: 0 as number,
-  floatingLabels: [] as Array<{ id: number; x: number; y: number; text: string; color: string; expiresAtMs: number }>,
+  floatingLabels: [] as Array<{
+    id: number
+    nodeId: string
+    offsetXPx?: number
+    offsetYPx?: number
+    text: string
+    color: string
+    expiresAtMs: number
+  }>,
 })
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
@@ -60,6 +68,33 @@ const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
 const hostEl = ref<HTMLDivElement | null>(null)
 
 let rafId: number | null = null
+
+let resizeRafId: number | null = null
+let relayoutDebounceId: number | null = null
+
+function requestResizeAndLayout() {
+  if (resizeRafId !== null) return
+  resizeRafId = window.requestAnimationFrame(() => {
+    resizeRafId = null
+    // Cheap per-frame resize: update canvas sizes; avoid heavy force relayout.
+    resizeCanvases()
+    clampCameraPan()
+  })
+}
+
+function requestRelayoutDebounced(delayMs = 180) {
+  if (relayoutDebounceId !== null) window.clearTimeout(relayoutDebounceId)
+  relayoutDebounceId = window.setTimeout(() => {
+    relayoutDebounceId = null
+    recomputeLayout()
+    clampCameraPan()
+  }, delayMs)
+}
+
+function onWindowResize() {
+  requestResizeAndLayout()
+  requestRelayoutDebounced()
+}
 
 function keyEdge(a: string, b: string) {
   return `${a}→${b}`
@@ -92,6 +127,7 @@ const dprClamp = computed(() => {
 })
 
 const showDemoControls = computed(() => !isTestMode.value && (scene.value === 'D' || scene.value === 'E'))
+const showResetView = computed(() => !isTestMode.value)
 
 type LayoutNode = GraphNode & { __x: number; __y: number }
 type LayoutLink = GraphLink & { __key: string }
@@ -103,12 +139,188 @@ const layout = reactive({
   h: 0,
 })
 
+const camera = reactive({
+  panX: 0,
+  panY: 0,
+  zoom: 1,
+})
+
+function clamp01(v: number) {
+  return Math.max(0, Math.min(1, v))
+}
+
+function clamp(v: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, v))
+}
+
+function resetCamera() {
+  camera.panX = 0
+  camera.panY = 0
+  camera.zoom = 1
+}
+
+function getWorldBounds() {
+  if (layout.nodes.length === 0) return null
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of layout.nodes) {
+    if (n.__x < minX) minX = n.__x
+    if (n.__x > maxX) maxX = n.__x
+    if (n.__y < minY) minY = n.__y
+    if (n.__y > maxY) maxY = n.__y
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null
+  return { minX, minY, maxX, maxY }
+}
+
+function clampCameraPan() {
+  if (isTestMode.value) return
+  const bounds = getWorldBounds()
+  if (!bounds) return
+
+  // Keep some breathing room so nodes can touch edges without feeling clipped.
+  const padPx = 80
+  const z = clamp(camera.zoom, 0.2, 10)
+
+  const worldW = Math.max(1, bounds.maxX - bounds.minX)
+  const worldH = Math.max(1, bounds.maxY - bounds.minY)
+  const contentW = worldW * z
+  const contentH = worldH * z
+
+  // Screen-space extents of the content under current pan/zoom.
+  const contentMinX = bounds.minX * z + camera.panX
+  const contentMaxX = bounds.maxX * z + camera.panX
+  const contentMinY = bounds.minY * z + camera.panY
+  const contentMaxY = bounds.maxY * z + camera.panY
+
+  // If the content is smaller than the viewport, center it (still respecting pad).
+  if (contentW <= layout.w - padPx * 2) {
+    camera.panX = (layout.w - contentW) / 2 - bounds.minX * z
+  } else {
+    // Ensure at least padPx of content remains visible on each side.
+    const minPanX = (layout.w - padPx) - bounds.maxX * z
+    const maxPanX = padPx - bounds.minX * z
+    camera.panX = clamp(camera.panX, minPanX, maxPanX)
+  }
+
+  if (contentH <= layout.h - padPx * 2) {
+    camera.panY = (layout.h - contentH) / 2 - bounds.minY * z
+  } else {
+    const minPanY = (layout.h - padPx) - bounds.maxY * z
+    const maxPanY = padPx - bounds.minY * z
+    camera.panY = clamp(camera.panY, minPanY, maxPanY)
+  }
+}
+
+function worldToScreen(x: number, y: number) {
+  return {
+    x: x * camera.zoom + camera.panX,
+    y: y * camera.zoom + camera.panY,
+  }
+}
+
+function screenToWorld(x: number, y: number) {
+  return {
+    x: (x - camera.panX) / camera.zoom,
+    y: (y - camera.panY) / camera.zoom,
+  }
+}
+
+function worldToCssTranslate(x: number, y: number) {
+  const p = worldToScreen(x, y)
+  // Keep text readable across zoom levels.
+  const scale = clamp(1 / Math.max(0.01, camera.zoom), 0.75, 1.25)
+  if (isTestMode.value || Math.abs(scale - 1) < 1e-3) return `translate3d(${p.x}px, ${p.y}px, 0)`
+  return `translate3d(${p.x}px, ${p.y}px, 0) scale(${scale})`
+}
+
+function clientToScreen(clientX: number, clientY: number) {
+  const host = hostEl.value
+  if (!host) return { x: 0, y: 0 }
+  const rect = host.getBoundingClientRect()
+  return { x: clientX - rect.left, y: clientY - rect.top }
+}
+
 const fxState = createFxState()
 
 let txRunSeq = 0
 let clearingRunSeq = 0
 
 const activeTimeouts: number[] = []
+
+const floatingLabelThrottleAtMsByKey = new Map<string, number>()
+let lastFloatingLabelThrottlePruneAtMs = 0
+
+function pruneFloatingLabelThrottle(nowMs: number) {
+  // Keeps the throttle map bounded over long sessions.
+  // Values are last-used timestamps; old keys can be dropped safely.
+  const pruneEveryMs = 5000
+  const ttlMs = 60_000
+  const maxEntries = 2000
+  if (nowMs - lastFloatingLabelThrottlePruneAtMs < pruneEveryMs && floatingLabelThrottleAtMsByKey.size <= maxEntries) return
+  lastFloatingLabelThrottlePruneAtMs = nowMs
+
+  for (const [k, t] of floatingLabelThrottleAtMsByKey) {
+    if (nowMs - t > ttlMs) floatingLabelThrottleAtMsByKey.delete(k)
+  }
+
+  if (floatingLabelThrottleAtMsByKey.size > maxEntries) {
+    // Drop oldest entries (Map preserves insertion order).
+    const overflow = floatingLabelThrottleAtMsByKey.size - maxEntries
+    let dropped = 0
+    for (const k of floatingLabelThrottleAtMsByKey.keys()) {
+      floatingLabelThrottleAtMsByKey.delete(k)
+      dropped++
+      if (dropped >= overflow) break
+    }
+  }
+}
+
+function pushFloatingLabel(opts: {
+  nodeId: string
+  id?: number
+  text: string
+  color: string
+  ttlMs?: number
+  offsetXPx?: number
+  offsetYPx?: number
+  throttleKey?: string
+  throttleMs?: number
+}) {
+  const nowMs = performance.now()
+  pruneFloatingLabelThrottle(nowMs)
+
+  const key = opts.throttleKey
+  const throttleMs = opts.throttleMs ?? 0
+  if (key && throttleMs > 0) {
+    const lastAt = floatingLabelThrottleAtMsByKey.get(key) ?? -Infinity
+    if (nowMs - lastAt < throttleMs) return
+    // Touch for LRU.
+    floatingLabelThrottleAtMsByKey.delete(key)
+    floatingLabelThrottleAtMsByKey.set(key, nowMs)
+  }
+
+  // Skip if node isn't in the current layout (prevents “teleporting” from stale coords).
+  const ln = layout.nodes.find((n) => n.id === opts.nodeId)
+  if (!ln) return
+
+  const maxFloatingLabels = 60
+  if (state.floatingLabels.length >= maxFloatingLabels) {
+    state.floatingLabels.splice(0, state.floatingLabels.length - maxFloatingLabels + 1)
+  }
+
+  state.floatingLabels.push({
+    id: opts.id ?? Math.floor(nowMs),
+    nodeId: opts.nodeId,
+    offsetXPx: opts.offsetXPx ?? 0,
+    offsetYPx: opts.offsetYPx ?? 0,
+    text: opts.text,
+    color: opts.color,
+    expiresAtMs: nowMs + (opts.ttlMs ?? 2200),
+  })
+}
 
 function scheduleTimeout(fn: () => void, delayMs: number) {
   const id = window.setTimeout(() => {
@@ -796,6 +1008,149 @@ const labelNodes = computed(() => {
   return out
 })
 
+const layoutNodeMap = computed(() => {
+  const m = new Map<string, LayoutNode>()
+  for (const n of layout.nodes) m.set(n.id, n)
+  return m
+})
+
+const nodePickGrid = computed(() => {
+  const cellSizeW = 180
+  const cells = new Map<string, LayoutNode[]>()
+  for (const n of layout.nodes) {
+    const cx = Math.floor(n.__x / cellSizeW)
+    const cy = Math.floor(n.__y / cellSizeW)
+    const k = `${cx},${cy}`
+    const arr = cells.get(k)
+    if (arr) arr.push(n)
+    else cells.set(k, [n])
+  }
+  return cells
+})
+
+type EdgeSeg = { key: string; fromId: string; toId: string; ax: number; ay: number; bx: number; by: number }
+
+const edgePickGrid = computed(() => {
+  const cellSizeW = 220
+  const cells = new Map<string, EdgeSeg[]>()
+  const nodes = layoutNodeMap.value
+
+  const push = (cx: number, cy: number, seg: EdgeSeg) => {
+    const k = `${cx},${cy}`
+    const arr = cells.get(k)
+    if (arr) arr.push(seg)
+    else cells.set(k, [seg])
+  }
+
+  for (const l of layout.links) {
+    const a = nodes.get(l.source)
+    const b = nodes.get(l.target)
+    if (!a || !b) continue
+
+    const ax = a.__x
+    const ay = a.__y
+    const bx = b.__x
+    const by = b.__y
+    const seg: EdgeSeg = { key: l.__key, fromId: l.source, toId: l.target, ax, ay, bx, by }
+
+    const minX = Math.min(ax, bx)
+    const maxX = Math.max(ax, bx)
+    const minY = Math.min(ay, by)
+    const maxY = Math.max(ay, by)
+
+    const cx0 = Math.floor(minX / cellSizeW)
+    const cx1 = Math.floor(maxX / cellSizeW)
+    const cy0 = Math.floor(minY / cellSizeW)
+    const cy1 = Math.floor(maxY / cellSizeW)
+
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        push(cx, cy, seg)
+      }
+    }
+  }
+
+  return { cellSizeW, cells }
+})
+
+function dist2PointToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const abx = bx - ax
+  const aby = by - ay
+  const apx = px - ax
+  const apy = py - ay
+  const abLen2 = abx * abx + aby * aby
+  if (abLen2 < 1e-9) {
+    const dx = px - ax
+    const dy = py - ay
+    return dx * dx + dy * dy
+  }
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLen2))
+  const cx = ax + abx * t
+  const cy = ay + aby * t
+  const dx = px - cx
+  const dy = py - cy
+  return dx * dx + dy * dy
+}
+
+function pickEdgeAt(clientX: number, clientY: number): EdgeSeg | null {
+  const host = hostEl.value
+  const canvas = canvasEl.value
+  if (!host || !canvas) return null
+
+  const s = clientToScreen(clientX, clientY)
+  const p = screenToWorld(s.x, s.y)
+
+  const { cellSizeW, cells } = edgePickGrid.value
+  const cx0 = Math.floor(p.x / cellSizeW)
+  const cy0 = Math.floor(p.y / cellSizeW)
+
+  const hitPx = 10
+  const hitW = hitPx / Math.max(0.01, camera.zoom)
+  const hit2 = hitW * hitW
+
+  let best: EdgeSeg | null = null
+  let bestD2 = Infinity
+
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const bucket = cells.get(`${cx0 + dx},${cy0 + dy}`)
+      if (!bucket) continue
+      for (const seg of bucket) {
+        const d2 = dist2PointToSegment(p.x, p.y, seg.ax, seg.ay, seg.bx, seg.by)
+        if (d2 <= hit2 && d2 < bestD2) {
+          best = seg
+          bestD2 = d2
+        }
+      }
+    }
+  }
+
+  return best
+}
+
+const floatingLabelsView = computed(() => {
+  const out: Array<{ id: number; x: number; y: number; text: string; color: string }> = []
+  for (const fl of state.floatingLabels) {
+    const ln = layoutNodeMap.value.get(fl.nodeId)
+    if (!ln) continue
+
+    // Anchor slightly above the node’s top edge (in screen-space px).
+    const sz = sizeForNode(ln)
+    const baseOffsetYPx = -(Math.max(sz.w, sz.h) / 2 + 10)
+    const dxW = (fl.offsetXPx ?? 0) / Math.max(0.01, camera.zoom)
+    const dyW = (baseOffsetYPx + (fl.offsetYPx ?? 0)) / Math.max(0.01, camera.zoom)
+
+    out.push({
+      id: fl.id,
+      x: ln.__x + dxW,
+      y: ln.__y + dyW,
+      text: fl.text,
+      color: fl.color,
+    })
+  }
+  return out
+})
+
 function applyNodePatches(patches: NodePatch[] | undefined) {
   if (!patches?.length || !state.snapshot) return
 
@@ -875,6 +1230,7 @@ function applyPatchesFromEvent(evt: DemoEvent) {
 async function loadScene() {
   clearScheduledTimeouts()
   resetPlaylistPointers()
+  resetCamera()
   state.loading = true
   state.error = ''
   state.sourcePath = ''
@@ -915,6 +1271,12 @@ async function loadScene() {
 }
 
 function resizeAndLayout() {
+  resizeCanvases()
+  recomputeLayout()
+  clampCameraPan()
+}
+
+function resizeCanvases() {
   const canvas = canvasEl.value
   const fxCanvas = fxCanvasEl.value
   const host = hostEl.value
@@ -935,8 +1297,11 @@ function resizeAndLayout() {
 
   layout.w = rect.width
   layout.h = rect.height
+}
 
-  computeLayout(state.snapshot, rect.width, rect.height, layoutMode.value)
+function recomputeLayout() {
+  if (!state.snapshot) return
+  computeLayout(state.snapshot, layout.w, layout.h, layoutMode.value)
 }
 
 watch(layoutMode, () => {
@@ -958,6 +1323,17 @@ onMounted(() => {
     }
   } catch {
     // ignore
+  }
+})
+
+onUnmounted(() => {
+  if (resizeRafId !== null) {
+    window.cancelAnimationFrame(resizeRafId)
+    resizeRafId = null
+  }
+  if (relayoutDebounceId !== null) {
+    window.clearTimeout(relayoutDebounceId)
+    relayoutDebounceId = null
   }
 })
 
@@ -1015,7 +1391,7 @@ watch(quality, () => {
   } catch {
     // ignore
   }
-  resizeAndLayout()
+  requestResizeAndLayout()
 })
 
 watch(labelsLod, () => {
@@ -1036,12 +1412,37 @@ function renderFrame(nowMs: number) {
   if (!fx) return
 
   const dpr = canvas.width / Math.max(1, layout.w)
+  const renderQuality: 'low' | 'med' | 'high' = isTestMode.value ? 'high' : quality.value
+  // Clear in screen-space (pan/zoom must not affect clearing).
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, layout.w, layout.h)
+
+  // Screen-space background fill (must happen before camera transform).
+  ctx.fillStyle = '#020617'
+  ctx.fillRect(0, 0, layout.w, layout.h)
 
   fx.setTransform(dpr, 0, 0, dpr, 0, 0)
-
-  ctx.clearRect(0, 0, layout.w, layout.h)
   fx.clearRect(0, 0, layout.w, layout.h)
+
+  // Screen-space flash overlay (clearing) — must not move with camera.
+  if (state.flash > 0) {
+    const t = clamp01(state.flash)
+    fx.save()
+    fx.globalAlpha = t
+    const grad = fx.createRadialGradient(layout.w / 2, layout.h / 2, 0, layout.w / 2, layout.h / 2, Math.max(layout.w, layout.h) * 0.7)
+    grad.addColorStop(0, VIZ_MAPPING.fx.flash.clearing.from)
+    grad.addColorStop(1, VIZ_MAPPING.fx.flash.clearing.to)
+    fx.fillStyle = grad
+    fx.fillRect(0, 0, layout.w, layout.h)
+    fx.restore()
+    state.flash = Math.max(0, state.flash - 0.03)
+  }
+
+  // Apply camera transform for drawing.
+  ctx.translate(camera.panX, camera.panY)
+  ctx.scale(camera.zoom, camera.zoom)
+  fx.translate(camera.panX, camera.panY)
+  fx.scale(camera.zoom, camera.zoom)
 
   // Prevent unbounded DOM growth (labels are transient).
   if (state.floatingLabels.length > 0) {
@@ -1069,9 +1470,11 @@ function renderFrame(nowMs: number) {
     palette: state.snapshot?.palette,
     selectedNodeId: state.selectedNodeId,
     activeEdges: state.activeEdges,
+    cameraZoom: camera.zoom,
+    quality: renderQuality,
   })
 
-  const r = renderFxFrame({
+  renderFxFrame({
     nowMs,
     ctx: fx,
     pos,
@@ -1079,10 +1482,10 @@ function renderFrame(nowMs: number) {
     h: layout.h,
     mapping: VIZ_MAPPING,
     fxState,
-    flash: state.flash,
     isTestMode: isTestMode.value,
+    cameraZoom: camera.zoom,
+    quality: renderQuality,
   })
-  state.flash = r.flash
 }
 
 function ensureRenderLoop() {
@@ -1106,19 +1509,41 @@ function pickNodeAt(clientX: number, clientY: number): LayoutNode | null {
   const canvas = canvasEl.value
   if (!host || !canvas) return null
 
-  const rect = host.getBoundingClientRect()
-  const x = clientX - rect.left
-  const y = clientY - rect.top
+  const s = clientToScreen(clientX, clientY)
+  const p = screenToWorld(s.x, s.y)
 
-  // Simple hit test (no pan/zoom yet).
-  for (const n of layout.nodes) {
-    const { w, h } = sizeForNode(n)
-    const r = Math.max(w, h) * 0.8
-    const dx = x - n.__x
-    const dy = y - n.__y
-    if (dx * dx + dy * dy <= r * r) return n
+
+  // Spatial hash (uniform grid) to avoid O(n) scan on every pointer event.
+  const cellSizeW = 180
+  const cx0 = Math.floor(p.x / cellSizeW)
+  const cy0 = Math.floor(p.y / cellSizeW)
+
+  let best: LayoutNode | null = null
+  let bestD2 = Infinity
+
+  const key = (cx: number, cy: number) => `${cx},${cy}`
+  const cells = nodePickGrid.value
+
+  for (let dyc = -1; dyc <= 1; dyc++) {
+    for (let dxc = -1; dxc <= 1; dxc++) {
+      const bucket = cells.get(key(cx0 + dxc, cy0 + dyc))
+      if (!bucket) continue
+      for (const n of bucket) {
+        const { w, h } = sizeForNode(n)
+        // Node size is rendered in screen-space; compensate in world-space.
+        const r = (Math.max(w, h) * 0.8) / Math.max(0.01, camera.zoom)
+        const dx = p.x - n.__x
+        const dy = p.y - n.__y
+        const d2 = dx * dx + dy * dy
+        if (d2 <= r * r && d2 < bestD2) {
+          best = n
+          bestD2 = d2
+        }
+      }
+    }
   }
-  return null
+
+  return best
 }
 
 function onCanvasClick(ev: MouseEvent) {
@@ -1137,10 +1562,116 @@ function nodeCardStyle() {
   if (!node) return { display: 'none' }
 
   const rect = host.getBoundingClientRect()
-  const x = Math.min(rect.width - 280, Math.max(12, node.__x + 16))
-  const y = Math.min(rect.height - 160, Math.max(12, node.__y - 60))
+  const p = worldToScreen(node.__x, node.__y)
+  const x = Math.min(rect.width - 280, Math.max(12, p.x + 16))
+  const y = Math.min(rect.height - 160, Math.max(12, p.y - 60))
   return { left: `${x}px`, top: `${y}px` }
 }
+
+const panState = reactive({
+  active: false,
+  pointerId: -1,
+  startClientX: 0,
+  startClientY: 0,
+  startPanX: 0,
+  startPanY: 0,
+  moved: false,
+})
+
+function onCanvasPointerDown(ev: PointerEvent) {
+  // Keep tests deterministic.
+  if (isTestMode.value) return
+
+  const canvas = canvasEl.value
+  if (!canvas) return
+
+  // If user grabs a node: select it, don't pan.
+  const hit = pickNodeAt(ev.clientX, ev.clientY)
+  if (hit) {
+    state.selectedNodeId = hit.id
+    return
+  }
+
+  panState.active = true
+  panState.pointerId = ev.pointerId
+  panState.startClientX = ev.clientX
+  panState.startClientY = ev.clientY
+  panState.startPanX = camera.panX
+  panState.startPanY = camera.panY
+  panState.moved = false
+
+  try {
+    canvas.setPointerCapture(ev.pointerId)
+  } catch {
+    // ignore
+  }
+}
+
+function onCanvasPointerMove(ev: PointerEvent) {
+  if (!panState.active) return
+  if (ev.pointerId !== panState.pointerId) return
+
+  const dx = ev.clientX - panState.startClientX
+  const dy = ev.clientY - panState.startClientY
+  if (!panState.moved && dx * dx + dy * dy >= 9) panState.moved = true
+
+  camera.panX = panState.startPanX + dx
+  camera.panY = panState.startPanY + dy
+  clampCameraPan()
+}
+
+function onCanvasPointerUp(ev: PointerEvent) {
+  if (!panState.active) return
+  if (ev.pointerId !== panState.pointerId) return
+
+  panState.active = false
+  panState.pointerId = -1
+
+  // Click on empty background: clear selection.
+  if (!panState.moved) state.selectedNodeId = null
+}
+
+function onCanvasWheel(ev: WheelEvent) {
+  // Keep tests deterministic.
+  if (isTestMode.value) return
+  const s = clientToScreen(ev.clientX, ev.clientY)
+  wheelState.lastSx = s.x
+  wheelState.lastSy = s.y
+  wheelState.pendingDeltaY += ev.deltaY
+  if (wheelState.rafId !== null) return
+
+  // Throttle to ~1 update per frame to reduce jank on fast wheels/trackpads.
+  wheelState.rafId = window.requestAnimationFrame(() => {
+    wheelState.rafId = null
+    const dy = wheelState.pendingDeltaY
+    wheelState.pendingDeltaY = 0
+
+    const sx = wheelState.lastSx
+    const sy = wheelState.lastSy
+    const before = screenToWorld(sx, sy)
+
+    const k = Math.exp(-dy * 0.001)
+    const nextZoom = clamp(camera.zoom * k, 0.4, 3.0)
+    if (nextZoom === camera.zoom) return
+
+    camera.zoom = nextZoom
+    camera.panX = sx - before.x * camera.zoom
+    camera.panY = sy - before.y * camera.zoom
+    clampCameraPan()
+  })
+}
+
+function resetView() {
+  resetCamera()
+  clampCameraPan()
+}
+
+const wheelState = reactive({
+  pendingDeltaY: 0,
+  lastSx: 0,
+  lastSy: 0,
+  rafId: null as number | null,
+})
 
 function runTxEvent(evt: TxUpdatedEvent, opts?: { onFinished?: () => void }) {
   if (!state.snapshot) return
@@ -1149,7 +1680,7 @@ function runTxEvent(evt: TxUpdatedEvent, opts?: { onFinished?: () => void }) {
   const runId = ++txRunSeq
 
   // In screenshot tests (test-mode + webdriver) we keep a deterministic, non-FX visual signal.
-  // In normal mode, edge glow must come from the spark/beam (so it fades with the flight).
+  // In interactive mode, edge glow must come from the spark/beam (so it fades with the flight).
   if (fxTestMode) {
     for (const e of evt.edges) state.activeEdges.add(keyEdge(e.from, e.to))
   }
@@ -1207,14 +1738,13 @@ function runTxEvent(evt: TxUpdatedEvent, opts?: { onFinished?: () => void }) {
 
       const ln = layout.nodes.find((n) => n.id === targetId)
       if (ln) {
-        state.floatingLabels.push({
-          id: Math.floor(performance.now()),
-          x: ln.__x,
-          y: ln.__y - 20,
+        pushFloatingLabel({
+          nodeId: targetId,
           text: '+125 GC',
           color: fxColorForNode(targetId, '#22d3ee'),
-          // Keep in DOM slightly longer than CSS animation (prevents growth without visual change).
-          expiresAtMs: performance.now() + 2200,
+          ttlMs: 2200,
+          // Slightly above the node edge.
+          offsetYPx: -6,
         })
       }
     }, ttl)
@@ -1297,7 +1827,7 @@ async function runClearingOnce() {
 
   const t0 = performance.now()
 
-  // Demo clearing animation (hardcoded look until real-mode):
+  // Demo clearing animation (hardcoded look until API-backed mode):
   // - Same spark flight as Single Tx (beam)
   // - Golden color
   // - Only node flashes (NO full-screen flash)
@@ -1371,17 +1901,16 @@ async function runClearingOnce() {
         isTestMode: false,
       })
 
-      const ln = layout.nodes.find((n) => n.id === e.to)
-      if (ln) {
-        state.floatingLabels.push({
-          id: Math.floor(performance.now()) + fnv1a(`lbl:${stepAtMs}:${idx}:${keyEdge(e.from, e.to)}`),
-          x: ln.__x,
-          y: ln.__y - 20,
-          text: formatDemoDebtAmount(e.from, e.to, stepAtMs),
-          color: fxColorForNode(e.to, clearingGold),
-          expiresAtMs: performance.now() + labelLifeMs,
-        })
-      }
+      pushFloatingLabel({
+        nodeId: e.to,
+        id: Math.floor(performance.now()) + fnv1a(`lbl:${stepAtMs}:${idx}:${keyEdge(e.from, e.to)}`),
+        text: formatDemoDebtAmount(e.from, e.to, stepAtMs),
+        color: fxColorForNode(e.to, clearingGold),
+        ttlMs: labelLifeMs,
+        offsetYPx: -6,
+        throttleKey: `clearing:${e.to}`,
+        throttleMs: 80,
+      })
     }, delayMs + microTtlMs)
   }
 
@@ -1543,17 +2072,16 @@ function runClearingStep(stepIndex: number, opts?: { onFinished?: () => void }) 
         isTestMode: false,
       })
 
-      const ln = layout.nodes.find((n) => n.id === e.to)
-      if (ln) {
-        state.floatingLabels.push({
-          id: Math.floor(performance.now()) + fnv1a(`lbl:${step.at_ms}:${i}:${keyEdge(e.from, e.to)}`),
-          x: ln.__x,
-          y: ln.__y - 20,
-          text: formatDemoDebtAmount(e.from, e.to, step.at_ms),
-          color: fxColorForNode(e.to, clearingGold),
-          expiresAtMs: performance.now() + labelLifeMs,
-        })
-      }
+      pushFloatingLabel({
+        nodeId: e.to,
+        id: Math.floor(performance.now()) + fnv1a(`lbl:${step.at_ms}:${i}:${keyEdge(e.from, e.to)}`),
+        text: formatDemoDebtAmount(e.from, e.to, step.at_ms),
+        color: fxColorForNode(e.to, clearingGold),
+        ttlMs: labelLifeMs,
+        offsetYPx: -6,
+        throttleKey: `clearing:${e.to}`,
+        throttleMs: 80,
+      })
     }, delayMs + microTtlMs)
   }
 
@@ -1681,11 +2209,11 @@ onMounted(() => {
   }
 
   loadScene()
-  window.addEventListener('resize', resizeAndLayout)
+  window.addEventListener('resize', onWindowResize)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', resizeAndLayout)
+  window.removeEventListener('resize', onWindowResize)
   clearScheduledTimeouts()
   stopRenderLoop()
 })
@@ -1699,7 +2227,16 @@ onUnmounted(() => {
     :data-scene="scene"
     :data-layout="layoutMode"
   >
-    <canvas ref="canvasEl" class="canvas" @click="onCanvasClick" />
+    <canvas
+      ref="canvasEl"
+      class="canvas"
+      @click="onCanvasClick"
+      @pointerdown="onCanvasPointerDown"
+      @pointermove="onCanvasPointerMove"
+      @pointerup="onCanvasPointerUp"
+      @pointercancel="onCanvasPointerUp"
+      @wheel.prevent="onCanvasWheel"
+    />
     <canvas ref="fxCanvasEl" class="canvas canvas-fx" />
 
     <!-- Minimal top HUD (controls + small status) -->
@@ -1744,6 +2281,10 @@ onUnmounted(() => {
         <div v-if="state.snapshot" class="pill subtle" aria-label="Stats">
           <span class="mono">Nodes {{ state.snapshot.nodes.length }} | Links {{ state.snapshot.links.length }}</span>
         </div>
+
+        <div v-if="isTestMode && !isWebDriver" class="pill subtle" aria-label="Mode">
+          <span class="mono">TEST MODE</span>
+        </div>
       </div>
     </div>
 
@@ -1761,6 +2302,11 @@ onUnmounted(() => {
     <div class="hud-bottom">
       <button class="btn" type="button" @click="runTxOnce">Single Tx</button>
       <button class="btn" type="button" @click="runClearingOnce">Run Clearing</button>
+
+      <template v-if="showResetView">
+        <div class="hud-divider" />
+        <button class="btn btn-ghost" type="button" @click="resetView">Reset view</button>
+      </template>
 
       <template v-if="showDemoControls">
         <div class="hud-divider" />
@@ -1801,7 +2347,7 @@ onUnmounted(() => {
         v-for="n in labelNodes"
         :key="n.id"
         class="node-label"
-        :style="{ transform: `translate3d(${n.x}px, ${n.y}px, 0)` }"
+        :style="{ transform: worldToCssTranslate(n.x, n.y) }"
       >
         <div class="node-label-inner" :style="{ borderColor: n.color, color: n.color }">{{ n.text }}</div>
       </div>
@@ -1809,10 +2355,10 @@ onUnmounted(() => {
 
     <div class="floating-layer">
       <div
-        v-for="fl in state.floatingLabels"
+        v-for="fl in floatingLabelsView"
         :key="fl.id"
         class="floating-label"
-        :style="{ transform: `translate3d(${fl.x}px, ${fl.y}px, 0)` }"
+        :style="{ transform: worldToCssTranslate(fl.x, fl.y) }"
       >
         <div class="floating-label-inner" :style="{ color: fl.color }">{{ fl.text }}</div>
       </div>
@@ -1940,13 +2486,14 @@ onUnmounted(() => {
   transform: translateX(-50%);
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
   gap: 12px;
   padding: 10px 12px;
   border-radius: 16px;
   background: rgba(15, 23, 42, 0.72);
   border: 1px solid rgba(148, 163, 184, 0.16);
   backdrop-filter: blur(10px);
+  z-index: 30;
+  pointer-events: auto;
 }
 
 .hud-divider {
@@ -2061,14 +2608,13 @@ onUnmounted(() => {
   left: 0;
   top: 0;
   pointer-events: none;
-  will-change: transform;
 }
 
 .floating-label-inner {
   font-size: 15px;
   font-weight: 700;
   text-shadow: 0 0 10px currentColor; /* Glow */
-  animation: floatUpFade 1.8s linear forwards;
+  animation: floatUpFade 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   /* Keep centering constant; animate only a pixel offset for smooth motion. */
   transform: translate3d(-50%, -50%, 0) translate3d(0, 0, 0);
   will-change: transform, opacity;
@@ -2080,13 +2626,17 @@ onUnmounted(() => {
     opacity: 0;
     transform: translate3d(-50%, -50%, 0) translate3d(0, 0, 0);
   }
-  1% {
+  8% {
     opacity: 1;
-    transform: translate3d(-50%, -50%, 0) translate3d(0, -1px, 0);
+    transform: translate3d(-50%, -50%, 0) translate3d(0, -2px, 0);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(-50%, -50%, 0) translate3d(0, -14px, 0);
   }
   100% {
     opacity: 0;
-    transform: translate3d(-50%, -50%, 0) translate3d(0, -72px, 0);
+    transform: translate3d(-50%, -50%, 0) translate3d(0, -34px, 0);
   }
 }
 </style>

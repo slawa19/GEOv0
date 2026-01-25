@@ -1,37 +1,22 @@
 import type { GraphNode } from '../types'
 import type { VizMapping } from '../vizMapping'
+import { withAlpha } from './color'
 
 export type LayoutNode = GraphNode & { __x: number; __y: number }
 
-function clamp01(v: number) {
-  return Math.max(0, Math.min(1, v))
-}
-
-function withAlpha(color: string, alpha: number) {
-  const a = clamp01(alpha)
-  const c = String(color || '').trim()
-  if (c.startsWith('rgba(') || c.startsWith('hsla(')) return c
-  if (c.startsWith('#')) {
-    const hex = c.slice(1)
-    const isShort = hex.length === 3
-    const isLong = hex.length === 6
-    if (isShort || isLong) {
-      const r = parseInt(isShort ? hex[0]! + hex[0]! : hex.slice(0, 2), 16)
-      const g = parseInt(isShort ? hex[1]! + hex[1]! : hex.slice(2, 4), 16)
-      const b = parseInt(isShort ? hex[2]! + hex[2]! : hex.slice(4, 6), 16)
-      if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
-        return `rgba(${r},${g},${b},${a})`
-      }
-    }
-  }
-  return c
-}
+const sizeCache = new WeakMap<GraphNode, { key: string; size: { w: number; h: number } }>()
 
 export function sizeForNode(n: GraphNode): { w: number; h: number } {
   const s = n.viz_size
+  const key = `${String(n.type)}:${String(s?.w ?? '')}:${String(s?.h ?? '')}`
+  const cached = sizeCache.get(n)
+  if (cached && cached.key === key) return cached.size
+
   const w = Math.max(6, Number(s?.w ?? (n.type === 'business' ? 14 : 10)))
   const h = Math.max(6, Number(s?.h ?? (n.type === 'business' ? 14 : 10)))
-  return { w, h }
+  const size = { w, h }
+  sizeCache.set(n, { key, size })
+  return size
 }
 
 export function fillForNode(n: GraphNode, mapping: VizMapping): string {
@@ -40,21 +25,32 @@ export function fillForNode(n: GraphNode, mapping: VizMapping): string {
   return hit ? hit.fill : mapping.node.color.person.fill
 }
 
-export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, opts: { mapping: VizMapping }) {
+export function drawNodeShape(
+  ctx: CanvasRenderingContext2D,
+  node: LayoutNode,
+  opts: { mapping: VizMapping; cameraZoom?: number; quality?: 'low' | 'med' | 'high' },
+) {
   const { mapping } = opts
+  const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
+  const invZ = 1 / z
+  const px = (v: number) => v * invZ
+  const q = opts.quality ?? 'high'
+  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
   const fill = fillForNode(node, mapping)
-  const { w, h } = sizeForNode(node)
+  const { w: w0, h: h0 } = sizeForNode(node)
+  const w = w0 * invZ
+  const h = h0 * invZ
   const isBusiness = String(node.type) === 'business'
 
   // IMPORTANT: node appearance follows the prototypes:
   // - business: emerald square
   // - person: blue circle
   // Additional semantics (debt bins, statuses) are still fixtures/backend-driven via viz_color_key.
-  const r = Math.max(4, Math.min(w, h) / 2)
+  const r = Math.max(px(4), Math.min(w, h) / 2)
 
   const x = node.__x - w / 2
   const y = node.__y - h / 2
-  const rr = Math.max(0, Math.min(4, Math.min(w, h) * 0.18))
+  const rr = Math.max(0, Math.min(px(4), Math.min(w, h) * 0.18))
 
   const roundedRectPath = (ctx2: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number, rad: number) => {
     const r2 = Math.max(0, Math.min(rad, Math.min(rw, rh) / 2))
@@ -82,11 +78,11 @@ export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, o
   // Use screen blending for "light" effect against dark background
   ctx.globalCompositeOperation = 'screen'
   ctx.shadowColor = fill
-  ctx.shadowBlur = r * 1.5 // Wide soft glow
+  ctx.shadowBlur = r * 1.5 * blurK // Wide soft glow
   ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
   
   if (isBusiness) {
-    roundedRectPath(ctx, x + 2, y + 2, w - 4, h - 4, rr)
+    roundedRectPath(ctx, x + px(2), y + px(2), w - px(4), h - px(4), rr)
     ctx.fill()
   } else {
     ctx.beginPath()
@@ -122,9 +118,9 @@ export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, o
   
   // Outer glowy stroke
   ctx.strokeStyle = withAlpha(fill, 0.6)
-  ctx.lineWidth = Math.max(2, r * 0.15)
+  ctx.lineWidth = Math.max(px(2), r * 0.15)
   ctx.shadowColor = fill
-  ctx.shadowBlur = Math.max(2, r * 0.3)
+  ctx.shadowBlur = Math.max(px(2), r * 0.3) * blurK
   
   if (isBusiness) {
     roundedRectPath(ctx, x, y, w, h, rr)
@@ -137,7 +133,7 @@ export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, o
 
   // Inner bright core stroke (white-ish)
   ctx.strokeStyle = withAlpha('#ffffff', 0.9)
-  ctx.lineWidth = Math.max(1, r * 0.05)
+  ctx.lineWidth = Math.max(px(1), r * 0.05)
   ctx.shadowBlur = 0 // Sharp core
   
   if (isBusiness) {
@@ -206,7 +202,7 @@ export function drawNodeShape(ctx: CanvasRenderingContext2D, node: LayoutNode, o
 
   // Optional badge pip if viz_badge_key is present (no semantics, just presence).
   if (node.viz_badge_key !== undefined && node.viz_badge_key !== null) {
-    const br = Math.max(1.6, r * 0.22)
+    const br = Math.max(px(1.6), r * 0.22)
     ctx.save()
     ctx.globalCompositeOperation = 'lighter'
     ctx.fillStyle = withAlpha('#ffffff', 0.85)
