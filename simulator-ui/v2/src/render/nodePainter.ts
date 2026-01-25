@@ -29,7 +29,7 @@ export function fillForNode(n: GraphNode, mapping: VizMapping): string {
 export function drawNodeShape(
   ctx: CanvasRenderingContext2D,
   node: LayoutNode,
-  opts: { mapping: VizMapping; cameraZoom?: number; quality?: 'low' | 'med' | 'high' },
+  opts: { mapping: VizMapping; cameraZoom?: number; quality?: 'low' | 'med' | 'high'; dragMode?: boolean },
 ) {
   const { mapping } = opts
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
@@ -52,6 +52,32 @@ export function drawNodeShape(
   const x = node.__x - w / 2
   const y = node.__y - h / 2
   const rr = Math.max(0, Math.min(px(4), Math.min(w, h) * 0.18))
+
+  // Drag fast-path: keep visuals recognizable but avoid expensive shadows/gradients.
+  if (opts.dragMode) {
+    ctx.save()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.fillStyle = withAlpha(fill, 0.45)
+    if (isBusiness) {
+      roundedRectPath(ctx, x, y, w, h, rr)
+      ctx.fill()
+      ctx.strokeStyle = withAlpha('#ffffff', 0.7)
+      ctx.lineWidth = Math.max(px(1), r * 0.07)
+      roundedRectPath(ctx, x, y, w, h, rr)
+      ctx.stroke()
+    } else {
+      ctx.beginPath()
+      ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = withAlpha('#ffffff', 0.7)
+      ctx.lineWidth = Math.max(px(1), r * 0.07)
+      ctx.beginPath()
+      ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+    ctx.restore()
+    return
+  }
 
   ctx.save()
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, toRaw, watch } from 'vue'
 import type {
   ClearingDoneEvent,
   ClearingPlanEvent,
@@ -616,11 +616,25 @@ const renderLoop = useRenderLoop({
   fxState,
   getSelectedNodeId: () => state.selectedNodeId,
   activeEdges,
+  getLinkLod: () => (dragState.active && dragState.dragging ? 'focus' : 'full'),
 })
 
 const ensureRenderLoop = renderLoop.ensureRenderLoop
 const stopRenderLoop = renderLoop.stopRenderLoop
 const renderOnce = renderLoop.renderOnce
+
+let dragRafPending = false
+let dragRafId: number | null = null
+
+function scheduleDragRender() {
+  if (dragRafPending) return
+  dragRafPending = true
+  dragRafId = window.requestAnimationFrame(() => {
+    dragRafPending = false
+    dragRafId = null
+    renderOnce()
+  })
+}
 
 function pickNodeAt(clientX: number, clientY: number) {
   return picking.pickNodeAt(clientX, clientY)
@@ -655,6 +669,7 @@ function onCanvasPointerDown(ev: PointerEvent) {
       dragState.startClientX = ev.clientX
       dragState.startClientY = ev.clientY
       dragState.cachedNode = ln // Cache reference to avoid O(n) lookup on every pointermove
+      dragState.cachedNodeRaw = toRaw(ln) as any
 
       const host = hostEl.value
       if (host) {
@@ -698,10 +713,11 @@ const dragState = reactive({
   hostTop: 0,
   // Cached reference to avoid O(n) lookup on every pointermove
   cachedNode: null as LayoutNode | null,
+  cachedNodeRaw: null as LayoutNode | null,
 })
 
 function onCanvasPointerMove(ev: PointerEvent) {
-  if (dragState.active && dragState.pointerId === ev.pointerId && dragState.cachedNode) {
+  if (dragState.active && dragState.pointerId === ev.pointerId && dragState.cachedNodeRaw) {
     const dx = ev.clientX - dragState.startClientX
     const dy = ev.clientY - dragState.startClientY
     const dist2 = dx * dx + dy * dy
@@ -712,10 +728,8 @@ function onCanvasPointerMove(ev: PointerEvent) {
     dragState.dragging = true
     clearHoveredEdge()
 
-    // Use cached node reference for O(1) access instead of O(n) find()
-    const ln = dragState.cachedNode
-
-    ensureRenderLoop()
+    // Use cached raw node reference for O(1) access without Vue reactivity overhead.
+    const ln = dragState.cachedNodeRaw
 
     const sx = ev.clientX - dragState.hostLeft
     const sy = ev.clientY - dragState.hostTop
@@ -732,8 +746,8 @@ function onCanvasPointerMove(ev: PointerEvent) {
       pinnedPos.set(id, { x, y })
     }
 
-    // Force immediate redraw to keep drag responsive even when the RAF loop is idle.
-    renderOnce()
+    // RAF-batch redraw to max ~60fps even if pointermove arrives faster.
+    scheduleDragRender()
     return
   }
 
@@ -782,6 +796,13 @@ function onCanvasPointerUp(ev: PointerEvent) {
     dragState.hostLeft = 0
     dragState.hostTop = 0
     dragState.cachedNode = null // Clear cached reference
+    dragState.cachedNodeRaw = null
+
+    if (dragRafId !== null) {
+      window.cancelAnimationFrame(dragRafId)
+      dragRafId = null
+      dragRafPending = false
+    }
 
     try {
       canvasEl.value?.releasePointerCapture(ev.pointerId)

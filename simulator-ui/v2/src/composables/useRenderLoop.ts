@@ -25,6 +25,9 @@ type UseRenderLoopDeps = {
 
   getSelectedNodeId: () => string | null
   activeEdges: Set<string>
+
+  // Optional: reduce link drawing cost (used during drag).
+  getLinkLod?: () => 'full' | 'focus'
 }
 
 type UseRenderLoopReturn = {
@@ -35,6 +38,11 @@ type UseRenderLoopReturn = {
 
 export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   let rafId: number | null = null
+
+  let lastCanvas: HTMLCanvasElement | null = null
+  let lastFxCanvas: HTMLCanvasElement | null = null
+  let cachedCtx: CanvasRenderingContext2D | null = null
+  let cachedFx: CanvasRenderingContext2D | null = null
 
   function clamp01(v: number) {
     return Math.max(0, Math.min(1, v))
@@ -47,10 +55,18 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     const snap = deps.getSnapshot()
 
     if (!canvas || !fxCanvas || !snap) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const fx = fxCanvas.getContext('2d')
-    if (!fx) return
+
+    if (canvas !== lastCanvas) {
+      lastCanvas = canvas
+      cachedCtx = canvas.getContext('2d')
+    }
+    if (fxCanvas !== lastFxCanvas) {
+      lastFxCanvas = fxCanvas
+      cachedFx = fxCanvas.getContext('2d')
+    }
+    const ctx = cachedCtx
+    const fx = cachedFx
+    if (!ctx || !fx) return
 
     const camera = deps.getCamera()
     const dpr = canvas.width / Math.max(1, layout.w)
@@ -97,6 +113,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     deps.pruneFloatingLabels(nowMs)
 
+    const linkLod = deps.getLinkLod ? deps.getLinkLod() : 'full'
     const pos = deps.drawBaseGraph(ctx, {
       w: layout.w,
       h: layout.h,
@@ -108,6 +125,8 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       activeEdges: deps.activeEdges,
       cameraZoom: camera.zoom,
       quality: renderQuality,
+      linkLod,
+      dragMode: linkLod === 'focus',
     })
 
     deps.renderFxFrame({
