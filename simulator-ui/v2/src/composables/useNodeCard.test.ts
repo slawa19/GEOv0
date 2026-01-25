@@ -11,6 +11,7 @@ describe('useNodeCard', () => {
       selectedNodeId,
       getNodeById: () => null,
       getLayoutNodeById: () => null,
+      getNodeScreenSize: () => ({ w: 10, h: 10 }),
       worldToScreen: (x, y) => ({ x, y }),
     })
 
@@ -29,6 +30,7 @@ describe('useNodeCard', () => {
       selectedNodeId,
       getNodeById: (id) => (id ? ({ id } as any) : null),
       getLayoutNodeById: (id) => ({ id, __x: 10, __y: 20 }),
+      getNodeScreenSize: () => ({ w: 10, h: 10 }),
       worldToScreen: () => ({ x: 1000, y: 1000 }),
     })
 

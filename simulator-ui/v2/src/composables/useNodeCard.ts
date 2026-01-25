@@ -9,6 +9,7 @@ type UseNodeCardDeps = {
   selectedNodeId: Ref<string | null>
   getNodeById: (id: string | null) => GraphNode | null
   getLayoutNodeById: (id: string) => LayoutNodeLike | null
+  getNodeScreenSize: (node: GraphNode) => { w: number; h: number }
   worldToScreen: (x: number, y: number) => { x: number; y: number }
 }
 
@@ -36,23 +37,50 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
 
     const pad = 12
     const cardW = 260
-    const cardH = 170
-    const dx = 24
+    const cardH = 146
+    const gap = 18
 
-    const xRight = p.x + dx
-    const xLeft = p.x - dx - cardW
+    const { w: nw, h: nh } = deps.getNodeScreenSize(selectedNode.value)
+    const nodeW = Math.max(10, nw) + 18
+    const nodeH = Math.max(10, nh) + 18
 
-    let x: number
-    if (xRight + cardW <= rect.width - pad) {
-      x = xRight
-    } else if (xLeft >= pad) {
-      x = xLeft
-    } else {
-      x = clamp(xRight, pad, rect.width - pad - cardW)
+    const nodeRect = {
+      x: p.x - nodeW / 2,
+      y: p.y - nodeH / 2,
+      w: nodeW,
+      h: nodeH,
     }
 
-    const y = clamp(p.y - cardH / 2, pad, rect.height - pad - cardH)
-    return { left: `${x}px`, top: `${y}px` }
+    const clampCard = (x: number, y: number) => ({
+      x: clamp(x, pad, rect.width - pad - cardW),
+      y: clamp(y, pad, rect.height - pad - cardH),
+    })
+
+    const intersects = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
+      !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y)
+
+    const candidates = [
+      // right
+      { x: p.x + nodeW / 2 + gap, y: p.y - cardH / 2 },
+      // left
+      { x: p.x - nodeW / 2 - gap - cardW, y: p.y - cardH / 2 },
+      // bottom
+      { x: p.x - cardW / 2, y: p.y + nodeH / 2 + gap },
+      // top
+      { x: p.x - cardW / 2, y: p.y - nodeH / 2 - gap - cardH },
+    ]
+
+    for (const c of candidates) {
+      const t = clampCard(c.x, c.y)
+      const cardRect = { x: t.x, y: t.y, w: cardW, h: cardH }
+      if (!intersects(cardRect, nodeRect)) {
+        return { left: `${t.x}px`, top: `${t.y}px` }
+      }
+    }
+
+    // Fallback: keep card in-bounds.
+    const t = clampCard(p.x + nodeW / 2 + gap, p.y - cardH / 2)
+    return { left: `${t.x}px`, top: `${t.y}px` }
   }
 
   return { selectedNode, nodeCardStyle }

@@ -181,6 +181,7 @@ const nodeCard = useNodeCard({
   }),
   getNodeById,
   getLayoutNodeById: (id) => layout.nodes.find((n) => n.id === id) ?? null,
+  getNodeScreenSize: (n) => sizeForNode(n),
   worldToScreen,
 })
 
@@ -619,6 +620,7 @@ const renderLoop = useRenderLoop({
 
 const ensureRenderLoop = renderLoop.ensureRenderLoop
 const stopRenderLoop = renderLoop.stopRenderLoop
+const renderOnce = renderLoop.renderOnce
 
 function pickNodeAt(clientX: number, clientY: number) {
   return picking.pickNodeAt(clientX, clientY)
@@ -654,8 +656,19 @@ function onCanvasPointerDown(ev: PointerEvent) {
       dragState.startClientY = ev.clientY
       dragState.cachedNode = ln // Cache reference to avoid O(n) lookup on every pointermove
 
-      const s = clientToScreen(ev.clientX, ev.clientY)
-      const p = screenToWorld(s.x, s.y)
+      const host = hostEl.value
+      if (host) {
+        const r = host.getBoundingClientRect()
+        dragState.hostLeft = r.left
+        dragState.hostTop = r.top
+      } else {
+        dragState.hostLeft = 0
+        dragState.hostTop = 0
+      }
+
+      const sx = ev.clientX - dragState.hostLeft
+      const sy = ev.clientY - dragState.hostTop
+      const p = screenToWorld(sx, sy)
       dragState.offsetX = ln.__x - p.x
       dragState.offsetY = ln.__y - p.y
 
@@ -681,6 +694,8 @@ const dragState = reactive({
   startClientY: 0,
   offsetX: 0,
   offsetY: 0,
+  hostLeft: 0,
+  hostTop: 0,
   // Cached reference to avoid O(n) lookup on every pointermove
   cachedNode: null as LayoutNode | null,
 })
@@ -702,8 +717,9 @@ function onCanvasPointerMove(ev: PointerEvent) {
 
     ensureRenderLoop()
 
-    const s = clientToScreen(ev.clientX, ev.clientY)
-    const p = screenToWorld(s.x, s.y)
+    const sx = ev.clientX - dragState.hostLeft
+    const sy = ev.clientY - dragState.hostTop
+    const p = screenToWorld(sx, sy)
     const x = p.x + dragState.offsetX
     const y = p.y + dragState.offsetY
 
@@ -715,12 +731,22 @@ function onCanvasPointerMove(ev: PointerEvent) {
     if (id && pinnedPos.has(id)) {
       pinnedPos.set(id, { x, y })
     }
+
+    // Force immediate redraw to keep drag responsive even when the RAF loop is idle.
+    renderOnce()
     return
   }
 
   // Hover only when a node is selected, so it's obvious which edges are relevant.
   // Also keep WebDriver runs stable (no transient tooltip).
   if (!panState.active && !isWebDriver && state.selectedNodeId && selectedIncidentEdgeKeys.value.size > 0) {
+    // Do not show edge tooltips when hovering a node.
+    const nodeHit = pickNodeAt(ev.clientX, ev.clientY)
+    if (nodeHit) {
+      clearHoveredEdge()
+      return
+    }
+
     const seg = pickEdgeAt(ev.clientX, ev.clientY)
     if (seg && (seg.fromId === state.selectedNodeId || seg.toId === state.selectedNodeId)) {
       const link = layoutLinkMap.value.get(seg.key)
@@ -753,6 +779,8 @@ function onCanvasPointerUp(ev: PointerEvent) {
     dragState.dragging = false
     dragState.nodeId = null
     dragState.pointerId = null
+    dragState.hostLeft = 0
+    dragState.hostTop = 0
     dragState.cachedNode = null // Clear cached reference
 
     try {
@@ -1024,23 +1052,43 @@ onUnmounted(() => {
 
     <!-- Node card -->
     <div v-if="selectedNode && !dragState.active" class="node-card" :style="nodeCardStyle()">
-      <div class="node-title">{{ selectedNode.name ?? selectedNode.id }}</div>
-      <div class="node-meta">
-        <div><span class="k">Type</span> <span class="v">{{ selectedNode.type ?? '—' }}</span></div>
-        <div><span class="k">Status</span> <span class="v">{{ selectedNode.status ?? '—' }}</span></div>
-        <div><span class="k">Net</span> <span class="v mono">{{ selectedNode.net_balance_atoms ?? '—' }}</span></div>
-        <div>
-          <span class="k">Out</span>
-          <span class="v mono">{{ selectedNodeEdgeStats?.outLimitText ?? '—' }}</span>
-          <span class="k" style="margin-left: 10px">In</span>
-          <span class="v mono">{{ selectedNodeEdgeStats?.inLimitText ?? '—' }}</span>
+      <div class="node-header">
+        <div class="node-title">{{ selectedNode.name ?? selectedNode.id }}</div>
+        <div v-if="!isTestMode && !isWebDriver" class="node-actions">
+          <button v-if="!isSelectedPinned" class="btn btn-ghost btn-xxs" type="button" @click="pinSelectedNode">Pin</button>
+          <button v-else class="btn btn-ghost btn-xxs" type="button" @click="unpinSelectedNode">Unpin</button>
         </div>
-        <div><span class="k">Degree</span> <span class="v mono">{{ selectedNodeEdgeStats?.degree ?? '—' }}</span></div>
       </div>
 
-      <div v-if="!isTestMode && !isWebDriver" class="node-actions">
-        <button v-if="!isSelectedPinned" class="btn btn-ghost btn-xs" type="button" @click="pinSelectedNode">Pin</button>
-        <button v-else class="btn btn-ghost btn-xs" type="button" @click="unpinSelectedNode">Unpin</button>
+      <div class="node-grid">
+        <div class="node-item">
+          <span class="k">Type</span>
+          <span class="v">{{ selectedNode.type ?? '—' }}</span>
+        </div>
+        <div class="node-item">
+          <span class="k">Out</span>
+          <span class="v mono">{{ selectedNodeEdgeStats?.outLimitText ?? '—' }}</span>
+          <span class="v">{{ state.snapshot?.equivalent ?? '' }}</span>
+        </div>
+
+        <div class="node-item">
+          <span class="k">Status</span>
+          <span class="v">{{ selectedNode.status ?? '—' }}</span>
+        </div>
+        <div class="node-item">
+          <span class="k">In</span>
+          <span class="v mono">{{ selectedNodeEdgeStats?.inLimitText ?? '—' }}</span>
+          <span class="v">{{ state.snapshot?.equivalent ?? '' }}</span>
+        </div>
+
+        <div class="node-item">
+          <span class="k">Net</span>
+          <span class="v mono">{{ selectedNode.net_balance_atoms ?? '—' }}</span>
+        </div>
+        <div class="node-item">
+          <span class="k">Degree</span>
+          <span class="v mono">{{ selectedNodeEdgeStats?.degree ?? '—' }}</span>
+        </div>
       </div>
     </div>
 
@@ -1209,6 +1257,14 @@ onUnmounted(() => {
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
 }
 
+.node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .edge-tooltip {
   position: absolute;
   left: 0;
@@ -1241,18 +1297,28 @@ onUnmounted(() => {
 .node-title {
   font-size: 13px;
   font-weight: 650;
-  margin-bottom: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.node-meta {
+.node-grid {
   font-size: 12px;
   color: rgba(226, 232, 240, 0.78);
   display: grid;
-  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+
+.node-item {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
 }
 
 .node-actions {
-  margin-top: 10px;
   display: flex;
   gap: 8px;
 }
@@ -1300,6 +1366,12 @@ onUnmounted(() => {
 .btn.btn-xs {
   padding: 7px 10px;
   border-radius: 10px;
+}
+
+.btn.btn-xxs {
+  padding: 5px 8px;
+  border-radius: 10px;
+  font-size: 11px;
 }
 
 .btn:disabled {

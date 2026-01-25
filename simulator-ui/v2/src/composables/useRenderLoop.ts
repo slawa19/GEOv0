@@ -30,6 +30,7 @@ type UseRenderLoopDeps = {
 type UseRenderLoopReturn = {
   ensureRenderLoop: () => void
   stopRenderLoop: () => void
+  renderOnce: (nowMs?: number) => void
 }
 
 export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
@@ -139,5 +140,15 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     }
   }
 
-  return { ensureRenderLoop, stopRenderLoop }
+  function renderOnce(nowMs?: number) {
+    const t =
+      typeof nowMs === 'number'
+        ? nowMs
+        : typeof performance !== 'undefined'
+          ? performance.now()
+          : Date.now()
+    renderFrame(t)
+  }
+
+  return { ensureRenderLoop, stopRenderLoop, renderOnce }
 }
