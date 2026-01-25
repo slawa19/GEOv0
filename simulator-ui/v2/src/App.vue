@@ -71,6 +71,7 @@ let rafId: number | null = null
 
 let resizeRafId: number | null = null
 let relayoutDebounceId: number | null = null
+let lastLayoutKey: string | null = null
 
 function requestResizeAndLayout() {
   if (resizeRafId !== null) return
@@ -112,6 +113,19 @@ function fxColorForNode(nodeId: string, fallback: string): string {
 }
 
 const selectedNode = computed(() => getNodeById(state.selectedNodeId))
+
+const hoveredEdge = reactive({
+  key: null as string | null,
+  fromId: '' as string,
+  toId: '' as string,
+  amountText: '' as string,
+  screenX: 0 as number,
+  screenY: 0 as number,
+})
+
+function clearHoveredEdge() {
+  hoveredEdge.key = null
+}
 
 type LabelsLod = 'off' | 'selection' | 'neighbors'
 type Quality = 'low' | 'med' | 'high'
@@ -1014,6 +1028,22 @@ const layoutNodeMap = computed(() => {
   return m
 })
 
+const layoutLinkMap = computed(() => {
+  const m = new Map<string, LayoutLink>()
+  for (const l of layout.links) m.set(l.__key, l)
+  return m
+})
+
+const selectedIncidentEdgeKeys = computed(() => {
+  const out = new Set<string>()
+  const id = state.selectedNodeId
+  if (!id) return out
+  for (const l of layout.links) {
+    if (l.source === id || l.target === id) out.add(l.__key)
+  }
+  return out
+})
+
 const nodePickGrid = computed(() => {
   const cellSizeW = 180
   const cells = new Map<string, LayoutNode[]>()
@@ -1090,6 +1120,58 @@ function dist2PointToSegment(px: number, py: number, ax: number, ay: number, bx:
   const dx = px - cx
   const dy = py - cy
   return dx * dx + dy * dy
+}
+
+function closestPointOnSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const abx = bx - ax
+  const aby = by - ay
+  const apx = px - ax
+  const apy = py - ay
+  const abLen2 = abx * abx + aby * aby
+  if (abLen2 < 1e-9) return { x: ax, y: ay, t: 0 }
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLen2))
+  return { x: ax + abx * t, y: ay + aby * t, t }
+}
+
+function formatEdgeAmountText(link: GraphLink | null | undefined) {
+  const unit = state.snapshot?.equivalent ?? effectiveEq.value
+  const toNum = (v: unknown) => {
+    const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN
+    return Number.isFinite(n) ? n : null
+  }
+  const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+
+  const used = toNum(link?.used)
+  const limit = toNum(link?.trust_limit)
+  const available = toNum(link?.available)
+
+  const fromTxt = used !== null
+    ? fmt.format(used)
+    : available !== null
+      ? fmt.format(available)
+      : '—'
+  const toTxt = limit !== null
+    ? fmt.format(limit)
+    : available !== null && used !== null
+      ? fmt.format(available)
+      : '—'
+
+  return `from: ${fromTxt} / to: ${toTxt} ${unit}`
+}
+
+function edgeDirCaption() {
+  return 'from→to'
+}
+
+function edgeTooltipStyle() {
+  const host = hostEl.value
+  if (!host || !hoveredEdge.key) return { display: 'none' }
+
+  const rect = host.getBoundingClientRect()
+  const pad = 10
+  const x = clamp(hoveredEdge.screenX + 12, pad, rect.width - pad)
+  const y = clamp(hoveredEdge.screenY + 12, pad, rect.height - pad)
+  return { left: `${x}px`, top: `${y}px` }
 }
 
 function pickEdgeAt(clientX: number, clientY: number): EdgeSeg | null {
@@ -1236,6 +1318,7 @@ async function loadScene() {
   state.sourcePath = ''
   state.eventsPath = ''
   state.snapshot = null
+  lastLayoutKey = null
   state.demoTxEvents = []
   state.demoClearingPlan = null
   state.demoClearingDone = null
@@ -1285,22 +1368,40 @@ function resizeCanvases() {
   const rect = host.getBoundingClientRect()
   const dpr = Math.min(dprClamp.value, window.devicePixelRatio || 1)
 
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr))
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr))
-  canvas.style.width = `${Math.floor(rect.width)}px`
-  canvas.style.height = `${Math.floor(rect.height)}px`
+  const cssW = Math.max(1, Math.floor(rect.width))
+  const cssH = Math.max(1, Math.floor(rect.height))
+  const pxW = Math.max(1, Math.floor(cssW * dpr))
+  const pxH = Math.max(1, Math.floor(cssH * dpr))
 
-  fxCanvas.width = canvas.width
-  fxCanvas.height = canvas.height
-  fxCanvas.style.width = canvas.style.width
-  fxCanvas.style.height = canvas.style.height
+  // Only touch canvas sizing if something actually changed.
+  // Writing width/height resets the 2D context state and is relatively expensive.
+  const cssWStr = `${cssW}px`
+  const cssHStr = `${cssH}px`
 
-  layout.w = rect.width
-  layout.h = rect.height
+  if (canvas.width !== pxW) canvas.width = pxW
+  if (canvas.height !== pxH) canvas.height = pxH
+  if (canvas.style.width !== cssWStr) canvas.style.width = cssWStr
+  if (canvas.style.height !== cssHStr) canvas.style.height = cssHStr
+
+  if (fxCanvas.width !== canvas.width) fxCanvas.width = canvas.width
+  if (fxCanvas.height !== canvas.height) fxCanvas.height = canvas.height
+  if (fxCanvas.style.width !== canvas.style.width) fxCanvas.style.width = canvas.style.width
+  if (fxCanvas.style.height !== canvas.style.height) fxCanvas.style.height = canvas.style.height
+
+  // Keep layout dimensions aligned to CSS pixels to avoid sub-pixel churn triggering relayout.
+  layout.w = cssW
+  layout.h = cssH
 }
 
 function recomputeLayout() {
   if (!state.snapshot) return
+
+  const snap = state.snapshot
+  const snapKey = `${state.sourcePath}|${snap.generated_at}|${snap.nodes.length}|${snap.links.length}`
+  const key = `${snapKey}|${layoutMode.value}|${layout.w}x${layout.h}`
+  if (key === lastLayoutKey) return
+  lastLayoutKey = key
+
   computeLayout(state.snapshot, layout.w, layout.h, layoutMode.value)
 }
 
@@ -1589,6 +1690,7 @@ function onCanvasPointerDown(ev: PointerEvent) {
   const hit = pickNodeAt(ev.clientX, ev.clientY)
   if (hit) {
     state.selectedNodeId = hit.id
+    clearHoveredEdge()
     return
   }
 
@@ -1608,6 +1710,30 @@ function onCanvasPointerDown(ev: PointerEvent) {
 }
 
 function onCanvasPointerMove(ev: PointerEvent) {
+  // Hover only when a node is selected, so it's obvious which edges are relevant.
+  // Also keep WebDriver runs stable (no transient tooltip).
+  if (!panState.active && !isWebDriver && state.selectedNodeId && selectedIncidentEdgeKeys.value.size > 0) {
+    const seg = pickEdgeAt(ev.clientX, ev.clientY)
+    if (seg && (seg.fromId === state.selectedNodeId || seg.toId === state.selectedNodeId)) {
+      const link = layoutLinkMap.value.get(seg.key)
+      const s = clientToScreen(ev.clientX, ev.clientY)
+      const p = screenToWorld(s.x, s.y)
+      const cp = closestPointOnSegment(p.x, p.y, seg.ax, seg.ay, seg.bx, seg.by)
+      const sp = worldToScreen(cp.x, cp.y)
+
+      hoveredEdge.key = seg.key
+      hoveredEdge.fromId = seg.fromId
+      hoveredEdge.toId = seg.toId
+      hoveredEdge.amountText = formatEdgeAmountText(link)
+      hoveredEdge.screenX = sp.x
+      hoveredEdge.screenY = sp.y
+    } else {
+      clearHoveredEdge()
+    }
+  } else if (!panState.active) {
+    clearHoveredEdge()
+  }
+
   if (!panState.active) return
   if (ev.pointerId !== panState.pointerId) return
 
@@ -1629,6 +1755,7 @@ function onCanvasPointerUp(ev: PointerEvent) {
 
   // Click on empty background: clear selection.
   if (!panState.moved) state.selectedNodeId = null
+  if (!panState.moved) clearHoveredEdge()
 }
 
 function onCanvasWheel(ev: WheelEvent) {
@@ -1740,7 +1867,7 @@ function runTxEvent(evt: TxUpdatedEvent, opts?: { onFinished?: () => void }) {
       if (ln) {
         pushFloatingLabel({
           nodeId: targetId,
-          text: '+125 GC',
+          text: `${edgeDirCaption()}\n+125 GC`,
           color: fxColorForNode(targetId, '#22d3ee'),
           ttlMs: 2200,
           // Slightly above the node edge.
@@ -1904,7 +2031,7 @@ async function runClearingOnce() {
       pushFloatingLabel({
         nodeId: e.to,
         id: Math.floor(performance.now()) + fnv1a(`lbl:${stepAtMs}:${idx}:${keyEdge(e.from, e.to)}`),
-        text: formatDemoDebtAmount(e.from, e.to, stepAtMs),
+        text: `${edgeDirCaption()}\n${formatDemoDebtAmount(e.from, e.to, stepAtMs)}`,
         color: fxColorForNode(e.to, clearingGold),
         ttlMs: labelLifeMs,
         offsetYPx: -6,
@@ -2075,7 +2202,7 @@ function runClearingStep(stepIndex: number, opts?: { onFinished?: () => void }) 
       pushFloatingLabel({
         nodeId: e.to,
         id: Math.floor(performance.now()) + fnv1a(`lbl:${step.at_ms}:${i}:${keyEdge(e.from, e.to)}`),
-        text: formatDemoDebtAmount(e.from, e.to, step.at_ms),
+        text: `${edgeDirCaption()}\n${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
         color: fxColorForNode(e.to, clearingGold),
         ttlMs: labelLifeMs,
         offsetYPx: -6,
@@ -2235,9 +2362,17 @@ onUnmounted(() => {
       @pointermove="onCanvasPointerMove"
       @pointerup="onCanvasPointerUp"
       @pointercancel="onCanvasPointerUp"
+      @pointerleave="clearHoveredEdge"
       @wheel.prevent="onCanvasWheel"
     />
     <canvas ref="fxCanvasEl" class="canvas canvas-fx" />
+
+    <div v-if="hoveredEdge.key" class="edge-tooltip" :style="edgeTooltipStyle()" aria-label="Edge tooltip">
+      <div class="edge-tooltip-title">
+        {{ getNodeById(hoveredEdge.fromId)?.name ?? hoveredEdge.fromId }} → {{ getNodeById(hoveredEdge.toId)?.name ?? hoveredEdge.toId }}
+      </div>
+      <div class="edge-tooltip-amount mono">{{ hoveredEdge.amountText }}</div>
+    </div>
 
     <!-- Minimal top HUD (controls + small status) -->
     <div class="hud-top">
@@ -2461,6 +2596,35 @@ onUnmounted(() => {
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
 }
 
+.edge-tooltip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 55;
+  pointer-events: none;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  transform: translate3d(0, 0, 0);
+}
+
+.edge-tooltip-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(226, 232, 240, 0.92);
+  white-space: nowrap;
+  margin-bottom: 2px;
+}
+
+.edge-tooltip-amount {
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.78);
+  white-space: nowrap;
+}
+
 .node-title {
   font-size: 13px;
   font-weight: 650;
@@ -2611,7 +2775,7 @@ onUnmounted(() => {
 }
 
 .floating-label-inner {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   text-shadow: 0 0 10px currentColor; /* Glow */
   animation: floatUpFade 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -2619,6 +2783,9 @@ onUnmounted(() => {
   transform: translate3d(-50%, -50%, 0) translate3d(0, 0, 0);
   will-change: transform, opacity;
   backface-visibility: hidden;
+  white-space: pre-line;
+  text-align: center;
+  line-height: 1.05;
 }
 
 @keyframes floatUpFade {
