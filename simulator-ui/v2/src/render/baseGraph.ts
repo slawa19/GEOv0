@@ -84,10 +84,12 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   quality?: 'low' | 'med' | 'high'
   linkLod?: 'full' | 'focus'
   dragMode?: boolean
+  hiddenNodeId?: string | null
 }) {
   const { w, h, nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
   const linkLod = opts.linkLod ?? 'full'
   const dragMode = opts.dragMode ?? false
+  const hiddenNodeId = opts.hiddenNodeId ?? null
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
@@ -97,6 +99,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 
   // Links: base pass = strictly semantic viz_* (no focus/active overrides).
   for (const link of links) {
+    if (hiddenNodeId && (link.source === hiddenNodeId || link.target === hiddenNodeId)) continue
     if (linkLod === 'focus') {
       const isActive = activeEdges.has(link.__key)
       const isFocusIncident = !!selectedNodeId && isIncident(link, selectedNodeId)
@@ -124,6 +127,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   // Links: overlay pass = UX highlight for focus/active without overwriting base style.
   if (selectedNodeId || activeEdges.size > 0) {
     for (const link of links) {
+      if (hiddenNodeId && (link.source === hiddenNodeId || link.target === hiddenNodeId)) continue
       if (linkLod === 'focus') {
         const isActive = activeEdges.has(link.__key)
         const isFocusIncident = !!selectedNodeId && isIncident(link, selectedNodeId)
@@ -172,6 +176,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 
   // Nodes
   for (const n of nodes) {
+    if (hiddenNodeId && n.id === hiddenNodeId) continue
     const isSelected = selectedNodeId === n.id
 
     if (isSelected && !dragMode) {

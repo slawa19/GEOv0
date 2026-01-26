@@ -28,6 +28,9 @@ type UseRenderLoopDeps = {
 
   // Optional: reduce link drawing cost (used during drag).
   getLinkLod?: () => 'full' | 'focus'
+
+  // Optional: hide a node from canvas rendering (used for DOM drag preview).
+  getHiddenNodeId?: () => string | null
 }
 
 type UseRenderLoopReturn = {
@@ -127,6 +130,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       quality: renderQuality,
       linkLod,
       dragMode: linkLod === 'focus',
+      hiddenNodeId: deps.getHiddenNodeId ? deps.getHiddenNodeId() : null,
     })
 
     deps.renderFxFrame({

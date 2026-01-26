@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { GraphNode } from '../types'
 
 type LayoutNodeLike = { id: string; __x: number; __y: number }
+type LayoutLinkLike = { source: string; target: string }
 
 type UseNodeCardDeps = {
   hostEl: Ref<HTMLElement | null>
@@ -11,6 +12,9 @@ type UseNodeCardDeps = {
   getLayoutNodeById: (id: string) => LayoutNodeLike | null
   getNodeScreenSize: (node: GraphNode) => { w: number; h: number }
   worldToScreen: (x: number, y: number) => { x: number; y: number }
+  // New: get incident edges for positioning
+  getIncidentEdges?: (nodeId: string) => LayoutLinkLike[]
+  getLayoutNodes?: () => LayoutNodeLike[]
 }
 
 type UseNodeCardReturn = {
@@ -23,6 +27,55 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
 
   function clamp(v: number, lo: number, hi: number) {
     return Math.max(lo, Math.min(hi, v))
+  }
+
+  /**
+   * Determine edge direction quadrant relative to node center.
+   * Returns: 'right' | 'left' | 'top' | 'bottom'
+   */
+  function getEdgeDirection(
+    nodeCenterScreen: { x: number; y: number },
+    neighborScreen: { x: number; y: number },
+  ): 'right' | 'left' | 'top' | 'bottom' {
+    const dx = neighborScreen.x - nodeCenterScreen.x
+    const dy = neighborScreen.y - nodeCenterScreen.y
+
+    // Determine primary direction based on the larger component
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      return dx >= 0 ? 'right' : 'left'
+    } else {
+      return dy >= 0 ? 'bottom' : 'top'
+    }
+  }
+
+  /**
+   * Count how many edges go in each direction from the node.
+   */
+  function countEdgeDirections(
+    nodeId: string,
+    nodeScreen: { x: number; y: number },
+  ): { right: number; left: number; top: number; bottom: number } {
+    const counts = { right: 0, left: 0, top: 0, bottom: 0 }
+
+    if (!deps.getIncidentEdges || !deps.getLayoutNodes) {
+      return counts
+    }
+
+    const edges = deps.getIncidentEdges(nodeId)
+    const nodes = deps.getLayoutNodes()
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+
+    for (const edge of edges) {
+      const neighborId = edge.source === nodeId ? edge.target : edge.source
+      const neighbor = nodeMap.get(neighborId)
+      if (!neighbor) continue
+
+      const neighborScreen = deps.worldToScreen(neighbor.__x, neighbor.__y)
+      const dir = getEdgeDirection(nodeScreen, neighborScreen)
+      counts[dir]++
+    }
+
+    return counts
   }
 
   function nodeCardStyle() {
@@ -59,27 +112,52 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     const intersects = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
       !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y)
 
-    const candidates = [
-      // right
-      { x: p.x + nodeW / 2 + gap, y: p.y - cardH / 2 },
-      // left
-      { x: p.x - nodeW / 2 - gap - cardW, y: p.y - cardH / 2 },
-      // bottom
-      { x: p.x - cardW / 2, y: p.y + nodeH / 2 + gap },
-      // top
-      { x: p.x - cardW / 2, y: p.y - nodeH / 2 - gap - cardH },
+    // Count edges in each direction
+    const edgeCounts = countEdgeDirections(selectedNode.value.id, p)
+
+    // Create candidates with their direction names and edge counts
+    const candidates: Array<{
+      pos: { x: number; y: number }
+      direction: 'right' | 'left' | 'bottom' | 'top'
+      edgeCount: number
+    }> = [
+      {
+        pos: { x: p.x + nodeW / 2 + gap, y: p.y - cardH / 2 },
+        direction: 'right',
+        edgeCount: edgeCounts.right,
+      },
+      {
+        pos: { x: p.x - nodeW / 2 - gap - cardW, y: p.y - cardH / 2 },
+        direction: 'left',
+        edgeCount: edgeCounts.left,
+      },
+      {
+        pos: { x: p.x - cardW / 2, y: p.y + nodeH / 2 + gap },
+        direction: 'bottom',
+        edgeCount: edgeCounts.bottom,
+      },
+      {
+        pos: { x: p.x - cardW / 2, y: p.y - nodeH / 2 - gap - cardH },
+        direction: 'top',
+        edgeCount: edgeCounts.top,
+      },
     ]
 
+    // Sort candidates by edge count (prefer positions with fewer edges)
+    candidates.sort((a, b) => a.edgeCount - b.edgeCount)
+
+    // Try candidates in order of preference (least edges first)
     for (const c of candidates) {
-      const t = clampCard(c.x, c.y)
+      const t = clampCard(c.pos.x, c.pos.y)
       const cardRect = { x: t.x, y: t.y, w: cardW, h: cardH }
       if (!intersects(cardRect, nodeRect)) {
         return { left: `${t.x}px`, top: `${t.y}px` }
       }
     }
 
-    // Fallback: keep card in-bounds.
-    const t = clampCard(p.x + nodeW / 2 + gap, p.y - cardH / 2)
+    // Fallback: use the position with least edges, even if it intersects with node
+    const best = candidates[0]!
+    const t = clampCard(best.pos.x, best.pos.y)
     return { left: `${t.x}px`, top: `${t.y}px` }
   }
 

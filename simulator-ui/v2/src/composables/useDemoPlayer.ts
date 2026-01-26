@@ -176,7 +176,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         if (ln) {
           deps.pushFloatingLabel({
             nodeId: targetId,
-            text: `${deps.edgeDirCaption()}\n+125 GC`,
+            text: `+125 GC`,
             color: deps.fxColorForNode(targetId, '#22d3ee'),
             ttlMs: 2200,
             offsetYPx: -6,
@@ -271,7 +271,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           countPerEdge: 1,
           keyEdge: deps.keyEdge,
           seedFn: deps.seedFn,
-          isTestMode: deps.isTestMode(),
+          isTestMode: fxTestMode,
         })
       }, delayMs)
 
@@ -292,7 +292,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         deps.pushFloatingLabel({
           nodeId: e.to,
           id: Math.floor(performance.now()) + deps.seedFn(`lbl:${step.at_ms}:${i}:${deps.keyEdge(e.from, e.to)}`),
-          text: `${deps.edgeDirCaption()}\n${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
+          text: `${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
           color: deps.fxColorForNode(e.to, clearingGold),
           ttlMs: labelLifeMs,
           offsetYPx: -6,
@@ -316,8 +316,9 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
   }
 
   function runClearingOnce(plan: ClearingPlanEvent, done: ClearingDoneEvent | null) {
-    // In test-mode, apply the first highlight step deterministically (no timers/FX).
-    if (deps.isTestMode()) {
+    // In Playwright test-mode, apply the first highlight step deterministically (no timers/FX).
+    const fxTestMode = deps.isTestMode() && deps.isWebDriver
+    if (fxTestMode) {
       const step0 = plan.steps[0]
       for (const e of step0?.highlight_edges ?? []) deps.addActiveEdge(deps.keyEdge(e.from, e.to))
       return
@@ -362,7 +363,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           countPerEdge: 1,
           keyEdge: deps.keyEdge,
           seedFn: deps.seedFn,
-          isTestMode: deps.isTestMode(),
+          isTestMode: fxTestMode,
         })
       }, delayMs)
 
@@ -383,7 +384,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         deps.pushFloatingLabel({
           nodeId: e.to,
           id: Math.floor(performance.now()) + deps.seedFn(`lbl:${stepAtMs}:${idx}:${deps.keyEdge(e.from, e.to)}`),
-          text: `${deps.edgeDirCaption()}\n${formatDemoDebtAmount(e.from, e.to, stepAtMs)}`,
+          text: `${formatDemoDebtAmount(e.from, e.to, stepAtMs)}`,
           color: deps.fxColorForNode(e.to, clearingGold),
           ttlMs: labelLifeMs,
           offsetYPx: -6,

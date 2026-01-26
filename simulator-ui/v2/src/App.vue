@@ -15,6 +15,7 @@ import { loadEvents, loadSnapshot } from './fixtures'
 import { VIZ_MAPPING } from './vizMapping'
 import { drawBaseGraph, type LayoutLink as RenderLayoutLink } from './render/baseGraph'
 import { fillForNode, sizeForNode, type LayoutNode as RenderLayoutNode } from './render/nodePainter'
+import { withAlpha } from './render/color'
 import { createFxState, renderFxFrame, resetFxState, spawnEdgePulses, spawnNodeBursts, spawnSparks } from './render/fxRenderer'
 import { createTimerRegistry } from './demo/timerRegistry'
 import { useDemoPlayer } from './composables/useDemoPlayer'
@@ -68,7 +69,9 @@ const state = reactive({
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
+const dragEdgeCanvasEl = ref<HTMLCanvasElement | null>(null)
 const hostEl = ref<HTMLDivElement | null>(null)
+const dragPreviewEl = ref<HTMLDivElement | null>(null)
 
 function keyEdge(a: string, b: string) {
   return `${a}→${b}`
@@ -183,6 +186,9 @@ const nodeCard = useNodeCard({
   getLayoutNodeById: (id) => layout.nodes.find((n) => n.id === id) ?? null,
   getNodeScreenSize: (n) => sizeForNode(n),
   worldToScreen,
+  // New: provide edge info for smart card positioning
+  getIncidentEdges: (nodeId) => layout.links.filter((l) => l.source === nodeId || l.target === nodeId),
+  getLayoutNodes: () => layout.nodes,
 })
 
 const selectedNode = nodeCard.selectedNode
@@ -617,11 +623,126 @@ const renderLoop = useRenderLoop({
   getSelectedNodeId: () => state.selectedNodeId,
   activeEdges,
   getLinkLod: () => (dragState.active && dragState.dragging ? 'focus' : 'full'),
+  getHiddenNodeId: () => (dragState.active && dragState.dragging ? dragState.nodeId : null),
 })
 
 const ensureRenderLoop = renderLoop.ensureRenderLoop
 const stopRenderLoop = renderLoop.stopRenderLoop
 const renderOnce = renderLoop.renderOnce
+
+let dragEdgeCtx: CanvasRenderingContext2D | null = null
+let dragIncidentLinks: RenderLayoutLink[] = []
+
+function ensureDragEdgeCanvasSized() {
+  const base = canvasEl.value
+  const c = dragEdgeCanvasEl.value
+  if (!base || !c) return
+
+  if (c.width !== base.width || c.height !== base.height) {
+    c.width = base.width
+    c.height = base.height
+  }
+
+  if (!dragEdgeCtx) dragEdgeCtx = c.getContext('2d')
+}
+
+function clearDragEdgeCanvas() {
+  const c = dragEdgeCanvasEl.value
+  const ctx = dragEdgeCtx
+  if (!c || !ctx) return
+  if (!layout.w || !layout.h) return
+  const dpr = c.width / Math.max(1, layout.w)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, layout.w, layout.h)
+}
+
+function getLinkTerminationForDrag(n: LayoutNode, target: { __x: number; __y: number }, invZoom: number) {
+  const dx = target.__x - n.__x
+  const dy = target.__y - n.__y
+  if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return { x: n.__x, y: n.__y }
+
+  const angle = Math.atan2(dy, dx)
+  const { w: w0, h: h0 } = sizeForNode(n)
+  const w = w0 * invZoom
+  const h = h0 * invZoom
+
+  if (n.type !== 'business') {
+    const r = Math.max(w, h) / 2
+    return { x: n.__x + Math.cos(angle) * r, y: n.__y + Math.sin(angle) * r }
+  }
+
+  const hw = w / 2
+  const hh = h / 2
+
+  const absCos = Math.abs(Math.cos(angle))
+  const absSin = Math.abs(Math.sin(angle))
+
+  const xDist = absCos > 0.001 ? hw / absCos : Infinity
+  const yDist = absSin > 0.001 ? hh / absSin : Infinity
+  const dist = Math.min(xDist, yDist)
+
+  return { x: n.__x + Math.cos(angle) * dist, y: n.__y + Math.sin(angle) * dist }
+}
+
+function renderDragEdgesAtWorld(x: number, y: number) {
+  if (!dragState.active || !dragState.dragging) return
+  const nodeId = dragState.nodeId
+  if (!nodeId) return
+  const c = dragEdgeCanvasEl.value
+  if (!c) return
+  ensureDragEdgeCanvasSized()
+  const ctx = dragEdgeCtx
+  if (!ctx) return
+  if (!layout.w || !layout.h) return
+
+  const dpr = c.width / Math.max(1, layout.w)
+  const z = Math.max(0.01, camera.zoom)
+  const invZ = 1 / z
+
+  // Clear in screen-space.
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, layout.w, layout.h)
+
+  // Apply camera transform.
+  ctx.translate(camera.panX, camera.panY)
+  ctx.scale(z, z)
+
+  const palette = state.snapshot?.palette as any | undefined
+
+  const baseNode = dragState.cachedNodeRaw
+  if (!baseNode) return
+
+  const dragged: LayoutNode = { ...(baseNode as any), __x: x, __y: y }
+
+  for (const link of dragIncidentLinks) {
+    const otherId = link.source === nodeId ? link.target : link.source
+    const other = layout.nodes.find((n) => n.id === otherId) as any as LayoutNode | undefined
+    if (!other) continue
+
+    const start = getLinkTerminationForDrag(dragged, other, invZ)
+    const end = getLinkTerminationForDrag(other, dragged, invZ)
+
+    const widthKey = String((link as any).viz_width_key ?? 'hairline')
+    const alphaKey = String((link as any).viz_alpha_key ?? 'bg')
+    const colorKey = String((link as any).viz_color_key ?? '')
+
+    const baseWidth = VIZ_MAPPING.link.width_px[widthKey] ?? VIZ_MAPPING.link.width_px.hairline
+    const baseAlpha = VIZ_MAPPING.link.alpha[alphaKey] ?? VIZ_MAPPING.link.alpha.bg
+    const paletteColor = colorKey && palette ? palette[colorKey]?.color : undefined
+    const baseColor = paletteColor ?? VIZ_MAPPING.link.color.default
+
+    // Make drag edges readable.
+    const a = Math.max(0.22, Math.min(1, baseAlpha * 2.4))
+    const w = Math.max(baseWidth, VIZ_MAPPING.link.width_px.thin) * invZ
+
+    ctx.strokeStyle = withAlpha(baseColor, a)
+    ctx.lineWidth = w
+    ctx.beginPath()
+    ctx.moveTo(start.x, start.y)
+    ctx.lineTo(end.x, end.y)
+    ctx.stroke()
+  }
+}
 
 let dragRafPending = false
 let dragRafId: number | null = null
@@ -633,6 +754,68 @@ function scheduleDragRender() {
     dragRafPending = false
     dragRafId = null
     renderOnce()
+  })
+}
+
+let dragPreviewW = 0
+let dragPreviewH = 0
+let dragPreviewPending = false
+let dragPreviewRafId: number | null = null
+let dragPreviewNextX = 0
+let dragPreviewNextY = 0
+
+// Keep final drag position outside of Vue reactivity.
+let dragLastWorldX = 0
+let dragLastWorldY = 0
+
+function hideDragPreview() {
+  const el = dragPreviewEl.value
+  if (el) el.style.display = 'none'
+  dragIncidentLinks = []
+  clearDragEdgeCanvas()
+  if (dragPreviewRafId !== null) {
+    window.cancelAnimationFrame(dragPreviewRafId)
+    dragPreviewRafId = null
+    dragPreviewPending = false
+  }
+}
+
+function showDragPreviewForNode(nodeId: string) {
+  const el = dragPreviewEl.value
+  if (!el) return
+  const n = getNodeById(nodeId) ?? (layout.nodes.find((x) => x.id === nodeId) as any)
+  if (!n) return
+
+  const s = sizeForNode(n)
+  dragPreviewW = s.w
+  dragPreviewH = s.h
+
+  const fill = fillForNode(n, VIZ_MAPPING)
+
+  el.style.display = 'block'
+  el.style.width = `${dragPreviewW}px`
+  el.style.height = `${dragPreviewH}px`
+  el.style.background = `linear-gradient(135deg, ${fill}88, ${fill}44)`
+  el.style.borderColor = `${fill}aa`
+  el.style.boxShadow = `0 0 0 1px rgba(255,255,255,0.18), 0 12px 30px rgba(0,0,0,0.45), 0 0 24px ${fill}55`
+  el.style.borderRadius = String(n.type) === 'business' ? '5px' : '999px'
+}
+
+function scheduleDragPreviewAtWorld(x: number, y: number) {
+  const el = dragPreviewEl.value
+  if (!el) return
+  const p = worldToScreen(x, y)
+  // Position by top-left; the element itself encodes size.
+  dragPreviewNextX = p.x - dragPreviewW / 2
+  dragPreviewNextY = p.y - dragPreviewH / 2
+
+  if (dragPreviewPending) return
+  dragPreviewPending = true
+  dragPreviewRafId = window.requestAnimationFrame(() => {
+    dragPreviewPending = false
+    dragPreviewRafId = null
+    el.style.transform = `translate3d(${dragPreviewNextX}px, ${dragPreviewNextY}px, 0)`
+    renderDragEdgesAtWorld(dragLastWorldX, dragLastWorldY)
   })
 }
 
@@ -725,29 +908,35 @@ function onCanvasPointerMove(ev: PointerEvent) {
 
     if (!dragState.dragging && dist2 < threshold2) return
 
-    dragState.dragging = true
-    clearHoveredEdge()
-
-    // Use cached raw node reference for O(1) access without Vue reactivity overhead.
-    const ln = dragState.cachedNodeRaw
-
     const sx = ev.clientX - dragState.hostLeft
     const sy = ev.clientY - dragState.hostTop
     const p = screenToWorld(sx, sy)
     const x = p.x + dragState.offsetX
     const y = p.y + dragState.offsetY
 
-    ln.__x = x
-    ln.__y = y
-    // Dragging is an ephemeral override. Persist it only when the node is pinned.
-    // This keeps the Pin button meaningful: after dragging you can choose to Pin.
-    const id = dragState.nodeId
-    if (id && pinnedPos.has(id)) {
-      pinnedPos.set(id, { x, y })
+    dragLastWorldX = x
+    dragLastWorldY = y
+
+    if (!dragState.dragging) {
+      dragState.dragging = true
+      clearHoveredEdge()
+
+      const id = dragState.nodeId
+      if (id) {
+        showDragPreviewForNode(id)
+        // Cache incident links once for the overlay edge preview.
+        dragIncidentLinks = layout.links.filter((l) => l.source === id || l.target === id)
+        ensureDragEdgeCanvasSized()
+      }
+      scheduleDragPreviewAtWorld(x, y)
+
+      // Hide the node from canvas and lock in the baseline frame.
+      renderOnce()
+      return
     }
 
-    // RAF-batch redraw to max ~60fps even if pointermove arrives faster.
-    scheduleDragRender()
+    // Ideal drag: update only the DOM preview.
+    scheduleDragPreviewAtWorld(x, y)
     return
   }
 
@@ -789,6 +978,17 @@ function onCanvasPointerMove(ev: PointerEvent) {
 
 function onCanvasPointerUp(ev: PointerEvent) {
   if (dragState.active && dragState.pointerId === ev.pointerId) {
+    // Commit final position only once.
+    const id = dragState.nodeId
+    const ln = dragState.cachedNodeRaw
+    if (dragState.dragging && id && ln) {
+      ln.__x = dragLastWorldX
+      ln.__y = dragLastWorldY
+      if (pinnedPos.has(id)) pinnedPos.set(id, { x: dragLastWorldX, y: dragLastWorldY })
+    }
+
+    hideDragPreview()
+
     dragState.active = false
     dragState.dragging = false
     dragState.nodeId = null
@@ -809,6 +1009,9 @@ function onCanvasPointerUp(ev: PointerEvent) {
     } catch {
       // ignore
     }
+
+    // Ensure the canvas reflects the final committed position / un-hides the node.
+    renderOnce()
     return
   }
 
@@ -990,6 +1193,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  hideDragPreview()
   sceneState.teardown()
 })
 </script>
@@ -1001,6 +1205,7 @@ onUnmounted(() => {
     :data-ready="!state.loading && !state.error && state.snapshot ? '1' : '0'"
     :data-scene="scene"
     :data-layout="layoutMode"
+    :data-webdriver="isWebDriver ? '1' : '0'"
   >
     <canvas
       ref="canvasEl"
@@ -1013,7 +1218,11 @@ onUnmounted(() => {
       @pointerleave="clearHoveredEdge"
       @wheel.prevent="onCanvasWheel"
     />
+
+    <canvas ref="dragEdgeCanvasEl" class="canvas canvas-drag-edges" aria-hidden="true" />
     <canvas ref="fxCanvasEl" class="canvas canvas-fx" />
+
+    <div ref="dragPreviewEl" class="drag-preview" aria-hidden="true" />
 
     <div v-if="hoveredEdge.key" class="edge-tooltip" :style="edgeTooltipStyle()" aria-label="Edge tooltip">
       <div class="edge-tooltip-title">
@@ -1209,9 +1418,36 @@ onUnmounted(() => {
   z-index: 1;
 }
 
+.canvas-drag-edges {
+  pointer-events: none;
+  z-index: 2;
+}
+
+.root[data-webdriver='1'] .canvas-drag-edges {
+  display: none;
+}
+
 .canvas-fx {
   pointer-events: none;
+  z-index: 3;
+}
+
+.root[data-webdriver='1'] .canvas-fx {
+  /* Keep Playwright screenshots stable (no animated FX layer in captures). */
   z-index: 0;
+}
+
+.drag-preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  display: none;
+  pointer-events: none;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(6px);
 }
 
 .hud-top {
@@ -1219,7 +1455,13 @@ onUnmounted(() => {
   top: 12px;
   left: 12px;
   right: 12px;
+  z-index: 40;
   pointer-events: none;
+}
+
+.root[data-webdriver='1'] .hud-top {
+  /* Avoid screenshot diffs (HUD is not part of the scene gate). */
+  display: none;
 }
 
 .hud-row {
@@ -1253,12 +1495,12 @@ onUnmounted(() => {
   background: transparent;
   color: rgba(226, 232, 240, 0.95);
   border: none;
-  outline: none;
+  z-index: 3;
   font-size: 12px;
 }
 
 .value {
-  color: rgba(226, 232, 240, 0.95);
+  z-index: 2;
   font-size: 12px;
 }
 
