@@ -34,27 +34,6 @@
     ]
   },
   {
-    "event_id": "tx.demo.multi-hop.2",
-    "ts": "2026-01-11T00:00:00Z",
-    "type": "tx.updated",
-    "equivalent": "UAH",
-    "ttl_ms": 1200,
-    "edges": [
-      {
-        "from": "PID_U0001_9e3779b1",
-        "to": "PID_U0002_3c6ef362"
-      },
-      {
-        "from": "PID_U0002_3c6ef362",
-        "to": "PID_U0006_b54cda26"
-      },
-      {
-        "from": "PID_U0006_b54cda26",
-        "to": "PID_U0036_3fcd1ce4"
-      }
-    ]
-  },
-  {
     "event_id": "tx.demo.edge.1",
     "ts": "2026-01-11T00:00:00Z",
     "type": "tx.updated",

@@ -69,7 +69,6 @@ const state = reactive({
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
-const dragEdgeCanvasEl = ref<HTMLCanvasElement | null>(null)
 const hostEl = ref<HTMLDivElement | null>(null)
 const dragPreviewEl = ref<HTMLDivElement | null>(null)
 
@@ -630,149 +629,14 @@ const ensureRenderLoop = renderLoop.ensureRenderLoop
 const stopRenderLoop = renderLoop.stopRenderLoop
 const renderOnce = renderLoop.renderOnce
 
-let dragEdgeCtx: CanvasRenderingContext2D | null = null
-let dragIncidentLinks: RenderLayoutLink[] = []
-
-function ensureDragEdgeCanvasSized() {
-  const base = canvasEl.value
-  const c = dragEdgeCanvasEl.value
-  if (!base || !c) return
-
-  if (c.width !== base.width || c.height !== base.height) {
-    c.width = base.width
-    c.height = base.height
-  }
-
-  if (!dragEdgeCtx) dragEdgeCtx = c.getContext('2d')
-}
-
-function clearDragEdgeCanvas() {
-  const c = dragEdgeCanvasEl.value
-  const ctx = dragEdgeCtx
-  if (!c || !ctx) return
-  if (!layout.w || !layout.h) return
-  const dpr = c.width / Math.max(1, layout.w)
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, layout.w, layout.h)
-}
-
-function getLinkTerminationForDrag(n: LayoutNode, target: { __x: number; __y: number }, invZoom: number) {
-  const dx = target.__x - n.__x
-  const dy = target.__y - n.__y
-  if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return { x: n.__x, y: n.__y }
-
-  const angle = Math.atan2(dy, dx)
-  const { w: w0, h: h0 } = sizeForNode(n)
-  const w = w0 * invZoom
-  const h = h0 * invZoom
-
-  if (n.type !== 'business') {
-    const r = Math.max(w, h) / 2
-    return { x: n.__x + Math.cos(angle) * r, y: n.__y + Math.sin(angle) * r }
-  }
-
-  const hw = w / 2
-  const hh = h / 2
-
-  const absCos = Math.abs(Math.cos(angle))
-  const absSin = Math.abs(Math.sin(angle))
-
-  const xDist = absCos > 0.001 ? hw / absCos : Infinity
-  const yDist = absSin > 0.001 ? hh / absSin : Infinity
-  const dist = Math.min(xDist, yDist)
-
-  return { x: n.__x + Math.cos(angle) * dist, y: n.__y + Math.sin(angle) * dist }
-}
-
-function renderDragEdgesAtWorld(x: number, y: number) {
-  if (!dragState.active || !dragState.dragging) return
-  const nodeId = dragState.nodeId
-  if (!nodeId) return
-  const c = dragEdgeCanvasEl.value
-  if (!c) return
-  ensureDragEdgeCanvasSized()
-  const ctx = dragEdgeCtx
-  if (!ctx) return
-  if (!layout.w || !layout.h) return
-
-  const dpr = c.width / Math.max(1, layout.w)
-  const z = Math.max(0.01, camera.zoom)
-  const invZ = 1 / z
-
-  // Clear in screen-space.
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, layout.w, layout.h)
-
-  // Apply camera transform.
-  ctx.translate(camera.panX, camera.panY)
-  ctx.scale(z, z)
-
-  const palette = state.snapshot?.palette as any | undefined
-
-  const baseNode = dragState.cachedNodeRaw
-  if (!baseNode) return
-
-  const dragged: LayoutNode = { ...(baseNode as any), __x: x, __y: y }
-
-  for (const link of dragIncidentLinks) {
-    const otherId = link.source === nodeId ? link.target : link.source
-    const other = layout.nodes.find((n) => n.id === otherId) as any as LayoutNode | undefined
-    if (!other) continue
-
-    const start = getLinkTerminationForDrag(dragged, other, invZ)
-    const end = getLinkTerminationForDrag(other, dragged, invZ)
-
-    const widthKey = String((link as any).viz_width_key ?? 'hairline')
-    const alphaKey = String((link as any).viz_alpha_key ?? 'bg')
-    const colorKey = String((link as any).viz_color_key ?? '')
-
-    const baseWidth = VIZ_MAPPING.link.width_px[widthKey] ?? VIZ_MAPPING.link.width_px.hairline
-    const baseAlpha = VIZ_MAPPING.link.alpha[alphaKey] ?? VIZ_MAPPING.link.alpha.bg
-    const paletteColor = colorKey && palette ? palette[colorKey]?.color : undefined
-    const baseColor = paletteColor ?? VIZ_MAPPING.link.color.default
-
-    // Make drag edges readable.
-    const a = Math.max(0.22, Math.min(1, baseAlpha * 2.4))
-    const w = Math.max(baseWidth, VIZ_MAPPING.link.width_px.thin) * invZ
-
-    ctx.strokeStyle = withAlpha(baseColor, a)
-    ctx.lineWidth = w
-    ctx.beginPath()
-    ctx.moveTo(start.x, start.y)
-    ctx.lineTo(end.x, end.y)
-    ctx.stroke()
-  }
-}
-
-let dragRafPending = false
-let dragRafId: number | null = null
-
-function scheduleDragRender() {
-  if (dragRafPending) return
-  dragRafPending = true
-  dragRafId = window.requestAnimationFrame(() => {
-    dragRafPending = false
-    dragRafId = null
-    renderOnce()
-  })
-}
-
 let dragPreviewW = 0
 let dragPreviewH = 0
 let dragPreviewPending = false
 let dragPreviewRafId: number | null = null
-let dragPreviewNextX = 0
-let dragPreviewNextY = 0
-
-// Keep final drag position outside of Vue reactivity.
-let dragLastWorldX = 0
-let dragLastWorldY = 0
 
 function hideDragPreview() {
   const el = dragPreviewEl.value
   if (el) el.style.display = 'none'
-  dragIncidentLinks = []
-  clearDragEdgeCanvas()
   if (dragPreviewRafId !== null) {
     window.cancelAnimationFrame(dragPreviewRafId)
     dragPreviewRafId = null
@@ -786,6 +650,8 @@ function showDragPreviewForNode(nodeId: string) {
   const n = getNodeById(nodeId) ?? (layout.nodes.find((x) => x.id === nodeId) as any)
   if (!n) return
 
+  // sizeForNode returns CSS pixel size which matches the visual size on canvas
+  // (canvas renders with invZoom so visual size = baseSize regardless of zoom)
   const s = sizeForNode(n)
   dragPreviewW = s.w
   dragPreviewH = s.h
@@ -801,21 +667,29 @@ function showDragPreviewForNode(nodeId: string) {
   el.style.borderRadius = String(n.type) === 'business' ? '5px' : '999px'
 }
 
-function scheduleDragPreviewAtWorld(x: number, y: number) {
+function scheduleDragPreview() {
   const el = dragPreviewEl.value
   if (!el) return
-  const p = worldToScreen(x, y)
-  // Position by top-left; the element itself encodes size.
-  dragPreviewNextX = p.x - dragPreviewW / 2
-  dragPreviewNextY = p.y - dragPreviewH / 2
+
+  const n = dragState.cachedNode
+  if (!n) return
 
   if (dragPreviewPending) return
   dragPreviewPending = true
   dragPreviewRafId = window.requestAnimationFrame(() => {
     dragPreviewPending = false
     dragPreviewRafId = null
-    el.style.transform = `translate3d(${dragPreviewNextX}px, ${dragPreviewNextY}px, 0)`
-    renderDragEdgesAtWorld(dragLastWorldX, dragLastWorldY)
+
+    // Snapshot camera once per frame for stable DOM preview.
+    const cam = { panX: camera.panX, panY: camera.panY, zoom: camera.zoom }
+    const p = { x: n.__x * cam.zoom + cam.panX, y: n.__y * cam.zoom + cam.panY }
+
+    const previewX = p.x - dragPreviewW / 2
+    const previewY = p.y - dragPreviewH / 2
+    el.style.transform = `translate3d(${previewX}px, ${previewY}px, 0)`
+
+    // Edges are drawn in world-space on the main canvas.
+    renderOnce()
   })
 }
 
@@ -852,20 +726,10 @@ function onCanvasPointerDown(ev: PointerEvent) {
       dragState.startClientX = ev.clientX
       dragState.startClientY = ev.clientY
       dragState.cachedNode = ln // Cache reference to avoid O(n) lookup on every pointermove
-      dragState.cachedNodeRaw = toRaw(ln) as any
 
-      const host = hostEl.value
-      if (host) {
-        const r = host.getBoundingClientRect()
-        dragState.hostLeft = r.left
-        dragState.hostTop = r.top
-      } else {
-        dragState.hostLeft = 0
-        dragState.hostTop = 0
-      }
-
-      const sx = ev.clientX - dragState.hostLeft
-      const sy = ev.clientY - dragState.hostTop
+      const s = clientToScreen(ev.clientX, ev.clientY)
+      const sx = s.x
+      const sy = s.y
       const p = screenToWorld(sx, sy)
       dragState.offsetX = ln.__x - p.x
       dragState.offsetY = ln.__y - p.y
@@ -892,15 +756,12 @@ const dragState = reactive({
   startClientY: 0,
   offsetX: 0,
   offsetY: 0,
-  hostLeft: 0,
-  hostTop: 0,
   // Cached reference to avoid O(n) lookup on every pointermove
   cachedNode: null as LayoutNode | null,
-  cachedNodeRaw: null as LayoutNode | null,
 })
 
 function onCanvasPointerMove(ev: PointerEvent) {
-  if (dragState.active && dragState.pointerId === ev.pointerId && dragState.cachedNodeRaw) {
+  if (dragState.active && dragState.pointerId === ev.pointerId && dragState.cachedNode) {
     const dx = ev.clientX - dragState.startClientX
     const dy = ev.clientY - dragState.startClientY
     const dist2 = dx * dx + dy * dy
@@ -908,14 +769,15 @@ function onCanvasPointerMove(ev: PointerEvent) {
 
     if (!dragState.dragging && dist2 < threshold2) return
 
-    const sx = ev.clientX - dragState.hostLeft
-    const sy = ev.clientY - dragState.hostTop
-    const p = screenToWorld(sx, sy)
+    const s = clientToScreen(ev.clientX, ev.clientY)
+    const p = screenToWorld(s.x, s.y)
     const x = p.x + dragState.offsetX
     const y = p.y + dragState.offsetY
 
-    dragLastWorldX = x
-    dragLastWorldY = y
+    // Update the node position in world coordinates.
+    // Canvas links will follow automatically (same camera transform as everything else).
+    dragState.cachedNode.__x = x
+    dragState.cachedNode.__y = y
 
     if (!dragState.dragging) {
       dragState.dragging = true
@@ -924,19 +786,15 @@ function onCanvasPointerMove(ev: PointerEvent) {
       const id = dragState.nodeId
       if (id) {
         showDragPreviewForNode(id)
-        // Cache incident links once for the overlay edge preview.
-        dragIncidentLinks = layout.links.filter((l) => l.source === id || l.target === id)
-        ensureDragEdgeCanvasSized()
       }
-      scheduleDragPreviewAtWorld(x, y)
+      scheduleDragPreview()
 
       // Hide the node from canvas and lock in the baseline frame.
       renderOnce()
       return
     }
 
-    // Ideal drag: update only the DOM preview.
-    scheduleDragPreviewAtWorld(x, y)
+    scheduleDragPreview()
     return
   }
 
@@ -980,11 +838,9 @@ function onCanvasPointerUp(ev: PointerEvent) {
   if (dragState.active && dragState.pointerId === ev.pointerId) {
     // Commit final position only once.
     const id = dragState.nodeId
-    const ln = dragState.cachedNodeRaw
+    const ln = dragState.cachedNode
     if (dragState.dragging && id && ln) {
-      ln.__x = dragLastWorldX
-      ln.__y = dragLastWorldY
-      if (pinnedPos.has(id)) pinnedPos.set(id, { x: dragLastWorldX, y: dragLastWorldY })
+      if (pinnedPos.has(id)) pinnedPos.set(id, { x: ln.__x, y: ln.__y })
     }
 
     hideDragPreview()
@@ -993,16 +849,7 @@ function onCanvasPointerUp(ev: PointerEvent) {
     dragState.dragging = false
     dragState.nodeId = null
     dragState.pointerId = null
-    dragState.hostLeft = 0
-    dragState.hostTop = 0
     dragState.cachedNode = null // Clear cached reference
-    dragState.cachedNodeRaw = null
-
-    if (dragRafId !== null) {
-      window.cancelAnimationFrame(dragRafId)
-      dragRafId = null
-      dragRafPending = false
-    }
 
     try {
       canvasEl.value?.releasePointerCapture(ev.pointerId)
@@ -1050,6 +897,8 @@ function unpinSelectedNode() {
 }
 
 function onCanvasWheel(ev: WheelEvent) {
+  // While dragging a node we rely on a camera snapshot for DOM preview; keep camera stable.
+  if (dragState.active) return
   cameraSystem.onWheel(ev)
 }
 
@@ -1218,8 +1067,6 @@ onUnmounted(() => {
       @pointerleave="clearHoveredEdge"
       @wheel.prevent="onCanvasWheel"
     />
-
-    <canvas ref="dragEdgeCanvasEl" class="canvas canvas-drag-edges" aria-hidden="true" />
     <canvas ref="fxCanvasEl" class="canvas canvas-fx" />
 
     <div ref="dragPreviewEl" class="drag-preview" aria-hidden="true" />
@@ -1416,15 +1263,6 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   z-index: 1;
-}
-
-.canvas-drag-edges {
-  pointer-events: none;
-  z-index: 2;
-}
-
-.root[data-webdriver='1'] .canvas-drag-edges {
-  display: none;
 }
 
 .canvas-fx {

@@ -1,6 +1,7 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
+import { getLinkTermination } from './linkGeometry'
 import { drawNodeShape, fillForNode, sizeForNode, type LayoutNode } from './nodePainter'
 
 export type LayoutLink = GraphLink & { __key: string }
@@ -31,46 +32,6 @@ function linkColor(l: GraphLink, mapping: VizMapping, palette?: Palette) {
   return p?.color ?? mapping.link.color.default
 }
 
-function getLinkTermination(n: LayoutNode, target: { __x: number; __y: number }, invZoom: number) {
-  const dx = target.__x - n.__x
-  const dy = target.__y - n.__y
-  if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return { x: n.__x, y: n.__y }
-
-  const angle = Math.atan2(dy, dx)
-  const { w: w0, h: h0 } = sizeForNode(n as GraphNode)
-  const w = w0 * invZoom
-  const h = h0 * invZoom
-  
-  // Person = Circle
-  if (n.type !== 'business') {
-    const r = Math.max(w, h) / 2
-    // Terminate slightly inside the rim to ensure connection, or exactly at rim.
-    // Given the request "end at contours", we use r. 
-    return {
-      x: n.__x + Math.cos(angle) * r,
-      y: n.__y + Math.sin(angle) * r
-    }
-  }
-
-  // Business = Rectangle (Approximation for square)
-  // Ray-box intersection
-  const hw = w / 2
-  const hh = h / 2
-  
-  const absCos = Math.abs(Math.cos(angle))
-  const absSin = Math.abs(Math.sin(angle))
-  
-  const xDist = (absCos > 0.001) ? hw / absCos : Infinity
-  const yDist = (absSin > 0.001) ? hh / absSin : Infinity
-  
-  const dist = Math.min(xDist, yDist)
-  
-  return {
-    x: n.__x + Math.cos(angle) * dist,
-    y: n.__y + Math.sin(angle) * dist
-  }
-}
-
 export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   w: number
   h: number
@@ -99,7 +60,6 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 
   // Links: base pass = strictly semantic viz_* (no focus/active overrides).
   for (const link of links) {
-    if (hiddenNodeId && (link.source === hiddenNodeId || link.target === hiddenNodeId)) continue
     if (linkLod === 'focus') {
       const isActive = activeEdges.has(link.__key)
       const isFocusIncident = !!selectedNodeId && isIncident(link, selectedNodeId)
@@ -112,9 +72,14 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     const start = getLinkTermination(a, b, invZ)
     const end = getLinkTermination(b, a, invZ)
 
-    const alpha = linkAlpha(link, mapping)
-    const width = linkWidthPx(link, mapping)
+    const baseAlpha = linkAlpha(link, mapping)
+    const baseWidth = linkWidthPx(link, mapping)
     const color = linkColor(link, mapping, palette)
+
+    // During drag we render a reduced set of edges (focus LOD).
+    // Boost visibility here to avoid needing a second overlay pass.
+    const alpha = dragMode ? clamp01(Math.max(0.22, baseAlpha * 2.4)) : baseAlpha
+    const width = dragMode ? Math.max(baseWidth, mapping.link.width_px.thin) : baseWidth
 
     ctx.strokeStyle = withAlpha(color, alpha)
     ctx.lineWidth = width * invZ
@@ -125,9 +90,8 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   }
 
   // Links: overlay pass = UX highlight for focus/active without overwriting base style.
-  if (selectedNodeId || activeEdges.size > 0) {
+  if (!dragMode && (selectedNodeId || activeEdges.size > 0)) {
     for (const link of links) {
-      if (hiddenNodeId && (link.source === hiddenNodeId || link.target === hiddenNodeId)) continue
       if (linkLod === 'focus') {
         const isActive = activeEdges.has(link.__key)
         const isFocusIncident = !!selectedNodeId && isIncident(link, selectedNodeId)
@@ -164,7 +128,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       if (isActive) {
         const alpha = clamp01(Math.max(mapping.link.alpha.hi, baseAlpha * 4.0))
         const width = Math.max(baseWidth, mapping.link.width_px.highlight)
-        ctx.strokeStyle = withAlpha('#22d3ee', alpha)
+        ctx.strokeStyle = withAlpha(mapping.fx.tx_spark.trail, alpha)
         ctx.lineWidth = width * invZ
         ctx.beginPath()
         ctx.moveTo(start.x, start.y)

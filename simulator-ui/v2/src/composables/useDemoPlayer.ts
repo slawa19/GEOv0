@@ -1,6 +1,17 @@
 import { reactive } from 'vue'
 import type { ClearingDoneEvent, ClearingPlanEvent, DemoEvent, TxUpdatedEvent } from '../types'
 
+const CLEARING_ANIMATION = {
+  microTtlMs: 780,
+  microGapMs: 110,
+  labelLifeMs: 2200,
+  highlightPulseMs: 650,
+  sourceBurstMs: 360,
+  targetBurstMs: 520,
+  cleanupPadMs: 50,
+  labelThrottleMs: 80,
+} as const
+
 export type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
 
 export type LayoutNode = { id: string; __x: number; __y: number }
@@ -215,9 +226,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
 
     const runId = ++clearingRunSeq
     const clearingGold = '#fbbf24'
-    const microTtlMs = 780
-    const microGapMs = 110
-    const labelLifeMs = 2200
+    const { microTtlMs, microGapMs, labelLifeMs } = CLEARING_ANIMATION
 
     const formatDemoDebtAmount = (from: string, to: string, seedAtMs: number) => {
       const h = deps.seedFn(`clearing:amt:${deps.effectiveEq()}:${seedAtMs}:${deps.keyEdge(from, to)}`)
@@ -229,7 +238,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       deps.spawnEdgePulses({
         edges: step.highlight_edges,
         nowMs: performance.now(),
-        durationMs: 650,
+        durationMs: CLEARING_ANIMATION.highlightPulseMs,
         color: clearingGold,
         thickness: 1.0,
         seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
@@ -251,7 +260,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         deps.spawnNodeBursts({
           nodeIds: [e.from],
           nowMs: performance.now(),
-          durationMs: 360,
+          durationMs: CLEARING_ANIMATION.sourceBurstMs,
           color: deps.fxColorForNode(e.from, clearingGold),
           kind: 'tx-impact',
           seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${step.at_ms}:${i}`,
@@ -281,7 +290,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         deps.spawnNodeBursts({
           nodeIds: [e.to],
           nowMs: performance.now(),
-          durationMs: 520,
+          durationMs: CLEARING_ANIMATION.targetBurstMs,
           color: deps.fxColorForNode(e.to, clearingGold),
           kind: 'tx-impact',
           seedPrefix: `clearing:impact:${deps.effectiveEq()}:${step.at_ms}:${i}`,
@@ -297,15 +306,15 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           ttlMs: labelLifeMs,
           offsetYPx: -6,
           throttleKey: `clearing:${e.to}`,
-          throttleMs: 80,
+          throttleMs: CLEARING_ANIMATION.labelThrottleMs,
         })
       }, delayMs + microTtlMs)
     }
 
     const isLast = stepIndex >= plan.steps.length - 1
-    const targetBurstDurationMs = 520
+    const targetBurstDurationMs = CLEARING_ANIMATION.targetBurstMs
     const particlesEndsAt = edges.length > 0 ? (edges.length - 1) * microGapMs + microTtlMs + targetBurstDurationMs : 0
-    const cleanupDelayMs = Math.max(650, particlesEndsAt) + 50
+    const cleanupDelayMs = Math.max(CLEARING_ANIMATION.highlightPulseMs, particlesEndsAt) + CLEARING_ANIMATION.cleanupPadMs
 
     deps.scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
@@ -326,9 +335,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
 
     const runId = ++clearingRunSeq
     const clearingGold = '#fbbf24'
-    const microTtlMs = 780
-    const microGapMs = 110
-    const labelLifeMs = 2200
+    const { microTtlMs, microGapMs, labelLifeMs } = CLEARING_ANIMATION
 
     const formatDemoDebtAmount = (from: string, to: string, atMs: number) => {
       const h = deps.seedFn(`clearing:amt:${deps.effectiveEq()}:${atMs}:${deps.keyEdge(from, to)}`)
@@ -343,7 +350,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         deps.spawnNodeBursts({
           nodeIds: [e.from],
           nowMs: performance.now(),
-          durationMs: 360,
+          durationMs: CLEARING_ANIMATION.sourceBurstMs,
           color: deps.fxColorForNode(e.from, clearingGold),
           kind: 'tx-impact',
           seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${stepAtMs}:${idx}`,
@@ -373,7 +380,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         deps.spawnNodeBursts({
           nodeIds: [e.to],
           nowMs: performance.now(),
-          durationMs: 520,
+          durationMs: CLEARING_ANIMATION.targetBurstMs,
           color: deps.fxColorForNode(e.to, clearingGold),
           kind: 'tx-impact',
           seedPrefix: `clearing:impact:${deps.effectiveEq()}:${stepAtMs}:${idx}`,
@@ -389,7 +396,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           ttlMs: labelLifeMs,
           offsetYPx: -6,
           throttleKey: `clearing:${e.to}`,
-          throttleMs: 80,
+          throttleMs: CLEARING_ANIMATION.labelThrottleMs,
         })
       }, delayMs + microTtlMs)
     }
@@ -402,7 +409,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           deps.spawnEdgePulses({
             edges: step.highlight_edges,
             nowMs: performance.now(),
-            durationMs: 650,
+            durationMs: CLEARING_ANIMATION.highlightPulseMs,
             color: clearingGold,
             thickness: 1.0,
             seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
@@ -422,15 +429,15 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       }, Math.max(0, step.at_ms))
     }
 
-    const targetBurstDurationMs = 520
+    const targetBurstDurationMs = CLEARING_ANIMATION.targetBurstMs
     let doneAt = 0
     for (const s of plan.steps) {
       const base = Math.max(0, s.at_ms)
       const count = s.particles_edges?.length ?? 0
       const lastBurstEndsAt = count > 0 ? (count - 1) * microGapMs + microTtlMs + targetBurstDurationMs : 0
-      doneAt = Math.max(doneAt, base + 650, base + lastBurstEndsAt)
+      doneAt = Math.max(doneAt, base + CLEARING_ANIMATION.highlightPulseMs, base + lastBurstEndsAt)
     }
-    const cleanupDelayMs = doneAt + 50
+    const cleanupDelayMs = doneAt + CLEARING_ANIMATION.cleanupPadMs
 
     deps.scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
