@@ -7,9 +7,9 @@
  *
  * 1. **Sparks** (`FxSpark`, `spawnSparks`)
  *    - Moving particles that travel along edges from source to target
- *    - Two styles: 'comet' (wobbly trail) and 'beam' (straight line + star head)
+ *    - Two styles: 'comet' (wobbly trail) and 'beam' (straight line + glowing dot head)
  *    - Use for: transaction animations, clearing micro-transactions
- *    - NOTE: 'beam' style already renders full-edge glow, no need for separate edgePulse
+ *    - NOTE: 'beam' style renders trail from source to head position
  *
  * 2. **Edge Pulses** (`FxEdgePulse`, `spawnEdgePulses`)
  *    - Soft glow traveling along an edge with fading trail
@@ -350,12 +350,12 @@ export function renderFxFrame(opts: {
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
 
-        // Base beam (full segment) — thin core + soft halo
+        // Trail beam (from start to head) — thin core + soft halo
         {
           const baseAlpha = Math.max(0, Math.min(1, alpha * 0.55))
           const th = s.thickness * invZ
 
-          // Halo pass
+          // Halo pass (only from start to head, not full edge)
           ctx.globalAlpha = baseAlpha * 0.55
           ctx.strokeStyle = s.colorTrail
           ctx.lineWidth = Math.max(spx(1.2), th * 3.2)
@@ -363,23 +363,23 @@ export function renderFxFrame(opts: {
           ctx.shadowColor = withAlpha(s.colorTrail, 0.85)
           ctx.beginPath()
           ctx.moveTo(start.x, start.y)
-          ctx.lineTo(end.x, end.y)
+          ctx.lineTo(headX, headY)
           ctx.stroke()
 
-          // Core pass
+          // Core pass (only from start to head)
           ctx.shadowBlur = 0
           ctx.globalAlpha = baseAlpha
           ctx.strokeStyle = withAlpha(s.colorTrail, 0.9)
           ctx.lineWidth = Math.max(spx(0.9), th * 1.25)
           ctx.beginPath()
           ctx.moveTo(start.x, start.y)
-          ctx.lineTo(end.x, end.y)
+          ctx.lineTo(headX, headY)
           ctx.stroke()
         }
 
         // Moving bright “packet” segment near the head
         {
-          const segLen = Math.max(18, Math.min(54, len * 0.22))
+          const segLen = Math.max(spx(18), Math.min(spx(54), len * 0.22))
           const tailX = headX - ux * segLen
           const tailY = headY - uy * segLen
           const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
@@ -398,37 +398,17 @@ export function renderFxFrame(opts: {
           ctx.stroke()
         }
 
-        // Head: star-like spark (tiny cross) + bloom
+        // Head: soft glowing dot (no star/cross spikes)
         {
-          const r = Math.max(spx(1.8), th * 2.8)
-          const arm = Math.max(spx(6), r * 3.2)
-          const perpX = -uy
-          const perpY = ux
+          const r = Math.max(spx(2.2), th * 3.2)
 
-          ctx.shadowBlur = Math.max(spx(10), r * 6) * blurK
+          ctx.shadowBlur = Math.max(spx(14), r * 5) * blurK
           ctx.shadowColor = withAlpha(s.colorCore, 0.95)
           ctx.globalAlpha = 1
           ctx.fillStyle = withAlpha(s.colorCore, alpha)
           ctx.beginPath()
           ctx.arc(headX, headY, r, 0, Math.PI * 2)
           ctx.fill()
-
-          ctx.shadowBlur = Math.max(spx(12), r * 7) * blurK
-          ctx.shadowColor = withAlpha(s.colorTrail, 0.9)
-          ctx.strokeStyle = withAlpha(s.colorCore, alpha)
-          ctx.lineWidth = Math.max(spx(1.0), th * 1.1)
-
-          // Along direction
-          ctx.beginPath()
-          ctx.moveTo(headX - ux * arm, headY - uy * arm)
-          ctx.lineTo(headX + ux * arm, headY + uy * arm)
-          ctx.stroke()
-
-          // Perpendicular
-          ctx.beginPath()
-          ctx.moveTo(headX - perpX * arm * 0.65, headY - perpY * arm * 0.65)
-          ctx.lineTo(headX + perpX * arm * 0.65, headY + perpY * arm * 0.65)
-          ctx.stroke()
         }
 
         ctx.restore()
