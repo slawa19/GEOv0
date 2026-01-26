@@ -234,22 +234,31 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       return `${amt} GC`
     }
 
+    const edges = step.particles_edges ?? []
+
+    // Build set of particle edge keys to avoid double-animation.
+    // Beam sparks already render edge glow, so don't add EdgePulses for same edges.
+    const particleEdgeKeys = new Set(edges.map(e => deps.keyEdge(e.from, e.to)))
+
     if (step.highlight_edges && step.highlight_edges.length > 0) {
-      deps.spawnEdgePulses({
-        edges: step.highlight_edges,
-        nowMs: performance.now(),
-        durationMs: CLEARING_ANIMATION.highlightPulseMs,
-        color: clearingGold,
-        thickness: 1.0,
-        seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
-        countPerEdge: 1,
-        keyEdge: deps.keyEdge,
-        seedFn: deps.seedFn,
-        isTestMode: false,
-      })
+      // Filter out edges that will have beam sparks (to avoid double glow)
+      const highlightOnly = step.highlight_edges.filter(e => !particleEdgeKeys.has(deps.keyEdge(e.from, e.to)))
+      if (highlightOnly.length > 0) {
+        deps.spawnEdgePulses({
+          edges: highlightOnly,
+          nowMs: performance.now(),
+          durationMs: CLEARING_ANIMATION.highlightPulseMs,
+          color: clearingGold,
+          thickness: 1.0,
+          seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
+          countPerEdge: 1,
+          keyEdge: deps.keyEdge,
+          seedFn: deps.seedFn,
+          isTestMode: false,
+        })
+      }
     }
 
-    const edges = step.particles_edges ?? []
     for (let i = 0; i < edges.length; i++) {
       const e = edges[i]!
       const delayMs = i * microGapMs
@@ -405,26 +414,33 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       deps.scheduleTimeout(() => {
         if (runId !== clearingRunSeq) return
 
+        const particleEdges = step.particles_edges ?? []
+
+        // Build set of particle edge keys to avoid double-animation.
+        // Beam sparks already render edge glow, so don't add EdgePulses for same edges.
+        const particleEdgeKeys = new Set(particleEdges.map(e => deps.keyEdge(e.from, e.to)))
+
         if (step.highlight_edges && step.highlight_edges.length > 0) {
-          deps.spawnEdgePulses({
-            edges: step.highlight_edges,
-            nowMs: performance.now(),
-            durationMs: CLEARING_ANIMATION.highlightPulseMs,
-            color: clearingGold,
-            thickness: 1.0,
-            seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
-            countPerEdge: 1,
-            keyEdge: deps.keyEdge,
-            seedFn: deps.seedFn,
-            isTestMode: false,
-          })
+          // Filter out edges that will have beam sparks (to avoid double glow)
+          const highlightOnly = step.highlight_edges.filter(e => !particleEdgeKeys.has(deps.keyEdge(e.from, e.to)))
+          if (highlightOnly.length > 0) {
+            deps.spawnEdgePulses({
+              edges: highlightOnly,
+              nowMs: performance.now(),
+              durationMs: CLEARING_ANIMATION.highlightPulseMs,
+              color: clearingGold,
+              thickness: 1.0,
+              seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
+              countPerEdge: 1,
+              keyEdge: deps.keyEdge,
+              seedFn: deps.seedFn,
+              isTestMode: false,
+            })
+          }
         }
 
-        if (step.particles_edges) {
-          const edges = step.particles_edges
-          for (let i = 0; i < edges.length; i++) {
-            animateEdge(edges[i]!, i * microGapMs, step.at_ms, i)
-          }
+        for (let i = 0; i < particleEdges.length; i++) {
+          animateEdge(particleEdges[i]!, i * microGapMs, step.at_ms, i)
         }
       }, Math.max(0, step.at_ms))
     }

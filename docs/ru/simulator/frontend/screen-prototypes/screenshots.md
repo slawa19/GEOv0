@@ -66,7 +66,7 @@ CONTEXT (GEO): game-like tactical map UI (not admin dashboard). Deep space dark 
 
 ### Статика vs анимация (для test-mode)
 
-- В `VITE_TEST_MODE=1` (скриншоты A–E):
+- В `VITE_TEST_MODE=1` при прогоне скриншотов (Playwright/WebDriver, сцены A–E):
 	- FX (искры/частицы/flash) должны быть выключены или зафиксированы в одном статическом кадре;
 	- допускается оставить только «статическую» подсветку рёбер (incident links / highlight_edges),
 	- никаких процедурных «дыханий/мерцаний», влияющих на пиксели между прогонами.
