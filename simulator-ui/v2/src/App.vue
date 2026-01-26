@@ -192,6 +192,15 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v))
 }
 
+const overlayLabelScale = computed(() => {
+  // Keep e2e screenshots stable and avoid surprises in test-mode.
+  if (isTestMode.value || isWebDriver) return 1
+  // When zoomed out (z<1), make overlay text visually smaller so it "moves away" with nodes.
+  // Clamp to avoid becoming unreadable or comically large.
+  const z = Math.max(0.01, camera.zoom)
+  return clamp(z, 0.65, 1)
+})
+
 const cameraSystem = useCamera({
   canvasEl,
   hostEl,
@@ -291,6 +300,48 @@ const pushFloatingLabel = overlayState.pushFloatingLabel
 const pruneFloatingLabels = overlayState.pruneFloatingLabels
 const floatingLabelsView = overlayState.floatingLabelsView
 const resetOverlays = overlayState.resetOverlays
+
+type FloatingLabelFx = (typeof floatingLabelsView.value)[number] & { glow: number }
+
+const floatingLabelsViewFx = computed((): FloatingLabelFx[] => {
+  const base = floatingLabelsView.value
+  if (base.length === 0) return []
+
+  // Keep Playwright screenshots stable.
+  if (isWebDriver) return base.map((fl) => ({ ...fl, glow: 0 }))
+
+  // Trigger a soft glow when a label is close enough to any node
+  // that it could visually merge with it.
+  const nodes = layout.nodes
+  const padPx = 12
+  const falloffPx = 36
+
+  return base.map((fl) => {
+    const lp = worldToScreen(fl.x, fl.y)
+    let best = 0
+
+    for (const n of nodes) {
+      const sz = sizeForNode(n)
+      const rPx = Math.max(6, Math.max(sz.w, sz.h) / 2)
+      const np = worldToScreen(n.__x, n.__y)
+
+      const dx = lp.x - np.x
+      const dy = lp.y - np.y
+
+      // Fast reject.
+      if (Math.abs(dx) > rPx + padPx + falloffPx) continue
+      if (Math.abs(dy) > rPx + padPx + falloffPx) continue
+
+      const boundary = rPx + padPx
+      const d = Math.hypot(dx, dy)
+      const t = clamp01(1 - (d - boundary) / falloffPx)
+      if (t > best) best = t
+      if (best >= 0.98) break
+    }
+
+    return { ...fl, glow: best }
+  })
+})
 
 function scheduleTimeout(fn: () => void, delayMs: number) {
   return timers.schedule(fn, delayMs)
@@ -434,10 +485,17 @@ const labelNodes = computed(() => {
     const ln = layout.nodes.find((n) => n.id === id)
     if (!ln) continue
     const gn = getNodeById(id)
+
+    // Place the label below the node by a constant screen-space offset.
+    const z = Math.max(0.01, camera.zoom)
+    const sz = sizeForNode(ln)
+    const dyPx = Math.max(sz.w, sz.h) / 2 + 14
+    const dyW = dyPx / z
+
     out.push({
       id,
       x: ln.__x,
-      y: ln.__y,
+      y: ln.__y + dyW,
       text: gn?.name ? String(gn.name) : id,
       color: fxColorForNode(id, '#e2e8f0'),
     })
@@ -1139,6 +1197,7 @@ onUnmounted(() => {
     :data-scene="scene"
     :data-layout="layoutMode"
     :data-webdriver="isWebDriver ? '1' : '0'"
+    :style="{ '--overlay-scale': String(overlayLabelScale) }"
   >
     <canvas
       ref="canvasEl"
@@ -1302,7 +1361,7 @@ onUnmounted(() => {
         v-for="n in labelNodes"
         :key="n.id"
         class="node-label"
-        :style="{ transform: worldToCssTranslate(n.x, n.y) }"
+        :style="{ transform: worldToCssTranslateNoScale(n.x, n.y) }"
       >
         <div class="node-label-inner" :style="{ borderColor: n.color, color: n.color }">{{ n.text }}</div>
       </div>
@@ -1310,12 +1369,18 @@ onUnmounted(() => {
 
     <div class="floating-layer">
       <div
-        v-for="fl in floatingLabelsView"
+        v-for="fl in floatingLabelsViewFx"
         :key="fl.id"
         class="floating-label"
         :style="{ transform: worldToCssTranslateNoScale(fl.x, fl.y) }"
       >
-        <div class="floating-label-inner" :style="{ color: fl.color }">{{ fl.text }}</div>
+        <div
+          class="floating-label-inner"
+          :class="{ 'is-glow': fl.glow > 0.05 }"
+          :style="{ color: fl.color, '--glow': String(fl.glow) }"
+        >
+          {{ fl.text }}
+        </div>
       </div>
     </div>
   </div>
@@ -1637,14 +1702,18 @@ onUnmounted(() => {
 }
 
 .node-label-inner {
-  transform: translate3d(-50%, -135%, 0);
-  font-size: 11px;
+  /* Centered label, placed below the node via computed world offset (no frame). */
+  transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1));
+  font-size: 12px;
   font-weight: 650;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(2, 6, 23, 0.62);
-  text-shadow: 0 0 10px currentColor;
+  padding: 1px 6px;
+  border: none;
+  background: transparent;
+  text-align: center;
+  text-shadow:
+    0 0 14px rgba(0, 0, 0, 0.92),
+    0 0 10px rgba(148, 163, 184, 0.42);
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.18));
   white-space: nowrap;
 }
 
@@ -1659,10 +1728,10 @@ onUnmounted(() => {
   display: inline-block;
   font-size: 14px;
   font-weight: 700;
-  text-shadow: 0 0 10px currentColor; /* Glow */
+  text-shadow: 0 0 10px currentColor; /* Default glow */
   animation: floatUpFade 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   /* Keep centering constant; animate only a pixel offset for smooth motion. */
-  transform: translate3d(-50%, -50%, 0) translate3d(0, 0, 0);
+  transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1)) translate3d(0, 0, 0);
   will-change: transform, opacity;
   backface-visibility: hidden;
   white-space: pre-line;
@@ -1673,37 +1742,42 @@ onUnmounted(() => {
 
 /* Improve contrast over nodes/background, but keep WebDriver screenshots stable. */
 .root:not([data-webdriver='1']) .floating-label-inner {
-  /* Light outline around glyphs (no pill background) + keep neon glow. */
+  /* Airy by default: subtle dark halo + neon glow. */
   text-shadow:
-    0 1px 0 rgba(226, 232, 240, 0.75),
-    0 -1px 0 rgba(226, 232, 240, 0.75),
-    1px 0 0 rgba(226, 232, 240, 0.75),
-    -1px 0 0 rgba(226, 232, 240, 0.75),
-    1px 1px 0 rgba(226, 232, 240, 0.45),
-    -1px 1px 0 rgba(226, 232, 240, 0.45),
-    1px -1px 0 rgba(226, 232, 240, 0.45),
-    -1px -1px 0 rgba(226, 232, 240, 0.45),
-    0 0 12px rgba(0, 0, 0, 0.9),
+    0 0 12px rgba(0, 0, 0, 0.85),
     0 0 12px currentColor;
   filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.2));
+  transition: filter 120ms linear;
+}
+
+/* Only boost readability when the label is likely to merge with a node behind it. */
+.root:not([data-webdriver='1']) .floating-label-inner.is-glow {
+  filter:
+    drop-shadow(0 0 calc(6px + 14px * var(--glow)) rgba(255, 255, 255, 0.38))
+    drop-shadow(0 0 calc(8px + 18px * var(--glow)) currentColor)
+    drop-shadow(0 10px 22px rgba(0, 0, 0, 0.2));
+  text-shadow:
+    0 0 12px rgba(0, 0, 0, 0.92),
+    0 0 12px currentColor,
+    0 0 calc(4px + 12px * var(--glow)) rgba(255, 255, 255, 0.52);
 }
 
 @keyframes floatUpFade {
   0% {
     opacity: 0;
-    transform: translate3d(-50%, -50%, 0) translate3d(0, 0, 0);
+    transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1)) translate3d(0, 0, 0);
   }
   8% {
     opacity: 1;
-    transform: translate3d(-50%, -50%, 0) translate3d(0, -2px, 0);
+    transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1)) translate3d(0, -2px, 0);
   }
   60% {
     opacity: 1;
-    transform: translate3d(-50%, -50%, 0) translate3d(0, -14px, 0);
+    transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1)) translate3d(0, -14px, 0);
   }
   100% {
     opacity: 0;
-    transform: translate3d(-50%, -50%, 0) translate3d(0, -34px, 0);
+    transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1)) translate3d(0, -34px, 0);
   }
 }
 </style>
