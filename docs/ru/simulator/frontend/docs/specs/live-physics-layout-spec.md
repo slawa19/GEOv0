@@ -1,378 +1,507 @@
-# Спецификация: Live Physics Layout для Graph Visualization
+# Спецификация (финал): Live Physics Layout для Graph Visualization (v2 + d3-force)
 
-> **Цель**: Более просторное расположение узлов с учетом размеров экрана + живая физическая симуляция с отталкиванием узлов.
-> 
-> **Ограничения**: Без дополнительных зависимостей, минимальный overengineering.
+> **Решение**: Использовать `d3-force` для live-симуляции (как в v1). В `test-mode` симуляция полностью выключена.
+>
+> **Приоритет**: Скорость разработки и минимум отладки.
 
-## 1. Анализ текущего состояния
+## 1. Контекст и текущая архитектура (v2)
 
 ### Текущая архитектура
 
 ```
-forceLayout.ts        → Статический force-directed layout (детерминированный, 140-180 итераций)
+forceLayout.ts        → Статический baseline-layout (детерминированный)
 useLayoutCoordinator  → Координация resize + relayout
-useRenderLoop         → RAF-loop для рендеринга (60fps)
+useRenderLoop         → RAF-loop для рендеринга
+App.vue               → Интеракции (drag, selection), сборка зависимостей
 ```
 
-### Проблемы (видно на скриншоте)
+### Целевое улучшение
 
-| Проблема | Причина |
-|----------|---------|
-| Узлы скучены в центре | `linkDistanceBase = k * 0.70` слишком маленький + сильная центральная гравитация |
-| Не используется пространство экрана | Affine transform масштабирует только в конце, layout не "знает" о реальном viewport |
-| Статичная картинка | Layout вычисляется один раз при загрузке snapshot |
+| Что хотим | Почему это важно |
+|---|---|
+| «Живое» поведение узлов (repulsion + links + collide) | Улучшает читаемость и ощущение динамики без ручного relayout |
+| Реакция на drag и resize | Узлы расходятся/перестраиваются вокруг вмешательства пользователя |
+| Стабильные e2e (скриншоты) | `d3-force` по определению недетерминированен в RAF, поэтому в test-mode его выключаем |
 
-### Текущие параметры (forceLayout.ts)
+### Базовый принцип (важно для тестов)
 
-```typescript
-const cStrength = centerStrength ?? 0.060    // Гравитация к центру
-const chargeStrength = k * k * 0.020         // Отталкивание
-const springStrength = 0.022                 // Пружины связей
-const linkDistanceBase = k * 0.70            // Желаемая длина связи
-const iterations = 180                        // Фиксированное число итераций
-```
+- **Baseline layout остаётся детерминированным** (текущий `forceLayout.ts`).
+- **Live physics включается только в runtime**, и **не запускается в `test-mode`**.
+- E2E screenshot tests остаются без изменений.
 
 ---
 
-## 2. Предложение: Двухэтапный подход
+## 2. План: Baseline + Live Physics (d3-force)
 
-### Этап A: Улучшение статического layout (Quick Win)
+### Phase A: Quick Win (пропускаем)
 
-Минимальные изменения в `forceLayout.ts` для лучшего использования пространства:
+Baseline layout уже достаточно хороший как стартовая точка.
 
-```typescript
-// БЫЛО:
-const linkDistanceBase = Math.max(16, k * 0.70)
-const cStrength = centerStrength ?? 0.060
+**Оговорка (опционально позже):** иногда полезно сделать один небольшой runtime-тюнинг baseline (только при `!isTestMode`) чтобы уменьшить «первый взрыв» при старте симуляции. Это не часть MVP.
 
-// СТАНЕТ:
-const linkDistanceBase = Math.max(24, k * 1.10)  // +57% дистанция между связанными узлами
-const cStrength = centerStrength ?? 0.035        // -42% гравитация к центру
-const chargeStrength = k * k * 0.035             // +75% отталкивание
-```
+### Phase B: Live Physics Simulation (основная фаза)
 
-**Эффект**: Узлы займут больше пространства без изменения архитектуры.
+#### 2.1. Новый модуль: `physicsD3.ts`
 
----
+Цель: инкапсулировать `d3-force` и дать предсказуемые операции для App.vue.
 
-### Этап B: Live Physics Simulation (Основное предложение)
+**Почему отдельный модуль:** App.vue в v2 уже большой; небольшая изоляция логики симуляции ускорит итерации без превращения в overengineering.
 
-#### 2.1. Новый модуль: `usePhysicsSimulation.ts`
-
-```typescript
-export type PhysicsState = {
-  // Позиции (используем TypedArrays для производительности)
-  x: Float32Array
-  y: Float32Array
-  // Скорости
-  vx: Float32Array
-  vy: Float32Array
-  // Радиусы узлов (для collision detection)
-  r: Float32Array
-  // Флаг: симуляция активна
-  isRunning: boolean
-  // Температура (затухание со временем)
-  alpha: number
-}
+```ts
+export type PhysicsQuality = 'low' | 'med' | 'high'
 
 export type PhysicsConfig = {
-  // Viewport
   width: number
   height: number
-  // Силы
-  centerStrength: number      // Гравитация к центру (0.02)
-  repulsionStrength: number   // Отталкивание узлов (2000)
-  linkStrength: number        // Пружины связей (0.03)
-  linkDistance: number        // Идеальная длина связи (80)
-  // Collision
-  collisionStrength: number   // Сила отталкивания при overlap (0.7)
-  // Damping
-  velocityDecay: number       // Трение (0.4)
-  alphaDecay: number          // Затухание температуры (0.0228)
-  alphaMin: number            // Минимальная температура (0.001)
+  quality: PhysicsQuality
+
+  // Forces (d3-force масштабы отличаются от кастомных)
+  linkDistance: number
+  linkStrength: number
+  chargeStrength: number
+  centerStrength: number
+  collisionPadding: number
+
+  // Cooling
+  alphaMin: number
+  alphaDecay: number
+  velocityDecay: number
 }
 
-export function usePhysicsSimulation(
-  initialNodes: LayoutNode[],
-  links: LayoutLink[],
-  config: PhysicsConfig
-): {
-  state: PhysicsState
-  tick: () => boolean          // Один шаг симуляции, возвращает true если продолжать
+export type PhysicsEngine = {
+  isRunning: () => boolean
   start: () => void
   stop: () => void
-  reheat: () => void           // Перезапуск симуляции (при drag, resize)
-  getPositions: () => Map<string, {x: number, y: number}>
+  reheat: (alpha?: number) => void
+  tick: (substeps?: number) => void
+
+  syncFromLayout: () => void
+  syncToLayout: () => void
+
+  pin: (nodeId: string, x: number, y: number) => void
+  unpin: (nodeId: string) => void
+
+  updateViewport: (w: number, h: number) => void
 }
 ```
 
-#### 2.2. Физическая модель
+#### 2.2. Модель сил (d3-force)
 
-**Силы действующие на каждый узел:**
+Используем стандартные силы d3-force:
 
-```
-F_total = F_center + F_repulsion + F_links + F_collision + F_boundary
-```
+- `forceManyBody()` для repulsion (`strength` обычно отрицательный)
+- `forceLink()` для связей (distance + strength)
+- `forceCenter()` для стабилизации в центре viewport
+- `forceCollide()` для предотвращения overlap (радиус считается из визуального размера узла)
 
-1. **Center Force (гравитация к центру)**
-   ```
-   F_center = (center - position) * centerStrength * alpha
-   ```
-   - Держит граф собранным, не даёт разлететься
+**Границы (MVP):** после `tick()` делаем простой `clamp` позиций в прямоугольнике viewport с небольшим margin.
 
-2. **Repulsion Force (отталкивание всех от всех)**
-   ```
-   F_repulsion = direction * repulsionStrength / distance²
-   ```
-   - Каждая пара узлов отталкивается
-   - Сила убывает квадратично с расстоянием
-   - **Оптимизация**: Barnes-Hut не нужен для <500 узлов
+#### 2.3. Управление тиком
 
-3. **Link Force (пружины связей)**
-   ```
-   F_link = direction * (distance - idealDistance) * linkStrength
-   ```
-   - Связанные узлы притягиваются/отталкиваются к идеальной дистанции
+MVP-подход: как в v1 — вручную вызываем `simulation.tick()` внутри RAF (через render loop) и не используем `simulation.restart()` как «внутренний таймер».
 
-4. **Collision Force (предотвращение overlap)**
-   ```
-   if (distance < r1 + r2):
-     F_collision = direction * (r1 + r2 - distance) * collisionStrength
-   ```
-
-5. **Boundary Force (отталкивание от краёв)**
-   ```
-   if (x < margin) F += (margin - x) * boundaryStrength
-   if (x > width - margin) F -= (x - (width - margin)) * boundaryStrength
-   // аналогично для y
-   ```
-
-#### 2.3. Интеграция скоростей (Velocity Verlet упрощённый)
-
-```typescript
-function tick(): boolean {
-  if (state.alpha < config.alphaMin) {
-    state.isRunning = false
-    return false
-  }
-
-  // 1. Вычислить все силы
-  computeForces()
-
-  // 2. Обновить скорости с затуханием
-  for (let i = 0; i < n; i++) {
-    state.vx[i] = (state.vx[i] + fx[i]) * config.velocityDecay
-    state.vy[i] = (state.vy[i] + fy[i]) * config.velocityDecay
-  }
-
-  // 3. Обновить позиции
-  for (let i = 0; i < n; i++) {
-    state.x[i] += state.vx[i]
-    state.y[i] += state.vy[i]
-  }
-
-  // 4. Уменьшить температуру
-  state.alpha -= (state.alpha - config.alphaMin) * config.alphaDecay
-
-  return true
-}
-```
+**Почему так:** полностью контролируем, когда симуляция влияет на кадр; проще держать стабильный UX.
 
 #### 2.4. Интеграция с Render Loop
 
-```typescript
-// useRenderLoop.ts - модифицированный loop
+Варианты интеграции (оба допустимы):
 
-function renderFrame(nowMs: number) {
-  // ... existing code ...
+1) **Минимально (MVP):** `tick()` вызывается прямо в App.vue перед `renderOnce()` или через небольшой хук.
+2) **Чище архитектурно:** добавить в `useRenderLoop.ts` опциональный callback `beforeDraw(nowMs)` и тикать там.
 
-  // Шаг физики (может быть несколько за кадр для стабильности)
-  if (physics.state.isRunning) {
-    const substeps = 2
-    for (let i = 0; i < substeps; i++) {
-      if (!physics.tick()) break
-    }
-    // Обновить позиции в layout.nodes
-    updateNodePositions(physics.getPositions())
-  }
-
-  // ... draw graph ...
-}
-```
+В обоих вариантах: в `test-mode` симуляции нет (не создаём engine).
 
 ---
 
-## 3. Адаптация к размеру экрана
+## 3. Адаптация к размеру экрана (resize)
 
-### 3.1. Динамические параметры на основе viewport
+При resize:
 
-```typescript
-function computeAdaptiveConfig(w: number, h: number, nodeCount: number): PhysicsConfig {
-  const area = w * h
-  const k = Math.sqrt(area / nodeCount)  // Идеальное расстояние между узлами
+- обновляем цели центрирующей силы (например `forceX(w/2)` + `forceY(h/2)`; см. пример `physicsD3.ts` ниже)
+- при необходимости пересчитываем адаптивные `linkDistance` / `chargeStrength`
+- делаем `reheat()` (поднимаем `alpha` на небольшой уровень)
+- делаем простой clamp координат в пределах viewport
 
-  return {
-    width: w,
-    height: h,
-    centerStrength: 0.02,
-    repulsionStrength: k * k * 0.8,       // Масштабируется с площадью
-    linkStrength: 0.03,
-    linkDistance: Math.max(40, k * 0.9),  // Минимум 40px, иначе пропорционально
-    collisionStrength: 0.7,
-    velocityDecay: 0.4,
-    alphaDecay: 0.0228,
-    alphaMin: 0.001,
-  }
-}
-```
-
-### 3.2. Reheat при resize
-
-```typescript
-// useLayoutCoordinator.ts
-
-function onWindowResize() {
-  requestResizeAndLayout()
-  
-  // Перезапустить физику с новыми размерами
-  physics.updateConfig(computeAdaptiveConfig(layout.w, layout.h, nodeCount))
-  physics.reheat()
-}
-```
+Замечание: heavy relayout (пересчёт baseline layout) остаётся дебаунснутым и контролируется текущим `useLayoutCoordinator`.
 
 ---
 
-## 4. Drag Interaction
+## 4. Drag Interaction (pin/unpin)
 
-```typescript
-// При начале drag узла:
-function onDragStart(nodeId: string) {
-  physics.pinNode(nodeId)  // Зафиксировать узел в позиции курсора
-  physics.reheat()         // Перезапустить симуляцию
-}
+Используем стандартный d3-паттерн `fx/fy`:
 
-// При перетаскивании:
-function onDragMove(nodeId: string, x: number, y: number) {
-  physics.setNodePosition(nodeId, x, y)
-}
+- drag start: `node.fx = x; node.fy = y; reheat()`
+- drag move: обновляем `fx/fy`
+- drag end: если узел не должен оставаться pinned — `fx/fy = null`; затем `reheat()`
 
-// При отпускании:
-function onDragEnd(nodeId: string) {
-  physics.unpinNode(nodeId)
-}
-```
+Pinned-логика должна быть согласована с текущим состоянием `pinnedPos` (если оно используется в UI).
 
 ---
 
-## 5. Оптимизации производительности
+## 5. Производительность и деградация качества
 
-### 5.1. Пропуск далёких пар (для repulsion)
+Для `d3-force` базовые рычаги производительности:
 
-```typescript
-const maxRepulsionDistance = k * 3  // Не считать отталкивание дальше 3k
+- снижать качество через уже существующее `quality` в UI (low/med/high)
+- в low качестве уменьшать силу/количество вычислений: более быстрый cooling (больше `alphaDecay`) и меньшие значения сил
+- после затухания (`alpha < alphaMin`) не тикать симуляцию вообще
 
-for (let i = 0; i < n; i++) {
-  for (let j = i + 1; j < n; j++) {
-    const dx = x[j] - x[i]
-    const dy = y[j] - y[i]
-    const dist2 = dx * dx + dy * dy
-    
-    if (dist2 > maxRepulsionDistance * maxRepulsionDistance) continue
-    
-    // ... compute force ...
-  }
-}
-```
-
-### 5.2. Frozen state (после затухания)
-
-```typescript
-// Когда alpha < alphaMin, симуляция останавливается
-// RAF loop продолжает рендерить, но tick() не вызывается
-// Reheat при взаимодействии пользователя
-```
-
-### 5.3. Quality levels
-
-```typescript
-type QualityLevel = 'low' | 'med' | 'high'
-
-const substepsPerFrame: Record<QualityLevel, number> = {
-  low: 1,   // Мобильные / слабые устройства
-  med: 2,   // Обычный режим
-  high: 3,  // Presentation mode
-}
-```
+Дополнительно можно использовать `snapshot.limits` как сигнал деградации (если присутствует).
 
 ---
 
-## 6. Файловая структура изменений
+## 6. Файлы и изменения
+
+Минимальный набор:
 
 ```
-simulator-ui/v2/src/
-├── layout/
-│   ├── forceLayout.ts           # Существующий (модифицировать параметры)
-│   └── physicsSimulation.ts     # НОВЫЙ: live physics engine
-├── composables/
-│   ├── useLayoutCoordinator.ts  # Модифицировать: интеграция physics
-│   ├── useRenderLoop.ts         # Модифицировать: tick physics в loop
-│   └── usePicking.ts            # Модифицировать: drag → physics
+simulator-ui/v2/
+├── package.json                 # +d3-force, +@types/d3-force
+└── src/
+  ├── layout/
+  │   └── physicsD3.ts         # NEW: d3-force engine wrapper
+  ├── composables/
+  │   └── useRenderLoop.ts     # optional: beforeDraw hook
+  └── App.vue                  # init sim, tick, drag pin/unpin, resize reheat
 ```
 
 ---
 
 ## 7. План реализации
 
-### Фаза 1: Quick Win (1-2 часа)
-- [ ] Изменить параметры в `forceLayout.ts` для лучшего расстояния
-- [ ] Тестировать визуально
+### Фаза 1: Зависимость (10–20 минут)
+- [ ] Добавить `d3-force` и `@types/d3-force` в `simulator-ui/v2`
 
-### Фаза 2: Live Physics (4-6 часов)
-- [ ] Создать `physicsSimulation.ts` 
-- [ ] Базовая физика: center + repulsion + links
-- [ ] Интеграция с render loop
-- [ ] Collision detection
-- [ ] Boundary forces
+### Фаза 2: Базовая интеграция (2–3 часа)
+- [ ] Создать `physicsD3.ts` и инициализировать simulation из текущих `layout.nodes/layout.links`
+- [ ] Тикать `simulation.tick()` в RAF перед рендером
+- [ ] После `tick()` делать clamp координат в viewport
 
-### Фаза 3: Интерактивность (2-3 часа)
-- [ ] Drag nodes → reheat physics
-- [ ] Resize → adapt config + reheat
-- [ ] Pin/unpin nodes
+### Фаза 3: Drag + pin/unpin (1–2 часа)
+- [ ] На drag start/move выставлять `fx/fy` + `reheat()`
+- [ ] На drag end — `fx/fy=null` если узел не pinned
 
-### Фаза 4: Polish (1-2 часа)
-- [ ] Performance profiling
-- [ ] Quality settings
-- [ ] Tests
+### Фаза 4: Resize + reheat (30–60 минут)
+- [ ] Обновлять `center` force под новые размеры
+- [ ] `reheat()` на resize
+
+### Фаза 5: Проверка (30–60 минут)
+- [ ] Убедиться, что в `test-mode` симуляция не создаётся/не тикает
+- [ ] Убедиться, что e2e screenshot tests не менялись
 
 ---
 
-## 8. Оценка рисков
+## 8. Риски и митигации
 
 | Риск | Вероятность | Митигация |
-|------|-------------|-----------|
-| Производительность на 100+ узлах | Средняя | Пропуск далёких пар, substeps |
-| Нестабильная симуляция | Низкая | Velocity clamping, softening |
-| Регрессия детерминизма (e2e тесты) | Высокая | Флаг `isTestMode` → использовать старый статический layout |
+|---|---:|---|
+| Регрессия детерминизма (e2e) | Высокая | В `test-mode` не создаём/не тикаем d3-force |
+| Performance на больших графах | Средняя | Cooling быстрее, остановка на `alphaMin`, деградация по quality/limits |
+| «Расплывание»/уход за границы | Средняя | Простой clamp после tick (MVP) |
+
+**Если e2e флакают:** можно добавить дополнительную защиту `navigator.webdriver` (отключать симуляцию при WebDriver). По умолчанию не используем.
 
 ---
 
-## 9. Альтернативы (отклонённые)
+## 9. Альтернативы
 
-| Альтернатива | Почему отклонена |
-|--------------|------------------|
-| d3-force | Дополнительная зависимость, overengineering |
-| Web Workers | Сложность синхронизации, не нужно для <500 узлов |
-| Barnes-Hut | Overengineering для текущего масштаба |
-| WebGL physics | Огромный overhead для простой задачи |
+| Альтернатива | Почему не выбрана |
+|---|---|
+| Свой physics engine | Дольше по времени и больше отладки, чем `d3-force` |
+| Web Workers | Усложнение синхронизации; MVP не требует |
+| WebGL physics | Не соответствует масштабу задачи |
 
 ---
 
 ## 10. Acceptance Criteria
 
-1. ✅ Узлы занимают >70% viewport при первоначальной загрузке
-2. ✅ При resize окна граф плавно адаптируется
-3. ✅ Узлы не перекрываются (collision работает)
-4. ✅ Drag узла → остальные расходятся
-5. ✅ Симуляция затухает за ~3 секунды
-6. ✅ 60fps на 100 узлах / 87 связях
-7. ✅ e2e тесты не ломаются (isTestMode → детерминированный layout)
+1. ✅ В runtime граф «оживает» и затухает за ~3 секунды
+2. ✅ Узлы не перекрываются (collision работает)
+3. ✅ Drag узла → остальные расходятся
+4. ✅ Resize → reheat и обновление центра
+5. ✅ 60fps на ~100 узлах / ~100 связях в обычном режиме
+6. ✅ e2e тесты не ломаются (test-mode → только детерминированный layout, без d3-force)
+
+---
+
+## 11. Референсные значения параметров (из v1)
+
+Эти значения уже проверены в `simulator-ui/v1/src/components/simulator/GeoSimulatorMesh.vue`:
+
+```typescript
+// d3-force simulation setup (из v1, адаптировать для v2)
+sim = forceSimulation<GeoNode>(nodes)
+  .alpha(1)                      // Начальная "температура"
+  .alphaMin(0.02)                // Порог остановки
+  .alphaDecay(0.04)              // Скорость затухания (~3 сек до остановки)
+  .force('charge', forceManyBody().strength(-70))
+  .force('center', forceCenter(canvasW / 2, canvasH / 2))
+  .force('link', forceLink<GeoNode, GeoLink>(links)
+    .id(d => d.id)
+    .distance(100)               // Идеальная длина связи
+    .strength(0.65)
+  )
+  .force('collide', forceCollide<GeoNode>()
+    .radius(d => d.baseSize * 3) // Радиус коллизии
+    .strength(0.8)
+  )
+  .stop()  // Управляем вручную через tick()
+```
+
+**Для v2 рекомендуемая адаптация:**
+
+| Параметр | v1 | v2 (предложение) | Почему |
+|----------|-----|-------------------|--------|
+| `alpha` (start) | 1 | 0.3 | Baseline уже хороший, не нужен "взрыв" |
+| `alphaMin` | 0.02 | 0.001 | Дольше "живёт", плавнее затухает |
+| `alphaDecay` | 0.04 | 0.02 | Медленнее cooling, ~3 сек |
+| `charge.strength` | -70 | -80 | Чуть сильнее отталкивание |
+| `link.distance` | 100 | 80-120 (адаптивно) | Зависит от viewport/nodeCount |
+| `link.strength` | 0.65 | 0.4 | Мягче пружины, меньше "дёргания" |
+| `collide.radius` | `d.baseSize * 3` | `Math.max(d.__r ?? 15, 20)` | Из `sizeForNode()` |
+| `collide.strength` | 0.8 | 0.7 | Чуть мягче |
+
+---
+
+## 12. Пример реализации `physicsD3.ts` (стартовый скелет)
+
+```typescript
+// src/layout/physicsD3.ts
+import {
+  forceSimulation,
+  forceManyBody,
+  forceLink,
+  forceX,
+  forceY,
+  forceCollide,
+  type Simulation,
+  type SimulationNodeDatum,
+  type SimulationLinkDatum,
+} from 'd3-force'
+import type { LayoutNode, LayoutLink } from './forceLayout'
+import { sizeForNode } from '../render/nodePainter'
+
+// d3-force требует x/y на узлах, наши LayoutNode уже имеют __x/__y
+type D3Node = LayoutNode & SimulationNodeDatum & { fx?: number | null; fy?: number | null }
+type D3Link = LayoutLink & SimulationLinkDatum<D3Node>
+
+export type PhysicsConfig = {
+  width: number
+  height: number
+  chargeStrength: number
+  linkDistance: number
+  linkStrength: number
+  centerStrength: number
+  collideRadius: (node: D3Node) => number
+  collideStrength: number
+  alphaStart: number
+  alphaMin: number
+  alphaDecay: number
+}
+
+export function createDefaultConfig(w: number, h: number, nodeCount: number): PhysicsConfig {
+  const area = w * h
+  const k = Math.sqrt(area / Math.max(1, nodeCount))
+
+  return {
+    width: w,
+    height: h,
+    chargeStrength: -80,
+    linkDistance: Math.max(60, Math.min(120, k * 0.9)),
+    linkStrength: 0.4,
+    centerStrength: 0.05,
+    collideRadius: (n) => {
+      const s = sizeForNode(n)
+      // Близко к тому, как считается радиус в forceLayout.ts.
+      return Math.max(8, Math.max(s.w, s.h) * 0.56)
+    },
+    collideStrength: 0.7,
+    alphaStart: 0.3,
+    alphaMin: 0.001,
+    alphaDecay: 0.02,
+  }
+}
+
+export function createPhysicsEngine(
+  nodes: LayoutNode[],
+  links: LayoutLink[],
+  config: PhysicsConfig
+) {
+  // Преобразуем __x/__y в x/y для d3-force
+  const d3Nodes: D3Node[] = nodes.map(n => ({
+    ...n,
+    x: n.__x,
+    y: n.__y,
+  }))
+
+  const d3Links: D3Link[] = links.map(l => ({
+    ...l,
+    source: l.source,
+    target: l.target,
+  }))
+
+  const simulation: Simulation<D3Node, D3Link> = forceSimulation(d3Nodes)
+    .alpha(config.alphaStart)
+    .alphaMin(config.alphaMin)
+    .alphaDecay(config.alphaDecay)
+    .force('charge', forceManyBody<D3Node>().strength(config.chargeStrength))
+    // В d3-force `forceCenter` не имеет strength(). Для регулируемой "силы к центру" используем forceX/forceY.
+    .force('cx', forceX<D3Node>(config.width / 2).strength(config.centerStrength))
+    .force('cy', forceY<D3Node>(config.height / 2).strength(config.centerStrength))
+    .force('link', forceLink<D3Node, D3Link>(d3Links)
+      .id(d => d.id)
+      .distance(config.linkDistance)
+      .strength(config.linkStrength)
+    )
+    .force('collide', forceCollide<D3Node>()
+      .radius(config.collideRadius)
+      .strength(config.collideStrength)
+    )
+    .stop() // Ручное управление через tick()
+
+  const margin = 30
+
+  return {
+    isRunning: () => simulation.alpha() >= config.alphaMin,
+
+    start: () => {
+      simulation.alpha(config.alphaStart)
+    },
+
+    tick: (substeps = 1) => {
+      for (let i = 0; i < substeps; i++) {
+        simulation.tick()
+      }
+      // Clamp к viewport
+      for (const n of d3Nodes) {
+        n.x = Math.max(margin, Math.min(config.width - margin, n.x ?? config.width / 2))
+        n.y = Math.max(margin, Math.min(config.height - margin, n.y ?? config.height / 2))
+      }
+    },
+
+    syncToLayout: () => {
+      // Обновляем исходные LayoutNode
+      for (let i = 0; i < nodes.length; i++) {
+        nodes[i].__x = d3Nodes[i].x ?? nodes[i].__x
+        nodes[i].__y = d3Nodes[i].y ?? nodes[i].__y
+      }
+    },
+
+    syncFromLayout: () => {
+      // Если baseline layout был пересчитан (layout.nodes заменён), engine нужно пересоздать.
+      // Но если позиции обновились in-place, можно просто синкнуть координаты обратно в d3.
+      for (let i = 0; i < nodes.length; i++) {
+        d3Nodes[i].x = nodes[i].__x
+        d3Nodes[i].y = nodes[i].__y
+      }
+    },
+
+    reheat: (alpha = 0.3) => {
+      simulation.alpha(alpha)
+    },
+
+    pin: (nodeId: string, x: number, y: number) => {
+      const node = d3Nodes.find(n => n.id === nodeId)
+      if (node) {
+        node.fx = x
+        node.fy = y
+      }
+    },
+
+    unpin: (nodeId: string) => {
+      const node = d3Nodes.find(n => n.id === nodeId)
+      if (node) {
+        node.fx = null
+        node.fy = null
+      }
+    },
+
+    updateViewport: (w: number, h: number) => {
+      config.width = w
+      config.height = h
+      const cx = simulation.force('cx') as ReturnType<typeof forceX>
+      const cy = simulation.force('cy') as ReturnType<typeof forceY>
+      cx?.x(w / 2)
+      cy?.y(h / 2)
+    },
+
+    stop: () => {
+      simulation.stop()
+    },
+  }
+}
+
+export type PhysicsEngine = ReturnType<typeof createPhysicsEngine>
+```
+
+---
+
+## 13. Пример интеграции в App.vue
+
+```typescript
+// В App.vue setup()
+
+import { createPhysicsEngine, createDefaultConfig, type PhysicsEngine } from './layout/physicsD3'
+
+let physics: PhysicsEngine | null = null
+
+// После вызова computeLayout() и получения layout.nodes/layout.links:
+function initPhysics() {
+  if (isTestMode.value) return // Не создаём в test-mode!
+  
+  const config = createDefaultConfig(layout.w, layout.h, layout.nodes.length)
+  physics = createPhysicsEngine(layout.nodes, layout.links, config)
+}
+
+// В render loop (или через beforeDraw callback):
+function onBeforeRender() {
+  if (physics && physics.isRunning()) {
+    physics.tick()
+    physics.syncToLayout()
+  }
+}
+
+// Drag integration:
+function onDragStart(nodeId: string, x: number, y: number) {
+  physics?.pin(nodeId, x, y)
+  physics?.reheat(0.3)
+}
+
+function onDragMove(nodeId: string, x: number, y: number) {
+  physics?.pin(nodeId, x, y)
+}
+
+function onDragEnd(nodeId: string, keepPinned: boolean) {
+  if (!keepPinned) {
+    physics?.unpin(nodeId)
+  }
+  physics?.reheat(0.1)
+}
+
+// Resize:
+function onResize() {
+  physics?.updateViewport(layout.w, layout.h)
+  physics?.reheat(0.2)
+}
+```
+
+---
+
+## 14. Команды для старта
+
+```bash
+# 1. Установить зависимости
+cd simulator-ui/v2
+npm install d3-force
+npm install --save-dev @types/d3-force
+
+# 2. Создать файл
+# src/layout/physicsD3.ts (скелет из секции 12)
+
+# 3. Проверить тесты не сломаны
+npm run test:e2e
+
+# 4. Визуально проверить в браузере
+npm run dev
+# Открыть http://localhost:5173/?scene=A
+```
