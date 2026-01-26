@@ -28,6 +28,7 @@ import { useNodeCard } from './composables/useNodeCard'
 import { useRenderLoop } from './composables/useRenderLoop'
 import { useSceneState } from './composables/useSceneState'
 import { computeLayoutForMode, type LayoutMode } from './layout/forceLayout'
+import { createDefaultConfig, createPhysicsEngine, type PhysicsEngine } from './layout/physicsD3'
 import { fnv1a } from './utils/hash'
 
 type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
@@ -123,6 +124,47 @@ type LayoutLink = GraphLink & { __key: string }
 const baselineLayoutPos = new Map<string, { x: number; y: number }>()
 const pinnedPos = reactive(new Map<string, { x: number; y: number }>())
 
+let physicsEngine: PhysicsEngine | null = null
+
+function shouldUsePhysics() {
+  // Keep e2e + deterministic screenshots stable.
+  return !isTestMode.value
+}
+
+function stopPhysics() {
+  physicsEngine?.stop()
+  physicsEngine = null
+}
+
+function recreatePhysicsForCurrentLayout(opts: { w: number; h: number }) {
+  if (!shouldUsePhysics()) {
+    stopPhysics()
+    return
+  }
+
+  const nodes = layout.nodes
+  const links = layout.links
+
+  if (!nodes || nodes.length === 0) {
+    stopPhysics()
+    return
+  }
+
+  const config = createDefaultConfig({
+    width: opts.w,
+    height: opts.h,
+    nodeCount: nodes.length,
+    quality: quality.value,
+  })
+
+  physicsEngine = createPhysicsEngine({ nodes, links, config })
+
+  // Re-apply pinned nodes as fixed constraints for the simulation.
+  for (const [id, p] of pinnedPos) physicsEngine.pin(id, p.x, p.y)
+
+  physicsEngine.reheat()
+}
+
 const snapshotRef = computed(() => state.snapshot)
 
 const layoutCoordinator = useLayoutCoordinator<LayoutNode, LayoutLink, LayoutMode, GraphSnapshot>({
@@ -172,6 +214,11 @@ const worldToScreen = cameraSystem.worldToScreen
 const screenToWorld = cameraSystem.screenToWorld
 const worldToCssTranslate = cameraSystem.worldToCssTranslate
 const clientToScreen = cameraSystem.clientToScreen
+
+function worldToCssTranslateNoScale(x: number, y: number) {
+  const p = worldToScreen(x, y)
+  return `translate3d(${p.x}px, ${p.y}px, 0)`
+}
 
 const nodeCard = useNodeCard({
   hostEl,
@@ -309,7 +356,22 @@ function computeLayout(snapshot: GraphSnapshot, w: number, h: number, mode: Layo
     n.__x = p.x
     n.__y = p.y
   }
+
+  // Layout arrays are replaced on every relayout, so the physics engine must be recreated.
+  recreatePhysicsForCurrentLayout({ w, h })
 }
+
+// Keep physics viewport in sync even when resize does not trigger a relayout.
+watch(
+  () => [layout.w, layout.h] as const,
+  ([w, h], [prevW, prevH]) => {
+    if (!physicsEngine) return
+    if (!shouldUsePhysics()) return
+    if (w === prevW && h === prevH) return
+    physicsEngine.updateViewport(w, h)
+    physicsEngine.reheat(0.15)
+  },
+)
 
 const demoPlayer = useDemoPlayer({
   applyPatches: applyPatchesFromEvent,
@@ -623,6 +685,11 @@ const renderLoop = useRenderLoop({
   activeEdges,
   getLinkLod: () => (dragState.active && dragState.dragging ? 'focus' : 'full'),
   getHiddenNodeId: () => (dragState.active && dragState.dragging ? dragState.nodeId : null),
+  beforeDraw: () => {
+    if (!physicsEngine) return
+    physicsEngine.tick()
+    physicsEngine.syncToLayout()
+  },
 })
 
 const ensureRenderLoop = renderLoop.ensureRenderLoop
@@ -779,15 +846,19 @@ function onCanvasPointerMove(ev: PointerEvent) {
     dragState.cachedNode.__x = x
     dragState.cachedNode.__y = y
 
+    const id = dragState.nodeId
+    if (id && physicsEngine) physicsEngine.pin(id, x, y)
+
     if (!dragState.dragging) {
       dragState.dragging = true
       clearHoveredEdge()
 
-      const id = dragState.nodeId
       if (id) {
         showDragPreviewForNode(id)
       }
       scheduleDragPreview()
+
+      physicsEngine?.reheat(0.25)
 
       // Hide the node from canvas and lock in the baseline frame.
       renderOnce()
@@ -840,7 +911,13 @@ function onCanvasPointerUp(ev: PointerEvent) {
     const id = dragState.nodeId
     const ln = dragState.cachedNode
     if (dragState.dragging && id && ln) {
-      if (pinnedPos.has(id)) pinnedPos.set(id, { x: ln.__x, y: ln.__y })
+      // ALWAYS pin the node after drag (like v1) so user can see its edges
+      pinnedPos.set(id, { x: ln.__x, y: ln.__y })
+
+      if (physicsEngine) {
+        physicsEngine.pin(id, ln.__x, ln.__y)
+        physicsEngine.reheat(0.18)
+      }
     }
 
     hideDragPreview()
@@ -882,18 +959,24 @@ function pinSelectedNode() {
   const ln = layout.nodes.find((n) => n.id === id)
   if (!ln) return
   pinnedPos.set(id, { x: ln.__x, y: ln.__y })
+  physicsEngine?.pin(id, ln.__x, ln.__y)
+  physicsEngine?.reheat()
 }
 
 function unpinSelectedNode() {
   const id = state.selectedNodeId
   if (!id) return
   pinnedPos.delete(id)
+  physicsEngine?.unpin(id)
   const base = baselineLayoutPos.get(id)
   const ln = layout.nodes.find((n) => n.id === id)
   if (ln && base) {
     ln.__x = base.x
     ln.__y = base.y
   }
+
+  physicsEngine?.syncFromLayout()
+  physicsEngine?.reheat()
 }
 
 function onCanvasWheel(ev: WheelEvent) {
@@ -1043,6 +1126,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   hideDragPreview()
+  stopPhysics()
   sceneState.teardown()
 })
 </script>
@@ -1229,7 +1313,7 @@ onUnmounted(() => {
         v-for="fl in floatingLabelsView"
         :key="fl.id"
         class="floating-label"
-        :style="{ transform: worldToCssTranslate(fl.x, fl.y) }"
+        :style="{ transform: worldToCssTranslateNoScale(fl.x, fl.y) }"
       >
         <div class="floating-label-inner" :style="{ color: fl.color }">{{ fl.text }}</div>
       </div>
@@ -1572,6 +1656,7 @@ onUnmounted(() => {
 }
 
 .floating-label-inner {
+  display: inline-block;
   font-size: 14px;
   font-weight: 700;
   text-shadow: 0 0 10px currentColor; /* Glow */
@@ -1583,6 +1668,24 @@ onUnmounted(() => {
   white-space: pre-line;
   text-align: center;
   line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Improve contrast over nodes/background, but keep WebDriver screenshots stable. */
+.root:not([data-webdriver='1']) .floating-label-inner {
+  /* Light outline around glyphs (no pill background) + keep neon glow. */
+  text-shadow:
+    0 1px 0 rgba(226, 232, 240, 0.75),
+    0 -1px 0 rgba(226, 232, 240, 0.75),
+    1px 0 0 rgba(226, 232, 240, 0.75),
+    -1px 0 0 rgba(226, 232, 240, 0.75),
+    1px 1px 0 rgba(226, 232, 240, 0.45),
+    -1px 1px 0 rgba(226, 232, 240, 0.45),
+    1px -1px 0 rgba(226, 232, 240, 0.45),
+    -1px -1px 0 rgba(226, 232, 240, 0.45),
+    0 0 12px rgba(0, 0, 0, 0.9),
+    0 0 12px currentColor;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.2));
 }
 
 @keyframes floatUpFade {

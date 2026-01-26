@@ -31,6 +31,9 @@ type UseRenderLoopDeps = {
 
   // Optional: hide a node from canvas rendering (used for DOM drag preview).
   getHiddenNodeId?: () => string | null
+
+  // Optional: run per-frame updates before drawing (e.g. live physics).
+  beforeDraw?: (nowMs: number) => void
 }
 
 type UseRenderLoopReturn = {
@@ -113,6 +116,8 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     ctx.scale(camera.zoom, camera.zoom)
     fx.translate(camera.panX, camera.panY)
     fx.scale(camera.zoom, camera.zoom)
+
+    if (deps.beforeDraw) deps.beforeDraw(nowMs)
 
     deps.pruneFloatingLabels(nowMs)
 

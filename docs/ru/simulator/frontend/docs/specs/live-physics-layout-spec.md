@@ -169,25 +169,29 @@ simulator-ui/v2/
 
 ## 7. План реализации
 
+Правило процесса:
+
+- После каждой завершённой итерации (небольшой законченный кусок работы) **отмечаем выполненное прямо в пунктах ниже** (чекбоксы в этой секции), чтобы текущий статус реализации был виден из одного места.
+
 ### Фаза 1: Зависимость (10–20 минут)
-- [ ] Добавить `d3-force` и `@types/d3-force` в `simulator-ui/v2`
+- [x] Добавить `d3-force` и `@types/d3-force` в `simulator-ui/v2`
 
 ### Фаза 2: Базовая интеграция (2–3 часа)
-- [ ] Создать `physicsD3.ts` и инициализировать simulation из текущих `layout.nodes/layout.links`
-- [ ] Тикать `simulation.tick()` в RAF перед рендером
-- [ ] После `tick()` делать clamp координат в viewport
+- [x] Создать `physicsD3.ts` и инициализировать simulation из текущих `layout.nodes/layout.links`
+- [x] Тикать `simulation.tick()` в RAF перед рендером
+- [x] После `tick()` делать clamp координат в viewport
 
 ### Фаза 3: Drag + pin/unpin (1–2 часа)
-- [ ] На drag start/move выставлять `fx/fy` + `reheat()`
-- [ ] На drag end — `fx/fy=null` если узел не pinned
+- [x] На drag start/move выставлять `fx/fy` + `reheat()`
+- [x] На drag end — `fx/fy=null` если узел не pinned
 
 ### Фаза 4: Resize + reheat (30–60 минут)
-- [ ] Обновлять `center` force под новые размеры
-- [ ] `reheat()` на resize
+- [x] Обновлять `center` force под новые размеры
+- [x] `reheat()` на resize
 
 ### Фаза 5: Проверка (30–60 минут)
-- [ ] Убедиться, что в `test-mode` симуляция не создаётся/не тикает
-- [ ] Убедиться, что e2e screenshot tests не менялись
+- [x] Убедиться, что в `test-mode` симуляция не создаётся/не тикает
+- [x] Убедиться, что e2e screenshot tests не менялись
 
 ---
 
