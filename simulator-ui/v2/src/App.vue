@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import DemoHudBottom from './components/DemoHudBottom.vue'
+import DemoHudTop from './components/DemoHudTop.vue'
+import EdgeTooltip from './components/EdgeTooltip.vue'
+import LabelsOverlayLayers from './components/LabelsOverlayLayers.vue'
+import NodeCardOverlay from './components/NodeCardOverlay.vue'
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw, watch } from 'vue'
 import type {
   ClearingDoneEvent,
@@ -18,20 +23,34 @@ import { fillForNode, sizeForNode, type LayoutNode as RenderLayoutNode } from '.
 import { withAlpha } from './render/color'
 import { createFxState, renderFxFrame, resetFxState, spawnEdgePulses, spawnNodeBursts, spawnSparks } from './render/fxRenderer'
 import { createTimerRegistry } from './demo/timerRegistry'
+import { createPatchApplier } from './demo/patches'
+import { assertPlaylistEdgesExistInSnapshot } from './demo/playlistValidation'
+import { installGeoSimDevHook } from './dev/geoSimDevHook'
 import { useDemoPlayer } from './composables/useDemoPlayer'
 import { useCamera } from './composables/useCamera'
 import { useLayoutCoordinator } from './composables/useLayoutCoordinator'
 import { useOverlayState } from './composables/useOverlayState'
-import { closestPointOnSegment, usePicking } from './composables/usePicking'
+import { usePicking } from './composables/usePicking'
+import { useEdgeHover } from './composables/useEdgeHover'
 import { useEdgeTooltip } from './composables/useEdgeTooltip'
 import { useNodeCard } from './composables/useNodeCard'
+import { useDragPreview } from './composables/useDragPreview'
+import { useDragToPinInteraction } from './composables/useDragToPinInteraction'
+import { useDemoActions } from './composables/useDemoActions'
+import { useDemoPlaybackControls } from './composables/useDemoPlaybackControls'
+import { usePersistedSimulatorPrefs } from './composables/usePersistedSimulatorPrefs'
+import { createPhysicsManager } from './composables/usePhysicsManager'
+import { usePinning } from './composables/usePinning'
 import { useRenderLoop } from './composables/useRenderLoop'
 import { useSceneState } from './composables/useSceneState'
 import { computeLayoutForMode, type LayoutMode } from './layout/forceLayout'
-import { createDefaultConfig, createPhysicsEngine, type PhysicsEngine } from './layout/physicsD3'
 import { fnv1a } from './utils/hash'
-
-type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
+import { keyEdge } from './utils/edgeKey'
+import { clamp, clamp01 } from './utils/math'
+import { asFiniteNumber, formatAmount2 } from './utils/numberFormat'
+import { isDemoScene, SCENES, SCENE_IDS, type SceneId } from './scenes'
+import type { LayoutLink, LayoutNode } from './types/layout'
+import type { LabelsLod, Quality } from './types/uiPrefs'
 
 const eq = ref('UAH')
 const scene = ref<SceneId>('A')
@@ -73,10 +92,6 @@ const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
 const hostEl = ref<HTMLDivElement | null>(null)
 const dragPreviewEl = ref<HTMLDivElement | null>(null)
 
-function keyEdge(a: string, b: string) {
-  return `${a}→${b}`
-}
-
 function getNodeById(id: string | null): GraphNode | null {
   if (!id || !state.snapshot) return null
   return state.snapshot.nodes.find((n) => n.id === id) ?? null
@@ -88,23 +103,6 @@ function fxColorForNode(nodeId: string, fallback: string): string {
   return fillForNode(n, VIZ_MAPPING)
 }
 
-function asFiniteNumber(v: unknown): number {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  return 0
-}
-
-function formatAmount2(v: number): string {
-  if (!Number.isFinite(v)) return '0.00'
-  return v.toFixed(2)
-}
-
-type LabelsLod = 'off' | 'selection' | 'neighbors'
-type Quality = 'low' | 'med' | 'high'
-
 const labelsLod = ref<LabelsLod>('selection')
 const quality = ref<Quality>('high')
 
@@ -115,55 +113,11 @@ const dprClamp = computed(() => {
   return 2
 })
 
-const showDemoControls = computed(() => !isTestMode.value && (scene.value === 'D' || scene.value === 'E'))
+const showDemoControls = computed(() => !isTestMode.value && isDemoScene(scene.value))
 const showResetView = computed(() => !isTestMode.value)
-
-type LayoutNode = GraphNode & { __x: number; __y: number }
-type LayoutLink = GraphLink & { __key: string }
 
 const baselineLayoutPos = new Map<string, { x: number; y: number }>()
 const pinnedPos = reactive(new Map<string, { x: number; y: number }>())
-
-let physicsEngine: PhysicsEngine | null = null
-
-function shouldUsePhysics() {
-  // Keep e2e + deterministic screenshots stable.
-  return !isTestMode.value
-}
-
-function stopPhysics() {
-  physicsEngine?.stop()
-  physicsEngine = null
-}
-
-function recreatePhysicsForCurrentLayout(opts: { w: number; h: number }) {
-  if (!shouldUsePhysics()) {
-    stopPhysics()
-    return
-  }
-
-  const nodes = layout.nodes
-  const links = layout.links
-
-  if (!nodes || nodes.length === 0) {
-    stopPhysics()
-    return
-  }
-
-  const config = createDefaultConfig({
-    width: opts.w,
-    height: opts.h,
-    nodeCount: nodes.length,
-    quality: quality.value,
-  })
-
-  physicsEngine = createPhysicsEngine({ nodes, links, config })
-
-  // Re-apply pinned nodes as fixed constraints for the simulation.
-  for (const [id, p] of pinnedPos) physicsEngine.pin(id, p.x, p.y)
-
-  physicsEngine.reheat()
-}
 
 const snapshotRef = computed(() => state.snapshot)
 
@@ -184,13 +138,12 @@ const resizeAndLayout = layoutCoordinator.resizeAndLayout
 const requestResizeAndLayout = layoutCoordinator.requestResizeAndLayout
 const requestRelayoutDebounced = layoutCoordinator.requestRelayoutDebounced
 
-function clamp01(v: number) {
-  return Math.max(0, Math.min(1, v))
-}
-
-function clamp(v: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, v))
-}
+const persistedPrefs = usePersistedSimulatorPrefs({
+  layoutMode,
+  quality,
+  labelsLod,
+  requestResizeAndLayout,
+})
 
 const overlayLabelScale = computed(() => {
   // Keep e2e screenshots stable and avoid surprises in test-mode.
@@ -296,6 +249,8 @@ const overlayState = useOverlayState<LayoutNode>({
 const hoveredEdge = overlayState.hoveredEdge
 const clearHoveredEdge = overlayState.clearHoveredEdge
 const activeEdges = overlayState.activeEdges
+const addActiveEdge = overlayState.addActiveEdge
+const pruneActiveEdges = overlayState.pruneActiveEdges
 const pushFloatingLabel = overlayState.pushFloatingLabel
 const pruneFloatingLabels = overlayState.pruneFloatingLabels
 const floatingLabelsView = overlayState.floatingLabelsView
@@ -351,76 +306,51 @@ function clearScheduledTimeouts() {
   timers.clearAll()
 }
 
-function assertPlaylistEdgesExistInSnapshot(opts: { snapshot: GraphSnapshot; events: DemoEvent[]; eventsPath: string }) {
-  const { snapshot, events, eventsPath } = opts
-  const ok = new Set(snapshot.links.map((l) => keyEdge(l.source, l.target)))
-
-  const assertEdge = (from: string, to: string, ctx: string) => {
-    const k = keyEdge(from, to)
-    if (!ok.has(k)) {
-      throw new Error(`Unknown edge '${k}' referenced by ${ctx} (${eventsPath})`)
-    }
-  }
-
-  for (let ei = 0; ei < events.length; ei++) {
-    const evt = events[ei]!
-    const baseCtx = `event[${ei}] ${evt.type} ${'event_id' in evt ? String((evt as any).event_id ?? '') : ''}`.trim()
-
-    if (evt.type === 'tx.updated') {
-      for (let i = 0; i < evt.edges.length; i++) {
-        const e = evt.edges[i]!
-        assertEdge(e.from, e.to, `${baseCtx} edges[${i}]`)
-      }
-      continue
-    }
-
-    if (evt.type === 'clearing.plan') {
-      for (let si = 0; si < evt.steps.length; si++) {
-        const step = evt.steps[si]!
-        const he = step.highlight_edges ?? []
-        const pe = step.particles_edges ?? []
-        for (let i = 0; i < he.length; i++) {
-          const e = he[i]!
-          assertEdge(e.from, e.to, `${baseCtx} steps[${si}].highlight_edges[${i}]`)
-        }
-        for (let i = 0; i < pe.length; i++) {
-          const e = pe[i]!
-          assertEdge(e.from, e.to, `${baseCtx} steps[${si}].particles_edges[${i}]`)
-        }
-      }
-    }
-  }
-}
-
 function computeLayout(snapshot: GraphSnapshot, w: number, h: number, mode: LayoutMode) {
   const result = computeLayoutForMode(snapshot, w, h, mode, isTestMode.value)
   layout.nodes = result.nodes
   layout.links = result.links
 
-  baselineLayoutPos.clear()
-  for (const n of result.nodes) baselineLayoutPos.set(n.id, { x: n.__x, y: n.__y })
-
+  pinning.captureBaseline(result.nodes)
   // Re-apply pinned positions after any relayout.
-  for (const [id, p] of pinnedPos) {
-    const n = layout.nodes.find((x) => x.id === id)
-    if (!n) continue
-    n.__x = p.x
-    n.__y = p.y
-  }
+  pinning.reapplyPinnedToLayout()
 
   // Layout arrays are replaced on every relayout, so the physics engine must be recreated.
-  recreatePhysicsForCurrentLayout({ w, h })
+  physics.recreateForCurrentLayout({ w, h })
 }
+
+const physics = createPhysicsManager({
+  // Keep e2e + deterministic screenshots stable.
+  isEnabled: () => !isTestMode.value,
+  getLayoutNodes: () => layout.nodes,
+  getLayoutLinks: () => layout.links,
+  getQuality: () => quality.value,
+  getPinnedPos: () => pinnedPos,
+})
+
+const pinning = usePinning({
+  pinnedPos,
+  baselineLayoutPos,
+  getSelectedNodeId: () => state.selectedNodeId,
+  getLayoutNodeById: (id) => layout.nodes.find((n) => n.id === id) ?? null,
+  physics: {
+    pin: (id, x, y) => physics.pin(id, x, y),
+    unpin: (id) => physics.unpin(id),
+    syncFromLayout: () => physics.syncFromLayout(),
+    reheat: (alpha) => physics.reheat(alpha),
+  },
+})
+
+const isSelectedPinned = pinning.isSelectedPinned
+const pinSelectedNode = pinning.pinSelectedNode
+const unpinSelectedNode = pinning.unpinSelectedNode
 
 // Keep physics viewport in sync even when resize does not trigger a relayout.
 watch(
   () => [layout.w, layout.h] as const,
   ([w, h], [prevW, prevH]) => {
-    if (!physicsEngine) return
-    if (!shouldUsePhysics()) return
     if (w === prevW && h === prevH) return
-    physicsEngine.updateViewport(w, h)
-    physicsEngine.reheat(0.15)
+    physics.updateViewport(w, h, 0.15)
   },
 )
 
@@ -432,7 +362,7 @@ const demoPlayer = useDemoPlayer({
   pushFloatingLabel,
   resetOverlays,
   fxColorForNode,
-  addActiveEdge: (k) => activeEdges.add(k),
+  addActiveEdge,
   scheduleTimeout,
   clearScheduledTimeouts,
   getLayoutNode: (id) => layout.nodes.find((n) => n.id === id),
@@ -461,6 +391,30 @@ function resetDemoState() {
   demoPlayer.resetDemoState()
   state.selectedNodeId = null
 }
+
+const layoutIndex = computed(() => {
+  const nodeById = new Map<string, LayoutNode>()
+  for (const n of layout.nodes) nodeById.set(n.id, n)
+
+  const linkByKey = new Map<string, LayoutLink>()
+  const incidentEdgeKeysByNodeId = new Map<string, Set<string>>()
+
+  for (const l of layout.links) {
+    linkByKey.set(l.__key, l)
+
+    const a = l.source
+    const b = l.target
+    const sA = incidentEdgeKeysByNodeId.get(a) ?? new Set<string>()
+    sA.add(l.__key)
+    incidentEdgeKeysByNodeId.set(a, sA)
+
+    const sB = incidentEdgeKeysByNodeId.get(b) ?? new Set<string>()
+    sB.add(l.__key)
+    incidentEdgeKeysByNodeId.set(b, sB)
+  }
+
+  return { nodeById, linkByKey, incidentEdgeKeysByNodeId }
+})
 
 const labelNodes = computed(() => {
   if (isTestMode.value) return []
@@ -504,25 +458,17 @@ const labelNodes = computed(() => {
 })
 
 const layoutNodeMap = computed(() => {
-  const m = new Map<string, LayoutNode>()
-  for (const n of layout.nodes) m.set(n.id, n)
-  return m
+  return layoutIndex.value.nodeById
 })
 
 const layoutLinkMap = computed(() => {
-  const m = new Map<string, LayoutLink>()
-  for (const l of layout.links) m.set(l.__key, l)
-  return m
+  return layoutIndex.value.linkByKey
 })
 
 const selectedIncidentEdgeKeys = computed(() => {
-  const out = new Set<string>()
   const id = state.selectedNodeId
-  if (!id) return out
-  for (const l of layout.links) {
-    if (l.source === id || l.target === id) out.add(l.__key)
-  }
-  return out
+  if (!id) return new Set<string>()
+  return layoutIndex.value.incidentEdgeKeysByNodeId.get(id) ?? new Set<string>()
 })
 
 function edgeDirCaption() {
@@ -539,6 +485,21 @@ const edgeTooltip = useEdgeTooltip({
 const formatEdgeAmountText = edgeTooltip.formatEdgeAmountText
 const edgeTooltipStyle = edgeTooltip.edgeTooltipStyle
 
+const edgeHover = useEdgeHover({
+  hoveredEdge,
+  clearHoveredEdge,
+  isWebDriver: () => isWebDriver,
+  getSelectedNodeId: () => state.selectedNodeId,
+  hasSelectedIncidentEdges: () => selectedIncidentEdgeKeys.value.size > 0,
+  pickNodeAt: (x, y) => pickNodeAt(x, y),
+  pickEdgeAt: (x, y) => pickEdgeAt(x, y),
+  getLinkByKey: (k) => layoutLinkMap.value.get(k),
+  formatEdgeAmountText,
+  clientToScreen,
+  screenToWorld,
+  worldToScreen,
+})
+
 const picking = usePicking({
   getLayoutNodes: () => layout.nodes,
   getLayoutLinks: () => layout.links,
@@ -553,75 +514,15 @@ function pickEdgeAt(clientX: number, clientY: number) {
   return picking.pickEdgeAt(clientX, clientY)
 }
 
-function applyNodePatches(patches: NodePatch[] | undefined) {
-  if (!patches?.length || !state.snapshot) return
+const patchApplier = createPatchApplier({
+  getSnapshot: () => state.snapshot,
+  getLayoutNodes: () => layout.nodes,
+  getLayoutLinks: () => layout.links,
+  keyEdge,
+})
 
-  const snapIdx = new Map(state.snapshot.nodes.map((n, i) => [n.id, i]))
-  const layoutIdx = new Map(layout.nodes.map((n, i) => [n.id, i]))
-
-  for (const p of patches) {
-    const si = snapIdx.get(p.id)
-    if (si !== undefined) {
-      const cur = state.snapshot.nodes[si]!
-      state.snapshot.nodes[si] = {
-        ...cur,
-        net_balance_atoms: p.net_balance_atoms !== undefined ? p.net_balance_atoms : cur.net_balance_atoms,
-        net_sign: p.net_sign !== undefined ? p.net_sign : cur.net_sign,
-        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-        viz_size: p.viz_size !== undefined ? p.viz_size : cur.viz_size,
-      }
-    }
-
-    const li = layoutIdx.get(p.id)
-    if (li !== undefined) {
-      const cur = layout.nodes[li]!
-      layout.nodes[li] = {
-        ...cur,
-        net_balance_atoms: p.net_balance_atoms !== undefined ? p.net_balance_atoms : cur.net_balance_atoms,
-        net_sign: p.net_sign !== undefined ? p.net_sign : cur.net_sign,
-        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-        viz_size: p.viz_size !== undefined ? p.viz_size : cur.viz_size,
-      }
-    }
-  }
-}
-
-function applyEdgePatches(patches: EdgePatch[] | undefined) {
-  if (!patches?.length || !state.snapshot) return
-
-  const snapIdx = new Map(state.snapshot.links.map((l, i) => [keyEdge(l.source, l.target), i]))
-  const layoutIdx = new Map(layout.links.map((l, i) => [keyEdge(l.source, l.target), i]))
-
-  for (const p of patches) {
-    const k = keyEdge(p.source, p.target)
-
-    const si = snapIdx.get(k)
-    if (si !== undefined) {
-      const cur = state.snapshot.links[si]!
-      state.snapshot.links[si] = {
-        ...cur,
-        used: p.used !== undefined ? p.used : cur.used,
-        available: p.available !== undefined ? p.available : cur.available,
-        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-        viz_width_key: p.viz_width_key !== undefined ? p.viz_width_key : cur.viz_width_key,
-        viz_alpha_key: p.viz_alpha_key !== undefined ? p.viz_alpha_key : cur.viz_alpha_key,
-      }
-    }
-
-    const li = layoutIdx.get(k)
-    if (li !== undefined) {
-      const cur = layout.links[li]!
-      layout.links[li] = {
-        ...cur,
-        used: p.used !== undefined ? p.used : cur.used,
-        available: p.available !== undefined ? p.available : cur.available,
-        viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-        viz_width_key: p.viz_width_key !== undefined ? p.viz_width_key : cur.viz_width_key,
-        viz_alpha_key: p.viz_alpha_key !== undefined ? p.viz_alpha_key : cur.viz_alpha_key,
-      }
-    }
-  }
-}
+const applyNodePatches = patchApplier.applyNodePatches
+const applyEdgePatches = patchApplier.applyEdgePatches
 
 function applyPatchesFromEvent(evt: DemoEvent) {
   if (evt.type !== 'tx.updated' && evt.type !== 'clearing.done') return
@@ -635,86 +536,17 @@ watch(layoutMode, () => {
 })
 
 onMounted(() => {
-  try {
-    const v = String(localStorage.getItem('geo.sim.layoutMode') ?? '')
-    if (
-      v === 'admin-force' ||
-      v === 'community-clusters' ||
-      v === 'balance-split' ||
-      v === 'type-split' ||
-      v === 'status-split'
-    ) {
-      layoutMode.value = v
-    }
-  } catch {
-    // ignore
-  }
-})
+  persistedPrefs.loadFromStorage()
 
-
-onMounted(() => {
-  try {
-    const q = String(localStorage.getItem('geo.sim.quality') ?? '')
-    if (q === 'low' || q === 'med' || q === 'high') quality.value = q
-  } catch {
-    // ignore
-  }
-  try {
-    const l = String(localStorage.getItem('geo.sim.labelsLod') ?? '')
-    if (l === 'off' || l === 'selection' || l === 'neighbors') labelsLod.value = l
-  } catch {
-    // ignore
-  }
-})
-
-onMounted(() => {
-  // Dev-only hook for quick runtime sanity checks (does not affect rendering).
-  if (!import.meta.env.DEV) return
-  ;(window as any).__geoSim = {
-    get isTestMode() {
-      return isTestMode.value
-    },
-    get isWebDriver() {
-      return isWebDriver
-    },
-    get loading() {
-      return state.loading
-    },
-    get error() {
-      return state.error
-    },
-    get hasSnapshot() {
-      return !!state.snapshot
-    },
+  installGeoSimDevHook({
+    isDev: () => import.meta.env.DEV,
+    isTestMode: () => isTestMode.value,
+    isWebDriver: () => isWebDriver,
+    getState: () => state,
     fxState,
     runTxOnce,
     runClearingOnce,
-  }
-})
-
-watch(layoutMode, () => {
-  try {
-    localStorage.setItem('geo.sim.layoutMode', layoutMode.value)
-  } catch {
-    // ignore
-  }
-})
-
-watch(quality, () => {
-  try {
-    localStorage.setItem('geo.sim.quality', quality.value)
-  } catch {
-    // ignore
-  }
-  requestResizeAndLayout()
-})
-
-watch(labelsLod, () => {
-  try {
-    localStorage.setItem('geo.sim.labelsLod', labelsLod.value)
-  } catch {
-    // ignore
-  }
+  })
 })
 
 const renderLoop = useRenderLoop({
@@ -734,6 +566,7 @@ const renderLoop = useRenderLoop({
   setFlash: (v) => {
     state.flash = v
   },
+  pruneActiveEdges,
   pruneFloatingLabels,
   drawBaseGraph,
   renderFxFrame,
@@ -741,12 +574,10 @@ const renderLoop = useRenderLoop({
   fxState,
   getSelectedNodeId: () => state.selectedNodeId,
   activeEdges,
-  getLinkLod: () => (dragState.active && dragState.dragging ? 'focus' : 'full'),
-  getHiddenNodeId: () => (dragState.active && dragState.dragging ? dragState.nodeId : null),
+  getLinkLod: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? 'focus' : 'full'),
+  getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
   beforeDraw: () => {
-    if (!physicsEngine) return
-    physicsEngine.tick()
-    physicsEngine.syncToLayout()
+    physics.tickAndSyncToLayout()
   },
 })
 
@@ -754,69 +585,43 @@ const ensureRenderLoop = renderLoop.ensureRenderLoop
 const stopRenderLoop = renderLoop.stopRenderLoop
 const renderOnce = renderLoop.renderOnce
 
-let dragPreviewW = 0
-let dragPreviewH = 0
-let dragPreviewPending = false
-let dragPreviewRafId: number | null = null
+let showDragPreviewForNode: (nodeId: string) => void = () => {}
+let scheduleDragPreview: () => void = () => {}
+let hideDragPreview: () => void = () => {}
 
-function hideDragPreview() {
-  const el = dragPreviewEl.value
-  if (el) el.style.display = 'none'
-  if (dragPreviewRafId !== null) {
-    window.cancelAnimationFrame(dragPreviewRafId)
-    dragPreviewRafId = null
-    dragPreviewPending = false
-  }
-}
+const dragToPin = useDragToPinInteraction({
+  isEnabled: () => !isTestMode.value,
+  pickNodeAt: (x, y) => pickNodeAt(x, y),
+  getLayoutNodeById: (id) => layoutIndex.value.nodeById.get(id) ?? null,
+  setSelectedNodeId: (id) => {
+    state.selectedNodeId = id
+  },
+  clearHoveredEdge,
+  clientToScreen,
+  screenToWorld,
+  getCanvasEl: () => canvasEl.value,
+  renderOnce,
+  pinNodeLive: (id, x, y) => physics.pin(id, x, y),
+  commitPinnedPos: (id, x, y) => pinnedPos.set(id, { x, y }),
+  reheatPhysics: (alpha) => physics.reheat(alpha),
+  showDragPreviewForNode: (id) => showDragPreviewForNode(id),
+  scheduleDragPreview: () => scheduleDragPreview(),
+  hideDragPreview: () => hideDragPreview(),
+})
 
-function showDragPreviewForNode(nodeId: string) {
-  const el = dragPreviewEl.value
-  if (!el) return
-  const n = getNodeById(nodeId) ?? (layout.nodes.find((x) => x.id === nodeId) as any)
-  if (!n) return
+const dragPreview = useDragPreview({
+  el: dragPreviewEl,
+  getDraggedNode: () => dragToPin.dragState.cachedNode,
+  getNodeById: (id) => getNodeById(id),
+  getCamera: () => camera,
+  renderOnce,
+  sizeForNode: (n) => sizeForNode(n),
+  fillForNode: (n) => fillForNode(n, VIZ_MAPPING),
+})
 
-  // sizeForNode returns CSS pixel size which matches the visual size on canvas
-  // (canvas renders with invZoom so visual size = baseSize regardless of zoom)
-  const s = sizeForNode(n)
-  dragPreviewW = s.w
-  dragPreviewH = s.h
-
-  const fill = fillForNode(n, VIZ_MAPPING)
-
-  el.style.display = 'block'
-  el.style.width = `${dragPreviewW}px`
-  el.style.height = `${dragPreviewH}px`
-  el.style.background = `linear-gradient(135deg, ${fill}88, ${fill}44)`
-  el.style.borderColor = `${fill}aa`
-  el.style.boxShadow = `0 0 0 1px rgba(255,255,255,0.18), 0 12px 30px rgba(0,0,0,0.45), 0 0 24px ${fill}55`
-  el.style.borderRadius = String(n.type) === 'business' ? '5px' : '999px'
-}
-
-function scheduleDragPreview() {
-  const el = dragPreviewEl.value
-  if (!el) return
-
-  const n = dragState.cachedNode
-  if (!n) return
-
-  if (dragPreviewPending) return
-  dragPreviewPending = true
-  dragPreviewRafId = window.requestAnimationFrame(() => {
-    dragPreviewPending = false
-    dragPreviewRafId = null
-
-    // Snapshot camera once per frame for stable DOM preview.
-    const cam = { panX: camera.panX, panY: camera.panY, zoom: camera.zoom }
-    const p = { x: n.__x * cam.zoom + cam.panX, y: n.__y * cam.zoom + cam.panY }
-
-    const previewX = p.x - dragPreviewW / 2
-    const previewY = p.y - dragPreviewH / 2
-    el.style.transform = `translate3d(${previewX}px, ${previewY}px, 0)`
-
-    // Edges are drawn in world-space on the main canvas.
-    renderOnce()
-  })
-}
+hideDragPreview = dragPreview.hideDragPreview
+showDragPreviewForNode = dragPreview.showDragPreviewForNode
+scheduleDragPreview = dragPreview.scheduleDragPreview
 
 function pickNodeAt(clientX: number, clientY: number) {
   return picking.pickNodeAt(clientX, clientY)
@@ -837,126 +642,15 @@ function onCanvasPointerDown(ev: PointerEvent) {
 
   // If user grabs a node: select it, don't pan.
   // Also allow optional drag-to-pin interaction.
-  const hit = pickNodeAt(ev.clientX, ev.clientY)
-  if (hit) {
-    state.selectedNodeId = hit.id
-    clearHoveredEdge()
-
-    const ln = layout.nodes.find((n) => n.id === hit.id)
-    if (ln && canvasEl.value) {
-      dragState.active = true
-      dragState.dragging = false
-      dragState.nodeId = hit.id
-      dragState.pointerId = ev.pointerId
-      dragState.startClientX = ev.clientX
-      dragState.startClientY = ev.clientY
-      dragState.cachedNode = ln // Cache reference to avoid O(n) lookup on every pointermove
-
-      const s = clientToScreen(ev.clientX, ev.clientY)
-      const sx = s.x
-      const sy = s.y
-      const p = screenToWorld(sx, sy)
-      dragState.offsetX = ln.__x - p.x
-      dragState.offsetY = ln.__y - p.y
-
-      try {
-        canvasEl.value.setPointerCapture(ev.pointerId)
-      } catch {
-        // ignore
-      }
-    }
-
-    return
-  }
+  if (dragToPin.onPointerDown(ev)) return
 
   cameraSystem.onPointerDown(ev)
 }
 
-const dragState = reactive({
-  active: false,
-  dragging: false,
-  nodeId: null as string | null,
-  pointerId: null as number | null,
-  startClientX: 0,
-  startClientY: 0,
-  offsetX: 0,
-  offsetY: 0,
-  // Cached reference to avoid O(n) lookup on every pointermove
-  cachedNode: null as LayoutNode | null,
-})
-
 function onCanvasPointerMove(ev: PointerEvent) {
-  if (dragState.active && dragState.pointerId === ev.pointerId && dragState.cachedNode) {
-    const dx = ev.clientX - dragState.startClientX
-    const dy = ev.clientY - dragState.startClientY
-    const dist2 = dx * dx + dy * dy
-    const threshold2 = 4 * 4
+  if (dragToPin.onPointerMove(ev)) return
 
-    if (!dragState.dragging && dist2 < threshold2) return
-
-    const s = clientToScreen(ev.clientX, ev.clientY)
-    const p = screenToWorld(s.x, s.y)
-    const x = p.x + dragState.offsetX
-    const y = p.y + dragState.offsetY
-
-    // Update the node position in world coordinates.
-    // Canvas links will follow automatically (same camera transform as everything else).
-    dragState.cachedNode.__x = x
-    dragState.cachedNode.__y = y
-
-    const id = dragState.nodeId
-    if (id && physicsEngine) physicsEngine.pin(id, x, y)
-
-    if (!dragState.dragging) {
-      dragState.dragging = true
-      clearHoveredEdge()
-
-      if (id) {
-        showDragPreviewForNode(id)
-      }
-      scheduleDragPreview()
-
-      physicsEngine?.reheat(0.25)
-
-      // Hide the node from canvas and lock in the baseline frame.
-      renderOnce()
-      return
-    }
-
-    scheduleDragPreview()
-    return
-  }
-
-  // Hover only when a node is selected, so it's obvious which edges are relevant.
-  // Also keep WebDriver runs stable (no transient tooltip).
-  if (!panState.active && !isWebDriver && state.selectedNodeId && selectedIncidentEdgeKeys.value.size > 0) {
-    // Do not show edge tooltips when hovering a node.
-    const nodeHit = pickNodeAt(ev.clientX, ev.clientY)
-    if (nodeHit) {
-      clearHoveredEdge()
-      return
-    }
-
-    const seg = pickEdgeAt(ev.clientX, ev.clientY)
-    if (seg && (seg.fromId === state.selectedNodeId || seg.toId === state.selectedNodeId)) {
-      const link = layoutLinkMap.value.get(seg.key)
-      const s = clientToScreen(ev.clientX, ev.clientY)
-      const p = screenToWorld(s.x, s.y)
-      const cp = closestPointOnSegment(p.x, p.y, seg.ax, seg.ay, seg.bx, seg.by)
-      const sp = worldToScreen(cp.x, cp.y)
-
-      hoveredEdge.key = seg.key
-      hoveredEdge.fromId = seg.fromId
-      hoveredEdge.toId = seg.toId
-      hoveredEdge.amountText = formatEdgeAmountText(link)
-      hoveredEdge.screenX = sp.x
-      hoveredEdge.screenY = sp.y
-    } else {
-      clearHoveredEdge()
-    }
-  } else if (!panState.active) {
-    clearHoveredEdge()
-  }
+  edgeHover.onPointerMove(ev, { panActive: panState.active })
 
   if (!panState.active) return
 
@@ -964,38 +658,7 @@ function onCanvasPointerMove(ev: PointerEvent) {
 }
 
 function onCanvasPointerUp(ev: PointerEvent) {
-  if (dragState.active && dragState.pointerId === ev.pointerId) {
-    // Commit final position only once.
-    const id = dragState.nodeId
-    const ln = dragState.cachedNode
-    if (dragState.dragging && id && ln) {
-      // ALWAYS pin the node after drag (like v1) so user can see its edges
-      pinnedPos.set(id, { x: ln.__x, y: ln.__y })
-
-      if (physicsEngine) {
-        physicsEngine.pin(id, ln.__x, ln.__y)
-        physicsEngine.reheat(0.18)
-      }
-    }
-
-    hideDragPreview()
-
-    dragState.active = false
-    dragState.dragging = false
-    dragState.nodeId = null
-    dragState.pointerId = null
-    dragState.cachedNode = null // Clear cached reference
-
-    try {
-      canvasEl.value?.releasePointerCapture(ev.pointerId)
-    } catch {
-      // ignore
-    }
-
-    // Ensure the canvas reflects the final committed position / un-hides the node.
-    renderOnce()
-    return
-  }
+  if (dragToPin.onPointerUp(ev)) return
 
   const wasClick = cameraSystem.onPointerUp(ev)
   if (!wasClick) return
@@ -1005,41 +668,10 @@ function onCanvasPointerUp(ev: PointerEvent) {
   clearHoveredEdge()
 }
 
-const isSelectedPinned = computed(() => {
-  const id = state.selectedNodeId
-  if (!id) return false
-  return pinnedPos.has(id)
-})
-
-function pinSelectedNode() {
-  const id = state.selectedNodeId
-  if (!id) return
-  const ln = layout.nodes.find((n) => n.id === id)
-  if (!ln) return
-  pinnedPos.set(id, { x: ln.__x, y: ln.__y })
-  physicsEngine?.pin(id, ln.__x, ln.__y)
-  physicsEngine?.reheat()
-}
-
-function unpinSelectedNode() {
-  const id = state.selectedNodeId
-  if (!id) return
-  pinnedPos.delete(id)
-  physicsEngine?.unpin(id)
-  const base = baselineLayoutPos.get(id)
-  const ln = layout.nodes.find((n) => n.id === id)
-  if (ln && base) {
-    ln.__x = base.x
-    ln.__y = base.y
-  }
-
-  physicsEngine?.syncFromLayout()
-  physicsEngine?.reheat()
-}
 
 function onCanvasWheel(ev: WheelEvent) {
   // While dragging a node we rely on a camera snapshot for DOM preview; keep camera stable.
-  if (dragState.active) return
+  if (dragToPin.dragState.active) return
   cameraSystem.onWheel(ev)
 }
 
@@ -1048,112 +680,69 @@ function resetView() {
   clampCameraPan()
 }
 
-function runTxEvent(evt: TxUpdatedEvent, opts?: { onFinished?: () => void }) {
-  if (!state.snapshot) return
-  demoPlayer.runTxEvent(evt, opts)
-}
-
-async function runTxOnce() {
-  if (!state.snapshot) return
-
-  stopPlaylistPlayback()
-
-  state.error = ''
-
-  if (import.meta.env.DEV) {
-    ;(window as any).__geoSimTxCalls = ((window as any).__geoSimTxCalls ?? 0) + 1
-  }
-
-  try {
-    ensureRenderLoop()
-
-    clearScheduledTimeouts()
-    resetOverlays()
-
-    let evt: TxUpdatedEvent | undefined = state.demoTxEvents[0]
-    if (!evt) {
-      const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-tx')
-      assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
-      evt = events.find((e): e is TxUpdatedEvent => e.type === 'tx.updated')
-    }
-    if (!evt) return
-
-    runTxEvent(evt)
-  } catch (e: any) {
-    const msg = String(e?.message ?? e)
+const demoActions = useDemoActions({
+  getSnapshot: () => state.snapshot,
+  getEffectiveEq: () => effectiveEq.value,
+  getDemoTxEvents: () => state.demoTxEvents,
+  getDemoClearingPlan: () => state.demoClearingPlan,
+  getDemoClearingDone: () => state.demoClearingDone,
+  setError: (msg) => {
     state.error = msg
-    if (import.meta.env.DEV) {
-      ;(window as any).__geoSimLastTxError = msg
-    }
-    // eslint-disable-next-line no-console
-    console.error(e)
-  }
-}
-
-async function runClearingOnce() {
-  if (!state.snapshot) return
-
-  stopPlaylistPlayback()
-  state.error = ''
-
-  try {
-    ensureRenderLoop()
-    clearScheduledTimeouts()
-    resetOverlays()
-
-    let plan = state.demoClearingPlan
-    let done = state.demoClearingDone
-
-    if (!plan) {
-      const { events, sourcePath: eventsPath } = await loadEvents(effectiveEq.value, 'demo-clearing')
-      assertPlaylistEdgesExistInSnapshot({ snapshot: state.snapshot, events, eventsPath })
-      plan = events.find((e): e is ClearingPlanEvent => e.type === 'clearing.plan') ?? null
-      done = events.find((e): e is ClearingDoneEvent => e.type === 'clearing.done') ?? null
-    }
-    if (!plan) return
-
+  },
+  stopPlaylistPlayback,
+  ensureRenderLoop,
+  clearScheduledTimeouts,
+  resetOverlays,
+  loadEvents,
+  assertPlaylistEdgesExistInSnapshot,
+  runTxEvent: (evt) => {
+    demoPlayer.runTxEvent(evt)
+  },
+  runClearingOnce: (plan, done) => {
     demoPlayer.runClearingOnce(plan, done)
-  } catch (e: any) {
-    const msg = String(e?.message ?? e)
-    state.error = msg
-    if (import.meta.env.DEV) {
+  },
+  dev: {
+    isDev: () => import.meta.env.DEV,
+    onTxCall: () => {
+      ;(window as any).__geoSimTxCalls = ((window as any).__geoSimTxCalls ?? 0) + 1
+    },
+    onTxError: (msg, e) => {
+      ;(window as any).__geoSimLastTxError = msg
+      // eslint-disable-next-line no-console
+      console.error(e)
+    },
+    onClearingError: (msg, e) => {
       ;(window as any).__geoSimLastClearingError = msg
-    }
-    // eslint-disable-next-line no-console
-    console.error(e)
-  }
-}
-
-const canDemoPlay = computed(() => {
-  if (scene.value === 'D') return state.demoTxEvents.length > 0
-  if (scene.value === 'E') return !!state.demoClearingPlan
-  return false
+      // eslint-disable-next-line no-console
+      console.error(e)
+    },
+  },
 })
 
-const demoPlayLabel = computed(() => (playlist.playing ? 'Pause' : 'Play'))
+const runTxOnce = demoActions.runTxOnce
+const runClearingOnce = demoActions.runClearingOnce
 
-function runClearingStep(stepIndex: number, opts?: { onFinished?: () => void }) {
-  const plan = state.demoClearingPlan
-  if (!plan) return
-  if (!state.snapshot) return
-  demoPlayer.runClearingStep(stepIndex, plan, state.demoClearingDone, opts)
-}
+const demoPlayback = useDemoPlaybackControls({
+  getSnapshotReady: () => !!state.snapshot,
+  getScene: () => scene.value,
+  getDemoTxEvents: () => state.demoTxEvents,
+  getDemoClearingPlan: () => state.demoClearingPlan,
+  getDemoClearingDone: () => state.demoClearingDone,
+  getPlaylistPlaying: () => playlist.playing,
+  demoPlayer: {
+    runClearingStep: (stepIndex, plan, done, opts) => demoPlayer.runClearingStep(stepIndex, plan, done, opts),
+    demoStepOnce: (s, tx, plan, done) => demoPlayer.demoStepOnce(s, tx, plan, done),
+    demoTogglePlay: (s, tx, plan, done) => demoPlayer.demoTogglePlay(s, tx, plan, done),
+  },
+  resetDemoState,
+})
 
-function demoStepOnce() {
-  if (!state.snapshot) return
-  if (!canDemoPlay.value) return
-  demoPlayer.demoStepOnce(scene.value, state.demoTxEvents, state.demoClearingPlan, state.demoClearingDone)
-}
-
-function demoTogglePlay() {
-  if (!state.snapshot) return
-  if (!canDemoPlay.value) return
-  demoPlayer.demoTogglePlay(scene.value, state.demoTxEvents, state.demoClearingPlan, state.demoClearingDone)
-}
-
-function demoReset() {
-  resetDemoState()
-}
+const canDemoPlay = demoPlayback.canDemoPlay
+const demoPlayLabel = demoPlayback.demoPlayLabel
+const runClearingStep = demoPlayback.runClearingStep
+const demoStepOnce = demoPlayback.demoStepOnce
+const demoTogglePlay = demoPlayback.demoTogglePlay
+const demoReset = demoPlayback.demoReset
 
 const sceneState = useSceneState({
   eq,
@@ -1184,7 +773,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   hideDragPreview()
-  stopPhysics()
+  persistedPrefs.dispose()
+  physics.stop()
   sceneState.teardown()
 })
 </script>
@@ -1214,139 +804,50 @@ onUnmounted(() => {
 
     <div ref="dragPreviewEl" class="drag-preview" aria-hidden="true" />
 
-    <div v-if="hoveredEdge.key" class="edge-tooltip" :style="edgeTooltipStyle()" aria-label="Edge tooltip">
-      <div class="edge-tooltip-title">
-        {{ getNodeById(hoveredEdge.fromId)?.name ?? hoveredEdge.fromId }} → {{ getNodeById(hoveredEdge.toId)?.name ?? hoveredEdge.toId }}
-      </div>
-      <div class="edge-tooltip-amount mono">{{ hoveredEdge.amountText }}</div>
-    </div>
+    <EdgeTooltip
+      :edge="hoveredEdge"
+      :style="edgeTooltipStyle()"
+      :get-node-name="(id) => getNodeById(id)?.name ?? null"
+    />
 
-    <!-- Minimal top HUD (controls + small status) -->
-    <div class="hud-top">
-      <div class="hud-row">
-        <div class="pill">
-          <span class="label">EQ</span>
-          <template v-if="isDemoFixtures">
-            <span class="value">UAH</span>
-          </template>
-          <template v-else>
-            <select v-model="eq" class="select" aria-label="Equivalent">
-              <option value="UAH">UAH</option>
-              <option value="HOUR">HOUR</option>
-              <option value="EUR">EUR</option>
-            </select>
-          </template>
-        </div>
+    <DemoHudTop
+      v-model:eq="eq"
+      v-model:layoutMode="layoutMode"
+      v-model:scene="scene"
+      :is-demo-fixtures="isDemoFixtures"
+      :is-test-mode="isTestMode"
+      :is-web-driver="isWebDriver"
+      :nodes-count="state.snapshot?.nodes.length"
+      :links-count="state.snapshot?.links.length"
+    />
 
-        <div class="field">
-          <span class="label">Layout</span>
-          <select v-model="layoutMode" class="select" aria-label="Layout">
-            <option value="admin-force">Organic cloud (links)</option>
-            <option value="community-clusters">Community clusters</option>
-            <option value="balance-split">Constellations: balance</option>
-            <option value="type-split">Constellations: type</option>
-            <option value="status-split">Constellations: status</option>
-          </select>
-        </div>
+    <NodeCardOverlay
+      v-if="selectedNode && !dragToPin.dragState.active"
+      :node="selectedNode"
+      :style="nodeCardStyle()"
+      :edge-stats="selectedNodeEdgeStats"
+      :equivalent-text="state.snapshot?.equivalent ?? ''"
+      :show-pin-actions="!isTestMode && !isWebDriver"
+      :is-pinned="isSelectedPinned"
+      :pin="pinSelectedNode"
+      :unpin="unpinSelectedNode"
+    />
 
-        <div class="pill">
-          <span class="label">Scene</span>
-          <select v-model="scene" class="select" aria-label="Scene">
-            <option value="A">A — Overview</option>
-            <option value="B">B — Focus</option>
-            <option value="C">C — Statuses</option>
-            <option value="D">D — Tx burst</option>
-            <option value="E">E — Clearing</option>
-          </select>
-        </div>
-
-        <div v-if="state.snapshot" class="pill subtle" aria-label="Stats">
-          <span class="mono">Nodes {{ state.snapshot.nodes.length }} | Links {{ state.snapshot.links.length }}</span>
-        </div>
-
-        <div v-if="isTestMode && !isWebDriver" class="pill subtle" aria-label="Mode">
-          <span class="mono">TEST MODE</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Node card -->
-    <div v-if="selectedNode && !dragState.active" class="node-card" :style="nodeCardStyle()">
-      <div class="node-header">
-        <div class="node-title">{{ selectedNode.name ?? selectedNode.id }}</div>
-        <div v-if="!isTestMode && !isWebDriver" class="node-actions">
-          <button v-if="!isSelectedPinned" class="btn btn-ghost btn-xxs" type="button" @click="pinSelectedNode">Pin</button>
-          <button v-else class="btn btn-ghost btn-xxs" type="button" @click="unpinSelectedNode">Unpin</button>
-        </div>
-      </div>
-
-      <div class="node-grid">
-        <div class="node-item">
-          <span class="k">Type</span>
-          <span class="v">{{ selectedNode.type ?? '—' }}</span>
-        </div>
-        <div class="node-item">
-          <span class="k">Out</span>
-          <span class="v mono">{{ selectedNodeEdgeStats?.outLimitText ?? '—' }}</span>
-          <span class="v">{{ state.snapshot?.equivalent ?? '' }}</span>
-        </div>
-
-        <div class="node-item">
-          <span class="k">Status</span>
-          <span class="v">{{ selectedNode.status ?? '—' }}</span>
-        </div>
-        <div class="node-item">
-          <span class="k">In</span>
-          <span class="v mono">{{ selectedNodeEdgeStats?.inLimitText ?? '—' }}</span>
-          <span class="v">{{ state.snapshot?.equivalent ?? '' }}</span>
-        </div>
-
-        <div class="node-item">
-          <span class="k">Net</span>
-          <span class="v mono">{{ selectedNode.net_balance_atoms ?? '—' }}</span>
-        </div>
-        <div class="node-item">
-          <span class="k">Degree</span>
-          <span class="v mono">{{ selectedNodeEdgeStats?.degree ?? '—' }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Bottom HUD (as per prototypes: minimal buttons) -->
-    <div class="hud-bottom">
-      <button class="btn" type="button" @click="runTxOnce">Single Tx</button>
-      <button class="btn" type="button" @click="runClearingOnce">Run Clearing</button>
-
-      <template v-if="showResetView">
-        <div class="hud-divider" />
-        <button class="btn btn-ghost" type="button" @click="resetView">Reset view</button>
-      </template>
-
-      <template v-if="showDemoControls">
-        <div class="hud-divider" />
-        <button class="btn btn-ghost" type="button" :disabled="playlist.playing" @click="demoStepOnce">Step</button>
-        <button class="btn" type="button" :disabled="!canDemoPlay" @click="demoTogglePlay">{{ demoPlayLabel }}</button>
-        <button class="btn btn-ghost" type="button" @click="demoReset">Reset</button>
-
-        <div class="pill subtle">
-          <span class="label">Quality</span>
-          <select v-model="quality" class="select select-compact" aria-label="Quality">
-            <option value="low">Low</option>
-            <option value="med">Med</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-
-        <div class="pill subtle">
-          <span class="label">Labels</span>
-          <select v-model="labelsLod" class="select select-compact" aria-label="Labels">
-            <option value="off">Off</option>
-            <option value="selection">Selection</option>
-            <option value="neighbors">Neighbors</option>
-          </select>
-        </div>
-      </template>
-    </div>
+    <DemoHudBottom
+      v-model:quality="quality"
+      v-model:labelsLod="labelsLod"
+      :show-reset-view="showResetView"
+      :show-demo-controls="showDemoControls"
+      :playlist-playing="playlist.playing"
+      :can-demo-play="canDemoPlay"
+      :demo-play-label="demoPlayLabel"
+      :run-tx-once="runTxOnce"
+      :run-clearing-once="runClearingOnce"
+      :reset-view="resetView"
+      :demo-step-once="demoStepOnce"
+      :demo-toggle-play="demoTogglePlay"
+      :demo-reset="demoReset"
+    />
 
     <!-- Loading / error overlay (fail-fast, but non-intrusive) -->
     <div v-if="state.loading" class="overlay">Loading fixtures…</div>
@@ -1355,38 +856,15 @@ onUnmounted(() => {
       <div class="overlay-text mono">{{ state.error }}</div>
     </div>
 
-    <!-- Floating Labels (isolated layer for perf) -->
-    <div v-if="labelNodes.length" class="labels-layer">
-      <div
-        v-for="n in labelNodes"
-        :key="n.id"
-        class="node-label"
-        :style="{ transform: worldToCssTranslateNoScale(n.x, n.y) }"
-      >
-        <div class="node-label-inner" :style="{ borderColor: n.color, color: n.color }">{{ n.text }}</div>
-      </div>
-    </div>
-
-    <div class="floating-layer">
-      <div
-        v-for="fl in floatingLabelsViewFx"
-        :key="fl.id"
-        class="floating-label"
-        :style="{ transform: worldToCssTranslateNoScale(fl.x, fl.y) }"
-      >
-        <div
-          class="floating-label-inner"
-          :class="{ 'is-glow': fl.glow > 0.05 }"
-          :style="{ color: fl.color, '--glow': String(fl.glow) }"
-        >
-          {{ fl.text }}
-        </div>
-      </div>
-    </div>
+    <LabelsOverlayLayers
+      :label-nodes="labelNodes"
+      :floating-labels="floatingLabelsViewFx"
+      :world-to-css-translate-no-scale="worldToCssTranslateNoScale"
+    />
   </div>
 </template>
 
-<style scoped>
+<style>
 .root {
   position: relative;
   width: 100vw;

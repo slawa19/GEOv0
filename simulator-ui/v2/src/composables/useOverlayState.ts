@@ -1,5 +1,7 @@
 import { computed, reactive } from 'vue'
 
+import type { LayoutNodeLike as BaseLayoutNodeLike } from '../types/layout'
+
 export type HoveredEdgeState = {
   key: string | null
   fromId: string
@@ -21,7 +23,7 @@ export type FloatingLabel = {
 
 export type FloatingLabelView = { id: number; x: number; y: number; text: string; color: string }
 
-export type LayoutNodeLike = { __x: number; __y: number }
+export type LayoutNodeLike = BaseLayoutNodeLike
 
 type UseOverlayStateDeps<N extends LayoutNodeLike> = {
   getLayoutNodeById: (id: string) => N | undefined
@@ -50,8 +52,47 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
   const activeEdges = reactive(new Set<string>())
 
-  function addActiveEdge(key: string) {
+  const activeEdgeExpiresAtMsByKey = new Map<string, number>()
+  let lastActiveEdgePruneAtMs = 0
+
+  function addActiveEdge(key: string, ttlMs = 2000) {
+    const nowMs = deps.nowMs ? deps.nowMs() : performance.now()
+    const expiresAtMs = nowMs + Math.max(0, ttlMs)
+
     activeEdges.add(key)
+
+    // Touch for LRU (Map preserves insertion order).
+    activeEdgeExpiresAtMsByKey.delete(key)
+    activeEdgeExpiresAtMsByKey.set(key, expiresAtMs)
+  }
+
+  function pruneActiveEdges(nowMs: number) {
+    // Keeps activeEdges bounded over long sessions.
+    const pruneEveryMs = 250
+    const maxEntries = 2500
+    if (activeEdgeExpiresAtMsByKey.size === 0) return
+
+    // Throttle only when the map is large; small maps are cheap and should prune immediately.
+    if (activeEdgeExpiresAtMsByKey.size > 500 && nowMs - lastActiveEdgePruneAtMs < pruneEveryMs) return
+    lastActiveEdgePruneAtMs = nowMs
+
+    for (const [k, exp] of activeEdgeExpiresAtMsByKey) {
+      if (nowMs < exp) continue
+      activeEdgeExpiresAtMsByKey.delete(k)
+      activeEdges.delete(k)
+    }
+
+    if (activeEdgeExpiresAtMsByKey.size > maxEntries) {
+      // Drop oldest entries (Map preserves insertion order).
+      const overflow = activeEdgeExpiresAtMsByKey.size - maxEntries
+      let dropped = 0
+      for (const k of activeEdgeExpiresAtMsByKey.keys()) {
+        activeEdgeExpiresAtMsByKey.delete(k)
+        activeEdges.delete(k)
+        dropped++
+        if (dropped >= overflow) break
+      }
+    }
   }
 
   const floatingLabels = reactive<FloatingLabel[]>([])
@@ -178,6 +219,7 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
   function resetOverlays() {
     activeEdges.clear()
+    activeEdgeExpiresAtMsByKey.clear()
     deps.setFlash(0)
     deps.resetFxState()
   }
@@ -188,6 +230,7 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
     activeEdges,
     addActiveEdge,
+    pruneActiveEdges,
 
     floatingLabels,
     pushFloatingLabel,

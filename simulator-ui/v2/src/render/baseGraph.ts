@@ -1,10 +1,11 @@
 import type { GraphLink, GraphNode } from '../types'
+import type { LayoutLink } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
 import { getLinkTermination } from './linkGeometry'
 import { drawNodeShape, fillForNode, sizeForNode, type LayoutNode } from './nodePainter'
 
-export type LayoutLink = GraphLink & { __key: string }
+export type { LayoutLink } from '../types/layout'
 
 function linkWidthPx(l: GraphLink, mapping: VizMapping): number {
   const k = String(l.viz_width_key ?? 'hairline')

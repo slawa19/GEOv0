@@ -2,6 +2,29 @@ import { describe, expect, it } from 'vitest'
 import { useOverlayState } from './useOverlayState'
 
 describe('useOverlayState', () => {
+  it('activeEdges supports TTL pruning', () => {
+    let now = 0
+
+    const overlay = useOverlayState({
+      getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
+      sizeForNode: () => ({ w: 40, h: 40 }),
+      getCameraZoom: () => 1,
+      setFlash: () => undefined,
+      resetFxState: () => undefined,
+      nowMs: () => now,
+    })
+
+    overlay.addActiveEdge('A->B', 10)
+    overlay.addActiveEdge('B->C', 100)
+    expect(overlay.activeEdges.has('A->B')).toBe(true)
+    expect(overlay.activeEdges.has('B->C')).toBe(true)
+
+    now = 20
+    overlay.pruneActiveEdges(now)
+    expect(overlay.activeEdges.has('A->B')).toBe(false)
+    expect(overlay.activeEdges.has('B->C')).toBe(true)
+  })
+
   it('pushFloatingLabel respects throttleKey/throttleMs', () => {
     let now = 0
 

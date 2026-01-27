@@ -1,6 +1,9 @@
 import { reactive } from 'vue'
 
-export type LayoutNodeLike = { __x: number; __y: number }
+import type { LayoutNodeLike as BaseLayoutNodeLike } from '../types/layout'
+import { clamp } from '../utils/math'
+
+export type LayoutNodeLike = BaseLayoutNodeLike
 
 type UseCameraDeps<N extends LayoutNodeLike> = {
   canvasEl: { value: HTMLCanvasElement | null }
@@ -12,8 +15,6 @@ type UseCameraDeps<N extends LayoutNodeLike> = {
 
   isTestMode: () => boolean
 }
-
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
 type RectLike = { left: number; top: number }
 

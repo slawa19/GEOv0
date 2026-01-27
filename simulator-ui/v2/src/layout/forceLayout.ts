@@ -1,11 +1,13 @@
-import type { GraphLink, GraphNode, GraphSnapshot } from '../types'
+import type { GraphSnapshot } from '../types'
+import type { LayoutLink, LayoutNode } from '../types/layout'
 import { sizeForNode } from '../render/nodePainter'
 import { fnv1a } from '../utils/hash'
+import { clamp } from '../utils/math'
+import { keyEdge } from '../utils/edgeKey'
 
 export type LayoutMode = 'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'
 
-export type LayoutNode = GraphNode & { __x: number; __y: number }
-export type LayoutLink = GraphLink & { __key: string }
+export type { LayoutLink, LayoutNode } from '../types/layout'
 
 type ForceGroupAnchors = Map<string, { x: number; y: number }>
 
@@ -22,14 +24,6 @@ export type ForceLayoutOptions = {
   centerStrength?: number
   linkDistanceScaleSameGroup?: number
   linkDistanceScaleCrossGroup?: number
-}
-
-function keyEdge(a: string, b: string) {
-  return `${a}→${b}`
-}
-
-function clamp(v: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, v))
 }
 
 function computeOrganicGroupAnchors(opts: {

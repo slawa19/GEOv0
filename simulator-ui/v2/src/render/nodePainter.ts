@@ -1,9 +1,10 @@
 import type { GraphNode } from '../types'
+import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
 import { roundedRectPath } from './roundedRect'
 
-export type LayoutNode = GraphNode & { __x: number; __y: number }
+export type { LayoutNode } from '../types/layout'
 
 const sizeCache = new WeakMap<GraphNode, { key: string; size: { w: number; h: number } }>()
 

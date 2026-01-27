@@ -1,9 +1,11 @@
 import type { ComputedRef, Ref } from 'vue'
 import { computed } from 'vue'
 import type { GraphNode } from '../types'
+import type { LayoutLinkLike as BaseLayoutLinkLike, LayoutNodeWithId as BaseLayoutNodeWithId } from '../types/layout'
+import { clamp } from '../utils/math'
 
-type LayoutNodeLike = { id: string; __x: number; __y: number }
-type LayoutLinkLike = { source: string; target: string }
+type LayoutNodeLike = BaseLayoutNodeWithId
+type LayoutLinkLike = BaseLayoutLinkLike
 
 type UseNodeCardDeps = {
   hostEl: Ref<HTMLElement | null>
@@ -24,10 +26,6 @@ type UseNodeCardReturn = {
 
 export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
   const selectedNode = computed(() => deps.getNodeById(deps.selectedNodeId.value))
-
-  function clamp(v: number, lo: number, hi: number) {
-    return Math.max(lo, Math.min(hi, v))
-  }
 
   /**
    * Determine edge direction quadrant relative to node center.

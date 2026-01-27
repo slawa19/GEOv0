@@ -1,12 +1,14 @@
 import type { Ref } from 'vue'
 
+import type { GraphSnapshot } from '../types'
+
 type Quality = 'low' | 'med' | 'high'
 
 type UseRenderLoopDeps = {
   canvasEl: Ref<HTMLCanvasElement | null>
   fxCanvasEl: Ref<HTMLCanvasElement | null>
 
-  getSnapshot: () => { palette?: any } | null
+  getSnapshot: () => GraphSnapshot | null
   getLayout: () => { w: number; h: number; nodes: any[]; links: any[] }
   getCamera: () => { panX: number; panY: number; zoom: number }
 
@@ -17,6 +19,9 @@ type UseRenderLoopDeps = {
   setFlash: (v: number) => void
 
   pruneFloatingLabels: (nowMs: number) => void
+
+  // Optional: keep overlay sets bounded over long sessions.
+  pruneActiveEdges?: (nowMs: number) => void
 
   drawBaseGraph: (ctx: CanvasRenderingContext2D, opts: any) => any
   renderFxFrame: (opts: any) => void
@@ -52,6 +57,34 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
   function clamp01(v: number) {
     return Math.max(0, Math.min(1, v))
+  }
+
+  function pruneFxToMaxParticles(maxParticles: number) {
+    const fxState = deps.fxState as any
+    if (!fxState) return
+
+    const sparks = Array.isArray(fxState.sparks) ? fxState.sparks : null
+    const edgePulses = Array.isArray(fxState.edgePulses) ? fxState.edgePulses : null
+    const nodeBursts = Array.isArray(fxState.nodeBursts) ? fxState.nodeBursts : null
+    if (!sparks && !edgePulses && !nodeBursts) return
+
+    const max = Math.max(0, Math.floor(maxParticles))
+    const total = (sparks?.length ?? 0) + (edgePulses?.length ?? 0) + (nodeBursts?.length ?? 0)
+    if (total <= max) return
+
+    let overflow = total - max
+
+    const dropFront = (arr: any[] | null) => {
+      if (!arr || overflow <= 0) return
+      const d = Math.min(arr.length, overflow)
+      if (d > 0) arr.splice(0, d)
+      overflow -= d
+    }
+
+    // Prefer dropping oldest sparks first — they are the most numerous.
+    dropFront(sparks)
+    dropFront(edgePulses)
+    dropFront(nodeBursts)
   }
 
   function renderFrame(nowMs: number) {
@@ -119,7 +152,14 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     if (deps.beforeDraw) deps.beforeDraw(nowMs)
 
+    if (deps.pruneActiveEdges) deps.pruneActiveEdges(nowMs)
     deps.pruneFloatingLabels(nowMs)
+
+    // Optional hard cap for long-running sessions (reserved in spec).
+    const maxParticles = snap.limits?.max_particles
+    if (typeof maxParticles === 'number' && Number.isFinite(maxParticles)) {
+      pruneFxToMaxParticles(maxParticles)
+    }
 
     const linkLod = deps.getLinkLod ? deps.getLinkLod() : 'full'
     const pos = deps.drawBaseGraph(ctx, {

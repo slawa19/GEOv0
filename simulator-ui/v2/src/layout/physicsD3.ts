@@ -12,8 +12,36 @@ import {
 
 import type { LayoutLink, LayoutNode } from './forceLayout'
 import { sizeForNode } from '../render/nodePainter'
+import { clamp } from '../utils/math'
 
 export type PhysicsQuality = 'low' | 'med' | 'high'
+
+const DEFAULT_SUBSTEPS_BY_QUALITY: Record<PhysicsQuality, number> = {
+  low: 1,
+  med: 1,
+  high: 2,
+}
+
+// Values based on v1 (GeoSimulatorMesh.vue), adjusted for baseline-started v2.
+// Increased charge and alpha for stronger repulsion and longer "life".
+const PHYSICS_DEFAULTS = {
+  CHARGE_STRENGTH: -150,
+
+  MIN_LINK_DISTANCE_PX: 80,
+  MAX_LINK_DISTANCE_PX: 150,
+  LINK_DISTANCE_K_MULTIPLIER: 1.1,
+
+  LINK_STRENGTH: 0.3,
+  CENTER_STRENGTH: 0.03,
+  COLLISION_PADDING_PX: 8,
+
+  ALPHA_START: 0.8,
+  ALPHA_MIN: 0.006,
+  ALPHA_DECAY: 0.032,
+  VELOCITY_DECAY: 0.82,
+
+  VIEWPORT_MARGIN_PX: 30,
+} as const
 
 export type PhysicsConfig = {
   width: number
@@ -57,26 +85,27 @@ export function createDefaultConfig(opts: {
   const area = Math.max(1, width) * Math.max(1, height)
   const k = Math.sqrt(area / Math.max(1, nodeCount))
 
-  const substeps = quality === 'high' ? 2 : 1
-  const margin = 30
+  const substeps = DEFAULT_SUBSTEPS_BY_QUALITY[quality]
+  const margin = PHYSICS_DEFAULTS.VIEWPORT_MARGIN_PX
 
-  // Values based on v1 (GeoSimulatorMesh.vue), adjusted for baseline-started v2.
-  // Increased charge and alpha for stronger repulsion and longer "life"
   return {
     width,
     height,
     quality,
 
-    chargeStrength: -150,  // Stronger repulsion (was -80)
-    linkDistance: Math.max(80, Math.min(150, k * 1.1)),  // Longer links (was 60-120)
-    linkStrength: 0.3,     // Weaker springs for more organic feel (was 0.4)
-    centerStrength: 0.03,  // Weaker centering (was 0.05)
-    collisionPadding: 8,   // Larger padding (was 3)
+    chargeStrength: PHYSICS_DEFAULTS.CHARGE_STRENGTH, // Stronger repulsion (was -80)
+    linkDistance: Math.max(
+      PHYSICS_DEFAULTS.MIN_LINK_DISTANCE_PX,
+      Math.min(PHYSICS_DEFAULTS.MAX_LINK_DISTANCE_PX, k * PHYSICS_DEFAULTS.LINK_DISTANCE_K_MULTIPLIER),
+    ), // Longer links (was 60-120)
+    linkStrength: PHYSICS_DEFAULTS.LINK_STRENGTH, // Weaker springs for more organic feel (was 0.4)
+    centerStrength: PHYSICS_DEFAULTS.CENTER_STRENGTH, // Weaker centering (was 0.05)
+    collisionPadding: PHYSICS_DEFAULTS.COLLISION_PADDING_PX, // Larger padding (was 3)
 
-    alphaStart: 0.8,       // "Hot" start (was 0.3)
-    alphaMin: 0.006,       // Stop earlier to avoid long drifting
-    alphaDecay: 0.032,     // Faster decay = less "floating"
-    velocityDecay: 0.82,   // More friction = heavier feel
+    alphaStart: PHYSICS_DEFAULTS.ALPHA_START, // "Hot" start (was 0.3)
+    alphaMin: PHYSICS_DEFAULTS.ALPHA_MIN, // Stop earlier to avoid long drifting
+    alphaDecay: PHYSICS_DEFAULTS.ALPHA_DECAY, // Faster decay = less "floating"
+    velocityDecay: PHYSICS_DEFAULTS.VELOCITY_DECAY, // More friction = heavier feel
 
     margin,
     substeps,
@@ -97,10 +126,6 @@ export type PhysicsEngine = {
   unpin: (nodeId: string) => void
 
   updateViewport: (w: number, h: number) => void
-}
-
-function clamp(v: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, v))
 }
 
 export function createPhysicsEngine(opts: {
@@ -132,8 +157,13 @@ export function createPhysicsEngine(opts: {
   const nodeById = new Map<string, D3Node>()
   for (const n of d3Nodes) nodeById.set(n.id, n)
 
-  const isolateCenterStrength = Math.max(0.12, config.centerStrength)
-  const isolateChargeFactor = 0.22
+  const ISOLATE_CENTER_STRENGTH_MIN = 0.12
+  const ISOLATE_CHARGE_FACTOR = 0.22
+  const COLLIDE_STRENGTH = 0.7
+  const NODE_RADIUS_MIN_PX = 8
+  const NODE_SIZE_TO_RADIUS_MULTIPLIER = 0.56
+
+  const isolateCenterStrength = Math.max(ISOLATE_CENTER_STRENGTH_MIN, config.centerStrength)
 
   const simulation: Simulation<D3Node, D3Link> = forceSimulation(d3Nodes)
     .alpha(config.alphaStart)
@@ -144,7 +174,7 @@ export function createPhysicsEngine(opts: {
       'charge',
       forceManyBody<D3Node>().strength((n) => {
         const deg = degreeById.get(n.id) ?? 0
-        if (deg === 0) return config.chargeStrength * isolateChargeFactor
+        if (deg === 0) return config.chargeStrength * ISOLATE_CHARGE_FACTOR
         return config.chargeStrength
       }),
     )
@@ -175,10 +205,10 @@ export function createPhysicsEngine(opts: {
       forceCollide<D3Node>()
         .radius((n) => {
           const s = sizeForNode(n)
-          const r = Math.max(8, Math.max(s.w, s.h) * 0.56)
+          const r = Math.max(NODE_RADIUS_MIN_PX, Math.max(s.w, s.h) * NODE_SIZE_TO_RADIUS_MULTIPLIER)
           return r + config.collisionPadding
         })
-        .strength(0.7),
+        .strength(COLLIDE_STRENGTH),
     )
     .stop()
 

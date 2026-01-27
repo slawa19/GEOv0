@@ -30,6 +30,45 @@ function asOptionalNumber(value: unknown): number | undefined {
   return value
 }
 
+function asOptionalFiniteNumber(value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return value
+}
+
+function asSnapshotPalette(value: unknown, label: string): GraphSnapshot['palette'] {
+  if (value === undefined) return undefined
+  if (value === null) return undefined
+  if (!isRecord(value)) throw new Error(`${label} must be object`)
+
+  const out: NonNullable<GraphSnapshot['palette']> = {}
+  for (const [k, v] of Object.entries(value)) {
+    if (!isRecord(v)) throw new Error(`${label}.${k} must be object`)
+    const color = asString(v.color, `${label}.${k}.color`)
+    const labelText = asOptionalString(v.label)
+    out[k] = labelText ? { color, label: labelText } : { color }
+  }
+  return out
+}
+
+function asSnapshotLimits(value: unknown, label: string): GraphSnapshot['limits'] {
+  if (value === undefined) return undefined
+  if (value === null) return undefined
+  if (!isRecord(value)) throw new Error(`${label} must be object`)
+
+  const max_nodes = asOptionalFiniteNumber(value.max_nodes)
+  const max_links = asOptionalFiniteNumber(value.max_links)
+  const max_particles = asOptionalFiniteNumber(value.max_particles)
+
+  if (max_nodes === undefined && max_links === undefined && max_particles === undefined) return undefined
+
+  return {
+    max_nodes,
+    max_links,
+    max_particles,
+  }
+}
+
 function asFiniteNumber(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be a finite number`)
   return value
@@ -220,9 +259,9 @@ export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapsho
       id: asOptionalString(l.id),
       source,
       target,
-      trust_limit: l.trust_limit as any,
-      used: l.used as any,
-      available: l.available as any,
+      trust_limit: asOptionalAnyNumberOrString(l.trust_limit),
+      used: asOptionalAnyNumberOrString(l.used),
+      available: asOptionalAnyNumberOrString(l.available),
       status: asOptionalString(l.status),
       viz_color_key: asOptionalNullableString(l.viz_color_key),
       viz_width_key: vw,
@@ -235,8 +274,8 @@ export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapsho
     generated_at,
     nodes,
     links,
-    palette: isRecord(raw.palette) ? (raw.palette as any) : undefined,
-    limits: isRecord(raw.limits) ? (raw.limits as any) : undefined,
+    palette: asSnapshotPalette(raw.palette, `palette (${sourcePath})`),
+    limits: asSnapshotLimits(raw.limits, `limits (${sourcePath})`),
   }
 }
 

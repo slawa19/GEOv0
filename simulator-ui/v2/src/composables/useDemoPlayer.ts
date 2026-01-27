@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import type { ClearingDoneEvent, ClearingPlanEvent, DemoEvent, TxUpdatedEvent } from '../types'
+import type { LayoutNodeWithId as BaseLayoutNodeWithId } from '../types/layout'
 
 const CLEARING_ANIMATION = {
   microTtlMs: 780,
@@ -14,7 +15,7 @@ const CLEARING_ANIMATION = {
 
 export type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
 
-export type LayoutNode = { id: string; __x: number; __y: number }
+export type LayoutNode = BaseLayoutNodeWithId
 
 export type FloatingLabelOpts = {
   id?: number

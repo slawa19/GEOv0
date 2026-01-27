@@ -1,7 +1,9 @@
 import { computed } from 'vue'
 
-export type LayoutNodeLike = { id: string; __x: number; __y: number }
-export type LayoutLinkLike = { __key: string; source: string; target: string }
+import type { LayoutLinkLike as BaseLayoutLinkLike, LayoutNodeWithId as BaseLayoutNodeWithId } from '../types/layout'
+
+export type LayoutNodeLike = BaseLayoutNodeWithId
+export type LayoutLinkLike = BaseLayoutLinkLike
 
 export type EdgeSeg = { key: string; fromId: string; toId: string; ax: number; ay: number; bx: number; by: number }
 
