@@ -57,6 +57,47 @@ describe('useDemoPlayer', () => {
     expect(deps.resetOverlays).toHaveBeenCalledTimes(1)
   })
 
+  it('runTxEvent applies intensity_key to spark thickness', () => {
+    const deps = {
+      applyPatches: vi.fn(),
+      spawnSparks: vi.fn(),
+      spawnNodeBursts: vi.fn(),
+      spawnEdgePulses: vi.fn(),
+      pushFloatingLabel: vi.fn(),
+      resetOverlays: vi.fn(),
+      fxColorForNode: vi.fn((id: string, fallback: string) => fallback),
+      addActiveEdge: vi.fn(),
+      scheduleTimeout: vi.fn(() => 1),
+      clearScheduledTimeouts: vi.fn(),
+      getLayoutNode: vi.fn((id: string) => ({ id, __x: 0, __y: 0 })),
+      isTestMode: () => false,
+      isWebDriver: false,
+      effectiveEq: () => 'UAH',
+      keyEdge: (a: string, b: string) => `${a}→${b}`,
+      seedFn: (s: string) => s.length,
+      edgeDirCaption: () => 'from→to',
+      txSparkCore: '#fff',
+      txSparkTrail: '#0ff',
+      clearingFlashFallback: '#fbbf24',
+    } as const
+
+    const player = useDemoPlayer(deps)
+
+    player.runTxEvent({
+      event_id: 'e2',
+      ts: 't',
+      type: 'tx.updated',
+      equivalent: 'UAH',
+      ttl_ms: 1200,
+      intensity_key: 'hi',
+      edges: [{ from: 'A', to: 'B' }],
+    })
+
+    expect(deps.spawnSparks).toHaveBeenCalledTimes(1)
+    const call = deps.spawnSparks.mock.calls[0]![0]
+    expect(call.thickness).toBeGreaterThan(1.0)
+  })
+
   it('runClearingStep skips edge pulses for edges with beam sparks (avoid double glow)', () => {
     const scheduled: Array<{ ms: number; fn: () => void }> = []
 
@@ -170,6 +211,58 @@ describe('useDemoPlayer', () => {
     expect(deps.spawnEdgePulses).toHaveBeenCalledWith(
       expect.objectContaining({
         edges: [{ from: 'C', to: 'D' }],
+      }),
+    )
+  })
+
+  it('runClearingStep applies intensity_key to highlight edge pulses', () => {
+    const deps = {
+      applyPatches: vi.fn(),
+      spawnSparks: vi.fn(),
+      spawnNodeBursts: vi.fn(),
+      spawnEdgePulses: vi.fn(),
+      pushFloatingLabel: vi.fn(),
+      resetOverlays: vi.fn(),
+      fxColorForNode: vi.fn((id: string, fallback: string) => fallback),
+      addActiveEdge: vi.fn(),
+      scheduleTimeout: vi.fn(() => 1),
+      clearScheduledTimeouts: vi.fn(),
+      getLayoutNode: vi.fn((id: string) => ({ id, __x: 0, __y: 0 })),
+      isTestMode: () => false,
+      isWebDriver: false,
+      effectiveEq: () => 'UAH',
+      keyEdge: (a: string, b: string) => `${a}→${b}`,
+      seedFn: (s: string) => s.length,
+      edgeDirCaption: () => 'from→to',
+      txSparkCore: '#fff',
+      txSparkTrail: '#0ff',
+      clearingFlashFallback: '#fbbf24',
+    } as const
+
+    const player = useDemoPlayer(deps)
+
+    const plan: ClearingPlanEvent = {
+      event_id: 'p3',
+      ts: 't',
+      type: 'clearing.plan',
+      equivalent: 'UAH',
+      plan_id: 'p',
+      steps: [
+        {
+          at_ms: 0,
+          intensity_key: 'hi',
+          highlight_edges: [{ from: 'C', to: 'D' }],
+          particles_edges: [{ from: 'A', to: 'B' }],
+        },
+      ],
+    }
+
+    player.runClearingStep(0, plan, null)
+
+    expect(deps.spawnEdgePulses).toHaveBeenCalledTimes(1)
+    expect(deps.spawnEdgePulses).toHaveBeenCalledWith(
+      expect.objectContaining({
+        countPerEdge: 2,
       }),
     )
   })

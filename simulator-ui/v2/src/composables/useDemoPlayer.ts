@@ -13,6 +13,33 @@ const CLEARING_ANIMATION = {
   labelThrottleMs: 80,
 } as const
 
+function intensityScale(intensityKey?: string): number {
+  const k = String(intensityKey ?? '').trim().toLowerCase()
+  if (!k) return 1
+
+  // Spec uses a loose enum (examples include: muted/active/hi and sometimes mid).
+  // Keep this conservative to avoid overblown visuals and perf regressions.
+  switch (k) {
+    case 'muted':
+    case 'low':
+      return 0.75
+    case 'active':
+    case 'mid':
+    case 'med':
+      return 1
+    case 'hi':
+    case 'high':
+      return 1.35
+    default:
+      return 1
+  }
+}
+
+function intensityCountPerEdge(intensityKey?: string): number {
+  const s = intensityScale(intensityKey)
+  return s >= 1.3 ? 2 : 1
+}
+
 export type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
 
 export type LayoutNode = BaseLayoutNodeWithId
@@ -136,6 +163,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     }
 
     const ttl = Math.max(250, evt.ttl_ms || 1200)
+    const k = intensityScale(evt.intensity_key)
 
     deps.spawnSparks({
       edges: evt.edges,
@@ -143,7 +171,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       ttlMs: ttl,
       colorCore: deps.txSparkCore,
       colorTrail: deps.txSparkTrail,
-      thickness: 1.0,
+      thickness: 1.0 * k,
       kind: 'beam',
       seedPrefix: `tx:${deps.effectiveEq()}`,
       countPerEdge: 1,
@@ -237,6 +265,9 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
 
     const edges = step.particles_edges ?? []
 
+    const stepIntensityKey = step.intensity_key
+    const k = intensityScale(stepIntensityKey)
+
     // Build set of particle edge keys to avoid double-animation.
     // Beam sparks already render edge glow, so don't add EdgePulses for same edges.
     const particleEdgeKeys = new Set(edges.map(e => deps.keyEdge(e.from, e.to)))
@@ -250,9 +281,9 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           nowMs: performance.now(),
           durationMs: CLEARING_ANIMATION.highlightPulseMs,
           color: clearingGold,
-          thickness: 1.0,
+          thickness: 1.0 * k,
           seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
-          countPerEdge: 1,
+          countPerEdge: intensityCountPerEdge(stepIntensityKey),
           keyEdge: deps.keyEdge,
           seedFn: deps.seedFn,
           isTestMode: false,
@@ -284,7 +315,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           ttlMs: microTtlMs,
           colorCore: '#ffffff',
           colorTrail: clearingGold,
-          thickness: 1.1,
+          thickness: 1.1 * k,
           kind: 'beam',
           seedPrefix: `clearing:micro:${deps.effectiveEq()}:${step.at_ms}:${i}`,
           countPerEdge: 1,
@@ -415,6 +446,9 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       deps.scheduleTimeout(() => {
         if (runId !== clearingRunSeq) return
 
+        const stepIntensityKey = step.intensity_key
+        const k = intensityScale(stepIntensityKey)
+
         const particleEdges = step.particles_edges ?? []
 
         // Build set of particle edge keys to avoid double-animation.
@@ -430,9 +464,9 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
               nowMs: performance.now(),
               durationMs: CLEARING_ANIMATION.highlightPulseMs,
               color: clearingGold,
-              thickness: 1.0,
+              thickness: 1.0 * k,
               seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
-              countPerEdge: 1,
+              countPerEdge: intensityCountPerEdge(stepIntensityKey),
               keyEdge: deps.keyEdge,
               seedFn: deps.seedFn,
               isTestMode: false,
@@ -441,7 +475,64 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         }
 
         for (let i = 0; i < particleEdges.length; i++) {
-          animateEdge(particleEdges[i]!, i * microGapMs, step.at_ms, i)
+          const e = particleEdges[i]!
+          const delayMs = i * microGapMs
+          // Inline version of animateEdge so we can apply intensity scaling.
+          deps.scheduleTimeout(() => {
+            if (runId !== clearingRunSeq) return
+
+            deps.spawnNodeBursts({
+              nodeIds: [e.from],
+              nowMs: performance.now(),
+              durationMs: CLEARING_ANIMATION.sourceBurstMs,
+              color: deps.fxColorForNode(e.from, clearingGold),
+              kind: 'tx-impact',
+              seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${step.at_ms}:${i}`,
+              seedFn: deps.seedFn,
+              isTestMode: false,
+            })
+
+            deps.spawnSparks({
+              edges: [e],
+              nowMs: performance.now(),
+              ttlMs: microTtlMs,
+              colorCore: '#ffffff',
+              colorTrail: clearingGold,
+              thickness: 1.1 * k,
+              kind: 'beam',
+              seedPrefix: `clearing:micro:${deps.effectiveEq()}:${step.at_ms}:${i}`,
+              countPerEdge: 1,
+              keyEdge: deps.keyEdge,
+              seedFn: deps.seedFn,
+              isTestMode: fxTestMode,
+            })
+          }, delayMs)
+
+          deps.scheduleTimeout(() => {
+            if (runId !== clearingRunSeq) return
+
+            deps.spawnNodeBursts({
+              nodeIds: [e.to],
+              nowMs: performance.now(),
+              durationMs: CLEARING_ANIMATION.targetBurstMs,
+              color: deps.fxColorForNode(e.to, clearingGold),
+              kind: 'tx-impact',
+              seedPrefix: `clearing:impact:${deps.effectiveEq()}:${step.at_ms}:${i}`,
+              seedFn: deps.seedFn,
+              isTestMode: false,
+            })
+
+            deps.pushFloatingLabel({
+              nodeId: e.to,
+              id: Math.floor(performance.now()) + deps.seedFn(`lbl:${step.at_ms}:${i}:${deps.keyEdge(e.from, e.to)}`),
+              text: `${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
+              color: deps.fxColorForNode(e.to, clearingGold),
+              ttlMs: labelLifeMs,
+              offsetYPx: -6,
+              throttleKey: `clearing:${e.to}`,
+              throttleMs: CLEARING_ANIMATION.labelThrottleMs,
+            })
+          }, delayMs + microTtlMs)
         }
       }, Math.max(0, step.at_ms))
     }
