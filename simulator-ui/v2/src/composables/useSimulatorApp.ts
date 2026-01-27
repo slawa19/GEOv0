@@ -1,38 +1,32 @@
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 
 import { loadEvents, loadSnapshot } from '../fixtures'
 import { assertPlaylistEdgesExistInSnapshot } from '../demo/playlistValidation'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode, sizeForNode } from '../render/nodePainter'
-import type { GraphSnapshot } from '../types'
+import type { ClearingDoneEvent, ClearingPlanEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
 import type { SceneId } from '../scenes'
 import { VIZ_MAPPING } from '../vizMapping'
-import { clamp } from '../utils/math'
 
-import { createAppComputeLayout } from './useAppComputeLayout'
-import { useAppDemoControls } from './useAppDemoControls'
 import { useAppDemoPlayerSetup } from './useAppDemoPlayerSetup'
-import { useAppFxOverlays } from './useAppFxOverlays'
 import { useAppLifecycle } from './useAppLifecycle'
-import { useAppPhysicsAndPinning } from './useAppPhysicsAndPinning'
-import { useAppRenderLoop } from './useAppRenderLoop'
-import { useAppSceneState } from './useAppSceneState'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
 import { useAppViewAndNodeCard } from './useAppViewAndNodeCard'
 import { useCanvasInteractions } from './useCanvasInteractions'
-import { useEdgeHover } from './useEdgeHover'
-import { useEdgeTooltip } from './useEdgeTooltip'
-import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
 import { useLabelNodes } from './useLabelNodes'
-import { useLayoutCoordinator } from './useLayoutCoordinator'
 import { useLayoutIndex } from './useLayoutIndex'
 import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
-import { usePicking } from './usePicking'
 import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
 import { useAppDragToPinAndPreview } from './useAppDragToPinAndPreview'
+import { useNodeSelectionAndCardOpen } from './useNodeSelectionAndCardOpen'
+import { useAppSceneAndDemo } from './useAppSceneAndDemo'
+import { useAppPickingAndHover } from './useAppPickingAndHover'
+import { useAppFxAndRender } from './useAppFxAndRender'
+import { useAppPhysicsAndPinningWiring } from './useAppPhysicsAndPinningWiring'
+import { useAppLayoutWiring } from './useAppLayoutWiring'
 
 export function useSimulatorApp() {
   const eq = ref('UAH')
@@ -55,31 +49,27 @@ export function useSimulatorApp() {
     sourcePath: '' as string,
     eventsPath: '' as string,
     snapshot: null as GraphSnapshot | null,
-    demoTxEvents: [] as any[],
-    demoClearingPlan: null as any,
-    demoClearingDone: null as any,
+    demoTxEvents: [] as TxUpdatedEvent[],
+    demoClearingPlan: null as ClearingPlanEvent | null,
+    demoClearingDone: null as ClearingDoneEvent | null,
     selectedNodeId: null as string | null,
     flash: 0 as number,
   })
 
-  const isNodeCardOpen = ref(false)
-
-  function selectNode(id: string | null) {
-    state.selectedNodeId = id
-    // Single selection should not implicitly open the card.
-    isNodeCardOpen.value = false
-  }
-
-  function setNodeCardOpen(open: boolean) {
-    isNodeCardOpen.value = open && !!state.selectedNodeId
-  }
-
-  watch(
-    () => state.selectedNodeId,
-    (id) => {
-      if (!id) isNodeCardOpen.value = false
+  const selectedNodeIdRef = computed<string | null>({
+    get: () => state.selectedNodeId,
+    set: (id) => {
+      state.selectedNodeId = id
     },
-  )
+  })
+
+  const selectionAndCard = useNodeSelectionAndCardOpen({
+    selectedNodeId: selectedNodeIdRef,
+  })
+
+  const isNodeCardOpen = selectionAndCard.isNodeCardOpen
+  const selectNode = selectionAndCard.selectNode
+  const setNodeCardOpen = selectionAndCard.setNodeCardOpen
 
   const canvasEl = ref<HTMLCanvasElement | null>(null)
   const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
@@ -118,19 +108,9 @@ export function useSimulatorApp() {
   const showResetView = uiDerived.showResetView
   const overlayLabelScale = uiDerived.overlayLabelScale
 
-  const baselineLayoutPos = new Map<string, { x: number; y: number }>()
-  const pinnedPos = reactive(new Map<string, { x: number; y: number }>())
-
   const snapshotRef = computed(() => state.snapshot)
 
-  let computeLayoutImpl: ((snapshot: GraphSnapshot, w: number, h: number, mode: LayoutMode) => void) | null = null
-
-  function computeLayout(snapshot: GraphSnapshot, w: number, h: number, mode: LayoutMode) {
-    if (!computeLayoutImpl) throw new Error('computeLayout called before computeLayoutImpl init')
-    computeLayoutImpl(snapshot, w, h, mode)
-  }
-
-  const layoutCoordinator = useLayoutCoordinator<LayoutNode, LayoutLink, LayoutMode, GraphSnapshot>({
+  const layoutWiring = useAppLayoutWiring({
     canvasEl,
     fxCanvasEl,
     hostEl,
@@ -139,8 +119,10 @@ export function useSimulatorApp() {
     dprClamp,
     isTestMode,
     getSourcePath: () => state.sourcePath,
-    computeLayout,
+    computeLayoutForMode,
   })
+
+  const layoutCoordinator = layoutWiring.layoutCoordinator
 
   const layout = layoutCoordinator.layout
   const resizeAndLayout = layoutCoordinator.resizeAndLayout
@@ -209,61 +191,72 @@ export function useSimulatorApp() {
     getSelectedNodeId: () => state.selectedNodeId,
   }).selectedNodeEdgeStats
 
-  const fxOverlays = useAppFxOverlays<LayoutNode>({
+  const fxAndRender = useAppFxAndRender({
+    canvasEl,
+    fxCanvasEl,
+    hostEl,
+    getSnapshot: () => state.snapshot,
+    getLayout: () => ({
+      w: layout.w,
+      h: layout.h,
+      nodes: layout.nodes,
+      links: layout.links,
+    }),
+    getLayoutNodes: () => layout.nodes,
     getLayoutNodeById: (id) => getLayoutNodeById(id) ?? undefined,
+    getCamera: () => camera,
+    worldToScreen,
     sizeForNode,
-    getCameraZoom: () => camera.zoom,
+    isTestMode: () => isTestMode.value,
+    isWebDriver: () => isWebDriver,
+    getQuality: () => quality.value,
+    getFlash: () => state.flash,
     setFlash: (v) => {
       state.flash = v
     },
-    isWebDriver: () => isWebDriver,
-    getLayoutNodes: () => layout.nodes,
-    worldToScreen,
+    mapping: VIZ_MAPPING,
+    getSelectedNodeId: () => state.selectedNodeId,
+    getLinkLod: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? 'focus' : 'full'),
+    getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
+    beforeDraw: () => {
+      physics.tickAndSyncToLayout()
+    },
   })
 
-  const fxState = fxOverlays.fxState
-  const hoveredEdge = fxOverlays.hoveredEdge
-  const clearHoveredEdge = fxOverlays.clearHoveredEdge
-  const activeEdges = fxOverlays.activeEdges
-  const addActiveEdge = fxOverlays.addActiveEdge
-  const pruneActiveEdges = fxOverlays.pruneActiveEdges
-  const pushFloatingLabel = fxOverlays.pushFloatingLabel
-  const pruneFloatingLabels = fxOverlays.pruneFloatingLabels
-  const resetOverlays = fxOverlays.resetOverlays
-  const floatingLabelsViewFx = fxOverlays.floatingLabelsViewFx
-  const scheduleTimeout = fxOverlays.scheduleTimeout
-  const clearScheduledTimeouts = fxOverlays.clearScheduledTimeouts
+  const fxState = fxAndRender.fxState
+  const hoveredEdge = fxAndRender.hoveredEdge
+  const clearHoveredEdge = fxAndRender.clearHoveredEdge
+  const activeEdges = fxAndRender.activeEdges
+  const addActiveEdge = fxAndRender.addActiveEdge
+  const pruneActiveEdges = fxAndRender.pruneActiveEdges
+  const pushFloatingLabel = fxAndRender.pushFloatingLabel
+  const resetOverlays = fxAndRender.resetOverlays
+  const floatingLabelsViewFx = fxAndRender.floatingLabelsViewFx
+  const scheduleTimeout = fxAndRender.scheduleTimeout
+  const clearScheduledTimeouts = fxAndRender.clearScheduledTimeouts
+  const ensureRenderLoop = fxAndRender.ensureRenderLoop
+  const stopRenderLoop = fxAndRender.stopRenderLoop
+  const renderOnce = fxAndRender.renderOnce
 
-  const physicsAndPinning = useAppPhysicsAndPinning({
+  const physicsAndPinning = useAppPhysicsAndPinningWiring({
     isEnabled: () => !isTestMode.value,
     getLayoutNodes: () => layout.nodes,
     getLayoutLinks: () => layout.links,
     getQuality: () => quality.value,
-    getPinnedPos: () => pinnedPos,
-    pinnedPos,
-    baselineLayoutPos,
     getSelectedNodeId: () => state.selectedNodeId,
     getLayoutNodeById: (id) => getLayoutNodeById(id),
   })
 
   const physics = physicsAndPinning.physics
   const pinning = physicsAndPinning.pinning
+  const pinnedPos = physicsAndPinning.pinnedPos
   const isSelectedPinned = physicsAndPinning.isSelectedPinned
   const pinSelectedNode = physicsAndPinning.pinSelectedNode
   const unpinSelectedNode = physicsAndPinning.unpinSelectedNode
 
-  computeLayoutImpl = createAppComputeLayout<GraphSnapshot, LayoutMode, LayoutNode, LayoutLink>({
-    isTestMode: () => isTestMode.value,
-    computeLayoutForMode,
-    setLayout: (nodes, links) => {
-      layout.nodes = nodes
-      layout.links = links
-    },
-    onAfterLayout: (result, ctx) => {
-      pinning.captureBaseline(result.nodes)
-      pinning.reapplyPinnedToLayout()
-      physics.recreateForCurrentLayout({ w: ctx.w, h: ctx.h })
-    },
+  layoutWiring.initComputeLayout({
+    pinning,
+    physics,
   })
 
   const demoPlayerSetup = useAppDemoPlayerSetup({
@@ -299,77 +292,29 @@ export function useSimulatorApp() {
     fxColorForNode,
   }).labelNodes
 
-  const edgeTooltip = useEdgeTooltip({
+  const pickingAndHover = useAppPickingAndHover({
     hostEl,
-    hoveredEdge,
-    clamp,
-    getUnit: () => state.snapshot?.equivalent ?? effectiveEq.value,
-  })
-
-  const formatEdgeAmountText = edgeTooltip.formatEdgeAmountText
-  const edgeTooltipStyle = edgeTooltip.edgeTooltipStyle
-
-  const picking = usePicking({
+    canvasEl,
     getLayoutNodes: () => layout.nodes,
     getLayoutLinks: () => layout.links,
     getCameraZoom: () => camera.zoom,
-    sizeForNode,
     clientToScreen,
     screenToWorld,
-    isReady: () => !!hostEl.value && !!canvasEl.value,
-  })
-
-  const pickNodeAt = picking.pickNodeAt
-  const pickEdgeAt = picking.pickEdgeAt
-
-  const edgeHover = useEdgeHover({
+    worldToScreen,
+    sizeForNode,
     hoveredEdge,
     clearHoveredEdge,
     isWebDriver: () => isWebDriver,
     getSelectedNodeId: () => state.selectedNodeId,
     hasSelectedIncidentEdges: () => selectedIncidentEdgeKeys.value.size > 0,
-    pickNodeAt,
-    pickEdgeAt,
     getLinkByKey: (k) => layoutLinkMap.value.get(k),
-    formatEdgeAmountText,
-    clientToScreen,
-    screenToWorld,
-    worldToScreen,
+    getUnit: () => state.snapshot?.equivalent ?? effectiveEq.value,
   })
 
-  const renderLoop = useAppRenderLoop({
-    canvasEl,
-    fxCanvasEl,
-    getSnapshot: () => state.snapshot,
-    getLayout: () => ({
-      w: layout.w,
-      h: layout.h,
-      nodes: layout.nodes,
-      links: layout.links,
-    }),
-    getCamera: () => camera,
-    isTestMode: () => isTestMode.value,
-    getQuality: () => quality.value,
-    getFlash: () => state.flash,
-    setFlash: (v) => {
-      state.flash = v
-    },
-    pruneActiveEdges,
-    pruneFloatingLabels,
-    mapping: VIZ_MAPPING,
-    fxState,
-    getSelectedNodeId: () => state.selectedNodeId,
-    activeEdges,
-    getLinkLod: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? 'focus' : 'full'),
-    getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
-    beforeDraw: () => {
-      physics.tickAndSyncToLayout()
-    },
-  })
+  const pickNodeAt = pickingAndHover.pickNodeAt
+  const edgeHover = pickingAndHover.edgeHover
+  const edgeTooltipStyle = pickingAndHover.edgeTooltipStyle
 
-  const ensureRenderLoop = renderLoop.ensureRenderLoop
-  const stopRenderLoop = renderLoop.stopRenderLoop
-  const renderOnce = renderLoop.renderOnce
 
   const dragToPinAndPreview = useAppDragToPinAndPreview({
     dragPreviewEl,
@@ -415,73 +360,48 @@ export function useSimulatorApp() {
 
   const resetView = viewControls.resetView
 
-  const demoControls = useAppDemoControls({
-    scene,
-    isDev: () => import.meta.env.DEV,
-    getSnapshot: () => state.snapshot,
-    getEffectiveEq: () => effectiveEq.value,
-    getDemoTxEvents: () => state.demoTxEvents,
-    getDemoClearingPlan: () => state.demoClearingPlan,
-    getDemoClearingDone: () => state.demoClearingDone,
-    setError: (msg) => {
-      state.error = msg
-    },
-    setSelectedNodeId: selectNode,
-    demoPlayer,
-    ensureRenderLoop,
-    clearScheduledTimeouts,
-    resetOverlays,
-    loadEvents,
-    assertPlaylistEdgesExistInSnapshot,
-  })
-
-  const runTxOnce = demoControls.runTxOnce
-  const runClearingOnce = demoControls.runClearingOnce
-  const canDemoPlay = demoControls.canDemoPlay
-  const demoPlayLabel = demoControls.demoPlayLabel
-  const demoStepOnce = demoControls.demoStepOnce
-  const demoTogglePlay = demoControls.demoTogglePlay
-  const demoReset = demoControls.demoReset
-  const resetPlaylistPointers = demoControls.resetPlaylistPointers
-
-  const sceneState = useAppSceneState({
+  const sceneAndDemo = useAppSceneAndDemo({
     eq,
     scene,
     layoutMode,
-    isTestMode: () => isTestMode.value,
-    isEqAllowed: (v) => ALLOWED_EQS.has(String(v ?? '').toUpperCase()),
     effectiveEq,
     state,
+    isTestMode: () => isTestMode.value,
+    isDev: () => import.meta.env.DEV,
+    isWebDriver: () => isWebDriver,
+    isEqAllowed: (v) => ALLOWED_EQS.has(String(v ?? '').toUpperCase()),
     loadSnapshot,
     loadEvents,
     assertPlaylistEdgesExistInSnapshot,
     clearScheduledTimeouts,
-    resetPlaylistPointers,
+    resetOverlays,
     resetCamera,
     resetLayoutKeyCache: () => layoutCoordinator.resetLayoutKeyCache(),
-    resetOverlays,
     resizeAndLayout,
     ensureRenderLoop,
     setupResizeListener: () => layoutCoordinator.setupResizeListener(),
     teardownResizeListener: () => layoutCoordinator.teardownResizeListener(),
     stopRenderLoop,
+    demoPlayer,
+    setSelectedNodeId: selectNode,
+    fxState,
   })
 
-  const devHook = useGeoSimDevHookSetup({
-    isDev: () => import.meta.env.DEV,
-    isTestMode: () => isTestMode.value,
-    isWebDriver: () => isWebDriver,
-    getState: () => state,
-    fxState,
-    runTxOnce,
-    runClearingOnce,
-  })
+  const runTxOnce = sceneAndDemo.runTxOnce
+  const runClearingOnce = sceneAndDemo.runClearingOnce
+  const canDemoPlay = sceneAndDemo.canDemoPlay
+  const demoPlayLabel = sceneAndDemo.demoPlayLabel
+  const demoStepOnce = sceneAndDemo.demoStepOnce
+  const demoTogglePlay = sceneAndDemo.demoTogglePlay
+  const demoReset = sceneAndDemo.demoReset
+
+  const sceneState = sceneAndDemo.sceneState
 
   useAppLifecycle({
     layoutMode,
     resizeAndLayout,
     persistedPrefs,
-    setupDevHook: devHook.setupDevHook,
+    setupDevHook: sceneAndDemo.setupDevHook,
     sceneState,
     hideDragPreview,
     physics,
