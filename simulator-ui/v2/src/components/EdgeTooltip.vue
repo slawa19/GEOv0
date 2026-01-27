@@ -2,7 +2,7 @@
 import type { CSSProperties } from 'vue'
 
 type HoveredEdge = {
-  key: string
+  key: string | null
   fromId: string
   toId: string
   amountText: string

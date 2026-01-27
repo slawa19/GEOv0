@@ -25,6 +25,7 @@ export function useCanvasInteractions(opts: {
   isTestMode: () => boolean
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
   setSelectedNodeId: (id: string | null) => void
+  setNodeCardOpen: (open: boolean) => void
   clearHoveredEdge: () => void
   dragToPin: DragToPinLike
   cameraSystem: CameraSystemLike
@@ -35,9 +36,20 @@ export function useCanvasInteractions(opts: {
     const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
     if (!hit) {
       opts.setSelectedNodeId(null)
+      opts.setNodeCardOpen(false)
       return
     }
     opts.setSelectedNodeId(hit.id)
+    // Single click only selects; keep the card closed.
+    opts.setNodeCardOpen(false)
+  }
+
+  function onCanvasDblClick(ev: MouseEvent) {
+    const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
+    if (!hit) return
+
+    opts.setSelectedNodeId(hit.id)
+    opts.setNodeCardOpen(true)
   }
 
   function onCanvasPointerDown(ev: PointerEvent) {
@@ -70,6 +82,7 @@ export function useCanvasInteractions(opts: {
 
     // Click on empty background: clear selection.
     opts.setSelectedNodeId(null)
+    opts.setNodeCardOpen(false)
     opts.clearHoveredEdge()
   }
 
@@ -81,6 +94,7 @@ export function useCanvasInteractions(opts: {
 
   return {
     onCanvasClick,
+    onCanvasDblClick,
     onCanvasPointerDown,
     onCanvasPointerMove,
     onCanvasPointerUp,

@@ -35,6 +35,7 @@ const {
   showResetView,
 
   // selection + overlays
+  isNodeCardOpen,
   hoveredEdge,
   clearHoveredEdge,
   edgeTooltipStyle,
@@ -50,6 +51,7 @@ const {
 
   // handlers
   onCanvasClick,
+  onCanvasDblClick,
   onCanvasPointerDown,
   onCanvasPointerMove,
   onCanvasPointerUp,
@@ -90,6 +92,7 @@ const {
       ref="canvasEl"
       class="canvas"
       @click="onCanvasClick"
+      @dblclick.prevent="onCanvasDblClick"
       @pointerdown="onCanvasPointerDown"
       @pointermove="onCanvasPointerMove"
       @pointerup="onCanvasPointerUp"
@@ -119,7 +122,7 @@ const {
     />
 
     <NodeCardOverlay
-      v-if="selectedNode && !dragToPin.dragState.active"
+      v-if="isNodeCardOpen && selectedNode && !dragToPin.dragState.active"
       :node="selectedNode"
       :style="nodeCardStyle()"
       :edge-stats="selectedNodeEdgeStats"

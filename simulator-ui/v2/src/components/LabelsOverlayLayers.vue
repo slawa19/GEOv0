@@ -9,7 +9,7 @@ type LabelNode = {
 }
 
 type FloatingLabel = {
-  id: string
+  id: number
   x: number
   y: number
   text: string

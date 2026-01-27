@@ -1,4 +1,4 @@
-import type { GraphSnapshot } from '../types'
+import type { GraphNode, GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import { sizeForNode } from '../render/nodePainter'
 import { fnv1a } from '../utils/hash'

@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
 import { loadEvents, loadSnapshot } from '../fixtures'
 import { assertPlaylistEdgesExistInSnapshot } from '../demo/playlistValidation'
@@ -61,6 +61,25 @@ export function useSimulatorApp() {
     selectedNodeId: null as string | null,
     flash: 0 as number,
   })
+
+  const isNodeCardOpen = ref(false)
+
+  function selectNode(id: string | null) {
+    state.selectedNodeId = id
+    // Single selection should not implicitly open the card.
+    isNodeCardOpen.value = false
+  }
+
+  function setNodeCardOpen(open: boolean) {
+    isNodeCardOpen.value = open && !!state.selectedNodeId
+  }
+
+  watch(
+    () => state.selectedNodeId,
+    (id) => {
+      if (!id) isNodeCardOpen.value = false
+    },
+  )
 
   const canvasEl = ref<HTMLCanvasElement | null>(null)
   const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
@@ -357,9 +376,7 @@ export function useSimulatorApp() {
     isTestMode: () => isTestMode.value,
     pickNodeAt,
     getLayoutNodeById: (id) => layoutIndex.value.nodeById.get(id) ?? null,
-    setSelectedNodeId: (id) => {
-      state.selectedNodeId = id
-    },
+    setSelectedNodeId: selectNode,
     clearHoveredEdge,
     clientToScreen,
     screenToWorld,
@@ -380,9 +397,8 @@ export function useSimulatorApp() {
   const canvasInteractions = useCanvasInteractions({
     isTestMode: () => isTestMode.value,
     pickNodeAt,
-    setSelectedNodeId: (id) => {
-      state.selectedNodeId = id
-    },
+    setSelectedNodeId: selectNode,
+    setNodeCardOpen,
     clearHoveredEdge,
     dragToPin,
     cameraSystem,
@@ -391,6 +407,7 @@ export function useSimulatorApp() {
   })
 
   const onCanvasClick = canvasInteractions.onCanvasClick
+  const onCanvasDblClick = canvasInteractions.onCanvasDblClick
   const onCanvasPointerDown = canvasInteractions.onCanvasPointerDown
   const onCanvasPointerMove = canvasInteractions.onCanvasPointerMove
   const onCanvasPointerUp = canvasInteractions.onCanvasPointerUp
@@ -409,9 +426,7 @@ export function useSimulatorApp() {
     setError: (msg) => {
       state.error = msg
     },
-    setSelectedNodeId: (id) => {
-      state.selectedNodeId = id
-    },
+    setSelectedNodeId: selectNode,
     demoPlayer,
     ensureRenderLoop,
     clearScheduledTimeouts,
@@ -499,6 +514,7 @@ export function useSimulatorApp() {
     showResetView,
 
     // selection + overlays
+    isNodeCardOpen,
     hoveredEdge,
     clearHoveredEdge,
     edgeTooltipStyle,
@@ -514,6 +530,7 @@ export function useSimulatorApp() {
 
     // handlers
     onCanvasClick,
+    onCanvasDblClick,
     onCanvasPointerDown,
     onCanvasPointerMove,
     onCanvasPointerUp,
