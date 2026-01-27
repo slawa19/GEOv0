@@ -3,23 +3,11 @@ import type { ComputedRef, Ref } from 'vue'
 import type { DemoEvent, GraphSnapshot } from '../types'
 import type { LayoutMode } from '../layout/forceLayout'
 import type { SceneId } from '../scenes'
+import type { SimulatorAppState } from '../types/simulatorApp'
 
 import { useAppDemoControls } from './useAppDemoControls'
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
-
-type AppState = {
-  loading: boolean
-  error: string
-  sourcePath: string
-  eventsPath: string
-  snapshot: GraphSnapshot | null
-  demoTxEvents: import('../types').TxUpdatedEvent[]
-  demoClearingPlan: import('../types').ClearingPlanEvent | null
-  demoClearingDone: import('../types').ClearingDoneEvent | null
-  selectedNodeId: string | null
-  flash: number
-}
 
 type LoadEventsKind = 'demo-tx' | 'demo-clearing'
 
@@ -33,7 +21,7 @@ export function useAppSceneAndDemo(opts: {
   scene: Ref<SceneId>
   layoutMode: Ref<LayoutMode>
   effectiveEq: ComputedRef<string>
-  state: AppState
+  state: SimulatorAppState
 
   // flags
   isTestMode: () => boolean

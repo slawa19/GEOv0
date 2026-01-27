@@ -1,21 +1,9 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { ClearingDoneEvent, ClearingPlanEvent, DemoEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
+import type { DemoEvent, GraphSnapshot } from '../types'
 import type { LayoutMode } from '../layout/forceLayout'
 import type { SceneId } from '../scenes'
+import type { SimulatorAppState } from '../types/simulatorApp'
 import { useSceneState } from './useSceneState'
-
-type AppState = {
-  loading: boolean
-  error: string
-  sourcePath: string
-  eventsPath: string
-  snapshot: GraphSnapshot | null
-  selectedNodeId: string | null
-  flash: number
-  demoTxEvents: TxUpdatedEvent[]
-  demoClearingPlan: ClearingPlanEvent | null
-  demoClearingDone: ClearingDoneEvent | null
-}
 
 type LoadEventsKind = 'demo-tx' | 'demo-clearing'
 
@@ -26,7 +14,7 @@ export function useAppSceneState(opts: {
   isTestMode: () => boolean
   isEqAllowed: (eq: string) => boolean
   effectiveEq: ComputedRef<string>
-  state: AppState
+  state: SimulatorAppState
   loadSnapshot: (eq: string) => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
   loadEvents: (eq: string, kind: LoadEventsKind) => Promise<{ events: DemoEvent[]; sourcePath: string }>
   assertPlaylistEdgesExistInSnapshot: (opts: { snapshot: GraphSnapshot; events: DemoEvent[]; eventsPath: string }) => void

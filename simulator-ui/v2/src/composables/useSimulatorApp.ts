@@ -5,28 +5,28 @@ import { assertPlaylistEdgesExistInSnapshot } from '../demo/playlistValidation'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode, sizeForNode } from '../render/nodePainter'
 import type { ClearingDoneEvent, ClearingPlanEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
-import type { LayoutLink, LayoutNode } from '../types/layout'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
 import type { SceneId } from '../scenes'
 import { VIZ_MAPPING } from '../vizMapping'
+import type { SimulatorAppState } from '../types/simulatorApp'
 
 import { useAppDemoPlayerSetup } from './useAppDemoPlayerSetup'
 import { useAppLifecycle } from './useAppLifecycle'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
-import { useAppViewAndNodeCard } from './useAppViewAndNodeCard'
-import { useCanvasInteractions } from './useCanvasInteractions'
 import { useLabelNodes } from './useLabelNodes'
 import { useLayoutIndex } from './useLayoutIndex'
 import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
 import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
-import { useAppDragToPinAndPreview } from './useAppDragToPinAndPreview'
 import { useNodeSelectionAndCardOpen } from './useNodeSelectionAndCardOpen'
 import { useAppSceneAndDemo } from './useAppSceneAndDemo'
 import { useAppPickingAndHover } from './useAppPickingAndHover'
 import { useAppFxAndRender } from './useAppFxAndRender'
 import { useAppPhysicsAndPinningWiring } from './useAppPhysicsAndPinningWiring'
 import { useAppLayoutWiring } from './useAppLayoutWiring'
+import { useAppDragToPinWiring } from './useAppDragToPinWiring'
+import { useAppCanvasInteractionsWiring } from './useAppCanvasInteractionsWiring'
+import { useAppViewWiring } from './useAppViewWiring'
 
 export function useSimulatorApp() {
   const eq = ref('UAH')
@@ -43,17 +43,17 @@ export function useSimulatorApp() {
 
   const ALLOWED_EQS = new Set(['UAH', 'HOUR', 'EUR'])
 
-  const state = reactive({
+  const state = reactive<SimulatorAppState>({
     loading: true,
-    error: '' as string,
-    sourcePath: '' as string,
-    eventsPath: '' as string,
-    snapshot: null as GraphSnapshot | null,
-    demoTxEvents: [] as TxUpdatedEvent[],
-    demoClearingPlan: null as ClearingPlanEvent | null,
-    demoClearingDone: null as ClearingDoneEvent | null,
-    selectedNodeId: null as string | null,
-    flash: 0 as number,
+    error: '',
+    sourcePath: '',
+    eventsPath: '',
+    snapshot: null,
+    demoTxEvents: [],
+    demoClearingPlan: null,
+    demoClearingDone: null,
+    selectedNodeId: null,
+    flash: 0,
   })
 
   const selectedNodeIdRef = computed<string | null>({
@@ -91,15 +91,16 @@ export function useSimulatorApp() {
   const labelsLod = ref<LabelsLod>('selection')
   const quality = ref<Quality>('high')
 
-  // uiDerived reads camera.zoom, so create it after camera exists.
-  // We wire it with a getter once camera is available.
+  // uiDerived reads camera.zoom (for overlay label scale). Keep this wiring robust
+  // by using a replaceable getter, so no TDZ/lazy-eval footgun is possible.
+  let getCameraZoomSafe = () => 1
   const uiDerived = useAppUiDerivedState({
     eq,
     scene,
     quality,
     isTestMode,
     isWebDriver,
-    getCameraZoom: () => camera.zoom,
+    getCameraZoom: () => getCameraZoomSafe(),
   })
 
   const effectiveEq = uiDerived.effectiveEq
@@ -146,7 +147,7 @@ export function useSimulatorApp() {
     requestResizeAndLayout,
   })
 
-  const viewAndNodeCard = useAppViewAndNodeCard({
+  const viewWiring = useAppViewWiring({
     canvasEl,
     hostEl,
     getLayoutNodes: () => layout.nodes,
@@ -169,22 +170,21 @@ export function useSimulatorApp() {
     getIncidentEdges: (nodeId) => layout.links.filter((l) => l.source === nodeId || l.target === nodeId),
   })
 
-  const cameraSystem = viewAndNodeCard.cameraSystem
-  const viewControls = viewAndNodeCard.viewControls
-  const nodeCard = viewAndNodeCard.nodeCard
+  const cameraSystem = viewWiring.cameraSystem
+  const camera = viewWiring.camera
+  const panState = viewWiring.panState
 
-  const camera = cameraSystem.camera
-  const panState = cameraSystem.panState
+  getCameraZoomSafe = () => camera.zoom
 
-  const resetCamera = cameraSystem.resetCamera
-  const worldToScreen = cameraSystem.worldToScreen
-  const screenToWorld = cameraSystem.screenToWorld
-  const clientToScreen = cameraSystem.clientToScreen
+  const resetCamera = viewWiring.resetCamera
+  const worldToScreen = viewWiring.worldToScreen
+  const screenToWorld = viewWiring.screenToWorld
+  const clientToScreen = viewWiring.clientToScreen
 
-  const worldToCssTranslateNoScale = viewControls.worldToCssTranslateNoScale
+  const worldToCssTranslateNoScale = viewWiring.worldToCssTranslateNoScale
 
-  const selectedNode = nodeCard.selectedNode
-  const nodeCardStyle = nodeCard.nodeCardStyle
+  const selectedNode = viewWiring.selectedNode
+  const nodeCardStyle = viewWiring.nodeCardStyle
 
   const selectedNodeEdgeStats = useSelectedNodeEdgeStats({
     getSnapshot: () => state.snapshot,
@@ -313,10 +313,8 @@ export function useSimulatorApp() {
 
   const pickNodeAt = pickingAndHover.pickNodeAt
   const edgeHover = pickingAndHover.edgeHover
-  const edgeTooltipStyle = pickingAndHover.edgeTooltipStyle
 
-
-  const dragToPinAndPreview = useAppDragToPinAndPreview({
+  const dragToPinWiring = useAppDragToPinWiring({
     dragPreviewEl,
     isTestMode: () => isTestMode.value,
     pickNodeAt,
@@ -325,24 +323,21 @@ export function useSimulatorApp() {
     clearHoveredEdge,
     clientToScreen,
     screenToWorld,
-    getCanvasEl: () => canvasEl.value,
+    canvasEl,
     renderOnce,
-    pinNodeLive: (id, x, y) => physics.pin(id, x, y),
-    commitPinnedPos: (id, x, y) => pinnedPos.set(id, { x, y }),
-    reheatPhysics: (alpha) => physics.reheat(alpha),
+    physics,
+    pinnedPos,
     getNodeById,
     getCamera: () => camera,
-    sizeForNode: (n) => sizeForNode(n),
-    fillForNode: (n) => fillForNode(n, VIZ_MAPPING),
   })
 
-  const dragToPin = dragToPinAndPreview.dragToPin
-  const hideDragPreview = dragToPinAndPreview.hideDragPreview
+  const dragToPin = dragToPinWiring.dragToPin
+  const hideDragPreview = dragToPinWiring.hideDragPreview
 
-  const canvasInteractions = useCanvasInteractions({
+  const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,
     pickNodeAt,
-    setSelectedNodeId: selectNode,
+    selectNode,
     setNodeCardOpen,
     clearHoveredEdge,
     dragToPin,
@@ -350,15 +345,6 @@ export function useSimulatorApp() {
     edgeHover,
     getPanActive: () => panState.active,
   })
-
-  const onCanvasClick = canvasInteractions.onCanvasClick
-  const onCanvasDblClick = canvasInteractions.onCanvasDblClick
-  const onCanvasPointerDown = canvasInteractions.onCanvasPointerDown
-  const onCanvasPointerMove = canvasInteractions.onCanvasPointerMove
-  const onCanvasPointerUp = canvasInteractions.onCanvasPointerUp
-  const onCanvasWheel = canvasInteractions.onCanvasWheel
-
-  const resetView = viewControls.resetView
 
   const sceneAndDemo = useAppSceneAndDemo({
     eq,
@@ -386,14 +372,6 @@ export function useSimulatorApp() {
     setSelectedNodeId: selectNode,
     fxState,
   })
-
-  const runTxOnce = sceneAndDemo.runTxOnce
-  const runClearingOnce = sceneAndDemo.runClearingOnce
-  const canDemoPlay = sceneAndDemo.canDemoPlay
-  const demoPlayLabel = sceneAndDemo.demoPlayLabel
-  const demoStepOnce = sceneAndDemo.demoStepOnce
-  const demoTogglePlay = sceneAndDemo.demoTogglePlay
-  const demoReset = sceneAndDemo.demoReset
 
   const sceneState = sceneAndDemo.sceneState
 
@@ -437,9 +415,9 @@ export function useSimulatorApp() {
     isNodeCardOpen,
     hoveredEdge,
     clearHoveredEdge,
-    edgeTooltipStyle,
-    selectedNode,
-    nodeCardStyle,
+    edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
+    selectedNode: viewWiring.selectedNode,
+    nodeCardStyle: viewWiring.nodeCardStyle,
     selectedNodeEdgeStats,
 
     // pinning
@@ -449,30 +427,30 @@ export function useSimulatorApp() {
     unpinSelectedNode,
 
     // handlers
-    onCanvasClick,
-    onCanvasDblClick,
-    onCanvasPointerDown,
-    onCanvasPointerMove,
-    onCanvasPointerUp,
-    onCanvasWheel,
+    onCanvasClick: canvasInteractionsWiring.onCanvasClick,
+    onCanvasDblClick: canvasInteractionsWiring.onCanvasDblClick,
+    onCanvasPointerDown: canvasInteractionsWiring.onCanvasPointerDown,
+    onCanvasPointerMove: canvasInteractionsWiring.onCanvasPointerMove,
+    onCanvasPointerUp: canvasInteractionsWiring.onCanvasPointerUp,
+    onCanvasWheel: canvasInteractionsWiring.onCanvasWheel,
 
     // demo
     playlist,
-    canDemoPlay,
-    demoPlayLabel,
-    runTxOnce,
-    runClearingOnce,
-    demoStepOnce,
-    demoTogglePlay,
-    demoReset,
+    canDemoPlay: sceneAndDemo.canDemoPlay,
+    demoPlayLabel: sceneAndDemo.demoPlayLabel,
+    runTxOnce: sceneAndDemo.runTxOnce,
+    runClearingOnce: sceneAndDemo.runClearingOnce,
+    demoStepOnce: sceneAndDemo.demoStepOnce,
+    demoTogglePlay: sceneAndDemo.demoTogglePlay,
+    demoReset: sceneAndDemo.demoReset,
 
     // labels
     labelNodes,
     floatingLabelsViewFx,
-    worldToCssTranslateNoScale,
+    worldToCssTranslateNoScale: viewWiring.worldToCssTranslateNoScale,
 
     // helpers for template
     getNodeById,
-    resetView,
+    resetView: viewWiring.resetView,
   }
 }

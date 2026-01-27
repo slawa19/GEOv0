@@ -1,25 +1,11 @@
-import type { GraphSnapshot } from '../types'
-import type { TxUpdatedEvent, ClearingPlanEvent, ClearingDoneEvent } from '../types'
 import { installGeoSimDevHook } from '../dev/geoSimDevHook'
-
-type AppState = {
-  loading: boolean
-  error: string
-  sourcePath: string
-  eventsPath: string
-  snapshot: GraphSnapshot | null
-  demoTxEvents: TxUpdatedEvent[]
-  demoClearingPlan: ClearingPlanEvent | null
-  demoClearingDone: ClearingDoneEvent | null
-  selectedNodeId: string | null
-  flash: number
-}
+import type { SimulatorAppState } from '../types/simulatorApp'
 
 export function useGeoSimDevHookSetup(opts: {
   isDev: () => boolean
   isTestMode: () => boolean
   isWebDriver: () => boolean
-  getState: () => AppState
+  getState: () => SimulatorAppState
   fxState: unknown
   runTxOnce: () => void
   runClearingOnce: () => void
