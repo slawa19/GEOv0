@@ -130,7 +130,7 @@
         "to": { "$ref": "#/$defs/id", "description": "Debtor" },
         "equivalent": { "type": "string" },
         "limit": {
-          "oneOf": [
+          "anyOf": [
             { "type": "integer" },
             { "type": "number" },
             { "type": "string" }

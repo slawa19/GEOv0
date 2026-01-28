@@ -1,3 +1,14 @@
+# ARCHIVED: Анализ плана Real Mode Monorepo Architecture
+
+Этот документ перенесён в архив, чтобы не отвлекать от реализации.
+
+Актуальный вход для разработки:
+- `docs/ru/simulator/backend/pre-implementation-readiness-report.md`
+
+Оригинальное содержимое сохранено ниже без правок.
+
+---
+
 ## Анализ плана Real Mode Monorepo Architecture
 
 Изучив план и связанные спецификации, вот мой анализ:

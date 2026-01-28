@@ -12,16 +12,20 @@
 ## 1) Endpoints (MVP)
 
 ### Snapshot
-- `GET /api/v1/simulator/graph/snapshot?equivalent=HOUR`
+- `GET /api/v1/simulator/graph/snapshot?equivalent=UAH`
   - Возвращает текущее состояние сети + готовые `viz_*` поля.
 
 ### Focus/Ego (опционально, но рекомендуется)
-- `GET /api/v1/simulator/graph/ego?equivalent=HOUR&pid=PID_...&depth=1`
+- `GET /api/v1/simulator/graph/ego?equivalent=UAH&pid=PID_...&depth=1`
   - Возвращает подграф вокруг узла (для режима Focus, чтобы не тянуть всё).
 
 ### Events
-- `GET /api/v1/simulator/events?equivalent=HOUR` (SSE)
+- `GET /api/v1/simulator/events?equivalent=UAH` (SSE)
   - Поток событий транзакций/клиринга, готовых к анимации.
+
+Примечание про `equivalent`:
+- Это строковый `EquivalentCode` (см. `api/openapi.yaml`), в примерах ниже используем `UAH`.
+- В демо/seed данных также встречаются `HOUR` и `KWH` (см. `seeds/equivalents.json`).
 
 Дополнение (Real Mode):
 - backend также эмитит системное событие `run_status`:
@@ -30,7 +34,7 @@
 - событие `tick` не требуется для UI по умолчанию и допускается только как debug-режим (опционально)
 
 Примечание: на раннем MVP можно сделать polling-режим:
-- `GET /api/v1/simulator/events/poll?equivalent=HOUR&after=evt_...`
+- `GET /api/v1/simulator/events/poll?equivalent=UAH&after=evt_...`
   - Возвращает массив событий.
 
 ---
@@ -66,19 +70,19 @@
   - Обновить интенсивность: `{ intensity_percent: 0..100 }`.
 
 ### Live events (namespace by run)
-- `GET /api/v1/simulator/runs/{run_id}/events?equivalent=HOUR` (SSE)
+- `GET /api/v1/simulator/runs/{run_id}/events?equivalent=UAH` (SSE)
   - То же, что `/api/v1/simulator/events`, но привязанное к конкретному run.
 
 ### Snapshot (namespace by run)
-- `GET /api/v1/simulator/runs/{run_id}/graph/snapshot?equivalent=HOUR`
+- `GET /api/v1/simulator/runs/{run_id}/graph/snapshot?equivalent=UAH`
   - То же, что `/api/v1/simulator/graph/snapshot`, но привязанное к конкретному run.
 
 ### Metrics
-- `GET /api/v1/simulator/runs/{run_id}/metrics?equivalent=HOUR&from_ms=...&to_ms=...&step_ms=...`
+- `GET /api/v1/simulator/runs/{run_id}/metrics?equivalent=UAH&from_ms=...&to_ms=...&step_ms=...`
   - Возвращает time-series (готовые для графиков).
 
 ### Bottlenecks
-- `GET /api/v1/simulator/runs/{run_id}/bottlenecks?equivalent=HOUR&limit=20&min_score=0.7`
+- `GET /api/v1/simulator/runs/{run_id}/bottlenecks?equivalent=UAH&limit=20&min_score=0.7`
   - Возвращает top bottlenecks + причины.
 
 ### Artifacts (опционально)
@@ -199,7 +203,7 @@ export type GraphLink = {
   "event_id": "evt_tx_0007",
   "ts": "2026-01-22T12:00:01Z",
   "type": "tx.updated",
-  "equivalent": "HOUR",
+  "equivalent": "UAH",
   "ttl_ms": 1200,
   "intensity_key": "mid",
   "edges": [
@@ -224,7 +228,7 @@ export type GraphLink = {
   "event_id": "evt_0001",
   "ts": "2026-01-22T12:00:00Z",
   "type": "clearing.plan",
-  "equivalent": "HOUR",
+  "equivalent": "UAH",
   "plan_id": "clr_2026_01_22_0001",
   "steps": [
     { "at_ms": 0,   "highlight_edges": [{"from":"user_2","to":"user_5"}], "intensity_key": "hi" },
@@ -301,7 +305,7 @@ export type ScenarioSummary = {
   "created_at": "2026-01-28T10:05:00Z",
   "participants_count": 100,
   "trustlines_count": 520,
-  "equivalents": ["UAH", "EUR", "HOUR"],
+  "equivalents": ["UAH", "KWH"],
   "clusters_count": 7,
   "hubs_count": 6,
   "tags": ["preset", "demo"]
@@ -408,7 +412,7 @@ export type MetricsResponse = {
 {
   "api_version": "simulator-api/1",
   "run_id": "run_2026_01_28_001",
-  "equivalent": "HOUR",
+  "equivalent": "UAH",
   "from_ms": 0,
   "to_ms": 600000,
   "step_ms": 10000,

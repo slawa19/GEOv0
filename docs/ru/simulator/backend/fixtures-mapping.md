@@ -4,7 +4,7 @@
 
 Цель: зафиксировать правила, по которым canonical fixtures из `admin-fixtures/v1/datasets/*.json` превращаются в валидный `fixtures/simulator/*/scenario.json` (по схеме `fixtures/simulator/scenario.schema.json`).
 
-Документ специально написан так, чтобы по нему можно было реализовать конвертер `generate_simulator_scenario.py`.
+Документ специально написан так, чтобы по нему можно было реализовать/поддерживать генератор seed-сценариев `scripts/generate_simulator_seed_scenarios.py`.
 
 ---
 
@@ -69,8 +69,8 @@ TrustLine direction фиксирована:
 - допустимый shorthand: `baseEquivalent: string`
 
 Правило для `equivalents`:
-1) собрать все `equivalent` из `trustlines.json` (уникально)
-2) оставить только те, которые присутствуют в `equivalents.json` и `is_active=true`
+1) собрать все `equivalent` из `admin-fixtures/v1/datasets/trustlines.json` (уникально)
+2) оставить только те, которые присутствуют в `admin-fixtures/v1/datasets/equivalents.json` и `is_active=true`
 3) отсортировать лексикографически
 
 Если итоговый список пустой — это ошибка конвертации.
