@@ -16,7 +16,7 @@ from app.config import settings
 from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
-from app.schemas.payment import PaymentCreateRequest, PaymentResult, PaymentRoute, PaymentError
+from app.schemas.payment import PaymentConstraints, PaymentCreateRequest, PaymentResult, PaymentRoute, PaymentError
 from app.core.auth.crypto import verify_signature
 from app.core.auth.canonical import canonical_json
 from app.utils.exceptions import (
@@ -44,6 +44,55 @@ class PaymentService:
         request: PaymentCreateRequest,
         *,
         idempotency_key: str | None = None,
+    ) -> PaymentResult:
+        return await self._create_payment_impl(
+            sender_id,
+            request,
+            idempotency_key=idempotency_key,
+            require_signature=True,
+        )
+
+    async def create_payment_internal(
+        self,
+        sender_id: uuid.UUID,
+        *,
+        to_pid: str,
+        equivalent: str,
+        amount: str,
+        description: str | None = None,
+        constraints: PaymentConstraints | None = None,
+        idempotency_key: str | None = None,
+    ) -> PaymentResult:
+        """Internal-only payment path for the simulator runner.
+
+        IMPORTANT:
+        - This must never be exposed via HTTP endpoints.
+        - It bypasses signature verification and should only be used by trusted
+          in-process code.
+        """
+
+        req = PaymentCreateRequest(
+            to=to_pid,
+            equivalent=equivalent,
+            amount=amount,
+            description=description,
+            constraints=constraints,
+            signature="__internal__",
+        )
+        return await self._create_payment_impl(
+            sender_id,
+            req,
+            idempotency_key=idempotency_key,
+            require_signature=False,
+        )
+
+    async def _create_payment_impl(
+        self,
+        sender_id: uuid.UUID,
+        request: PaymentCreateRequest,
+        *,
+        idempotency_key: str | None = None,
+        require_signature: bool,
     ) -> PaymentResult:
         """
         Create and execute a payment.
@@ -141,14 +190,15 @@ class PaymentService:
                 pass
             raise NotFoundException("Sender not found")
 
-        if not isinstance(request.signature, str) or not request.signature:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+        if require_signature:
+            if not isinstance(request.signature, str) or not request.signature:
+                try:
+                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
-            except Exception:
-                pass
-            raise InvalidSignatureException("Missing signature")
+                    PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
+                except Exception:
+                    pass
+                raise InvalidSignatureException("Missing signature")
 
         receiver = (await self.session.execute(select(Participant).where(Participant.pid == request.to))).scalar_one_or_none()
         if not receiver:
@@ -179,29 +229,30 @@ class PaymentService:
                 pass
             raise NotFoundException(f"Equivalent {request.equivalent} not found")
 
-        # Signature validation (proof-of-possession + binding of request fields).
-        # Canonical message is part of the API contract for MVP.
-        payload: dict = {
-            "to": request.to,
-            "equivalent": request.equivalent,
-            "amount": request.amount,
-        }
-        if request.description is not None:
-            payload["description"] = request.description
-        if request.constraints is not None:
-            payload["constraints"] = request.constraints.model_dump(exclude_unset=True)
+        if require_signature:
+            # Signature validation (proof-of-possession + binding of request fields).
+            # Canonical message is part of the API contract for MVP.
+            payload: dict = {
+                "to": request.to,
+                "equivalent": request.equivalent,
+                "amount": request.amount,
+            }
+            if request.description is not None:
+                payload["description"] = request.description
+            if request.constraints is not None:
+                payload["constraints"] = request.constraints.model_dump(exclude_unset=True)
 
-        message = canonical_json(payload)
-        try:
-            verify_signature(sender.public_key, message, request.signature)
-        except Exception:
+            message = canonical_json(payload)
             try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="invalid_signature").inc()
+                verify_signature(sender.public_key, message, request.signature)
             except Exception:
-                pass
-            raise InvalidSignatureException("Invalid signature")
+                try:
+                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                    PAYMENT_EVENTS_TOTAL.labels(event="create", result="invalid_signature").inc()
+                except Exception:
+                    pass
+                raise InvalidSignatureException("Invalid signature")
 
         # 2. Routing
         tx_uuid = uuid.uuid4()

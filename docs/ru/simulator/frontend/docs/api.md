@@ -216,7 +216,25 @@ export type GraphLink = {
 }
 ```
 
-### 4.3 `clearing.plan` (сценарий клиринга)
+### 4.3 `tx.failed` (диагностика ошибок/отказов)
+
+Назначение:
+- UI показывает понятную причину (и при желании может подсветить ребро `from -> to`).
+- `tx.failed` не заменяет `run_status.last_error`, а дополняет его деталями по конкретной транзакции.
+
+```json
+{
+  "event_id": "evt_tx_0008",
+  "ts": "2026-01-22T12:00:02Z",
+  "type": "tx.failed",
+  "equivalent": "UAH",
+  "from": "user_1",
+  "to": "user_2",
+  "error": { "code": "PAYMENT_TIMEOUT", "message": "PAYMENT_TIMEOUT", "at": "2026-01-22T12:00:02Z" }
+}
+```
+
+### 4.4 `clearing.plan` (сценарий клиринга)
 
 Примечание по визуалу:
 - `steps` — это сценарные «подсказки» для FX overlay.
@@ -238,7 +256,7 @@ export type GraphLink = {
 }
 ```
 
-### 4.4 `clearing.done`
+### 4.5 `clearing.done`
 - Снять эффекты, затем либо:
   - запросить новый snapshot, либо
   - получить патчи.

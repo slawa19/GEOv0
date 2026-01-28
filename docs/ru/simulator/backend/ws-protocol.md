@@ -66,6 +66,10 @@ MVP-гарантии (сознательно простые):
   - UI при реконнекте отправляет заголовок `Last-Event-ID: <event_id>`.
   - Backend может попытаться реплеить из ring-buffer (если хранит), но в MVP это **не обязательно**.
 
+Hardening (после MVP):
+- Backend может завершать SSE stream после получения терминального `run_status.state` = `stopped` или `error`.
+- Backend может включать строгий режим replay: если `Last-Event-ID` старее окна ring-buffer, вернуть 410 и UI делает full refresh (GET run_status + snapshots).
+
 ## 3) Системные сообщения
 
 ### 3.1 `run_status` (обязательное)
@@ -98,6 +102,7 @@ MVP правило: `run_status` — единственный обязатель
 
 ## 4) Доменные сообщения
 - `tx.updated`
+- `tx.failed`
 - `clearing.plan`
 - `clearing.done`
 

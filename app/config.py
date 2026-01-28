@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     # Observability
     METRICS_ENABLED: bool = True
 
+    # Simulator (DB-first UI state)
+    # When enabled, simulator persists runs/metrics/bottlenecks/artifacts indexes to the main DB.
+    SIMULATOR_DB_ENABLED: bool = True
+
     # Admin API (minimal MVP)
     # NOTE: Shared secret to unblock Admin UI integration in MVP.
     # Replace with proper role-based auth in production.

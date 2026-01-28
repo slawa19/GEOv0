@@ -106,3 +106,27 @@
 
 - Дальнейшая детализация payload’ов и error taxonomy в процессе реализации может потребовать точечных уточнений в `ws-protocol.md` и `api-examples.md`.
 - Нагрузочные/ретеншн параметры (TTL, размер ring buffer) уточняются по мере появления реальных потоков событий.
+
+---
+
+## Примечания по текущей реализации (обновлено: 2026-01-28)
+
+Этот документ остаётся актуальным как «контрактный чек‑лист». Для удобства разработки фиксируем несколько практических уточнений, которые появились в ходе реализации MVP:
+
+- **Tick-model в Real mode**: `sim_time_ms = tick_index * 1000`, а `intensity_percent` влияет на **budget действий на тик**, а не на скорость sim-time (см. `runner-algorithm.md`).
+- **In-process SSE в тестах**: httpx ASGI transport может буферизовать stream, поэтому под pytest допускается **finite SSE** (минимум: `run_status` + 1 событие). Это не меняет внешний контракт; это только test-stability режим.
+- **Real mode smoke**: есть отдельный integration smoke для real-mode SSE (помогает ловить регрессии в раннере и in-process payments).
+- **Artifacts (локальный MVP)**: создаются минимальные артефакты (`status.json`, обновляемый `last_tick.json`) в `.local-run/simulator/runs/<run_id>/artifacts`.
+
+---
+
+## PR gate checklist (минимум перед каждым PR по Simulator)
+
+Backend:
+- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe -m pytest -q tests/contract/test_openapi_contract.py`
+- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe -m pytest -q tests/integration/test_simulator_sse_smoke.py`
+- `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe -m pytest -q` (полный прогон)
+
+Admin UI fixtures (если менялись fixtures/генераторы):
+- `npm --prefix admin-ui run sync:fixtures`
+- `npm --prefix admin-ui run validate:fixtures`

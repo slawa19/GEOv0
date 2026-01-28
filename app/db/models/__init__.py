@@ -9,6 +9,7 @@ from .auth_challenge import AuthChallenge
 from .audit_log import AuditLog
 from .integrity_checkpoint import IntegrityCheckpoint
 from .config import Config
+from .simulator_storage import SimulatorRun, SimulatorRunMetric, SimulatorRunBottleneck, SimulatorRunArtifact
 
 __all__ = [
     "Base",
@@ -22,4 +23,8 @@ __all__ = [
     "AuditLog",
     "IntegrityCheckpoint",
     "Config",
+    "SimulatorRun",
+    "SimulatorRunMetric",
+    "SimulatorRunBottleneck",
+    "SimulatorRunArtifact",
 ]

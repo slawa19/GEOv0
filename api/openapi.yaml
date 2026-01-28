@@ -244,6 +244,26 @@ paths:
                       type: object
                       additionalProperties: true
 
+  /admin/participants/stats:
+    get:
+      tags: [Admin]
+      summary: Participants stats (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Participants stats
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
   /admin/participants/{pid}/freeze:
     post:
       tags: [Admin]
@@ -619,6 +639,88 @@ paths:
                 additionalProperties: true
         '403':
           $ref: '#/components/responses/Unauthorized'
+
+  /admin/trustlines/bottlenecks:
+    get:
+      tags: [Admin]
+      summary: Trustlines bottlenecks (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: threshold
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 0.10
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - in: query
+          name: equivalent
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bottlenecks list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /admin/liquidity/summary:
+    get:
+      tags: [Admin]
+      summary: Liquidity summary (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: equivalent
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: threshold
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+            default: 0.10
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Liquidity summary
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
 
   /admin/incidents:
     get:
@@ -3312,6 +3414,40 @@ components:
             additionalProperties: true
       additionalProperties: true
 
+    SimulatorTxFailedEvent:
+      type: object
+      required: [event_id, ts, type, equivalent, error]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [tx.failed]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        from:
+          type: string
+          nullable: true
+        to:
+          type: string
+          nullable: true
+        error:
+          type: object
+          required: [code, message, at]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            at:
+              type: string
+              format: date-time
+          additionalProperties: true
+      additionalProperties: true
+
     SimulatorClearingPlanStep:
       type: object
       required: [at_ms]
@@ -3378,6 +3514,7 @@ components:
     SimulatorEvent:
       oneOf:
         - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
+        - $ref: '#/components/schemas/SimulatorTxFailedEvent'
         - $ref: '#/components/schemas/SimulatorClearingPlanEvent'
         - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
         - $ref: '#/components/schemas/SimulatorRunStatusEvent'

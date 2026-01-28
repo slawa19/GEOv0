@@ -31,11 +31,19 @@
 .EXAMPLE
     .\run_local.ps1 -Action status -Verbose
     Показать статус сервисов с детальной информацией.
+
+.EXAMPLE
+    .\run_local.ps1 -Action cleanup-simulator -SimulatorRetentionDays 30 -DryRun
+    Показать, какие simulator runs (DB + .local-run artifacts) будут удалены по retention.
+
+.EXAMPLE
+    .\run_local.ps1 -Action cleanup-simulator -SimulatorRetentionDays 30
+    Удалить старые simulator runs (DB + .local-run artifacts) по retention.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'restart-backend', 'status', 'reset-db', 'check-db')]
+    [ValidateSet('start', 'stop', 'restart', 'restart-backend', 'status', 'reset-db', 'check-db', 'cleanup-simulator')]
     [string]$Action = 'start',
 
     [int]$BackendPort = 18000,
@@ -55,7 +63,11 @@ param(
     [ValidateSet('repo', 'greenfield-village-100', 'riverside-town-50')]
     [string]$FixturesCommunity = 'repo',
 
-    [switch]$RegenerateFixtures
+    [switch]$RegenerateFixtures,
+
+    # Simulator retention (maintenance)
+    [int]$SimulatorRetentionDays = 30,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -508,6 +520,14 @@ switch ($Action) {
         }
 
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\check_sqlite_db.py') -Description "check_sqlite_db.py"
+        exit 0
+    }
+
+    'cleanup-simulator' {
+        $args = @('--retention-days', [string]$SimulatorRetentionDays)
+        if ($DryRun) { $args += '--dry-run' }
+
+        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\cleanup_simulator_runs.py') -Arguments $args -Description "cleanup_simulator_runs.py"
         exit 0
     }
 
