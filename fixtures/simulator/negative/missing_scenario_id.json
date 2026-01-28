@@ -1,0 +1,6 @@
+{
+  "schema_version": "scenario/1",
+  "equivalents": ["UAH"],
+  "participants": [{ "id": "p1", "type": "person" }],
+  "trustlines": []
+}

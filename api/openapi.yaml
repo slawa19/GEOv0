@@ -874,6 +874,349 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /simulator/scenarios:
+    get:
+      tags: [Simulator]
+      summary: List simulator scenarios (Real Mode control plane)
+      responses:
+        '200':
+          description: Scenarios list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenariosListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Simulator]
+      summary: Upload a simulator scenario (Real Mode control plane)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioUploadRequest'
+      responses:
+        '200':
+          description: Scenario summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /simulator/scenarios/{scenario_id}:
+    get:
+      tags: [Simulator]
+      summary: Get simulator scenario summary (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/ScenarioIdPath'
+      responses:
+        '200':
+          description: Scenario summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs:
+    post:
+      tags: [Simulator]
+      summary: Start a simulator run (Real Mode control plane)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCreateRequest'
+      responses:
+        '200':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunCreateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /simulator/runs/{run_id}:
+    get:
+      tags: [Simulator]
+      summary: Get simulator run status (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/pause:
+    post:
+      tags: [Simulator]
+      summary: Pause simulator run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/resume:
+    post:
+      tags: [Simulator]
+      summary: Resume simulator run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/stop:
+    post:
+      tags: [Simulator]
+      summary: Stop simulator run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/restart:
+    post:
+      tags: [Simulator]
+      summary: Restart simulator run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/intensity:
+    post:
+      tags: [Simulator]
+      summary: Set simulator run intensity (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetIntensityRequest'
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/events:
+    get:
+      tags: [Simulator]
+      summary: Run events stream (SSE) (Real Mode control plane)
+      description: |
+        Server-Sent Events stream. Each message contains one JSON event.
+
+        This endpoint is modeled as `text/event-stream` in OpenAPI.
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/EquivalentQuery'
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/graph/snapshot:
+    get:
+      tags: [Simulator]
+      summary: Graph snapshot for a run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/EquivalentQuery'
+      responses:
+        '200':
+          description: Graph snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorGraphSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/metrics:
+    get:
+      tags: [Simulator]
+      summary: Metrics time-series for a run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/EquivalentQuery'
+        - in: query
+          name: from_ms
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: to_ms
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: step_ms
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Metrics time-series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/bottlenecks:
+    get:
+      tags: [Simulator]
+      summary: Bottlenecks for a run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/EquivalentQuery'
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+        - in: query
+          name: min_score
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+      responses:
+        '200':
+          description: Bottlenecks list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BottlenecksResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/artifacts:
+    get:
+      tags: [Simulator]
+      summary: Artifacts index for a run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: Artifacts index
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactIndex'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/artifacts/{name}:
+    get:
+      tags: [Simulator]
+      summary: Download a specific artifact for a run (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - $ref: '#/components/parameters/ArtifactNamePath'
+      responses:
+        '200':
+          description: Artifact content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /admin/clearing/cycles:
     get:
       tags: [Admin]
@@ -1738,6 +2081,34 @@ components:
         type: string
         format: uuid
         description: TrustLine UUID
+
+    ScenarioIdPath:
+      in: path
+      name: scenario_id
+      required: true
+      schema:
+        type: string
+
+    RunIdPath:
+      in: path
+      name: run_id
+      required: true
+      schema:
+        type: string
+
+    ArtifactNamePath:
+      in: path
+      name: name
+      required: true
+      schema:
+        type: string
+
+    EquivalentQuery:
+      in: query
+      name: equivalent
+      required: true
+      schema:
+        $ref: '#/components/schemas/EquivalentCode'
 
   responses:
     BadRequest:
@@ -3009,3 +3380,403 @@ components:
         - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
         - $ref: '#/components/schemas/SimulatorClearingPlanEvent'
         - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
+        - $ref: '#/components/schemas/SimulatorRunStatusEvent'
+
+    SimulatorRunStatusEvent:
+      type: object
+      required: [event_id, ts, type, run_id, scenario_id, state]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [run_status]
+        run_id:
+          type: string
+        scenario_id:
+          type: string
+        state:
+          $ref: '#/components/schemas/RunState'
+        sim_time_ms:
+          type: integer
+          nullable: true
+          minimum: 0
+        intensity_percent:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 100
+        ops_sec:
+          type: number
+          nullable: true
+          minimum: 0
+        queue_depth:
+          type: integer
+          nullable: true
+          minimum: 0
+        last_event_type:
+          type: string
+          nullable: true
+        current_phase:
+          type: string
+          nullable: true
+        last_error:
+          type: object
+          nullable: true
+          required: [code, message, at]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            at:
+              type: string
+              format: date-time
+          additionalProperties: false
+      additionalProperties: true
+
+    ScenarioUploadRequest:
+      type: object
+      required: [scenario]
+      properties:
+        scenario:
+          type: object
+          description: Scenario JSON payload (validated separately via scenario schema)
+          additionalProperties: true
+      additionalProperties: false
+
+    ScenarioSummary:
+      type: object
+      required: [api_version, scenario_id, participants_count, trustlines_count, equivalents]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        scenario_id:
+          type: string
+        name:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        participants_count:
+          type: integer
+          minimum: 0
+        trustlines_count:
+          type: integer
+          minimum: 0
+        equivalents:
+          type: array
+          items:
+            type: string
+        clusters_count:
+          type: integer
+          nullable: true
+        hubs_count:
+          type: integer
+          nullable: true
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+      additionalProperties: false
+
+    ScenariosListResponse:
+      type: object
+      required: [api_version, items]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScenarioSummary'
+      additionalProperties: false
+
+    RunCreateRequest:
+      type: object
+      required: [scenario_id, mode, intensity_percent]
+      properties:
+        scenario_id:
+          type: string
+        mode:
+          type: string
+          enum: [fixtures, real]
+        intensity_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+      additionalProperties: false
+
+    RunCreateResponse:
+      type: object
+      required: [api_version, run_id]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        run_id:
+          type: string
+      additionalProperties: false
+
+    RunState:
+      type: string
+      enum: [idle, running, paused, stopping, stopped, error]
+
+    RunStatus:
+      type: object
+      required: [api_version, run_id, scenario_id, mode, state]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        run_id:
+          type: string
+        scenario_id:
+          type: string
+        mode:
+          type: string
+          enum: [fixtures, real]
+        state:
+          $ref: '#/components/schemas/RunState'
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        stopped_at:
+          type: string
+          format: date-time
+          nullable: true
+        sim_time_ms:
+          type: integer
+          nullable: true
+          minimum: 0
+        intensity_percent:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 100
+        ops_sec:
+          type: number
+          nullable: true
+          minimum: 0
+        queue_depth:
+          type: integer
+          nullable: true
+          minimum: 0
+        errors_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        errors_last_1m:
+          type: integer
+          nullable: true
+          minimum: 0
+        last_error:
+          type: object
+          nullable: true
+          required: [code, message, at]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            at:
+              type: string
+              format: date-time
+          additionalProperties: false
+        last_event_type:
+          type: string
+          nullable: true
+        current_phase:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    SetIntensityRequest:
+      type: object
+      required: [intensity_percent]
+      properties:
+        intensity_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+      additionalProperties: false
+
+    MetricPoint:
+      type: object
+      required: [t_ms, v]
+      properties:
+        t_ms:
+          type: integer
+          minimum: 0
+        v:
+          type: number
+      additionalProperties: false
+
+    MetricSeriesKey:
+      type: string
+      enum:
+        - success_rate
+        - avg_route_length
+        - total_debt
+        - clearing_volume
+        - bottlenecks_score
+
+    MetricSeries:
+      type: object
+      required: [key, points]
+      properties:
+        key:
+          $ref: '#/components/schemas/MetricSeriesKey'
+        unit:
+          type: string
+          nullable: true
+          enum: ['%', count, amount]
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricPoint'
+      additionalProperties: false
+
+    MetricsResponse:
+      type: object
+      required: [api_version, run_id, equivalent, from_ms, to_ms, step_ms, series]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        run_id:
+          type: string
+        equivalent:
+          type: string
+        from_ms:
+          type: integer
+          minimum: 0
+        to_ms:
+          type: integer
+          minimum: 0
+        step_ms:
+          type: integer
+          minimum: 1
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricSeries'
+      additionalProperties: false
+
+    BottleneckTarget:
+      oneOf:
+        - type: object
+          required: [kind, from, to]
+          properties:
+            kind:
+              type: string
+              enum: [edge]
+            from:
+              type: string
+            to:
+              type: string
+          additionalProperties: false
+        - type: object
+          required: [kind, id]
+          properties:
+            kind:
+              type: string
+              enum: [node]
+            id:
+              type: string
+          additionalProperties: false
+
+    BottleneckReasonCode:
+      type: string
+      enum:
+        - LOW_AVAILABLE
+        - HIGH_USED
+        - FREQUENT_ABORTS
+        - TOO_MANY_TIMEOUTS
+        - ROUTING_TOO_DEEP
+        - CLEARING_PRESSURE
+
+    BottleneckItem:
+      type: object
+      required: [target, score, reason_code]
+      properties:
+        target:
+          $ref: '#/components/schemas/BottleneckTarget'
+        score:
+          type: number
+        reason_code:
+          $ref: '#/components/schemas/BottleneckReasonCode'
+        label:
+          type: string
+          nullable: true
+        suggested_action:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    BottlenecksResponse:
+      type: object
+      required: [api_version, run_id, equivalent, items]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        run_id:
+          type: string
+        equivalent:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BottleneckItem'
+      additionalProperties: false
+
+    ArtifactItem:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+        content_type:
+          type: string
+          nullable: true
+        size_bytes:
+          type: integer
+          nullable: true
+          minimum: 0
+        sha256:
+          type: string
+          nullable: true
+        url:
+          type: string
+      additionalProperties: false
+
+    ArtifactIndex:
+      type: object
+      required: [api_version, run_id, items]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        run_id:
+          type: string
+        artifact_path:
+          type: string
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactItem'
+        bundle_url:
+          type: string
+          nullable: true
+      additionalProperties: false

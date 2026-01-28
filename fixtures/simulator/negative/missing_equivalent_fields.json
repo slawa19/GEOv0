@@ -1,0 +1,6 @@
+{
+  "schema_version": "scenario/1",
+  "scenario_id": "missing_equivalent_fields",
+  "participants": [{ "id": "p1", "type": "person" }],
+  "trustlines": []
+}

@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://geov0.local/simulator/scenario.schema.json",
+  "title": "GEO Simulator Scenario (MVP)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scenario_id", "participants", "trustlines"],
+  "anyOf": [
+    { "required": ["equivalents"] },
+    { "required": ["baseEquivalent"] }
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of scenario.json input schema (not api_version)",
+      "examples": ["scenario/1"]
+    },
+    "scenario_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional PRNG seed for deterministic runs"
+    },
+    "baseEquivalent": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional MVP shorthand. If provided, equivalent is assumed for trustlines/events when missing. Prefer 'equivalents' for explicitness."
+    },
+    "equivalents": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "participants": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/participant" }
+    },
+    "groups": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/group" }
+    },
+    "behaviorProfiles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/behaviorProfile" }
+    },
+    "trustlines": {
+      "type": "array",
+      "minItems": 0,
+      "items": { "$ref": "#/$defs/trustline" }
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/timelineEvent" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["person", "business", "hub"] },
+        "status": { "type": "string", "enum": ["active", "suspended", "left", "deleted", "frozen"] },
+        "groupId": { "$ref": "#/$defs/id" },
+        "behaviorProfileId": { "$ref": "#/$defs/id" },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" }
+      }
+    },
+    "behaviorProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "extends": { "$ref": "#/$defs/id" },
+        "props": { "type": "object", "additionalProperties": true },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/behaviorRule" }
+        }
+      }
+    },
+    "behaviorRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "action"],
+      "properties": {
+        "trigger": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "trustline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "limit"],
+      "properties": {
+        "from": { "$ref": "#/$defs/id", "description": "Creditor" },
+        "to": { "$ref": "#/$defs/id", "description": "Debtor" },
+        "equivalent": { "type": "string" },
+        "limit": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "number" },
+            { "type": "string" }
+          ]
+        },
+        "policy": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "timelineEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "type"],
+      "properties": {
+        "time": {
+          "description": "Event time in simulation timeline. MVP supports: integer milliseconds from run start OR simple tokens like 'day_10' (runner interprets).",
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "minLength": 1, "maxLength": 50 }
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": ["payment", "clearing", "stress", "inject", "note"]
+        },
+        "description": { "type": "string" },
+        "effects": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    }
+  }
+}

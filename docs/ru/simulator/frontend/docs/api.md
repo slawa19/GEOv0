@@ -23,9 +23,69 @@
 - `GET /api/v1/simulator/events?equivalent=HOUR` (SSE)
   - Поток событий транзакций/клиринга, готовых к анимации.
 
+Дополнение (Real Mode):
+- backend также эмитит системное событие `run_status`:
+  - при смене состояния (`start/pause/resume/stop/error`)
+  - и периодически во время `running` (например раз в 1–2 секунды)
+- событие `tick` не требуется для UI по умолчанию и допускается только как debug-режим (опционально)
+
 Примечание: на раннем MVP можно сделать polling-режим:
 - `GET /api/v1/simulator/events/poll?equivalent=HOUR&after=evt_...`
   - Возвращает массив событий.
+
+---
+
+## 1.1) Endpoints (Real Mode control plane — расширение)
+
+Этот раздел добавляет недостающие контракты, чтобы UI мог показывать вкладки:
+`Scenario`, `Run`, `Metrics`, `Bottlenecks`, `Artifacts`.
+
+Важно:
+- Текущие `/graph/snapshot` и `/events` можно трактовать как **"active run"** (MVP),
+  либо позже расширить до namespace с `run_id`.
+- UI не должен вычислять метрики/узкие места из raw событий — backend отдаёт готовые серии/списки.
+
+### Scenarios
+- `GET /api/v1/simulator/scenarios`
+  - Список доступных сценариев (presets).
+- `POST /api/v1/simulator/scenarios`
+  - Загрузка `scenario.json` (создаёт `scenario_id`).
+- `GET /api/v1/simulator/scenarios/{scenario_id}` (опционально)
+  - Полная информация по сценарию + summary.
+
+### Runs
+- `POST /api/v1/simulator/runs`
+  - Старт прогона: `{ scenario_id, mode, intensity_percent } -> { run_id }`.
+- `GET /api/v1/simulator/runs/{run_id}`
+  - Текущее состояние прогона (для polling UI).
+- `POST /api/v1/simulator/runs/{run_id}/pause`
+- `POST /api/v1/simulator/runs/{run_id}/resume`
+- `POST /api/v1/simulator/runs/{run_id}/stop`
+- `POST /api/v1/simulator/runs/{run_id}/restart` (опционально)
+- `POST /api/v1/simulator/runs/{run_id}/intensity`
+  - Обновить интенсивность: `{ intensity_percent: 0..100 }`.
+
+### Live events (namespace by run)
+- `GET /api/v1/simulator/runs/{run_id}/events?equivalent=HOUR` (SSE)
+  - То же, что `/api/v1/simulator/events`, но привязанное к конкретному run.
+
+### Snapshot (namespace by run)
+- `GET /api/v1/simulator/runs/{run_id}/graph/snapshot?equivalent=HOUR`
+  - То же, что `/api/v1/simulator/graph/snapshot`, но привязанное к конкретному run.
+
+### Metrics
+- `GET /api/v1/simulator/runs/{run_id}/metrics?equivalent=HOUR&from_ms=...&to_ms=...&step_ms=...`
+  - Возвращает time-series (готовые для графиков).
+
+### Bottlenecks
+- `GET /api/v1/simulator/runs/{run_id}/bottlenecks?equivalent=HOUR&limit=20&min_score=0.7`
+  - Возвращает top bottlenecks + причины.
+
+### Artifacts (опционально)
+- `GET /api/v1/simulator/runs/{run_id}/artifacts`
+  - Индекс артефактов (urls + метаданные).
+- `GET /api/v1/simulator/runs/{run_id}/artifacts/{name}`
+  - Скачать конкретный файл (`summary.json`, `events.ndjson`, `snapshots-0001.json`, ...).
 
 ---
 
@@ -197,3 +257,256 @@ backend может одновременно обновить и `viz_color_key`,
 - В `Overview` не рисовать постоянные частицы: частицы только по `tx.*` и шагам `clearing.plan`.
 - Если одновременно слишком много событий: оставить top-N по `intensity_key`.
 - Подписи — только выбранный узел + соседи (глобальные подписи — отдельная настройка).
+
+---
+
+## 7) Real Mode: строгие типы для control plane
+
+Цель этого раздела — чтобы backend и UI **не могли разъехаться по полям**.
+
+Правила:
+- Все ответы control-plane должны содержать `api_version` (строка), чтобы UI мог fail-fast при несовместимости.
+- Новые поля добавлять можно (backward-compatible). Переименования/удаления — только через новый major `api_version`.
+- `scenario.json` как входной формат должен иметь собственную `schema_version` (не путать с `api_version`).
+
+### 7.1 ScenarioSummary
+
+```ts
+export type ScenarioSummary = {
+  api_version: string // например: "simulator-api/1"
+
+  scenario_id: string
+  name?: string
+  created_at?: string // ISO
+
+  participants_count: number
+  trustlines_count: number
+  equivalents: string[]
+
+  clusters_count?: number
+  hubs_count?: number
+
+  // Backend/tooling может приложить готовые подсказки для UI.
+  tags?: string[]
+}
+```
+
+Пример:
+
+```json
+{
+  "api_version": "simulator-api/1",
+  "scenario_id": "greenfield-village-100",
+  "name": "Greenfield Village (100)",
+  "created_at": "2026-01-28T10:05:00Z",
+  "participants_count": 100,
+  "trustlines_count": 520,
+  "equivalents": ["UAH", "EUR", "HOUR"],
+  "clusters_count": 7,
+  "hubs_count": 6,
+  "tags": ["preset", "demo"]
+}
+```
+
+### 7.2 Scenarios list
+
+```ts
+export type ScenariosListResponse = {
+  api_version: string
+  items: ScenarioSummary[]
+}
+```
+
+### 7.3 RunStatus
+
+```ts
+export type RunState = 'idle' | 'running' | 'paused' | 'stopping' | 'stopped' | 'error'
+
+export type RunStatus = {
+  api_version: string
+
+  run_id: string
+  scenario_id: string
+  mode: 'fixtures' | 'real'
+
+  state: RunState
+  started_at?: string // ISO
+  stopped_at?: string // ISO
+
+  // UI-статус (то, что ты хотел видеть на вкладке Run)
+  sim_time_ms?: number // виртуальное время симуляции
+  intensity_percent?: number // 0..100
+  ops_sec?: number
+  queue_depth?: number
+
+  // Ошибки
+  errors_total?: number
+  errors_last_1m?: number
+  last_error?: { code: string; message: string; at: string } | null
+
+  // Для "какая фаза/событие сейчас"
+  last_event_type?: string | null
+  current_phase?: string | null
+}
+```
+
+Пример:
+
+```json
+{
+  "api_version": "simulator-api/1",
+  "run_id": "run_2026_01_28_001",
+  "scenario_id": "greenfield-village-100",
+  "mode": "real",
+  "state": "running",
+  "started_at": "2026-01-28T10:10:00Z",
+  "sim_time_ms": 184000,
+  "intensity_percent": 65,
+  "ops_sec": 18.4,
+  "queue_depth": 2,
+  "errors_total": 3,
+  "errors_last_1m": 1,
+  "last_error": { "code": "PAYMENT_TIMEOUT", "message": "prepare timeout", "at": "2026-01-28T10:12:57Z" },
+  "last_event_type": "tx.updated",
+  "current_phase": "payments"
+}
+```
+
+### 7.4 MetricSeries
+
+Принцип: UI рисует графики, но **не вычисляет** метрики из событий.
+
+```ts
+export type MetricPoint = { t_ms: number; v: number }
+
+export type MetricSeries = {
+  key:
+    | 'success_rate'
+    | 'avg_route_length'
+    | 'total_debt'
+    | 'clearing_volume'
+    | 'bottlenecks_score'
+
+  unit?: '%' | 'count' | 'amount'
+  points: MetricPoint[]
+}
+
+export type MetricsResponse = {
+  api_version: string
+  run_id: string
+  equivalent: string
+  from_ms: number
+  to_ms: number
+  step_ms: number
+  series: MetricSeries[]
+}
+```
+
+Пример:
+
+```json
+{
+  "api_version": "simulator-api/1",
+  "run_id": "run_2026_01_28_001",
+  "equivalent": "HOUR",
+  "from_ms": 0,
+  "to_ms": 600000,
+  "step_ms": 10000,
+  "series": [
+    { "key": "success_rate", "unit": "%", "points": [{"t_ms":0,"v":92.0},{"t_ms":10000,"v":93.1}] },
+    { "key": "avg_route_length", "unit": "count", "points": [{"t_ms":0,"v":2.4},{"t_ms":10000,"v":2.6}] }
+  ]
+}
+```
+
+### 7.5 BottleneckItem
+
+```ts
+export type BottleneckTarget =
+  | { kind: 'edge'; from: string; to: string }
+  | { kind: 'node'; id: string }
+
+export type BottleneckItem = {
+  target: BottleneckTarget
+  score: number
+  reason_code:
+    | 'LOW_AVAILABLE'
+    | 'HIGH_USED'
+    | 'FREQUENT_ABORTS'
+    | 'TOO_MANY_TIMEOUTS'
+    | 'ROUTING_TOO_DEEP'
+    | 'CLEARING_PRESSURE'
+
+  // Опциональные подсказки для UI
+  label?: string
+  suggested_action?: string
+}
+
+export type BottlenecksResponse = {
+  api_version: string
+  run_id: string
+  equivalent: string
+  items: BottleneckItem[]
+}
+```
+
+Пример:
+
+```json
+{
+  "api_version": "simulator-api/1",
+  "run_id": "run_2026_01_28_001",
+  "equivalent": "UAH",
+  "items": [
+    {
+      "target": { "kind": "edge", "from": "shop_12", "to": "household_44" },
+      "score": 0.91,
+      "reason_code": "LOW_AVAILABLE",
+      "label": "No capacity",
+      "suggested_action": "Increase trust limit or reroute"
+    }
+  ]
+}
+```
+
+### 7.6 ArtifactIndex
+
+Важное: UI в браузере **не открывает папки**. Поэтому артефакты — это ссылки для скачивания/просмотра.
+
+```ts
+export type ArtifactItem = {
+  name: string // "summary.json" | "events.ndjson" | "snapshots-0001.json" | ...
+  content_type?: string
+  size_bytes?: number
+  sha256?: string
+  url: string
+}
+
+export type ArtifactIndex = {
+  api_version: string
+  run_id: string
+
+  // Для dev-режима можно отдать путь, но UI использует это только как "copy".
+  artifact_path?: string
+
+  items: ArtifactItem[]
+
+  // Опционально: одна ссылка на zip bundle.
+  bundle_url?: string
+}
+```
+
+Пример:
+
+```json
+{
+  "api_version": "simulator-api/1",
+  "run_id": "run_2026_01_28_001",
+  "artifact_path": "C:/geo/runs/run_2026_01_28_001",
+  "items": [
+    { "name": "summary.json", "content_type": "application/json", "size_bytes": 18234, "url": "/api/v1/simulator/runs/run_2026_01_28_001/artifacts/summary.json" },
+    { "name": "events.ndjson", "content_type": "application/x-ndjson", "size_bytes": 934455, "url": "/api/v1/simulator/runs/run_2026_01_28_001/artifacts/events.ndjson" }
+  ],
+  "bundle_url": "/api/v1/simulator/runs/run_2026_01_28_001/artifacts/bundle.zip"
+}
+```

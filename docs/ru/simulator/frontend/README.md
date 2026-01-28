@@ -7,6 +7,7 @@
 - Основные спецификации (актуальные):
   - [docs/specs/GEO-game-interface-spec.md](docs/specs/GEO-game-interface-spec.md)
   - [docs/specs/GEO-visual-demo-fast-mock.md](docs/specs/GEO-visual-demo-fast-mock.md)
+  - [docs/specs/simulator-real-mode-screens-spec.md](docs/specs/simulator-real-mode-screens-spec.md) (панели Scenario/Run/Metrics/Bottlenecks/Artifacts)
 - Контракт API (snapshot/events + `viz_*`):
   - [docs/api.md](docs/api.md)
 

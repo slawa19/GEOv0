@@ -1,0 +1,12 @@
+{
+  "schema_version": "scenario/1",
+  "scenario_id": "minimal",
+  "equivalents": ["UAH"],
+  "participants": [
+    { "id": "p1", "name": "Ivan", "type": "person" },
+    { "id": "p2", "name": "Coffee Shop", "type": "business" }
+  ],
+  "trustlines": [
+    { "from": "p1", "to": "p2", "limit": 1000, "equivalent": "UAH" }
+  ]
+}

@@ -1,0 +1,5251 @@
+{
+  "schema_version": "scenario/1",
+  "scenario_id": "greenfield-village-100",
+  "name": "greenfield-village-100",
+  "equivalents": [
+    "EUR",
+    "HOUR",
+    "UAH"
+  ],
+  "participants": [
+    {
+      "id": "PID_U0001_9e3779b1",
+      "name": "GreenField Cooperative (Co-op)",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0002_3c6ef362",
+      "name": "GreenField Warehouse",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0003_daa66d13",
+      "name": "GreenField Procurement Desk",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0004_78dde6c4",
+      "name": "Riverside Market Hall",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0005_17156075",
+      "name": "Village Transport Co-op",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0006_b54cda26",
+      "name": "SunnyHarvest Bakery",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0007_538453d7",
+      "name": "MeadowDairy Collective",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0008_f1bbcd88",
+      "name": "Hilltop Greenhouses",
+      "type": "business",
+      "status": "frozen",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0009_8ff34739",
+      "name": "Oak & Iron Workshop",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0010_2e2ac0ea",
+      "name": "Community Energy & Water Team",
+      "type": "business",
+      "status": "active",
+      "groupId": "anchors",
+      "behaviorProfileId": "anchor_hub"
+    },
+    {
+      "id": "PID_U0011_cc623a9b",
+      "name": "Anton Petrenko (Grain Farmer)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0012_6a99b44c",
+      "name": "Maria Shevchenko (Vegetable Farmer)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0013_08d12dfd",
+      "name": "Oksana Hrytsenko (Berry Farm)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0014_a708a7ae",
+      "name": "Dmytro Kovalenko (Honey & Apiary)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0015_4540215f",
+      "name": "Iryna Bondar (Eggs & Poultry)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0016_e3779b10",
+      "name": "Serhii Melnyk (Goat Cheese)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0017_81af14c1",
+      "name": "Yulia Tkachenko (Herbal Tea)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0018_1fe68e72",
+      "name": "Viktor Koval (Sunflower Oil Press)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0019_be1e0823",
+      "name": "Kateryna Marchenko (Flour Milling)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0020_5c5581d4",
+      "name": "Oleh Savchenko (Meat Processing)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0021_fa8cfb85",
+      "name": "Nina Romanenko (Canning & Pickles)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0022_98c47536",
+      "name": "Taras Klymenko (Carpentry)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0023_36fbeee7",
+      "name": "Alina Moroz (Sewing & Alterations)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0024_d5336898",
+      "name": "Bohdan Kravets (Shoemaker)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0025_736ae249",
+      "name": "Svitlana Poliakova (Pottery)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0026_11a25bfa",
+      "name": "Denys Lysenko (Welding)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0027_afd9d5ab",
+      "name": "Hanna Sydorenko (Tailor Workshop)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0028_4e114f5c",
+      "name": "Roman Zadorozhnyi (Firewood & Timber)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0029_ec48c90d",
+      "name": "Pavlo Rudenko (Farm Equipment Rental)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0030_8a8042be",
+      "name": "Olena Fedorova (Seedlings & Plants)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0031_28b7bc6f",
+      "name": "Maksym Horbach (Compost & Soil)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0032_c6ef3620",
+      "name": "Tetiana Kovalchuk (Bread Supplies)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0033_6526afd1",
+      "name": "Andrii Boiko (Fishing & Smoked Fish)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0034_035e2982",
+      "name": "Larysa Ivashchenko (Handmade Soap)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0035_a195a333",
+      "name": "Ihor Chernenko (Metal Parts)",
+      "type": "person",
+      "status": "active",
+      "groupId": "producers",
+      "behaviorProfileId": "producer"
+    },
+    {
+      "id": "PID_U0036_3fcd1ce4",
+      "name": "Riverside Grocery",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0037_de049695",
+      "name": "Village Butcher Shop",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0038_7c3c1046",
+      "name": "Morning Coffee Corner",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0039_1a7389f7",
+      "name": "Family Canteen",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0040_b8ab03a8",
+      "name": "Farmers’ Corner Shop",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0041_56e27d59",
+      "name": "HomeGoods Mini-Mart",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0042_f519f70a",
+      "name": "Pharmacy & Health Kiosk",
+      "type": "business",
+      "status": "frozen",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0043_935170bb",
+      "name": "School Cafeteria",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0044_3188ea6c",
+      "name": "Weekend Street Food Stall",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0045_cfc0641d",
+      "name": "Cooperative Storefront",
+      "type": "business",
+      "status": "active",
+      "groupId": "retail",
+      "behaviorProfileId": "retail"
+    },
+    {
+      "id": "PID_U0046_6df7ddce",
+      "name": "Alex Turner (General Builder)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0047_0c2f577f",
+      "name": "Ethan Brooks (Electrician)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0048_aa66d130",
+      "name": "Liam Carter (Plumber)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0049_489e4ae1",
+      "name": "Noah Bennett (Mechanic)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0050_e6d5c492",
+      "name": "Chloe Evans (Bicycle Repair)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0051_850d3e43",
+      "name": "Grace Collins (Accountant)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0052_2344b7f4",
+      "name": "Ava Reed (Legal Advisor)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0053_c17c31a5",
+      "name": "Mason Wright (IT Support)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0054_5fb3ab56",
+      "name": "Ella Morgan (Nurse)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0055_fdeb2507",
+      "name": "Lucas Hayes (Tutor)",
+      "type": "person",
+      "status": "frozen",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0056_9c229eb8",
+      "name": "Mia Foster (Childcare)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0057_3a5a1869",
+      "name": "Jack Russell (Courier)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0058_d891921a",
+      "name": "Amelia Scott (Hairdresser)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0059_76c90bcb",
+      "name": "Henry Ward (Photographer)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0060_1500857c",
+      "name": "Sophia Kim (Translator)",
+      "type": "person",
+      "status": "active",
+      "groupId": "services",
+      "behaviorProfileId": "service"
+    },
+    {
+      "id": "PID_U0061_b337ff2d",
+      "name": "The Adams Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0062_516f78de",
+      "name": "The Baker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0063_efa6f28f",
+      "name": "The Carter Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0064_8dde6c40",
+      "name": "The Davis Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0065_2c15e5f1",
+      "name": "The Edwards Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0066_ca4d5fa2",
+      "name": "The Foster Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0067_6884d953",
+      "name": "The Garcia Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0068_06bc5304",
+      "name": "The Harris Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0069_a4f3ccb5",
+      "name": "The Ivanov Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0070_432b4666",
+      "name": "The Johnson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0071_e162c017",
+      "name": "The King Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0072_7f9a39c8",
+      "name": "The Lewis Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0073_1dd1b379",
+      "name": "The Miller Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0074_bc092d2a",
+      "name": "The Nelson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0075_5a40a6db",
+      "name": "The Owens Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0076_f878208c",
+      "name": "The Parker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0077_96af9a3d",
+      "name": "The Quinn Family (Household)",
+      "type": "person",
+      "status": "frozen",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0078_34e713ee",
+      "name": "The Robinson Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0079_d31e8d9f",
+      "name": "The Smith Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0080_71560750",
+      "name": "The Taylor Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0081_0f8d8101",
+      "name": "The Walker Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0082_adc4fab2",
+      "name": "The Young Family (Household)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0083_4bfc7463",
+      "name": "Oliver Price (Odd Jobs)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0084_ea33ee14",
+      "name": "Emily Price (Home Baking)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0085_886b67c5",
+      "name": "Daniel Hughes (Garden Help)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0086_26a2e176",
+      "name": "Lily Hughes (Babysitting)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0087_c4da5b27",
+      "name": "Benjamin Lee (Repairs)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0088_6311d4d8",
+      "name": "Isabella Lee (Sewing Help)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0089_01494e89",
+      "name": "James Hill (Driving Help)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0090_9f80c83a",
+      "name": "Charlotte Hill (Cooking Help)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0091_3db841eb",
+      "name": "William Green (Harvest Help)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0092_dbefbb9c",
+      "name": "Harper Green (Crafts)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0093_7a27354d",
+      "name": "Michael Wood (Handyman)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0094_185eaefe",
+      "name": "Evelyn Wood (Care Visits)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0095_b69628af",
+      "name": "Samuel Clark (Errands)",
+      "type": "person",
+      "status": "active",
+      "groupId": "households",
+      "behaviorProfileId": "household"
+    },
+    {
+      "id": "PID_U0096_54cda260",
+      "name": "Olivia Bennett (Community Coordinator)",
+      "type": "person",
+      "status": "active",
+      "groupId": "agents",
+      "behaviorProfileId": "agent"
+    },
+    {
+      "id": "PID_U0097_f3051c11",
+      "name": "Daniel Stone (Trustline Officer)",
+      "type": "person",
+      "status": "active",
+      "groupId": "agents",
+      "behaviorProfileId": "agent"
+    },
+    {
+      "id": "PID_U0098_913c95c2",
+      "name": "Emma Wright (Dispute Mediator)",
+      "type": "person",
+      "status": "active",
+      "groupId": "agents",
+      "behaviorProfileId": "agent"
+    },
+    {
+      "id": "PID_U0099_2f740f73",
+      "name": "Ryan Cooper (Operations Lead)",
+      "type": "person",
+      "status": "frozen",
+      "groupId": "agents",
+      "behaviorProfileId": "agent"
+    },
+    {
+      "id": "PID_U0100_cdab8924",
+      "name": "Sophia Turner (Tech Steward)",
+      "type": "person",
+      "status": "active",
+      "groupId": "agents",
+      "behaviorProfileId": "agent"
+    }
+  ],
+  "groups": [
+    {
+      "id": "anchors",
+      "label": "Anchors"
+    },
+    {
+      "id": "producers",
+      "label": "Producers"
+    },
+    {
+      "id": "retail",
+      "label": "Retail"
+    },
+    {
+      "id": "services",
+      "label": "Services"
+    },
+    {
+      "id": "households",
+      "label": "Households"
+    },
+    {
+      "id": "agents",
+      "label": "Agents"
+    }
+  ],
+  "behaviorProfiles": [
+    {
+      "id": "anchor_hub"
+    },
+    {
+      "id": "producer"
+    },
+    {
+      "id": "retail"
+    },
+    {
+      "id": "service"
+    },
+    {
+      "id": "household"
+    },
+    {
+      "id": "agent"
+    }
+  ],
+  "trustlines": [
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0053_c17c31a5",
+      "limit": "550.00",
+      "equivalent": "EUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0060_1500857c",
+      "limit": "550.00",
+      "equivalent": "EUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "700.00",
+      "equivalent": "EUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "700.00",
+      "equivalent": "EUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0096_54cda260",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0097_f3051c11",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0098_913c95c2",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0099_2f740f73",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0100_cdab8924",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0076_f878208c",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0091_3db841eb",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0062_516f78de",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0092_dbefbb9c",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0078_34e713ee",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0093_7a27354d",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0064_8dde6c40",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0094_185eaefe",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0080_71560750",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0095_b69628af",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0066_ca4d5fa2",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0067_6884d953",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0068_06bc5304",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0084_ea33ee14",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0070_432b4666",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0085_886b67c5",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0071_e162c017",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0086_26a2e176",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0072_7f9a39c8",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0088_6311d4d8",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0074_bc092d2a",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0089_01494e89",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0061_b337ff2d",
+      "to": "PID_U0046_6df7ddce",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0061_b337ff2d",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0062_516f78de",
+      "to": "PID_U0064_8dde6c40",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0063_efa6f28f",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0064_8dde6c40",
+      "to": "PID_U0066_ca4d5fa2",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0065_2c15e5f1",
+      "to": "PID_U0067_6884d953",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0066_ca4d5fa2",
+      "to": "PID_U0051_850d3e43",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0066_ca4d5fa2",
+      "to": "PID_U0068_06bc5304",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0067_6884d953",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0068_06bc5304",
+      "to": "PID_U0070_432b4666",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0069_a4f3ccb5",
+      "to": "PID_U0071_e162c017",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0070_432b4666",
+      "to": "PID_U0072_7f9a39c8",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0071_e162c017",
+      "to": "PID_U0056_9c229eb8",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0071_e162c017",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0072_7f9a39c8",
+      "to": "PID_U0074_bc092d2a",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0073_1dd1b379",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0074_bc092d2a",
+      "to": "PID_U0076_f878208c",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0075_5a40a6db",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0076_f878208c",
+      "to": "PID_U0046_6df7ddce",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0076_f878208c",
+      "to": "PID_U0078_34e713ee",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0077_96af9a3d",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0078_34e713ee",
+      "to": "PID_U0080_71560750",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0079_d31e8d9f",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0080_71560750",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0081_0f8d8101",
+      "to": "PID_U0051_850d3e43",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0081_0f8d8101",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0082_adc4fab2",
+      "to": "PID_U0084_ea33ee14",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0083_4bfc7463",
+      "to": "PID_U0085_886b67c5",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0084_ea33ee14",
+      "to": "PID_U0086_26a2e176",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0085_886b67c5",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0086_26a2e176",
+      "to": "PID_U0056_9c229eb8",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0086_26a2e176",
+      "to": "PID_U0088_6311d4d8",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0087_c4da5b27",
+      "to": "PID_U0089_01494e89",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0088_6311d4d8",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0089_01494e89",
+      "to": "PID_U0091_3db841eb",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0090_9f80c83a",
+      "to": "PID_U0092_dbefbb9c",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0046_6df7ddce",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0093_7a27354d",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0092_dbefbb9c",
+      "to": "PID_U0094_185eaefe",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0093_7a27354d",
+      "to": "PID_U0095_b69628af",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0094_185eaefe",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0095_b69628af",
+      "to": "PID_U0062_516f78de",
+      "limit": "4.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0096_54cda260",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0097_f3051c11",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0098_913c95c2",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0099_2f740f73",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0100_cdab8924",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "5.00",
+      "equivalent": "HOUR",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0002_3c6ef362",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0005_17156075",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0006_b54cda26",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0007_538453d7",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0037_de049695",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0038_7c3c1046",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0040_b8ab03a8",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0041_56e27d59",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0042_f519f70a",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0043_935170bb",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0044_3188ea6c",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0045_cfc0641d",
+      "limit": "1000.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0046_6df7ddce",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0051_850d3e43",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0056_9c229eb8",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0006_b54cda26",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0007_538453d7",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0037_de049695",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0045_cfc0641d",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0047_0c2f577f",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0052_2344b7f4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0057_3a5a1869",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0011_cc623a9b",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0014_a708a7ae",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0017_81af14c1",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0020_5c5581d4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0023_36fbeee7",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0026_11a25bfa",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0029_ec48c90d",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0032_c6ef3620",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0035_a195a333",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0067_6884d953",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0071_e162c017",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0085_886b67c5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0089_01494e89",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0091_3db841eb",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0093_7a27354d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0095_b69628af",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0050_e6d5c492",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0055_fdeb2507",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0060_1500857c",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0043_935170bb",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0048_aa66d130",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0053_c17c31a5",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0058_d891921a",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0062_516f78de",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0070_432b4666",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0078_34e713ee",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0086_26a2e176",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0094_185eaefe",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0043_935170bb",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0049_489e4ae1",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0054_5fb3ab56",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0059_76c90bcb",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0071_e162c017",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0095_b69628af",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0006_b54cda26",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0007_538453d7",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0012_6a99b44c",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0012_6a99b44c",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0012_6a99b44c",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0013_08d12dfd",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0013_08d12dfd",
+      "to": "PID_U0007_538453d7",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0013_08d12dfd",
+      "to": "PID_U0045_cfc0641d",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0006_b54cda26",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0037_de049695",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0015_4540215f",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0015_4540215f",
+      "to": "PID_U0006_b54cda26",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0015_4540215f",
+      "to": "PID_U0037_de049695",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0016_e3779b10",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0016_e3779b10",
+      "to": "PID_U0007_538453d7",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0016_e3779b10",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0016_e3779b10",
+      "to": "PID_U0085_886b67c5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0017_81af14c1",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0017_81af14c1",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0017_81af14c1",
+      "to": "PID_U0038_7c3c1046",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0018_1fe68e72",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0018_1fe68e72",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0019_be1e0823",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0019_be1e0823",
+      "to": "PID_U0006_b54cda26",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0037_de049695",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0021_fa8cfb85",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0021_fa8cfb85",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0021_fa8cfb85",
+      "to": "PID_U0089_01494e89",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0022_98c47536",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0023_36fbeee7",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0023_36fbeee7",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0023_36fbeee7",
+      "to": "PID_U0040_b8ab03a8",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0024_d5336898",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0025_736ae249",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0025_736ae249",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0026_11a25bfa",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0026_11a25bfa",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0026_11a25bfa",
+      "to": "PID_U0041_56e27d59",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0026_11a25bfa",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0026_11a25bfa",
+      "to": "PID_U0093_7a27354d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0027_afd9d5ab",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0028_4e114f5c",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0029_ec48c90d",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0029_ec48c90d",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0029_ec48c90d",
+      "to": "PID_U0042_f519f70a",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0030_8a8042be",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0031_28b7bc6f",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0031_28b7bc6f",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0032_c6ef3620",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0032_c6ef3620",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0032_c6ef3620",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0032_c6ef3620",
+      "to": "PID_U0043_935170bb",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0033_6526afd1",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0033_6526afd1",
+      "to": "PID_U0037_de049695",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0034_035e2982",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0035_a195a333",
+      "to": "PID_U0003_daa66d13",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0035_a195a333",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0035_a195a333",
+      "to": "PID_U0044_3188ea6c",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0011_cc623a9b",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0043_935170bb",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0062_516f78de",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0064_8dde6c40",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0066_ca4d5fa2",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0067_6884d953",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0068_06bc5304",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0070_432b4666",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0071_e162c017",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0072_7f9a39c8",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0074_bc092d2a",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0076_f878208c",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0078_34e713ee",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0080_71560750",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0084_ea33ee14",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0085_886b67c5",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0086_26a2e176",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0088_6311d4d8",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0089_01494e89",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0091_3db841eb",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0092_dbefbb9c",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0093_7a27354d",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0094_185eaefe",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0095_b69628af",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0066_ca4d5fa2",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0074_bc092d2a",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0064_8dde6c40",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0072_7f9a39c8",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0080_71560750",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0088_6311d4d8",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0085_886b67c5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0093_7a27354d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0040_b8ab03a8",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0040_b8ab03a8",
+      "to": "PID_U0023_36fbeee7",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0041_56e27d59",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0089_01494e89",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0068_06bc5304",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0076_f878208c",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0084_ea33ee14",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0092_dbefbb9c",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0044_3188ea6c",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0044_3188ea6c",
+      "to": "PID_U0035_a195a333",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "850.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0067_6884d953",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0091_3db841eb",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0002_3c6ef362",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0006_b54cda26",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0007_538453d7",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0005_17156075",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0002_3c6ef362",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0006_b54cda26",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0007_538453d7",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0005_17156075",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0002_3c6ef362",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "700.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0006_b54cda26",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0007_538453d7",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0005_17156075",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0061_b337ff2d",
+      "to": "PID_U0011_cc623a9b",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0061_b337ff2d",
+      "to": "PID_U0062_516f78de",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0061_b337ff2d",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0062_516f78de",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0062_516f78de",
+      "to": "PID_U0066_ca4d5fa2",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0063_efa6f28f",
+      "to": "PID_U0064_8dde6c40",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0063_efa6f28f",
+      "to": "PID_U0067_6884d953",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0064_8dde6c40",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0064_8dde6c40",
+      "to": "PID_U0068_06bc5304",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0065_2c15e5f1",
+      "to": "PID_U0066_ca4d5fa2",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0065_2c15e5f1",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0066_ca4d5fa2",
+      "to": "PID_U0014_a708a7ae",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0066_ca4d5fa2",
+      "to": "PID_U0067_6884d953",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0066_ca4d5fa2",
+      "to": "PID_U0070_432b4666",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0067_6884d953",
+      "to": "PID_U0068_06bc5304",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0067_6884d953",
+      "to": "PID_U0071_e162c017",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0068_06bc5304",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0068_06bc5304",
+      "to": "PID_U0072_7f9a39c8",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0069_a4f3ccb5",
+      "to": "PID_U0070_432b4666",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0069_a4f3ccb5",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0070_432b4666",
+      "to": "PID_U0071_e162c017",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0070_432b4666",
+      "to": "PID_U0074_bc092d2a",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0071_e162c017",
+      "to": "PID_U0017_81af14c1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0071_e162c017",
+      "to": "PID_U0072_7f9a39c8",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0071_e162c017",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0072_7f9a39c8",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0072_7f9a39c8",
+      "to": "PID_U0076_f878208c",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0073_1dd1b379",
+      "to": "PID_U0074_bc092d2a",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0073_1dd1b379",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0074_bc092d2a",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0074_bc092d2a",
+      "to": "PID_U0078_34e713ee",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0075_5a40a6db",
+      "to": "PID_U0076_f878208c",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0075_5a40a6db",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0076_f878208c",
+      "to": "PID_U0020_5c5581d4",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0076_f878208c",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0076_f878208c",
+      "to": "PID_U0080_71560750",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0077_96af9a3d",
+      "to": "PID_U0078_34e713ee",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0077_96af9a3d",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0078_34e713ee",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0078_34e713ee",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0079_d31e8d9f",
+      "to": "PID_U0080_71560750",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0079_d31e8d9f",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0080_71560750",
+      "to": "PID_U0081_0f8d8101",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0080_71560750",
+      "to": "PID_U0084_ea33ee14",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0081_0f8d8101",
+      "to": "PID_U0023_36fbeee7",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0081_0f8d8101",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0081_0f8d8101",
+      "to": "PID_U0085_886b67c5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0082_adc4fab2",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0082_adc4fab2",
+      "to": "PID_U0086_26a2e176",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0083_4bfc7463",
+      "to": "PID_U0011_cc623a9b",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0083_4bfc7463",
+      "to": "PID_U0019_be1e0823",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0083_4bfc7463",
+      "to": "PID_U0084_ea33ee14",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0083_4bfc7463",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0084_ea33ee14",
+      "to": "PID_U0013_08d12dfd",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0084_ea33ee14",
+      "to": "PID_U0085_886b67c5",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0084_ea33ee14",
+      "to": "PID_U0088_6311d4d8",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0085_886b67c5",
+      "to": "PID_U0015_4540215f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0085_886b67c5",
+      "to": "PID_U0086_26a2e176",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0085_886b67c5",
+      "to": "PID_U0089_01494e89",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0086_26a2e176",
+      "to": "PID_U0017_81af14c1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0086_26a2e176",
+      "to": "PID_U0026_11a25bfa",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0086_26a2e176",
+      "to": "PID_U0087_c4da5b27",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0086_26a2e176",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0087_c4da5b27",
+      "to": "PID_U0019_be1e0823",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0087_c4da5b27",
+      "to": "PID_U0020_5c5581d4",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0087_c4da5b27",
+      "to": "PID_U0088_6311d4d8",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0087_c4da5b27",
+      "to": "PID_U0091_3db841eb",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0088_6311d4d8",
+      "to": "PID_U0021_fa8cfb85",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0088_6311d4d8",
+      "to": "PID_U0089_01494e89",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0088_6311d4d8",
+      "to": "PID_U0092_dbefbb9c",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0089_01494e89",
+      "to": "PID_U0023_36fbeee7",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0089_01494e89",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0089_01494e89",
+      "to": "PID_U0093_7a27354d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0090_9f80c83a",
+      "to": "PID_U0025_736ae249",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0090_9f80c83a",
+      "to": "PID_U0091_3db841eb",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0090_9f80c83a",
+      "to": "PID_U0094_185eaefe",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0012_6a99b44c",
+      "limit": "550.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0027_afd9d5ab",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0029_ec48c90d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0092_dbefbb9c",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0095_b69628af",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0092_dbefbb9c",
+      "to": "PID_U0029_ec48c90d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0092_dbefbb9c",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0092_dbefbb9c",
+      "to": "PID_U0093_7a27354d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0093_7a27354d",
+      "to": "PID_U0031_28b7bc6f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0093_7a27354d",
+      "to": "PID_U0062_516f78de",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0093_7a27354d",
+      "to": "PID_U0094_185eaefe",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0094_185eaefe",
+      "to": "PID_U0033_6526afd1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0094_185eaefe",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0094_185eaefe",
+      "to": "PID_U0095_b69628af",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0095_b69628af",
+      "to": "PID_U0035_a195a333",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0095_b69628af",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0095_b69628af",
+      "to": "PID_U0064_8dde6c40",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0096_54cda260",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0097_f3051c11",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0098_913c95c2",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0099_2f740f73",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0100_cdab8924",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "400.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    }
+  ],
+  "events": []
+}
