@@ -67,7 +67,7 @@
 
 И открываться в браузере (Vite порт): http://localhost:5176/
 
-**Никаких Docker/Postgres/Qdrant.**
+**Никаких Docker/Postgres.**
 
 ---
 

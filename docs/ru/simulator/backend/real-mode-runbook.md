@@ -19,7 +19,6 @@
 Опционально:
 
 - Postgres + Redis (через Docker Compose) — чтобы тестировать real‑semantics (таймауты, локи, конкурентность)
-- Qdrant — только если конкретные фичи/сервисы его реально требуют
 
 ---
 
@@ -137,28 +136,15 @@ Dev‑override (uvicorn `--reload`, volumes, debug):
 
 ---
 
-## 5) Qdrant (опционально)
+## 5) Как понять, что Real Mode симулятора работает
 
-Если конкретная часть проекта требует Qdrant:
-
-- Docker: `docker compose -f docker-compose.qdrant.yml --profile tools up -d qdrant`
-- Локальный exe: используется task «Qdrant: ensure running (docker or local)»
-
-Проверка:
-
-- `http://localhost:6333/readyz` → 200
-
----
-
-## 6) Как понять, что Real Mode симулятора работает
-
-### 6.1 Базовые признаки «ок»
+### 5.1 Базовые признаки «ок»
 
 - Backend отвечает на `GET /api/v1/health`
 - Swagger UI открывается (`/docs`)
 - Admin UI в real mode (в `admin-ui/.env.local` выставлены `VITE_API_MODE=real` и `VITE_API_BASE_URL=...`)
 
-### 6.2 Симуляторный control plane (когда endpoints реализованы)
+### 5.2 Симуляторный control plane (когда endpoints реализованы)
 
 Ориентир по контракту — `api/openapi.yaml` и документы протокола.
 
@@ -176,15 +162,15 @@ Dev‑override (uvicorn `--reload`, volumes, debug):
 
 ---
 
-## 7) Troubleshooting
+## 6) Troubleshooting
 
-### 7.1 Порты заняты
+### 6.1 Порты заняты
 
 - Для Backend/Admin UI используйте `-AutoPorts`:
   - `./scripts/run_local.ps1 start -AutoPorts`
 - Simulator UI сам подберёт порт, если 5176 занят или «excluded».
 
-### 7.2 Нет `.venv` или Python зависимостей
+### 6.2 Нет `.venv` или Python зависимостей
 
 `scripts/run_local.ps1` ожидает Python в `.venv`.
 
@@ -192,7 +178,7 @@ Dev‑override (uvicorn `--reload`, volumes, debug):
 - Активировать: `./.venv/Scripts/Activate.ps1`
 - Установить deps: `pip install -r requirements.txt -r requirements-dev.txt`
 
-### 7.3 Admin UI неожиданно в mock mode
+### 6.3 Admin UI неожиданно в mock mode
 
 Проверьте `admin-ui/.env.local`:
 
@@ -201,7 +187,7 @@ Dev‑override (uvicorn `--reload`, volumes, debug):
 
 Проще всего: запускать через `./scripts/run_local.ps1 start`.
 
-### 7.4 Docker окружение не стартует
+### 6.4 Docker окружение не стартует
 
 - `docker compose ps`
 - `docker compose logs -f app`
@@ -209,7 +195,7 @@ Dev‑override (uvicorn `--reload`, volumes, debug):
 
 ---
 
-## 8) Примечание про UX артефактов (важно для Real Mode)
+## 7) Примечание про UX артефактов (важно для Real Mode)
 
 В браузере нельзя надёжно «открыть папку на диске».
 

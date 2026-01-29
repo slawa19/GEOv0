@@ -5,7 +5,17 @@
 param(
   [int]$Port = 5176,
   [string]$HostName = '127.0.0.1',
-  [int]$MaxPortTries = 200
+  [int]$MaxPortTries = 200,
+
+  # UI API mode:
+  # - fixtures: demo/fixtures mode (default)
+  # - real: real backend integration (fetch-stream SSE + REST)
+  [ValidateSet('fixtures', 'real')]
+  [string]$Mode = 'fixtures',
+
+  # Backend origin for Vite proxy (/api/v1 -> backend). Used mainly for Mode=real.
+  # Example: http://127.0.0.1:8000
+  [string]$BackendOrigin = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +58,41 @@ function Test-HttpOk([string]$url) {
   } catch {
     return $false
   }
+}
+
+function Try-Detect-DockerBackendOrigin([string]$hostForUrl) {
+  # Detect the published host port for the API container (geov0-app:8000) and return an origin like http://127.0.0.1:18000
+  $port = $null
+
+  try {
+    $docker = Get-Command docker -ErrorAction SilentlyContinue
+    if ($docker) {
+      $out = & docker port geov0-app 8000/tcp 2>$null
+      $last = ($out | Select-Object -Last 1)
+      if ($last -and ($last -match ':(\d+)\s*$')) {
+        $port = [int]$Matches[1]
+      }
+    }
+  } catch {}
+
+  if (-not $port) {
+    try {
+      $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+      if ($wsl) {
+        $out = & wsl.exe -e bash -lc "docker port geov0-app 8000/tcp" 2>$null
+        $last = ($out | Select-Object -Last 1)
+        if ($last -and ($last -match ':(\d+)\s*$')) {
+          $port = [int]$Matches[1]
+        }
+      }
+    } catch {}
+  }
+
+  if ($port) {
+    return "http://${hostForUrl}:$port"
+  }
+
+  return $null
 }
 
 function Get-ExcludedTcpPortRanges([ValidateSet('ipv4','ipv6')] [string]$ipVersion) {
@@ -137,13 +182,40 @@ if (Test-TcpOpen $HostName $selectedPort) {
 
 Write-Host ''
 Write-Host 'Starting GEO Simulator UI (Vite dev server)...'
-Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/"
+if ($Mode -eq 'real') {
+  Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/?mode=real"
+} else {
+  Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/"
+}
 Write-Host "If the port is unavailable, Vite will pick another and print the actual URL." -ForegroundColor DarkGray
 Write-Host ''
 
 $viteCli = Join-Path $appDir 'node_modules/vite/bin/vite.js'
 if (-not (Test-Path $viteCli)) {
   throw "Vite CLI not found: $viteCli (did npm install succeed?)"
+}
+
+if ($Mode -eq 'real') {
+  $env:VITE_API_MODE = 'real'
+} else {
+  Remove-Item Env:VITE_API_MODE -ErrorAction SilentlyContinue
+}
+
+if ($Mode -eq 'real' -and [string]::IsNullOrWhiteSpace($BackendOrigin)) {
+  $detected = Try-Detect-DockerBackendOrigin -hostForUrl $HostName
+  if ($detected) {
+    $BackendOrigin = $detected
+    Write-Host "Detected backend origin from Docker: ${BackendOrigin}" -ForegroundColor DarkGray
+  } else {
+    Write-Host 'Backend origin not provided and could not be auto-detected from Docker.' -ForegroundColor Yellow
+    Write-Host 'Pass -BackendOrigin http://127.0.0.1:<port> to force it.' -ForegroundColor Yellow
+  }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($BackendOrigin)) {
+  $env:VITE_GEO_BACKEND_ORIGIN = $BackendOrigin
+} else {
+  Remove-Item Env:VITE_GEO_BACKEND_ORIGIN -ErrorAction SilentlyContinue
 }
 
 node $viteCli --host $HostName --port $selectedPort

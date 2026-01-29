@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import DemoHudBottom from './DemoHudBottom.vue'
 import DemoHudTop from './DemoHudTop.vue'
+import RealHudBottom from './RealHudBottom.vue'
+import RealHudTop from './RealHudTop.vue'
 import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
@@ -10,10 +12,16 @@ import { useSimulatorApp } from '../composables/useSimulatorApp'
 const app = useSimulatorApp()
 
 const {
+  apiMode,
+
   // flags
   isDemoFixtures,
   isTestMode,
   isWebDriver,
+
+  // real mode
+  real,
+  realActions,
 
   // state + prefs
   state,
@@ -110,7 +118,32 @@ const {
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
     />
 
+    <RealHudTop
+      v-if="apiMode === 'real'"
+      v-model:eq="eq"
+      v-model:layoutMode="layoutMode"
+      :api-base="real.apiBase"
+      :access-token="real.accessToken"
+      :loading-scenarios="real.loadingScenarios"
+      :scenarios="real.scenarios"
+      :selected-scenario-id="real.selectedScenarioId"
+      :desired-mode="real.desiredMode"
+      :intensity-percent="real.intensityPercent"
+      :run-id="real.runId"
+      :run-status="real.runStatus"
+      :sse-state="real.sseState"
+      :last-error="real.lastError"
+      :refresh-scenarios="realActions.refreshScenarios"
+      :start-run="realActions.startRun"
+      @update:apiBase="realActions.setApiBase"
+      @update:accessToken="realActions.setAccessToken"
+      @update:selectedScenarioId="realActions.setSelectedScenarioId"
+      @update:desiredMode="realActions.setDesiredMode"
+      @update:intensityPercent="realActions.setIntensityPercent"
+    />
+
     <DemoHudTop
+      v-else
       v-model:eq="eq"
       v-model:layoutMode="layoutMode"
       v-model:scene="scene"
@@ -133,7 +166,30 @@ const {
       :unpin="unpinSelectedNode"
     />
 
+
+    <RealHudBottom
+      v-if="apiMode === 'real'"
+      v-model:quality="quality"
+      v-model:labelsLod="labelsLod"
+      :show-reset-view="showResetView"
+      :run-id="real.runId"
+      :run-status="real.runStatus"
+      :sse-state="real.sseState"
+      :intensity-percent="real.intensityPercent"
+      :set-intensity="realActions.applyIntensity"
+      :pause="realActions.pause"
+      :resume="realActions.resume"
+      :stop="realActions.stop"
+      :refresh-snapshot="realActions.refreshSnapshot"
+      :artifacts="real.artifacts"
+      :artifacts-loading="real.artifactsLoading"
+      :refresh-artifacts="realActions.refreshArtifacts"
+      :download-artifact="realActions.downloadArtifact"
+      :reset-view="resetView"
+    />
+
     <DemoHudBottom
+      v-else
       v-model:quality="quality"
       v-model:labelsLod="labelsLod"
       :show-reset-view="showResetView"
@@ -150,9 +206,9 @@ const {
     />
 
     <!-- Loading / error overlay (fail-fast, but non-intrusive) -->
-    <div v-if="state.loading" class="overlay">Loading fixtures…</div>
+    <div v-if="state.loading" class="overlay">Loading…</div>
     <div v-else-if="state.error" class="overlay overlay-error">
-      <div class="overlay-title">Fixtures error</div>
+      <div class="overlay-title">Error</div>
       <div class="overlay-text mono">{{ state.error }}</div>
     </div>
 

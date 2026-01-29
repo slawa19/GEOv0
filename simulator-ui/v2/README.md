@@ -59,6 +59,44 @@ npm run dev
 
 When `VITE_TEST_MODE=1` and you are not running under Playwright, the HUD shows a small `TEST MODE` pill.
 
+---
+
+## Real Mode (backend integration)
+
+The UI can run in **Real Mode** (REST control-plane + SSE data-plane) against the backend simulator API.
+
+### Prereqs
+- Backend running locally (default): `http://127.0.0.1:8000`
+- A valid **access token** (Bearer) for GEO Hub API
+
+### Run (PowerShell)
+
+From `simulator-ui/v2`:
+
+```powershell
+$env:VITE_API_MODE='real'
+$env:VITE_GEO_API_BASE='/api/v1'
+
+# Optional: proxy target if your backend is not on 8000
+# $env:VITE_GEO_BACKEND_ORIGIN='http://127.0.0.1:8000'
+
+npm run dev
+```
+
+Notes:
+- The Vite dev server proxies `/api/v1/*` to the backend (including SSE), so the browser stays same-origin.
+- The token can be pasted into the HUD and is persisted in localStorage (dev convenience).
+
+### Quick manual smoke
+1) Set `mode=real` (env above does it) and open http://localhost:5176/
+2) Paste token
+3) Click scenarios refresh (↻), select a scenario
+4) Click `Start run`
+5) Confirm:
+	- `run_status` heartbeat updates (state/sim_time/ops/queue)
+	- graph snapshot renders
+	- `tx.updated` / clearing events animate when present
+
 ## E2E screenshots (Playwright)
 
 From `simulator-ui/v2`:

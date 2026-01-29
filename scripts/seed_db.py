@@ -248,10 +248,14 @@ async def _seed_from_admin_fixtures_datasets(
         print(f"Starting seeding process (source=fixtures, pack={label})...")
         try:
             # --- Equivalents ---
+            existing_eq_codes = set((await session.execute(select(Equivalent.code))).scalars().all())
             eq_models: list[Equivalent] = []
             for item in equivalents_data or []:
                 code = str(item.get("code") or "").strip().upper()
                 validate_equivalent_code(code)
+
+                if code in existing_eq_codes:
+                    continue
 
                 raw_meta = item.get("metadata") or item.get("metadata_")
                 if raw_meta is None:
@@ -274,10 +278,14 @@ async def _seed_from_admin_fixtures_datasets(
             }
 
             # --- Participants ---
+            existing_pids = set((await session.execute(select(Participant.pid))).scalars().all())
             p_models: list[Participant] = []
             for item in participants_data or []:
                 pid = str(item.get("pid") or "").strip()
                 if not pid:
+                    continue
+
+                if pid in existing_pids:
                     continue
                 p_models.append(
                     Participant(
@@ -298,6 +306,17 @@ async def _seed_from_admin_fixtures_datasets(
             }
 
             # --- TrustLines ---
+            existing_trustlines = set(
+                (
+                    await session.execute(
+                        select(
+                            TrustLine.from_participant_id,
+                            TrustLine.to_participant_id,
+                            TrustLine.equivalent_id,
+                        )
+                    )
+                ).all()
+            )
             tl_models: list[TrustLine] = []
             for item in trustlines_data or []:
                 from_pid = str(item.get("from") or item.get("from_pid") or "").strip()
@@ -310,6 +329,10 @@ async def _seed_from_admin_fixtures_datasets(
                 p_to = p_by_pid.get(to_pid)
                 eq = eq_by_code.get(eq_code)
                 if not (p_from and p_to and eq):
+                    continue
+
+                key = (p_from.id, p_to.id, eq.id)
+                if key in existing_trustlines:
                     continue
 
                 policy = item.get("policy") or {}
@@ -344,6 +367,13 @@ async def _seed_from_admin_fixtures_datasets(
             await session.flush()
 
             # --- Debts ---
+            existing_debts = set(
+                (
+                    await session.execute(
+                        select(Debt.debtor_id, Debt.creditor_id, Debt.equivalent_id)
+                    )
+                ).all()
+            )
             debt_models: list[Debt] = []
             for item in debts_data or []:
                 debtor_pid = str(item.get("debtor") or "").strip()
@@ -362,6 +392,10 @@ async def _seed_from_admin_fixtures_datasets(
                 if amt <= 0:
                     continue
 
+                key = (debtor.id, creditor.id, eq.id)
+                if key in existing_debts:
+                    continue
+
                 debt_models.append(
                     Debt(
                         debtor_id=debtor.id,
@@ -374,6 +408,7 @@ async def _seed_from_admin_fixtures_datasets(
             await session.flush()
 
             # --- Transactions (subset, plus a few "stuck" ones for Incidents dashboard) ---
+            existing_tx_ids = set((await session.execute(select(Transaction.id))).scalars().all())
             tx_models: list[Transaction] = []
             for item in _iter_slice(transactions_data or [], max_transactions):
                 tx_id = str(item.get("tx_id") or item.get("id") or "").strip()
@@ -392,6 +427,9 @@ async def _seed_from_admin_fixtures_datasets(
                     tx_uuid = uuid.UUID(str(item.get("id"))) if item.get("id") else uuid.uuid5(uuid.NAMESPACE_URL, f"tx:{tx_id}")
                 except Exception:
                     tx_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"tx:{tx_id}")
+
+                if tx_uuid in existing_tx_ids:
+                    continue
 
                 tx_models.append(
                     Transaction(
@@ -416,9 +454,14 @@ async def _seed_from_admin_fixtures_datasets(
                 eq_code = str(equivalent).strip().upper()
                 if not initiator or eq_code not in eq_by_code:
                     return
+
+                stuck_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"stuck:{tx_id}")
+                if stuck_uuid in existing_tx_ids:
+                    return
+
                 tx_models.append(
                     Transaction(
-                        id=uuid.uuid5(uuid.NAMESPACE_URL, f"stuck:{tx_id}"),
+                        id=stuck_uuid,
                         tx_id=tx_id,
                         idempotency_key=None,
                         type="PAYMENT",
@@ -475,10 +518,15 @@ async def _seed_from_admin_fixtures_datasets(
             await session.flush()
 
             # --- Audit log (subset) ---
+            existing_audit_ids = set((await session.execute(select(AuditLog.id))).scalars().all())
             al_models: list[AuditLog] = []
             for item in _iter_slice(audit_data or [], max_audit):
                 id_raw = str(item.get("id") or "").strip() or str(uuid.uuid4())
                 ts = _parse_dt(item.get("timestamp")) or datetime.now(timezone.utc)
+
+                audit_id = uuid.uuid5(uuid.NAMESPACE_URL, f"audit:{id_raw}")
+                if audit_id in existing_audit_ids:
+                    continue
 
                 actor_role = item.get("actor_role")
                 actor_label = str(item.get("actor_id") or "").strip()
@@ -489,7 +537,7 @@ async def _seed_from_admin_fixtures_datasets(
 
                 al_models.append(
                     AuditLog(
-                        id=uuid.uuid5(uuid.NAMESPACE_URL, f"audit:{id_raw}"),
+                        id=audit_id,
                         timestamp=ts,
                         actor_id=None,
                         actor_role=actor_role,

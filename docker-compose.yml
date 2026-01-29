@@ -50,6 +50,7 @@ services:
         condition: service_healthy
     volumes:
       - ./seeds:/app/seeds:ro
+      - ./admin-fixtures:/app/admin-fixtures:ro
 
 volumes:
   postgres_data:

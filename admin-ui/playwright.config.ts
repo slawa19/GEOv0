@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const e2ePort = Number.parseInt(process.env.PW_E2E_PORT ?? '', 10) || 5173
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
@@ -8,13 +11,17 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: e2eBaseUrl,
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 5173',
-    url: 'http://127.0.0.1:5173',
-    reuseExistingServer: !process.env.CI,
+    command: `npm run dev -- --host 127.0.0.1 --port ${e2ePort}`,
+    url: e2eBaseUrl,
+    reuseExistingServer: process.env.PW_REUSE_SERVER === '1',
+    env: {
+      ...process.env,
+      VITE_API_MODE: 'mock',
+    },
     timeout: 120_000,
   },
   projects: [

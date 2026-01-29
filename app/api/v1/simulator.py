@@ -12,7 +12,6 @@ from starlette.responses import FileResponse, Response, StreamingResponse
 
 from app.api import deps
 from app.core.simulator.runtime import runtime
-from app.schemas.participant import Participant
 from app.schemas.simulator import (
     ArtifactIndex,
     BottlenecksResponse,
@@ -180,7 +179,7 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
 @router.get("/graph/snapshot", response_model=SimulatorGraphSnapshot)
 async def graph_snapshot_active_run(
     equivalent: str = Query(...),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     run_id = runtime.get_active_run_id()
     if run_id is None:
@@ -194,7 +193,7 @@ async def ego_snapshot_active_run(
     equivalent: str = Query(...),
     pid: str = Query(...),
     depth: int = Query(1, ge=1, le=2),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     run_id = runtime.get_active_run_id()
     if run_id is None:
@@ -206,7 +205,7 @@ async def ego_snapshot_active_run(
 async def events_stream_active_run(
     request: Request,
     equivalent: str = Query(...),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     run_id = runtime.get_active_run_id() or "active"
 
@@ -245,7 +244,7 @@ async def events_stream_active_run(
 async def events_poll_active_run(
     equivalent: str = Query(...),
     after: Optional[str] = Query(None),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     # MVP: no replay buffer.
     return []
@@ -258,7 +257,7 @@ async def events_poll_active_run(
 
 @router.get("/scenarios", response_model=ScenariosListResponse)
 async def list_scenarios(
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return ScenariosListResponse(items=runtime.list_scenarios())
 
@@ -266,7 +265,7 @@ async def list_scenarios(
 @router.post("/scenarios", response_model=ScenarioSummary)
 async def upload_scenario(
     body: ScenarioUploadRequest,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     rec = runtime.save_uploaded_scenario(body.scenario)
     return rec.summary()
@@ -275,7 +274,7 @@ async def upload_scenario(
 @router.get("/scenarios/{scenario_id}", response_model=ScenarioSummary)
 async def get_scenario_summary(
     scenario_id: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return runtime.get_scenario(scenario_id).summary()
 
@@ -283,7 +282,7 @@ async def get_scenario_summary(
 @router.post("/runs", response_model=RunCreateResponse)
 async def start_run(
     body: RunCreateRequest,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     run_id = await runtime.create_run(
         scenario_id=body.scenario_id, mode=body.mode, intensity_percent=body.intensity_percent
@@ -294,7 +293,7 @@ async def start_run(
 @router.get("/runs/{run_id}", response_model=RunStatus)
 async def get_run_status(
     run_id: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return runtime.get_run_status(run_id)
 
@@ -302,7 +301,7 @@ async def get_run_status(
 @router.post("/runs/{run_id}/pause", response_model=RunStatus)
 async def pause_run(
     run_id: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.pause(run_id)
 
@@ -310,7 +309,7 @@ async def pause_run(
 @router.post("/runs/{run_id}/resume", response_model=RunStatus)
 async def resume_run(
     run_id: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.resume(run_id)
 
@@ -318,7 +317,7 @@ async def resume_run(
 @router.post("/runs/{run_id}/stop", response_model=RunStatus)
 async def stop_run(
     run_id: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.stop(run_id)
 
@@ -326,7 +325,7 @@ async def stop_run(
 @router.post("/runs/{run_id}/restart", response_model=RunStatus)
 async def restart_run(
     run_id: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.restart(run_id)
 
@@ -335,7 +334,7 @@ async def restart_run(
 async def set_run_intensity(
     run_id: str,
     body: SetIntensityRequest,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.set_intensity(run_id, intensity_percent=body.intensity_percent)
 
@@ -345,7 +344,7 @@ async def run_events_stream(
     run_id: str,
     request: Request,
     equivalent: str = Query(...),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     last_event_id = request.headers.get("Last-Event-ID")
     if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
@@ -368,7 +367,7 @@ async def run_events_stream(
 async def graph_snapshot_for_run(
     run_id: str,
     equivalent: str = Query(...),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent)
 
@@ -380,7 +379,7 @@ async def metrics_for_run(
     from_ms: int = Query(..., ge=0),
     to_ms: int = Query(..., ge=0),
     step_ms: int = Query(..., ge=1),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.build_metrics(
         run_id=run_id,
@@ -397,7 +396,7 @@ async def bottlenecks_for_run(
     equivalent: str = Query(...),
     limit: int = Query(20, ge=1, le=200),
     min_score: Optional[float] = Query(None, ge=0.0, le=1.0),
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.build_bottlenecks(
         run_id=run_id,
@@ -410,7 +409,7 @@ async def bottlenecks_for_run(
 @router.get("/runs/{run_id}/artifacts", response_model=ArtifactIndex)
 async def artifacts_index(
     run_id: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     return await runtime.list_artifacts(run_id=run_id)
 
@@ -419,7 +418,7 @@ async def artifacts_index(
 async def artifacts_download(
     run_id: str,
     name: str,
-    current_participant: Participant = Depends(deps.get_current_participant),
+    _actor=Depends(deps.require_participant_or_admin),
 ):
     path = runtime.get_artifact_path(run_id=run_id, name=name)
     return FileResponse(path)
