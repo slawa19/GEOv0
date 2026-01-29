@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ScenarioSummary, SimulatorMode, RunStatus } from '../api/simulatorTypes'
+import { computed, ref } from 'vue'
 
 type Props = {
   apiBase: string
@@ -23,6 +24,12 @@ type Props = {
 }
 
 const props = defineProps<Props>()
+
+const DEFAULT_DEV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_DEV_ACCESS_TOKEN ?? 'dev-admin-token-change-me').trim()
+const isDev = import.meta.env.DEV
+const isLocalhost = typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+const isUsingDevToken = computed(() => isDev && isLocalhost && String(props.accessToken ?? '').trim() === DEFAULT_DEV_ACCESS_TOKEN)
+const showTokenEditor = ref(false)
 
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
@@ -103,16 +110,25 @@ function short(s: string, n: number) {
       </div>
 
       <div class="pill">
-        <span class="label">Token</span>
-        <input
-          class="select mono"
-          style="width: 220px"
-          type="password"
-          :value="accessToken"
-          aria-label="Access token"
-          placeholder="Bearer token"
-          @input="setAccessToken(($event.target as HTMLInputElement).value)"
-        />
+        <span class="label">Auth</span>
+        <template v-if="isUsingDevToken && !showTokenEditor">
+          <span class="mono">dev admin (auto)</span>
+          <button class="btn btn-xxs" type="button" @click="showTokenEditor = true">edit</button>
+        </template>
+        <template v-else>
+          <input
+            class="select mono"
+            style="width: 220px"
+            type="password"
+            :value="accessToken"
+            aria-label="Access token"
+            placeholder="JWT (Bearer) or admin token"
+            @input="setAccessToken(($event.target as HTMLInputElement).value)"
+          />
+          <button v-if="isDev && isLocalhost" class="btn btn-xxs" type="button" @click="showTokenEditor = false">
+            hide
+          </button>
+        </template>
       </div>
 
       <div class="pill">
@@ -131,6 +147,14 @@ function short(s: string, n: number) {
         <button class="btn btn-xxs" type="button" :disabled="loadingScenarios" @click="props.refreshScenarios">
           {{ loadingScenarios ? '…' : '↻' }}
         </button>
+      </div>
+
+      <div v-if="!loadingScenarios && scenarios.length === 0" class="pill pill-warn" aria-label="No scenarios">
+        <span class="label">Hint</span>
+        <span class="mono">
+          No scenarios. Graph won’t start in real mode until backend returns items for GET /simulator/scenarios.
+          Fix: ensure backend image includes fixtures/simulator (Dockerfile COPY fixtures/...) or upload scenario.json.
+        </span>
       </div>
 
       <div class="pill subtle">

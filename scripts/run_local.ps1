@@ -154,6 +154,92 @@ function Test-IsOurBackend {
     return ($cmdLower -like '*uvicorn*' -and $cmdLower -like '*app.main:app*')
 }
 
+function Test-WslDockerAvailable {
+    try {
+        if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $false }
+        & wsl.exe -e bash -lc 'command -v docker >/dev/null 2>&1'
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function Get-OurDockerContainersByPort {
+    param(
+        [int]$Port
+    )
+
+    $names = @()
+
+    # Native docker
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        try {
+            $out = & docker ps --format '{{.Names}} {{.Ports}}' 2>$null
+            foreach ($line in ($out | Where-Object { $_ })) {
+                $text = $line.ToString()
+                if ($text -notmatch '^(\S+)\s+(.+)$') { continue }
+                $name = $Matches[1]
+                $ports = $Matches[2]
+                if ($name -notlike 'geov0-*') { continue }
+                if ($ports -like "*:$Port->*") { $names += $name }
+            }
+        } catch {
+            # ignore
+        }
+    }
+
+    if ($names.Count -gt 0) { return $names }
+
+    # WSL docker
+    if (Test-WslDockerAvailable) {
+        try {
+            $out = & wsl.exe -e bash -lc "docker ps --format '{{.Names}} {{.Ports}}'" 2>$null
+            foreach ($line in ($out | Where-Object { $_ })) {
+                $text = $line.ToString()
+                if ($text -notmatch '^(\S+)\s+(.+)$') { continue }
+                $name = $Matches[1]
+                $ports = $Matches[2]
+                if ($name -notlike 'geov0-*') { continue }
+                if ($ports -like "*:$Port->*") { $names += $name }
+            }
+        } catch {
+            # ignore
+        }
+    }
+
+    return $names
+}
+
+function Stop-OurDockerContainers {
+    param(
+        [string[]]$Names
+    )
+
+    $Names = @($Names | Where-Object { $_ })
+    if ($Names.Count -eq 0) { return }
+
+    Write-Host "Stopping repo docker containers: $($Names -join ', ')" -ForegroundColor Yellow
+
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        try {
+            & docker stop @Names | Out-Null
+            return
+        } catch {
+            # fall through to WSL
+        }
+    }
+
+    if (Test-WslDockerAvailable) {
+        try {
+            $escaped = $Names | ForEach-Object { "'" + ($_.Replace("'", "'\\''")) + "'" }
+            $cmd = "docker stop " + ($escaped -join ' ')
+            & wsl.exe -e bash -lc "$cmd >/dev/null 2>&1 || true" | Out-Null
+        } catch {
+            # ignore
+        }
+    }
+}
+
 function Test-IsOurAdminUi {
     param([int]$Id, [string]$TargetUiDir)
     $cmd = Get-ProcessCommandLine -Id $Id
@@ -199,10 +285,35 @@ function Stop-IfListeningAndOurs {
     if ($isOurs) {
         Write-Host "Stopping $Kind listening on port $Port (PID $procId)..."
         Stop-ProcessById -Id $procId
+        return
     } else {
+        # Extra dev convenience: if the port is held by OUR docker-compose stack (geov0-*), stop it.
+        # Never touch чужие containers.
+        $dockerNames = Get-OurDockerContainersByPort -Port $Port
+        if ($dockerNames.Count -gt 0) {
+            Stop-OurDockerContainers -Names $dockerNames
+            return
+        }
+
         Write-Warning "Port $Port is in use by PID $procId, but it doesn't look like our $Kind. Skipping."
         Write-Verbose "Command line was: $(Get-ProcessCommandLine -Id $procId)"
     }
+}
+
+function Wait-ForPortToBeFree {
+    param(
+        [int]$Port,
+        [int]$TimeoutSec = 8
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Get-ListeningPid -Port $Port)) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    return (-not (Get-ListeningPid -Port $Port))
 }
 
 function Remove-StalePidFile {
@@ -629,10 +740,12 @@ switch ($Action) {
             Write-Host "     AutoPorts: selected port $backendPortUsed" -ForegroundColor Gray
         } else {
             Stop-IfListeningAndOurs -Port $backendPortUsed -Kind 'backend'
-            $currentListener = Get-ListeningPid -Port $backendPortUsed
-            if ($currentListener) {
+            if (-not (Wait-ForPortToBeFree -Port $backendPortUsed -TimeoutSec 10)) {
+                $currentListener = Get-ListeningPid -Port $backendPortUsed
                 throw "Port $backendPortUsed is busy (PID: $currentListener). Use -AutoPorts or free the port."
             }
+            $currentListener = Get-ListeningPid -Port $backendPortUsed
+            if ($currentListener) { throw "Port $backendPortUsed is busy (PID: $currentListener). Use -AutoPorts or free the port." }
             Write-Host "     Using port $backendPortUsed" -ForegroundColor Gray
         }
 

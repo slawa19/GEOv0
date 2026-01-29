@@ -27,7 +27,7 @@ import {
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { connectSse } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
-import { authHeaders } from '../api/http'
+import { ApiError, authHeaders } from '../api/http'
 import { normalizeApiBase } from '../api/apiBase'
 
 import { useAppDemoPlayerSetup } from './useAppDemoPlayerSetup'
@@ -73,6 +73,9 @@ export function useSimulatorApp() {
   // Playwright sets navigator.webdriver=true. Use it to keep screenshot tests stable even if
   // someone runs the dev server with VITE_TEST_MODE=1.
   const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
+
+  const isLocalhost =
+    typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
 
   const ALLOWED_EQS = new Set(['UAH', 'HOUR', 'EUR'])
 
@@ -130,7 +133,8 @@ export function useSimulatorApp() {
   })
 
   // Dev convenience: keep real mode usable even if localStorage token is empty.
-  if (import.meta.env.DEV && !String(real.accessToken ?? '').trim()) {
+  // Safety: only auto-fill on localhost.
+  if (import.meta.env.DEV && isLocalhost && !String(real.accessToken ?? '').trim()) {
     real.accessToken = DEFAULT_DEV_ACCESS_TOKEN
   }
 
@@ -525,13 +529,61 @@ export function useSimulatorApp() {
       real.intensityPercent = Math.round(Number(st.intensity_percent ?? real.intensityPercent))
       real.lastError = st.last_error ? `${st.last_error.code}: ${st.last_error.message}` : ''
     } catch (e: any) {
+      // If the server restarted, the in-memory run registry is gone.
+      // Clear stale run_id so the UI doesn't look "stuck" with a blank graph.
+      if (e instanceof ApiError && e.status === 404) {
+        real.runId = null
+        real.runStatus = null
+        real.lastEventId = null
+        real.artifacts = []
+        real.sseState = 'idle'
+        real.lastError = 'Stored run not found (server restarted). Click Start run to create a new run.'
+        return
+      }
       real.lastError = String(e?.message ?? e)
     }
   }
 
   async function refreshSnapshot() {
     await sceneState.loadScene()
+    // Scene loader stores errors in state.error; in real mode surface them in the HUD.
+    if (isRealMode.value && state.error) {
+      // Typical case: HTTP 404 when run_id was persisted but backend restarted.
+      if (state.error.includes('HTTP 404')) {
+        real.runId = null
+        real.runStatus = null
+        real.lastEventId = null
+        real.artifacts = []
+        stopSse()
+        real.lastError = 'Run not found (server restarted). Click Start run.'
+        return
+      }
+      real.lastError = state.error
+    }
   }
+
+  // Also surface initial scene-load errors (e.g., "No run started") that happen on mount
+  // before the user clicks "Start run".
+  watch(
+    () => state.error,
+    (e) => {
+      if (!isRealMode.value) return
+      if (!e) return
+
+      if (e.includes('HTTP 404')) {
+        real.runId = null
+        real.runStatus = null
+        real.lastEventId = null
+        real.artifacts = []
+        stopSse()
+        real.lastError = 'Run not found (server restarted). Click Start run.'
+        return
+      }
+
+      real.lastError = e
+    },
+    { flush: 'post' },
+  )
 
   function nextBackoff(attempt: number): number {
     const steps = [1000, 2000, 5000, 10000, 20000]
@@ -818,7 +870,29 @@ export function useSimulatorApp() {
   watch(
     () => isRealMode.value,
     (v) => {
-      if (v) refreshScenarios()
+      if (!v) return
+      void (async () => {
+        await refreshScenarios()
+
+        // If run_id was persisted from a previous session, try to restore UI state.
+        // If the backend restarted, this will clear the stale run_id and tell the user.
+        if (real.runId && real.accessToken) {
+          await refreshRunStatus()
+          if (real.runId) {
+            await refreshSnapshot()
+            if (real.runId) {
+              await runSseLoop()
+            }
+          }
+          return
+        }
+
+        // Dev UX: if user opened /?mode=real on localhost, auto-start a run once scenarios loaded.
+        // Avoid doing this in non-localhost environments.
+        if (import.meta.env.DEV && isLocalhost && real.accessToken && real.selectedScenarioId && !real.runId) {
+          await startRun()
+        }
+      })()
     },
     { immediate: true },
   )

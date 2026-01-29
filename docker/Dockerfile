@@ -18,6 +18,10 @@ RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/
+
+# Simulator fixtures (scenario registry + schema)
+COPY fixtures/ ./fixtures/
+
 COPY docker/docker-entrypoint.sh ./
 
 RUN chmod +x docker-entrypoint.sh

@@ -180,12 +180,13 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
 async def graph_snapshot_active_run(
     equivalent: str = Query(...),
     _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
 ):
     run_id = runtime.get_active_run_id()
     if run_id is None:
         # Active run is optional in MVP; return an empty snapshot.
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
-    return runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent)
+    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
 
 
 @router.get("/graph/ego", response_model=SimulatorGraphSnapshot)
@@ -194,11 +195,12 @@ async def ego_snapshot_active_run(
     pid: str = Query(...),
     depth: int = Query(1, ge=1, le=2),
     _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
 ):
     run_id = runtime.get_active_run_id()
     if run_id is None:
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
-    return runtime.build_ego_snapshot(run_id=run_id, equivalent=equivalent, pid=pid, depth=depth)
+    return await runtime.build_ego_snapshot(run_id=run_id, equivalent=equivalent, pid=pid, depth=depth, session=db)
 
 
 @router.get("/events")
@@ -368,8 +370,9 @@ async def graph_snapshot_for_run(
     run_id: str,
     equivalent: str = Query(...),
     _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
 ):
-    return runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent)
+    return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
 
 
 @router.get("/runs/{run_id}/metrics", response_model=MetricsResponse)

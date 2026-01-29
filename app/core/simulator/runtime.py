@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import json
 import os
 import random
@@ -13,7 +14,7 @@ import zipfile
 from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -39,6 +40,7 @@ from app.schemas.simulator import (
     SimulatorGraphLink,
     SimulatorGraphNode,
     SimulatorGraphSnapshot,
+    SimulatorVizSize,
     SimulatorClearingDoneEvent,
     SimulatorClearingPlanEvent,
     SimulatorTxFailedEvent,
@@ -50,11 +52,13 @@ from app.db.models.debt import Debt
 from app.db.models.participant import Participant
 from app.db.models.simulator_storage import SimulatorRun, SimulatorRunArtifact, SimulatorRunBottleneck, SimulatorRunMetric
 from app.db.models.trustline import TrustLine
-from app.db.session import AsyncSessionLocal
+import app.db.session as db_session
 from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.payments.service import PaymentService
 from app.utils.exceptions import BadRequestException, NotFoundException, RoutingException, TimeoutException, GeoException
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -301,6 +305,10 @@ class _SimulatorRuntimeBase:
 
     def _load_fixture_scenarios(self) -> None:
         if not FIXTURES_DIR.exists():
+            # This typically means the runtime is running without repo fixtures mounted
+            # (e.g., a Docker image missing COPY fixtures/...). Keep startup resilient,
+            # but make the root cause visible in logs.
+            logger.warning("simulator.fixtures_missing path=%s", str(FIXTURES_DIR))
             return
 
         for child in sorted(FIXTURES_DIR.iterdir()):
@@ -315,6 +323,7 @@ class _SimulatorRuntimeBase:
                 self._scenarios[rec.scenario_id] = rec
             except Exception:
                 # Keep startup resilient; invalid fixture can be diagnosed later.
+                logger.exception("simulator.fixture_scenario_load_failed path=%s", str(scenario_path))
                 continue
 
     def _load_uploaded_scenarios(self) -> None:
@@ -466,7 +475,7 @@ class _SimulatorRuntimeBase:
         # DB-first for real-mode: return persisted points if available.
         if self._db_enabled() and run.mode == "real":
             try:
-                async with AsyncSessionLocal() as session:
+                async with db_session.AsyncSessionLocal() as session:
                     rows = (
                         await session.execute(
                             select(SimulatorRunMetric)
@@ -589,7 +598,7 @@ class _SimulatorRuntimeBase:
         # DB-first for real-mode: return persisted bottlenecks if available.
         if self._db_enabled() and run.mode == "real":
             try:
-                async with AsyncSessionLocal() as session:
+                async with db_session.AsyncSessionLocal() as session:
                     latest = (
                         await session.execute(
                             select(func.max(SimulatorRunBottleneck.computed_at)).where(
@@ -718,7 +727,7 @@ class _SimulatorRuntimeBase:
         if self._db_enabled() and run.mode != "real":
             try:
                 computed_at = _utc_now()
-                async with AsyncSessionLocal() as session:
+                async with db_session.AsyncSessionLocal() as session:
                     rows: list[SimulatorRunBottleneck] = []
                     for it in items:
                         target_id = f"{it.target.from_}->{it.target.to}"  # type: ignore[attr-defined]
@@ -809,7 +818,7 @@ class _SimulatorRuntimeBase:
 
         if self._db_enabled():
             try:
-                async with AsyncSessionLocal() as session:
+                async with db_session.AsyncSessionLocal() as session:
                     await session.execute(delete(SimulatorRunArtifact).where(SimulatorRunArtifact.run_id == run_id))
                     rows = [
                         SimulatorRunArtifact(
@@ -1100,6 +1109,7 @@ class _SimulatorRuntimeBase:
         run = self.get_run(run_id)
         with self._lock:
             run.sim_time_ms = 0
+            run.tick_index = 0
             run.errors_total = 0
             run.last_error = None
             run.last_event_type = None
@@ -1161,13 +1171,30 @@ class _SimulatorRuntimeBase:
             except ValueError:
                 return
 
-    def build_graph_snapshot(self, *, run_id: str, equivalent: str) -> SimulatorGraphSnapshot:
+    async def build_graph_snapshot(
+        self,
+        *,
+        run_id: str,
+        equivalent: str,
+        session=None,
+    ) -> SimulatorGraphSnapshot:
         run = self.get_run(run_id)
         scenario = self.get_scenario(run.scenario_id).raw
-        return _scenario_to_snapshot(scenario, equivalent=equivalent)
+        snap = _scenario_to_snapshot(scenario, equivalent=equivalent)
+        if run.mode != "real":
+            return snap
+        return await self._enrich_snapshot_from_db(snap, equivalent=equivalent, session=session)
 
-    def build_ego_snapshot(self, *, run_id: str, equivalent: str, pid: str, depth: int) -> SimulatorGraphSnapshot:
-        snap = self.build_graph_snapshot(run_id=run_id, equivalent=equivalent)
+    async def build_ego_snapshot(
+        self,
+        *,
+        run_id: str,
+        equivalent: str,
+        pid: str,
+        depth: int,
+        session=None,
+    ) -> SimulatorGraphSnapshot:
+        snap = await self.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=session)
         if depth <= 0:
             return snap
 
@@ -1200,6 +1227,327 @@ class _SimulatorRuntimeBase:
             palette=snap.palette,
             limits=snap.limits,
         )
+
+    async def _enrich_snapshot_from_db(
+        self,
+        snap: SimulatorGraphSnapshot,
+        *,
+        equivalent: str,
+        session=None,
+    ) -> SimulatorGraphSnapshot:
+        """Real-mode only.
+
+        Enrich scenario-topology snapshot with DB-derived state:
+        - link.used/available based on Debt amounts
+        - node.net_balance_atoms / node.net_sign
+        """
+
+        eq_code = str(equivalent or "").strip().upper()
+        if not eq_code:
+            return snap
+
+        pids = [n.id for n in snap.nodes if str(n.id or "").strip()]
+        if not pids:
+            return snap
+
+        async def _load_state(session) -> tuple[
+            Equivalent,
+            dict[str, Participant],
+            dict[str, uuid.UUID],
+            dict[tuple[uuid.UUID, uuid.UUID], Decimal],
+            dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]],
+        ] | None:
+            eq = (
+                await session.execute(select(Equivalent).where(Equivalent.code == eq_code))
+            ).scalar_one_or_none()
+            if eq is None:
+                return None
+
+            p_rows = (
+                await session.execute(select(Participant).where(Participant.pid.in_(pids)))
+            ).scalars().all()
+            pid_to_rec = {p.pid: p for p in p_rows}
+            pid_to_id = {p.pid: p.id for p in p_rows}
+            participant_ids = [p.id for p in p_rows]
+            if not participant_ids:
+                return None
+
+            # Debts: debtor -> creditor in DB
+            debt_rows = (
+                await session.execute(
+                    select(
+                        Debt.creditor_id,
+                        Debt.debtor_id,
+                        func.coalesce(func.sum(Debt.amount), 0).label("amount"),
+                    )
+                    .where(
+                        Debt.equivalent_id == eq.id,
+                        Debt.creditor_id.in_(participant_ids),
+                        Debt.debtor_id.in_(participant_ids),
+                    )
+                    .group_by(Debt.creditor_id, Debt.debtor_id)
+                )
+            ).all()
+            debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {
+                (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+            }
+
+            # Trustlines: from (creditor) -> to (debtor)
+            tl_rows = (
+                await session.execute(
+                    select(
+                        TrustLine.from_participant_id,
+                        TrustLine.to_participant_id,
+                        TrustLine.limit,
+                        TrustLine.status,
+                    ).where(
+                        TrustLine.equivalent_id == eq.id,
+                        TrustLine.from_participant_id.in_(participant_ids),
+                        TrustLine.to_participant_id.in_(participant_ids),
+                    )
+                )
+            ).all()
+            tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {
+                (r.from_participant_id, r.to_participant_id): (r.limit or Decimal("0"), r.status)
+                for r in tl_rows
+            }
+
+            return eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair
+
+        if session is None:
+            async with db_session.AsyncSessionLocal() as s:
+                loaded = await _load_state(s)
+        else:
+            loaded = await _load_state(session)
+
+        if loaded is None:
+            return snap
+
+        eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair = loaded
+
+        precision = int(getattr(eq, "precision", 2) or 2)
+        scale10 = Decimal(10) ** precision
+        money_quant = Decimal(1) / scale10
+
+        def _to_money_str(v: Decimal) -> str:
+            return format(v.quantize(money_quant, rounding=ROUND_DOWN), "f")
+
+        def _parse_amount(v: object) -> float | None:
+            if v is None:
+                return None
+            if isinstance(v, (int, float)):
+                x = float(v)
+                return x if x == x else None
+            if isinstance(v, Decimal):
+                return float(v)
+            if isinstance(v, str):
+                s = v.strip().replace(",", "")
+                if not s:
+                    return None
+                try:
+                    return float(s)
+                except ValueError:
+                    return None
+            return None
+
+        def _quantile(values_sorted: list[float], p: float) -> float:
+            if not values_sorted:
+                raise ValueError("values_sorted must be non-empty")
+            if p <= 0:
+                return values_sorted[0]
+            if p >= 1:
+                return values_sorted[-1]
+            n = len(values_sorted)
+            i = int(p * (n - 1))
+            return values_sorted[i]
+
+        def _link_width_key(limit: float | None, *, q33: float | None, q66: float | None) -> str:
+            if limit is None or q33 is None or q66 is None:
+                return "hairline"
+            if limit <= q33:
+                return "thin"
+            if limit <= q66:
+                return "mid"
+            return "thick"
+
+        def _link_alpha_key(status: str | None, used: float | None, limit: float | None) -> str:
+            if status and status != "active":
+                return "muted"
+            if used is None or limit is None or limit <= 0:
+                return "bg"
+            r = abs(used) / limit
+            if r >= 0.75:
+                return "hi"
+            if r >= 0.40:
+                return "active"
+            if r >= 0.15:
+                return "muted"
+            return "bg"
+
+        # Compute per-node totals from debt table.
+        credit_sum: dict[uuid.UUID, Decimal] = {}
+        debit_sum: dict[uuid.UUID, Decimal] = {}
+        for (creditor_id, debtor_id), amt in debt_by_pair.items():
+            if amt <= 0:
+                continue
+            credit_sum[creditor_id] = credit_sum.get(creditor_id, Decimal("0")) + amt
+            debit_sum[debtor_id] = debit_sum.get(debtor_id, Decimal("0")) + amt
+
+        # Links
+        link_stats: list[tuple[SimulatorGraphLink, float | None, float | None]] = []
+        for link in snap.links:
+            src_pid = str(link.source or "").strip()
+            dst_pid = str(link.target or "").strip()
+            if not src_pid or not dst_pid:
+                continue
+
+            src_id = pid_to_id.get(src_pid)
+            dst_id = pid_to_id.get(dst_pid)
+            if src_id is None or dst_id is None:
+                continue
+
+            used_amt = debt_by_pair.get((src_id, dst_id), Decimal("0"))
+            limit_amt: Decimal
+            status: str | None
+            if (src_id, dst_id) in tl_by_pair:
+                limit_amt, status = tl_by_pair[(src_id, dst_id)]
+            else:
+                status = link.status
+                try:
+                    limit_amt = Decimal(str(link.trust_limit or "0"))
+                except (InvalidOperation, ValueError):
+                    limit_amt = Decimal("0")
+
+            available_amt = limit_amt - used_amt
+            if available_amt < 0:
+                available_amt = Decimal("0")
+
+            link.trust_limit = _to_money_str(limit_amt)
+            link.used = _to_money_str(used_amt)
+            link.available = _to_money_str(available_amt)
+            if status is not None:
+                link.status = str(status)
+
+            link_stats.append((link, _parse_amount(limit_amt), _parse_amount(used_amt)))
+
+        limits = sorted([x for _, x, _ in link_stats if x is not None])
+        q33 = _quantile(limits, 0.33) if limits else None
+        q66 = _quantile(limits, 0.66) if limits else None
+
+        for link, limit_num, used_num in link_stats:
+            status_key: str | None
+            if isinstance(link.status, str):
+                status_key = link.status.strip().lower() or None
+            else:
+                status_key = None
+            link.viz_width_key = _link_width_key(limit_num, q33=q33, q66=q66)
+            link.viz_alpha_key = _link_alpha_key(status_key, used=used_num, limit=limit_num)
+
+        # Nodes: net + viz
+        atoms_by_pid: dict[str, int] = {}
+        mags: list[int] = []
+        debt_mags: list[int] = []
+
+        for node in snap.nodes:
+            pid = str(node.id or "").strip()
+            rec = pid_to_rec.get(pid)
+            if rec is None:
+                continue
+
+            credit = credit_sum.get(rec.id, Decimal("0"))
+            debit = debit_sum.get(rec.id, Decimal("0"))
+            net = credit - debit
+
+            atoms = int((net * scale10).to_integral_value(rounding=ROUND_HALF_UP))
+            node.net_balance_atoms = str(atoms)
+            if atoms < 0:
+                node.net_sign = -1
+            elif atoms > 0:
+                node.net_sign = 1
+            else:
+                node.net_sign = 0
+
+            atoms_by_pid[pid] = atoms
+            mags.append(abs(atoms))
+            if atoms < 0:
+                debt_mags.append(abs(atoms))
+
+            # Prefer DB metadata for status/type if scenario snapshot lacks them.
+            if not (node.status and str(node.status).strip()):
+                if getattr(rec, "status", None) is not None:
+                    node.status = str(rec.status)
+            if not (node.type and str(node.type).strip()):
+                if getattr(rec, "type", None) is not None:
+                    node.type = str(rec.type)
+
+        mags_sorted = sorted(mags)
+        mn = len(mags_sorted)
+
+        def _percentile_rank(sorted_mags: list[int], mag: int) -> float:
+            n = len(sorted_mags)
+            if n <= 1:
+                return 0.0
+            import bisect
+
+            i = bisect.bisect_right(sorted_mags, mag) - 1
+            i = max(0, min(i, n - 1))
+            return i / (n - 1)
+
+        def _scale_from_pct(pct: float, max_scale: float = 1.90, gamma: float = 0.75) -> float:
+            if pct <= 0:
+                return 1.0
+            if pct >= 1:
+                return max_scale
+            return 1.0 + (max_scale - 1.0) * (pct**gamma)
+
+        debt_mags_sorted = sorted(debt_mags)
+        dn = len(debt_mags_sorted)
+        DEBT_BINS = 9
+
+        def _debt_bin(mag: int) -> int:
+            if dn <= 1:
+                return 0
+            import bisect
+
+            i = bisect.bisect_right(debt_mags_sorted, mag) - 1
+            i = max(0, min(i, dn - 1))
+            pct = i / (dn - 1)
+            b = int(round(pct * (DEBT_BINS - 1)))
+            return max(0, min(b, DEBT_BINS - 1))
+
+        for node in snap.nodes:
+            pid = str(node.id or "").strip()
+            if not pid:
+                continue
+
+            atoms = atoms_by_pid.get(pid)
+            if atoms is None:
+                continue
+
+            status_key = str(node.status or "").strip().lower()
+            type_key = str(node.type or "").strip().lower()
+
+            if status_key in {"suspended", "frozen"}:
+                node.viz_color_key = "suspended"
+            elif status_key == "left":
+                node.viz_color_key = "left"
+            elif status_key in {"deleted", "banned"}:
+                node.viz_color_key = "deleted"
+            else:
+                if atoms < 0:
+                    node.viz_color_key = f"debt-{_debt_bin(abs(atoms))}"
+                else:
+                    node.viz_color_key = "business" if type_key == "business" else "person"
+
+            pct = _percentile_rank(mags_sorted, abs(atoms)) if mn > 0 else 0.0
+            s = _scale_from_pct(pct)
+            if type_key == "business":
+                w0, h0 = 26, 22
+            else:
+                w0, h0 = 16, 16
+            node.viz_size = SimulatorVizSize(w=float(int(round(w0 * s))), h=float(int(round(h0 * s))))
+
+        return snap
 
     async def _heartbeat_loop(self, run_id: str) -> None:
         try:
@@ -1238,7 +1586,7 @@ class _SimulatorRuntimeBase:
         scenario = self.get_scenario(run.scenario_id).raw
 
         try:
-            async with AsyncSessionLocal() as session:
+            async with db_session.AsyncSessionLocal() as session:
                 if not run._real_seeded:
                     await self._seed_scenario_into_db(session, scenario)
                     await session.commit()
@@ -1290,8 +1638,10 @@ class _SimulatorRuntimeBase:
                     st = m.setdefault((str(src), str(dst)), {"attempts": 0, "committed": 0, "rejected": 0, "errors": 0, "timeouts": 0})
                     st[key] = int(st.get(key, 0)) + int(n)
 
-                async def _do_one(action: _RealPaymentAction) -> tuple[int, str, str, str, str | None, str | None, float]:
-                    """Returns (seq, eq, sender_pid, receiver_pid, status, error_code, avg_route_len)."""
+                async def _do_one(
+                    action: _RealPaymentAction,
+                ) -> tuple[int, str, str, str, str | None, str | None, float, list[tuple[str, str]]]:
+                    """Returns (seq, eq, sender_pid, receiver_pid, status, error_code, avg_route_len, route_edges)."""
 
                     sender_id = sender_id_by_pid.get(action.sender_pid)
                     if sender_id is None:
@@ -1303,6 +1653,7 @@ class _SimulatorRuntimeBase:
                             None,
                             "SENDER_NOT_FOUND",
                             0.0,
+                            [],
                         )
 
                     idem = self._sim_idempotency_key(
@@ -1320,7 +1671,7 @@ class _SimulatorRuntimeBase:
                             run._real_in_flight += 1
 
                         try:
-                            async with AsyncSessionLocal() as s2:
+                            async with db_session.AsyncSessionLocal() as s2:
                                 service = PaymentService(s2)
                                 res = await service.create_payment_internal(
                                     sender_id,
@@ -1332,6 +1683,20 @@ class _SimulatorRuntimeBase:
                                 await s2.commit()
 
                             status = str(getattr(res, "status", None) or "")
+
+                            route_edges: list[tuple[str, str]] = []
+                            try:
+                                routes = getattr(res, "routes", None)
+                                if routes:
+                                    for r in routes:
+                                        path = getattr(r, "path", None)
+                                        if not path or len(path) < 2:
+                                            continue
+                                        route_edges = [(str(a), str(b)) for a, b in zip(path, path[1:])]
+                                        if route_edges:
+                                            break
+                            except Exception:
+                                route_edges = []
 
                             avg_route_len = 0.0
                             try:
@@ -1356,6 +1721,7 @@ class _SimulatorRuntimeBase:
                                 status,
                                 None,
                                 float(avg_route_len),
+                                route_edges,
                             )
                         except Exception as e:
                             code = "INTERNAL_ERROR"
@@ -1373,6 +1739,7 @@ class _SimulatorRuntimeBase:
                                 None,
                                 code,
                                 0.0,
+                                [],
                             )
                         finally:
                             with self._lock:
@@ -1381,7 +1748,7 @@ class _SimulatorRuntimeBase:
                 tasks = [asyncio.create_task(_do_one(a)) for a in planned]
 
                 next_seq = 0
-                ready: dict[int, tuple[str, str, str, str | None, str | None, float]] = {}
+                ready: dict[int, tuple[str, str, str, str | None, str | None, float, list[tuple[str, str]]]] = {}
 
                 def _inc(eq: str, key: str, n: int = 1) -> None:
                     d = per_eq.setdefault(
@@ -1402,20 +1769,25 @@ class _SimulatorRuntimeBase:
                         if item is None:
                             return
                         del ready[next_seq]
-                        eq, sender_pid, receiver_pid, status, err_code, avg_route_len = item
+                        eq, sender_pid, receiver_pid, status, err_code, avg_route_len, route_edges = item
+
+                        edges_pairs = route_edges or [(sender_pid, receiver_pid)]
 
                         if err_code is not None:
                             errors += 1
                             _inc(eq, "errors")
-                            _edge_inc(eq, sender_pid, receiver_pid, "attempts")
-                            _edge_inc(eq, sender_pid, receiver_pid, "errors")
+                            for a, b in edges_pairs:
+                                _edge_inc(eq, a, b, "attempts")
+                                _edge_inc(eq, a, b, "errors")
                             if err_code == "PAYMENT_TIMEOUT":
                                 timeouts += 1
                                 _inc(eq, "timeouts")
-                                _edge_inc(eq, sender_pid, receiver_pid, "timeouts")
+                                for a, b in edges_pairs:
+                                    _edge_inc(eq, a, b, "timeouts")
                             if err_code == "PAYMENT_REJECTED":
                                 _inc(eq, "rejected")
-                                _edge_inc(eq, sender_pid, receiver_pid, "rejected")
+                                for a, b in edges_pairs:
+                                    _edge_inc(eq, a, b, "rejected")
 
                             with self._lock:
                                 run.errors_total += 1
@@ -1436,36 +1808,34 @@ class _SimulatorRuntimeBase:
                                 error={"code": err_code, "message": err_code, "at": _utc_now()},
                             ).model_dump(mode="json", by_alias=True)
                             self._broadcast(run_id, failed_evt)
-
-                            evt = SimulatorTxUpdatedEvent(
-                                event_id=self._next_event_id(run),
-                                ts=_utc_now(),
-                                type="tx.updated",
-                                equivalent=eq,
-                                ttl_ms=800,
-                                intensity_key="lo",
-                                edges=[
-                                    {
-                                        "from": sender_pid,
-                                        "to": receiver_pid,
-                                        "style": {"viz_width_key": "thin", "viz_alpha_key": "lo"},
-                                    }
-                                ],
-                                node_badges=None,
-                            ).model_dump(mode="json")
-                            self._broadcast(run_id, evt)
                         else:
-                            _edge_inc(eq, sender_pid, receiver_pid, "attempts")
+                            for a, b in edges_pairs:
+                                _edge_inc(eq, a, b, "attempts")
                             if status == "COMMITTED":
                                 committed += 1
                                 _inc(eq, "committed")
-                                _edge_inc(eq, sender_pid, receiver_pid, "committed")
+                                for a, b in edges_pairs:
+                                    _edge_inc(eq, a, b, "committed")
                                 if float(avg_route_len) > 0:
                                     _route_add(eq, float(avg_route_len))
+
+                                evt = SimulatorTxUpdatedEvent(
+                                    event_id=self._next_event_id(run),
+                                    ts=_utc_now(),
+                                    type="tx.updated",
+                                    equivalent=eq,
+                                    ttl_ms=1200,
+                                    edges=[{"from": a, "to": b} for a, b in edges_pairs],
+                                    node_badges=None,
+                                ).model_dump(mode="json")
+                                with self._lock:
+                                    run.last_event_type = "tx.updated"
+                                self._broadcast(run_id, evt)
                             else:
                                 rejected += 1
                                 _inc(eq, "rejected")
-                                _edge_inc(eq, sender_pid, receiver_pid, "rejected")
+                                for a, b in edges_pairs:
+                                    _edge_inc(eq, a, b, "rejected")
 
                                 with self._lock:
                                     # Track last_error for diagnostics even on clean rejections.
@@ -1487,30 +1857,6 @@ class _SimulatorRuntimeBase:
                                 ).model_dump(mode="json", by_alias=True)
                                 self._broadcast(run_id, failed_evt)
 
-                            intensity_key = "hi" if status == "COMMITTED" else "mid"
-                            evt = SimulatorTxUpdatedEvent(
-                                event_id=self._next_event_id(run),
-                                ts=_utc_now(),
-                                type="tx.updated",
-                                equivalent=eq,
-                                ttl_ms=1200,
-                                intensity_key=intensity_key,
-                                edges=[
-                                    {
-                                        "from": sender_pid,
-                                        "to": receiver_pid,
-                                        "style": {"viz_width_key": "highlight", "viz_alpha_key": "hi"},
-                                    }
-                                ],
-                                node_badges=[
-                                    {"id": sender_pid, "viz_badge_key": "tx"},
-                                    {"id": receiver_pid, "viz_badge_key": "tx"},
-                                ],
-                            ).model_dump(mode="json")
-                            with self._lock:
-                                run.last_event_type = "tx.updated"
-                            self._broadcast(run_id, evt)
-
                         with self._lock:
                             run.queue_depth = max(0, run.queue_depth - 1)
 
@@ -1519,11 +1865,11 @@ class _SimulatorRuntimeBase:
                 try:
                     if tasks:
                         for t in asyncio.as_completed(tasks):
-                            seq, eq, sender_pid, receiver_pid, status, err_code, avg_route_len = await t
+                            seq, eq, sender_pid, receiver_pid, status, err_code, avg_route_len, route_edges = await t
 
                             if run.state != "running":
                                 break
-                            ready[seq] = (eq, sender_pid, receiver_pid, status, err_code, avg_route_len)
+                            ready[seq] = (eq, sender_pid, receiver_pid, status, err_code, avg_route_len, route_edges)
                             _emit_if_ready()
 
                             if max_timeouts_per_tick > 0 and timeouts >= max_timeouts_per_tick:
@@ -1810,7 +2156,7 @@ class SimulatorRuntime(_SimulatorRuntimeBase):
         if not self._db_enabled():
             return
         try:
-            async with AsyncSessionLocal() as session:
+            async with db_session.AsyncSessionLocal() as session:
                 row = SimulatorRun(
                     run_id=run.run_id,
                     scenario_id=run.scenario_id,
@@ -1889,7 +2235,7 @@ class SimulatorRuntime(_SimulatorRuntimeBase):
                     )
                 )
 
-            async with AsyncSessionLocal() as session:
+            async with db_session.AsyncSessionLocal() as session:
                 await session.execute(delete(SimulatorRunArtifact).where(SimulatorRunArtifact.run_id == run.run_id))
                 session.add_all(items)
                 await session.commit()
@@ -1973,7 +2319,7 @@ class SimulatorRuntime(_SimulatorRuntimeBase):
                 await session.commit()
 
             if db_session is None:
-                async with AsyncSessionLocal() as session:
+                async with db_session.AsyncSessionLocal() as session:
                     await _write(session)
             else:
                 await _write(db_session)
@@ -2211,6 +2557,10 @@ class SimulatorRuntime(_SimulatorRuntimeBase):
                         profile={},
                     )
                 )
+
+        # NOTE: app.db.session.AsyncSessionLocal has autoflush=False.
+        # We must flush pending inserts before querying IDs for trustlines.
+        await session.flush()
 
         # Trustlines
         trustlines = scenario.get("trustlines") or []

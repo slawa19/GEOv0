@@ -144,6 +144,13 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """httpx AsyncClient bound to the FastAPI app with a DB override."""
 
+    # IMPORTANT: simulator runtime uses app.db.session.AsyncSessionLocal directly
+    # (e.g. in the real-mode heartbeat loop). Patch it to point at the test
+    # sessionmaker so background tasks operate on the same DB as request handlers.
+    import app.db.session as app_db_session
+    _orig_async_session_local = app_db_session.AsyncSessionLocal
+    app_db_session.AsyncSessionLocal = TestingSessionLocal
+
     async def override_get_db():
         yield db_session
 
@@ -155,6 +162,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
             yield ac
     finally:
         app.dependency_overrides.clear()
+        app_db_session.AsyncSessionLocal = _orig_async_session_local
 
 
 # --- Sync E2E Example Fixtures ---

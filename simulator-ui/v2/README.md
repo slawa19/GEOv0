@@ -67,7 +67,9 @@ The UI can run in **Real Mode** (REST control-plane + SSE data-plane) against th
 
 ### Prereqs
 - Backend running locally (default): `http://127.0.0.1:8000`
-- A valid **access token** (Bearer) for GEO Hub API
+- Auth:
+	- In **dev on localhost**, the UI auto-uses the dev admin token (default: `dev-admin-token-change-me`) and shows `dev admin (auto)` in the HUD.
+	- In other environments, provide a valid Bearer token (JWT) or an admin token.
 
 ### Run (PowerShell)
 
@@ -85,14 +87,17 @@ npm run dev
 
 Notes:
 - The Vite dev server proxies `/api/v1/*` to the backend (including SSE), so the browser stays same-origin.
-- The token can be pasted into the HUD and is persisted in localStorage (dev convenience).
+- Token handling:
+	- The token is persisted in `localStorage`.
+	- Dev auto-token can be overridden via `VITE_GEO_DEV_ACCESS_TOKEN`.
+	- To force manual entry, set `VITE_GEO_DEV_ACCESS_TOKEN=''` and clear `localStorage` key `geo.sim.v2.accessToken`.
 
 ### Quick manual smoke
 1) Set `mode=real` (env above does it) and open http://localhost:5176/
-2) Paste token
-3) Click scenarios refresh (↻), select a scenario
-4) Click `Start run`
-5) Confirm:
+
+2) Click scenarios refresh (↻), select a scenario
+3) Click `Start run`
+4) Confirm:
 	- `run_status` heartbeat updates (state/sim_time/ops/queue)
 	- graph snapshot renders
 	- `tx.updated` / clearing events animate when present
