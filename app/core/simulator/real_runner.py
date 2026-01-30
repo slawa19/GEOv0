@@ -819,19 +819,41 @@ class RealRunner:
                         continue
 
                     plan_id = f"plan_{secrets.token_hex(6)}"
+
+                    # Extract edges from first cycle for visualization.
+                    # Each edge has: {"debtor": pid, "creditor": pid, "amount": ..., "debt_id": ...}
+                    # UI expects: {"from": pid, "to": pid}
+                    cycle_edges: list[dict[str, str]] = []
+                    try:
+                        for edge in cycles[0]:
+                            debtor_pid = str(edge.get("debtor") or "") if isinstance(edge, dict) else str(getattr(edge, "debtor", ""))
+                            creditor_pid = str(edge.get("creditor") or "") if isinstance(edge, dict) else str(getattr(edge, "creditor", ""))
+                            if debtor_pid and creditor_pid:
+                                cycle_edges.append({"from": debtor_pid, "to": creditor_pid})
+                    except Exception:
+                        cycle_edges = []
+
+                    # Build steps with highlight_edges for visible clearing animation.
+                    plan_steps: list[dict[str, Any]] = []
+                    if cycle_edges:
+                        plan_steps.append({"at_ms": 0, "highlight_edges": cycle_edges, "intensity_key": "hi"})
+                        plan_steps.append({"at_ms": 400, "particles_edges": cycle_edges, "intensity_key": "mid"})
+                        plan_steps.append({"at_ms": 900, "flash": {"kind": "clearing"}})
+                    else:
+                        # Fallback if no edges extracted.
+                        plan_steps.append({
+                            "at_ms": 0,
+                            "intensity_key": "mid",
+                            "flash": {"kind": "info", "title": "Clearing", "detail": "Auto clearing"},
+                        })
+
                     plan_evt = SimulatorClearingPlanEvent(
                         event_id=self._sse.next_event_id(run),
                         ts=self._utc_now(),
                         type="clearing.plan",
                         equivalent=eq,
                         plan_id=plan_id,
-                        steps=[
-                            {
-                                "at_ms": 0,
-                                "intensity_key": "mid",
-                                "flash": {"kind": "info", "title": "Clearing", "detail": "Auto clearing"},
-                            }
-                        ],
+                        steps=plan_steps,
                     ).model_dump(mode="json")
 
                     with self._lock:

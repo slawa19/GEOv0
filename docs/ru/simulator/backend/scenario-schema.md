@@ -14,11 +14,18 @@
 ## MVP договорённости
 - Время в `events[].time` — одно из:
 	- **миллисекунды от старта прогона** (integer)
-	- простой токен (string), например `day_10` (runner интерпретирует)
-- `behaviorProfiles`/`events` допускаются, но для самого первого MVP runner может работать и без них (только по данным сети + intensity).
-- Эквивалент для MVP:
-	- предпочтительно `equivalents: ["UAH"]`
-	- допускается shorthand `baseEquivalent: "UAH"` (если UI/runner не требует перечисления)
+	- простой токен (string), например `day_10` (для будущей интерпретации runner)
+- `behaviorProfiles`/`events` допускаются схемой, но **текущая реализация runner (fixtures + real)** их не интерпретирует.
+  - На практике сейчас runner использует только `participants[]`, `trustlines[]`, `equivalents[]` и `intensity_percent`.
+- Эквиваленты (важно для совместимости с текущим runtime):
+	- **обязательно** указывать `equivalents: ["UAH", ...]` (даже если он один)
+	- `baseEquivalent` можно оставить как метаданные, но не использовать как единственный источник правды
+	- у каждого trustline **обязательно** должен быть `trustlines[].equivalent` (иначе ребро не попадёт в граф и события)
+
+## Практические замечания по текущему коду
+
+1) `baseEquivalent` в schema является shorthand, но runtime строит граф/события по явным `equivalents[]` и `trustlines[].equivalent`.
+2) `trustlines[].status` не является полем schema; если нужно переносить статус из fixtures, его можно сохранять внутри `trustlines[].policy` (например `policy.status`).
 
 ## Что дальше
 - Добавить примеры валидных сценариев в `fixtures/simulator/*/scenario.json`.

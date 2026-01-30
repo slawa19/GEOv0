@@ -29,7 +29,7 @@
 | SB-05 | `POST /api/v1/simulator/runs/{run_id}/resume` **идемпотентно** возобновляет прогон; генерация событий продолжается | MUST | integration |
 | SB-06 | `POST /api/v1/simulator/runs/{run_id}/stop` **идемпотентно** останавливает прогон и освобождает ресурсы; stream корректно завершается | MUST | integration |
 | SB-07 | `GET /api/v1/simulator/runs/{run_id}/events` отдаёт SSE stream с событиями `SimulatorEvent` (включая `run_status`) согласно `ws-protocol.md` | MUST | integration |
-| SB-08 | Один шаг симуляции (tick) генерирует **0..N** событий согласно `behaviorProfiles` сценария; `tick` как событие допускается только в debug-режиме | MUST | unit (детерминизм с seed) |
+| SB-08 | Один шаг симуляции (tick) генерирует **0..N** доменных событий на основе доступных отношений (`trustlines[]`, `equivalents[]`) с детерминизмом по `seed`; `tick` как событие допускается только в debug-режиме. Примечание: `behaviorProfiles` по schema существуют, но текущий runner их не интерпретирует. | MUST | unit (детерминизм с seed) |
 | SB-09 | При моделировании платежей backend вызывает **реальный** PaymentEngine / GEO Core API (не mock) и эмитит события `tx.*` по факту вызовов/ответов | MUST | integration |
 | SB-10 | При ошибке/отказе PaymentEngine backend эмитит `tx.failed` с причиной (`last_error.code`/payload), чтобы UI мог показать понятную диагностику | MUST | unit |
 

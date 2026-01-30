@@ -138,7 +138,10 @@ MVP цель:
 ### 4.2 Бюджет действий на тик
 Задаём 2 константы (на уровне конфигурации сервера):
 - `actions_per_tick_min = 0`
-- `actions_per_tick_max = 50`  (значение уточняется профилированием)
+- `actions_per_tick_max = 20`
+
+Примечание (текущая реализация):
+- `actions_per_tick_max` сейчас фиксирован как `ACTIONS_PER_TICK_MAX = 20`.
 
 Линейная интерполяция:
 $$ actions\_budget = \left\lfloor actions\_per\_tick\_max \cdot \frac{intensity\_percent}{100} \right\rfloor $$
@@ -149,9 +152,14 @@ $$ actions\_budget = \left\lfloor actions\_per\_tick\_max \cdot \frac{intensity\
 
 ### 4.3 Guardrails
 Чтобы не убить PaymentEngine:
-- лимит параллельности запросов: `max_in_flight = 20`
+- лимит параллельности запросов (real mode): `SIMULATOR_REAL_MAX_IN_FLIGHT` (по умолчанию 1)
 - лимит общего QPS на payments: `max_payments_per_sec` (конфиг)
 - если лимиты превышены — новые действия откладываются/дропаются, но `run_status` остаётся.
+
+Дополнительные guardrails (текущая реализация, env):
+- `SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK` (по умолчанию 5)
+- `SIMULATOR_REAL_MAX_ERRORS_TOTAL` (по умолчанию 200)
+- клиринг: `SIMULATOR_CLEARING_MAX_DEPTH` (по умолчанию 6)
 
 Поле `queue_depth` в `run_status` отражает накопление (если очередь есть).
 
@@ -176,6 +184,9 @@ MVP включает:
    - инициировать клиринг по политике (например раз в N тиков или при накоплении долга)
    - эмитить `clearing.plan` → потом `clearing.done`
 
+Примечание (текущая реализация):
+- базовая «частота клиринга» сейчас фиксирована как `CLEARING_EVERY_N_TICKS = 25`.
+
 Важно:
 - строгий контракт payload’ов событий — в `api/openapi.yaml` и `simulator-domain-model.md`.
 
@@ -184,6 +195,11 @@ MVP включает:
 ## 6) Профили поведения (behaviorProfiles) — MVP интерпретация
 
 Сценарий может содержать детальные `behaviorProfiles.rules`, но MVP-реализация может быть проще.
+
+Статус текущей реализации:
+- planner в real mode **не интерпретирует** `behaviorProfiles` и `events`.
+- выбор действий строится из `trustlines[]` (и `equivalents[]`) с детерминизмом по `(seed, tick_index)`.
+- суммы платежей сейчас намеренно маленькие: `amount <= 3.00` и `<= trustline.limit`.
 
 ### 6.1 Пресеты по `behaviorProfileId`
 На этапе seed-сценариев (`greenfield-village-100`, `riverside-town-50`) используются ID:

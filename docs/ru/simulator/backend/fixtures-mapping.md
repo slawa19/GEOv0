@@ -65,8 +65,8 @@ TrustLine direction фиксирована:
 Источник: `admin-fixtures/v1/datasets/equivalents.json`
 
 В `scenario.json` используем один из вариантов:
-- предпочитаемый: `equivalents: string[]`
-- допустимый shorthand: `baseEquivalent: string`
+- **обязательный для текущего runtime**: `equivalents: string[]`
+- `baseEquivalent: string` допускается оставить как метаданные/shorthand схемы, но не использовать как единственный источник правды
 
 Правило для `equivalents`:
 1) собрать все `equivalent` из `admin-fixtures/v1/datasets/trustlines.json` (уникально)
@@ -145,7 +145,7 @@ TrustLine direction фиксирована:
 
 `behaviorProfiles[]` (MVP) можно хранить как «пустые» профили с `props`/`rules` и доопределять в runner:
 - конвертер создаёт profile ids
-- runner интерпретирует их как пресеты
+- runner может интерпретировать их как пресеты (в текущей реализации planner их не использует)
 
 ---
 
@@ -165,7 +165,7 @@ TrustLine direction фиксирована:
 Минимальный состав для seed-сценария:
 - `schema_version: "scenario/1"`
 - `scenario_id: <id>`
-- `equivalents: [...]` (или `baseEquivalent`)
+- `equivalents: [...]`
 - `participants: [...]` (+ groupId + behaviorProfileId)
 - `groups: [...]`
 - `behaviorProfiles: [...]`

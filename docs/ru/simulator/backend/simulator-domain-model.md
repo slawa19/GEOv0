@@ -79,17 +79,28 @@ MVP-контракт событий **точно равен** union `SimulatorEv
 - Опциональные поля (OpenAPI, can be omitted):
   - `ttl_ms`, `intensity_key`, `edges[]`, `node_badges[]`
 
-2) `clearing.plan`
+2) `tx.failed`
+- Назначение: нормализованное событие ошибки/отказа платежа (для статистики и UX без обращения к логам).
+- Обязательные поля (OpenAPI):
+  - `event_id`, `ts`, `type="tx.failed"`, `equivalent`, `error`
+- Поле `error` (OpenAPI):
+  - `error.code: string` (например `PAYMENT_TIMEOUT|PAYMENT_REJECTED|INTERNAL_ERROR`)
+  - `error.message: string`
+  - `error.at: ISO datetime`
+  - дополнительные детали допускаются как `additionalProperties`
+- Поля `from`/`to` допускаются как nullable.
+
+3) `clearing.plan`
 - Назначение: план анимации клиринга в виде шагов.
 - Обязательные поля (OpenAPI):
   - `event_id`, `ts`, `type="clearing.plan"`, `equivalent`, `plan_id`, `steps[]`
 
-3) `clearing.done`
+4) `clearing.done`
 - Назначение: маркер завершения клиринга.
 - Обязательные поля (OpenAPI):
   - `event_id`, `ts`, `type="clearing.done"`, `equivalent`
 
-4) `run_status`
+5) `run_status`
 - Назначение: мониторинг/восстановление состояния; обязательное событие для UI вкладки Run.
 - Эмитится:
   - при смене состояния (`start/pause/resume/stop/error`)
@@ -99,9 +110,10 @@ MVP-контракт событий **точно равен** union `SimulatorEv
 - Опциональные поля (OpenAPI):
   - `sim_time_ms`, `intensity_percent`, `ops_sec`, `queue_depth`, `last_event_type`, `current_phase`, `last_error` и др.
 
-Ошибки (MVP-решение):
+Ошибки (текущая модель):
 - отдельного `type="error"` события нет
-- ошибка выражается через `run_status.state="error"` + `last_error`
+- ошибки отдельных платежей выражаются через `tx.failed`
+- фатальная ошибка прогона выражается через `run_status.state="error"` + `last_error`
 
 #### 2.2.3 Системные события
 - `run_status` — обязательное для MVP событие статуса:
@@ -209,5 +221,23 @@ MVP-контракт событий **точно равен** union `SimulatorEv
       "particles_edges": [{ "from": "h1", "to": "p2" }]
     }
   ]
+}
+```
+
+### A.4 `tx.failed`
+```json
+{
+  "event_id": "evt_0150",
+  "ts": "2026-01-28T12:00:03.000Z",
+  "type": "tx.failed",
+  "equivalent": "UAH",
+  "from": "p1",
+  "to": "h1",
+  "error": {
+    "code": "PAYMENT_REJECTED",
+    "message": "insufficient limit",
+    "at": "2026-01-28T12:00:03.000Z",
+    "details": {"status_code": 409}
+  }
 }
 ```

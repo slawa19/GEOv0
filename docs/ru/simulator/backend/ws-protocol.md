@@ -58,17 +58,32 @@ data: { ...json... }
 - 1s, 2s, 5s, 10s, 20s (с jitter), далее держать 20s.
 
 MVP-гарантии (сознательно простые):
-- stream не гарантирует полнофункциональный replay при реконнекте.
+- stream реализован как best-effort и не гарантирует «ровно один раз».
 - Если клиент хочет "догнать" состояние после реконнекта — он делает `GET run_status` + `GET snapshot`.
 
-Опционально (не блокирует MVP):
-- поддержать `Last-Event-ID` для best-effort пропуска дубликатов.
-  - UI при реконнекте отправляет заголовок `Last-Event-ID: <event_id>`.
-  - Backend может попытаться реплеить из ring-buffer (если хранит), но в MVP это **не обязательно**.
+### 2.1 `Last-Event-ID` replay (реализовано)
+UI при реконнекте может отправлять заголовок `Last-Event-ID: <event_id>`.
+
+Backend пытается реплеить события из in-memory ring-buffer (best-effort).
+
+Настройки replay buffer (env):
+- `SIMULATOR_EVENT_BUFFER_SIZE` (по умолчанию 2000 событий)
+- `SIMULATOR_EVENT_BUFFER_TTL_SEC` (по умолчанию 600 секунд)
 
 Hardening (после MVP):
 - Backend может завершать SSE stream после получения терминального `run_status.state` = `stopped` или `error`.
 - Backend может включать строгий режим replay: если `Last-Event-ID` старее окна ring-buffer, вернуть 410 и UI делает full refresh (GET run_status + snapshots).
+
+Строгий replay (реализовано):
+- env: `SIMULATOR_SSE_STRICT_REPLAY=1`
+- поведение: при слишком старом `Last-Event-ID` endpoint возвращает `HTTP 410`.
+
+### 2.2 Важное замечание про pytest
+В integration-тестах (pytest + in-process ASGI transport) SSE stream намеренно **завершается рано** после минимального «первого кадра»
+(`run_status` + хотя бы одно доменное событие), чтобы тесты не зависали на бесконечном streaming response.
+
+Если нужно проверять long-running stream поведение (keep-alives/реальный reconnection), используйте реальный HTTP клиент против запущенного uvicorn,
+а не in-process transport.
 
 ## 3) Системные сообщения
 
@@ -141,6 +156,7 @@ MVP правило: `run_status` — единственный обязатель
 |---|---|---|
 | `run_status` | SSE | статус прогона + heartbeat |
 | `tx.updated` | SSE | визуальные подсветки транзакций |
+| `tx.failed` | SSE | отказ/ошибка платежа (нормализованный код в `error.code`) |
 | `clearing.plan` | SSE | план шагов клиринга |
 | `clearing.done` | SSE | завершение клиринга |
 

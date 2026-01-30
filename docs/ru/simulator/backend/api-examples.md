@@ -181,6 +181,17 @@ $eventsUrl = "$BaseUrl/simulator/runs/$runId/events?equivalent=$Equivalent"
 curl.exe -N -H "Accept: text/event-stream" -H "Authorization: Bearer $accessToken" "$eventsUrl"
 ```
 
+### 4.1 Replay при реконнекте (Last-Event-ID)
+
+Если SSE соединение оборвалось, клиент может переподключиться с заголовком `Last-Event-ID: <event_id>`.
+
+```powershell
+$lastEventId = "<event_id_from_previous_stream>"
+curl.exe -N -H "Accept: text/event-stream" -H "Authorization: Bearer $accessToken" -H "Last-Event-ID: $lastEventId" "$eventsUrl"
+```
+
+Примечание: при включённом строгом режиме replay (`SIMULATOR_SSE_STRICT_REPLAY=1`) backend может вернуть `HTTP 410`, если `Last-Event-ID` слишком старый (вне окна ring-buffer). В этом случае делайте full refresh через `GET /simulator/runs/{run_id}` + `GET snapshot`.
+
 Ожидаемое поведение: сервер периодически присылает `run_status` (heartbeat) во время `running`.
 
 ## 5) Snapshot / Metrics / Bottlenecks / Artifacts

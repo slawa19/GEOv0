@@ -193,6 +193,22 @@ Dev‑override (uvicorn `--reload`, volumes, debug):
 - `docker compose logs -f app`
 - Проверьте конфликты портов и healthcheck’и db/redis.
 
+### 6.5 Симулятор: полезные env-параметры
+
+SSE replay buffer (best-effort):
+- `SIMULATOR_EVENT_BUFFER_SIZE` (по умолчанию 2000)
+- `SIMULATOR_EVENT_BUFFER_TTL_SEC` (по умолчанию 600)
+- `SIMULATOR_SSE_STRICT_REPLAY=1` — возвращать `HTTP 410`, если `Last-Event-ID` слишком старый
+
+Real Mode guardrails:
+- `SIMULATOR_REAL_MAX_IN_FLIGHT` (по умолчанию 1)
+- `SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK` (по умолчанию 5)
+- `SIMULATOR_REAL_MAX_ERRORS_TOTAL` (по умолчанию 200)
+- `SIMULATOR_CLEARING_MAX_DEPTH` (по умолчанию 6)
+
+Где искать артефакты прогона локально:
+- `.local-run/simulator/runs/<run_id>/artifacts/` (включая `events.ndjson`)
+
 ---
 
 ## 7) Примечание про UX артефактов (важно для Real Mode)

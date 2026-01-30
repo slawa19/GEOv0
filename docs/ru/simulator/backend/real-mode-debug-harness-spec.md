@@ -98,7 +98,9 @@
 
 Путь (локально):
 
-- `.local-run/simulator/debug-runs/<run_id>/`
+- Встроенные артефакты runtime (уже есть): `.local-run/simulator/runs/<run_id>/artifacts/`
+  - включает `events.ndjson`, `status.json`, `last_tick.json` и др.
+- Артефакты debug harness (если добавим отдельный CLI-слой): `.local-run/simulator/debug-runs/<run_id>/`
 
 Содержимое:
 
@@ -195,16 +197,15 @@
 
 ### 6.1. Нормализованный `tx.failed`
 
-Если уже есть событие `tx.failed` — убедиться, что оно содержит:
+Событие `tx.failed` уже является частью OpenAPI union и используется для нормализованных ошибок/отказов платежей.
+Проверки совместимости/качества payload:
 
 - `error.code` (стабильный enum/строка)
 - `error.message` (человекочитаемо)
 - `from`, `to`, `amount`, `equivalent` (когда применимо)
 
-Если сейчас `tx.failed` отсутствует в OpenAPI union, тогда:
-
-- либо расширить OpenAPI (предпочтительно),
-- либо логировать failure как `tx.updated` с `status=failed` (хуже).
+Примечание:
+- `amount` может отсутствовать (nullable/опционально) в зависимости от точки отказа; для диагностики это допустимо.
 
 ### 6.2. Correlation IDs
 

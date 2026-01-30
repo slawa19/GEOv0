@@ -411,7 +411,8 @@
      "prompt": "…текст пользователя…",
      "constraints": {
        "maxParticipants": 300,
-       "baseEquivalent": "UAH"
+       "baseEquivalent": "UAH",
+       "equivalents": ["UAH"]
      }
    }
    ```

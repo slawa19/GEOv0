@@ -193,14 +193,16 @@ WHERE created_at < NOW() - INTERVAL '30 days';
 ### 4.2 Очистка файлов артефактов
 Артефакты физически лежат в файловом хранилище (локально или в S3-совместимом). Для локального MVP:
 
-- Layout: `var/simulator-artifacts/<run_id>/<name>`
+- Layout (текущая реализация): `.local-run/simulator/runs/<run_id>/artifacts/<name>`
 - В БД в `simulator_run_artifacts.storage_url` кладём URL вида:
   - `/api/v1/simulator/runs/<run_id>/artifacts/<name>`
 
 Файловую очистку делаем отдельной job:
 - находит runs старше retention
-- удаляет папку `var/simulator-artifacts/<run_id>`
+- удаляет папку `.local-run/simulator/runs/<run_id>`
 - (опционально) удаляет записи `simulator_runs` (если ещё не удалены)
 
 ## 5) TODO (для закрытия документа)
-- (опционально) описать расширение: хранение последних N событий в `event_log` для поддержки `Last-Event-ID`.
+- Replay buffer для `Last-Event-ID` уже реализован как in-memory ring-buffer (best-effort).
+  - env: `SIMULATOR_EVENT_BUFFER_SIZE`, `SIMULATOR_EVENT_BUFFER_TTL_SEC`
+  - строгий режим: `SIMULATOR_SSE_STRICT_REPLAY=1` (возвращает 410 при слишком старом `Last-Event-ID`)

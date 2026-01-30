@@ -122,7 +122,7 @@ HTTP метрики собираются middleware в `app/main.py`.
 
 - `geo_simulator_sse_clients` (Gauge)
 - `geo_simulator_sse_events_sent_total{type}` (Counter)
-  - type: ограниченное enum (например `run_status|tx_completed|tx_failed|error|snapshot`)
+  - type: ограниченное enum (например `run_status|tx.updated|tx.failed|clearing.plan|clearing.done|keepalive`)
 - `geo_simulator_sse_bytes_sent_total` (Counter)
 - `geo_simulator_sse_disconnects_total{reason}` (Counter)
   - reason: `client|timeout|server_error`
@@ -130,6 +130,8 @@ HTTP метрики собираются middleware в `app/main.py`.
 4) Буферы/очереди (важно для best‑effort stream)
 
 - `geo_simulator_event_buffer_size` (Gauge)
+  - что именно: либо "текущая заполненность ring-buffer", либо "ёмкость" — важно зафиксировать семантику
+  - связь с конфигом: `SIMULATOR_EVENT_BUFFER_SIZE` (ёмкость) и `SIMULATOR_EVENT_BUFFER_TTL_SEC` (TTL окна replay)
 - `geo_simulator_event_dropped_total{reason}` (Counter)
   - reason: `ring_full|queue_full|backpressure`
 

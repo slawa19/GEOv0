@@ -116,7 +116,7 @@
 - **Tick-model в Real mode**: `sim_time_ms = tick_index * 1000`, а `intensity_percent` влияет на **budget действий на тик**, а не на скорость sim-time (см. `runner-algorithm.md`).
 - **In-process SSE в тестах**: httpx ASGI transport может буферизовать stream, поэтому под pytest допускается **finite SSE** (минимум: `run_status` + 1 событие). Это не меняет внешний контракт; это только test-stability режим.
 - **Real mode smoke**: есть отдельный integration smoke для real-mode SSE (помогает ловить регрессии в раннере и in-process payments).
-- **Artifacts (локальный MVP)**: создаются минимальные артефакты (`status.json`, обновляемый `last_tick.json`) в `.local-run/simulator/runs/<run_id>/artifacts`.
+- **Artifacts (локальный MVP)**: создаются минимальные артефакты (`events.ndjson`, `status.json`, обновляемый `last_tick.json`) в `.local-run/simulator/runs/<run_id>/artifacts` (best-effort).
 
 ---
 

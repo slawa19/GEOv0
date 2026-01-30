@@ -52,14 +52,12 @@ Source of truth:
 - SB-08, SB-NF-04 (seed/PRNG/порядок обхода)
 - частично SB-10 (маппинг ошибок в `tx.failed`)
 
-Расположение (предложение):
-```
-tests/unit/simulator/
-  test_scenario_loader.py
-  test_runner_tick.py
-  test_runner_determinism.py
-  test_behavior_profiles.py
-```
+Расположение (фактически в репозитории сейчас):
+- `tests/unit/test_simulator_real_planner_determinism.py`
+- `tests/unit/test_simulator_sse_replay.py`
+- `tests/unit/test_simulator_tx_failed_event_schema.py`
+- `tests/unit/test_simulator_rejection_codes.py`
+- `tests/unit/test_simulator_fixtures_clearing_plan_done_pair.py`
 
 ### 3.2 Contract (контракты схем/типов)
 Цель: ловить дрейф контрактов без запуска сервисов.
@@ -68,12 +66,7 @@ tests/unit/simulator/
 - SB-01 (валидаторы сценариев)
 - соответствие примеров/полей в OpenAPI
 
-Расположение (предложение):
-```
-tests/contract/simulator/
-  test_scenario_schema.py
-  test_openapi_simulator_contract.py
-```
+Расположение: см. `tests/contract/` и `tests/unit/` (часть контрактов сейчас живёт как unit, например schema для `tx.failed`).
 
 Минимум:
 - позитивная проверка `fixtures/simulator/*/scenario.json` против `fixtures/simulator/scenario.schema.json`;
@@ -86,13 +79,14 @@ tests/contract/simulator/
 - SB-02..SB-07
 - частично SB-09/SB-10 (если поднимаем тестовую среду PaymentEngine)
 
-Расположение (предложение):
-```
-tests/integration/simulator/
-  test_simulator_api.py
-  test_simulator_sse_stream.py
-  test_payment_integration.py
-```
+Расположение (фактически в репозитории сейчас):
+- `tests/integration/test_simulator_sse_smoke.py`
+- `tests/integration/test_simulator_sse_real_smoke.py`
+- `tests/integration/test_simulator_sse_strict_replay_410.py`
+- `tests/integration/test_simulator_sse_tx_failed_timeout.py`
+- `tests/integration/test_simulator_sse_fixtures_clearing_animation_pair.py`
+- `tests/integration/test_simulator_artifacts_events_ndjson.py`
+- `tests/integration/test_simulator_real_snapshot_db_enrichment.py`
 
 Примечание по SSE тестам:
 - для MVP достаточно проверить, что stream отдаёт:
@@ -100,6 +94,9 @@ tests/integration/simulator/
   - минимум 1 `run_status` в течение 2 секунд после старта
   - keep-alive комментарии (best-effort)
   - корректное завершение/закрытие при `stop`.
+
+Важно: под pytest in-process ASGI transport SSE stream **намеренно завершается рано** ("первый кадр"), чтобы тесты не зависали.
+См. `ws-protocol.md` (раздел про pytest). Для проверки keep-alive/долгого стрима используйте реальный HTTP клиент против запущенного backend.
 
 ### 3.4 E2E (UI + backend)
 Цель: подтвердить, что simulator-ui в `apiMode=real` способен управлять run и визуализировать поток (без падений).
