@@ -76,7 +76,7 @@ export function useAppDemoPlayerSetup(deps: {
     edgeDirCaption,
     txSparkCore: VIZ_MAPPING.fx.tx_spark.core,
     txSparkTrail: VIZ_MAPPING.fx.tx_spark.trail,
-    clearingFlashFallback: '#fbbf24',
+    clearingFlashFallback: VIZ_MAPPING.fx.clearing_debt,
   })
 
   return { demoPlayer, playlist: demoPlayer.playlist }

@@ -6,10 +6,11 @@ const CLEARING_ANIMATION = {
   microTtlMs: 780,
   microGapMs: 110,
   labelLifeMs: 2200,
-  highlightPulseMs: 650,
+  // Clearing needs to be visually obvious: keep edge highlights visible longer.
+  highlightPulseMs: 2400,
   sourceBurstMs: 360,
   targetBurstMs: 520,
-  cleanupPadMs: 50,
+  cleanupPadMs: 220,
   labelThrottleMs: 80,
 } as const
 
@@ -104,7 +105,7 @@ type DemoPlayerDeps = {
   pushFloatingLabel: (opts: FloatingLabelOpts) => void
   resetOverlays: () => void
   fxColorForNode: (id: string, fallback: string) => string
-  addActiveEdge: (key: string) => void
+  addActiveEdge: (key: string, ttlMs?: number) => void
 
   // Timing
   scheduleTimeout: (fn: () => void, ms: number) => number
@@ -254,7 +255,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     }
 
     const runId = ++clearingRunSeq
-    const clearingGold = '#fbbf24'
+    const clearingColor = deps.clearingFlashFallback
     const { microTtlMs, microGapMs, labelLifeMs } = CLEARING_ANIMATION
 
     const formatDemoDebtAmount = (from: string, to: string, seedAtMs: number) => {
@@ -276,11 +277,14 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       // Filter out edges that will have beam sparks (to avoid double glow)
       const highlightOnly = step.highlight_edges.filter(e => !particleEdgeKeys.has(deps.keyEdge(e.from, e.to)))
       if (highlightOnly.length > 0) {
+        // Keep edges "active" longer than the pulse itself so they fade slower.
+        for (const e of highlightOnly) deps.addActiveEdge(deps.keyEdge(e.from, e.to), CLEARING_ANIMATION.highlightPulseMs + 900)
+
         deps.spawnEdgePulses({
           edges: highlightOnly,
           nowMs: performance.now(),
           durationMs: CLEARING_ANIMATION.highlightPulseMs,
-          color: clearingGold,
+          color: clearingColor,
           thickness: 1.0 * k,
           seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
           countPerEdge: intensityCountPerEdge(stepIntensityKey),
@@ -298,11 +302,14 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       deps.scheduleTimeout(() => {
         if (runId !== clearingRunSeq) return
 
+        // Keep micro edges highlighted a bit longer than the particle itself.
+        deps.addActiveEdge(deps.keyEdge(e.from, e.to), microTtlMs + 900)
+
         deps.spawnNodeBursts({
           nodeIds: [e.from],
           nowMs: performance.now(),
           durationMs: CLEARING_ANIMATION.sourceBurstMs,
-          color: deps.fxColorForNode(e.from, clearingGold),
+          color: deps.fxColorForNode(e.from, clearingColor),
           kind: 'tx-impact',
           seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${step.at_ms}:${i}`,
           seedFn: deps.seedFn,
@@ -314,7 +321,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           nowMs: performance.now(),
           ttlMs: microTtlMs,
           colorCore: '#ffffff',
-          colorTrail: clearingGold,
+          colorTrail: clearingColor,
           thickness: 1.1 * k,
           kind: 'beam',
           seedPrefix: `clearing:micro:${deps.effectiveEq()}:${step.at_ms}:${i}`,
@@ -332,7 +339,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           nodeIds: [e.to],
           nowMs: performance.now(),
           durationMs: CLEARING_ANIMATION.targetBurstMs,
-          color: deps.fxColorForNode(e.to, clearingGold),
+          color: deps.fxColorForNode(e.to, clearingColor),
           kind: 'tx-impact',
           seedPrefix: `clearing:impact:${deps.effectiveEq()}:${step.at_ms}:${i}`,
           seedFn: deps.seedFn,
@@ -343,7 +350,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
           nodeId: e.to,
           id: Math.floor(performance.now()) + deps.seedFn(`lbl:${step.at_ms}:${i}:${deps.keyEdge(e.from, e.to)}`),
           text: `${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
-          color: deps.fxColorForNode(e.to, clearingGold),
+          color: deps.fxColorForNode(e.to, clearingColor),
           ttlMs: labelLifeMs,
           offsetYPx: -6,
           throttleKey: `clearing:${e.to}`,
@@ -375,7 +382,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     }
 
     const runId = ++clearingRunSeq
-    const clearingGold = '#fbbf24'
+    const clearingColor = deps.clearingFlashFallback
     const { microTtlMs, microGapMs, labelLifeMs } = CLEARING_ANIMATION
 
     const formatDemoDebtAmount = (from: string, to: string, atMs: number) => {
@@ -387,6 +394,8 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     const animateEdge = (e: { from: string; to: string }, delayMs: number, stepAtMs: number, idx: number) => {
       deps.scheduleTimeout(() => {
         if (runId !== clearingRunSeq) return
+
+        deps.addActiveEdge(deps.keyEdge(e.from, e.to), microTtlMs + 900)
 
         deps.spawnNodeBursts({
           nodeIds: [e.from],
@@ -485,7 +494,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
               nodeIds: [e.from],
               nowMs: performance.now(),
               durationMs: CLEARING_ANIMATION.sourceBurstMs,
-              color: deps.fxColorForNode(e.from, clearingGold),
+              color: deps.fxColorForNode(e.from, clearingColor),
               kind: 'tx-impact',
               seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${step.at_ms}:${i}`,
               seedFn: deps.seedFn,
@@ -497,7 +506,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
               nowMs: performance.now(),
               ttlMs: microTtlMs,
               colorCore: '#ffffff',
-              colorTrail: clearingGold,
+              colorTrail: clearingColor,
               thickness: 1.1 * k,
               kind: 'beam',
               seedPrefix: `clearing:micro:${deps.effectiveEq()}:${step.at_ms}:${i}`,
@@ -515,7 +524,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
               nodeIds: [e.to],
               nowMs: performance.now(),
               durationMs: CLEARING_ANIMATION.targetBurstMs,
-              color: deps.fxColorForNode(e.to, clearingGold),
+              color: deps.fxColorForNode(e.to, clearingColor),
               kind: 'tx-impact',
               seedPrefix: `clearing:impact:${deps.effectiveEq()}:${step.at_ms}:${i}`,
               seedFn: deps.seedFn,
@@ -526,7 +535,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
               nodeId: e.to,
               id: Math.floor(performance.now()) + deps.seedFn(`lbl:${step.at_ms}:${i}:${deps.keyEdge(e.from, e.to)}`),
               text: `${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
-              color: deps.fxColorForNode(e.to, clearingGold),
+              color: deps.fxColorForNode(e.to, clearingColor),
               ttlMs: labelLifeMs,
               offsetYPx: -6,
               throttleKey: `clearing:${e.to}`,

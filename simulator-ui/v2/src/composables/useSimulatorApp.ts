@@ -12,7 +12,7 @@ import type { SimulatorAppState } from '../types/simulatorApp'
 import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
 import { createPatchApplier } from '../demo/patches'
-import { spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
+import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 
 import {
   artifactDownloadUrl,
@@ -581,6 +581,237 @@ export function useSimulatorApp() {
     }
   }
 
+  type RealClearingFxConfig = {
+    highlightPulseMs: number
+    highlightThickness: number
+    microTtlMs: number
+    microThickness: number
+    nodeBurstMs: number
+  }
+
+  const REAL_CLEARING_FX: RealClearingFxConfig = {
+    // Keep clearing highlights visible long enough to be noticed.
+    highlightPulseMs: 5200,
+    highlightThickness: 2.9,
+    microTtlMs: 860,
+    microThickness: 1.25,
+    nodeBurstMs: 1100,
+  }
+
+  const clearingPlanFxStarted = new Set<string>()
+
+  function safeBigInt(v: unknown): bigint {
+    if (typeof v === 'bigint') return v
+    if (typeof v === 'number' && Number.isFinite(v)) return BigInt(Math.trunc(v))
+    if (typeof v === 'string') {
+      try {
+        return BigInt(v)
+      } catch {
+        return 0n
+      }
+    }
+    return 0n
+  }
+
+  function signedBalanceForNodeId(nodeId: string): bigint {
+    const n = getNodeById(nodeId)
+    if (!n) return 0n
+    const abs = n.net_balance_atoms == null ? 0n : safeBigInt(n.net_balance_atoms)
+    const s = typeof n.net_sign === 'number' && Number.isFinite(n.net_sign) ? BigInt(n.net_sign) : 0n
+    return abs * s
+  }
+
+  function formatBigIntCompact(v: bigint): string {
+    const abs = v < 0n ? -v : v
+    const thousand = 1_000n
+    const million = 1_000_000n
+    const billion = 1_000_000_000n
+
+    if (abs < thousand) return abs.toString()
+    if (abs < million) return `${(abs / thousand).toString()}K`
+    if (abs < billion) return `${(abs / million).toString()}M`
+    return `${(abs / billion).toString()}B`
+  }
+
+  function pushFloatingLabelWhenReady(
+    opts: Parameters<typeof pushFloatingLabel>[0],
+    retryLeft = 6,
+    retryDelayMs = 90,
+  ) {
+    if (retryLeft <= 0) return
+    if (getLayoutNodeById(opts.nodeId)) {
+      pushFloatingLabel(opts)
+      return
+    }
+    scheduleTimeout(() => pushFloatingLabelWhenReady(opts, retryLeft - 1, retryDelayMs), retryDelayMs)
+  }
+
+  function pushBalanceDeltaLabels(
+    beforeById: Map<string, bigint>,
+    nodeIds: string[],
+    unit: string,
+    opts?: { throttleMs?: number },
+  ) {
+    for (const id of nodeIds) {
+      const before = beforeById.get(id) ?? 0n
+      const after = signedBalanceForNodeId(id)
+      const delta = after - before
+      if (delta === 0n) continue
+
+      const sign = delta > 0n ? '+' : '-'
+      const color = delta > 0n ? VIZ_MAPPING.fx.tx_spark.trail : VIZ_MAPPING.fx.clearing_debt
+      pushFloatingLabelWhenReady({
+        nodeId: id,
+        text: `${sign}${formatBigIntCompact(delta)} ${unit}`,
+        color: fxColorForNode(id, color),
+        ttlMs: 1900,
+        offsetYPx: -6,
+        throttleKey: `bal:${id}`,
+        throttleMs: opts?.throttleMs ?? 240,
+      })
+    }
+  }
+
+  function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
+    const out: string[] = []
+    const seen = new Set<string>()
+    for (const e of edges) {
+      if (!seen.has(e.from)) {
+        seen.add(e.from)
+        out.push(e.from)
+      }
+      if (!seen.has(e.to)) {
+        seen.add(e.to)
+        out.push(e.to)
+      }
+    }
+    return out
+  }
+
+  function runRealClearingPlanFx(plan: ClearingPlanEvent) {
+    const planId = String(plan?.plan_id ?? '')
+    if (!planId) return
+    if (clearingPlanFxStarted.has(planId)) return
+    clearingPlanFxStarted.add(planId)
+
+    const clearingColor = VIZ_MAPPING.fx.clearing_debt
+    state.flash = Math.max(state.flash ?? 0, 0.75)
+
+    for (const step of plan.steps ?? []) {
+      const atMs = Math.max(0, Number(step.at_ms ?? 0))
+      scheduleTimeout(() => {
+        const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        const k = intensityScale(step.intensity_key)
+        const countPerEdge = k >= 1.0 ? 2 : 1
+
+        const highlight = (step.highlight_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
+        if (highlight.length > 0) {
+          spawnEdgePulses(fxState, {
+            edges: highlight,
+            nowMs,
+            durationMs: REAL_CLEARING_FX.highlightPulseMs,
+            color: clearingColor,
+            thickness: REAL_CLEARING_FX.highlightThickness * k,
+            seedPrefix: `real-clearing:highlight:${planId}:${plan.equivalent}:${step.at_ms}`,
+            countPerEdge,
+            keyEdge,
+            seedFn: fnv1a,
+            isTestMode: isTestMode.value && isWebDriver,
+          })
+
+          // Keep edges active even longer than the pulse itself.
+          for (const e of highlight) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.highlightPulseMs + 2200)
+        }
+
+        const particles = (step.particles_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
+        if (particles.length > 0) {
+          for (const e of particles) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.microTtlMs + 2200)
+
+          spawnSparks(fxState, {
+            edges: particles,
+            nowMs,
+            ttlMs: REAL_CLEARING_FX.microTtlMs,
+            colorCore: VIZ_MAPPING.fx.tx_spark.core,
+            colorTrail: clearingColor,
+            thickness: REAL_CLEARING_FX.microThickness * k,
+            kind: 'comet',
+            seedPrefix: `real-clearing:micro:${planId}:${plan.equivalent}:${step.at_ms}`,
+            countPerEdge: 1,
+            keyEdge,
+            seedFn: fnv1a,
+            isTestMode: isTestMode.value && isWebDriver,
+          })
+
+          const nodeIds = nodesFromEdges(particles)
+          spawnNodeBursts(fxState, {
+            nodeIds,
+            nowMs,
+            durationMs: REAL_CLEARING_FX.nodeBurstMs,
+            color: clearingColor,
+            kind: 'clearing',
+            seedPrefix: `real-clearing:nodes:${planId}:${step.at_ms}`,
+            seedFn: fnv1a,
+            isTestMode: isTestMode.value && isWebDriver,
+          })
+        }
+
+        state.flash = Math.max(state.flash ?? 0, 0.38)
+      }, atMs)
+    }
+
+    const maxAt = Math.max(
+      0,
+      ...((plan.steps ?? [])
+        .map((s) => Number(s.at_ms ?? 0))
+        .filter((v) => Number.isFinite(v))),
+    )
+    scheduleTimeout(() => {
+      clearingPlanFxStarted.delete(planId)
+    }, Math.max(1500, Math.min(30_000, maxAt + 2500)))
+  }
+
+  function runRealClearingDoneFx(plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent) {
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    const clearingColor = VIZ_MAPPING.fx.clearing_debt
+
+    state.flash = 1
+
+    const planEdges: Array<{ from: string; to: string }> = []
+    if (plan?.steps) {
+      for (const s of plan.steps) {
+        for (const e of s.highlight_edges ?? []) planEdges.push({ from: e.from, to: e.to })
+      }
+    }
+    if (planEdges.length > 0) {
+      spawnEdgePulses(fxState, {
+        edges: planEdges,
+        nowMs,
+        durationMs: 4200,
+        color: clearingColor,
+        thickness: 3.2,
+        seedPrefix: `real-clearing:done:${done.plan_id}`,
+        countPerEdge: 1,
+        keyEdge,
+        seedFn: fnv1a,
+        isTestMode: isTestMode.value && isWebDriver,
+      })
+
+      for (const e of planEdges) addActiveEdge(keyEdge(e.from, e.to), 5200)
+
+      const nodeIds = nodesFromEdges(planEdges)
+      spawnNodeBursts(fxState, {
+        nodeIds,
+        nowMs,
+        durationMs: 900,
+        color: clearingColor,
+        kind: 'clearing',
+        seedPrefix: `real-clearing:done-nodes:${done.plan_id}`,
+        seedFn: fnv1a,
+        isTestMode: isTestMode.value && isWebDriver,
+      })
+    }
+  }
+
   const labelNodes = useLabelNodes({
     isTestMode: () => isTestMode.value,
     getLabelsLod: () => labelsLod.value,
@@ -713,6 +944,8 @@ export function useSimulatorApp() {
     real.runStatus = null
     real.lastEventId = null
     real.artifacts = []
+    clearingPlansById.clear()
+    clearingPlanFxStarted.clear()
     resetRunStats()
     stopSse()
     if (opts?.clearError ?? true) {
@@ -891,8 +1124,15 @@ export function useSimulatorApp() {
 
               // Apply patches immediately (no demo resetOverlays that would wipe FX).
               const tx = evt as TxUpdatedEvent
+              const beforeById = new Map<string, bigint>()
+              const nodeIds = (tx.node_patch ?? []).map((p) => p.id)
+              for (const id of nodeIds) beforeById.set(id, signedBalanceForNodeId(id))
+
               if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
               if (tx.edge_patch) realPatchApplier.applyEdgePatches(tx.edge_patch)
+
+              // Restore “floating numbers” in real mode: show per-node balance deltas when patches include net balance updates.
+              if (nodeIds.length > 0) pushBalanceDeltaLabels(beforeById, nodeIds, tx.equivalent, { throttleMs: 220 })
               runRealTxFx(tx)
 
               // NOTE: Snapshot refresh disabled to avoid "graph jumping".
@@ -919,23 +1159,33 @@ export function useSimulatorApp() {
             }
 
             if ((evt as any).type === 'clearing.plan') {
-              const planId = String((evt as any).plan_id ?? '')
-              if (planId) clearingPlansById.set(planId, evt as any)
+              const plan = evt as ClearingPlanEvent
+              const planId = String(plan.plan_id ?? '')
+              if (planId) {
+                clearingPlansById.set(planId, plan)
+                runRealClearingPlanFx(plan)
+              }
               return
             }
 
             if ((evt as any).type === 'clearing.done') {
-              const planId = String((evt as any).plan_id ?? '')
+              const done = evt as ClearingDoneEvent
+              const planId = String(done.plan_id ?? '')
               const plan = planId ? clearingPlansById.get(planId) : undefined
-              if (plan) {
-                clearingPlansById.delete(planId)
-                demoPlayer.runClearingOnce(plan, evt as any)
-              } else {
-                // Fallback: apply patches immediately, without animation.
-                realPatchApplier.applyNodePatches((evt as any).node_patch)
-                realPatchApplier.applyEdgePatches((evt as any).edge_patch)
-                resetOverlays()
-              }
+
+              // Apply patches immediately (do not reset overlays in real mode).
+              const beforeById = new Map<string, bigint>()
+              const nodeIds = (done.node_patch ?? []).map((p) => p.id)
+              for (const id of nodeIds) beforeById.set(id, signedBalanceForNodeId(id))
+
+              if (done.node_patch) realPatchApplier.applyNodePatches(done.node_patch)
+              if (done.edge_patch) realPatchApplier.applyEdgePatches(done.edge_patch)
+
+              // Show balance delta labels for clearing commits too.
+              if (nodeIds.length > 0) pushBalanceDeltaLabels(beforeById, nodeIds, done.equivalent, { throttleMs: 180 })
+
+              runRealClearingDoneFx(plan, done)
+              if (planId) clearingPlansById.delete(planId)
 
               // NOTE: Snapshot refresh disabled to avoid "graph jumping".
               // Patches from clearing.done.node_patch/edge_patch are applied above.
