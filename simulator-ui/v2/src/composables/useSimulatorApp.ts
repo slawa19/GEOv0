@@ -10,7 +10,9 @@ import type { SceneId } from '../scenes'
 import { VIZ_MAPPING } from '../vizMapping'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { keyEdge } from '../utils/edgeKey'
+import { fnv1a } from '../utils/hash'
 import { createPatchApplier } from '../demo/patches'
+import { spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 
 import {
   artifactDownloadUrl,
@@ -77,6 +79,8 @@ export function useSimulatorApp() {
   const isLocalhost =
     typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
 
+  const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100'
+
   const ALLOWED_EQS = new Set(['UAH', 'HOUR', 'EUR'])
 
   function lsGet(key: string, fallback = ''): string {
@@ -122,7 +126,8 @@ export function useSimulatorApp() {
     scenarios: [] as ScenarioSummary[],
     selectedScenarioId: lsGet('geo.sim.v2.selectedScenarioId', ''),
     desiredMode: (lsGet('geo.sim.v2.desiredMode', 'real') === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode,
-    intensityPercent: Number(lsGet('geo.sim.v2.intensityPercent', '50')) || 50,
+    // Default lower than demo to keep real-mode readable (avoid dozens of overlapping sparks).
+    intensityPercent: Number(lsGet('geo.sim.v2.intensityPercent', '30')) || 30,
     runId: lsGet('geo.sim.v2.runId', '') || null,
     runStatus: null as RunStatus | null,
     sseState: 'idle',
@@ -130,7 +135,75 @@ export function useSimulatorApp() {
     lastError: '',
     artifacts: [] as ArtifactIndexItem[],
     artifactsLoading: false,
+
+    // Live run stats (ephemeral; not persisted).
+    runStats: {
+      startedAtMs: 0,
+      attempts: 0,
+      committed: 0,
+      rejected: 0,
+      errors: 0,
+      timeouts: 0,
+      rejectedByCode: {} as Record<string, number>,
+      errorsByCode: {} as Record<string, number>,
+    },
   })
+
+  function resetRunStats() {
+    real.runStats.startedAtMs = Date.now()
+    real.runStats.attempts = 0
+    real.runStats.committed = 0
+    real.runStats.rejected = 0
+    real.runStats.errors = 0
+    real.runStats.timeouts = 0
+    real.runStats.rejectedByCode = {}
+    real.runStats.errorsByCode = {}
+  }
+
+  function inc(map: Record<string, number>, key: string) {
+    map[key] = (map[key] ?? 0) + 1
+  }
+
+  function intensityScale(intensityKey?: string): number {
+    const k = String(intensityKey ?? '').trim().toLowerCase()
+    if (!k) return 1
+    switch (k) {
+      case 'muted':
+      case 'low':
+        return 0.75
+      case 'active':
+      case 'mid':
+      case 'med':
+        return 1
+      case 'hi':
+      case 'high':
+        return 1.35
+      default:
+        return 1
+    }
+  }
+
+  // tx.failed often represents a "clean rejection" (routing capacity, trustline constraints).
+  // Those should not be surfaced as global "errors" in the HUD.
+  function isUserFacingRunError(code: string): boolean {
+    const c = String(code ?? '').toUpperCase()
+    if (!c) return false
+    if (c === 'PAYMENT_TIMEOUT') return true
+    if (c === 'SENDER_NOT_FOUND') return true
+    // Everything else is treated as a clean rejection for UX purposes.
+    return false
+  }
+
+  function pickDefaultScenarioId(scenarios: ScenarioSummary[]): string {
+    const preferred = scenarios.find((s) => s.scenario_id === DEFAULT_REAL_SCENARIO_ID)?.scenario_id
+    return preferred ?? scenarios[0]?.scenario_id ?? ''
+  }
+
+  function ensureScenarioSelectionValid() {
+    if (!real.scenarios.length) return
+    const hasSelected = real.scenarios.some((s) => s.scenario_id === real.selectedScenarioId)
+    if (!hasSelected) real.selectedScenarioId = pickDefaultScenarioId(real.scenarios)
+  }
 
   // Dev convenience: keep real mode usable even if localStorage token is empty.
   // Safety: only auto-fill on localhost.
@@ -393,6 +466,121 @@ export function useSimulatorApp() {
   const demoPlayer = demoPlayerSetup.demoPlayer
   const playlist = demoPlayerSetup.playlist
 
+  // Real-mode tx visuals must be independent from demoPlayer.
+  // demoPlayer.runTxEvent() ends with resetOverlays(), which clears FX and can make
+  // sparks effectively invisible under steady SSE.
+  type RealTxFxConfig = {
+    ratePerSec: number
+    burst: number
+    maxConcurrentSparks: number
+    maxEdgesPerEvent: number
+    ttlMinMs: number
+    ttlMaxMs: number
+    activeEdgePadMs: number
+    minGapMs: number
+  }
+
+  const REAL_TX_FX: RealTxFxConfig = {
+    // Token bucket: how many tx events per second can spawn sparks.
+    ratePerSec: 3.0,
+    burst: 2.0,
+    // Hard caps for perf.
+    maxConcurrentSparks: 28,
+    // Avoid animating long routes as a wall of particles.
+    maxEdgesPerEvent: 2,
+    // Clamp TTL to keep the scene from accumulating particles.
+    ttlMinMs: 240,
+    ttlMaxMs: 900,
+    // Extra highlight time to make motion readable.
+    activeEdgePadMs: 260,
+    // Safety: prevent spamming even if tokens allow bursts.
+    minGapMs: 120,
+  }
+
+  let txFxTokens = REAL_TX_FX.burst
+  let txFxLastRefillAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  let txFxLastSpawnAtMs = 0
+
+  function refillTxFxTokens(nowMs: number) {
+    const dt = Math.max(0, nowMs - txFxLastRefillAtMs)
+    txFxLastRefillAtMs = nowMs
+    txFxTokens = Math.min(REAL_TX_FX.burst, txFxTokens + (dt * REAL_TX_FX.ratePerSec) / 1000)
+  }
+
+  function pickSparkEdges(edges: TxUpdatedEvent['edges']): Array<{ from: string; to: string }> {
+    if (!edges || edges.length === 0) return []
+    if (edges.length <= REAL_TX_FX.maxEdgesPerEvent) return edges
+
+    const first = edges[0]!
+    const last = edges[edges.length - 1]!
+    if (first.from === last.from && first.to === last.to) return [first]
+    return [first, last]
+  }
+
+  function runRealTxFx(evt: TxUpdatedEvent) {
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    if (nowMs - txFxLastSpawnAtMs < REAL_TX_FX.minGapMs) return
+
+    refillTxFxTokens(nowMs)
+    if (txFxTokens < 1) return
+    if (fxState.sparks.length >= REAL_TX_FX.maxConcurrentSparks) return
+
+    const sparkEdges = pickSparkEdges(evt.edges)
+    if (sparkEdges.length === 0) return
+
+    txFxTokens -= 1
+    txFxLastSpawnAtMs = nowMs
+
+    const ttlRaw = Number(evt.ttl_ms ?? 1200)
+    const ttlMs = Math.max(REAL_TX_FX.ttlMinMs, Math.min(REAL_TX_FX.ttlMaxMs, Number.isFinite(ttlRaw) ? ttlRaw : 1200))
+    const k = intensityScale(evt.intensity_key)
+
+    // Keep a short-lived highlight so the spark reads as motion along an edge.
+    for (const e of sparkEdges) addActiveEdge(keyEdge(e.from, e.to), ttlMs + REAL_TX_FX.activeEdgePadMs)
+
+    spawnSparks(fxState, {
+      edges: sparkEdges,
+      nowMs,
+      ttlMs,
+      colorCore: VIZ_MAPPING.fx.tx_spark.core,
+      colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
+      thickness: 0.95 * k,
+      kind: 'beam',
+      seedPrefix: `real-tx:${evt.equivalent}`,
+      countPerEdge: 1,
+      keyEdge,
+      seedFn: fnv1a,
+      isTestMode: isTestMode.value && isWebDriver,
+    })
+
+    if (!(isTestMode.value && isWebDriver)) {
+      const src = sparkEdges[0]!.from
+      const dst = sparkEdges[sparkEdges.length - 1]!.to
+      spawnNodeBursts(fxState, {
+        nodeIds: [src],
+        nowMs,
+        durationMs: 280,
+        color: fxColorForNode(src, VIZ_MAPPING.fx.tx_spark.trail),
+        kind: 'tx-impact',
+        seedPrefix: 'real-tx-src',
+        seedFn: fnv1a,
+        isTestMode: false,
+      })
+      scheduleTimeout(() => {
+        spawnNodeBursts(fxState, {
+          nodeIds: [dst],
+          nowMs: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+          durationMs: 420,
+          color: fxColorForNode(dst, VIZ_MAPPING.fx.tx_spark.trail),
+          kind: 'tx-impact',
+          seedPrefix: 'real-tx-dst',
+          seedFn: fnv1a,
+          isTestMode: false,
+        })
+      }, ttlMs)
+    }
+  }
+
   const labelNodes = useLabelNodes({
     isTestMode: () => isTestMode.value,
     getLabelsLod: () => labelsLod.value,
@@ -464,10 +652,24 @@ export function useSimulatorApp() {
     if (!isRealMode.value) return loadSnapshotFixtures(eq)
 
     const runId = real.runId
-    if (!runId) throw new Error('No run started (set token, choose scenario, Start run)')
+    // Real mode initial state: allow the app to render an empty graph without surfacing an error overlay.
+    if (!runId) {
+      return {
+        snapshot: {
+          equivalent: eq,
+          generated_at: new Date().toISOString(),
+          nodes: [],
+          links: [],
+        },
+        sourcePath: 'No run started',
+      }
+    }
     if (!real.accessToken) throw new Error('Missing access token')
 
     const snapshot = await getSnapshot({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, eq)
+    // Real snapshots currently don't declare FX limits; apply a sane default cap so long sessions
+    // can't accumulate too many particles (sparks + pulses + bursts).
+    if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
     return { snapshot, sourcePath: `GET ${real.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot` }
   }
 
@@ -506,6 +708,21 @@ export function useSimulatorApp() {
 
   const sceneState = sceneAndDemo.sceneState
 
+  function resetStaleRun(opts?: { clearError?: boolean }) {
+    real.runId = null
+    real.runStatus = null
+    real.lastEventId = null
+    real.artifacts = []
+    resetRunStats()
+    stopSse()
+    if (opts?.clearError ?? true) {
+      real.lastError = ''
+      state.error = ''
+    }
+    // Keep selection usable after restart (do not auto-start).
+    ensureScenarioSelectionValid()
+  }
+
   // -----------------
   // Real Mode: SSE loop
   // -----------------
@@ -527,17 +744,13 @@ export function useSimulatorApp() {
       const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
       real.runStatus = st
       real.intensityPercent = Math.round(Number(st.intensity_percent ?? real.intensityPercent))
-      real.lastError = st.last_error ? `${st.last_error.code}: ${st.last_error.message}` : ''
+      const le = st.last_error
+      real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
     } catch (e: any) {
       // If the server restarted, the in-memory run registry is gone.
-      // Clear stale run_id so the UI doesn't look "stuck" with a blank graph.
+      // Clear stale run_id so the UI doesn't look "stuck" (and doesn't require a manual page reload).
       if (e instanceof ApiError && e.status === 404) {
-        real.runId = null
-        real.runStatus = null
-        real.lastEventId = null
-        real.artifacts = []
-        real.sseState = 'idle'
-        real.lastError = 'Stored run not found (server restarted). Click Start run to create a new run.'
+        resetStaleRun({ clearError: true })
         return
       }
       real.lastError = String(e?.message ?? e)
@@ -550,12 +763,7 @@ export function useSimulatorApp() {
     if (isRealMode.value && state.error) {
       // Typical case: HTTP 404 when run_id was persisted but backend restarted.
       if (state.error.includes('HTTP 404')) {
-        real.runId = null
-        real.runStatus = null
-        real.lastEventId = null
-        real.artifacts = []
-        stopSse()
-        real.lastError = 'Run not found (server restarted). Click Start run.'
+        resetStaleRun({ clearError: true })
         return
       }
       real.lastError = state.error
@@ -571,12 +779,7 @@ export function useSimulatorApp() {
       if (!e) return
 
       if (e.includes('HTTP 404')) {
-        real.runId = null
-        real.runStatus = null
-        real.lastEventId = null
-        real.artifacts = []
-        stopSse()
-        real.lastError = 'Run not found (server restarted). Click Start run.'
+        resetStaleRun({ clearError: true })
         return
       }
 
@@ -678,38 +881,39 @@ export function useSimulatorApp() {
               real.runStatus = evt as any
               real.intensityPercent = Math.round(Number((evt as any).intensity_percent ?? real.intensityPercent))
               const le = (evt as any).last_error
-              real.lastError = le ? `${le.code}: ${le.message}` : ''
+              real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
               return
             }
 
             if ((evt as any).type === 'tx.updated') {
-              sceneAndDemo.runTxOnce // keep deps referenced (no-op)
-              demoPlayer.runTxEvent(evt as any)
+              real.runStats.attempts += 1
+              real.runStats.committed += 1
 
-              // Periodically refetch snapshot to sync viz_* fields
-              eventsSinceLastRefresh++
-              if (eventsSinceLastRefresh >= EVENTS_BEFORE_REFRESH) {
-                eventsSinceLastRefresh = 0
-                scheduleSnapshotRefresh()
-              }
+              // Apply patches immediately (no demo resetOverlays that would wipe FX).
+              const tx = evt as TxUpdatedEvent
+              if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
+              if (tx.edge_patch) realPatchApplier.applyEdgePatches(tx.edge_patch)
+              runRealTxFx(tx)
+
+              // NOTE: Snapshot refresh disabled to avoid "graph jumping".
+              // UI applies incremental patches from tx.updated.edge_patch instead.
+              // Interactivity (clicks, drag, zoom) remains fully functional.
               return
             }
 
             if ((evt as any).type === 'tx.failed') {
               const code = String((evt as any).error?.code ?? 'TX_FAILED')
-              const from = String((evt as any).from ?? '')
-              const to = String((evt as any).to ?? '')
-              if (from && to) addActiveEdge(keyEdge(from, to), 1400)
-              if (to) {
-                pushFloatingLabel({
-                  nodeId: to,
-                  text: `FAIL ${code}`,
-                  color: '#f87171',
-                  ttlMs: 2400,
-                  offsetYPx: -6,
-                  throttleKey: `tx_failed:${to}`,
-                  throttleMs: 120,
-                })
+              real.runStats.attempts += 1
+              if (code.toUpperCase() === 'PAYMENT_TIMEOUT') {
+                real.runStats.timeouts += 1
+                real.runStats.errors += 1
+                inc(real.runStats.errorsByCode, code)
+              } else if (isUserFacingRunError(code)) {
+                real.runStats.errors += 1
+                inc(real.runStats.errorsByCode, code)
+              } else {
+                real.runStats.rejected += 1
+                inc(real.runStats.rejectedByCode, code)
               }
               return
             }
@@ -733,8 +937,8 @@ export function useSimulatorApp() {
                 resetOverlays()
               }
 
-              // Refetch snapshot to sync state after clearing
-              scheduleSnapshotRefresh()
+              // NOTE: Snapshot refresh disabled to avoid "graph jumping".
+              // Patches from clearing.done.node_patch/edge_patch are applied above.
             }
           },
         })
@@ -753,6 +957,12 @@ export function useSimulatorApp() {
         if (ctrl.signal.aborted) return
 
         const msg = String(e?.message ?? e)
+        // If backend restarted (or run id expired), clear stale state and stop reconnect loop.
+        if (msg.includes('SSE HTTP 404') || msg.includes('HTTP 404')) {
+          resetStaleRun({ clearError: true })
+          return
+        }
+
         real.lastError = msg
 
         // Strict replay mode: backend may return 410 → do a full refresh.
@@ -805,9 +1015,7 @@ export function useSimulatorApp() {
     try {
       const res = await listScenarios({ apiBase: real.apiBase, accessToken: real.accessToken })
       real.scenarios = res.items ?? []
-      if (!real.selectedScenarioId && real.scenarios.length) {
-        real.selectedScenarioId = real.scenarios[0]!.scenario_id
-      }
+      ensureScenarioSelectionValid()
     } catch (e: any) {
       real.lastError = String(e?.message ?? e)
     } finally {
@@ -822,8 +1030,17 @@ export function useSimulatorApp() {
       return
     }
 
+    // If a previous run_id is still stored but is no longer active, start a fresh run.
+    // We explicitly do NOT auto-stop an active run here.
+    const st = String(real.runStatus?.state ?? '').toLowerCase()
+    const isActive = !!real.runId && (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
+    if (real.runId && !isActive) {
+      resetStaleRun({ clearError: true })
+    }
+
     real.lastError = ''
     try {
+      resetRunStats()
       const res = await createRun(
         { apiBase: real.apiBase, accessToken: real.accessToken },
         { scenario_id: real.selectedScenarioId, mode: real.desiredMode, intensity_percent: real.intensityPercent },
@@ -920,6 +1137,9 @@ export function useSimulatorApp() {
       void (async () => {
         await refreshScenarios()
 
+        // Prefer deterministic default selection without auto-start.
+        ensureScenarioSelectionValid()
+
         // If run_id was persisted from a previous session, try to restore UI state.
         // If the backend restarted, this will clear the stale run_id and tell the user.
         if (real.runId && real.accessToken) {
@@ -933,11 +1153,15 @@ export function useSimulatorApp() {
           return
         }
 
-        // Dev UX: if user opened /?mode=real on localhost, auto-start a run once scenarios loaded.
-        // Avoid doing this in non-localhost environments.
-        if (import.meta.env.DEV && isLocalhost && real.accessToken && real.selectedScenarioId && !real.runId) {
-          await startRun()
-        }
+        // Opt-in dev UX: auto-start only when explicitly requested.
+        const shouldAutoStart =
+          import.meta.env.DEV &&
+          isLocalhost &&
+          real.accessToken &&
+          real.selectedScenarioId &&
+          !real.runId &&
+          new URLSearchParams(window.location.search).get('autostart') === '1'
+        if (shouldAutoStart) await startRun()
       })()
     },
     { immediate: true },

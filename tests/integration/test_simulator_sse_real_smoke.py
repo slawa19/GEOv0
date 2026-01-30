@@ -22,6 +22,7 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
 
     seen_run_status = False
     seen_tx = False
+    seen_tx_with_edges = False
 
     async with client.stream(
         "GET",
@@ -33,7 +34,7 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
 
         # We expect an immediate run_status snapshot, then at least one tx.updated.
         async def _read_until() -> None:
-            nonlocal seen_run_status, seen_tx
+            nonlocal seen_run_status, seen_tx, seen_tx_with_edges
             async for line in r.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -42,10 +43,16 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
                     seen_run_status = True
                 if payload.get("type") == "tx.updated":
                     seen_tx = True
-                if seen_run_status and seen_tx:
+                    edges = payload.get("edges")
+                    if isinstance(edges, list) and edges:
+                        e0 = edges[0]
+                        if isinstance(e0, dict) and isinstance(e0.get("from"), str) and isinstance(e0.get("to"), str):
+                            seen_tx_with_edges = True
+                if seen_run_status and seen_tx_with_edges:
                     return
 
         await asyncio.wait_for(_read_until(), timeout=10.0)
 
     assert seen_run_status
     assert seen_tx
+    assert seen_tx_with_edges

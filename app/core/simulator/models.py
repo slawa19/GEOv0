@@ -83,6 +83,7 @@ class RunRecord:
     _next_tx_at_ms: int = 0
     _next_clearing_at_ms: int = 0
     _clearing_pending_done_at_ms: int | None = None
+    _clearing_pending_plan_id_by_eq: dict[str, str] = field(default_factory=dict)
 
     artifacts_dir: Optional[Path] = None
 

@@ -22,6 +22,19 @@ function makeMockSnapshot(): GraphSnapshot {
 }
 
 describe('forceLayout', () => {
+  it('handles empty snapshot', () => {
+    const snapshot: GraphSnapshot = {
+      equivalent: 'UAH',
+      generated_at: '2026-01-25T00:00:00Z',
+      nodes: [],
+      links: [],
+    }
+
+    const out = computeLayoutForMode(snapshot, 800, 600, 'admin-force', true)
+    expect(out.nodes).toEqual([])
+    expect(out.links).toEqual([])
+  })
+
   it('applyForceLayout produces deterministic positions for same seed', () => {
     const snapshot = makeMockSnapshot()
 

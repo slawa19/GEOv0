@@ -178,6 +178,10 @@ class SimulatorClearingDoneEvent(BaseModel):
     type: Literal["clearing.done"]
     equivalent: str
 
+    # Links clearing.done back to the previously emitted clearing.plan.
+    # UI uses this to drive the clearing animation lifecycle.
+    plan_id: str
+
     model_config = ConfigDict(extra="allow")
 
 

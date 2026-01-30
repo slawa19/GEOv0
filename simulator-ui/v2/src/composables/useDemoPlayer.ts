@@ -158,9 +158,9 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     const fxTestMode = deps.isTestMode() && deps.isWebDriver
     const runId = ++txRunSeq
 
-    if (fxTestMode) {
-      for (const e of evt.edges) deps.addActiveEdge(deps.keyEdge(e.from, e.to))
-    }
+    // Keep a short-lived highlighted edge so the "spark flight" reads as
+    // moving along a fading line (same UX idea as clearing highlight edges).
+    for (const e of evt.edges) deps.addActiveEdge(deps.keyEdge(e.from, e.to))
 
     const ttl = Math.max(250, evt.ttl_ms || 1200)
     const k = intensityScale(evt.intensity_key)

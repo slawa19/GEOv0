@@ -141,6 +141,11 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     linkDistanceScaleSameGroup,
     linkDistanceScaleCrossGroup,
   } = opts
+
+  // Real mode can render an empty snapshot before a run is started.
+  // Handle it explicitly to avoid "cannot read properties of undefined" when the algorithm expects at least 1 node.
+  if (!snapshot.nodes.length) return { nodes: [], links: [] }
+
   // Deterministic Force-Directed Layout:
   // - Gravity (center force)
   // - Optional group attraction (anchor force)
@@ -153,7 +158,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   const cy = h / 2
 
   const nodesSorted = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id))
-  const n = Math.max(1, nodesSorted.length)
+  const n = nodesSorted.length
 
   const availW = Math.max(1, w - margin * 2)
   const availH = Math.max(1, h - margin * 2)
@@ -167,7 +172,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     const s = sizeForNode(node)
     return Math.max(8, Math.max(s.w, s.h) * 0.56)
   })
-  const collidePad = 3
+  const collidePad = 6
 
   // Initial positions: around group anchors (if provided), else centered disc.
   const x = new Float64Array(n)
@@ -175,21 +180,49 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   const vx = new Float64Array(n)
   const vy = new Float64Array(n)
 
-  const baseRad = Math.max(24, Math.min(Math.min(availW, availH) * 0.22, k * 1.25))
-  for (let i = 0; i < n; i++) {
-    const node = nodesSorted[i]!
-    const seed = fnv1a(`${snapshot.equivalent}:${seedKey}:${node.id}`)
-    const a = ((seed % 4096) / 4096) * Math.PI * 2
-    const rr = Math.sqrt(((Math.floor(seed / 4096) % 4096) / 4096))
-    const rad = baseRad * rr
+  const hasGroups = !!groupKeyByNodeId && !!groupAnchors && groupKeyByNodeId.size > 0 && groupAnchors.size > 0
 
-    const gKey = groupKeyByNodeId?.get(node.id)
-    const anchor = gKey && groupAnchors?.get(gKey) ? groupAnchors.get(gKey)! : { x: cx, y: cy }
+  if (!hasGroups) {
+    // Deterministic spacious seed: sunflower spiral over the whole viewport.
+    // This prevents the "clump then spread" feel right after start.
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+    const a0 = ((fnv1a(`${snapshot.equivalent}:${seedKey}:a0`) % 4096) / 4096) * Math.PI * 2
+    const maxRad = Math.max(90, Math.min(Math.min(availW, availH) * 0.46, k * 3.0))
 
-    x[i] = anchor.x + Math.cos(a) * rad
-    y[i] = anchor.y + Math.sin(a) * rad
-    vx[i] = 0
-    vy[i] = 0
+    for (let i = 0; i < n; i++) {
+      const node = nodesSorted[i]!
+      const seed = fnv1a(`${snapshot.equivalent}:${seedKey}:${node.id}`)
+      const t = (i + 0.5) / n
+
+      const jitterA = (((seed % 1024) / 1024) - 0.5) * 0.18
+      const jitterR = 0.96 + ((((Math.floor(seed / 1024) % 1024) / 1024) - 0.5) * 0.10)
+
+      const a = a0 + i * goldenAngle + jitterA
+      const rad = Math.sqrt(t) * maxRad * jitterR
+
+      x[i] = cx + Math.cos(a) * rad
+      y[i] = cy + Math.sin(a) * rad
+      vx[i] = 0
+      vy[i] = 0
+    }
+  } else {
+    // Grouped layouts: seed around anchors, but start further apart so clusters don't collapse.
+    const baseRad = Math.max(56, Math.min(Math.min(availW, availH) * 0.34, k * 2.2))
+    for (let i = 0; i < n; i++) {
+      const node = nodesSorted[i]!
+      const seed = fnv1a(`${snapshot.equivalent}:${seedKey}:${node.id}`)
+      const a = ((seed % 4096) / 4096) * Math.PI * 2
+      const rr = Math.sqrt(((Math.floor(seed / 4096) % 4096) / 4096))
+      const rad = baseRad * rr
+
+      const gKey = groupKeyByNodeId?.get(node.id)
+      const anchor = gKey && groupAnchors?.get(gKey) ? groupAnchors.get(gKey)! : { x: cx, y: cy }
+
+      x[i] = anchor.x + Math.cos(a) * rad
+      y[i] = anchor.y + Math.sin(a) * rad
+      vx[i] = 0
+      vy[i] = 0
+    }
   }
 
   const linksSorted = [...snapshot.links].sort((a, b) =>
@@ -200,11 +233,12 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   const damping = 0.88
   const maxSpeed = Math.max(0.8, k * 0.35)
 
-  const cStrength = centerStrength ?? 0.060
+  const cStrength = centerStrength ?? 0.052
   const gStrength = groupStrength ?? 0
-  const chargeStrength = Math.max(0.001, k * k) * 0.020
+  // Increased spacing: stronger repulsion + longer link distances
+  const chargeStrength = Math.max(0.001, k * k) * 0.055
   const springStrength = 0.022
-  const linkDistanceBase = Math.max(16, k * 0.70)
+  const linkDistanceBase = Math.max(24, k * 1.25)
   const collisionStrength = 0.70
   const softening2 = 36
 
@@ -461,7 +495,7 @@ function computeLayoutCommunityClusters(snapshot: GraphSnapshot, w: number, h: n
 }
 
 function computeLayoutAdminForce(snapshot: GraphSnapshot, w: number, h: number, isTestMode: boolean) {
-  return applyForceLayout({ snapshot, w, h, seedKey: 'admin-force', isTestMode, centerStrength: 0.070 })
+  return applyForceLayout({ snapshot, w, h, seedKey: 'admin-force', isTestMode, centerStrength: 0.055 })
 }
 
 function computeLayoutConstellations(

@@ -17,10 +17,26 @@ type Props = {
   runStatus: RunStatus | null
 
   sseState: string
-  lastError: string
+  lastError: string | null
 
   refreshScenarios: () => void
   startRun: () => void
+
+  pause: () => void
+  resume: () => void
+  stop: () => void
+  applyIntensity: () => void
+
+  runStats: {
+    startedAtMs: number
+    attempts: number
+    committed: number
+    rejected: number
+    errors: number
+    timeouts: number
+    rejectedByCode: Record<string, number>
+    errorsByCode: Record<string, number>
+  }
 }
 
 const props = defineProps<Props>()
@@ -30,6 +46,60 @@ const isDev = import.meta.env.DEV
 const isLocalhost = typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
 const isUsingDevToken = computed(() => isDev && isLocalhost && String(props.accessToken ?? '').trim() === DEFAULT_DEV_ACCESS_TOKEN)
 const showTokenEditor = ref(false)
+
+const readyHint = computed<string>(() => {
+  if (props.runId) return ''
+  if (!String(props.accessToken ?? '').trim()) return 'Set Auth token'
+  if (!String(props.selectedScenarioId ?? '').trim()) return 'Choose Scenario'
+  return 'Ready — click Start'
+})
+
+const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
+  const s = String(props.sseState ?? '').toLowerCase()
+  if (s === 'open') return 'ok'
+  if (s === 'reconnecting' || s === 'connecting') return 'warn'
+  if (s === 'closed') return 'err'
+  return 'info'
+})
+
+const runTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
+  const s = String(props.runStatus?.state ?? '').toLowerCase()
+  if (s === 'running') return 'ok'
+  if (s === 'paused') return 'warn'
+  if (s === 'error') return 'err'
+  return 'info'
+})
+
+const canPause = computed(() => props.runStatus?.state === 'running')
+const canResume = computed(() => props.runStatus?.state === 'paused')
+const canStop = computed(() => {
+  const s = props.runStatus?.state
+  return s === 'running' || s === 'paused' || s === 'created'
+})
+
+const isRunActive = computed(() => {
+  if (!props.runId) return false
+  const s = String(props.runStatus?.state ?? '').toLowerCase()
+  return s === 'running' || s === 'paused' || s === 'created' || s === 'stopping'
+})
+
+const successRatePct = computed(() => {
+  const a = Number(props.runStats?.attempts ?? 0)
+  const ok = Number(props.runStats?.committed ?? 0)
+  if (a <= 0) return 0
+  return Math.round((ok / a) * 100)
+})
+
+const runSummary = computed(() => {
+  const st = String(props.runStatus?.state ?? '')
+  if (!st) return ''
+  if (st !== 'stopped' && st !== 'error') return ''
+  const ok = props.runStats.committed
+  const a = props.runStats.attempts
+  const rej = props.runStats.rejected
+  const err = props.runStats.errors
+  return `Done — ok ${ok}/${a} (${successRatePct.value}%), rej ${rej}, err ${err}`
+})
 
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
@@ -72,127 +142,156 @@ function short(s: string, n: number) {
 
 <template>
   <div class="hud-top">
-    <div class="hud-row" style="flex-wrap: wrap">
-      <div class="pill">
-        <span class="label">Mode</span>
-        <span class="mono">REAL</span>
+    <div class="hud-top-grid">
+      <div class="hud-controls" aria-label="Controls">
+        <div class="hudbar">
+          <span class="hud-badge" data-tone="info">REAL</span>
+
+          <div class="hud-chip">
+            <span class="hud-label">EQ</span>
+            <select v-model="eq" class="hud-select" aria-label="Equivalent">
+              <option value="UAH">UAH</option>
+              <option value="HOUR">HOUR</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </div>
+
+          <div class="hud-chip">
+            <span class="hud-label">Layout</span>
+            <select v-model="layoutMode" class="hud-select" aria-label="Layout">
+              <option value="admin-force">Organic cloud</option>
+              <option value="community-clusters">Clusters</option>
+              <option value="balance-split">Balance</option>
+              <option value="type-split">Type</option>
+              <option value="status-split">Status</option>
+            </select>
+          </div>
+
+          <div class="hud-chip">
+            <span class="hud-label">Scenario</span>
+            <select
+              class="hud-select"
+              :value="selectedScenarioId"
+              aria-label="Scenario"
+              @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">— select —</option>
+              <option v-for="s in scenarios" :key="s.scenario_id" :value="s.scenario_id">
+                {{ s.label ? `${s.label} (${s.scenario_id})` : s.scenario_id }}
+              </option>
+            </select>
+            <button class="btn btn-xxs" type="button" :disabled="loadingScenarios" @click="props.refreshScenarios">↻</button>
+            <button class="btn btn-xs" type="button" :disabled="isRunActive || !selectedScenarioId" @click="props.startRun">
+              {{ runId && !isRunActive ? 'New run' : 'Start' }}
+            </button>
+            <button class="btn btn-xs" type="button" :disabled="!runId || !canPause" @click="props.pause">Pause</button>
+            <button class="btn btn-xs" type="button" :disabled="!runId || !canResume" @click="props.resume">Resume</button>
+            <button class="btn btn-xs btn-ghost" type="button" :disabled="!runId || !canStop" @click="props.stop">Stop</button>
+          </div>
+
+          <details class="hud-chip hud-chip-advanced">
+            <summary class="hud-label" style="cursor: pointer; list-style: none">
+              <span class="hud-badge" data-tone="info">⚙</span>
+              <span style="margin-left: 6px">Advanced</span>
+            </summary>
+
+            <div class="hudbar" style="margin-top: 8px">
+              <div class="hud-chip subtle">
+                <span class="hud-label">API</span>
+                <input
+                  class="hud-input"
+                  :value="apiBase"
+                  aria-label="API base"
+                  @input="setApiBase(($event.target as HTMLInputElement).value)"
+                />
+              </div>
+
+              <div class="hud-chip subtle">
+                <span class="hud-label">Auth</span>
+                <template v-if="isUsingDevToken && !showTokenEditor">
+                  <span class="hud-value mono">dev admin</span>
+                  <button class="btn btn-xxs" type="button" @click="showTokenEditor = true">Edit</button>
+                </template>
+                <template v-else>
+                  <input
+                    class="hud-input mono"
+                    style="width: 22ch"
+                    type="password"
+                    :value="accessToken"
+                    aria-label="Access token"
+                    placeholder="token"
+                    @input="setAccessToken(($event.target as HTMLInputElement).value)"
+                  />
+                  <button v-if="isDev && isLocalhost" class="btn btn-xxs" type="button" @click="showTokenEditor = false">Hide</button>
+                </template>
+              </div>
+
+              <div class="hud-chip subtle">
+                <span class="hud-label">Run mode</span>
+                <select class="hud-select" :value="desiredMode" aria-label="Run mode" @change="setDesiredMode(($event.target as HTMLSelectElement).value)">
+                  <option value="real">real</option>
+                  <option value="fixtures">fixtures</option>
+                </select>
+              </div>
+
+              <div class="hud-chip subtle">
+                <span class="hud-label">Intensity</span>
+                <input
+                  class="hud-input"
+                  style="width: 6ch"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  :value="intensityPercent"
+                  aria-label="Intensity percent"
+                  @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
+                />
+                <button class="btn btn-xxs" type="button" :disabled="!runId" @click="props.applyIntensity">Apply</button>
+              </div>
+            </div>
+          </details>
+
+          <div v-if="!loadingScenarios && scenarios.length === 0" class="hud-chip" aria-label="No scenarios">
+            <span class="hud-badge" data-tone="warn">No scenarios</span>
+            <span class="hud-label">Backend must return GET /simulator/scenarios</span>
+          </div>
+        </div>
       </div>
 
-      <div class="pill">
-        <span class="label">EQ</span>
-        <select v-model="eq" class="select" aria-label="Equivalent">
-          <option value="UAH">UAH</option>
-          <option value="HOUR">HOUR</option>
-          <option value="EUR">EUR</option>
-        </select>
+      <div class="hud-status" aria-label="Run status">
+        <div class="hudbar" style="justify-content: flex-end">
+          <span class="hud-badge" :data-tone="sseTone">SSE {{ sseState }}</span>
+          <span class="hud-badge" :data-tone="runTone">Run {{ runStatus?.state ?? (runId ? '…' : '—') }}</span>
+          <span class="hud-chip subtle" style="gap: 8px" aria-label="Stats">
+            <span class="hud-label">Tx</span>
+            <span class="hud-value">ok {{ runStats.committed }}</span>
+            <span class="hud-label">/</span>
+            <span class="hud-value">{{ runStats.attempts }}</span>
+            <span class="hud-label">SR</span>
+            <span class="hud-value">{{ successRatePct }}%</span>
+            <span v-if="runStats.rejected" class="hud-label">rej {{ runStats.rejected }}</span>
+            <span v-if="runStats.errors" class="hud-label">err {{ runStats.errors }}</span>
+          </span>
+          <span v-if="runId" class="hud-chip subtle" style="gap: 6px">
+            <span class="hud-label">ID</span>
+            <span class="hud-value mono" style="opacity: 0.9">{{ short(runId, 18) }}</span>
+          </span>
+        </div>
       </div>
 
-      <div class="field pill">
-        <span class="label">Layout</span>
-        <select v-model="layoutMode" class="select" aria-label="Layout">
-          <option value="admin-force">Organic cloud (links)</option>
-          <option value="community-clusters">Community clusters</option>
-          <option value="balance-split">Constellations: balance</option>
-          <option value="type-split">Constellations: type</option>
-          <option value="status-split">Constellations: status</option>
-        </select>
+      <div v-if="!lastError && (readyHint || runSummary)" class="hud-alert" data-tone="info" aria-label="Status">
+        <span class="hud-label">Status</span>
+        <div class="hud-alert__msg">
+          <span class="mono">{{ runSummary || readyHint }}</span>
+        </div>
       </div>
 
-      <div class="pill">
-        <span class="label">API</span>
-        <input
-          class="select"
-          style="width: 160px"
-          :value="apiBase"
-          aria-label="API base"
-          @input="setApiBase(($event.target as HTMLInputElement).value)"
-        />
-      </div>
-
-      <div class="pill">
-        <span class="label">Auth</span>
-        <template v-if="isUsingDevToken && !showTokenEditor">
-          <span class="mono">dev admin (auto)</span>
-          <button class="btn btn-xxs" type="button" @click="showTokenEditor = true">edit</button>
-        </template>
-        <template v-else>
-          <input
-            class="select mono"
-            style="width: 220px"
-            type="password"
-            :value="accessToken"
-            aria-label="Access token"
-            placeholder="JWT (Bearer) or admin token"
-            @input="setAccessToken(($event.target as HTMLInputElement).value)"
-          />
-          <button v-if="isDev && isLocalhost" class="btn btn-xxs" type="button" @click="showTokenEditor = false">
-            hide
-          </button>
-        </template>
-      </div>
-
-      <div class="pill">
-        <span class="label">Scenario</span>
-        <select
-          class="select"
-          :value="selectedScenarioId"
-          aria-label="Scenario"
-          @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">— select —</option>
-          <option v-for="s in scenarios" :key="s.scenario_id" :value="s.scenario_id">
-            {{ s.label ? `${s.label} (${s.scenario_id})` : s.scenario_id }}
-          </option>
-        </select>
-        <button class="btn btn-xxs" type="button" :disabled="loadingScenarios" @click="props.refreshScenarios">
-          {{ loadingScenarios ? '…' : '↻' }}
-        </button>
-      </div>
-
-      <div v-if="!loadingScenarios && scenarios.length === 0" class="pill pill-warn" aria-label="No scenarios">
-        <span class="label">Hint</span>
-        <span class="mono">
-          No scenarios. Graph won’t start in real mode until backend returns items for GET /simulator/scenarios.
-          Fix: ensure backend image includes fixtures/simulator (Dockerfile COPY fixtures/...) or upload scenario.json.
-        </span>
-      </div>
-
-      <div class="pill subtle">
-        <span class="label">Run mode</span>
-        <select class="select" :value="desiredMode" aria-label="Run mode" @change="setDesiredMode(($event.target as HTMLSelectElement).value)">
-          <option value="real">real</option>
-          <option value="fixtures">fixtures</option>
-        </select>
-      </div>
-
-      <div class="pill subtle">
-        <span class="label">Intensity</span>
-        <input
-          class="select"
-          style="width: 56px"
-          type="number"
-          min="0"
-          max="100"
-          step="1"
-          :value="intensityPercent"
-          aria-label="Intensity percent"
-          @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
-        />
-      </div>
-
-      <button class="btn" type="button" :disabled="!selectedScenarioId" @click="props.startRun">Start run</button>
-
-      <div class="pill subtle" aria-label="Run status">
-        <span class="label">SSE</span>
-        <span class="mono">{{ sseState }}</span>
-        <span class="label" style="margin-left: 10px">Run</span>
-        <span class="mono">{{ runStatus?.state ?? (runId ? '…' : '—') }}</span>
-        <span v-if="runId" class="mono" style="opacity: 0.8">{{ short(runId, 22) }}</span>
-      </div>
-
-      <div v-if="lastError" class="pill pill-error">
-        <span class="label">Error</span>
-        <span class="mono">{{ short(lastError, 120) }}</span>
+      <div v-if="lastError" class="hud-alert" data-tone="err" aria-label="Error">
+        <span class="hud-label">Error</span>
+        <div class="hud-alert__msg">
+          <span class="mono">{{ short(lastError, 160) }}</span>
+        </div>
       </div>
     </div>
   </div>
