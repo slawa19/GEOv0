@@ -23,6 +23,7 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
     seen_run_status = False
     seen_tx = False
     seen_tx_with_edges = False
+    seen_tx_with_patches = False
 
     async with client.stream(
         "GET",
@@ -34,7 +35,7 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
 
         # We expect an immediate run_status snapshot, then at least one tx.updated.
         async def _read_until() -> None:
-            nonlocal seen_run_status, seen_tx, seen_tx_with_edges
+            nonlocal seen_run_status, seen_tx, seen_tx_with_edges, seen_tx_with_patches
             async for line in r.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -48,7 +49,27 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
                         e0 = edges[0]
                         if isinstance(e0, dict) and isinstance(e0.get("from"), str) and isinstance(e0.get("to"), str):
                             seen_tx_with_edges = True
-                if seen_run_status and seen_tx_with_edges:
+
+                    edge_patch = payload.get("edge_patch")
+                    node_patch = payload.get("node_patch")
+                    if isinstance(edge_patch, list) and edge_patch and isinstance(node_patch, list) and node_patch:
+                        ep0 = edge_patch[0]
+                        np0 = node_patch[0]
+                        if (
+                            isinstance(ep0, dict)
+                            and isinstance(ep0.get("source"), str)
+                            and isinstance(ep0.get("target"), str)
+                            and isinstance(ep0.get("viz_alpha_key"), str)
+                            and isinstance(ep0.get("viz_width_key"), str)
+                            and isinstance(np0, dict)
+                            and isinstance(np0.get("id"), str)
+                            and isinstance(np0.get("net_balance_atoms"), str)
+                            and isinstance(np0.get("net_sign"), int)
+                            and isinstance(np0.get("viz_color_key"), str)
+                            and isinstance(np0.get("viz_size"), dict)
+                        ):
+                            seen_tx_with_patches = True
+                if seen_run_status and seen_tx_with_edges and seen_tx_with_patches:
                     return
 
         await asyncio.wait_for(_read_until(), timeout=10.0)
@@ -56,3 +77,4 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
     assert seen_run_status
     assert seen_tx
     assert seen_tx_with_edges
+    assert seen_tx_with_patches

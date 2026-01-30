@@ -11,6 +11,10 @@ From repo root:
 - PowerShell: `./scripts/run_simulator_ui.ps1`
 - cmd.exe: `scripts\\run_simulator_ui.cmd`
 
+Tip (real mode / proxy changes): if the UI is already running and you need it to pick up new env/proxy settings, use:
+
+- PowerShell: `./scripts/run_simulator_ui.ps1 -RestartIfRunning`
+
 Or manually:
 
 ```bash
@@ -66,10 +70,20 @@ When `VITE_TEST_MODE=1` and you are not running under Playwright, the HUD shows 
 The UI can run in **Real Mode** (REST control-plane + SSE data-plane) against the backend simulator API.
 
 ### Prereqs
-- Backend running locally (default): `http://127.0.0.1:8000`
+- Backend running locally (default): `http://127.0.0.1:18000` (see `scripts/run_local.ps1 -BackendPort`)
 - Auth:
-	- In **dev on localhost**, the UI auto-uses the dev admin token (default: `dev-admin-token-change-me`) and shows `dev admin (auto)` in the HUD.
-	- In other environments, provide a valid Bearer token (JWT) or an admin token.
+	- **Admin token** (recommended for dev/admin flows): send it as `X-Admin-Token`.
+		- In **dev on localhost**, the UI auto-uses the dev admin token (default: `dev-admin-token-change-me`) and shows `dev admin (auto)` in the HUD.
+	- **Bearer token** (JWT): obtained via `POST /api/v1/auth/login` and sent as `Authorization: Bearer <token>`.
+
+### After backend changes (required)
+
+If you change backend code while using Real Mode (especially anything related to SSE events like `tx.updated`, `node_patch`, `edge_patch`, `viz_*`):
+
+1) **Restart the backend**.
+2) Start a **new run** in the UI.
+
+Without a backend restart, the UI may keep running but will receive old event payloads, which looks like "transactions animate but net/color/size never change".
 
 ### Run (PowerShell)
 
@@ -79,8 +93,8 @@ From `simulator-ui/v2`:
 $env:VITE_API_MODE='real'
 $env:VITE_GEO_API_BASE='/api/v1'
 
-# Optional: proxy target if your backend is not on 8000
-# $env:VITE_GEO_BACKEND_ORIGIN='http://127.0.0.1:8000'
+# Optional: proxy target if your backend is not on 18000
+# $env:VITE_GEO_BACKEND_ORIGIN='http://127.0.0.1:18000'
 
 npm run dev
 ```
@@ -101,6 +115,14 @@ Notes:
 	- `run_status` heartbeat updates (state/sim_time/ops/queue)
 	- graph snapshot renders
 	- `tx.updated` / clearing events animate when present
+
+### Troubleshooting: "balances / colors / sizes don't change"
+
+- Verify SSE payload contains patches:
+	- In DevTools → Network → the `/events` request → a `tx.updated` item should include `node_patch` and `edge_patch`.
+- Verify you're connected to the expected backend:
+	- The UI persists API base and token in `localStorage` (keys like `geo.sim.v2.apiBase`).
+	- If you started a backend on a different port/origin, update the API base in the UI and reload.
 
 ## E2E screenshots (Playwright)
 

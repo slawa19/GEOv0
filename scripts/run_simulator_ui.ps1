@@ -7,6 +7,10 @@ param(
   [string]$HostName = '127.0.0.1',
   [int]$MaxPortTries = 200,
 
+  # If the port is already serving the Simulator UI, stop that dev server and restart it.
+  # Useful when you changed env/proxy defaults but the old Vite server is still running.
+  [switch]$RestartIfRunning,
+
   # UI API mode:
   # - fixtures: demo/fixtures mode (default)
   # - real: real backend integration (fetch-stream SSE + REST)
@@ -58,6 +62,36 @@ function Test-HttpOk([string]$url) {
   } catch {
     return $false
   }
+}
+
+function Test-BackendHealthzOk([string]$origin) {
+  $url = "$origin/healthz"
+
+  try {
+    $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $url -ErrorAction Stop
+    if ($r.StatusCode -lt 200 -or $r.StatusCode -ge 300) {
+      return $false
+    }
+
+    try {
+      $body = $r.Content | ConvertFrom-Json
+      return ($null -ne $body -and $body.status -eq 'ok')
+    } catch {
+      # If JSON parsing fails, treat it as not-our-backend.
+      return $false
+    }
+  } catch {
+    return $false
+  }
+}
+
+function Try-Detect-LocalBackendOrigin([string]$hostForUrl) {
+  # Default local dev backend port is scripts/run_local.ps1 -BackendPort (default 18000)
+  $origin = "http://${hostForUrl}:18000"
+  if (Test-BackendHealthzOk $origin) {
+    return $origin
+  }
+  return $null
 }
 
 function Try-Detect-DockerBackendOrigin([string]$hostForUrl) {
@@ -165,11 +199,51 @@ if (Test-PortExcluded $selectedPort) {
 if (Test-TcpOpen $HostName $selectedPort) {
   $url = "http://${HostName}:$selectedPort/"
   if (Test-HttpOk $url) {
+    if (-not $RestartIfRunning) {
+      Write-Host ''
+      Write-Host 'GEO Simulator UI already running.'
+      Write-Host "Open in browser: $url"
+      Write-Host "Tip: pass -RestartIfRunning to restart the dev server (useful after env/proxy changes)." -ForegroundColor DarkGray
+      Write-Host ''
+      exit 0
+    }
+
     Write-Host ''
-    Write-Host 'GEO Simulator UI already running.'
-    Write-Host "Open in browser: $url"
-    Write-Host ''
-    exit 0
+    Write-Host "GEO Simulator UI already running on $url; restarting..." -ForegroundColor Yellow
+
+    $listenerPid = $null
+    try {
+      $conn = Get-NetTCPConnection -LocalPort $selectedPort -State Listen -ErrorAction Stop | Select-Object -First 1
+      if ($conn) { $listenerPid = $conn.OwningProcess }
+    } catch {}
+
+    if (-not $listenerPid) {
+      throw "Cannot determine PID listening on port $selectedPort."
+    }
+
+    $proc = $null
+    try { $proc = Get-Process -Id $listenerPid -ErrorAction Stop } catch {}
+
+    $cmdLine = ''
+    try {
+      $wmi = Get-CimInstance Win32_Process -Filter "ProcessId=$listenerPid" -ErrorAction SilentlyContinue
+      if ($wmi) { $cmdLine = [string]$wmi.CommandLine }
+    } catch {}
+
+    $isProbablyOurVite = $false
+    $appDirWin = $appDir.Replace('/', '\\')
+    if ($proc -and $proc.ProcessName -eq 'node') {
+      if ($cmdLine -and ($cmdLine -like '*vite*') -and (($cmdLine -like "*$appDir*") -or ($cmdLine -like "*$appDirWin*"))) {
+        $isProbablyOurVite = $true
+      }
+    }
+
+    if (-not $isProbablyOurVite) {
+      throw "Refusing to stop PID $listenerPid ($($proc.ProcessName)) on port $selectedPort because it doesn't look like our Vite dev server. CommandLine: $cmdLine"
+    }
+
+    Stop-Process -Id $listenerPid -Force
+    Start-Sleep -Milliseconds 250
   }
 
   # Port is occupied by something else. Pick the next free one (skipping excluded ranges).
@@ -202,13 +276,20 @@ if ($Mode -eq 'real') {
 }
 
 if ($Mode -eq 'real' -and [string]::IsNullOrWhiteSpace($BackendOrigin)) {
-  $detected = Try-Detect-DockerBackendOrigin -hostForUrl $HostName
-  if ($detected) {
-    $BackendOrigin = $detected
-    Write-Host "Detected backend origin from Docker: ${BackendOrigin}" -ForegroundColor DarkGray
+  $detectedLocal = Try-Detect-LocalBackendOrigin -hostForUrl $HostName
+  if ($detectedLocal) {
+    $BackendOrigin = $detectedLocal
+    Write-Host "Detected backend origin from local dev backend (healthz ok): ${BackendOrigin}" -ForegroundColor DarkGray
   } else {
-    Write-Host 'Backend origin not provided and could not be auto-detected from Docker.' -ForegroundColor Yellow
-    Write-Host 'Pass -BackendOrigin http://127.0.0.1:<port> to force it.' -ForegroundColor Yellow
+    $detectedDocker = Try-Detect-DockerBackendOrigin -hostForUrl $HostName
+    if ($detectedDocker) {
+      $BackendOrigin = $detectedDocker
+      Write-Host "Detected backend origin from Docker: ${BackendOrigin}" -ForegroundColor DarkGray
+    } else {
+      Write-Host 'Backend origin not provided and could not be auto-detected (local 18000 or Docker geov0-app).' -ForegroundColor Yellow
+      Write-Host 'Pass -BackendOrigin http://127.0.0.1:<port> to force it.' -ForegroundColor Yellow
+      throw 'Cannot start Simulator UI in real mode without a reachable backend. (Refusing to silently proxy to an unrelated service.)'
+    }
   }
 }
 

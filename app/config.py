@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # When enabled, simulator persists runs/metrics/bottlenecks/artifacts indexes to the main DB.
     SIMULATOR_DB_ENABLED: bool = True
 
+    # Real-mode SSE viz patches: refresh cached quantiles every N ticks.
+    # Higher value = fewer DB scans, less accurate viz_size/viz_width_key.
+    SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS: int = 10
+
     # Admin API (minimal MVP)
     # NOTE: Shared secret to unblock Admin UI integration in MVP.
     # Replace with proper role-based auth in production.

@@ -100,6 +100,9 @@ class RunRecord:
     _real_in_flight: int = 0
     _real_consec_tick_failures: int = 0
 
+    # Real-mode per-equivalent viz quantile cache for SSE node_patch/edge_patch.
+    _real_viz_by_eq: dict[str, Any] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
         if self._subs is None:
             self._subs = []

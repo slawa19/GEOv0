@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Callable, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 import app.db.session as db_session
 import app.core.simulator.storage as simulator_storage
@@ -26,6 +26,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.schemas.simulator import (
     SimulatorClearingDoneEvent,
     SimulatorClearingPlanEvent,
@@ -337,6 +338,7 @@ class RealRunner:
                         float,
                         list[tuple[str, str]],
                         list[dict[str, Any]] | None,
+                        list[dict[str, Any]] | None,
                     ],
                 ] = {}
 
@@ -359,7 +361,7 @@ class RealRunner:
                         if item is None:
                             return
                         del ready[next_seq]
-                        eq, sender_pid, receiver_pid, status, err_code, err_details, avg_route_len, route_edges, edge_patch = item
+                        eq, sender_pid, receiver_pid, status, err_code, err_details, avg_route_len, route_edges, edge_patch, node_patch = item
 
                         edges_pairs = route_edges or [(sender_pid, receiver_pid)]
 
@@ -429,6 +431,8 @@ class RealRunner:
                                 ).model_dump(mode="json", by_alias=True)
                                 if edge_patch:
                                     evt_dict["edge_patch"] = edge_patch
+                                if node_patch:
+                                    evt_dict["node_patch"] = node_patch
                                 with self._lock:
                                     run.last_event_type = "tx.updated"
                                 self._sse.broadcast(run_id, evt_dict)
@@ -477,20 +481,108 @@ class RealRunner:
 
                             # Build edge_patch for committed transactions (Variant A: SSE patches)
                             edge_patch_list: list[dict[str, Any]] | None = None
+                            node_patch_list: list[dict[str, Any]] | None = None
                             if status == "COMMITTED":
                                 edges_pairs = route_edges or [(sender_pid, receiver_pid)]
 
                                 edge_patch_list = []
                                 try:
                                     async with db_session.AsyncSessionLocal() as patch_session:
-                                        eq_id = await patch_session.scalar(select(Equivalent.id).where(Equivalent.code == eq))
-                                        if eq_id is None:
-                                            raise ValueError(f"Equivalent {eq} not found")
+                                        helper: VizPatchHelper | None
+                                        with self._lock:
+                                            helper = run._real_viz_by_eq.get(str(eq))
+
+                                        if helper is None:
+                                            helper = await VizPatchHelper.create(
+                                                patch_session,
+                                                equivalent_code=str(eq),
+                                                refresh_every_ticks=int(
+                                                    getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10
+                                                ),
+                                            )
+                                            with self._lock:
+                                                run._real_viz_by_eq[str(eq)] = helper
+
+                                        eq_id = helper.equivalent_id
+
+                                        participant_ids: list[uuid.UUID] = []
+                                        if run._real_participants:
+                                            participant_ids = [pid for (pid, _) in run._real_participants]
+                                        await helper.maybe_refresh_quantiles(
+                                            patch_session,
+                                            tick_index=int(run.tick_index),
+                                            participant_ids=participant_ids,
+                                        )
 
                                         # Fetch participants in one query.
                                         pids = sorted({pid for ab in edges_pairs for pid in ab if pid})
                                         res = await patch_session.execute(select(Participant).where(Participant.pid.in_(pids)))
                                         pid_to_participant = {p.pid: p for p in res.scalars().all()}
+
+                                        try:
+                                            node_patch_list = await helper.compute_node_patches(
+                                                patch_session,
+                                                pid_to_participant=pid_to_participant,
+                                                pids=pids,
+                                            )
+                                            if node_patch_list == []:
+                                                node_patch_list = None
+                                        except Exception as e_np:
+                                            self._logger.warning(f"Failed to build node_patch: {e_np}")
+                                            node_patch_list = None
+
+                                        # Batch-load debts and trustlines for the affected edges (avoid N+1).
+                                        id_pairs: list[tuple[uuid.UUID, uuid.UUID]] = []
+                                        for src_pid, dst_pid in edges_pairs:
+                                            src_part = pid_to_participant.get(src_pid)
+                                            dst_part = pid_to_participant.get(dst_pid)
+                                            if not src_part or not dst_part:
+                                                continue
+                                            id_pairs.append((src_part.id, dst_part.id))
+
+                                        debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+                                        tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {}
+
+                                        if id_pairs:
+                                            debt_cond = or_(*[and_(Debt.creditor_id == a, Debt.debtor_id == b) for a, b in id_pairs])
+                                            debt_rows = (
+                                                await patch_session.execute(
+                                                    select(
+                                                        Debt.creditor_id,
+                                                        Debt.debtor_id,
+                                                        func.coalesce(func.sum(Debt.amount), 0).label("amount"),
+                                                    )
+                                                    .where(Debt.equivalent_id == eq_id, debt_cond)
+                                                    .group_by(Debt.creditor_id, Debt.debtor_id)
+                                                )
+                                            ).all()
+                                            debt_by_pair = {
+                                                (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+                                            }
+
+                                            tl_cond = or_(
+                                                *[
+                                                    and_(
+                                                        TrustLine.from_participant_id == a,
+                                                        TrustLine.to_participant_id == b,
+                                                    )
+                                                    for a, b in id_pairs
+                                                ]
+                                            )
+                                            tl_rows = (
+                                                await patch_session.execute(
+                                                    select(
+                                                        TrustLine.from_participant_id,
+                                                        TrustLine.to_participant_id,
+                                                        TrustLine.limit,
+                                                        TrustLine.status,
+                                                    ).where(TrustLine.equivalent_id == eq_id, tl_cond)
+                                                )
+                                            ).all()
+                                            tl_by_pair = {
+                                                (r.from_participant_id, r.to_participant_id): (r.limit or Decimal("0"), r.status)
+                                                for r in tl_rows
+                                            }
 
                                         for src_pid, dst_pid in edges_pairs:
                                             src_part = pid_to_participant.get(src_pid)
@@ -498,24 +590,18 @@ class RealRunner:
                                             if not src_part or not dst_part:
                                                 continue
 
-                                            debt = await patch_session.scalar(
-                                                select(Debt).where(
-                                                    Debt.creditor_id == src_part.id,
-                                                    Debt.debtor_id == dst_part.id,
-                                                    Debt.equivalent_id == eq_id,
-                                                )
+                                            used_amt = debt_by_pair.get((src_part.id, dst_part.id), Decimal("0"))
+                                            limit_amt, tl_status = tl_by_pair.get(
+                                                (src_part.id, dst_part.id),
+                                                (Decimal("0"), None),
                                             )
-                                            tl = await patch_session.scalar(
-                                                select(TrustLine).where(
-                                                    TrustLine.from_participant_id == src_part.id,
-                                                    TrustLine.to_participant_id == dst_part.id,
-                                                    TrustLine.equivalent_id == eq_id,
-                                                )
-                                            )
-
-                                            used_amt = debt.amount if debt else Decimal("0")
-                                            limit_amt = tl.limit if tl else Decimal("0")
                                             available_amt = max(Decimal("0"), limit_amt - used_amt)
+
+                                            edge_viz = helper.edge_viz(
+                                                status=tl_status,
+                                                used=used_amt,
+                                                limit=limit_amt,
+                                            )
 
                                             edge_patch_list.append(
                                                 {
@@ -523,12 +609,13 @@ class RealRunner:
                                                     "target": dst_pid,
                                                     "used": str(used_amt),
                                                     "available": str(available_amt),
-                                                    # NOTE: viz_* are NOT included — snapshot refetch handles them
+                                                    **edge_viz,
                                                 }
                                             )
                                 except Exception as e_patch:
                                     self._logger.warning(f"Failed to build edge_patch: {e_patch}")
                                     edge_patch_list = None
+                                    node_patch_list = None
 
                                 if edge_patch_list == []:
                                     edge_patch_list = None
@@ -543,6 +630,7 @@ class RealRunner:
                                 avg_route_len,
                                 route_edges,
                                 edge_patch_list,
+                                node_patch_list,
                             )
                             _emit_if_ready()
 

@@ -21,3 +21,10 @@ npm run dev
 ```
 
 Open: http://localhost:5176/
+
+## Real mode note (important)
+
+When running the UI in **Real Mode** against the backend:
+
+- After any backend code change (especially SSE/event payload changes), **restart the backend**.
+	Otherwise the UI can keep working but will receive old event shapes (e.g. missing `node_patch`), which makes balances/colors/sizes look "stuck".
