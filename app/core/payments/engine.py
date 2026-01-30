@@ -670,7 +670,7 @@ class PaymentEngine:
             for eq_id, pairs in affected_pairs_by_equivalent.items():
                 await checker.check_trust_limits(equivalent_id=eq_id, participant_pairs=list(pairs))
                 await checker.check_zero_sum(equivalent_id=eq_id)
-                await checker.check_debt_symmetry(equivalent_id=eq_id)
+                await checker.check_debt_symmetry(equivalent_id=eq_id, participant_pairs=list(pairs))
         except IntegrityViolationException as exc:
             await self.session.rollback()
             await self.abort(tx_id, reason=f"Invariant violation: {exc.code}")
@@ -785,6 +785,10 @@ class PaymentEngine:
             debt_s_r.amount += remaining_amount
             self.session.add(debt_s_r)
 
+        # NOTE: app sessions may run with autoflush=False. Ensure the DB view is
+        # consistent before the symmetry-netting queries below.
+        await self.session.flush()
+
         # Enforce debt symmetry by netting mutual debts, if any.
         debt_forward = await self._get_debt(from_id, to_id, equivalent_id)
         debt_reverse = await self._get_debt(to_id, from_id, equivalent_id)
@@ -807,6 +811,10 @@ class PaymentEngine:
                 await self.session.delete(debt_reverse)
             else:
                 self.session.add(debt_reverse)
+
+            # Flush netting effects immediately so later flows / invariant checks
+            # don't observe a transient mutual-debt state.
+            await self.session.flush()
 
     async def _get_debt(self, debtor_id: UUID, creditor_id: UUID, equivalent_id: UUID) -> Debt | None:
         stmt = select(Debt).where(

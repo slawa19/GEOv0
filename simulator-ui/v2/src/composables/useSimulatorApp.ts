@@ -592,6 +592,37 @@ export function useSimulatorApp() {
     return Math.max(250, Math.round(base + jitter))
   }
 
+  // Snapshot refetch for real mode (Variant B: throttled pull)
+  let eventsSinceLastRefresh = 0
+  let lastSnapshotRefreshTs = 0
+  let pendingSnapshotRefresh = false
+  const EVENTS_BEFORE_REFRESH = 10 // Refetch every N events
+  const MIN_REFRESH_INTERVAL_MS = 3000 // Minimum 3s between refreshes
+
+  function scheduleSnapshotRefresh() {
+    if (pendingSnapshotRefresh) return
+
+    const now = Date.now()
+    const elapsed = now - lastSnapshotRefreshTs
+
+    if (elapsed >= MIN_REFRESH_INTERVAL_MS) {
+      // Refresh immediately
+      doSnapshotRefresh()
+    } else {
+      // Defer until throttle window passes
+      pendingSnapshotRefresh = true
+      setTimeout(() => {
+        pendingSnapshotRefresh = false
+        doSnapshotRefresh()
+      }, MIN_REFRESH_INTERVAL_MS - elapsed)
+    }
+  }
+
+  async function doSnapshotRefresh() {
+    lastSnapshotRefreshTs = Date.now()
+    await refreshSnapshot()
+  }
+
   async function runSseLoop() {
     const mySeq = ++sseSeq
     stopSse()
@@ -605,6 +636,11 @@ export function useSimulatorApp() {
     let attempt = 0
     real.sseState = 'connecting'
     real.lastError = ''
+
+    // Reset refetch counters on new SSE session
+    eventsSinceLastRefresh = 0
+    lastSnapshotRefreshTs = Date.now()
+    pendingSnapshotRefresh = false
 
     while (!ctrl.signal.aborted && mySeq === sseSeq) {
       const runId = real.runId
@@ -649,6 +685,13 @@ export function useSimulatorApp() {
             if ((evt as any).type === 'tx.updated') {
               sceneAndDemo.runTxOnce // keep deps referenced (no-op)
               demoPlayer.runTxEvent(evt as any)
+
+              // Periodically refetch snapshot to sync viz_* fields
+              eventsSinceLastRefresh++
+              if (eventsSinceLastRefresh >= EVENTS_BEFORE_REFRESH) {
+                eventsSinceLastRefresh = 0
+                scheduleSnapshotRefresh()
+              }
               return
             }
 
@@ -689,6 +732,9 @@ export function useSimulatorApp() {
                 realPatchApplier.applyEdgePatches((evt as any).edge_patch)
                 resetOverlays()
               }
+
+              // Refetch snapshot to sync state after clearing
+              scheduleSnapshotRefresh()
             }
           },
         })

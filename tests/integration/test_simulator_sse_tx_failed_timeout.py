@@ -48,6 +48,11 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
                     seen_run_status = True
                 if payload.get("type") == "tx.failed":
                     seen_failed = True
+                    error = payload.get("error")
+                    assert isinstance(error, dict)
+                    assert error.get("code") == "PAYMENT_TIMEOUT"
+                    assert isinstance(error.get("message"), str) and error.get("message")
+                    assert isinstance(error.get("at"), str) and error.get("at")
                 if seen_run_status and seen_failed:
                     return
 

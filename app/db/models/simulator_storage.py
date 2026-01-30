@@ -52,6 +52,8 @@ class SimulatorRun(Base):
 class SimulatorRunMetric(Base):
     __tablename__ = "simulator_run_metrics"
 
+    # NOTE: FK to simulator_runs intentionally omitted for MVP (SQLite tests + best-effort runtime).
+    # TODO: Add FK with ON DELETE CASCADE when runs management becomes DB-first.
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     equivalent_code: Mapped[str] = mapped_column(String(50), primary_key=True)
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
@@ -72,6 +74,8 @@ class SimulatorRunMetric(Base):
 class SimulatorRunBottleneck(Base):
     __tablename__ = "simulator_run_bottlenecks"
 
+    # NOTE: FK to simulator_runs intentionally omitted for MVP (SQLite tests + best-effort runtime).
+    # TODO: Add FK with ON DELETE CASCADE when runs management becomes DB-first.
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     equivalent_code: Mapped[str] = mapped_column(String(50), primary_key=True)
     computed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), primary_key=True, server_default=func.now())
@@ -97,6 +101,8 @@ class SimulatorRunBottleneck(Base):
 class SimulatorRunArtifact(Base):
     __tablename__ = "simulator_run_artifacts"
 
+    # NOTE: FK to simulator_runs intentionally omitted for MVP (SQLite tests + best-effort runtime).
+    # TODO: Add FK with ON DELETE CASCADE when runs management becomes DB-first.
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), primary_key=True)
 

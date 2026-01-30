@@ -14,20 +14,20 @@ async def test_subscribe_replays_events_after_last_event_id() -> None:
         run = runtime.get_run(run_id)
 
         evt1 = {
-            "event_id": runtime._next_event_id(run),  # type: ignore[attr-defined]
+            "event_id": runtime._sse.next_event_id(run),  # type: ignore[attr-defined]
             "ts": datetime.now(timezone.utc).isoformat(),
             "type": "tx.updated",
             "equivalent": "USD",
         }
-        runtime._broadcast(run_id, evt1)  # type: ignore[attr-defined]
+        runtime._sse.broadcast(run_id, evt1)  # type: ignore[attr-defined]
 
         evt2 = {
-            "event_id": runtime._next_event_id(run),  # type: ignore[attr-defined]
+            "event_id": runtime._sse.next_event_id(run),  # type: ignore[attr-defined]
             "ts": datetime.now(timezone.utc).isoformat(),
             "type": "tx.updated",
             "equivalent": "USD",
         }
-        runtime._broadcast(run_id, evt2)  # type: ignore[attr-defined]
+        runtime._sse.broadcast(run_id, evt2)  # type: ignore[attr-defined]
 
         sub = await runtime.subscribe(run_id, equivalent="USD", after_event_id=str(evt1["event_id"]))
         try:

@@ -152,7 +152,12 @@ class InvariantChecker:
 
         return []
 
-    async def check_debt_symmetry(self, *, equivalent_id: Optional[UUID] = None) -> List[dict]:
+    async def check_debt_symmetry(
+        self,
+        *,
+        equivalent_id: Optional[UUID] = None,
+        participant_pairs: Optional[List[tuple[UUID, UUID]]] = None,
+    ) -> List[dict]:
         """Check debt symmetry invariant.
 
         Invariant: NOT (debt[A→B, E] > 0 AND debt[B→A, E] > 0)
@@ -189,6 +194,21 @@ class InvariantChecker:
 
         if equivalent_id is not None:
             query = query.where(d1.equivalent_id == equivalent_id)
+
+        if participant_pairs:
+            # Limit the symmetry check to pairs relevant for the current operation.
+            # This avoids failing a payment because of unrelated pre-existing debt
+            # symmetry violations elsewhere in the graph.
+            pair_conds = []
+            for a, b in participant_pairs:
+                pair_conds.append(
+                    or_(
+                        and_(d1.debtor_id == a, d1.creditor_id == b),
+                        and_(d1.debtor_id == b, d1.creditor_id == a),
+                    )
+                )
+            if pair_conds:
+                query = query.where(or_(*pair_conds))
 
         rows = (await self.session.execute(query)).all()
         violations: List[dict] = []

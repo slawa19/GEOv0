@@ -33,17 +33,16 @@ settings.RECOVERY_ENABLED = False
 settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
 _is_sqlite = TEST_DATABASE_URL.startswith("sqlite")
-if _is_sqlite:
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        echo=False,
-        poolclass=NullPool,
-    )
-else:
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        echo=False,
-    )
+
+# NOTE: For asyncpg on Windows, pooled connections can be bound to a previous
+# event loop between tests (pytest-asyncio uses per-test loops by default),
+# causing errors like "Event loop is closed" and "another operation is in progress".
+# Using NullPool avoids reusing loop-bound connections across tests.
+engine = create_async_engine(
+    TEST_DATABASE_URL,
+    echo=False,
+    poolclass=NullPool,
+)
 TestingSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
@@ -111,6 +110,23 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """SQLAlchemy session with a per-test transaction that is rolled back."""
 
     await _ensure_schema_initialized()
+
+    # Simulator runtime can spawn background tasks (heartbeat / real-mode tick)
+    # that keep DB connections open. Under SQLite this can race with our per-test
+    # hard reset (table deletes) and produce "database is locked".
+    try:
+        from app.core.simulator.runtime import runtime as simulator_runtime
+
+        with simulator_runtime._lock:
+            run_ids = list(simulator_runtime._runs.keys())
+
+        for run_id in run_ids:
+            try:
+                await simulator_runtime.stop(run_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     if _is_sqlite:
         # SQLite has flaky transactional isolation under rapid commit-heavy tests.
