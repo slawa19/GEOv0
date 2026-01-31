@@ -69,6 +69,8 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
                                 and isinstance(np0.get("viz_color_key"), str)
                                 and isinstance(np0.get("viz_size"), dict)
                             ):
+                                # Contract: net_balance_atoms is magnitude; sign is carried by net_sign.
+                                assert not str(np0.get("net_balance_atoms")).startswith("-")
                                 seen_tx_with_patches = True
                     if seen_run_status and seen_tx_with_edges and seen_tx_with_patches:
                         return

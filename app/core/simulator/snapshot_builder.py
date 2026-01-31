@@ -294,7 +294,7 @@ class SnapshotBuilder:
             net = credit - debit
 
             atoms = net_decimal_to_atoms(net, precision=precision)
-            node.net_balance_atoms = str(atoms)
+            node.net_balance_atoms = str(abs(atoms))
             node.net_sign = atoms_to_net_sign(atoms)
 
             atoms_by_pid[pid] = atoms

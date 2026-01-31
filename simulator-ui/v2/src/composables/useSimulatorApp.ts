@@ -603,9 +603,13 @@ export function useSimulatorApp() {
   function signedBalanceForNodeId(nodeId: string): bigint {
     const n = getNodeById(nodeId)
     if (!n) return 0n
-    const abs = n.net_balance_atoms == null ? 0n : safeBigInt(n.net_balance_atoms)
-    const s = typeof n.net_sign === 'number' && Number.isFinite(n.net_sign) ? BigInt(n.net_sign) : 0n
-    return abs * s
+    const mag = n.net_balance_atoms == null ? 0n : safeBigInt(n.net_balance_atoms)
+    if (mag < 0n) throw new Error(`Invalid snapshot: net_balance_atoms must be magnitude for node '${nodeId}'`)
+
+    const s = typeof n.net_sign === 'number' && Number.isFinite(n.net_sign) ? n.net_sign : null
+    if (s === 1) return mag
+    if (s === -1) return -mag
+    return 0n
   }
 
   function formatBigIntCompact(v: bigint): string {

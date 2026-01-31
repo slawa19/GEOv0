@@ -274,7 +274,7 @@ class VizPatchHelper:
             out.append(
                 {
                     "id": pid,
-                    "net_balance_atoms": str(atoms),
+                    "net_balance_atoms": str(abs(atoms)),
                     "net_sign": net_sign,
                     "viz_color_key": self._node_color_key(atoms=atoms, status=getattr(p, "status", None), type_=getattr(p, "type", None)),
                     "viz_size": self._node_size(atoms=atoms, type_=getattr(p, "type", None)),

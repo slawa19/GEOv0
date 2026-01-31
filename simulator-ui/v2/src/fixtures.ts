@@ -93,6 +93,32 @@ function asOptionalAnyNumberOrString(value: unknown): string | number | undefine
   return undefined
 }
 
+type NetSign = -1 | 0 | 1 | null | undefined
+
+function normalizeBalanceAtomsMagnitude(
+  net_balance_atoms: string | null | undefined,
+  net_sign: NetSign,
+  context: string,
+): string | null | undefined {
+  if (net_balance_atoms === undefined) return undefined
+  if (net_balance_atoms === null) return null
+
+  const raw = net_balance_atoms
+  if (!raw) return raw
+
+  // Contract: net_balance_atoms is magnitude; sign is carried separately in net_sign.
+  // Demo fixtures historically included signed atoms; normalize them at load-time.
+  if (raw.startsWith('-')) {
+    if (net_sign === -1) return raw.slice(1)
+    if (net_sign === undefined) {
+      throw new Error(`Signed net_balance_atoms without net_sign at ${context}`)
+    }
+    throw new Error(`Signed net_balance_atoms with net_sign=${String(net_sign)} at ${context}`)
+  }
+
+  return raw
+}
+
 function asNodePatchArray(value: unknown, label: string): NodePatch[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value)) throw new Error(`${label} must be array`)
@@ -116,10 +142,11 @@ function asNodePatchArray(value: unknown, label: string): NodePatch[] | undefine
 
     const netSign = (p.net_sign === -1 || p.net_sign === 0 || p.net_sign === 1 || p.net_sign === null) ? p.net_sign : undefined
     const netBal = (typeof p.net_balance_atoms === 'string' || p.net_balance_atoms === null) ? p.net_balance_atoms : undefined
+    const normalizedNetBal = normalizeBalanceAtomsMagnitude(netBal, netSign, `${label}[${idx}] node:${id}`)
 
     return {
       id,
-      net_balance_atoms: netBal,
+      net_balance_atoms: normalizedNetBal,
       net_sign: netSign,
       viz_color_key: vizColorKey,
       viz_size,
@@ -230,14 +257,18 @@ export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapsho
       viz_size = null
     }
 
+    const netBal = (typeof n.net_balance_atoms === 'string' || n.net_balance_atoms === null) ? n.net_balance_atoms : undefined
+    const netSign = (n.net_sign === -1 || n.net_sign === 0 || n.net_sign === 1 || n.net_sign === null) ? n.net_sign : undefined
+    const normalizedNetBal = normalizeBalanceAtomsMagnitude(netBal, netSign, `node:${id} (${sourcePath})`)
+
     return {
       id,
       name: asOptionalString(n.name),
       type: asOptionalString(n.type),
       status: asOptionalString(n.status),
       links_count: typeof n.links_count === 'number' ? n.links_count : undefined,
-      net_balance_atoms: (typeof n.net_balance_atoms === 'string' || n.net_balance_atoms === null) ? n.net_balance_atoms : undefined,
-      net_sign: (n.net_sign === -1 || n.net_sign === 0 || n.net_sign === 1 || n.net_sign === null) ? n.net_sign : undefined,
+      net_balance_atoms: normalizedNetBal,
+      net_sign: netSign,
       viz_color_key: vizColorKey,
       viz_size,
       viz_badge_key: asOptionalNullableString(n.viz_badge_key),

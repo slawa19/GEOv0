@@ -269,8 +269,35 @@ export function useSimulatorRealMode(opts: {
               if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
               if (tx.edge_patch) realPatchApplier.applyEdgePatches(tx.edge_patch)
 
-              if (nodeIds.length > 0) pushBalanceDeltaLabels(beforeById, nodeIds, tx.equivalent, { throttleMs: 220 })
+              // Balance delta labels: sender should appear immediately, receiver should appear on spark arrival.
+              // For routed tx (multiple edges), treat the first.from as sender and last.to as receiver.
+              const edges = Array.isArray(tx.edges) ? tx.edges : []
+              const senderId = edges.length > 0 ? String(edges[0]!.from ?? '') : ''
+              const receiverId = edges.length > 0 ? String(edges[edges.length - 1]!.to ?? '') : ''
+
+              // Run spark FX first so we can align timing with ttl_ms clamping logic.
               runRealTxFx(tx)
+
+              if (nodeIds.length > 0) {
+                const isSenderInPatch = !!senderId && nodeIds.includes(senderId)
+                const isReceiverInPatch = !!receiverId && nodeIds.includes(receiverId)
+
+                // Immediately show sender delta.
+                if (isSenderInPatch) pushBalanceDeltaLabels(beforeById, [senderId], tx.equivalent, { throttleMs: 220 })
+
+                // Delay receiver delta until the spark reaches it.
+                if (isReceiverInPatch && receiverId !== senderId) {
+                  const ttlRaw = Number((tx as any).ttl_ms ?? 1200)
+                  const ttlMs = Math.max(240, Math.min(900, Number.isFinite(ttlRaw) ? ttlRaw : 1200))
+                  setTimeout(() => {
+                    pushBalanceDeltaLabels(beforeById, [receiverId], tx.equivalent, { throttleMs: 220 })
+                  }, ttlMs)
+                }
+
+                // Any other patched nodes (rare) are shown immediately.
+                const rest = nodeIds.filter((id) => id !== senderId && id !== receiverId)
+                if (rest.length > 0) pushBalanceDeltaLabels(beforeById, rest, tx.equivalent, { throttleMs: 220 })
+              }
               return
             }
 
