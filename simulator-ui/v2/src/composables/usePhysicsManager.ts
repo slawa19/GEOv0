@@ -3,13 +3,25 @@ import type { LayoutLink, LayoutNode } from '../types/layout'
 
 export type PhysicsQuality = 'low' | 'med' | 'high'
 
+export type PhysicsManager = {
+  stop: () => void
+  recreateForCurrentLayout: (viewport: { w: number; h: number }) => void
+  updateViewport: (w: number, h: number, reheatAlpha?: number) => void
+  tickAndSyncToLayout: () => void
+  pin: (id: string, x: number, y: number) => void
+  unpin: (id: string) => void
+  syncFromLayout: () => void
+  reheat: (alpha?: number) => void
+  isRunning: () => boolean
+}
+
 export function createPhysicsManager(opts: {
   isEnabled: () => boolean
   getLayoutNodes: () => LayoutNode[]
   getLayoutLinks: () => LayoutLink[]
   getQuality: () => PhysicsQuality
   getPinnedPos: () => Iterable<[string, { x: number; y: number }]>
-}) {
+}): PhysicsManager {
   const { isEnabled, getLayoutNodes, getLayoutLinks, getQuality, getPinnedPos } = opts
 
   let engine: PhysicsEngine | null = null
@@ -55,6 +67,9 @@ export function createPhysicsManager(opts: {
 
   function tickAndSyncToLayout() {
     if (!engine) return
+    // Once the simulation cools down, doing syncToLayout every frame becomes pure overhead.
+    // This is especially visible in full Chrome even when the user hasn't started any scenario.
+    if (!engine.isRunning()) return
     engine.tick()
     engine.syncToLayout()
   }
@@ -75,6 +90,12 @@ export function createPhysicsManager(opts: {
     engine?.reheat(alpha)
   }
 
+  function isRunning() {
+    if (!engine) return false
+    if (!isEnabled()) return false
+    return engine.isRunning()
+  }
+
   return {
     stop,
     recreateForCurrentLayout,
@@ -84,5 +105,6 @@ export function createPhysicsManager(opts: {
     unpin,
     syncFromLayout,
     reheat,
+    isRunning,
   }
 }

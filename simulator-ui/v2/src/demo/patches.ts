@@ -38,6 +38,23 @@ export function createPatchApplier(opts: {
 }) {
   const { getSnapshot, getLayoutNodes, getLayoutLinks, keyEdge } = opts
 
+  function applyNodePatchInPlace(target: any, p: NodePatch) {
+    if (!target) return
+    if (p.net_balance_atoms !== undefined) target.net_balance_atoms = p.net_balance_atoms
+    if (p.net_sign !== undefined) target.net_sign = p.net_sign
+    if (p.viz_color_key !== undefined) target.viz_color_key = p.viz_color_key
+    if (p.viz_size !== undefined) target.viz_size = p.viz_size
+  }
+
+  function applyEdgePatchInPlace(target: any, p: EdgePatch) {
+    if (!target) return
+    if (p.used !== undefined) target.used = p.used
+    if (p.available !== undefined) target.available = p.available
+    if (p.viz_color_key !== undefined) target.viz_color_key = p.viz_color_key
+    if (p.viz_width_key !== undefined) target.viz_width_key = p.viz_width_key
+    if (p.viz_alpha_key !== undefined) target.viz_alpha_key = p.viz_alpha_key
+  }
+
   function applyNodePatches(patches: NodePatch[] | undefined) {
     const snapshot = getSnapshot()
     if (!patches?.length || !snapshot) return
@@ -50,26 +67,14 @@ export function createPatchApplier(opts: {
     for (const p of patches) {
       const si = snapIdx.get(p.id)
       if (si !== undefined) {
-        const cur = snapshot.nodes[si]!
-        snapshot.nodes[si] = {
-          ...cur,
-          net_balance_atoms: p.net_balance_atoms !== undefined ? p.net_balance_atoms : cur.net_balance_atoms,
-          net_sign: p.net_sign !== undefined ? p.net_sign : cur.net_sign,
-          viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-          viz_size: p.viz_size !== undefined ? p.viz_size : cur.viz_size,
-        }
+        // IMPORTANT: mutate in-place to preserve node identity.
+        // This keeps drag/physics references valid during scenario playback and reduces GC.
+        applyNodePatchInPlace(snapshot.nodes[si] as any, p)
       }
 
       const li = layoutIdx.get(p.id)
       if (li !== undefined) {
-        const cur = layoutNodes[li]!
-        layoutNodes[li] = {
-          ...cur,
-          net_balance_atoms: p.net_balance_atoms !== undefined ? p.net_balance_atoms : cur.net_balance_atoms,
-          net_sign: p.net_sign !== undefined ? p.net_sign : cur.net_sign,
-          viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-          viz_size: p.viz_size !== undefined ? p.viz_size : cur.viz_size,
-        }
+        applyNodePatchInPlace(layoutNodes[li] as any, p)
       }
     }
   }
@@ -88,28 +93,12 @@ export function createPatchApplier(opts: {
 
       const si = snapIdx.get(k)
       if (si !== undefined) {
-        const cur = snapshot.links[si]!
-        snapshot.links[si] = {
-          ...cur,
-          used: p.used !== undefined ? p.used : cur.used,
-          available: p.available !== undefined ? p.available : cur.available,
-          viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-          viz_width_key: p.viz_width_key !== undefined ? p.viz_width_key : cur.viz_width_key,
-          viz_alpha_key: p.viz_alpha_key !== undefined ? p.viz_alpha_key : cur.viz_alpha_key,
-        }
+        applyEdgePatchInPlace(snapshot.links[si] as any, p)
       }
 
       const li = layoutIdx.get(k)
       if (li !== undefined) {
-        const cur = layoutLinks[li]!
-        layoutLinks[li] = {
-          ...cur,
-          used: p.used !== undefined ? p.used : cur.used,
-          available: p.available !== undefined ? p.available : cur.available,
-          viz_color_key: p.viz_color_key !== undefined ? p.viz_color_key : cur.viz_color_key,
-          viz_width_key: p.viz_width_key !== undefined ? p.viz_width_key : cur.viz_width_key,
-          viz_alpha_key: p.viz_alpha_key !== undefined ? p.viz_alpha_key : cur.viz_alpha_key,
-        }
+        applyEdgePatchInPlace(layoutLinks[li] as any, p)
       }
     }
   }

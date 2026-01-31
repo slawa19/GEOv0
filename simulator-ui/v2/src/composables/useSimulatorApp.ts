@@ -1,4 +1,4 @@
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import { loadEvents as loadEventsFixtures, loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { assertPlaylistEdgesExistInSnapshot } from '../demo/playlistValidation'
@@ -256,7 +256,55 @@ export function useSimulatorApp() {
   }
 
   const labelsLod = ref<LabelsLod>('selection')
-  const quality = ref<Quality>('high')
+  // Baseline default. Persisted prefs (if any) will override this on mount.
+  const quality = ref<Quality>('med')
+
+  // If Chrome struggles even right after opening the page (e.g. ~1 FPS),
+  // auto-downgrade quality to recover responsiveness.
+  // This is deliberately conservative: only kicks in on very low measured FPS.
+  onMounted(() => {
+    if (isTestMode.value) return
+    if (isWebDriver) return
+
+    let frames = 0
+    let startMs = 0
+    let rafId = 0
+    let guardActive = true
+    let qualityTouchedWhileGuardActive = false
+
+    const stopWatch = watch(
+      quality,
+      () => {
+        if (guardActive) qualityTouchedWhileGuardActive = true
+      },
+      { flush: 'sync' },
+    )
+
+    const loop = (t: number) => {
+      if (startMs === 0) startMs = t
+      frames++
+
+      const elapsed = t - startMs
+      if (elapsed < 1800) {
+        rafId = window.requestAnimationFrame(loop)
+        return
+      }
+
+      guardActive = false
+      stopWatch()
+      window.cancelAnimationFrame(rafId)
+
+      const fps = (frames * 1000) / Math.max(1, elapsed)
+
+      // Emergency recovery: if we're below ~12 FPS on the landing view,
+      // force low quality to make the UI usable.
+      if (!qualityTouchedWhileGuardActive && fps < 12 && quality.value !== 'low') {
+        quality.value = 'low'
+      }
+    }
+
+    rafId = window.requestAnimationFrame(loop)
+  })
 
   // uiDerived reads camera.zoom (for overlay label scale). Keep this wiring robust
   // by using a replaceable getter, so no TDZ/lazy-eval footgun is possible.
@@ -385,6 +433,10 @@ export function useSimulatorApp() {
     getSelectedNodeId: () => state.selectedNodeId,
     getLinkLod: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? 'focus' : 'full'),
     getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
+    isAnimating: () =>
+      panState.active ||
+      (dragToPin.dragState.active && dragToPin.dragState.dragging) ||
+      (typeof (physics as any).isRunning === 'function' && (physics as any).isRunning()),
     beforeDraw: () => {
       physics.tickAndSyncToLayout()
     },

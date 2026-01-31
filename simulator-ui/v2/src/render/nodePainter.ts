@@ -40,7 +40,7 @@ export function drawNodeShape(
   const invZ = 1 / z
   const px = (v: number) => v * invZ
   const q = opts.quality ?? 'high'
-  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
+  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
   const fill = fillForNode(node, mapping)
   const { w: w0, h: h0 } = sizeForNode(node)
   const w = w0 * invZ
@@ -86,33 +86,38 @@ export function drawNodeShape(
   ctx.save()
 
   // 1) Soft bloom (underlay) - "Holographic" glow
-  ctx.save()
-  // Use screen blending for "light" effect against dark background
-  ctx.globalCompositeOperation = 'screen'
-  ctx.shadowColor = fill
-  ctx.shadowBlur = r * 1.5 * blurK // Wide soft glow
-  ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
-  
-  if (isBusiness) {
-    roundedRectPath(ctx, x + px(2), y + px(2), w - px(4), h - px(4), rr)
-    ctx.fill()
-  } else {
-    ctx.beginPath()
-    ctx.arc(node.__x, node.__y, r * 0.8, 0, Math.PI * 2)
-    ctx.fill()
+  // Very expensive in full Chrome; keep only for med/high.
+  if (blurK > 0) {
+    ctx.save()
+    // Use screen blending for "light" effect against dark background
+    ctx.globalCompositeOperation = 'screen'
+    ctx.shadowColor = fill
+    ctx.shadowBlur = r * 1.5 * blurK // Wide soft glow
+    ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
+
+    if (isBusiness) {
+      roundedRectPath(ctx, x + px(2), y + px(2), w - px(4), h - px(4), rr)
+      ctx.fill()
+    } else {
+      ctx.beginPath()
+      ctx.arc(node.__x, node.__y, r * 0.8, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
   }
-  ctx.restore()
 
   // 2) Body fill - Semi-transparent glass (Darker/More Solid now)
   ctx.save()
   ctx.globalCompositeOperation = 'source-over'
-  // Linear gradient for "deep holographic" look
-  // From moderately opaque at top-left to darker at bottom-right, but visible enough to hide stars behind it.
-  const glassGrad = ctx.createLinearGradient(x, y, x + w, y + h)
-  glassGrad.addColorStop(0, withAlpha(fill, 0.55)) 
-  glassGrad.addColorStop(1, withAlpha(fill, 0.25))
-  
-  ctx.fillStyle = glassGrad
+  // Linear gradients are moderately expensive; keep them for high only.
+  if (q === 'high') {
+    const glassGrad = ctx.createLinearGradient(x, y, x + w, y + h)
+    glassGrad.addColorStop(0, withAlpha(fill, 0.55))
+    glassGrad.addColorStop(1, withAlpha(fill, 0.25))
+    ctx.fillStyle = glassGrad
+  } else {
+    ctx.fillStyle = withAlpha(fill, 0.42)
+  }
   if (isBusiness) {
     roundedRectPath(ctx, x, y, w, h, rr)
     ctx.fill()
@@ -132,7 +137,7 @@ export function drawNodeShape(
   ctx.strokeStyle = withAlpha(fill, 0.6)
   ctx.lineWidth = Math.max(px(2), r * 0.15)
   ctx.shadowColor = fill
-  ctx.shadowBlur = Math.max(px(2), r * 0.3) * blurK
+  ctx.shadowBlur = blurK > 0 ? Math.max(px(2), r * 0.3) * blurK : 0
   
   if (isBusiness) {
     roundedRectPath(ctx, x, y, w, h, rr)

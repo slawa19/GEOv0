@@ -300,7 +300,12 @@ export function renderFxFrame(opts: {
   const invZ = 1 / z
   const spx = (v: number) => v * invZ
   const q = opts.quality ?? 'high'
-  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
+  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  const allowGradients = q === 'high'
+
+  // Lazily computed world-space view rect (getTransform().inverse is not cheap).
+  let cachedWorldView: { x: number; y: number; w: number; h: number } | null = null
+  const worldView = () => (cachedWorldView ??= worldRectForCanvas(ctx, w, h))
 
   // NOTE: Test mode primarily aims to make screenshot tests stable by not spawning FX.
   // Rendering stays enabled so manual interaction in test mode doesn't feel "dead".
@@ -382,13 +387,16 @@ export function renderFxFrame(opts: {
           const segLen = Math.max(spx(18), Math.min(spx(54), len * 0.22))
           const tailX = headX - ux * segLen
           const tailY = headY - uy * segLen
-          const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
-          grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
-          grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * 0.55))
-          grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-
           ctx.globalAlpha = 1
-          ctx.strokeStyle = grad
+          if (allowGradients) {
+            const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
+            grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
+            grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * 0.55))
+            grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+            ctx.strokeStyle = grad
+          } else {
+            ctx.strokeStyle = withAlpha(s.colorCore, alpha * 0.65)
+          }
           ctx.lineWidth = Math.max(spx(1.4), th * 4.2)
           ctx.shadowBlur = Math.max(spx(12), th * 20) * blurK
           ctx.shadowColor = withAlpha(s.colorTrail, 0.9)
@@ -447,13 +455,16 @@ export function renderFxFrame(opts: {
       // Trail (glow pass)
       {
         const th = s.thickness * invZ
-        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-        grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail * 0.9))
-        grad.addColorStop(0.25, withAlpha(s.colorTrail, alphaTrail * 0.55))
-        grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-
         ctx.globalAlpha = 1
-        ctx.strokeStyle = grad
+        if (allowGradients) {
+          const grad = ctx.createLinearGradient(x, y, tailX, tailY)
+          grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail * 0.9))
+          grad.addColorStop(0.25, withAlpha(s.colorTrail, alphaTrail * 0.55))
+          grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+          ctx.strokeStyle = grad
+        } else {
+          ctx.strokeStyle = withAlpha(s.colorTrail, alphaTrail * 0.75)
+        }
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
         ctx.lineWidth = Math.max(spx(1.2), th * 3.0)
@@ -468,14 +479,17 @@ export function renderFxFrame(opts: {
       // Trail (core pass)
       {
         const th = s.thickness * invZ
-        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-        grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail))
-        grad.addColorStop(0.35, withAlpha(s.colorTrail, alphaTrail * 0.35))
-        grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-
         ctx.shadowBlur = 0
         ctx.globalAlpha = 1
-        ctx.strokeStyle = grad
+        if (allowGradients) {
+          const grad = ctx.createLinearGradient(x, y, tailX, tailY)
+          grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail))
+          grad.addColorStop(0.35, withAlpha(s.colorTrail, alphaTrail * 0.35))
+          grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+          ctx.strokeStyle = grad
+        } else {
+          ctx.strokeStyle = withAlpha(s.colorTrail, alphaTrail * 0.85)
+        }
         ctx.lineWidth = Math.max(spx(0.9), th * 1.9)
         ctx.beginPath()
         ctx.moveTo(tailX, tailY)
@@ -570,13 +584,16 @@ export function renderFxFrame(opts: {
       ctx.stroke()
 
       // Moving pulse head + tail.
-      const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-      grad.addColorStop(0, withAlpha(p.color, alpha * 0.95))
-      grad.addColorStop(0.35, withAlpha(p.color, alpha * 0.35))
-      grad.addColorStop(1, withAlpha(p.color, 0))
-
       ctx.globalAlpha = 1
-      ctx.strokeStyle = grad
+      if (allowGradients) {
+        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
+        grad.addColorStop(0, withAlpha(p.color, alpha * 0.95))
+        grad.addColorStop(0.35, withAlpha(p.color, alpha * 0.35))
+        grad.addColorStop(1, withAlpha(p.color, 0))
+        ctx.strokeStyle = grad
+      } else {
+        ctx.strokeStyle = withAlpha(p.color, alpha * 0.85)
+      }
       ctx.lineWidth = Math.max(spx(1.2), (p.thickness * invZ) * 2.8)
       ctx.shadowBlur = Math.max(spx(10), (p.thickness * invZ) * 14) * blurK
       ctx.shadowColor = withAlpha(p.color, 0.9)
@@ -625,7 +642,7 @@ export function renderFxFrame(opts: {
 
         // Clip to outside of node so interior stays dark.
         const outside = new Path2D()
-        const view = worldRectForCanvas(ctx, w, h)
+        const view = worldView()
         outside.rect(view.x, view.y, view.w, view.h)
         outside.addPath(nodeOutlinePath2D(n, 1.0, invZ))
         ctx.clip(outside, 'evenodd')

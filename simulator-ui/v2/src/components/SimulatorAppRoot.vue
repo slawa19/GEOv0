@@ -93,6 +93,7 @@ const {
     :data-ready="!state.loading && !state.error && state.snapshot ? '1' : '0'"
     :data-scene="scene"
     :data-layout="layoutMode"
+    :data-quality="quality"
     :data-webdriver="isWebDriver ? '1' : '0'"
     :style="{ '--overlay-scale': String(overlayLabelScale) }"
   >

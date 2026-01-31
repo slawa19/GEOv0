@@ -35,6 +35,18 @@
   z-index: 0;
 }
 
+/* Low quality: disable expensive backdrop blurs (big perf win in Chrome). */
+.root[data-quality='low'] .drag-preview,
+.root[data-quality='low'] .hud-chip,
+.root[data-quality='low'] .pill,
+.root[data-quality='low'] .hud-bottom,
+.root[data-quality='low'] .node-card,
+.root[data-quality='low'] .edge-tooltip,
+.root[data-quality='low'] .overlay {
+  backdrop-filter: none;
+  background: rgba(15, 23, 42, 0.92);
+}
+
 .drag-preview {
   position: absolute;
   left: 0;

@@ -47,6 +47,9 @@ export function useAppFxAndRender(opts: {
 
   // hooks
   beforeDraw: () => void
+
+  // Optional: hint whether the scene is actively animating (physics, pan/zoom, demo playback).
+  isAnimating?: () => boolean
 }) {
   const fxOverlays = useAppFxOverlays<LayoutNode>({
     getLayoutNodeById: opts.getLayoutNodeById,
@@ -77,6 +80,7 @@ export function useAppFxAndRender(opts: {
     getLinkLod: opts.getLinkLod,
     getHiddenNodeId: opts.getHiddenNodeId,
     beforeDraw: opts.beforeDraw,
+    isAnimating: opts.isAnimating,
   })
 
   return {

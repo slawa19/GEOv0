@@ -47,6 +47,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   linkLod?: 'full' | 'focus'
   dragMode?: boolean
   hiddenNodeId?: string | null
+  pos?: Map<string, LayoutNode>
 }) {
   const { w, h, nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
   const linkLod = opts.linkLod ?? 'full'
@@ -55,9 +56,11 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
-  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
+  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
 
-  const pos = new Map(nodes.map((n) => [n.id, n]))
+  const pos = opts.pos ?? new Map<string, LayoutNode>()
+  pos.clear()
+  for (const n of nodes) pos.set(n.id, n)
 
   // Links: base pass = strictly semantic viz_* (no focus/active overrides).
   for (const link of links) {
@@ -161,7 +164,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       ctx.globalCompositeOperation = 'screen' // Black stroke will disappear, only colored shadow remains
       
       ctx.shadowColor = glow
-      ctx.shadowBlur = r * 1.2 * blurK
+      ctx.shadowBlur = blurK > 0 ? r * 1.2 * blurK : 0
       // Trick: Stroke is black (invisible in Screen mode), so we don't see a "hard" contour.
       // But the shadow (glow) is drawn.
       ctx.strokeStyle = '#000000' 
@@ -179,7 +182,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       ctx.stroke()
       
       // Optional: Second pass for "core" intensity closer to the node
-      ctx.shadowBlur = r * 0.4 * blurK
+      ctx.shadowBlur = blurK > 0 ? r * 0.4 * blurK : 0
       ctx.stroke()
 
       ctx.restore()

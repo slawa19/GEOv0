@@ -26,6 +26,9 @@ export function useAppRenderLoop(opts: {
   getLinkLod: () => 'focus' | 'full'
   getHiddenNodeId: () => string | null
   beforeDraw: () => void
+
+  // Optional: hint whether the scene is actively animating (pan/zoom, physics, playback).
+  isAnimating?: () => boolean
 }) {
   const renderLoop = useRenderLoop({
     canvasEl: opts.canvasEl,
@@ -56,6 +59,7 @@ export function useAppRenderLoop(opts: {
     getLinkLod: opts.getLinkLod,
     getHiddenNodeId: opts.getHiddenNodeId,
     beforeDraw: opts.beforeDraw,
+    isAnimating: opts.isAnimating,
   })
 
   return {
