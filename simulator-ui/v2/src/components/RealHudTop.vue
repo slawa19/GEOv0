@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import type { ScenarioSummary, SimulatorMode, RunStatus } from '../api/simulatorTypes'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
 type Props = {
-  apiBase: string
-  accessToken: string
-
   loadingScenarios: boolean
   scenarios: ScenarioSummary[]
   selectedScenarioId: string
@@ -40,19 +37,6 @@ type Props = {
 }
 
 const props = defineProps<Props>()
-
-const DEFAULT_DEV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_DEV_ACCESS_TOKEN ?? 'dev-admin-token-change-me').trim()
-const isDev = import.meta.env.DEV
-const isLocalhost = typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
-const isUsingDevToken = computed(() => isDev && isLocalhost && String(props.accessToken ?? '').trim() === DEFAULT_DEV_ACCESS_TOKEN)
-const showTokenEditor = ref(false)
-
-const readyHint = computed<string>(() => {
-  if (props.runId) return ''
-  if (!String(props.accessToken ?? '').trim()) return 'Set Auth token'
-  if (!String(props.selectedScenarioId ?? '').trim()) return 'Choose Scenario'
-  return 'Ready — click Start'
-})
 
 const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
   const s = String(props.sseState ?? '').toLowerCase()
@@ -90,35 +74,14 @@ const successRatePct = computed(() => {
   return Math.round((ok / a) * 100)
 })
 
-const runSummary = computed(() => {
-  const st = String(props.runStatus?.state ?? '')
-  if (!st) return ''
-  if (st !== 'stopped' && st !== 'error') return ''
-  const ok = props.runStats.committed
-  const a = props.runStats.attempts
-  const rej = props.runStats.rejected
-  const err = props.runStats.errors
-  return `Done — ok ${ok}/${a} (${successRatePct.value}%), rej ${rej}, err ${err}`
-})
-
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
 
 const emit = defineEmits<{
-  (e: 'update:apiBase', v: string): void
-  (e: 'update:accessToken', v: string): void
   (e: 'update:selectedScenarioId', v: string): void
   (e: 'update:desiredMode', v: SimulatorMode): void
   (e: 'update:intensityPercent', v: number): void
 }>()
-
-function setApiBase(v: string) {
-  emit('update:apiBase', v)
-}
-
-function setAccessToken(v: string) {
-  emit('update:accessToken', v)
-}
 
 function setSelectedScenarioId(v: string) {
   emit('update:selectedScenarioId', v)
@@ -189,68 +152,29 @@ function short(s: string, n: number) {
             <button class="btn btn-xs btn-ghost" type="button" :disabled="!runId || !canStop" @click="props.stop">Stop</button>
           </div>
 
-          <details class="hud-chip hud-chip-advanced">
-            <summary class="hud-label" style="cursor: pointer; list-style: none">
-              <span class="hud-badge" data-tone="info">⚙</span>
-              <span style="margin-left: 6px">Advanced</span>
-            </summary>
+          <div class="hud-chip">
+            <span class="hud-label">Mode</span>
+            <select class="hud-select" :value="desiredMode" aria-label="Run mode" @change="setDesiredMode(($event.target as HTMLSelectElement).value)">
+              <option value="real">real</option>
+              <option value="fixtures">fixtures</option>
+            </select>
+          </div>
 
-            <div class="hudbar" style="margin-top: 8px">
-              <div class="hud-chip subtle">
-                <span class="hud-label">API</span>
-                <input
-                  class="hud-input"
-                  :value="apiBase"
-                  aria-label="API base"
-                  @input="setApiBase(($event.target as HTMLInputElement).value)"
-                />
-              </div>
-
-              <div class="hud-chip subtle">
-                <span class="hud-label">Auth</span>
-                <template v-if="isUsingDevToken && !showTokenEditor">
-                  <span class="hud-value mono">dev admin</span>
-                  <button class="btn btn-xxs" type="button" @click="showTokenEditor = true">Edit</button>
-                </template>
-                <template v-else>
-                  <input
-                    class="hud-input mono"
-                    style="width: 22ch"
-                    type="password"
-                    :value="accessToken"
-                    aria-label="Access token"
-                    placeholder="token"
-                    @input="setAccessToken(($event.target as HTMLInputElement).value)"
-                  />
-                  <button v-if="isDev && isLocalhost" class="btn btn-xxs" type="button" @click="showTokenEditor = false">Hide</button>
-                </template>
-              </div>
-
-              <div class="hud-chip subtle">
-                <span class="hud-label">Run mode</span>
-                <select class="hud-select" :value="desiredMode" aria-label="Run mode" @change="setDesiredMode(($event.target as HTMLSelectElement).value)">
-                  <option value="real">real</option>
-                  <option value="fixtures">fixtures</option>
-                </select>
-              </div>
-
-              <div class="hud-chip subtle">
-                <span class="hud-label">Intensity</span>
-                <input
-                  class="hud-input"
-                  style="width: 6ch"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="1"
-                  :value="intensityPercent"
-                  aria-label="Intensity percent"
-                  @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
-                />
-                <button class="btn btn-xxs" type="button" :disabled="!runId" @click="props.applyIntensity">Apply</button>
-              </div>
-            </div>
-          </details>
+          <div class="hud-chip">
+            <span class="hud-label">Intensity</span>
+            <input
+              class="hud-input"
+              style="width: 6ch"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              :value="intensityPercent"
+              aria-label="Intensity percent"
+              @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
+            />
+            <button class="btn btn-xxs" type="button" :disabled="!runId" @click="props.applyIntensity">Apply</button>
+          </div>
 
           <div v-if="!loadingScenarios && scenarios.length === 0" class="hud-chip" aria-label="No scenarios">
             <span class="hud-badge" data-tone="warn">No scenarios</span>
@@ -270,20 +194,15 @@ function short(s: string, n: number) {
             <span class="hud-value">{{ runStats.attempts }}</span>
             <span class="hud-label">SR</span>
             <span class="hud-value">{{ successRatePct }}%</span>
-            <span v-if="runStats.rejected" class="hud-label">rej {{ runStats.rejected }}</span>
-            <span v-if="runStats.errors" class="hud-label">err {{ runStats.errors }}</span>
+            <span class="hud-label">rej</span>
+            <span class="hud-value">{{ runStats.rejected }}</span>
+            <span class="hud-label">err</span>
+            <span class="hud-value">{{ runStats.errors }}</span>
           </span>
           <span v-if="runId" class="hud-chip subtle" style="gap: 6px">
             <span class="hud-label">ID</span>
             <span class="hud-value mono" style="opacity: 0.9">{{ short(runId, 18) }}</span>
           </span>
-        </div>
-      </div>
-
-      <div v-if="!lastError && (readyHint || runSummary)" class="hud-alert" data-tone="info" aria-label="Status">
-        <span class="hud-label">Status</span>
-        <div class="hud-alert__msg">
-          <span class="mono">{{ runSummary || readyHint }}</span>
         </div>
       </div>
 
