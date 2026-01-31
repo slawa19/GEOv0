@@ -11,6 +11,7 @@
 - Спеки UI/визуала:
   - [frontend/docs/specs/GEO-game-interface-spec.md](frontend/docs/specs/GEO-game-interface-spec.md)
   - [frontend/docs/specs/GEO-visual-demo-fast-mock.md](frontend/docs/specs/GEO-visual-demo-fast-mock.md)
+- UI perf/quality policy (software-only / low FPS): [frontend/docs/performance-and-quality-policy.md](frontend/docs/performance-and-quality-policy.md)
 - Референсы экранов: [frontend/screen-prototypes/](frontend/screen-prototypes/)
 
 ## Навигация

@@ -26,6 +26,7 @@
 - Визуальный язык (цвета/ключи/приоритеты): [docs/visual-language.md](docs/visual-language.md)
 - FX playbook (эффекты, правила композиции): [docs/fx-playbook.md](docs/fx-playbook.md)
 - Правила рендера графа (узлы/рёбра/LOD): [docs/graph-rendering-rules.md](docs/graph-rendering-rules.md)
+- Performance & quality policy (software-only / low FPS): [docs/performance-and-quality-policy.md](docs/performance-and-quality-policy.md)
 
 ## Архив (устаревшие версии)
 
@@ -34,3 +35,4 @@
   - [archive/README.md](archive/README.md)
 
 Остальные файлы могут содержать дубликаты/черновики (исторические версии).
+

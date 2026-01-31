@@ -132,6 +132,18 @@
 - Consumer-код использует `res.routes` напрямую и **не делает** защитный парсинг через `getattr`, `dict.get(...)` и т.п.
 - Если `Transaction.payload.routes` имеет неверную форму, это считается багом/коррупцией данных и должно проявляться как явная ошибка (fail-fast) на границе `PaymentService`.
 
+### 1.9. Simulator UI: устойчивость производительности (software-only / low FPS)
+
+Дополнение (Январь 2026): UI симулятора должен оставаться работоспособным даже если браузер внезапно перешёл в software-only режим (например, `Microsoft Basic Render Driver`) или baseline FPS крайне низкий сразу после открытия.
+
+Решение:
+- Вводим эвристику определения software-only (по WebGL renderer string, если доступно).
+- В software-only режиме автоматически выбираем безопасное качество рендера (`quality=low`), если пользователь не успел вручную переключить качество вскоре после старта.
+- Отключаем дорогие CSS-эффекты (например, `backdrop-filter`) при software-only независимо от выбранного качества.
+- Для сохранения визуального glow без `shadowBlur` используем pre-baked glow sprites как fallback в software-only режиме.
+
+Каноничное описание политики и точек реализации: [simulator/frontend/docs/performance-and-quality-policy.md](simulator/frontend/docs/performance-and-quality-policy.md).
+
 ---
 
 ## 2. Дефолты и лимиты
