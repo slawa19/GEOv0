@@ -163,6 +163,17 @@ export type FxState = {
   sparks: FxSpark[]
   edgePulses: FxEdgePulse[]
   nodeBursts: FxNodeBurst[]
+
+  // Optional runtime-only cap to keep FX bounded (set by render loop).
+  __maxParticles?: number
+
+  // Optional runtime-only telemetry / knobs (set by render loop).
+  __fxBudgetScale?: number
+  __lastFps?: number
+
+  // Optional runtime-only render knobs (set by render loop).
+  __renderQuality?: 'low' | 'med' | 'high'
+  __dprClamp?: number
 }
 
 export function createFxState(): FxState {
@@ -192,10 +203,21 @@ export function spawnEdgePulses(
 ) {
   if (opts.isTestMode) return
 
+  const max =
+    typeof fxState.__maxParticles === 'number' && Number.isFinite(fxState.__maxParticles)
+      ? Math.max(0, Math.floor(fxState.__maxParticles))
+      : null
+  let budget =
+    max === null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, max - (fxState.sparks.length + fxState.edgePulses.length + fxState.nodeBursts.length))
+  if (budget <= 0) return
+
   const { edges, nowMs, durationMs, color, thickness, seedPrefix, countPerEdge, keyEdge, seedFn } = opts
   for (const e of edges) {
     const k = keyEdge(e.from, e.to)
     for (let i = 0; i < Math.max(1, countPerEdge); i++) {
+      if (budget-- <= 0) return
       const seed = seedFn(`${seedPrefix}:${k}:${i}`)
       fxState.edgePulses.push({
         key: `pulse:${k}#${i}#${nowMs.toFixed(0)}`,
@@ -226,9 +248,20 @@ export function spawnNodeBursts(
 ) {
   if (opts.isTestMode) return
 
+  const max =
+    typeof fxState.__maxParticles === 'number' && Number.isFinite(fxState.__maxParticles)
+      ? Math.max(0, Math.floor(fxState.__maxParticles))
+      : null
+  let budget =
+    max === null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, max - (fxState.sparks.length + fxState.edgePulses.length + fxState.nodeBursts.length))
+  if (budget <= 0) return
+
   const { nodeIds, nowMs, durationMs, color, seedPrefix, seedFn } = opts
   const kind = opts.kind ?? 'clearing'
   for (const id of nodeIds) {
+    if (budget-- <= 0) return
     const seed = seedFn(`${seedPrefix}:${id}`)
     fxState.nodeBursts.push({
       key: `burst:${id}#${nowMs.toFixed(0)}`,
@@ -261,11 +294,22 @@ export function spawnSparks(
 ) {
   if (opts.isTestMode) return
 
+  const max =
+    typeof fxState.__maxParticles === 'number' && Number.isFinite(fxState.__maxParticles)
+      ? Math.max(0, Math.floor(fxState.__maxParticles))
+      : null
+  let budget =
+    max === null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, max - (fxState.sparks.length + fxState.edgePulses.length + fxState.nodeBursts.length))
+  if (budget <= 0) return
+
   const { edges, nowMs, ttlMs, colorCore, colorTrail, thickness, seedPrefix, countPerEdge, keyEdge, seedFn } = opts
   const kind = opts.kind ?? 'comet'
   for (const e of edges) {
     const k = keyEdge(e.from, e.to)
     for (let i = 0; i < Math.max(1, countPerEdge); i++) {
+      if (budget-- <= 0) return
       const seed = seedFn(`${seedPrefix}:${k}:${i}`)
       fxState.sparks.push({
         key: `${k}#${i}#${nowMs.toFixed(0)}`,

@@ -35,14 +35,22 @@
   z-index: 0;
 }
 
-/* Low quality: disable expensive backdrop blurs (big perf win in Chrome). */
+/* Low quality OR no-GPU: disable expensive backdrop blurs (big perf win in Chrome). */
 .root[data-quality='low'] .drag-preview,
 .root[data-quality='low'] .hud-chip,
 .root[data-quality='low'] .pill,
 .root[data-quality='low'] .hud-bottom,
 .root[data-quality='low'] .node-card,
 .root[data-quality='low'] .edge-tooltip,
-.root[data-quality='low'] .overlay {
+.root[data-quality='low'] .overlay,
+
+.root[data-gpu='0'] .drag-preview,
+.root[data-gpu='0'] .hud-chip,
+.root[data-gpu='0'] .pill,
+.root[data-gpu='0'] .hud-bottom,
+.root[data-gpu='0'] .node-card,
+.root[data-gpu='0'] .edge-tooltip,
+.root[data-gpu='0'] .overlay {
   backdrop-filter: none;
   background: rgba(15, 23, 42, 0.92);
 }

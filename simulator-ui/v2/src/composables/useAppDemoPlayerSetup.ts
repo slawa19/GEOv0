@@ -61,6 +61,10 @@ export function useAppDemoPlayerSetup(deps: {
     spawnSparks: (opts) => spawnSparks(deps.fxState, opts),
     spawnNodeBursts: (opts) => spawnNodeBursts(deps.fxState, opts),
     spawnEdgePulses: (opts) => spawnEdgePulses(deps.fxState, opts),
+    getFxBudgetScale: () => {
+      const v = (deps.fxState as any).__fxBudgetScale
+      return typeof v === 'number' && Number.isFinite(v) ? v : 1
+    },
     pushFloatingLabel: deps.pushFloatingLabel,
     resetOverlays: deps.resetOverlays,
     fxColorForNode: deps.fxColorForNode,

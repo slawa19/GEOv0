@@ -6,6 +6,7 @@ import RealHudTop from './RealHudTop.vue'
 import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
+import DevPerfOverlay from './DevPerfOverlay.vue'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
 
@@ -31,6 +32,9 @@ const {
   quality,
   labelsLod,
 
+  // env
+  gpuAccelLikely,
+
   // refs
   hostEl,
   canvasEl,
@@ -41,6 +45,10 @@ const {
   overlayLabelScale,
   showDemoControls,
   showResetView,
+
+  // dev / diagnostics
+  showPerfOverlay,
+  perf,
 
   // selection + overlays
   isNodeCardOpen,
@@ -94,6 +102,7 @@ const {
     :data-scene="scene"
     :data-layout="layoutMode"
     :data-quality="quality"
+    :data-gpu="gpuAccelLikely ? '1' : '0'"
     :data-webdriver="isWebDriver ? '1' : '0'"
     :style="{ '--overlay-scale': String(overlayLabelScale) }"
   >
@@ -214,5 +223,7 @@ const {
       :floating-labels="floatingLabelsViewFx"
       :world-to-css-translate-no-scale="worldToCssTranslateNoScale"
     />
+
+    <DevPerfOverlay :enabled="showPerfOverlay" :perf="perf" />
   </div>
 </template>

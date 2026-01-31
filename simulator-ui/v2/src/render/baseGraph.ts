@@ -44,6 +44,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   activeEdges: Set<string>
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
+  softwareMode?: boolean
   linkLod?: 'full' | 'focus'
   dragMode?: boolean
   hiddenNodeId?: string | null
@@ -56,7 +57,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
-  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  const blurK = q === 'high' ? 1 : 0
 
   const pos = opts.pos ?? new Map<string, LayoutNode>()
   pos.clear()
@@ -160,35 +161,58 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const r = Math.max(nw, nh) / 2
       const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
       
-      ctx.save()
-      ctx.globalCompositeOperation = 'screen' // Black stroke will disappear, only colored shadow remains
-      
-      ctx.shadowColor = glow
-      ctx.shadowBlur = blurK > 0 ? r * 1.2 * blurK : 0
-      // Trick: Stroke is black (invisible in Screen mode), so we don't see a "hard" contour.
-      // But the shadow (glow) is drawn.
-      ctx.strokeStyle = '#000000' 
-      ctx.lineWidth = Math.max(4 * invZ, r * 0.25) // keep minimum in screen-space
-      ctx.globalAlpha = 1.0
-      
-      ctx.beginPath()
-      if (isBusiness) {
-         const offset = 0
-         ctx.roundRect(n.__x - nw/2 - offset, n.__y - nh/2 - offset, nw + offset*2, nh + offset*2, rr)
-      } else {
-         const offset = 0
-         ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
-      }
-      ctx.stroke()
-      
-      // Optional: Second pass for "core" intensity closer to the node
-      ctx.shadowBlur = blurK > 0 ? r * 0.4 * blurK : 0
-      ctx.stroke()
+      if (q === 'high') {
+        ctx.save()
+        ctx.globalCompositeOperation = 'screen' // Black stroke will disappear, only colored shadow remains
 
-      ctx.restore()
+        ctx.shadowColor = glow
+        ctx.shadowBlur = blurK > 0 ? r * 1.2 * blurK : 0
+        // Trick: Stroke is black (invisible in Screen mode), so we don't see a "hard" contour.
+        // But the shadow (glow) is drawn.
+        ctx.strokeStyle = '#000000'
+        ctx.lineWidth = Math.max(4 * invZ, r * 0.25) // keep minimum in screen-space
+        ctx.globalAlpha = 1.0
+
+        ctx.beginPath()
+        if (isBusiness) {
+          const offset = 0
+          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
+        } else {
+          const offset = 0
+          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
+        }
+        ctx.stroke()
+
+        // Optional: Second pass for "core" intensity closer to the node
+        ctx.shadowBlur = blurK > 0 ? r * 0.4 * blurK : 0
+        ctx.stroke()
+
+        ctx.restore()
+      } else {
+        // Med: keep selection visible but avoid CPU-heavy blur.
+        ctx.save()
+        ctx.globalCompositeOperation = 'source-over'
+        ctx.shadowBlur = 0
+        ctx.shadowColor = 'transparent'
+        ctx.strokeStyle = withAlpha(glow, 0.9)
+        ctx.lineWidth = Math.max(2.5 * invZ, r * 0.14)
+        ctx.globalAlpha = 1.0
+
+        ctx.beginPath()
+        if (isBusiness) {
+          const offset = Math.max(1.5 * invZ, r * 0.08)
+          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
+        } else {
+          const offset = Math.max(1.5 * invZ, r * 0.08)
+          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
+        }
+        ctx.stroke()
+
+        ctx.restore()
+      }
     }
 
-    drawNodeShape(ctx, n, { mapping, cameraZoom: z, quality: q, dragMode })
+    drawNodeShape(ctx, n, { mapping, cameraZoom: z, quality: q, dragMode, softwareMode: !!opts.softwareMode })
   }
 
   return pos

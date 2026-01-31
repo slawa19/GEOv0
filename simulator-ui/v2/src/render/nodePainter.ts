@@ -2,6 +2,7 @@ import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
+import { drawGlowSprite } from './glowSprites'
 import { roundedRectPath } from './roundedRect'
 
 export type { LayoutNode } from '../types/layout'
@@ -33,7 +34,13 @@ export function fillForNode(n: GraphNode, mapping: VizMapping): string {
 export function drawNodeShape(
   ctx: CanvasRenderingContext2D,
   node: LayoutNode,
-  opts: { mapping: VizMapping; cameraZoom?: number; quality?: 'low' | 'med' | 'high'; dragMode?: boolean },
+  opts: {
+    mapping: VizMapping
+    cameraZoom?: number
+    quality?: 'low' | 'med' | 'high'
+    dragMode?: boolean
+    softwareMode?: boolean
+  },
 ) {
   const { mapping } = opts
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
@@ -41,6 +48,7 @@ export function drawNodeShape(
   const px = (v: number) => v * invZ
   const q = opts.quality ?? 'high'
   const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  const softwareMode = !!opts.softwareMode
   const fill = fillForNode(node, mapping)
   const { w: w0, h: h0 } = sizeForNode(node)
   const w = w0 * invZ
@@ -87,7 +95,25 @@ export function drawNodeShape(
 
   // 1) Soft bloom (underlay) - "Holographic" glow
   // Very expensive in full Chrome; keep only for med/high.
-  if (blurK > 0) {
+  if (softwareMode) {
+    // Pre-baked glow sprite: preserves the "soft" look but avoids per-frame blur cost.
+    // Use a modest glow even on low to keep nodes readable in software-only Chrome.
+    const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
+    drawGlowSprite(ctx, {
+      kind: 'bloom',
+      shape: isBusiness ? 'rounded-rect' : 'circle',
+      x: node.__x,
+      y: node.__y,
+      w,
+      h,
+      r,
+      rr,
+      color: fill,
+      blurPx: r * 1.5 * k,
+      lineWidthPx: 0,
+      composite: 'screen',
+    })
+  } else if (blurK > 0) {
     ctx.save()
     // Use screen blending for "light" effect against dark background
     ctx.globalCompositeOperation = 'screen'
@@ -134,18 +160,37 @@ export function drawNodeShape(
   // Double stroke for "core + glow" effect
   
   // Outer glowy stroke
-  ctx.strokeStyle = withAlpha(fill, 0.6)
-  ctx.lineWidth = Math.max(px(2), r * 0.15)
-  ctx.shadowColor = fill
-  ctx.shadowBlur = blurK > 0 ? Math.max(px(2), r * 0.3) * blurK : 0
-  
-  if (isBusiness) {
-    roundedRectPath(ctx, x, y, w, h, rr)
-    ctx.stroke()
+  const rimLineW = Math.max(px(2), r * 0.15)
+  if (softwareMode) {
+    const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
+    drawGlowSprite(ctx, {
+      kind: 'rim',
+      shape: isBusiness ? 'rounded-rect' : 'circle',
+      x: node.__x,
+      y: node.__y,
+      w,
+      h,
+      r,
+      rr,
+      color: fill,
+      blurPx: Math.max(px(2), r * 0.3) * k,
+      lineWidthPx: rimLineW,
+      composite: 'screen',
+    })
   } else {
-    ctx.beginPath()
-    ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
-    ctx.stroke()
+    ctx.strokeStyle = withAlpha(fill, 0.6)
+    ctx.lineWidth = rimLineW
+    ctx.shadowColor = fill
+    ctx.shadowBlur = blurK > 0 ? Math.max(px(2), r * 0.3) * blurK : 0
+
+    if (isBusiness) {
+      roundedRectPath(ctx, x, y, w, h, rr)
+      ctx.stroke()
+    } else {
+      ctx.beginPath()
+      ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
+      ctx.stroke()
+    }
   }
 
   // Inner bright core stroke (white-ish)

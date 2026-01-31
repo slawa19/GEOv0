@@ -43,6 +43,10 @@ type UseRenderLoopDeps = {
   // Optional: hint whether the scene is actively animating (physics, pan/zoom, demo playback).
   // When omitted, a conservative heuristic based on FX + flash is used.
   isAnimating?: () => boolean
+
+  // Optional: hint that the browser is in software-only rendering mode.
+  // Used to pick cheaper rendering paths that preserve aesthetics.
+  isSoftwareMode?: () => boolean
 }
 
 type UseRenderLoopReturn = {
@@ -67,8 +71,47 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   // Hot-path cache: avoid per-frame allocations for node lookup in render.
   const cachedPos = new Map<string, any>()
 
+  // Adaptive FX budgeting (scenario playback on med/high can overwhelm Chrome).
+  // We measure FPS only while the scene is animating and scale the particle cap.
+  let fpsSampleStartedAtMs = 0
+  let fpsSampleFrames = 0
+  let fxBudgetScale = 1
+  let lastFps = 60
+
+  // Adaptive render quality: when Chrome collapses on Med/High, we temporarily render
+  // with cheaper quality settings (disables blur/gradients) without changing user prefs.
+  let adaptiveRenderQuality: Quality | null = null
+  let qualityUpgradeStreak = 0
+
+  // Adaptive DPR clamp: when fill-rate dominates (common in Chrome with blur/compositing),
+  // reducing canvas resolution can be a much stronger lever than just lowering FX budgets.
+  let adaptiveDprClamp: number | null = null
+  let dprUpgradeStreak = 0
+
   function clamp01(v: number) {
     return Math.max(0, Math.min(1, v))
+  }
+
+  function baseDprClampForQuality(q: Quality): number {
+    if (q === 'low') return 1
+    if (q === 'med') return 1.5
+    return 2
+  }
+
+  function ensureCanvasDpr(layoutW: number, layoutH: number, desiredDpr: number) {
+    const canvas = deps.canvasEl.value
+    const fxCanvas = deps.fxCanvasEl.value
+    if (!canvas || !fxCanvas) return
+
+    const dpr = Math.max(0.5, Math.min(4, desiredDpr))
+    const pxW = Math.max(1, Math.floor(layoutW * dpr))
+    const pxH = Math.max(1, Math.floor(layoutH * dpr))
+
+    if (canvas.width !== pxW) canvas.width = pxW
+    if (canvas.height !== pxH) canvas.height = pxH
+
+    if (fxCanvas.width !== canvas.width) fxCanvas.width = canvas.width
+    if (fxCanvas.height !== canvas.height) fxCanvas.height = canvas.height
   }
 
   function pruneFxToMaxParticles(maxParticles: number) {
@@ -124,8 +167,27 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (!ctx || !fx) return
 
     const camera = deps.getCamera()
+    const userQuality: Quality = deps.isTestMode() ? 'high' : deps.getQuality()
+    const softwareMode = !deps.isTestMode() && typeof deps.isSoftwareMode === 'function' ? !!deps.isSoftwareMode() : false
+
+    const activeForPerf = isAnimatingNow()
+    updateAdaptivePerf(nowMs, activeForPerf, userQuality)
+
+    // Adaptive DPR downscaling: adjust canvas pixel resolution before computing dpr.
+    if (!deps.isTestMode()) {
+      const win = typeof window !== 'undefined' ? window : (globalThis as any)
+      const deviceDpr = Math.max(1, Number(win.devicePixelRatio ?? 1))
+      const baseClamp = baseDprClampForQuality(userQuality)
+      const clamp = adaptiveDprClamp !== null ? Math.min(baseClamp, adaptiveDprClamp) : baseClamp
+      const desiredDpr = Math.min(deviceDpr, clamp)
+      ensureCanvasDpr(layout.w, layout.h, desiredDpr)
+      ;(deps.fxState as any).__dprClamp = clamp
+    }
+
     const dpr = canvas.width / Math.max(1, layout.w)
-    const renderQuality: Quality = deps.isTestMode() ? 'high' : deps.getQuality()
+
+    const renderQuality: Quality =
+      deps.isTestMode() ? 'high' : activeForPerf && adaptiveRenderQuality ? adaptiveRenderQuality : userQuality
 
     // Clear in screen-space (pan/zoom must not affect clearing).
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -171,10 +233,26 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (deps.pruneActiveEdges) deps.pruneActiveEdges(nowMs)
     deps.pruneFloatingLabels(nowMs)
 
-    // Optional hard cap for long-running sessions (reserved in spec).
-    const maxParticles = snap.limits?.max_particles
-    if (typeof maxParticles === 'number' && Number.isFinite(maxParticles)) {
-      pruneFxToMaxParticles(maxParticles)
+    // FX hard cap:
+    // - Prefer declared snapshot limits.
+    // - Otherwise apply a quality-based default to keep demo playback bounded.
+    //   (Without this, long/fast playlists can accumulate huge spark/pulse queues.)
+    if (!deps.isTestMode()) {
+      const declared = snap.limits?.max_particles
+      const defaultMaxParticles = renderQuality === 'low' ? 120 : renderQuality === 'med' ? 180 : 220
+
+      const baseMaxParticles =
+        typeof declared === 'number' && Number.isFinite(declared) ? Math.max(0, Math.floor(declared)) : defaultMaxParticles
+
+      // Only adapt while active; during idle (12fps throttle) we avoid reacting to low FPS.
+      const scale = activeForPerf ? fxBudgetScale : 1
+      const effectiveMaxParticles = Math.max(40, Math.floor(baseMaxParticles * scale))
+
+      ;(deps.fxState as any).__maxParticles = effectiveMaxParticles
+      ;(deps.fxState as any).__fxBudgetScale = scale
+      ;(deps.fxState as any).__lastFps = lastFps
+      ;(deps.fxState as any).__renderQuality = renderQuality
+      pruneFxToMaxParticles(effectiveMaxParticles)
     }
 
     const linkLod = deps.getLinkLod ? deps.getLinkLod() : 'full'
@@ -189,6 +267,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       activeEdges: deps.activeEdges,
       cameraZoom: camera.zoom,
       quality: renderQuality,
+      softwareMode,
       linkLod,
       dragMode: linkLod === 'focus',
       hiddenNodeId: deps.getHiddenNodeId ? deps.getHiddenNodeId() : null,
@@ -228,6 +307,106 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       // ignore
     }
     return hasActiveFxOrOverlays()
+  }
+
+  function updateAdaptivePerf(nowMs: number, isActive: boolean, baseQuality: Quality) {
+    if (!isActive) {
+      fpsSampleStartedAtMs = 0
+      fpsSampleFrames = 0
+      qualityUpgradeStreak = 0
+      adaptiveRenderQuality = null
+
+      dprUpgradeStreak = 0
+      adaptiveDprClamp = null
+
+      fxBudgetScale = 1
+      return
+    }
+
+    if (fpsSampleStartedAtMs === 0) {
+      fpsSampleStartedAtMs = nowMs
+      fpsSampleFrames = 0
+    }
+
+    fpsSampleFrames++
+
+    const windowMs = 900
+    const elapsed = nowMs - fpsSampleStartedAtMs
+    if (elapsed < windowMs) return
+
+    const fps = (fpsSampleFrames * 1000) / Math.max(1, elapsed)
+    lastFps = fps
+
+    // 1) Budget scale (particle cap)
+    let targetScale = 1
+    if (fps < 22) targetScale = 0.45
+    else if (fps < 28) targetScale = 0.6
+    else if (fps < 34) targetScale = 0.72
+    else if (fps < 44) targetScale = 0.86
+    fxBudgetScale = fxBudgetScale * 0.8 + targetScale * 0.2
+
+    // 2) Render-quality override (hysteresis)
+    // Downgrade quickly when FPS is bad; upgrade slowly when it stabilizes.
+    const pickDowngrade = (): Quality | null => {
+      if (baseQuality === 'low') return null
+
+      if (fps < 18) return 'low'
+
+      if (baseQuality === 'high') {
+        if (fps < 26) return 'low'
+        if (fps < 34) return 'med'
+        return null
+      }
+
+      // baseQuality === 'med'
+      if (fps < 24) return 'low'
+      return null
+    }
+
+    const wantedDowngrade = pickDowngrade()
+    if (wantedDowngrade) {
+      adaptiveRenderQuality = wantedDowngrade
+      qualityUpgradeStreak = 0
+    } else {
+      // Candidate for upgrade back to base quality.
+      const upgradeFps = baseQuality === 'high' ? 48 : 42
+      if (fps >= upgradeFps) qualityUpgradeStreak++
+      else qualityUpgradeStreak = 0
+
+      // Require a few consecutive good windows to avoid oscillation.
+      if (qualityUpgradeStreak >= 3) {
+        adaptiveRenderQuality = null
+        qualityUpgradeStreak = 0
+      }
+    }
+
+    // 3) DPR clamp override (hysteresis)
+    // Heuristic: if FPS collapses while active, drop DPR quickly (fill-rate win),
+    // then restore slowly once stable.
+    const pickDprClamp = (): number | null => {
+      if (baseQuality === 'low') return null
+      if (fps < 20) return 1
+      if (fps < 28) return 1.25
+      return null
+    }
+
+    const wantedDpr = pickDprClamp()
+    if (wantedDpr !== null) {
+      adaptiveDprClamp = wantedDpr
+      dprUpgradeStreak = 0
+    } else {
+      const upgradeFps = baseQuality === 'high' ? 50 : 44
+      if (fps >= upgradeFps) dprUpgradeStreak++
+      else dprUpgradeStreak = 0
+
+      if (dprUpgradeStreak >= 3) {
+        adaptiveDprClamp = null
+        dprUpgradeStreak = 0
+      }
+    }
+
+    fpsSampleStartedAtMs = nowMs
+    fpsSampleFrames = 0
   }
 
   function scheduleNext(nowMs: number) {

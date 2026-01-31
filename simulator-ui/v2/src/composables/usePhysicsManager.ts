@@ -25,6 +25,7 @@ export function createPhysicsManager(opts: {
   const { isEnabled, getLayoutNodes, getLayoutLinks, getQuality, getPinnedPos } = opts
 
   let engine: PhysicsEngine | null = null
+  let lastTickAtMs = 0
 
   function stop() {
     engine?.stop()
@@ -52,6 +53,8 @@ export function createPhysicsManager(opts: {
 
     engine = createPhysicsEngine({ nodes, links, config })
 
+    lastTickAtMs = 0
+
     // Re-apply pinned nodes as fixed constraints for the simulation.
     for (const [id, p] of getPinnedPos()) engine.pin(id, p.x, p.y)
 
@@ -70,6 +73,15 @@ export function createPhysicsManager(opts: {
     // Once the simulation cools down, doing syncToLayout every frame becomes pure overhead.
     // This is especially visible in full Chrome even when the user hasn't started any scenario.
     if (!engine.isRunning()) return
+
+    // d3-force can be surprisingly expensive on large graphs; avoid ticking at full RAF rate.
+    // This keeps visuals smooth while reducing CPU pressure during demo playback.
+    const q = getQuality()
+    const intervalMs = q === 'low' ? 32 : q === 'med' ? 24 : 20
+    const nowMs = performance.now()
+    if (lastTickAtMs > 0 && nowMs - lastTickAtMs < intervalMs) return
+    lastTickAtMs = nowMs
+
     engine.tick()
     engine.syncToLayout()
   }

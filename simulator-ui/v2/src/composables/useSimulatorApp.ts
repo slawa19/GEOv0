@@ -1,4 +1,4 @@
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 import { loadEvents as loadEventsFixtures, loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { assertPlaylistEdgesExistInSnapshot } from '../demo/playlistValidation'
@@ -362,6 +362,58 @@ export function useSimulatorApp() {
     requestResizeAndLayout,
   })
 
+  function detectGpuAccelerationLikelyAvailable(): boolean {
+    if (typeof document === 'undefined') return true
+    try {
+      const canvas = document.createElement('canvas')
+      const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null
+      if (!gl) return false
+
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info') as any
+      if (dbg) {
+        const renderer = String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) ?? '')
+        const r = renderer.toLowerCase()
+        if (r.includes('microsoft basic render driver')) return false
+        if (r.includes('swiftshader')) return false
+        if (r.includes('llvmpipe')) return false
+      }
+
+      // If WebGL context exists, assume some form of GPU path is available.
+      return true
+    } catch {
+      return true
+    }
+  }
+
+  const gpuAccelLikely = ref(true)
+  onMounted(() => {
+    // Keep deterministic in tests and avoid fighting the user in webdriver.
+    if (isTestMode.value) return
+    if (isWebDriver) return
+
+    gpuAccelLikely.value = detectGpuAccelerationLikelyAvailable()
+
+    // If the browser is in software-only mode, prefer low quality by default.
+    // Do not override if the user touched quality shortly after mount.
+    if (!gpuAccelLikely.value) {
+      let touched = false
+      const stop = watch(
+        quality,
+        () => {
+          touched = true
+        },
+        { flush: 'sync' },
+      )
+
+      window.setTimeout(() => {
+        stop()
+        if (!touched && quality.value !== 'low') {
+          quality.value = 'low'
+        }
+      }, 400)
+    }
+  })
+
   const viewWiring = useAppViewWiring({
     canvasEl,
     hostEl,
@@ -437,6 +489,7 @@ export function useSimulatorApp() {
       panState.active ||
       (dragToPin.dragState.active && dragToPin.dragState.dragging) ||
       (typeof (physics as any).isRunning === 'function' && (physics as any).isRunning()),
+    isSoftwareMode: () => !gpuAccelLikely.value,
     beforeDraw: () => {
       physics.tickAndSyncToLayout()
     },
@@ -456,6 +509,61 @@ export function useSimulatorApp() {
   const ensureRenderLoop = fxAndRender.ensureRenderLoop
   const stopRenderLoop = fxAndRender.stopRenderLoop
   const renderOnce = fxAndRender.renderOnce
+
+  const showPerfOverlay = computed(() => {
+    if (isTestMode.value) return false
+    if (typeof window === 'undefined') return false
+    try {
+      return new URLSearchParams(window.location.search).get('perf') === '1'
+    } catch {
+      return false
+    }
+  })
+
+  const perf = reactive({
+    lastFps: null as number | null,
+    fxBudgetScale: null as number | null,
+    maxParticles: null as number | null,
+    renderQuality: null as string | null,
+    dprClamp: null as number | null,
+
+    canvasCssW: null as number | null,
+    canvasCssH: null as number | null,
+    canvasPxW: null as number | null,
+    canvasPxH: null as number | null,
+    canvasDpr: null as number | null,
+  })
+
+  let perfTimer: number | null = null
+  onMounted(() => {
+    if (!showPerfOverlay.value) return
+
+    const poll = () => {
+      const fx = fxState as any
+      perf.lastFps = typeof fx?.__lastFps === 'number' ? fx.__lastFps : null
+      perf.fxBudgetScale = typeof fx?.__fxBudgetScale === 'number' ? fx.__fxBudgetScale : null
+      perf.maxParticles = typeof fx?.__maxParticles === 'number' ? fx.__maxParticles : null
+      perf.renderQuality = typeof fx?.__renderQuality === 'string' ? fx.__renderQuality : null
+      perf.dprClamp = typeof fx?.__dprClamp === 'number' ? fx.__dprClamp : null
+
+      const c = canvasEl.value
+      if (c) {
+        perf.canvasCssW = c.clientWidth || null
+        perf.canvasCssH = c.clientHeight || null
+        perf.canvasPxW = c.width || null
+        perf.canvasPxH = c.height || null
+        perf.canvasDpr = c.clientWidth ? c.width / Math.max(1, c.clientWidth) : null
+      }
+    }
+
+    poll()
+    perfTimer = window.setInterval(poll, 500)
+  })
+
+  onUnmounted(() => {
+    if (perfTimer !== null) window.clearInterval(perfTimer)
+    perfTimer = null
+  })
 
   const realPatchApplier = createPatchApplier({
     getSnapshot: () => state.snapshot,
@@ -744,23 +852,33 @@ export function useSimulatorApp() {
       const atMs = Math.max(0, Number(step.at_ms ?? 0))
       scheduleTimeout(() => {
         const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        const budgetScaleRaw = (fxState as any).__fxBudgetScale
+        const budgetScale =
+          typeof budgetScaleRaw === 'number' && Number.isFinite(budgetScaleRaw) ? Math.max(0.25, Math.min(1, budgetScaleRaw)) : 1
+
+        const allowEdgePulses = budgetScale >= 0.65
+        const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
+
         const k = intensityScale(step.intensity_key)
-        const countPerEdge = k >= 1.0 ? 2 : 1
+        const baseCountPerEdge = k >= 1.0 ? 2 : 1
+        const countPerEdge = baseCountPerEdge > 1 && budgetScale < 0.85 ? 1 : baseCountPerEdge
 
         const highlight = (step.highlight_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
         if (highlight.length > 0) {
-          spawnEdgePulses(fxState, {
-            edges: highlight,
-            nowMs,
-            durationMs: REAL_CLEARING_FX.highlightPulseMs,
-            color: clearingColor,
-            thickness: REAL_CLEARING_FX.highlightThickness * k,
-            seedPrefix: `real-clearing:highlight:${planId}:${plan.equivalent}:${step.at_ms}`,
-            countPerEdge,
-            keyEdge,
-            seedFn: fnv1a,
-            isTestMode: isTestMode.value && isWebDriver,
-          })
+          if (allowEdgePulses) {
+            spawnEdgePulses(fxState, {
+              edges: highlight,
+              nowMs,
+              durationMs: REAL_CLEARING_FX.highlightPulseMs,
+              color: clearingColor,
+              thickness: REAL_CLEARING_FX.highlightThickness * k * Math.min(1, 0.85 + budgetScale * 0.15),
+              seedPrefix: `real-clearing:highlight:${planId}:${plan.equivalent}:${step.at_ms}`,
+              countPerEdge,
+              keyEdge,
+              seedFn: fnv1a,
+              isTestMode: isTestMode.value && isWebDriver,
+            })
+          }
 
           // Keep edges active even longer than the pulse itself.
           for (const e of highlight) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.highlightPulseMs + 2200)
@@ -785,17 +903,20 @@ export function useSimulatorApp() {
             isTestMode: isTestMode.value && isWebDriver,
           })
 
-          const nodeIds = nodesFromEdges(particles)
-          spawnNodeBursts(fxState, {
-            nodeIds,
-            nowMs,
-            durationMs: REAL_CLEARING_FX.nodeBurstMs,
-            color: clearingColor,
-            kind: 'clearing',
-            seedPrefix: `real-clearing:nodes:${planId}:${step.at_ms}`,
-            seedFn: fnv1a,
-            isTestMode: isTestMode.value && isWebDriver,
-          })
+          if (budgetScale >= 0.55) {
+            const nodeIds = nodesFromEdges(particles)
+            const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
+            spawnNodeBursts(fxState, {
+              nodeIds: capped,
+              nowMs,
+              durationMs: REAL_CLEARING_FX.nodeBurstMs,
+              color: clearingColor,
+              kind: 'clearing',
+              seedPrefix: `real-clearing:nodes:${planId}:${step.at_ms}`,
+              seedFn: fnv1a,
+              isTestMode: isTestMode.value && isWebDriver,
+            })
+          }
         }
 
         state.flash = Math.max(state.flash ?? 0, 0.38)
@@ -816,6 +937,11 @@ export function useSimulatorApp() {
   function runRealClearingDoneFx(plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent) {
     const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const clearingColor = VIZ_MAPPING.fx.clearing_debt
+
+    const budgetScaleRaw = (fxState as any).__fxBudgetScale
+    const budgetScale =
+      typeof budgetScaleRaw === 'number' && Number.isFinite(budgetScaleRaw) ? Math.max(0.25, Math.min(1, budgetScaleRaw)) : 1
+    const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
 
     state.flash = 1
 
@@ -841,17 +967,20 @@ export function useSimulatorApp() {
 
       for (const e of planEdges) addActiveEdge(keyEdge(e.from, e.to), 5200)
 
-      const nodeIds = nodesFromEdges(planEdges)
-      spawnNodeBursts(fxState, {
-        nodeIds,
-        nowMs,
-        durationMs: 900,
-        color: clearingColor,
-        kind: 'clearing',
-        seedPrefix: `real-clearing:done-nodes:${done.plan_id}`,
-        seedFn: fnv1a,
-        isTestMode: isTestMode.value && isWebDriver,
-      })
+      if (budgetScale >= 0.55) {
+        const nodeIds = nodesFromEdges(planEdges)
+        const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
+        spawnNodeBursts(fxState, {
+          nodeIds: capped,
+          nowMs,
+          durationMs: 900,
+          color: clearingColor,
+          kind: 'clearing',
+          seedPrefix: `real-clearing:done-nodes:${done.plan_id}`,
+          seedFn: fnv1a,
+          isTestMode: isTestMode.value && isWebDriver,
+        })
+      }
     }
   }
 
@@ -1093,6 +1222,9 @@ export function useSimulatorApp() {
     quality,
     labelsLod,
 
+    // env
+    gpuAccelLikely,
+
     // refs
     hostEl,
     canvasEl,
@@ -1103,6 +1235,10 @@ export function useSimulatorApp() {
     overlayLabelScale,
     showDemoControls,
     showResetView,
+
+    // dev / diagnostics
+    showPerfOverlay,
+    perf,
 
     // selection + overlays
     isNodeCardOpen,

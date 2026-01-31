@@ -50,6 +50,9 @@ export function useAppFxAndRender(opts: {
 
   // Optional: hint whether the scene is actively animating (physics, pan/zoom, demo playback).
   isAnimating?: () => boolean
+
+  // Optional: hint that the browser is in software-only rendering mode.
+  isSoftwareMode?: () => boolean
 }) {
   const fxOverlays = useAppFxOverlays<LayoutNode>({
     getLayoutNodeById: opts.getLayoutNodeById,
@@ -81,6 +84,7 @@ export function useAppFxAndRender(opts: {
     getHiddenNodeId: opts.getHiddenNodeId,
     beforeDraw: opts.beforeDraw,
     isAnimating: opts.isAnimating,
+    isSoftwareMode: opts.isSoftwareMode,
   })
 
   return {

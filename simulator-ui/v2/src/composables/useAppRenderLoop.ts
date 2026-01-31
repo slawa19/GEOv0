@@ -29,6 +29,9 @@ export function useAppRenderLoop(opts: {
 
   // Optional: hint whether the scene is actively animating (pan/zoom, physics, playback).
   isAnimating?: () => boolean
+
+  // Optional: hint that the browser is in software-only rendering mode.
+  isSoftwareMode?: () => boolean
 }) {
   const renderLoop = useRenderLoop({
     canvasEl: opts.canvasEl,
@@ -60,6 +63,7 @@ export function useAppRenderLoop(opts: {
     getHiddenNodeId: opts.getHiddenNodeId,
     beforeDraw: opts.beforeDraw,
     isAnimating: opts.isAnimating,
+    isSoftwareMode: opts.isSoftwareMode,
   })
 
   return {
