@@ -138,9 +138,9 @@ const {
       :stop="realActions.stop"
       :apply-intensity="realActions.applyIntensity"
       :run-stats="real.runStats"
-      @update:selectedScenarioId="realActions.setSelectedScenarioId"
-      @update:desiredMode="realActions.setDesiredMode"
-      @update:intensityPercent="realActions.setIntensityPercent"
+      @update:selected-scenario-id="realActions.setSelectedScenarioId"
+      @update:desired-mode="realActions.setDesiredMode"
+      @update:intensity-percent="realActions.setIntensityPercent"
     />
 
     <DemoHudTop

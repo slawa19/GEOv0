@@ -213,6 +213,12 @@ Feature: Simulator UI Real Mode
 - E2E fixtures scenes: `npm --prefix simulator-ui/v2 run test:e2e`
 - E2E real mode (когда появится): `GEO_E2E_REAL_MODE=1 npm --prefix simulator-ui/v2 run test:e2e`
 
+Рекомендация по быстрым прогонам:
+- Для «быстрых проверок» UI (smoke/e2e без зависимости от БД и данных) используйте **sandbox/topology-only**:
+  - API: `mode=fixtures` (в UI может отображаться как `sandbox`)
+  - ожидания: топология/рендер/стрим/контроль run; без «семантической» раскраски по долгам/балансам.
+- Для проверки DB enrichment и бизнес-семантики визуализации используйте `mode=real`.
+
 ---
 
 ## 8) Definition of Done для C2

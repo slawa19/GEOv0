@@ -40,13 +40,31 @@ from app.core.simulator.runtime_utils import (
     utc_now as _utc_now,
 )
 from app.core.simulator.scenario_registry import ScenarioRegistry
-from app.core.simulator.snapshot_builder import SnapshotBuilder
+from app.core.simulator.snapshot_builder import SnapshotBuilder, scenario_to_snapshot
 import app.core.simulator.storage as simulator_storage
 from app.core.simulator.sse_broadcast import SseBroadcast
 from app.utils.exceptions import NotFoundException
 from app.utils.exceptions import ConflictException
 
 logger = logging.getLogger(__name__)
+
+
+def _scenario_allowlist() -> Optional[set[str]]:
+    """Allowlist for preset scenarios shown to the UI.
+
+    - If SIMULATOR_SCENARIO_ALLOWLIST is unset: show only the canonical demo presets.
+    - If set to '*' or 'all': disable filtering.
+    - If set to comma-separated ids: show only those.
+    """
+
+    raw = str(os.environ.get("SIMULATOR_SCENARIO_ALLOWLIST", "")).strip()
+    if raw:
+        if raw in {"*", "all", "ALL"}:
+            return None
+        items = {x.strip() for x in raw.split(",") if x.strip()}
+        return items or None
+
+    return {"greenfield-village-100", "riverside-town-50"}
 
 def _safe_int_env(name: str, default: int) -> int:
     try:
@@ -235,8 +253,11 @@ class _SimulatorRuntimeBase:
     # -----------------------------
 
     def list_scenarios(self) -> list[ScenarioSummary]:
+        allow = _scenario_allowlist()
         with self._lock:
             items = sorted(self._scenarios.values(), key=lambda s: s.scenario_id)
+        if allow is not None:
+            items = [s for s in items if s.scenario_id in allow]
         return [s.summary() for s in items]
 
     def get_scenario(self, scenario_id: str) -> ScenarioRecord:
@@ -248,6 +269,26 @@ class _SimulatorRuntimeBase:
 
     def save_uploaded_scenario(self, scenario: dict[str, Any]) -> ScenarioRecord:
         return self._scenario_registry.save_uploaded_scenario(scenario)
+
+    async def build_scenario_preview(
+        self,
+        *,
+        scenario_id: str,
+        equivalent: str,
+        mode: RunMode,
+        session=None,
+    ) -> SimulatorGraphSnapshot:
+        """Build a graph preview without starting a run.
+
+        - mode=fixtures: topology-only preview (no DB enrichment)
+        - mode=real: best-effort DB enrichment (balances/debts -> viz_*)
+        """
+
+        rec = self.get_scenario(scenario_id)
+        snap = scenario_to_snapshot(rec.raw, equivalent=equivalent, utc_now=_utc_now)
+        if mode != "real":
+            return snap
+        return await self._snapshot_builder.enrich_snapshot_from_db_if_enabled(snap, equivalent=equivalent, session=session)
 
     # -----------------------------
     # Runs

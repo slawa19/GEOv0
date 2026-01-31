@@ -14,7 +14,7 @@ import { fnv1a } from '../utils/hash'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 
-import { getSnapshot } from '../api/simulatorApi'
+import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 
@@ -870,25 +870,49 @@ export function useSimulatorApp() {
     if (!isRealMode.value) return loadSnapshotFixtures(eq)
 
     const runId = real.runId
-    // Real mode initial state: allow the app to render an empty graph without surfacing an error overlay.
-    if (!runId) {
-      return {
-        snapshot: {
-          equivalent: eq,
-          generated_at: new Date().toISOString(),
-          nodes: [],
-          links: [],
-        },
-        sourcePath: 'No run started',
+    const scenarioId = real.selectedScenarioId
+
+    const runState = String(real.runStatus?.state ?? '').toLowerCase()
+    const isActiveRun =
+      !!runId &&
+      // Optimistic: if runId exists but status not fetched yet, assume active to avoid falling back to preview.
+      (!real.runStatus || runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')
+
+    // Real mode: if we have a run, use run snapshot
+    if (isActiveRun) {
+      if (!real.accessToken) throw new Error('Missing access token')
+      const snapshot = await getSnapshot({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, eq)
+      // Real snapshots currently don't declare FX limits; apply a sane default cap so long sessions
+      // can't accumulate too many particles (sparks + pulses + bursts).
+      if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
+      return { snapshot, sourcePath: `GET ${real.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot` }
+    }
+
+    // Real mode: no run, but have scenario selected - show preview
+    // Use desiredMode so UI can toggle between sandbox(topology-only) and real(DB-enriched) previews.
+    if (scenarioId && real.accessToken) {
+      try {
+        const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq, {
+          mode: real.desiredMode,
+        })
+        if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
+        return { snapshot, sourcePath: `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview` }
+      } catch (e) {
+        // Fallback to empty if preview fails
+        console.warn('Failed to load scenario preview:', e)
       }
     }
-    if (!real.accessToken) throw new Error('Missing access token')
 
-    const snapshot = await getSnapshot({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, eq)
-    // Real snapshots currently don't declare FX limits; apply a sane default cap so long sessions
-    // can't accumulate too many particles (sparks + pulses + bursts).
-    if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
-    return { snapshot, sourcePath: `GET ${real.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot` }
+    // Fallback: empty snapshot
+    return {
+      snapshot: {
+        equivalent: eq,
+        generated_at: new Date().toISOString(),
+        nodes: [],
+        links: [],
+      },
+      sourcePath: 'No run started',
+    }
   }
 
   async function loadEventsForUi(eq: string, playlist: string) {

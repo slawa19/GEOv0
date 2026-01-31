@@ -522,6 +522,11 @@ export function useSimulatorRealMode(opts: {
           return
         }
 
+        // No active run on mount: show scenario preview immediately.
+        if (real.accessToken && real.selectedScenarioId && !real.runId) {
+          await refreshSnapshot()
+        }
+
         const shouldAutoStart =
           import.meta.env.DEV &&
           isLocalhost &&
@@ -533,6 +538,26 @@ export function useSimulatorRealMode(opts: {
       })()
     },
     { immediate: true },
+  )
+
+  // When user selects a different scenario (and no run is active), reload scene so preview graph appears.
+  watch(
+    () => [real.selectedScenarioId, real.desiredMode, effectiveEq.value, real.accessToken, real.runId] as const,
+    async ([scenarioId]) => {
+      if (!isRealMode.value) return
+      if (!scenarioId) return
+      if (!real.accessToken) return
+
+      const st = String(real.runStatus?.state ?? '').toLowerCase()
+      const isActive =
+        !!real.runId &&
+        // Optimistic: if we have runId but status not fetched yet, treat it as active.
+        (!real.runStatus || st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
+      if (isActive) return
+
+      await refreshSnapshot()
+    },
+    { flush: 'post' },
   )
 
   return {

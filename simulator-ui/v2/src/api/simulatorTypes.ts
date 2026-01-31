@@ -35,6 +35,7 @@ export type RunError = {
 export type RunStatus = {
   run_id: string
   scenario_id: string
+  mode?: SimulatorMode
   state: RunState | string
   sim_time_ms: number
   intensity_percent: number

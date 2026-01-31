@@ -16,6 +16,7 @@ from app.schemas.simulator import (
     ArtifactIndex,
     BottlenecksResponse,
     MetricsResponse,
+    RunMode,
     RunCreateRequest,
     RunCreateResponse,
     RunStatus,
@@ -279,6 +280,18 @@ async def get_scenario_summary(
     _actor=Depends(deps.require_participant_or_admin),
 ):
     return runtime.get_scenario(scenario_id).summary()
+
+
+@router.get("/scenarios/{scenario_id}/graph/preview", response_model=SimulatorGraphSnapshot)
+async def scenario_graph_preview(
+    scenario_id: str,
+    equivalent: str = Query(...),
+    mode: RunMode = Query("fixtures"),
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    """Preview the scenario graph topology without starting a run."""
+    return await runtime.build_scenario_preview(scenario_id=scenario_id, equivalent=equivalent, mode=mode, session=db)
 
 
 @router.post("/runs", response_model=RunCreateResponse)

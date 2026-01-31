@@ -24,7 +24,10 @@ export function sizeForNode(n: GraphNode): { w: number; h: number } {
 export function fillForNode(n: GraphNode, mapping: VizMapping): string {
   const key = String(n.viz_color_key ?? (n.type === 'business' ? 'business' : 'person'))
   const hit = mapping.node.color[key]
-  return hit ? hit.fill : mapping.node.color.person.fill
+  if (hit) return hit.fill
+  // Fallback for unknown keys (e.g. debt-0): use type-based color per vizMapping contract.
+  const typeKey = n.type === 'business' ? 'business' : 'person'
+  return mapping.node.color[typeKey]?.fill ?? mapping.node.color.person.fill
 }
 
 export function drawNodeShape(

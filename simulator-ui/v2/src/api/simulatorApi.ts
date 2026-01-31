@@ -9,6 +9,7 @@ import type {
   ScenarioSummary,
   ScenariosListResponse,
   SimulatorGraphSnapshot,
+  SimulatorMode,
 } from './simulatorTypes'
 
 export function listScenarios(cfg: HttpConfig): Promise<ScenariosListResponse> {
@@ -17,6 +18,16 @@ export function listScenarios(cfg: HttpConfig): Promise<ScenariosListResponse> {
 
 export function getScenario(cfg: HttpConfig, scenarioId: string): Promise<ScenarioSummary> {
   return httpJson(cfg, `/simulator/scenarios/${encodeURIComponent(scenarioId)}`)
+}
+
+export function getScenarioPreview(
+  cfg: HttpConfig,
+  scenarioId: string,
+  equivalent: string,
+  opts?: { mode?: SimulatorMode },
+): Promise<SimulatorGraphSnapshot> {
+  const q = new URLSearchParams({ equivalent, ...(opts?.mode ? { mode: opts.mode } : {}) }).toString()
+  return httpJson(cfg, `/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?${q}`)
 }
 
 export function uploadScenario(cfg: HttpConfig, req: { scenario: unknown; scenario_id?: string }): Promise<ScenarioSummary> {

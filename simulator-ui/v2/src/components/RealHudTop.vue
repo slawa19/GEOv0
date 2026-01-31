@@ -63,6 +63,8 @@ const canStop = computed(() => {
 
 const isRunActive = computed(() => {
   if (!props.runId) return false
+  // Optimistic: when runId exists but runStatus hasn't arrived yet, treat it as active.
+  if (!props.runStatus) return true
   const s = String(props.runStatus?.state ?? '').toLowerCase()
   return s === 'running' || s === 'paused' || s === 'created' || s === 'stopping'
 })
@@ -74,27 +76,50 @@ const successRatePct = computed(() => {
   return Math.round((ok / a) * 100)
 })
 
+// Show the actual mode from runStatus if running, otherwise show desired mode
+const currentMode = computed(() => {
+  const actualMode = props.runStatus?.mode
+  if (actualMode) return actualMode
+  return props.desiredMode
+})
+
+const modeBadgeText = computed(() => {
+  return currentMode.value === 'fixtures' ? 'SANDBOX' : 'REAL'
+})
+
+const modeBadgeTone = computed<'ok' | 'warn' | 'info'>(() => {
+  return currentMode.value === 'fixtures' ? 'warn' : 'info'
+})
+
+const modeTitle = computed(() => {
+  if (currentMode.value === 'fixtures') {
+    return 'Sandbox (topology-only): no DB enrichment (no balances/debts-based viz)'
+  }
+  return 'Real: uses DB enrichment (balances/debts-based viz when available)'
+})
+
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
 
 const emit = defineEmits<{
-  (e: 'update:selectedScenarioId', v: string): void
-  (e: 'update:desiredMode', v: SimulatorMode): void
-  (e: 'update:intensityPercent', v: number): void
+  // Use kebab-case event names so listeners work reliably in templates.
+  (e: 'update:selected-scenario-id', v: string): void
+  (e: 'update:desired-mode', v: SimulatorMode): void
+  (e: 'update:intensity-percent', v: number): void
 }>()
 
 function setSelectedScenarioId(v: string) {
-  emit('update:selectedScenarioId', v)
+  emit('update:selected-scenario-id', v)
 }
 
 function setDesiredMode(v: string) {
-  emit('update:desiredMode', (v === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode)
+  emit('update:desired-mode', (v === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode)
 }
 
 function setIntensityPercent(v: string) {
   const n = Number(v)
   if (!Number.isFinite(n)) return
-  emit('update:intensityPercent', Math.max(0, Math.min(100, Math.round(n))))
+  emit('update:intensity-percent', Math.max(0, Math.min(100, Math.round(n))))
 }
 
 function short(s: string, n: number) {
@@ -108,7 +133,7 @@ function short(s: string, n: number) {
     <div class="hud-top-grid">
       <div class="hud-controls" aria-label="Controls">
         <div class="hudbar">
-          <span class="hud-badge" data-tone="info">REAL</span>
+          <span class="hud-badge" :data-tone="modeBadgeTone" :title="modeTitle">{{ modeBadgeText }}</span>
 
           <div class="hud-chip">
             <span class="hud-label">EQ</span>
@@ -154,9 +179,16 @@ function short(s: string, n: number) {
 
           <div class="hud-chip">
             <span class="hud-label">Mode</span>
-            <select class="hud-select" :value="desiredMode" aria-label="Run mode" @change="setDesiredMode(($event.target as HTMLSelectElement).value)">
-              <option value="real">real</option>
-              <option value="fixtures">fixtures</option>
+            <select
+              class="hud-select"
+              :value="desiredMode"
+              :disabled="isRunActive"
+              aria-label="Run mode"
+              :title="modeTitle"
+              @change="setDesiredMode(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="real">real (DB)</option>
+              <option value="fixtures">sandbox (topology-only)</option>
             </select>
           </div>
 
@@ -173,7 +205,7 @@ function short(s: string, n: number) {
               aria-label="Intensity percent"
               @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
             />
-            <button class="btn btn-xxs" type="button" :disabled="!runId" @click="props.applyIntensity">Apply</button>
+            <button class="btn btn-xxs" type="button" :disabled="!isRunActive" @click="props.applyIntensity">Apply</button>
           </div>
 
           <div v-if="!loadingScenarios && scenarios.length === 0" class="hud-chip" aria-label="No scenarios">

@@ -157,11 +157,16 @@ function asEdgePatchArray(value: unknown, label: string): EdgePatch[] | undefine
   })
 }
 
+// Keys that fall back to type-based colors in nodePainter (e.g. "debt-0" → business/person).
+const VIZ_COLOR_FALLBACK_KEYS = new Set(['debt-0'])
+
 function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_width_key' | 'viz_alpha_key', key: string, context: string) {
   const strict = String(import.meta.env.VITE_STRICT_VIZ_KEYS ?? '1') === '1'
   if (!strict) return
 
   if (kind === 'viz_color_key') {
+    // Allow keys that intentionally fall back to type-based color.
+    if (VIZ_COLOR_FALLBACK_KEYS.has(key)) return
     if (!VIZ_MAPPING.node.color[key]) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
     return
   }

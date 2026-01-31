@@ -295,11 +295,24 @@ Health endpoints (also available as `/api/v1/*` aliases):
 - `GET /health` and `GET /healthz` → `{ "status": "ok" }`
 - `GET /health/db` → DB connectivity check (`{ "status": "ok" }` or HTTP 503)
 
-### Testing & Development
+### Testing (single entry point)
 
-To run tests locally (recommended on Windows):
+This section is the canonical “how to run tests” entry point for this repo.
 
-**PowerShell:**
+#### What tests exist
+
+- **Backend (pytest):** unit + integration tests under `tests/`.
+  - Contract test for OpenAPI: `tests/contract/test_openapi_contract.py`.
+  - Simulator-focused tests: `tests/unit/test_simulator_*.py`, `tests/integration/test_simulator_*.py`.
+- **Simulator UI v2:** unit tests (Vitest) + E2E screenshot tests (Playwright) under `simulator-ui/v2/`.
+- **Admin UI:** unit tests (Vitest) + E2E tests (Playwright) under `admin-ui/`.
+
+Test discovery/markers are configured in `pytest.ini`.
+
+#### Backend tests (pytest)
+
+Recommended on Windows:
+
 ```powershell
 # 1) Create venv (once)
 py -m venv .venv
@@ -311,33 +324,27 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
 
-# 4) Run all tests (includes OpenAPI contract test)
+# 4) Run all backend tests (includes OpenAPI contract test)
 python -m pytest -q
+```
 
-# Optional: run only OpenAPI contract test
+Focused runs:
+
+```powershell
+# OpenAPI contract only
 python -m pytest -q tests/contract/test_openapi_contract.py
-```
 
-**Windows CMD:**
-```bat
-REM If you tried before, start clean:
-REM rmdir /s /q .venv
+# Simulator SSE smoke (fixtures-mode)
+python -m pytest -q tests/integration/test_simulator_sse_smoke.py
 
-py -m venv .venv
-call .\.venv\Scripts\activate.bat
-python -m pip install -r requirements.txt
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-```
-
-**Windows CMD (safe one-liner, avoids full `%TEMP%` drives):**
-```bat
-mkdir D:\Temp 2>nul && set TEMP=D:\Temp && set TMP=D:\Temp && py -m venv .venv && call .\.venv\Scripts\activate.bat && python -m pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt && python -m pytest -q
+# Run only simulator-related tests
+python -m pytest -q tests/unit/test_simulator_*.py tests/integration/test_simulator_*.py
 ```
 
 Troubleshooting:
 - If `pytest` is not found in PATH, use `python -m pytest` (it always uses the active interpreter).
-- If you see `ModuleNotFoundError: No module named 'pytest_asyncio'`, it means dev dependencies were not installed into the interpreter you are running. Re-run `python -m pip install -r requirements-dev.txt` after activating `.venv`.
+- If you see `ModuleNotFoundError: No module named 'pytest_asyncio'`, dev dependencies were not installed into the interpreter you are running.
+  Re-run `python -m pip install -r requirements-dev.txt` after activating `.venv`.
 - If venv creation fails with `ensurepip ... returned non-zero exit status 1`:
   - delete the venv and retry: `rmdir /s /q .venv` (CMD) or `Remove-Item -Recurse -Force .venv` (PowerShell)
   - ensure your base Python has bundled pip: `py -m ensurepip --upgrade`
@@ -346,18 +353,10 @@ Troubleshooting:
   - CMD: `set TEMP=D:\Temp` and `set TMP=D:\Temp`
   - PowerShell: `$env:TEMP='D:\Temp'; $env:TMP='D:\Temp'`
 
-The integration tests (`tests/integration/test_scenarios.py`) cover:
-- Registration & Authentication
-- TrustLine management
-- Direct Payments
-- Multi-hop Payments
-- Debt Clearing Cycles
+#### Postgres-backed backend tests (when isolation/locking matters)
 
-Postgres-backed tests (recommended for TS-23 concurrency semantics):
+SQLite cannot validate real locking/isolation behavior. Use Postgres for concurrency semantics (example: TS-23).
 
-**Why:** SQLite cannot validate real locking/isolation behavior. TS-23 is designed to run on Postgres.
-
-**PowerShell (Windows + Docker Compose):**
 ```powershell
 # 1) Start Postgres
 docker compose up -d db
@@ -365,15 +364,51 @@ docker compose up -d db
 # 2) Create a dedicated test database inside the container (one-time)
 docker exec geov0-db createdb -U geo geov0_test 2>$null
 
-# 3) Run the Postgres-only concurrency test
+# 3) Point tests at the dedicated DB and explicitly allow schema reset
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"  # required: test harness will DROP/CREATE schema
 
+# 4) Run the test
 python -m pytest -q tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
 
 Safety note: when `TEST_DATABASE_URL` is non-SQLite, the test harness resets schema.
 Always use a dedicated test database (like `geov0_test`).
+
+#### Simulator UI v2 tests
+
+From repo root:
+
+```powershell
+# Unit tests (Vitest)
+cd simulator-ui/v2
+npm install
+npm run test:unit
+
+# E2E / screenshots (Playwright)
+npm run test:e2e
+
+# Update snapshots (only for intentional visual changes)
+npm run test:e2e:update
+```
+
+Docs for simulator UI and Real Mode:
+- `simulator-ui/README.md`
+- `simulator-ui/v2/README.md`
+- `docs/ru/simulator/frontend/docs/api.md`
+- `docs/ru/simulator/backend/simulator-domain-model.md`
+
+#### For AI assistants (repo rule-of-thumb)
+
+If you are an AI assistant operating in this repo, follow these rules:
+
+1) Prefer VS Code Tasks when available (they encode the correct env/ports). If you run commands manually, use PowerShell on Windows.
+2) Always run pytest as `python -m pytest ...` after activating `.venv`.
+3) Never point `TEST_DATABASE_URL` at a developer DB. If it is non-SQLite, set `GEO_TEST_ALLOW_DB_RESET=1` only when you are sure it targets a dedicated disposable test DB.
+4) For simulator Real Mode contract changes, run at least:
+   - `python -m pytest -q tests/contract/test_openapi_contract.py`
+   - `python -m pytest -q tests/integration/test_simulator_sse_smoke.py`
+5) Do not paste multi-line Python into PowerShell as if it were a script; run Python via `python ...` (or via the configured interpreter/tools).
 
 ---
 

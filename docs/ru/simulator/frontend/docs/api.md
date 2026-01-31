@@ -60,6 +60,11 @@
 ### Runs
 - `POST /api/v1/simulator/runs`
   - Старт прогона: `{ scenario_id, mode, intensity_percent } -> { run_id }`.
+
+Примечание про `mode`:
+- `real` — прогон с **DB enrichment** (балансы/долги/статусы для `viz_*`, если доступно).
+- `fixtures` — **sandbox/topology-only**: backend строит снапшот из topology сценария без DB enrichment.
+  Это удобно для быстрых smoke/e2e и отладки UI, но визуально может отличаться от «семантических» fixtures из Admin UI.
 - `GET /api/v1/simulator/runs/{run_id}`
   - Текущее состояние прогона (для polling UI).
 - `POST /api/v1/simulator/runs/{run_id}/pause`

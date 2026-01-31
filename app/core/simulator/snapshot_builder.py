@@ -379,6 +379,22 @@ class SnapshotBuilder:
 
         return snap
 
+    async def enrich_snapshot_from_db_if_enabled(
+        self,
+        snap: SimulatorGraphSnapshot,
+        *,
+        equivalent: str,
+        session=None,
+    ) -> SimulatorGraphSnapshot:
+        """Best-effort DB enrichment for snapshots.
+
+        If DB is disabled, returns the snapshot unchanged.
+        """
+
+        if not self._db_enabled():
+            return snap
+        return await self._enrich_snapshot_from_db(snap, equivalent=equivalent, session=session)
+
 
 def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> SimulatorGraphSnapshot:
     participants = raw.get("participants") or []
@@ -390,6 +406,12 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
         pid = str(p.get("id") or "")
         if not pid:
             continue
+        node_type = str(p.get("type") or "person").strip().lower()
+        # Default viz_size based on type (matches nodePainter.ts defaults)
+        if node_type == "business":
+            default_size = SimulatorVizSize(w=26.0, h=22.0)
+        else:
+            default_size = SimulatorVizSize(w=16.0, h=16.0)
         nodes.append(
             SimulatorGraphNode(
                 id=pid,
@@ -397,6 +419,7 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
                 type=p.get("type"),
                 status=p.get("status"),
                 viz_color_key=_node_color_key(p),
+                viz_size=default_size,
             )
         )
 
