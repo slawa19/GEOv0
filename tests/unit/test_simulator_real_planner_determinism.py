@@ -1,6 +1,15 @@
+import logging
+import threading
+from datetime import datetime, timezone
+
 import pytest
 
-from app.core.simulator.runtime import RunRecord, SimulatorRuntime
+from app.core.simulator.models import RunRecord
+from app.core.simulator.real_runner import RealRunner
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _scenario_minimal() -> dict:
@@ -20,8 +29,24 @@ def _scenario_minimal() -> dict:
 
 
 def test_real_planner_is_deterministic_and_prefix_stable() -> None:
-    runtime = SimulatorRuntime()
     scenario = _scenario_minimal()
+
+    runner = RealRunner(
+        lock=threading.RLock(),
+        get_run=lambda _run_id: (_ for _ in ()).throw(AssertionError("get_run should not be called")),
+        get_scenario_raw=lambda _scenario_id: (_ for _ in ()).throw(AssertionError("get_scenario_raw should not be called")),
+        sse=None,  # not used by _plan_real_payments
+        artifacts=None,  # not used by _plan_real_payments
+        utc_now=_utc_now,
+        publish_run_status=lambda _run_id: None,
+        db_enabled=lambda: False,
+        actions_per_tick_max=20,
+        clearing_every_n_ticks=25,
+        real_max_consec_tick_failures_default=3,
+        real_max_timeouts_per_tick_default=3,
+        real_max_errors_total_default=10,
+        logger=logging.getLogger(__name__),
+    )
 
     run = RunRecord(
         run_id="r",
@@ -33,15 +58,15 @@ def test_real_planner_is_deterministic_and_prefix_stable() -> None:
     run.tick_index = 7
 
     run.intensity_percent = 50
-    planned_a1 = runtime._plan_real_payments(run, scenario)
-    planned_a2 = runtime._plan_real_payments(run, scenario)
+    planned_a1 = runner._plan_real_payments(run, scenario)
+    planned_a2 = runner._plan_real_payments(run, scenario)
     assert planned_a1 == planned_a2
     assert len(planned_a1) > 0
 
     run.intensity_percent = 100
-    planned_b = runtime._plan_real_payments(run, scenario)
+    planned_b = runner._plan_real_payments(run, scenario)
     assert planned_b[: len(planned_a1)] == planned_a1
 
     run.tick_index = 8
-    planned_c = runtime._plan_real_payments(run, scenario)
+    planned_c = runner._plan_real_payments(run, scenario)
     assert planned_c != planned_b
