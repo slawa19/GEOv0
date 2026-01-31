@@ -4,7 +4,7 @@ import TooltipLabel from '../../ui/TooltipLabel.vue'
 import GraphSearchBar from './GraphSearchBar.vue'
 import { t } from '../../i18n'
 
-type ToolbarTab = 'filters' | 'display' | 'navigate'
+type ToolbarTab = 'filters' | 'display'
 type LayoutName = 'fcose' | 'grid' | 'circle'
 
 type Option = {
@@ -45,13 +45,11 @@ type Props = {
   hideIsolates: boolean
   showLegend: boolean
 
-  // Navigate
+  // Search / Focus
   searchQuery: string
   focusPid: string
   fetchSuggestions: FetchSuggestionsFn
   canFind: boolean
-  zoom: number
-
   focusMode: boolean
   focusDepth: 1 | 2
   focusRootPid: string
@@ -59,8 +57,6 @@ type Props = {
 
   // Actions
   onFocusSearch: () => void
-  onFit: () => void
-  onRelayout: () => void
   onUseSelectedForFocus: () => void
   onClearFocusMode: () => void
 }
@@ -87,7 +83,6 @@ const emit = defineEmits<{
 
   (e: 'update:searchQuery', v: string): void
   (e: 'update:focusPid', v: string): void
-  (e: 'update:zoom', v: number): void
 
   (e: 'update:focusMode', v: boolean): void
   (e: 'update:focusDepth', v: 1 | 2): void
@@ -178,11 +173,6 @@ const focusPidModel = computed({
   set: (v) => emit('update:focusPid', v),
 })
 
-const zoomModel = computed({
-  get: () => props.zoom,
-  set: (v) => emit('update:zoom', v),
-})
-
 const focusModeModel = computed({
   get: () => props.focusMode,
   set: (v) => emit('update:focusMode', v),
@@ -208,7 +198,9 @@ const thresholdFieldWidth = computed(() => '18ch')
 const minDegreeFieldWidth = computed(() => '12ch')
 
 const layoutFieldWidth = computed(() => widthChFromLabels(props.layoutOptions.map((o) => o.label), 12, 22, 6))
-const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate.depth1'), t('graph.navigate.depth2')], 10, 18, 4))
+const focusDepthFieldWidth = computed(() =>
+  widthChFromLabels([t('graph.navigate.depth1'), t('graph.navigate.depth2')], 10, 18, 4),
+)
 </script>
 
 <template>
@@ -222,8 +214,78 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
         :label="t('graph.toolbar.filtersTab')"
         name="filters"
       >
-        <div class="filtersGrid">
-          <div class="ctl filtersGrid__eq">
+        <div class="filtersLayout">
+          <div class="filtersLayout__search">
+            <GraphSearchBar
+              v-model:search-query="searchQueryModel"
+              v-model:focus-pid="focusPidModel"
+              :can-find="canFind"
+              :fetch-suggestions="fetchSuggestions"
+              :on-focus-search="onFocusSearch"
+            />
+          </div>
+
+          <div class="filtersLayout__focus">
+            <div class="focusRow">
+              <div class="focusRow__toggle">
+                <TooltipLabel
+                  class="toolbarLabel"
+                  :label="t('graph.navigate.focus')"
+                  :tooltip-text="t('graph.navigate.focusMode.tooltip')"
+                />
+                <el-switch
+                  v-model="focusModeModel"
+                  size="small"
+                />
+              </div>
+
+              <div class="focusRow__controls">
+                <el-select
+                  v-model="focusDepthModel"
+                  size="small"
+                  class="ctl__field ctl__field--compact focus__depth"
+                  :disabled="!focusMode"
+                  :style="{ '--geo-ctl-width': focusDepthFieldWidth }"
+                >
+                  <el-option
+                    :label="t('graph.navigate.depth1')"
+                    :value="1"
+                  />
+                  <el-option
+                    :label="t('graph.navigate.depth2')"
+                    :value="2"
+                  />
+                </el-select>
+
+                <el-tag
+                  v-if="focusMode && focusRootPid"
+                  type="info"
+                  class="focus__tag"
+                >
+                  {{ focusRootPid }}
+                </el-tag>
+
+                <el-button
+                  size="small"
+                  :disabled="!canUseSelectedForFocus"
+                  @click="onUseSelectedForFocus"
+                >
+                  {{ t('graph.navigate.useSelected') }}
+                </el-button>
+                <el-button
+                  size="small"
+                  :disabled="!focusMode"
+                  @click="onClearFocusMode"
+                >
+                  {{ t('graph.navigate.clear') }}
+                </el-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="filtersLayout__filters">
+            <div class="filtersRow">
+              <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.equivalent')"
@@ -243,9 +305,9 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
                 :value="c"
               />
             </el-select>
-          </div>
+              </div>
 
-          <div class="ctl filtersGrid__status">
+              <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.status')"
@@ -267,9 +329,9 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
                 :value="s.value"
               />
             </el-select>
-          </div>
+              </div>
 
-          <div class="ctl filtersGrid__threshold">
+              <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.bottleneck')"
@@ -282,9 +344,9 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
               :style="{ '--geo-ctl-width': thresholdFieldWidth }"
               :placeholder="t('graph.filters.bottleneckPlaceholder')"
             />
-          </div>
+              </div>
 
-          <div class="ctl filtersGrid__type">
+              <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.type')"
@@ -301,9 +363,9 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
                 {{ t('participant.type.business') }}
               </el-checkbox-button>
             </el-checkbox-group>
-          </div>
+              </div>
 
-          <div class="ctl filtersGrid__degree">
+              <div class="ctl">
             <TooltipLabel
               class="toolbarLabel ctl__label"
               :label="t('graph.filters.minDegree')"
@@ -318,6 +380,8 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
               class="ctl__field ctl__field--compact"
               :style="{ '--geo-ctl-width': minDegreeFieldWidth }"
             />
+              </div>
+            </div>
           </div>
         </div>
       </el-tab-pane>
@@ -471,116 +535,7 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
         </div>
       </el-tab-pane>
 
-      <el-tab-pane
-        :label="t('graph.toolbar.navigateTab')"
-        name="navigate"
-      >
-        <div class="navPane">
-          <GraphSearchBar
-            v-model:search-query="searchQueryModel"
-            v-model:focus-pid="focusPidModel"
-            :can-find="canFind"
-            :fetch-suggestions="fetchSuggestions"
-            :on-focus-search="onFocusSearch"
-          />
-
-          <div class="navMainRow">
-            <div class="navMainGroup navMainGroup--actions">
-              <TooltipLabel
-                class="toolbarLabel navMainGroup__label"
-                :label="t('graph.navigate.actions')"
-                tooltip-key="graph.actions"
-                :max-lines="4"
-              />
-              <div class="navMainGroup__content navActions">
-                <el-button
-                  size="small"
-                  @click="onFit"
-                >
-                  {{ t('graph.navigate.fit') }}
-                </el-button>
-                <el-button
-                  size="small"
-                  @click="onRelayout"
-                >
-                  {{ t('graph.navigate.relayout') }}
-                </el-button>
-
-                <div class="zoomrow">
-                  <TooltipLabel
-                    class="toolbarLabel zoomrow__label"
-                    :label="t('graph.navigate.zoom')"
-                    tooltip-key="graph.zoom"
-                  />
-                  <el-slider
-                    v-model="zoomModel"
-                    :min="0.1"
-                    :max="3"
-                    :step="0.05"
-                    class="zoomrow__slider"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div class="navMainGroup navMainGroup--focus">
-              <div class="navToggle">
-                <TooltipLabel
-                  class="toolbarLabel"
-                  :label="t('graph.navigate.focus')"
-                  :tooltip-text="t('graph.navigate.focusMode.tooltip')"
-                />
-                <el-switch
-                  v-model="focusModeModel"
-                  size="small"
-                />
-              </div>
-
-              <div class="navMainGroup__content navFocusControls">
-                <el-select
-                  v-model="focusDepthModel"
-                  size="small"
-                  class="ctl__field ctl__field--compact navFocus__depth"
-                  :disabled="!focusMode"
-                  :style="{ '--geo-ctl-width': focusDepthFieldWidth }"
-                >
-                  <el-option
-                    :label="t('graph.navigate.depth1')"
-                    :value="1"
-                  />
-                  <el-option
-                    :label="t('graph.navigate.depth2')"
-                    :value="2"
-                  />
-                </el-select>
-
-                <el-tag
-                  v-if="focusMode && focusRootPid"
-                  type="info"
-                  class="navFocus__tag"
-                >
-                  {{ focusRootPid }}
-                </el-tag>
-
-                <el-button
-                  size="small"
-                  :disabled="!canUseSelectedForFocus"
-                  @click="onUseSelectedForFocus"
-                >
-                  {{ t('graph.navigate.useSelected') }}
-                </el-button>
-                <el-button
-                  size="small"
-                  :disabled="!focusMode"
-                  @click="onClearFocusMode"
-                >
-                  {{ t('graph.navigate.clear') }}
-                </el-button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </el-tab-pane>
+      <!-- Navigate tab removed: search moved into Filters, nav actions live in the page header. -->
     </el-tabs>
   </div>
 </template>
@@ -598,33 +553,37 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
   padding: 0;
 }
 
-.filtersGrid {
+.filtersLayout {
   display: grid;
-  grid-template-areas: 'eq status threshold type degree';
-  grid-template-columns: max-content max-content max-content max-content max-content;
+  grid-template-columns: minmax(320px, 1fr) auto;
+  grid-template-areas:
+    'search filters'
+    'focus  filters';
+  gap: 10px 18px;
+  align-items: start;
+}
+
+.filtersLayout__search {
+  grid-area: search;
+  min-width: 0;
+}
+
+.filtersLayout__focus {
+  grid-area: focus;
+  min-width: 0;
+}
+
+.filtersLayout__filters {
+  grid-area: filters;
+  min-width: 0;
+}
+
+.filtersRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px 12px;
   align-items: start;
-  justify-content: start;
-}
-
-.filtersGrid__eq {
-  grid-area: eq;
-}
-
-.filtersGrid__status {
-  grid-area: status;
-}
-
-.filtersGrid__threshold {
-  grid-area: threshold;
-}
-
-.filtersGrid__type {
-  grid-area: type;
-}
-
-.filtersGrid__degree {
-  grid-area: degree;
 }
 
 .ctl {
@@ -738,118 +697,58 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
 
 
 
-.navPane {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  --geo-nav-label-w: 84px;
-}
-
-.navMainRow {
+.focusRow {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 18px;
 }
 
-.navMainGroup {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.navMainGroup--focus {
-  margin-left: 12px;
-}
-
-.navMainGroup__label {
-  width: var(--geo-nav-label-w);
-}
-
-.navMainGroup__content {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.navToggle {
+.focusRow__toggle {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.navActions {
-  flex-wrap: nowrap;
-  width: max-content;
-}
-
-.navFocusControls {
+.focusRow__controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
-
-.navFocus__depth {
+.focus__depth {
   width: var(--geo-ctl-width, 120px);
 }
 
-.navFocus__tag {
+.focus__tag {
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.zoomrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.zoomrow__label {
-  font-size: var(--geo-font-size-label);
-  font-weight: 600;
-  color: var(--el-text-color-regular);
-}
-
-.zoomrow__slider {
-  flex: 0 0 auto !important;
-  width: clamp(160px, 18vw, 260px) !important;
-}
-
 @media (max-width: 992px) {
-  .filtersGrid {
+  .filtersLayout {
+    grid-template-columns: 1fr;
     grid-template-areas:
-      'eq status'
-      'threshold type'
-      'degree .';
-    grid-template-columns: max-content max-content;
-  }
-  .navActions {
-    flex-wrap: wrap;
-    width: 100%;
+      'search'
+      'focus'
+      'filters';
   }
 
-  .navMainGroup--focus {
-    margin-left: 0;
+  .filtersRow {
+    justify-content: flex-start;
   }
 }
 
 @media (max-width: 768px) {
-  .filtersGrid {
-    grid-template-areas:
-      'eq'
-      'status'
-      'threshold'
-      'type'
-      'degree';
+  .filtersLayout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      'search'
+      'focus'
+      'filters';
   }
 
   .displayGrid {
@@ -865,16 +764,5 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
     grid-template-columns: 1fr;
   }
 
-  .navMainRow {
-    align-items: start;
-  }
-
-  .navGroup__label {
-    min-width: 0;
-  }
-
-  .zoomrow__slider {
-    width: clamp(180px, 60vw, 320px);
-  }
 }
 </style>

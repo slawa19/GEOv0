@@ -10,7 +10,7 @@ export const STORAGE_KEYS = {
   analyticsToggles: 'geo.graph.analytics.toggles.v1',
 } as const
 
-type ToolbarTab = 'filters' | 'display' | 'navigate'
+type ToolbarTab = 'filters' | 'display'
 
 export function useGraphPageStorage(input: {
   showLegend: Ref<boolean>
@@ -29,7 +29,8 @@ export function useGraphPageStorage(input: {
       if (rawLegend !== null) input.showLegend.value = rawLegend === '1'
 
       const rawTab = storage.getItem(STORAGE_KEYS.toolbarTab)
-      if (rawTab === 'filters' || rawTab === 'display' || rawTab === 'navigate') input.toolbarTab.value = rawTab
+      if (rawTab === 'filters' || rawTab === 'display') input.toolbarTab.value = rawTab
+      if (rawTab === 'navigate') input.toolbarTab.value = 'filters'
 
       const rawSpacing = storage.getItem(STORAGE_KEYS.layoutSpacing)
       if (rawSpacing !== null) {

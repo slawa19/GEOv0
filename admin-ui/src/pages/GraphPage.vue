@@ -141,7 +141,7 @@ const showLegend = ref(false)
 const layoutName = ref<'fcose' | 'grid' | 'circle'>('fcose')
 const layoutSpacing = ref<number>(DEFAULT_LAYOUT_SPACING)
 
-const toolbarTab = ref<'filters' | 'display' | 'navigate'>('filters')
+const toolbarTab = ref<'filters' | 'display'>('filters')
 
 const isRealMode = computed(() => effectiveApiMode() === 'real')
 const selected = ref<SelectedInfo | null>(null)
@@ -427,6 +427,37 @@ const stats = computed(() => {
           tooltip-key="nav.graph"
         />
         <div class="hdr__right">
+          <div class="hdr__controls">
+            <el-button
+              size="small"
+              @click="graphViz.fit"
+            >
+              {{ t('graph.navigate.fit') }}
+            </el-button>
+            <el-button
+              size="small"
+              @click="graphViz.runLayout"
+            >
+              {{ t('graph.navigate.relayout') }}
+            </el-button>
+
+            <div class="hdrZoom">
+              <TooltipLabel
+                class="hdrZoom__label"
+                :label="t('graph.navigate.zoom')"
+                tooltip-key="graph.zoom"
+              />
+              <el-slider
+                v-model="zoom"
+                :min="0.1"
+                :max="3"
+                :step="0.05"
+                class="hdrZoom__slider"
+              />
+            </div>
+          </div>
+
+          <div class="hdr__stats">
           <el-tag type="info">
             {{ seedLabel }}
           </el-tag>
@@ -442,6 +473,7 @@ const stats = computed(() => {
           >
             {{ t('graph.stats.bottlenecks') }}: {{ stats.bottlenecks }}
           </el-tag>
+          </div>
         </div>
       </div>
     </template>
@@ -493,7 +525,6 @@ const stats = computed(() => {
       v-model:show-legend="showLegend"
       v-model:search-query="searchQuery"
       v-model:focus-pid="focusPid"
-      v-model:zoom="zoom"
       v-model:focus-mode="focusMode"
       v-model:focus-depth="focusDepth"
       :available-equivalents="availableEquivalents"
@@ -501,8 +532,6 @@ const stats = computed(() => {
       :layout-options="layoutOptions"
       :fetch-suggestions="graphViz.querySearchParticipants"
       :on-focus-search="graphViz.focusSearch"
-      :on-fit="graphViz.fit"
-      :on-relayout="graphViz.runLayout"
       :can-find="graphViz.canFind.value"
       :focus-root-pid="focusRootPid"
       :can-use-selected-for-focus="canUseSelectedForFocus"
@@ -585,6 +614,42 @@ const stats = computed(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.hdr__controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Element Plus adds default spacing via .el-button + .el-button { margin-left: 12px }.
+   In this row we rely on flex gap for consistent spacing. */
+.hdr__controls :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.hdr__stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.hdrZoom {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hdrZoom__label {
+  color: var(--el-text-color-secondary);
+}
+
+.hdrZoom__slider {
+  width: 140px;
 }
 
 .guardRow {

@@ -77,6 +77,7 @@ const onSelect = (s: ParticipantSuggestion) => {
   flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .navRow__label {
@@ -85,8 +86,10 @@ const onSelect = (s: ParticipantSuggestion) => {
 }
 
 .navRow__field {
-  width: 320px;
-  flex: 0 0 auto;
+  flex: 1 1 320px;
+  width: auto;
+  max-width: 420px;
+  min-width: 0;
 }
 
 .navRow__button {
