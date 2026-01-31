@@ -6,8 +6,9 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
 from app.api.deps import get_db
@@ -42,6 +43,7 @@ engine = create_async_engine(
     TEST_DATABASE_URL,
     echo=False,
     poolclass=NullPool,
+    connect_args={"timeout": 30} if _is_sqlite else {},
 )
 TestingSessionLocal = async_sessionmaker(
     bind=engine,
@@ -117,14 +119,28 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     try:
         from app.core.simulator.runtime import runtime as simulator_runtime
 
-        with simulator_runtime._lock:
-            run_ids = list(simulator_runtime._runs.keys())
+        # Ensure simulator cleanup uses the same test DB sessionmaker.
+        import app.db.session as app_db_session
+        _orig_async_session_local = app_db_session.AsyncSessionLocal
+        app_db_session.AsyncSessionLocal = TestingSessionLocal
+        try:
+            with simulator_runtime._lock:
+                run_ids = list(simulator_runtime._runs.keys())
 
-        for run_id in run_ids:
-            try:
-                await simulator_runtime.stop(run_id)
-            except Exception:
-                pass
+            for run_id in run_ids:
+                try:
+                    await simulator_runtime.stop(run_id)
+                except Exception:
+                    pass
+
+            # Release any pooled SQLite connections that could keep locks.
+            if _is_sqlite:
+                try:
+                    await app_db_session.engine.dispose()
+                except Exception:
+                    pass
+        finally:
+            app_db_session.AsyncSessionLocal = _orig_async_session_local
     except Exception:
         pass
 
@@ -132,9 +148,35 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         # SQLite has flaky transactional isolation under rapid commit-heavy tests.
         # For stability we hard-reset DB state per test.
         # Truncating tables is much faster than drop/create for the whole schema.
-        async with engine.begin() as conn:
-            for table in reversed(Base.metadata.sorted_tables):
-                await conn.execute(table.delete())
+        try:
+            # Best-effort: ensure any other engine in the process is disposed before writes.
+            from app.db.session import engine as app_engine
+
+            await app_engine.dispose()
+        except Exception:
+            pass
+
+        # SQLite can intermittently raise "database is locked" if some background task
+        # is still releasing a connection/transaction. Use a busy timeout + a small
+        # retry loop to de-flake test teardown/setup on Windows.
+        for attempt in range(6):
+            try:
+                async with engine.begin() as conn:
+                    try:
+                        await conn.execute(text("PRAGMA busy_timeout = 30000"))
+                        await conn.execute(text("PRAGMA journal_mode = WAL"))
+                    except Exception:
+                        # Best-effort pragmas.
+                        pass
+
+                    for table in reversed(Base.metadata.sorted_tables):
+                        await conn.execute(table.delete())
+                break
+            except OperationalError as e:
+                msg = str(e).lower()
+                if "database is locked" not in msg or attempt >= 5:
+                    raise
+                await asyncio.sleep(0.25 * (attempt + 1))
 
         async with TestingSessionLocal() as session:
             yield session

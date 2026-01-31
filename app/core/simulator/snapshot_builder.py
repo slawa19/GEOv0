@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Optional
 
 from sqlalchemy import func, select
@@ -13,6 +13,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord, ScenarioRecord
+from app.core.simulator.net_balance_utils import atoms_to_net_sign, net_decimal_to_atoms
 from app.schemas.simulator import (
     SIMULATOR_API_VERSION,
     SimulatorGraphLink,
@@ -292,14 +293,9 @@ class SnapshotBuilder:
             debit = debit_sum.get(rec.id, Decimal("0"))
             net = credit - debit
 
-            atoms = int((net * scale10).to_integral_value(rounding=ROUND_HALF_UP))
+            atoms = net_decimal_to_atoms(net, precision=precision)
             node.net_balance_atoms = str(atoms)
-            if atoms < 0:
-                node.net_sign = -1
-            elif atoms > 0:
-                node.net_sign = 1
-            else:
-                node.net_sign = 0
+            node.net_sign = atoms_to_net_sign(atoms)
 
             atoms_by_pid[pid] = atoms
             mags.append(abs(atoms))

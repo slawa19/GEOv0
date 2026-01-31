@@ -22,19 +22,20 @@ export const VIZ_MAPPING: VizMapping = {
     color: {
       business: { fill: '#10b981' },
       person: { fill: '#3b82f6' },
-      suspended: { fill: '#94a3b8' },
-      left: { fill: '#64748b' },
-      deleted: { fill: '#475569' },
+      suspended: { fill: '#e6a23c' },  // aligned with admin-ui (warning orange)
+      left: { fill: '#909399' },
+      deleted: { fill: '#606266' },
 
-      'debt-0': { fill: '#84cc16' },
-      'debt-1': { fill: '#a3e635' },
-      'debt-2': { fill: '#d9f99d' },
-      'debt-3': { fill: '#f59e0b' },
-      'debt-4': { fill: '#f97316' },
-      'debt-5': { fill: '#fb7185' },
-      'debt-6': { fill: '#ef4444' },
-      'debt-7': { fill: '#dc2626' },
-      'debt-8': { fill: '#991b1b' },
+      // Debt bins: debt-0 uses base type color (person/business), so not listed here.
+      // Gradient: light yellow -> red (aligned with admin-ui)
+      'debt-1': { fill: '#eadca8' },
+      'debt-2': { fill: '#e2cf8d' },
+      'debt-3': { fill: '#d8c073' },
+      'debt-4': { fill: '#cfae62' },
+      'debt-5': { fill: '#c79459' },
+      'debt-6': { fill: '#be7a52' },
+      'debt-7': { fill: '#b05f4b' },
+      'debt-8': { fill: '#9a4444' },
     },
   },
   link: {

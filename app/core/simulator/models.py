@@ -71,7 +71,7 @@ class RunRecord:
     _error_timestamps: "deque[float]" = field(default_factory=deque)
 
     _event_seq: int = 0
-    _subs: list[_Subscription] = None  # type: ignore[assignment]
+    _subs: list[_Subscription] = field(default_factory=list)
     _heartbeat_task: Optional[asyncio.Task[None]] = None
 
     # Best-effort in-memory replay buffer for SSE reconnects.
@@ -103,6 +103,7 @@ class RunRecord:
     # Real-mode per-equivalent viz quantile cache for SSE node_patch/edge_patch.
     _real_viz_by_eq: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        if self._subs is None:
-            self._subs = []
+    # Real-mode logging throttle state (avoid log spam within one tick).
+    # Stored on the run to avoid unbounded per-run dictionaries in RealRunner.
+    _real_warned_tick: int = -10**9
+    _real_warned_keys: set[str] = field(default_factory=set)

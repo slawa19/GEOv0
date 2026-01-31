@@ -355,6 +355,22 @@ export const RU: Record<string, string> = {
   'config.labels.CLEARING_ENABLED': 'Клиринг (циклы)',
   'config.help.CLEARING_ENABLED': 'Включает периодическую логику клиринга/settlement. Отключать только для тестов или аварийной изоляции.',
 
+  'config.helpFallback.kind.boolean': 'Тип: переключатель (true/false).',
+  'config.helpFallback.kind.number': 'Тип: число.',
+  'config.helpFallback.kind.string': 'Тип: строка.',
+  'config.helpFallback.kind.json': 'Тип: JSON (валидный JSON строкой).',
+  'config.helpFallback.section.featureFlags': 'Влияет на включение/отключение функций (feature flags).',
+  'config.helpFallback.section.logging': 'Влияет на логирование backend.',
+  'config.helpFallback.section.rateLimit': 'Влияет на ограничение запросов (rate limit).',
+  'config.helpFallback.section.routing': 'Влияет на поиск маршрутов платежа.',
+  'config.helpFallback.section.recovery': 'Влияет на фоновое обслуживание и обработку зависших tx.',
+  'config.helpFallback.section.integrity': 'Влияет на фоновые расчёты/проверки целостности.',
+  'config.helpFallback.section.other': 'Технический параметр backend.',
+  'config.helpFallback.units.seconds': 'Единицы: секунды.',
+  'config.helpFallback.units.count': 'Единицы: количество (шт.).',
+  'config.helpFallback.apply': 'Применяется сразу после сохранения.',
+  'config.helpFallback.safeDefault': 'Если не уверены — оставьте значение как есть.',
+
   'health.loadFailed': 'Не удалось загрузить health',
 
   'fixtures.loadFailedOne': 'Не удалось загрузить фикстуру: {path} ({status})',

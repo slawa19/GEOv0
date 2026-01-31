@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import bisect
 import uuid
-from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
 from sqlalchemy import func, select
@@ -12,6 +12,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.core.simulator.net_balance_utils import atoms_to_net_sign, net_decimal_to_atoms
 
 
 @dataclass
@@ -28,17 +29,11 @@ class VizPatchHelper:
     precision: int
     refresh_every_ticks: int = 10
 
-    _mags_sorted: list[int] = None  # type: ignore[assignment]
-    _debt_mags_sorted: list[int] = None  # type: ignore[assignment]
+    _mags_sorted: list[int] = field(default_factory=list)
+    _debt_mags_sorted: list[int] = field(default_factory=list)
     _limit_q33: float | None = None
     _limit_q66: float | None = None
     _last_refresh_tick: int = -10**9
-
-    def __post_init__(self) -> None:
-        if self._mags_sorted is None:
-            self._mags_sorted = []
-        if self._debt_mags_sorted is None:
-            self._debt_mags_sorted = []
 
     @classmethod
     async def create(
@@ -69,7 +64,8 @@ class VizPatchHelper:
         if tick_index - self._last_refresh_tick < self.refresh_every_ticks:
             return
 
-        scale10 = Decimal(10) ** int(self.precision)
+        precision = int(self.precision)
+        scale10 = Decimal(10) ** precision
 
         debt_rows = (
             await session.execute(
@@ -100,7 +96,7 @@ class VizPatchHelper:
         debt_mags: list[int] = []
         for pid in participant_ids:
             net = credit_sum.get(pid, Decimal("0")) - debit_sum.get(pid, Decimal("0"))
-            atoms = int((net * scale10).to_integral_value(rounding=ROUND_HALF_UP))
+            atoms = net_decimal_to_atoms(net, precision=precision)
             mag = abs(atoms)
             mags.append(mag)
             if atoms < 0:
@@ -263,7 +259,8 @@ class VizPatchHelper:
         credit_sum = {r.creditor_id: (r.amount or Decimal("0")) for r in credit_rows}
         debit_sum = {r.debtor_id: (r.amount or Decimal("0")) for r in debit_rows}
 
-        scale10 = Decimal(10) ** int(self.precision)
+        precision = int(self.precision)
+        scale10 = Decimal(10) ** precision
         out: list[dict[str, Any]] = []
         for pid in pid_list:
             p = pid_to_participant.get(pid)
@@ -271,13 +268,8 @@ class VizPatchHelper:
                 continue
 
             net = credit_sum.get(p.id, Decimal("0")) - debit_sum.get(p.id, Decimal("0"))
-            atoms = int((net * scale10).to_integral_value(rounding=ROUND_HALF_UP))
-            if atoms < 0:
-                net_sign: int = -1
-            elif atoms > 0:
-                net_sign = 1
-            else:
-                net_sign = 0
+            atoms = net_decimal_to_atoms(net, precision=precision)
+            net_sign: int = atoms_to_net_sign(atoms)
 
             out.append(
                 {

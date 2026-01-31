@@ -11,6 +11,7 @@ from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast
 from app.schemas.simulator import RunMode, RunStatus
+from app.utils.exceptions import ConflictException
 from app.utils.exceptions import NotFoundException
 
 
@@ -32,6 +33,9 @@ class RunLifecycle:
         run_to_status: Callable[[RunRecord], RunStatus],
         get_run_status_payload_json: Callable[[str], dict[str, Any]],
         real_max_in_flight_default: int,
+        get_max_active_runs: Callable[[], int],
+        get_max_run_records: Callable[[], int],
+        logger,
     ) -> None:
         self._lock = lock
         self._runs = runs
@@ -47,6 +51,47 @@ class RunLifecycle:
         self._run_to_status = run_to_status
         self._get_run_status_payload_json = get_run_status_payload_json
         self._real_max_in_flight_default = real_max_in_flight_default
+        self._get_max_active_runs = get_max_active_runs
+        self._get_max_run_records = get_max_run_records
+        self._logger = logger
+
+    def _count_active_runs_locked(self) -> int:
+        active_states = {"running", "paused", "stopping"}
+        return sum(1 for r in self._runs.values() if str(getattr(r, "state", "")) in active_states)
+
+    def _enforce_active_run_limit_locked(self) -> None:
+        max_active = int(self._get_max_active_runs() or 0)
+        if max_active <= 0:
+            return
+        active = self._count_active_runs_locked()
+        if active >= max_active:
+            raise ConflictException(
+                "Too many active simulator runs",
+                details={"max_active_runs": max_active, "active_runs": active},
+            )
+
+    def _prune_run_records_locked(self) -> None:
+        max_records = int(self._get_max_run_records() or 0)
+        if max_records <= 0:
+            return
+        if len(self._runs) <= max_records:
+            return
+
+        # Prefer pruning stopped runs first (oldest first).
+        stopped: list[RunRecord] = [r for r in self._runs.values() if str(getattr(r, "state", "")) == "stopped"]
+
+        def _sort_key(r: RunRecord):
+            ts = getattr(r, "stopped_at", None) or getattr(r, "started_at", None)
+            return (ts is None, ts)
+
+        stopped.sort(key=_sort_key)
+
+        while len(self._runs) > max_records and stopped:
+            r = stopped.pop(0)
+            try:
+                del self._runs[r.run_id]
+            except Exception:
+                break
 
     def _get_run(self, run_id: str) -> RunRecord:
         with self._lock:
@@ -90,20 +135,30 @@ class RunLifecycle:
         run._next_clearing_at_ms = 25_000
         run._clearing_pending_done_at_ms = None
 
-        # Minimal local artifacts (best-effort).
-        self._artifacts.init_run_artifacts(run)
-
         with self._lock:
+            self._enforce_active_run_limit_locked()
+
+            # Minimal local artifacts (best-effort). Do it before exposing the run.
+            self._artifacts.init_run_artifacts(run)
+
             self._runs[run_id] = run
             self._set_active_run_id(run_id)
 
-        # Start artifacts writer (best-effort; no-op if artifacts disabled).
-        self._artifacts.start_events_writer(run_id)
+            # Start artifacts writer (best-effort; no-op if artifacts disabled).
+            self._artifacts.start_events_writer(run_id)
 
-        # Start heartbeat loop.
-        run._heartbeat_task = asyncio.create_task(self._heartbeat_loop(run_id), name=f"simulator-heartbeat:{run_id}")
-        # Emit immediate status event (so SSE clients don't wait for first tick).
-        self._publish_run_status(run_id)
+            # Start heartbeat loop.
+            run._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(run_id),
+                name=f"simulator-heartbeat:{run_id}",
+            )
+
+            # Emit immediate status event (so SSE clients don't wait for first tick).
+            self._publish_run_status(run_id)
+
+            # Prevent unbounded growth in-memory.
+            self._prune_run_records_locked()
+
         await simulator_storage.upsert_run(run)
         await simulator_storage.sync_artifacts(run)
         return run_id
@@ -177,7 +232,7 @@ class RunLifecycle:
             except asyncio.CancelledError:
                 pass
             except Exception:
-                pass
+                self._logger.exception("simulator.run.stop_heartbeat_failed run_id=%s", run_id)
 
         if events_task is not None:
             await self._artifacts.stop_events_writer(run_id)

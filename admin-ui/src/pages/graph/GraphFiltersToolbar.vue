@@ -243,12 +243,6 @@ const focusDepthFieldWidth = computed(() => widthChFromLabels([t('graph.navigate
                 :value="c"
               />
             </el-select>
-            <div
-              v-if="eqModel === 'ALL'"
-              class="ctl__hint"
-            >
-              {{ t('graph.filters.equivalentNetVizHint') }}
-            </div>
           </div>
 
           <div class="ctl filtersGrid__status">

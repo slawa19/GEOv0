@@ -330,6 +330,105 @@ function Seed-DbIfRequested() {
   Invoke-Docker (@('exec','geov0-app') + $args) | Out-Host
 }
 
+function Stop-LocalUvicornServers() {
+  # Stop local uvicorn processes (app.main:app) running outside Docker.
+  # These are typically started by run_local.ps1.
+  
+  Write-Host 'Stopping local uvicorn servers...'
+  
+  $stoppedCount = 0
+  $commonPorts = @(8000, 18000, 28000)
+  
+  try {
+    $pythonProcesses = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue
+    
+    foreach ($proc in $pythonProcesses) {
+      $cmdLine = $proc.CommandLine
+      if (-not $cmdLine) { continue }
+      
+      # Match uvicorn running app.main:app
+      if ($cmdLine -match 'uvicorn.*app\.main:app') {
+        try {
+          Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          $stoppedCount++
+          Write-Host " Stopped PID $($proc.ProcessId)" -ForegroundColor Yellow
+        } catch {
+          Write-Host " Failed to stop PID $($proc.ProcessId): $_" -ForegroundColor Red
+        }
+      }
+    }
+  } catch {
+    Write-Host " Could not enumerate Python processes: $_" -ForegroundColor DarkGray
+  }
+  
+  # Also check by port listening (in case command line is not available)
+  foreach ($port in $commonPorts) {
+    try {
+      $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($conn -and $conn.OwningProcess) {
+        $pid = $conn.OwningProcess
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.CommandLine -and $proc.CommandLine -match 'uvicorn.*app\.main:app') {
+          try {
+            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            $stoppedCount++
+            Write-Host " Stopped PID $pid (port $port)" -ForegroundColor Yellow
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+  
+  if ($stoppedCount -eq 0) {
+    Write-Host ' No local uvicorn servers found running.' -ForegroundColor DarkGray
+  } else {
+    Write-Host " Stopped $stoppedCount uvicorn process(es)." -ForegroundColor Green
+  }
+}
+
+function Stop-ViteDevServers() {
+  # Stop Node.js processes running Vite for simulator-ui and admin-ui.
+  # Identifies processes by command line containing vite.js and project paths.
+  
+  Write-Host 'Stopping Vite dev servers (simulator-ui, admin-ui)...'
+  
+  $stoppedCount = 0
+  
+  try {
+    $nodeProcesses = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue
+    
+    foreach ($proc in $nodeProcesses) {
+      $cmdLine = $proc.CommandLine
+      if (-not $cmdLine) { continue }
+      
+      # Match vite processes for simulator-ui or admin-ui
+      $isSimulatorUiVite = $cmdLine -match 'simulator-ui[\\/]v2[\\/].*vite' -or $cmdLine -match 'simulator-ui[\\/]v2[\\/]node_modules'
+      $isAdminUiVite = $cmdLine -match 'admin-ui[\\/].*vite' -or $cmdLine -match 'admin-ui[\\/]node_modules[\\/].*vite'
+      $isNpmDevServer = ($cmdLine -match 'npm.*run\s+dev.*--port\s+(5173|5176|5174|5175)') -or ($cmdLine -match 'npm-cli\.js.*run\s+dev')
+      # Also match Playwright test server for admin-ui/simulator-ui
+      $isPlaywrightTestServer = $cmdLine -match '(admin-ui|simulator-ui)[\\/].*@playwright[\\/]test[\\/]cli\.js\s+test-server'
+      
+      if ($isSimulatorUiVite -or $isAdminUiVite -or $isNpmDevServer -or $isPlaywrightTestServer) {
+        try {
+          Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          $stoppedCount++
+          Write-Host " Stopped PID $($proc.ProcessId)" -ForegroundColor Yellow
+        } catch {
+          Write-Host " Failed to stop PID $($proc.ProcessId): $_" -ForegroundColor Red
+        }
+      }
+    }
+  } catch {
+    Write-Host " Could not enumerate Node processes: $_" -ForegroundColor DarkGray
+  }
+  
+  if ($stoppedCount -eq 0) {
+    Write-Host ' No Vite dev servers found running.' -ForegroundColor DarkGray
+  } else {
+    Write-Host " Stopped $stoppedCount Vite dev server process(es)." -ForegroundColor Green
+  }
+}
+
 function Start-SimulatorUiReal() {
   if ($NoSimulatorUi) {
     Write-Host 'Skipping Simulator UI (NoSimulatorUi=1).'
@@ -366,10 +465,24 @@ if ($Action -eq 'doctor') {
 }
 
 if ($Action -eq 'stop') {
+  Write-Host 'Stopping all simulator services...'
+  
+  # 1. Stop Vite dev servers (simulator-ui, admin-ui) - no Docker required
+  Stop-ViteDevServers
+  
+  # 2. Stop local uvicorn servers (started by run_local.ps1)
+  Stop-LocalUvicornServers
+  
+  # 3. Stop Docker containers if Docker is available
   $mode = Get-DockerMode
-  if ($mode -eq 'missing') { Warn-MissingDockerAndExit }
-  Write-Host 'Stopping services...'
-  try { Invoke-DockerCompose @('stop','app','redis','db') | Out-Host } catch {}
+  if ($mode -ne 'missing') {
+    Write-Host 'Stopping Docker containers (app, redis, db)...'
+    try { Invoke-DockerCompose @('stop','app','redis','db') | Out-Host } catch {}
+  } else {
+    Write-Host 'Docker not available, skipping container stop.' -ForegroundColor DarkGray
+  }
+  
+  Write-Host 'All simulator services stopped.' -ForegroundColor Green
   exit 0
 }
 

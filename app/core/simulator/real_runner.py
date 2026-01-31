@@ -36,6 +36,13 @@ from app.schemas.simulator import (
 from app.utils.exceptions import GeoException, TimeoutException
 
 
+def _safe_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)) or str(default))
+    except Exception:
+        return int(default)
+
+
 def map_rejection_code(err_details: Any) -> str:
     """Map structured error details to a stable simulator rejection code.
 
@@ -112,6 +119,34 @@ class RealRunner:
         self._real_max_errors_total_default = int(real_max_errors_total_default)
         self._logger = logger
 
+        # Cache env-derived limits (avoid getenv on every tick).
+        self._real_max_consec_tick_failures_limit = _safe_int_env(
+            "SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES",
+            int(self._real_max_consec_tick_failures_default),
+        )
+        self._real_max_timeouts_per_tick_limit = _safe_int_env(
+            "SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK",
+            int(self._real_max_timeouts_per_tick_default),
+        )
+        self._real_max_errors_total_limit = _safe_int_env(
+            "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
+            int(self._real_max_errors_total_default),
+        )
+        self._clearing_max_depth_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_DEPTH", 6)
+        self._clearing_max_fx_edges_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", 30)
+
+    def _should_warn_this_tick(self, run: RunRecord, *, key: str) -> bool:
+        with self._lock:
+            tick = int(run.tick_index)
+            if int(getattr(run, "_real_warned_tick", -10**9)) != tick:
+                run._real_warned_tick = tick
+                run._real_warned_keys.clear()
+
+            if key in run._real_warned_keys:
+                return False
+            run._real_warned_keys.add(key)
+            return True
+
     async def tick_real_mode(self, run_id: str) -> None:
         run = self._get_run(run_id)
         scenario = self._get_scenario_raw(run.scenario_id)
@@ -140,18 +175,8 @@ class RealRunner:
                     run.current_phase = "payments" if planned else None
                 sender_id_by_pid = {pid: participant_id for (participant_id, pid) in participants}
 
-                max_timeouts_per_tick = int(
-                    os.getenv(
-                        "SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK",
-                        str(self._real_max_timeouts_per_tick_default),
-                    )
-                )
-                max_errors_total = int(
-                    os.getenv(
-                        "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
-                        str(self._real_max_errors_total_default),
-                    )
-                )
+                max_timeouts_per_tick = int(self._real_max_timeouts_per_tick_limit)
+                max_errors_total = int(self._real_max_errors_total_limit)
 
                 committed = 0
                 rejected = 0
@@ -233,36 +258,23 @@ class RealRunner:
                                 )
                                 await s2.commit()
 
-                            status = str(getattr(res, "status", None) or "")
+                            status = str(res.status or "")
+
+                            routes = res.routes or []
 
                             route_edges: list[tuple[str, str]] = []
-                            try:
-                                routes = getattr(res, "routes", None)
-                                if routes:
-                                    for r in routes:
-                                        path = getattr(r, "path", None)
-                                        if not path or len(path) < 2:
-                                            continue
-                                        route_edges = [(str(a), str(b)) for a, b in zip(path, path[1:])]
-                                        if route_edges:
-                                            break
-                            except Exception:
-                                route_edges = []
+                            for r in routes:
+                                path = r.path
+                                if len(path) < 2:
+                                    continue
+                                route_edges = [(str(a), str(b)) for a, b in zip(path, path[1:])]
+                                if route_edges:
+                                    break
 
                             avg_route_len = 0.0
-                            try:
-                                routes = getattr(res, "routes", None)
-                                if routes:
-                                    lens: list[float] = []
-                                    for r in routes:
-                                        path = getattr(r, "path", None)
-                                        if not path or len(path) < 2:
-                                            continue
-                                        lens.append(float(max(1, int(len(path) - 1))))
-                                    if lens:
-                                        avg_route_len = float(sum(lens) / len(lens))
-                            except Exception:
-                                avg_route_len = 0.0
+                            lens = [float(len(r.path) - 1) for r in routes if len(r.path) >= 2]
+                            if lens:
+                                avg_route_len = float(sum(lens) / len(lens))
 
                             return (
                                 action.seq,
@@ -445,6 +457,13 @@ class RealRunner:
                                 try:
                                     rejection_code = map_rejection_code(err_details)
                                 except Exception:
+                                    if self._should_warn_this_tick(run, key="map_rejection_code_failed"):
+                                        self._logger.debug(
+                                            "simulator.real.map_rejection_code_failed run_id=%s tick=%s",
+                                            str(run.run_id),
+                                            int(run.tick_index),
+                                            exc_info=True,
+                                        )
                                     rejection_code = "PAYMENT_REJECTED"
 
                                 with self._lock:
@@ -473,21 +492,32 @@ class RealRunner:
 
                 try:
                     if tasks:
-                        for t in asyncio.as_completed(tasks):
-                            seq, eq, sender_pid, receiver_pid, status, err_code, err_details, avg_route_len, route_edges = await t
+                        async with db_session.AsyncSessionLocal() as patch_session:
+                            # Per-tick caches to avoid repeated heavy work when multiple tx touch the same pids.
+                            per_tick_pid_to_participant_by_eq_and_pids: dict[
+                                tuple[str, tuple[str, ...]],
+                                dict[str, Participant],
+                            ] = {}
+                            per_tick_node_patch_by_eq_and_pids: dict[
+                                tuple[str, tuple[str, ...]],
+                                list[dict[str, Any]] | None,
+                            ] = {}
+                            per_tick_quantiles_refreshed_by_eq: set[str] = set()
 
-                            if run.state != "running":
-                                break
+                            for t in asyncio.as_completed(tasks):
+                                seq, eq, sender_pid, receiver_pid, status, err_code, err_details, avg_route_len, route_edges = await t
 
-                            # Build edge_patch for committed transactions (Variant A: SSE patches)
-                            edge_patch_list: list[dict[str, Any]] | None = None
-                            node_patch_list: list[dict[str, Any]] | None = None
-                            if status == "COMMITTED":
-                                edges_pairs = route_edges or [(sender_pid, receiver_pid)]
+                                if run.state != "running":
+                                    break
 
-                                edge_patch_list = []
+                                # Build edge_patch for committed transactions (Variant A: SSE patches)
+                                edge_patch_list: list[dict[str, Any]] | None = None
+                                node_patch_list: list[dict[str, Any]] | None = None
                                 try:
-                                    async with db_session.AsyncSessionLocal() as patch_session:
+                                    if status == "COMMITTED":
+                                        edges_pairs = route_edges or [(sender_pid, receiver_pid)]
+
+                                        edge_patch_list = []
                                         helper: VizPatchHelper | None
                                         with self._lock:
                                             helper = run._real_viz_by_eq.get(str(eq))
@@ -508,27 +538,44 @@ class RealRunner:
                                         participant_ids: list[uuid.UUID] = []
                                         if run._real_participants:
                                             participant_ids = [pid for (pid, _) in run._real_participants]
-                                        await helper.maybe_refresh_quantiles(
-                                            patch_session,
-                                            tick_index=int(run.tick_index),
-                                            participant_ids=participant_ids,
-                                        )
+                                        if str(eq) not in per_tick_quantiles_refreshed_by_eq:
+                                            await helper.maybe_refresh_quantiles(
+                                                patch_session,
+                                                tick_index=int(run.tick_index),
+                                                participant_ids=participant_ids,
+                                            )
+                                            per_tick_quantiles_refreshed_by_eq.add(str(eq))
 
                                         # Fetch participants in one query.
                                         pids = sorted({pid for ab in edges_pairs for pid in ab if pid})
-                                        res = await patch_session.execute(select(Participant).where(Participant.pid.in_(pids)))
-                                        pid_to_participant = {p.pid: p for p in res.scalars().all()}
+                                        pids_key = (str(eq), tuple(pids))
+                                        pid_to_participant = per_tick_pid_to_participant_by_eq_and_pids.get(pids_key)
+                                        if pid_to_participant is None:
+                                            res = await patch_session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                                            pid_to_participant = {p.pid: p for p in res.scalars().all()}
+                                            per_tick_pid_to_participant_by_eq_and_pids[pids_key] = pid_to_participant
 
                                         try:
-                                            node_patch_list = await helper.compute_node_patches(
-                                                patch_session,
-                                                pid_to_participant=pid_to_participant,
-                                                pids=pids,
-                                            )
-                                            if node_patch_list == []:
-                                                node_patch_list = None
-                                        except Exception as e_np:
-                                            self._logger.warning(f"Failed to build node_patch: {e_np}")
+                                            if pids_key in per_tick_node_patch_by_eq_and_pids:
+                                                node_patch_list = per_tick_node_patch_by_eq_and_pids[pids_key]
+                                            else:
+                                                node_patch_list = await helper.compute_node_patches(
+                                                    patch_session,
+                                                    pid_to_participant=pid_to_participant,
+                                                    pids=pids,
+                                                )
+                                                if node_patch_list == []:
+                                                    node_patch_list = None
+                                                per_tick_node_patch_by_eq_and_pids[pids_key] = node_patch_list
+                                        except Exception:
+                                            if self._should_warn_this_tick(run, key=f"node_patch_failed:{eq}"):
+                                                self._logger.warning(
+                                                    "simulator.real.node_patch_failed run_id=%s tick=%s eq=%s",
+                                                    str(run.run_id),
+                                                    int(run.tick_index),
+                                                    str(eq),
+                                                    exc_info=True,
+                                                )
                                             node_patch_list = None
 
                                         # Batch-load debts and trustlines for the affected edges (avoid N+1).
@@ -612,35 +659,49 @@ class RealRunner:
                                                     **edge_viz,
                                                 }
                                             )
-                                except Exception as e_patch:
-                                    self._logger.warning(f"Failed to build edge_patch: {e_patch}")
+                                except Exception:
+                                    if self._should_warn_this_tick(run, key=f"edge_patch_failed:{eq}"):
+                                        self._logger.warning(
+                                            "simulator.real.edge_patch_failed run_id=%s tick=%s eq=%s",
+                                            str(run.run_id),
+                                            int(run.tick_index),
+                                            str(eq),
+                                            exc_info=True,
+                                        )
                                     edge_patch_list = None
                                     node_patch_list = None
+                                finally:
+                                    # Important for SQLite: end the implicit read transaction so it doesn't hold a lock
+                                    # while other tasks commit writes.
+                                    try:
+                                        await patch_session.rollback()
+                                    except Exception:
+                                        pass
 
                                 if edge_patch_list == []:
                                     edge_patch_list = None
 
-                            ready[seq] = (
-                                eq,
-                                sender_pid,
-                                receiver_pid,
-                                status,
-                                err_code,
-                                err_details,
-                                avg_route_len,
-                                route_edges,
-                                edge_patch_list,
-                                node_patch_list,
-                            )
-                            _emit_if_ready()
-
-                            if max_timeouts_per_tick > 0 and timeouts >= max_timeouts_per_tick:
-                                await self.fail_run(
-                                    run_id,
-                                    code="REAL_MODE_TOO_MANY_TIMEOUTS",
-                                    message=f"Too many payment timeouts in one tick: {timeouts}",
+                                ready[seq] = (
+                                    eq,
+                                    sender_pid,
+                                    receiver_pid,
+                                    status,
+                                    err_code,
+                                    err_details,
+                                    avg_route_len,
+                                    route_edges,
+                                    edge_patch_list,
+                                    node_patch_list,
                                 )
-                                break
+                                _emit_if_ready()
+
+                                if max_timeouts_per_tick > 0 and timeouts >= max_timeouts_per_tick:
+                                    await self.fail_run(
+                                        run_id,
+                                        code="REAL_MODE_TOO_MANY_TIMEOUTS",
+                                        message=f"Too many payment timeouts in one tick: {timeouts}",
+                                    )
+                                    break
                 finally:
                     # Cancel any remaining tasks if we bailed early.
                     for task in tasks:
@@ -691,7 +752,13 @@ class RealRunner:
                         ).scalar_one()
                         total_debt_by_eq[str(eq_code)] = float(total)
                 except Exception:
-                    pass
+                    if self._should_warn_this_tick(run, key="total_debt_snapshot_failed"):
+                        self._logger.debug(
+                            "simulator.real.total_debt_snapshot_failed run_id=%s tick=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            exc_info=True,
+                        )
 
                 # Avg route length for this tick (successful payments).
                 for eq in equivalents:
@@ -737,6 +804,12 @@ class RealRunner:
                 )
                 await simulator_storage.sync_artifacts(run)
         except Exception as e:
+            self._logger.warning(
+                "simulator.real.tick_failed run_id=%s tick=%s",
+                str(run.run_id),
+                int(getattr(run, "tick_index", 0) or 0),
+                exc_info=True,
+            )
             with self._lock:
                 run.errors_total += 1
                 run._error_timestamps.append(time.time())
@@ -750,12 +823,7 @@ class RealRunner:
                     "at": self._utc_now().isoformat(),
                 }
 
-            max_consec = int(
-                os.getenv(
-                    "SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES",
-                    str(self._real_max_consec_tick_failures_default),
-                )
-            )
+            max_consec = int(self._real_max_consec_tick_failures_limit)
             if max_consec > 0 and run._real_consec_tick_failures >= max_consec:
                 await self.fail_run(
                     run_id,
@@ -802,10 +870,8 @@ class RealRunner:
         a transaction as "aborted" after any error, and subsequent queries fail
         with InFailedSQLTransactionError.
         """
-        try:
-            max_depth = int(os.getenv("SIMULATOR_CLEARING_MAX_DEPTH", "6"))
-        except Exception:
-            max_depth = 6
+        max_depth = int(self._clearing_max_depth_limit)
+        max_fx_edges = int(self._clearing_max_fx_edges_limit)
         cleared_amount_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
         for eq in equivalents:
             # Use isolated session per equivalent to prevent transaction poisoning
@@ -831,7 +897,18 @@ class RealRunner:
                             if debtor_pid and creditor_pid:
                                 cycle_edges.append({"from": debtor_pid, "to": creditor_pid})
                     except Exception:
+                        if self._should_warn_this_tick(run, key=f"clearing_cycle_edges_parse_failed:{eq}"):
+                            self._logger.debug(
+                                "simulator.real.clearing_cycle_edges_parse_failed run_id=%s tick=%s eq=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                str(eq),
+                                exc_info=True,
+                            )
                         cycle_edges = []
+
+                    if max_fx_edges > 0 and len(cycle_edges) > max_fx_edges:
+                        cycle_edges = cycle_edges[:max_fx_edges]
 
                     # Build steps with highlight_edges for visible clearing animation.
                     plan_steps: list[dict[str, Any]] = []
@@ -911,6 +988,14 @@ class RealRunner:
                         run.current_phase = None
                     self._sse.broadcast(run_id, done_evt)
             except Exception as e:
+                if self._should_warn_this_tick(run, key=f"clearing_failed:{eq}"):
+                    self._logger.warning(
+                        "simulator.real.clearing_failed run_id=%s tick=%s eq=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                        exc_info=True,
+                    )
                 with self._lock:
                     run.errors_total += 1
                     run._error_timestamps.append(time.time())

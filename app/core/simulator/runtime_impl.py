@@ -44,8 +44,16 @@ from app.core.simulator.snapshot_builder import SnapshotBuilder
 import app.core.simulator.storage as simulator_storage
 from app.core.simulator.sse_broadcast import SseBroadcast
 from app.utils.exceptions import NotFoundException
+from app.utils.exceptions import ConflictException
 
 logger = logging.getLogger(__name__)
+
+def _safe_int_env(name: str, default: int) -> int:
+    try:
+        v = int(os.environ.get(name, str(default)) or str(default))
+        return v
+    except Exception:
+        return int(default)
 
 
 class _SimulatorRuntimeBase:
@@ -65,6 +73,18 @@ class _SimulatorRuntimeBase:
         self._runs: dict[str, RunRecord] = {}
         self._active_run_id: Optional[str] = None
 
+        self._is_shutting_down = False
+
+        # Runtime knobs (env-configurable; defaults preserve existing behavior).
+        self._tick_ms_base = _safe_int_env("SIMULATOR_TICK_MS_BASE", TICK_MS_BASE)
+        self._actions_per_tick_max = _safe_int_env("SIMULATOR_ACTIONS_PER_TICK_MAX", ACTIONS_PER_TICK_MAX)
+        self._clearing_every_n_ticks = _safe_int_env("SIMULATOR_CLEARING_EVERY_N_TICKS", CLEARING_EVERY_N_TICKS)
+        self._max_active_runs = _safe_int_env("SIMULATOR_MAX_ACTIVE_RUNS", 1)
+        self._max_run_records = _safe_int_env("SIMULATOR_MAX_RUN_RECORDS", 200)
+
+        # Local artifact retention (0 disables).
+        self._artifacts_ttl_hours = _safe_int_env("SIMULATOR_ARTIFACTS_TTL_HOURS", 0)
+
         self._artifacts = ArtifactsManager(
             lock=self._lock,
             runs=self._runs,
@@ -80,6 +100,7 @@ class _SimulatorRuntimeBase:
             scenarios=self._scenarios,
             utc_now=_utc_now,
             db_enabled=simulator_storage.db_enabled,
+            logger=logger,
         )
 
         self._snapshot_builder = SnapshotBuilder(
@@ -101,20 +122,29 @@ class _SimulatorRuntimeBase:
         )
         self._scenario_registry.load_all()
 
+        # Best-effort cleanup of old local artifacts (keeps dev dirs from growing forever).
+        try:
+            self._artifacts.cleanup_old_runs(ttl_hours=self._artifacts_ttl_hours)
+        except Exception:
+            logger.exception("simulator.artifacts.cleanup_failed")
+
         # SSE replay buffer sizing/TTL. Best-effort; does not change OpenAPI.
-        self._event_buffer_max = int(os.environ.get("SIMULATOR_EVENT_BUFFER_SIZE", "2000"))
-        self._event_buffer_ttl_sec = int(os.environ.get("SIMULATOR_EVENT_BUFFER_TTL_SEC", "600"))
+        self._event_buffer_max = _safe_int_env("SIMULATOR_EVENT_BUFFER_SIZE", 2000)
+        self._event_buffer_ttl_sec = _safe_int_env("SIMULATOR_EVENT_BUFFER_TTL_SEC", 600)
+        self._sse_sub_queue_max = _safe_int_env("SIMULATOR_SSE_SUB_QUEUE_MAX", 500)
 
         # If enabled, SSE endpoints may return 410 when Last-Event-ID is too old
         # to be replayed from the in-memory ring buffer.
-        self._sse_strict_replay = bool(int(os.environ.get("SIMULATOR_SSE_STRICT_REPLAY", "0")))
+        self._sse_strict_replay = bool(_safe_int_env("SIMULATOR_SSE_STRICT_REPLAY", 0))
 
         self._sse = SseBroadcast(
             lock=self._lock,
             runs=self._runs,
             get_event_buffer_max=lambda: int(self._event_buffer_max),
             get_event_buffer_ttl_sec=lambda: int(self._event_buffer_ttl_sec),
+            get_sub_queue_max=lambda: int(self._sse_sub_queue_max),
             enqueue_event_artifact=self._artifacts.enqueue_event_artifact,
+            logger=logger,
         )
 
         self._run_lifecycle = RunLifecycle(
@@ -132,6 +162,9 @@ class _SimulatorRuntimeBase:
             run_to_status=_run_to_status,
             get_run_status_payload_json=lambda run_id: self.get_run_status(run_id).model_dump(mode="json"),
             real_max_in_flight_default=REAL_MAX_IN_FLIGHT_DEFAULT,
+            get_max_active_runs=lambda: int(self._max_active_runs),
+            get_max_run_records=lambda: int(self._max_run_records),
+            logger=logger,
         )
 
         self._fixtures_runner = FixturesRunner(
@@ -150,13 +183,41 @@ class _SimulatorRuntimeBase:
             utc_now=_utc_now,
             publish_run_status=self.publish_run_status,
             db_enabled=simulator_storage.db_enabled,
-            actions_per_tick_max=ACTIONS_PER_TICK_MAX,
-            clearing_every_n_ticks=CLEARING_EVERY_N_TICKS,
+            actions_per_tick_max=self._actions_per_tick_max,
+            clearing_every_n_ticks=self._clearing_every_n_ticks,
             real_max_consec_tick_failures_default=REAL_MAX_CONSEC_TICK_FAILURES_DEFAULT,
             real_max_timeouts_per_tick_default=REAL_MAX_TIMEOUTS_PER_TICK_DEFAULT,
             real_max_errors_total_default=REAL_MAX_ERRORS_TOTAL_DEFAULT,
             logger=logger,
         )
+
+    async def shutdown(self) -> None:
+        """Best-effort graceful shutdown.
+
+        Cancels heartbeat tasks, stops artifact writers, and clears subscriptions.
+        """
+
+        run_ids: list[str]
+        with self._lock:
+            if self._is_shutting_down:
+                return
+            self._is_shutting_down = True
+            run_ids = list(self._runs.keys())
+
+        # Stop runs sequentially to avoid amplifying load on shutdown.
+        for run_id in run_ids:
+            try:
+                await self.stop(run_id)
+            except Exception:
+                logger.exception("simulator.runtime.shutdown_stop_failed run_id=%s", run_id)
+
+        # Ensure subscriptions are cleared even if individual streams didn't unsubscribe.
+        with self._lock:
+            for run in self._runs.values():
+                try:
+                    run._subs.clear()
+                except Exception:
+                    pass
 
     def is_sse_strict_replay_enabled(self) -> bool:
         return self._sse_strict_replay
@@ -208,6 +269,9 @@ class _SimulatorRuntimeBase:
         return _run_to_status(run)
 
     async def create_run(self, *, scenario_id: str, mode: RunMode, intensity_percent: int) -> str:
+        with self._lock:
+            if self._is_shutting_down:
+                raise ConflictException("Simulator runtime is shutting down")
         return await self._run_lifecycle.create_run(
             scenario_id=scenario_id,
             mode=mode,
@@ -377,7 +441,7 @@ class _SimulatorRuntimeBase:
 
                     # Runner-algorithm: fixed sim-time tick; intensity controls action budget.
                     run.tick_index += 1
-                    run.sim_time_ms = run.tick_index * TICK_MS_BASE
+                    run.sim_time_ms = run.tick_index * int(self._tick_ms_base)
 
                     # Real-mode sets queue_depth during tick work; fixtures-mode has no queue.
                     if run.mode == "fixtures":
@@ -399,7 +463,14 @@ class _SimulatorRuntimeBase:
 
 
 class SimulatorRuntime(_SimulatorRuntimeBase):
+    """Concrete runtime implementation.
+
+    Public entrypoints should import `SimulatorRuntime`/`runtime` from
+    `app.core.simulator.runtime` to keep imports stable.
+    """
+
     def _db_enabled(self) -> bool:
+        """Whether simulator DB persistence is enabled in the current process."""
         return simulator_storage.db_enabled()
 
 

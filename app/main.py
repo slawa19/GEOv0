@@ -119,6 +119,14 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Simulator runtime graceful shutdown (best-effort).
+        try:
+            from app.core.simulator.runtime import runtime
+
+            await runtime.shutdown()
+        except Exception:
+            logger.exception("simulator.runtime.shutdown_failed")
+
         from app.utils import security
 
         security.set_redis_client(None)

@@ -78,6 +78,15 @@ Hardening (после MVP):
 - env: `SIMULATOR_SSE_STRICT_REPLAY=1`
 - поведение: при слишком старом `Last-Event-ID` endpoint возвращает `HTTP 410`.
 
+### 2.1.1 Ограничение concurrent SSE connections (реализовано)
+Для базовой защиты от DoS backend ограничивает количество одновременных подписок SSE:
+
+- `SIMULATOR_SSE_MAX_CONNECTIONS` (по умолчанию 50) — общий лимит подписок SSE во всём процессе
+- `SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN` (по умолчанию 10) — лимит подписок SSE на один `run_id`
+
+Если значение `<= 0`, соответствующий лимит отключается.
+При превышении лимитов endpoint возвращает `HTTP 429`.
+
 ### 2.2 Важное замечание про pytest
 В integration-тестах (pytest + in-process ASGI transport) SSE stream намеренно **завершается рано** после минимального «первого кадра»
 (`run_status` + хотя бы одно доменное событие), чтобы тесты не зависали на бесконечном streaming response.

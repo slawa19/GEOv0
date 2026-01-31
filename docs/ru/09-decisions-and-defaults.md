@@ -109,6 +109,29 @@
 
 **Публичный статус платежа:** `PaymentResult.status` — это финальный результат и возвращает только `COMMITTED` или `ABORTED`.
 
+### 1.8. Каноничный контракт результата платежа (single source of truth)
+
+Решение для MVP: форма результата платежа и маршрутов — **строго типизированный контракт**, который задаётся и валидируется в одном месте.
+
+**Source of truth (схемы):**
+
+- Pydantic-модели: `app/schemas/payment.py` (`PaymentResult`, `PaymentRoute`).
+- (Для внешнего API) OpenAPI: `api/openapi.yaml`.
+
+**Инварианты контракта:**
+
+- `PaymentResult.routes: Optional[List[PaymentRoute]]`.
+- `PaymentRoute` имеет ровно поля `{ path: List[str], amount: str }` (лишние поля запрещены).
+
+**Где контракт должен обеспечиваться:**
+
+- Единственная точка приведения/валидации «сырого payload из БД» → типизированная модель: `PaymentService._tx_to_payment_result()`.
+
+**Правило для consumer-кода (симулятор/раннер/внутренние сервисы):**
+
+- Consumer-код использует `res.routes` напрямую и **не делает** защитный парсинг через `getattr`, `dict.get(...)` и т.п.
+- Если `Transaction.payload.routes` имеет неверную форму, это считается багом/коррупцией данных и должно проявляться как явная ошибка (fail-fast) на границе `PaymentService`.
+
 ---
 
 ## 2. Дефолты и лимиты

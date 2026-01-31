@@ -21,6 +21,36 @@ export function normalizeEqCode(v: string): string {
   return String(v || '').trim().toUpperCase()
 }
 
+/**
+ * Compute the primary (most popular) equivalent based on active trustlines count.
+ * Returns the equivalent code with the most trustlines, or first available, or empty string.
+ */
+export function computePrimaryEquivalent(trustlines: { equivalent: string; status?: string }[], equivalents: { code: string }[]): string {
+  const countByEq = new Map<string, number>()
+  for (const t of trustlines || []) {
+    const status = String(t.status || '').toLowerCase()
+    if (status !== 'active') continue
+    const code = normalizeEqCode(t.equivalent)
+    if (!code) continue
+    countByEq.set(code, (countByEq.get(code) || 0) + 1)
+  }
+
+  let maxCode = ''
+  let maxCount = 0
+  for (const [code, count] of countByEq) {
+    if (count > maxCount) {
+      maxCode = code
+      maxCount = count
+    }
+  }
+
+  if (maxCode) return maxCode
+
+  // Fallback: first equivalent from the list
+  const first = (equivalents || [])[0]
+  return first ? normalizeEqCode(first.code) : ''
+}
+
 export function filterTrustlinesByEqAndStatus(input: {
   trustlines: Trustline[]
   equivalent: string
@@ -30,7 +60,8 @@ export function filterTrustlinesByEqAndStatus(input: {
   const allowed = new Set((input.statusFilter || []).map((s) => String(s).toLowerCase()).filter(Boolean))
 
   return (input.trustlines || []).filter((t) => {
-    if (eqKey !== 'ALL' && normalizeEqCode(t.equivalent) !== eqKey) return false
+    // Filter by equivalent (empty = show all)
+    if (eqKey && normalizeEqCode(t.equivalent) !== eqKey) return false
     if (allowed.size && !allowed.has(String(t.status || '').toLowerCase())) return false
     return true
   })
@@ -41,7 +72,8 @@ export function computeIncidentRatioByPid(input: { incidents: Incident[]; equiva
   const ratios = new Map<string, number>()
 
   for (const i of input.incidents || []) {
-    if (eqKey !== 'ALL' && normalizeEqCode(i.equivalent) !== eqKey) continue
+    // Filter by equivalent (empty = show all)
+    if (eqKey && normalizeEqCode(i.equivalent) !== eqKey) continue
     const pid = String(i.initiator_pid || '').trim()
     if (!pid) continue
     const ratio = i.sla_seconds > 0 ? i.age_seconds / i.sla_seconds : 0
@@ -75,8 +107,8 @@ export function useGraphData(opts: {
   const availableEquivalents = computed(() => {
     const fromDs = (equivalents.value || []).map((e) => normalizeEqCode(e.code)).filter(Boolean)
     const fromTls = (trustlines.value || []).map((t) => normalizeEqCode(t.equivalent)).filter(Boolean)
-    const all = Array.from(new Set([...fromDs, ...fromTls])).sort()
-    return ['ALL', ...all]
+    // Note: 'ALL' option removed — now we always select a specific equivalent for proper viz_* support
+    return Array.from(new Set([...fromDs, ...fromTls])).sort()
   })
 
   const precisionByEq = computed(() => {
@@ -127,9 +159,10 @@ export function useGraphData(opts: {
     loading.value = true
     error.value = null
     try {
+      // First load without equivalent to get full trustlines list for primary equivalent computation
       const snapEq = normalizeEqCode(opts.eq.value)
       const [snap, cc] = await Promise.all([
-        api.graphSnapshot({ equivalent: snapEq !== 'ALL' ? snapEq : undefined }),
+        api.graphSnapshot({ equivalent: snapEq || undefined }),
         api.clearingCycles(),
       ])
 
@@ -151,7 +184,11 @@ export function useGraphData(opts: {
       fullSnapshot = payload
       fullClearingCycles = clearingCycles.value
 
-      if (!availableEquivalents.value.includes(opts.eq.value)) opts.eq.value = 'ALL'
+      // Auto-select primary equivalent if not set or invalid
+      const currentEq = normalizeEqCode(opts.eq.value)
+      if (!currentEq || !availableEquivalents.value.includes(currentEq)) {
+        opts.eq.value = computePrimaryEquivalent(payload.trustlines, payload.equivalents)
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       error.value = msg || t('graph.data.loadFailed')
@@ -164,7 +201,7 @@ export function useGraphData(opts: {
     if (opts.focusMode.value) return
     try {
       const snapEq = normalizeEqCode(opts.eq.value)
-      const snap = await api.graphSnapshot({ equivalent: snapEq !== 'ALL' ? snapEq : undefined })
+      const snap = await api.graphSnapshot({ equivalent: snapEq || undefined })
       const s = assertSuccess(snap)
       const payload: GraphSnapshotPayload = {
         participants: (s.participants || []) as Participant[],

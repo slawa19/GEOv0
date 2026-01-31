@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { ref } from 'vue'
 
-import { computeIncidentRatioByPid, filterTrustlinesByEqAndStatus, normalizeEqCode, useGraphData } from './useGraphData'
+import {
+  computeIncidentRatioByPid,
+  computePrimaryEquivalent,
+  filterTrustlinesByEqAndStatus,
+  normalizeEqCode,
+  useGraphData,
+} from './useGraphData'
 import type { Equivalent, Incident, Trustline } from '../pages/graph/graphTypes'
 
 describe('useGraphData', () => {
@@ -28,8 +34,36 @@ describe('useGraphData', () => {
     ).toEqual(['B'])
 
     expect(
-      filterTrustlinesByEqAndStatus({ trustlines, equivalent: 'ALL', statusFilter: ['active'] }).map((t) => t.to)
+      filterTrustlinesByEqAndStatus({ trustlines, equivalent: '', statusFilter: ['active'] }).map((t) => t.to)
     ).toEqual(['B', 'D'])
+  })
+
+  it('computePrimaryEquivalent picks equivalent with most active trustlines', () => {
+    const trustlines = [
+      { equivalent: 'UAH', status: 'active' },
+      { equivalent: 'UAH', status: 'active' },
+      { equivalent: 'EUR', status: 'active' },
+      { equivalent: 'EUR', status: 'closed' },
+      { equivalent: ' usd ', status: 'active' },
+    ]
+
+    const equivalents = [{ code: 'EUR' }, { code: 'UAH' }, { code: 'USD' }]
+
+    expect(computePrimaryEquivalent(trustlines, equivalents)).toBe('UAH')
+  })
+
+  it('computePrimaryEquivalent falls back to first equivalent when no active trustlines', () => {
+    const trustlines = [
+      { equivalent: 'UAH', status: 'closed' },
+      { equivalent: 'UAH', status: 'frozen' },
+    ]
+    const equivalents = [{ code: 'EUR' }, { code: 'UAH' }]
+
+    expect(computePrimaryEquivalent(trustlines, equivalents)).toBe('EUR')
+  })
+
+  it('computePrimaryEquivalent returns empty string when no data', () => {
+    expect(computePrimaryEquivalent([], [])).toBe('')
   })
 
   it('computeIncidentRatioByPid filters by eq and keeps max ratio per pid', () => {
@@ -46,8 +80,8 @@ describe('useGraphData', () => {
     expect(m.has('PID_C')).toBe(false)
   })
 
-  it('availableEquivalents merges dataset + trustlines and always includes ALL', () => {
-    const eq = ref('ALL')
+  it('availableEquivalents merges dataset + trustlines (no ALL option)', () => {
+    const eq = ref('')
     const isRealMode = ref(false)
     const focusMode = ref(false)
     const focusRootPid = ref('')
@@ -70,6 +104,6 @@ describe('useGraphData', () => {
       { ...tlBase, equivalent: 'EUR' },
     ]
 
-    expect(g.availableEquivalents.value).toEqual(['ALL', 'EUR', 'USD'])
+    expect(g.availableEquivalents.value).toEqual(['EUR', 'USD'])
   })
 })

@@ -113,7 +113,7 @@ const props = defineProps<{
   width: 28px;
   height: 12px;
   border-radius: 6px;
-  background: linear-gradient(90deg, #f2e8c4 0%, #eadca8 20%, #e2cf8d 35%, #cfae62 55%, #c79459 70%, #b05f4b 85%, #9a4444 100%);
+  background: linear-gradient(90deg, #eadca8 0%, #e2cf8d 18%, #cfae62 40%, #c79459 60%, #b05f4b 82%, #9a4444 100%);
 }
 
 .swatch--node-left {

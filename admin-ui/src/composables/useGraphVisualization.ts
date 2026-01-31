@@ -1,7 +1,7 @@
 import { ElMessage } from 'element-plus'
 import cytoscape, { type Core, type EdgeSingular, type ElementDefinition, type LayoutOptions, type NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { computed, onBeforeUnmount, onMounted, type ComputedRef, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch, type ComputedRef, type Ref } from 'vue'
 
 import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
 import { GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
@@ -162,6 +162,10 @@ export function useGraphVisualization(options: {
 
     n.addClass('selected-node')
 
+    // Start with the pulse ON immediately (avoids a short "static" phase before the first timer tick).
+    selectedPulseOn = true
+    n.addClass('selected-pulse')
+
     // Blink by toggling a secondary class (Cytoscape has no CSS animations).
     selectedPulseTimer = window.setInterval(() => {
       const cy2 = options.getCy()
@@ -193,6 +197,94 @@ export function useGraphVisualization(options: {
   function isBottleneck(t: Trustline): boolean {
     return isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: options.threshold.value })
   }
+
+  function getDrawerClientRect(): DOMRect | null {
+    // GraphAnalyticsDrawer sets data-testid on <el-drawer>.
+    const byTestId = document.querySelector('[data-testid="graph-drawer"]') as HTMLElement | null
+    if (byTestId) return byTestId.getBoundingClientRect()
+
+    // Fallback (should rarely be needed): best-effort lookup.
+    const generic = document.querySelector('.el-drawer') as HTMLElement | null
+    if (generic) return generic.getBoundingClientRect()
+
+    return null
+  }
+
+  function rectsIntersect(a: { x1: number; y1: number; x2: number; y2: number }, b: DOMRect, pad = 0): boolean {
+    const bx1 = b.left - pad
+    const by1 = b.top - pad
+    const bx2 = b.right + pad
+    const by2 = b.bottom + pad
+    return a.x1 < bx2 && a.x2 > bx1 && a.y1 < by2 && a.y2 > by1
+  }
+
+  function nodeClientRect(n: NodeSingular): { x1: number; y1: number; x2: number; y2: number } | null {
+    const cy2 = options.getCy()
+    const container = cy2?.container()
+    if (!cy2 || !container) return null
+    const c = container.getBoundingClientRect()
+    const bb = n.renderedBoundingBox({ includeLabels: false })
+    return {
+      x1: c.left + bb.x1,
+      y1: c.top + bb.y1,
+      x2: c.left + bb.x2,
+      y2: c.top + bb.y2,
+    }
+  }
+
+  function panIfCoveredByDrawer(pid: string) {
+    const cy2 = options.getCy()
+    if (!cy2) return
+    if (!options.drawerOpen.value) return
+
+    const drawerRect = getDrawerClientRect()
+    if (!drawerRect) return
+
+    const n = cy2.getElementById(pid)
+    if (!n || n.empty()) return
+
+    const nr = nodeClientRect(n)
+    if (!nr) return
+
+    const pad = 14
+    if (!rectsIntersect(nr, drawerRect, pad)) return
+
+    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0
+    const isRightDrawer = viewportW ? drawerRect.left > viewportW / 2 : true
+
+    if (isRightDrawer) {
+      // Move node left, just enough to clear the drawer.
+      const overflow = nr.x2 - (drawerRect.left - pad)
+      if (overflow > 1) cy2.panBy({ x: -overflow, y: 0 })
+      return
+    }
+
+    // Left drawer: move node right.
+    const overflow = (drawerRect.right + pad) - nr.x1
+    if (overflow > 1) cy2.panBy({ x: overflow, y: 0 })
+  }
+
+  function schedulePanIfCoveredByDrawer(pid: string) {
+    const p = String(pid || '').trim()
+    if (!p) return
+    // Drawer is mounted/animated; check coverage after it appears.
+    window.setTimeout(() => panIfCoveredByDrawer(p), 0)
+    window.setTimeout(() => panIfCoveredByDrawer(p), 250)
+  }
+
+  // When the drawer opens (or selection changes while open), pan just enough to keep
+  // the selected node visible (if the drawer covers it).
+  const stopDrawerPanWatch = watch(
+    () => ({
+      open: options.drawerOpen.value,
+      pid: options.selected.value && options.selected.value.kind === 'node' ? options.selected.value.pid : '',
+    }),
+    (cur, prev) => {
+      if (!cur.open || !cur.pid) return
+      if (cur.open !== prev.open || cur.pid !== prev.pid) schedulePanIfCoveredByDrawer(cur.pid)
+    },
+    { flush: 'post' }
+  )
 
   function buildElements() {
     // 1) Start from trustlines filtered by non-type filters (equivalent/status/...).
@@ -317,27 +409,78 @@ export function useGraphVisualization(options: {
       const ratio = options.incidentRatioByPid.value.get(pid)
       const name = (p?.display_name || '').trim()
       const typeKey = String(p?.type || '').toLowerCase()
+
+      const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
+      const darkenHex = (hex: string, factor: number): string => {
+        const h = String(hex || '').trim().toLowerCase()
+        const m = /^#([0-9a-f]{6})$/.exec(h)
+        const v = m?.[1]
+        if (!v) return '#111318'
+        const r = parseInt(v.slice(0, 2), 16)
+        const g = parseInt(v.slice(2, 4), 16)
+        const b = parseInt(v.slice(4, 6), 16)
+        const f = clamp01(factor)
+        const rr = Math.round(r * f)
+        const gg = Math.round(g * f)
+        const bb = Math.round(b * f)
+        return `#${rr.toString(16).padStart(2, '0')}${gg.toString(16).padStart(2, '0')}${bb.toString(16).padStart(2, '0')}`
+      }
+
+      const statusKey = String(p?.status || '').toLowerCase()
+      const vizColorKeyRaw = String(p?.viz_color_key || '').toLowerCase()
+      const baseColorByVizKey: Record<string, string> = {
+        person: '#3b82f6',
+        business: '#10b981',
+        debt: '#f97316',
+        'debt-0': '#f2e8c4',
+        'debt-1': '#eadca8',
+        'debt-2': '#e2cf8d',
+        'debt-3': '#d8c073',
+        'debt-4': '#cfae62',
+        'debt-5': '#c79459',
+        'debt-6': '#be7a52',
+        'debt-7': '#b05f4b',
+        'debt-8': '#9a4444',
+        suspended: '#e6a23c',
+        left: '#909399',
+        deleted: '#606266',
+      }
+
+      const baseColor = (() => {
+        // Keep precedence aligned with applyStyle(): status overrides everything.
+        if (statusKey === 'suspended' || statusKey === 'frozen') return '#e6a23c'
+        if (statusKey === 'left') return '#909399'
+        if (statusKey === 'deleted' || statusKey === 'banned') return '#606266'
+
+        if (vizColorKeyRaw && baseColorByVizKey[vizColorKeyRaw]) return baseColorByVizKey[vizColorKeyRaw]
+        if (typeKey && baseColorByVizKey[typeKey]) return baseColorByVizKey[typeKey]
+        return '#409eff'
+      })()
+
+      // Selected contour should match node color but be much darker.
+      const selectionBorderColor = darkenHex(baseColor, 0.35)
       const baseW = typeKey === 'business' ? 26 : 16
       const baseH = typeKey === 'business' ? 22 : 16
       const vizW = typeof p?.viz_size?.w === 'number' ? p.viz_size.w : baseW
       const vizH = typeof p?.viz_size?.h === 'number' ? p.viz_size.h : baseH
-      const vizColorKey = String(p?.viz_color_key || '').toLowerCase()
+      const vizColorKey = vizColorKeyRaw
       return {
         data: {
           id: pid,
           label: '',
           pid,
           display_name: name,
-          status: (p?.status || '').toLowerCase(),
+          status: statusKey,
           type: (p?.type || '').toLowerCase(),
           incident_ratio: typeof ratio === 'number' ? ratio : 0,
 
           viz_w: vizW,
           viz_h: vizH,
           viz_color_key: vizColorKey,
+          sel_border_color: selectionBorderColor,
         },
         classes: [
-          (p?.status || '').toLowerCase() ? `p-${(p?.status || '').toLowerCase()}` : '',
+          statusKey ? `p-${statusKey}` : '',
           (p?.type || '').toLowerCase() ? `type-${(p?.type || '').toLowerCase()}` : '',
           vizColorKey ? `viz-${vizColorKey}` : '',
           options.showIncidents.value && (options.incidentRatioByPid.value.get(pid) || 0) > 0 ? 'has-incident' : '',
@@ -469,18 +612,26 @@ export function useGraphVisualization(options: {
     const inv = 1 / Math.max(0.15, z)
     const s = zoomScale(inv)
 
+    // For strokes (edges, selection contour), we want *less noise* when zoomed out,
+    // and also avoid "fat" strokes when zoomed in.
+    // - zoomed out (z < 1): scale down with z
+    // - zoomed in (z > 1): scale down with 1/z
+    const strokeScale = z >= 1 ? 1 / z : z
+
     const nodeFont = clamp(11 * inv, 3.2, 12)
     const outlineW = clamp(2 * s, 0.6, 2.4)
     const marginY = clamp(6 * inv, 1, 8)
 
-    const edgeW = clamp(1.2 * inv, 0.25, 1.6)
-    const edgeWBottleneck = clamp(2.4 * inv, 0.6, 3)
-    const edgeWCycle = clamp(3.0 * inv, 0.7, 3.6)
-    const edgeWConnection = clamp(3.0 * inv, 0.7, 3.6)
-    const arrowScale = clamp(0.8 * s, 0.32, 1.0)
-    const arrowScaleBottleneck = clamp(0.95 * s, 0.4, 1.15)
-    const arrowScaleCycle = clamp(1.05 * s, 0.45, 1.25)
-    const arrowScaleConnection = clamp(1.05 * s, 0.45, 1.25)
+    const edgeW = clamp(1.2 * strokeScale, 0.12, 1.4)
+    const edgeWBottleneck = clamp(2.4 * strokeScale, 0.28, 2.6)
+    const edgeWCycle = clamp(3.0 * strokeScale, 0.34, 3.2)
+    const edgeWConnection = clamp(3.0 * strokeScale, 0.34, 3.2)
+    const arrowScale = clamp(0.9 * strokeScale, 0.16, 1.0)
+    const arrowScaleBottleneck = clamp(1.05 * strokeScale, 0.18, 1.15)
+    const arrowScaleCycle = clamp(1.1 * strokeScale, 0.2, 1.25)
+    const arrowScaleConnection = clamp(1.1 * strokeScale, 0.2, 1.25)
+
+    const selectedBorderW = clamp(3.5 * strokeScale, 1.2, 3.5)
 
     cy.style()
       .selector('node')
@@ -488,6 +639,10 @@ export function useGraphVisualization(options: {
         'font-size': nodeFont,
         'text-outline-width': outlineW,
         'text-margin-y': marginY,
+      })
+      .selector('node.selected-node')
+      .style({
+        'border-width': selectedBorderW,
       })
       .selector('edge')
       .style({
@@ -520,12 +675,28 @@ export function useGraphVisualization(options: {
       'url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%278%27%20height%3D%278%27%3E%3Ccircle%20cx%3D%272%27%20cy%3D%272%27%20r%3D%271%27%20fill%3D%27%23000000%27%20fill-opacity%3D%270.18%27/%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%271%27%20fill%3D%27%23000000%27%20fill-opacity%3D%270.18%27/%3E%3C/svg%3E")'
 
     cy.style([
+      // Ensure built-in Cytoscape active/selection visuals never show up.
+      {
+        selector: 'node:active, node:selected',
+        style: {
+          'overlay-opacity': 0,
+          'overlay-padding': 0,
+          'underlay-opacity': 0,
+          'underlay-padding': 0,
+          'active-bg-opacity': 0,
+          'active-bg-size': 0,
+        },
+      },
+      { selector: 'edge:selected', style: { 'overlay-opacity': 0, 'overlay-padding': 0, 'underlay-opacity': 0 } },
       {
         selector: 'node',
         style: {
           'background-color': '#409eff',
           label: options.showLabels.value ? 'data(label)' : '',
           color: '#cfd3dc',
+          // Disable Cytoscape default "active" background (removes dark square artifact on tap).
+          'active-bg-opacity': 0,
+          'active-bg-size': 0,
           // Base values; real sizes are adjusted by updateZoomStyles().
           'font-size': 11,
           // Allow fonts to become small when zoomed out.
@@ -571,18 +742,6 @@ export function useGraphVisualization(options: {
       { selector: 'node.p-suspended, node.p-frozen', style: { 'background-color': '#e6a23c' } },
       { selector: 'node.p-left', style: { 'background-color': '#909399' } },
       { selector: 'node.p-deleted, node.p-banned', style: { 'background-color': '#606266' } },
-
-      // Selection pulse as overlay glow (doesn't conflict with border-color based highlights).
-      // Note: overlay color is keyed by status to feel consistent with the legend.
-      { selector: 'node.selected-node, node.selected-pulse', style: { 'overlay-color': '#409eff' } },
-      { selector: 'node.selected-node.p-active, node.selected-pulse.p-active', style: { 'overlay-color': '#67c23a' } },
-      {
-        selector:
-          'node.selected-node.p-frozen, node.selected-pulse.p-frozen, node.selected-node.p-suspended, node.selected-pulse.p-suspended',
-        style: { 'overlay-color': '#e6a23c' },
-      },
-      { selector: 'node.selected-node.p-left, node.selected-pulse.p-left', style: { 'overlay-color': '#909399' } },
-      { selector: 'node.selected-node.p-deleted, node.selected-pulse.p-deleted, node.selected-node.p-banned, node.selected-pulse.p-banned', style: { 'overlay-color': '#606266' } },
 
       // Type shapes only; size comes from backend-provided viz_w/viz_h.
       { selector: 'node.type-person', style: { shape: 'ellipse' } },
@@ -687,9 +846,31 @@ export function useGraphVisualization(options: {
         },
       },
 
-      // Selection pulse: overlay opacity/padding only.
-      { selector: 'node.selected-node', style: { 'overlay-opacity': 0.12, 'overlay-padding': 6 } },
-      { selector: 'node.selected-pulse', style: { 'overlay-opacity': 0.22, 'overlay-padding': 12 } },
+      // Selected contour: blink the border (no glow).
+      // Keep this block near the end so it overrides other highlight layers (connection/cycle/search).
+      // selected-pulse is toggled on/off by JS timer.
+      {
+        selector: 'node.selected-node, node.selected-pulse',
+        style: {
+          'overlay-opacity': 0,
+          'overlay-padding': 0,
+          'underlay-opacity': 0,
+          'underlay-padding': 0,
+        },
+      },
+      // Keep border-width constant to avoid the "node expands" effect.
+      // Base state: contour hidden.
+      {
+        selector: 'node.selected-node',
+        style: {
+          'border-width': 4,
+          'border-opacity': 0,
+          'border-color': 'data(sel_border_color)',
+        },
+      },
+      // Pulse ON: show contour (opacity only).
+      { selector: 'node.selected-pulse', style: { 'border-opacity': 1 } },
+
     ])
 
     updateZoomStyles()
@@ -1087,72 +1268,6 @@ export function useGraphVisualization(options: {
     const cy = options.getCy()
     if (!cy) return
 
-    function getDrawerClientRect(): DOMRect | null {
-      // GraphAnalyticsDrawer sets data-testid on <el-drawer>.
-      const byTestId = document.querySelector('[data-testid="graph-drawer"]') as HTMLElement | null
-      if (byTestId) return byTestId.getBoundingClientRect()
-
-      // Fallback (should rarely be needed): best-effort lookup.
-      const generic = document.querySelector('.el-drawer') as HTMLElement | null
-      if (generic) return generic.getBoundingClientRect()
-
-      return null
-    }
-
-    function rectsIntersect(a: { x1: number; y1: number; x2: number; y2: number }, b: DOMRect, pad = 0): boolean {
-      const bx1 = b.left - pad
-      const by1 = b.top - pad
-      const bx2 = b.right + pad
-      const by2 = b.bottom + pad
-      return a.x1 < bx2 && a.x2 > bx1 && a.y1 < by2 && a.y2 > by1
-    }
-
-    function nodeClientRect(n: NodeSingular): { x1: number; y1: number; x2: number; y2: number } | null {
-      const cy2 = options.getCy()
-      const container = cy2?.container()
-      if (!cy2 || !container) return null
-      const c = container.getBoundingClientRect()
-      const bb = n.renderedBoundingBox({ includeLabels: false })
-      return {
-        x1: c.left + bb.x1,
-        y1: c.top + bb.y1,
-        x2: c.left + bb.x2,
-        y2: c.top + bb.y2,
-      }
-    }
-
-    function panIfCoveredByDrawer(pid: string) {
-      const cy2 = options.getCy()
-      if (!cy2) return
-      if (!options.drawerOpen.value) return
-
-      const drawerRect = getDrawerClientRect()
-      if (!drawerRect) return
-
-      const n = cy2.getElementById(pid)
-      if (!n || n.empty()) return
-
-      const nr = nodeClientRect(n)
-      if (!nr) return
-
-      const pad = 14
-      if (!rectsIntersect(nr, drawerRect, pad)) return
-
-      const viewportW = window.innerWidth || document.documentElement.clientWidth || 0
-      const isRightDrawer = viewportW ? drawerRect.left > viewportW / 2 : true
-
-      if (isRightDrawer) {
-        // Move node left, just enough to clear the drawer.
-        const overflow = nr.x2 - (drawerRect.left - pad)
-        if (overflow > 1) cy2.panBy({ x: -overflow, y: 0 })
-        return
-      }
-
-      // Left drawer: move node right.
-      const overflow = (drawerRect.right + pad) - nr.x1
-      if (overflow > 1) cy2.panBy({ x: overflow, y: 0 })
-    }
-
     cy.on('tap', 'node', (ev) => {
       const n = ev.target as NodeSingular
       const pid = String(n.data('pid') || n.id())
@@ -1195,9 +1310,7 @@ export function useGraphVisualization(options: {
         options.drawerTab.value = 'summary'
         options.drawerOpen.value = true
 
-        // Drawer is mounted/animated; check coverage after it appears.
-        window.setTimeout(() => panIfCoveredByDrawer(pid), 0)
-        window.setTimeout(() => panIfCoveredByDrawer(pid), 250)
+        schedulePanIfCoveredByDrawer(pid)
         return
       }
 
@@ -1242,6 +1355,8 @@ export function useGraphVisualization(options: {
       elements: [],
       minZoom: 0.1,
       maxZoom: 3,
+      // We implement our own selection highlight via classes; disable Cytoscape selection state.
+      autounselectify: true,
     })
 
     options.setCy(cy)
@@ -1280,6 +1395,7 @@ export function useGraphVisualization(options: {
   // but composable guarantees cleanup when used inside a component.
   onBeforeUnmount(() => {
     destroyCy()
+    stopDrawerPanWatch()
   })
 
   onMounted(() => {

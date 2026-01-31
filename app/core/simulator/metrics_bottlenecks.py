@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -31,12 +32,14 @@ class MetricsBottlenecks:
         scenarios: dict[str, ScenarioRecord],
         utc_now,
         db_enabled,
+        logger: logging.Logger,
     ) -> None:
         self._lock = lock
         self._runs = runs
         self._scenarios = scenarios
         self._utc_now = utc_now
         self._db_enabled = db_enabled
+        self._logger = logger
 
     def _get_run(self, run_id: str) -> RunRecord:
         with self._lock:
@@ -132,7 +135,12 @@ class MetricsBottlenecks:
                 )
             except Exception:
                 # Fall back to synthetic below.
-                pass
+                self._logger.debug(
+                    "simulator.metrics.db_query_failed_falling_back run_id=%s equivalent=%s",
+                    run_id,
+                    equivalent,
+                    exc_info=True,
+                )
 
         def v01(x: float) -> float:
             return max(0.0, min(1.0, x))

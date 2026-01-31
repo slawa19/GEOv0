@@ -46,6 +46,7 @@ class PaymentCreateRequest(BaseModel):
 
 
 class PaymentRoute(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     path: List[str]
     amount: str
 

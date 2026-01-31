@@ -94,7 +94,7 @@ const seedLabel = computed(() => {
   return computeSeedLabel(participants.value)
 })
 
-const eq = ref<string>('ALL')
+const eq = ref<string>('')  // Will be auto-selected to primary equivalent after loadData()
 const statusFilter = ref<string[]>(['active', 'frozen', 'closed'])
 const threshold = ref<string>(DEFAULT_THRESHOLD)
 
@@ -104,7 +104,7 @@ function syncFromRouteQuery() {
   withRouteHydration(() => {
     const nextEq = readQueryString(route.query.equivalent).trim().toUpperCase()
     const nextThr = readQueryString(route.query.threshold).trim()
-    if (nextEq) eq.value = nextEq
+    if (nextEq) eq.value = nextEq === 'ALL' ? '' : nextEq
     if (nextThr) threshold.value = nextThr
   })
 }
@@ -117,7 +117,7 @@ watch(
 
 watch(eq, (v) => {
   if (applyingRouteQuery.value) return
-  updateRouteQuery({ equivalent: v === 'ALL' ? '' : v })
+  updateRouteQuery({ equivalent: v || '' })
 })
 watch(threshold, (v) => {
   if (applyingRouteQuery.value) return

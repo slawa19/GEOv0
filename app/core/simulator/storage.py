@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Optional
@@ -17,15 +18,29 @@ from app.db.models.simulator_storage import (
     SimulatorRunMetric,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def db_enabled() -> bool:
     return bool(getattr(settings, "SIMULATOR_DB_ENABLED", False))
+
+
+def _validate_run_for_storage(run: RunRecord) -> None:
+    if not str(getattr(run, "run_id", "") or "").strip():
+        raise ValueError("run_id is required")
+    if not str(getattr(run, "scenario_id", "") or "").strip():
+        raise ValueError("scenario_id is required")
+    if not str(getattr(run, "mode", "") or "").strip():
+        raise ValueError("mode is required")
+    if not str(getattr(run, "state", "") or "").strip():
+        raise ValueError("state is required")
 
 
 async def upsert_run(run: RunRecord) -> None:
     if not db_enabled():
         return
     try:
+        _validate_run_for_storage(run)
         async with db.AsyncSessionLocal() as session:
             row = SimulatorRun(
                 run_id=run.run_id,
@@ -48,6 +63,7 @@ async def upsert_run(run: RunRecord) -> None:
             await session.merge(row)
             await session.commit()
     except Exception:
+        logger.exception("simulator.storage.upsert_run_failed run_id=%s", getattr(run, "run_id", ""))
         return
 
 
@@ -73,7 +89,11 @@ async def sync_artifacts(run: RunRecord) -> None:
                 if size <= sha_max_bytes:
                     sha = artifact_sha256(p)
             except Exception:
-                pass
+                logger.exception(
+                    "simulator.storage.artifact_hash_failed run_id=%s name=%s",
+                    getattr(run, "run_id", ""),
+                    getattr(p, "name", ""),
+                )
             items.append(
                 SimulatorRunArtifact(
                     run_id=run.run_id,
@@ -90,6 +110,7 @@ async def sync_artifacts(run: RunRecord) -> None:
             session.add_all(items)
             await session.commit()
     except Exception:
+        logger.exception("simulator.storage.sync_artifacts_failed run_id=%s", getattr(run, "run_id", ""))
         return
 
 

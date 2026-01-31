@@ -446,8 +446,10 @@ class PaymentService:
 
     def _tx_to_payment_result(self, tx: Transaction) -> PaymentResult:
         payload = tx.payload or {}
-        routes_payload = payload.get('routes') or []
-        routes = [PaymentRoute(path=r.get('path', []), amount=str(r.get('amount'))) for r in routes_payload] or None
+        routes_payload = payload.get('routes')
+        routes = None
+        if routes_payload is not None:
+            routes = [PaymentRoute.model_validate(r) for r in routes_payload] or None
 
         committed_at = tx.updated_at if tx.state == 'COMMITTED' else None
         error = None

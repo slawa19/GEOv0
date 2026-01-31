@@ -169,4 +169,5 @@ class ScenarioRegistry:
                 rec = scenario_to_record(raw, source_path=scenario_path, created_at=None)
                 self._scenarios[rec.scenario_id] = rec
             except Exception:
+                self._logger.exception("simulator.uploaded_scenario_load_failed path=%s", str(scenario_path))
                 continue

@@ -355,6 +355,22 @@ export const EN: Record<string, string> = {
   'config.labels.CLEARING_ENABLED': 'Clearing cycles',
   'config.help.CLEARING_ENABLED': 'Enables periodic clearing/settlement logic. Turn off only for testing or emergency isolation.',
 
+  'config.helpFallback.kind.boolean': 'Type: toggle (true/false).',
+  'config.helpFallback.kind.number': 'Type: number.',
+  'config.helpFallback.kind.string': 'Type: string.',
+  'config.helpFallback.kind.json': 'Type: JSON (valid JSON string).',
+  'config.helpFallback.section.featureFlags': 'Affects feature enablement (feature flags).',
+  'config.helpFallback.section.logging': 'Affects backend logging.',
+  'config.helpFallback.section.rateLimit': 'Affects request rate limiting.',
+  'config.helpFallback.section.routing': 'Affects payment route search.',
+  'config.helpFallback.section.recovery': 'Affects background maintenance and stuck tx handling.',
+  'config.helpFallback.section.integrity': 'Affects background integrity computations/checks.',
+  'config.helpFallback.section.other': 'Backend technical setting.',
+  'config.helpFallback.units.seconds': 'Units: seconds.',
+  'config.helpFallback.units.count': 'Units: count.',
+  'config.helpFallback.apply': 'Takes effect immediately after saving.',
+  'config.helpFallback.safeDefault': 'If unsure, keep the current value.',
+
   'health.loadFailed': 'Failed to load health',
 
   'fixtures.loadFailedOne': 'Failed to load fixture: {path} ({status})',

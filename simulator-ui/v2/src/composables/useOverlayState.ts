@@ -220,6 +220,7 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
   function resetOverlays() {
     activeEdges.clear()
     activeEdgeExpiresAtMsByKey.clear()
+    floatingLabels.splice(0, floatingLabels.length)
     deps.setFlash(0)
     deps.resetFxState()
   }

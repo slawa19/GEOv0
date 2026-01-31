@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import APIRouter, Depends, Query, Request, HTTPException
+from fastapi import APIRouter, Depends, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse
 
 from app.api import deps
@@ -27,7 +27,7 @@ from app.schemas.simulator import (
     SimulatorRunStatusEvent,
     SimulatorTxUpdatedEvent,
 )
-from app.utils.exceptions import NotFoundException
+from app.utils.exceptions import GoneException, NotFoundException
 
 router = APIRouter(prefix="/simulator")
 
@@ -229,7 +229,7 @@ async def events_stream_active_run(
     if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
         run_id=run_id, after_event_id=last_event_id
     ):
-        raise HTTPException(status_code=410, detail="Last-Event-ID is too old; please refresh state")
+        raise GoneException("Last-Event-ID is too old; please refresh state")
 
     return StreamingResponse(
         _run_events_stream(
@@ -352,7 +352,7 @@ async def run_events_stream(
     if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
         run_id=run_id, after_event_id=last_event_id
     ):
-        raise HTTPException(status_code=410, detail="Last-Event-ID is too old; please refresh state")
+        raise GoneException("Last-Event-ID is too old; please refresh state")
 
     return StreamingResponse(
         _run_events_stream(

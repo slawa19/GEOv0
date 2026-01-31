@@ -74,6 +74,11 @@ class TooManyRequestsException(GeoException):
         super().__init__(message or "Too many requests", code=ErrorCode.E009, details=details, status_code=429)
 
 
+class GoneException(GeoException):
+    def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
+        super().__init__(message or "Gone", code=ErrorCode.E009, details=details, status_code=410)
+
+
 class InvalidSignatureException(GeoException):
     def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
         super().__init__(message, code=ErrorCode.E005, details=details, status_code=400)

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
@@ -76,7 +78,41 @@ class ArtifactsManager:
             # Raw events export (NDJSON). The writer task appends lines.
             (artifacts_dir / "events.ndjson").write_text("", encoding="utf-8")
         except Exception:
+            self._logger.exception("simulator.artifacts.init_failed run_id=%s", getattr(run, "run_id", ""))
             run.artifacts_dir = None
+
+    def cleanup_old_runs(self, *, ttl_hours: int) -> None:
+        """Best-effort cleanup for `.local-run/simulator/runs/*`.
+
+        Only touches local filesystem artifacts; never affects DB state.
+        """
+
+        ttl_hours = int(ttl_hours or 0)
+        if ttl_hours <= 0:
+            return
+
+        base = (self._local_state_dir() / "runs").resolve()
+        if not base.exists() or not base.is_dir():
+            return
+
+        cutoff = time.time() - (ttl_hours * 3600)
+
+        for p in sorted(base.iterdir()):
+            if not p.is_dir():
+                continue
+
+            try:
+                rp = p.resolve()
+                if not str(rp).startswith(str(base)):
+                    continue
+                mtime = float(rp.stat().st_mtime)
+                if mtime >= cutoff:
+                    continue
+                shutil.rmtree(rp, ignore_errors=False)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                self._logger.exception("simulator.artifacts.cleanup_failed path=%s", str(p))
 
     async def list_artifacts(self, *, run_id: str) -> ArtifactIndex:
         run = self._get_run(run_id)
@@ -133,7 +169,7 @@ class ArtifactsManager:
                     session.add_all(rows)
                     await session.commit()
             except Exception:
-                pass
+                self._logger.exception("simulator.artifacts.db_sync_failed run_id=%s", run_id)
 
         return ArtifactIndex(
             api_version=SIMULATOR_API_VERSION,
@@ -169,6 +205,7 @@ class ArtifactsManager:
             if not path.exists():
                 path.write_text("", encoding="utf-8")
         except Exception:
+            self._logger.exception("simulator.artifacts.events_writer_init_failed run_id=%s", run_id)
             return
 
         with self._lock:
@@ -198,7 +235,7 @@ class ArtifactsManager:
             try:
                 q.put_nowait(None)
             except Exception:
-                pass
+                self._logger.exception("simulator.artifacts.events_writer_stop_enqueue_failed run_id=%s", run_id)
 
         try:
             await asyncio.wait_for(task, timeout=2.0)
@@ -207,8 +244,9 @@ class ArtifactsManager:
             try:
                 await task
             except Exception:
-                pass
+                self._logger.exception("simulator.artifacts.events_writer_stop_cancel_failed run_id=%s", run_id)
         except Exception:
+            self._logger.exception("simulator.artifacts.events_writer_stop_failed run_id=%s", run_id)
             return
 
     async def _events_writer_loop(
@@ -248,6 +286,7 @@ class ArtifactsManager:
                 await asyncio.to_thread(_append_text, path, text)
             except Exception:
                 # Best-effort: drop on IO errors.
+                self._logger.exception("simulator.artifacts.events_writer_append_failed run_id=%s", run_id)
                 continue
 
     def enqueue_event_artifact(self, run_id: str, payload: dict[str, Any]) -> None:
@@ -258,6 +297,7 @@ class ArtifactsManager:
         try:
             line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         except Exception:
+            self._logger.exception("simulator.artifacts.events_json_encode_failed run_id=%s", run_id)
             return
         try:
             q.put_nowait(line)
@@ -299,11 +339,13 @@ class ArtifactsManager:
             await asyncio.to_thread(_write_json, base / "summary.json", summary_payload)
             await asyncio.to_thread(_build_bundle, base)
         except Exception:
+            self._logger.exception("simulator.artifacts.finalize_failed run_id=%s", run_id)
             return
 
         try:
             await simulator_storage.sync_artifacts(run)
         except Exception:
+            self._logger.exception("simulator.artifacts.sync_failed run_id=%s", run_id)
             return
 
     def write_real_tick_artifact(self, run: RunRecord, payload: dict[str, Any]) -> None:
@@ -316,4 +358,5 @@ class ArtifactsManager:
                 encoding="utf-8",
             )
         except Exception:
+            self._logger.exception("simulator.artifacts.last_tick_write_failed run_id=%s", getattr(run, "run_id", ""))
             return

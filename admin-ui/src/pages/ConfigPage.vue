@@ -132,6 +132,32 @@ function configTooltipText(key: string): string | undefined {
   return undefined
 }
 
+function configTooltipTextForRow(row: Row): string {
+  const explicit = configTooltipText(row.key)
+  if (explicit) return explicit
+
+  const kUpper = String(row.key || '').trim().toUpperCase()
+  const section = sectionForKey(row.key)
+
+  const lines: string[] = []
+  const kindKey = `config.helpFallback.kind.${row.kind}`
+  if (te(kindKey)) lines.push(t(kindKey as never))
+
+  const sectionKey = `config.helpFallback.section.${section}`
+  if (te(sectionKey)) lines.push(t(sectionKey as never))
+
+  if (kUpper.endsWith('_SECONDS')) {
+    lines.push(t('config.helpFallback.units.seconds'))
+  } else if (kUpper.includes('_REQUESTS') || kUpper.endsWith('_COUNT') || kUpper.includes('_MAX_')) {
+    lines.push(t('config.helpFallback.units.count'))
+  }
+
+  lines.push(t('config.helpFallback.apply'))
+  lines.push(t('config.helpFallback.safeDefault'))
+
+  return lines.filter(Boolean).slice(0, 4).join('\n')
+}
+
 function appliesForKey(key: string): ScopeTag[] {
   // /admin/config currently only exposes runtime-mutable items.
   // Keep the function for future expansion and UI consistency.
@@ -315,15 +341,17 @@ watch(
             <el-table-column
               :label="t('config.columns.key')"
               min-width="300"
-              show-overflow-tooltip
             >
               <template #default="scope">
                 <div class="cfgName">
                   <TooltipLabel
                     :label="configLabel(scope.row.key)"
-                    :tooltip-text="configTooltipText(scope.row.key)"
+                    :tooltip-text="configTooltipTextForRow(scope.row)"
                   />
-                  <div class="cfgKey geoHint">
+                  <div
+                    v-if="configLabel(scope.row.key) !== scope.row.key"
+                    class="cfgKey geoHint"
+                  >
                     <span :class="{ focus: focusKey && scope.row.key === focusKey }">
                       <TableCellEllipsis :text="scope.row.key" />
                     </span>
@@ -394,6 +422,7 @@ watch(
                       allow-create
                       default-first-option
                       class="cfgSelect"
+                      popper-class="geoSelectPopper geoSelectPopper--configValue"
                       :placeholder="t('config.logLevelPlaceholder')"
                     >
                       <el-option
@@ -471,7 +500,7 @@ watch(
 }
 .cfgSection__title {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   margin: 4px 0 4px 0;
   color: var(--el-text-color-primary);
 }
@@ -525,6 +554,23 @@ watch(
 
 .cfgSelect {
   width: 160px;
+}
+
+/* geoTable enforces label font size; restore standard size for select input and dropdown options */
+.cfgSelect :deep(.el-input__wrapper) {
+  font-size: var(--el-font-size-base);
+}
+
+.cfgSelect :deep(.el-input__inner) {
+  font-size: var(--el-font-size-base);
+}
+
+:global(.geoSelectPopper--configValue) {
+  font-size: var(--el-font-size-base);
+}
+
+:global(.geoSelectPopper--configValue .el-select-dropdown__item) {
+  font-size: var(--el-font-size-base);
 }
 
 .cfgText {

@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import time
 import threading
 from typing import Any, Callable, Optional
 
 from app.core.simulator.models import RunRecord, _Subscription
+from app.utils.exceptions import TooManyRequestsException
+
+
+def _safe_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)) or str(default))
+    except Exception:
+        return int(default)
 
 
 class SseBroadcast:
@@ -16,15 +26,27 @@ class SseBroadcast:
         runs: dict[str, RunRecord],
         get_event_buffer_max: Callable[[], int],
         get_event_buffer_ttl_sec: Callable[[], int],
+        get_sub_queue_max: Callable[[], int],
         enqueue_event_artifact: Callable[[str, dict[str, Any]], None],
+        logger: logging.Logger,
     ) -> None:
         self._lock = lock
         self._runs = runs
         self._get_event_buffer_max = get_event_buffer_max
         self._get_event_buffer_ttl_sec = get_event_buffer_ttl_sec
+        self._get_sub_queue_max = get_sub_queue_max
         self._enqueue_event_artifact = enqueue_event_artifact
+        self._logger = logger
+
+    def _count_total_subs_locked(self) -> int:
+        """Counts subscriptions across all runs.
+
+        Caller must hold `_lock`.
+        """
+        return sum(len(r._subs) for r in self._runs.values())
 
     def next_event_id(self, run: RunRecord) -> str:
+        """Allocates a monotonically increasing event id for a run (best-effort)."""
         with self._lock:
             run._event_seq += 1
             return f"evt_{run.run_id}_{run._event_seq:06d}"
@@ -79,6 +101,7 @@ class SseBroadcast:
             self.prune_event_buffer_locked(run, now=now)
 
     def replay_events(self, *, run_id: str, equivalent: str, after_event_id: str) -> list[dict[str, Any]]:
+        """Returns buffered events after `after_event_id` for SSE reconnect replay."""
         run = self._runs.get(run_id)
         if run is None:
             return []
@@ -103,6 +126,7 @@ class SseBroadcast:
         return out
 
     def broadcast(self, run_id: str, payload: dict[str, Any]) -> None:
+        """Broadcasts one event payload to current subscribers of the run."""
         run = self._runs.get(run_id)
         if run is None:
             return
@@ -117,7 +141,7 @@ class SseBroadcast:
         try:
             self._enqueue_event_artifact(run_id, payload)
         except Exception:
-            pass
+            self._logger.exception("simulator.sse.enqueue_event_artifact_failed run_id=%s", run_id)
 
         with self._lock:
             subs = list(run._subs)
@@ -135,17 +159,45 @@ class SseBroadcast:
                         sub.queue.put_nowait(payload)
                         continue
                     except Exception:
-                        pass
+                        self._logger.debug(
+                            "simulator.sse.run_status_drop_failed run_id=%s", run_id, exc_info=True
+                        )
                 continue
 
     async def subscribe(self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None) -> _Subscription:
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=500)
+        """Creates a new SSE subscription queue.
+
+        Enforces best-effort concurrent connection limits via env:
+        `SIMULATOR_SSE_MAX_CONNECTIONS` and `SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN`.
+        """
+        queue_max = max(1, int(self._get_sub_queue_max()))
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=queue_max)
         sub = _Subscription(equivalent=equivalent, queue=queue)
 
         with self._lock:
             run = self._runs.get(run_id)
             if run is None:
                 return sub
+
+            max_total = _safe_int_env("SIMULATOR_SSE_MAX_CONNECTIONS", 50)
+            max_per_run = _safe_int_env("SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", 10)
+
+            if max_total > 0:
+                total = self._count_total_subs_locked()
+                if total >= max_total:
+                    raise TooManyRequestsException(
+                        "Too many concurrent SSE connections",
+                        details={"max_total": max_total, "total": total},
+                    )
+
+            if max_per_run > 0:
+                cur = len(run._subs)
+                if cur >= max_per_run:
+                    raise TooManyRequestsException(
+                        "Too many concurrent SSE connections for run",
+                        details={"max_per_run": max_per_run, "run_subs": cur, "run_id": run_id},
+                    )
+
             run._subs.append(sub)
 
         if after_event_id:
@@ -158,6 +210,7 @@ class SseBroadcast:
         return sub
 
     async def unsubscribe(self, run_id: str, sub: _Subscription) -> None:
+        """Removes a previously created subscription (best-effort)."""
         with self._lock:
             run = self._runs.get(run_id)
             if run is None:

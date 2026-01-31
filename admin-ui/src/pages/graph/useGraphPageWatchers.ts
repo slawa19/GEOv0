@@ -71,10 +71,15 @@ export function useGraphPageWatchers(opts: {
     throttledRebuild()
   })
 
+  let eqReqId = 0
+
   watch(opts.eq, () => {
     void (async () => {
       if (!opts.focusMode.value) {
+        eqReqId += 1
+        const reqId = eqReqId
         await opts.refreshSnapshotForEq()
+        if (reqId !== eqReqId) return
       }
       opts.graphViz.rebuildGraph({ fit: false })
     })()

@@ -34,6 +34,31 @@ Source of truth:
   - 2PC-like prepare/commit (через `PaymentEngine`)
   - явные таймауты (см. раздел 3)
 
+---
+
+## 1.3 Каноничный контракт результата payment (single source of truth)
+
+Это правило фиксирует, **где** определяется форма результата платежа и маршрутов, и **кто** отвечает за валидацию.
+
+**Source of truth:**
+
+- Pydantic-модели результата: `app/schemas/payment.py` (`PaymentResult`, `PaymentRoute`).
+
+**Контракт:**
+
+- `PaymentResult.routes: Optional[List[PaymentRoute]]`
+- `PaymentRoute = { path: List[str], amount: str }` (лишние поля запрещены)
+
+**Единственная точка валидации payload → model:**
+
+- `PaymentService._tx_to_payment_result()` валидирует `Transaction.payload.routes` через Pydantic.
+
+**Правило для consumer-кода (например runner):**
+
+- использовать `res.routes` напрямую;
+- не выполнять «защитный парсинг» и не поддерживать несколько форм ответа в consumer-коде;
+- несоответствие контракту считать багом/коррупцией данных и чинить на границе `PaymentService`.
+
 ### 1.2 Clearing
 В текущем backend есть Clearing API:
 - `GET /api/v1/clearing/cycles?equivalent=...` — найти циклы

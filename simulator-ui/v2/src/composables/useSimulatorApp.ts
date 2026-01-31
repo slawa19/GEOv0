@@ -14,22 +14,8 @@ import { fnv1a } from '../utils/hash'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 
-import {
-  artifactDownloadUrl,
-  createRun,
-  getRun,
-  getSnapshot,
-  listArtifacts,
-  listScenarios,
-  pauseRun,
-  resumeRun,
-  setIntensity,
-  stopRun,
-} from '../api/simulatorApi'
+import { getSnapshot } from '../api/simulatorApi'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
-import { connectSse } from '../api/sse'
-import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
-import { ApiError, authHeaders } from '../api/http'
 import { normalizeApiBase } from '../api/apiBase'
 
 import { useAppDemoPlayerSetup } from './useAppDemoPlayerSetup'
@@ -49,6 +35,7 @@ import { useAppLayoutWiring } from './useAppLayoutWiring'
 import { useAppDragToPinWiring } from './useAppDragToPinWiring'
 import { useAppCanvasInteractionsWiring } from './useAppCanvasInteractionsWiring'
 import { useAppViewWiring } from './useAppViewWiring'
+import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 
 export function useSimulatorApp() {
   const eq = ref('UAH')
@@ -116,7 +103,7 @@ export function useSimulatorApp() {
   const DEFAULT_DEV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_DEV_ACCESS_TOKEN ?? 'dev-admin-token-change-me').trim()
   const ENV_ACCESS_TOKEN = String(import.meta.env.VITE_GEO_ACCESS_TOKEN ?? '').trim()
 
-  const real = reactive({
+  const real = reactive<RealModeState>({
     apiBase: normalizeApiBase(lsGet('geo.sim.v2.apiBase', String(import.meta.env.VITE_GEO_API_BASE ?? '/api/v1'))),
     accessToken: lsGet(
       'geo.sim.v2.accessToken',
@@ -939,309 +926,36 @@ export function useSimulatorApp() {
 
   const sceneState = sceneAndDemo.sceneState
 
-  function resetStaleRun(opts?: { clearError?: boolean }) {
-    real.runId = null
-    real.runStatus = null
-    real.lastEventId = null
-    real.artifacts = []
-    clearingPlansById.clear()
-    clearingPlanFxStarted.clear()
-    resetRunStats()
-    stopSse()
-    if (opts?.clearError ?? true) {
-      real.lastError = ''
-      state.error = ''
-    }
-    // Keep selection usable after restart (do not auto-start).
-    ensureScenarioSelectionValid()
-  }
-
-  // -----------------
-  // Real Mode: SSE loop
-  // -----------------
-
-  let sseAbort: AbortController | null = null
-  let sseSeq = 0
-
   const clearingPlansById = new Map<string, ClearingPlanEvent>()
 
-  function stopSse() {
-    sseAbort?.abort()
-    sseAbort = null
-    real.sseState = 'idle'
+  function cleanupRealRunFxAndTimers() {
+    clearScheduledTimeouts()
+    resetOverlays()
+    clearHoveredEdge()
+    clearingPlanFxStarted.clear()
+    physics.stop()
   }
 
-  async function refreshRunStatus() {
-    if (!real.runId || !real.accessToken) return
-    try {
-      const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      real.runStatus = st
-      real.intensityPercent = Math.round(Number(st.intensity_percent ?? real.intensityPercent))
-      const le = st.last_error
-      real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
-    } catch (e: any) {
-      // If the server restarted, the in-memory run registry is gone.
-      // Clear stale run_id so the UI doesn't look "stuck" (and doesn't require a manual page reload).
-      if (e instanceof ApiError && e.status === 404) {
-        resetStaleRun({ clearError: true })
-        return
-      }
-      real.lastError = String(e?.message ?? e)
-    }
-  }
-
-  async function refreshSnapshot() {
-    await sceneState.loadScene()
-    // Scene loader stores errors in state.error; in real mode surface them in the HUD.
-    if (isRealMode.value && state.error) {
-      // Typical case: HTTP 404 when run_id was persisted but backend restarted.
-      if (state.error.includes('HTTP 404')) {
-        resetStaleRun({ clearError: true })
-        return
-      }
-      real.lastError = state.error
-    }
-  }
-
-  // Also surface initial scene-load errors (e.g., "No run started") that happen on mount
-  // before the user clicks "Start run".
-  watch(
-    () => state.error,
-    (e) => {
-      if (!isRealMode.value) return
-      if (!e) return
-
-      if (e.includes('HTTP 404')) {
-        resetStaleRun({ clearError: true })
-        return
-      }
-
-      real.lastError = e
-    },
-    { flush: 'post' },
-  )
-
-  function nextBackoff(attempt: number): number {
-    const steps = [1000, 2000, 5000, 10000, 20000]
-    const base = steps[Math.min(steps.length - 1, attempt)]!
-    const jitter = 0.2 * base * (Math.random() - 0.5)
-    return Math.max(250, Math.round(base + jitter))
-  }
-
-  // Snapshot refetch for real mode (Variant B: throttled pull)
-  let eventsSinceLastRefresh = 0
-  let lastSnapshotRefreshTs = 0
-  let pendingSnapshotRefresh = false
-  const EVENTS_BEFORE_REFRESH = 10 // Refetch every N events
-  const MIN_REFRESH_INTERVAL_MS = 3000 // Minimum 3s between refreshes
-
-  function scheduleSnapshotRefresh() {
-    if (pendingSnapshotRefresh) return
-
-    const now = Date.now()
-    const elapsed = now - lastSnapshotRefreshTs
-
-    if (elapsed >= MIN_REFRESH_INTERVAL_MS) {
-      // Refresh immediately
-      doSnapshotRefresh()
-    } else {
-      // Defer until throttle window passes
-      pendingSnapshotRefresh = true
-      setTimeout(() => {
-        pendingSnapshotRefresh = false
-        doSnapshotRefresh()
-      }, MIN_REFRESH_INTERVAL_MS - elapsed)
-    }
-  }
-
-  async function doSnapshotRefresh() {
-    lastSnapshotRefreshTs = Date.now()
-    await refreshSnapshot()
-  }
-
-  async function runSseLoop() {
-    const mySeq = ++sseSeq
-    stopSse()
-
-    if (!isRealMode.value) return
-    if (!real.runId || !real.accessToken) return
-
-    const ctrl = new AbortController()
-    sseAbort = ctrl
-
-    let attempt = 0
-    real.sseState = 'connecting'
-    real.lastError = ''
-
-    // Reset refetch counters on new SSE session
-    eventsSinceLastRefresh = 0
-    lastSnapshotRefreshTs = Date.now()
-    pendingSnapshotRefresh = false
-
-    while (!ctrl.signal.aborted && mySeq === sseSeq) {
-      const runId = real.runId
-      const eqNow = effectiveEq.value
-      const url = `${real.apiBase.replace(/\/+$/, '')}/simulator/runs/${encodeURIComponent(runId)}/events?equivalent=${encodeURIComponent(
-        eqNow,
-      )}`
-
-      try {
-        real.sseState = 'open'
-        await connectSse({
-          url,
-          headers: authHeaders(real.accessToken),
-          lastEventId: real.lastEventId,
-          signal: ctrl.signal,
-          onMessage: (msg) => {
-            if (ctrl.signal.aborted) return
-            if (msg.id) real.lastEventId = msg.id
-            if (!msg.data) return
-
-            let parsed: unknown
-            try {
-              parsed = JSON.parse(msg.data)
-            } catch {
-              return
-            }
-
-            const evt = normalizeSimulatorEvent(parsed)
-            if (!evt) return
-
-            // Prefer payload event_id when present.
-            if ((evt as any).event_id) real.lastEventId = String((evt as any).event_id)
-
-            if ((evt as any).type === 'run_status') {
-              real.runStatus = evt as any
-              real.intensityPercent = Math.round(Number((evt as any).intensity_percent ?? real.intensityPercent))
-              const le = (evt as any).last_error
-              real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
-              return
-            }
-
-            if ((evt as any).type === 'tx.updated') {
-              real.runStats.attempts += 1
-              real.runStats.committed += 1
-
-              // Apply patches immediately (no demo resetOverlays that would wipe FX).
-              const tx = evt as TxUpdatedEvent
-              const beforeById = new Map<string, bigint>()
-              const nodeIds = (tx.node_patch ?? []).map((p) => p.id)
-              for (const id of nodeIds) beforeById.set(id, signedBalanceForNodeId(id))
-
-              if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
-              if (tx.edge_patch) realPatchApplier.applyEdgePatches(tx.edge_patch)
-
-              // Restore “floating numbers” in real mode: show per-node balance deltas when patches include net balance updates.
-              if (nodeIds.length > 0) pushBalanceDeltaLabels(beforeById, nodeIds, tx.equivalent, { throttleMs: 220 })
-              runRealTxFx(tx)
-
-              // NOTE: Snapshot refresh disabled to avoid "graph jumping".
-              // UI applies incremental patches from tx.updated.edge_patch instead.
-              // Interactivity (clicks, drag, zoom) remains fully functional.
-              return
-            }
-
-            if ((evt as any).type === 'tx.failed') {
-              const code = String((evt as any).error?.code ?? 'TX_FAILED')
-              real.runStats.attempts += 1
-              if (code.toUpperCase() === 'PAYMENT_TIMEOUT') {
-                real.runStats.timeouts += 1
-                real.runStats.errors += 1
-                inc(real.runStats.errorsByCode, code)
-              } else if (isUserFacingRunError(code)) {
-                real.runStats.errors += 1
-                inc(real.runStats.errorsByCode, code)
-              } else {
-                real.runStats.rejected += 1
-                inc(real.runStats.rejectedByCode, code)
-              }
-              return
-            }
-
-            if ((evt as any).type === 'clearing.plan') {
-              const plan = evt as ClearingPlanEvent
-              const planId = String(plan.plan_id ?? '')
-              if (planId) {
-                clearingPlansById.set(planId, plan)
-                runRealClearingPlanFx(plan)
-              }
-              return
-            }
-
-            if ((evt as any).type === 'clearing.done') {
-              const done = evt as ClearingDoneEvent
-              const planId = String(done.plan_id ?? '')
-              const plan = planId ? clearingPlansById.get(planId) : undefined
-
-              // Apply patches immediately (do not reset overlays in real mode).
-              const beforeById = new Map<string, bigint>()
-              const nodeIds = (done.node_patch ?? []).map((p) => p.id)
-              for (const id of nodeIds) beforeById.set(id, signedBalanceForNodeId(id))
-
-              if (done.node_patch) realPatchApplier.applyNodePatches(done.node_patch)
-              if (done.edge_patch) realPatchApplier.applyEdgePatches(done.edge_patch)
-
-              // Show balance delta labels for clearing commits too.
-              if (nodeIds.length > 0) pushBalanceDeltaLabels(beforeById, nodeIds, done.equivalent, { throttleMs: 180 })
-
-              runRealClearingDoneFx(plan, done)
-              if (planId) clearingPlansById.delete(planId)
-
-              // NOTE: Snapshot refresh disabled to avoid "graph jumping".
-              // Patches from clearing.done.node_patch/edge_patch are applied above.
-            }
-          },
-        })
-
-        // Stream ended (server may close on stopped/error). Refresh status for UI.
-        await refreshRunStatus()
-
-        const st = String(real.runStatus?.state ?? '')
-        if (st === 'stopped' || st === 'error') {
-          real.sseState = 'closed'
-          return
-        }
-
-        real.sseState = 'reconnecting'
-      } catch (e: any) {
-        if (ctrl.signal.aborted) return
-
-        const msg = String(e?.message ?? e)
-        // If backend restarted (or run id expired), clear stale state and stop reconnect loop.
-        if (msg.includes('SSE HTTP 404') || msg.includes('HTTP 404')) {
-          resetStaleRun({ clearError: true })
-          return
-        }
-
-        real.lastError = msg
-
-        // Strict replay mode: backend may return 410 → do a full refresh.
-        if (msg.includes(' 410 ') || msg.includes('HTTP 410') || msg.includes('status 410')) {
-          real.lastEventId = null
-          await refreshRunStatus()
-          await refreshSnapshot()
-        }
-
-        real.sseState = 'reconnecting'
-      }
-
-      const delay = nextBackoff(attempt++)
-      await new Promise((r) => setTimeout(r, delay))
-    }
-  }
-
-  watch(
-    () => [apiMode.value, real.runId, real.accessToken, effectiveEq.value, real.apiBase] as const,
-    () => {
-      if (!isRealMode.value) {
-        stopSse()
-        return
-      }
-      // Reconnect when run/token/eq/base changes.
-      runSseLoop()
-    },
-    { flush: 'post' },
-  )
+  const realMode = useSimulatorRealMode({
+    isRealMode,
+    isLocalhost,
+    effectiveEq,
+    state,
+    real,
+    ensureScenarioSelectionValid,
+    resetRunStats,
+    cleanupRealRunFxAndTimers,
+    isUserFacingRunError,
+    inc,
+    loadScene: () => sceneState.loadScene(),
+    realPatchApplier,
+    signedBalanceForNodeId,
+    pushBalanceDeltaLabels,
+    runRealTxFx,
+    runRealClearingPlanFx,
+    runRealClearingDoneFx,
+    clearingPlansById,
+  })
 
   useAppLifecycle({
     layoutMode,
@@ -1253,169 +967,6 @@ export function useSimulatorApp() {
     physics,
     getLayoutSize: () => ({ w: layout.w, h: layout.h }),
   })
-
-  async function refreshScenarios() {
-    if (!real.accessToken) {
-      real.lastError = 'Missing access token'
-      return
-    }
-
-    real.loadingScenarios = true
-    real.lastError = ''
-    try {
-      const res = await listScenarios({ apiBase: real.apiBase, accessToken: real.accessToken })
-      real.scenarios = res.items ?? []
-      ensureScenarioSelectionValid()
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    } finally {
-      real.loadingScenarios = false
-    }
-  }
-
-  async function startRun() {
-    if (!real.selectedScenarioId) return
-    if (!real.accessToken) {
-      real.lastError = 'Missing access token'
-      return
-    }
-
-    // If a previous run_id is still stored but is no longer active, start a fresh run.
-    // We explicitly do NOT auto-stop an active run here.
-    const st = String(real.runStatus?.state ?? '').toLowerCase()
-    const isActive = !!real.runId && (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
-    if (real.runId && !isActive) {
-      resetStaleRun({ clearError: true })
-    }
-
-    real.lastError = ''
-    try {
-      resetRunStats()
-      const res = await createRun(
-        { apiBase: real.apiBase, accessToken: real.accessToken },
-        { scenario_id: real.selectedScenarioId, mode: real.desiredMode, intensity_percent: real.intensityPercent },
-      )
-      real.runId = res.run_id
-      real.runStatus = null
-      real.lastEventId = null
-      real.artifacts = []
-
-      await refreshRunStatus()
-      await refreshSnapshot()
-      await runSseLoop()
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    }
-  }
-
-  async function pause() {
-    if (!real.runId || !real.accessToken) return
-    try {
-      real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    }
-  }
-
-  async function resume() {
-    if (!real.runId || !real.accessToken) return
-    try {
-      real.runStatus = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    }
-  }
-
-  async function stop() {
-    if (!real.runId || !real.accessToken) return
-    try {
-      real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      // Server may close SSE; keep UI consistent.
-      await refreshRunStatus()
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    }
-  }
-
-  async function applyIntensity() {
-    if (!real.runId || !real.accessToken) return
-    try {
-      real.runStatus = await setIntensity({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, real.intensityPercent)
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    }
-  }
-
-  async function refreshArtifacts() {
-    if (!real.runId || !real.accessToken) return
-    real.artifactsLoading = true
-    try {
-      const idx = await listArtifacts({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
-      real.artifacts = idx.items ?? []
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    } finally {
-      real.artifactsLoading = false
-    }
-  }
-
-  async function downloadArtifact(name: string) {
-    if (!real.runId || !real.accessToken) return
-    try {
-      const url = artifactDownloadUrl({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, name)
-      const res = await fetch(url, { headers: authHeaders(real.accessToken) })
-      if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`)
-      const blob = await res.blob()
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = name
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(blobUrl)
-    } catch (e: any) {
-      real.lastError = String(e?.message ?? e)
-    }
-  }
-
-  // Preload scenarios on first real-mode mount.
-  watch(
-    () => isRealMode.value,
-    (v) => {
-      if (!v) return
-      void (async () => {
-        await refreshScenarios()
-
-        // Prefer deterministic default selection without auto-start.
-        ensureScenarioSelectionValid()
-
-        // If run_id was persisted from a previous session, try to restore UI state.
-        // If the backend restarted, this will clear the stale run_id and tell the user.
-        if (real.runId && real.accessToken) {
-          await refreshRunStatus()
-          if (real.runId) {
-            await refreshSnapshot()
-            if (real.runId) {
-              await runSseLoop()
-            }
-          }
-          return
-        }
-
-        // Opt-in dev UX: auto-start only when explicitly requested.
-        const shouldAutoStart =
-          import.meta.env.DEV &&
-          isLocalhost &&
-          real.accessToken &&
-          real.selectedScenarioId &&
-          !real.runId &&
-          new URLSearchParams(window.location.search).get('autostart') === '1'
-        if (shouldAutoStart) await startRun()
-      })()
-    },
-    { immediate: true },
-  )
 
   return {
     apiMode,
@@ -1443,15 +994,15 @@ export function useSimulatorApp() {
       setIntensityPercent: (v: number) => {
         real.intensityPercent = Math.max(0, Math.min(100, Math.round(v)))
       },
-      refreshScenarios,
-      startRun,
-      pause,
-      resume,
-      stop,
-      applyIntensity,
-      refreshSnapshot,
-      refreshArtifacts,
-      downloadArtifact,
+      refreshScenarios: realMode.refreshScenarios,
+      startRun: realMode.startRun,
+      pause: realMode.pause,
+      resume: realMode.resume,
+      stop: realMode.stop,
+      applyIntensity: realMode.applyIntensity,
+      refreshSnapshot: realMode.refreshSnapshot,
+      refreshArtifacts: realMode.refreshArtifacts,
+      downloadArtifact: realMode.downloadArtifact,
     },
 
     // state + prefs
