@@ -4,11 +4,31 @@
 .env
 .env.*
 !.env.example
+!.env*.example
+
+# =========================
+# Secrets / keys (never commit)
+# =========================
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
 
 # =========================
 # IDE / editor (local workspace settings)
 # =========================
+.kilocode/
+.idea/
 .vscode/
+.DS_Store
+Thumbs.db
+
+# =========================
+# Docker (local overrides)
+# =========================
+docker-compose.override.yml
+docker-compose.override.yaml
 
 # =========================
 # Local DB artifacts
@@ -16,6 +36,11 @@
 *.db
 *.sqlite
 *.sqlite3
+
+# Allow committed test data/fixtures if the project ever stores them as DB files
+!fixtures/**/*.db
+!fixtures/**/*.sqlite
+!fixtures/**/*.sqlite3
 
 # =========================
 # Local Qdrant data / logs
@@ -66,9 +91,21 @@ dist/
 .cache/
 *.log
 *.tmp
+*.pid
+*.ndjson
+tmp/
+.tmp*/
+
+# root-only local runtime artifacts
+/.local-*.pid
+/.tmp_events.ndjson
+/.tmp*.ndjson
 
 # Local run artifacts (scripts/run_local.ps1)
 .local-run/
+
+# Local working directory (project-specific)
+.local/
 
 # Project-private working docs
 plans/
@@ -77,6 +114,15 @@ docs/plans/
 # =========================
 # Frontend apps (Node.js / npm)
 # =========================
+
+# generic Node/Vite artifacts (monorepo-safe)
+node_modules/
+coverage/
+.vite/
+.turbo/
+.pnpm-store/
+playwright-report/
+test-results/
 
 # admin-ui
 admin-ui/node_modules/
