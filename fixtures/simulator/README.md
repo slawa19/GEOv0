@@ -2,6 +2,9 @@
 
 This folder contains canonical `scenario.json` examples and the input schema for the simulator.
 
+RU overview of how scenarios and the engine work:
+- `docs/ru/simulator/scenarios-and-engine.md`
+
 - `scenario.schema.json` — JSON Schema (MVP).
 - `minimal/scenario.json` — smallest valid scenario.
 - `golden-7_2-like/scenario.json` — example aligned with the illustrative structure from `docs/ru/simulator/backend/GEO-community-simulator-application.md` (7.2).
@@ -11,3 +14,8 @@ This folder contains canonical `scenario.json` examples and the input schema for
 
 Regenerate seed scenarios:
 - `D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe scripts/generate_simulator_seed_scenarios.py`
+
+Notes:
+- The backend loads preset scenarios from `fixtures/simulator/*/scenario.json`.
+- Uploaded scenarios are stored under `.local-run/simulator/scenarios/<scenario_id>/scenario.json`.
+- Scenario list shown to UI may be filtered by `SIMULATOR_SCENARIO_ALLOWLIST`.

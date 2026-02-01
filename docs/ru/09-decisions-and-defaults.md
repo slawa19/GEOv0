@@ -144,6 +144,21 @@
 
 Каноничное описание политики и точек реализации: [simulator/frontend/docs/performance-and-quality-policy.md](simulator/frontend/docs/performance-and-quality-policy.md).
 
+### 1.10. Simulator (MVP): сценарии и движок запуска
+
+Решение: симулятор использует **входные сценарии (`scenario.json`)** и общий движок запуска (runtime + runner). Сценарий — это **описание мира (участники/trustlines/эквиваленты)**, а не скрипт с заранее заданным результатом.
+
+Каноничные входные артефакты и доки:
+- RU обзор (для пользователей + для технарей): [simulator/scenarios-and-engine.md](simulator/scenarios-and-engine.md)
+- Индекс документации симулятора: [simulator/README.md](simulator/README.md)
+- JSON Schema сценария: [fixtures/simulator/scenario.schema.json](fixtures/simulator/scenario.schema.json)
+- Примеры сценариев: [fixtures/simulator/](fixtures/simulator/)
+
+Дефолты runtime (env‑override допускается):
+- `SIMULATOR_TICK_MS_BASE=1000`
+- `SIMULATOR_ACTIONS_PER_TICK_MAX=20`
+- `SIMULATOR_CLEARING_EVERY_N_TICKS=25` (для real mode)
+
 ---
 
 ## 2. Дефолты и лимиты

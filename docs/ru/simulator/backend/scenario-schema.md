@@ -5,6 +5,9 @@
 Этот документ описывает входной формат `scenario.json` и ссылается на формальную схему:
 - `fixtures/simulator/scenario.schema.json`
 
+Практический обзор (как это запускается и где лежит движок):
+- [../scenarios-and-engine.md](../scenarios-and-engine.md)
+
 ## Термины
 - `schema_version`: версия входного формата сценария (не путать с `api_version` control-plane).
 - `scenario_id`: идентификатор сценария.
@@ -26,6 +29,14 @@
 
 1) `baseEquivalent` в schema является shorthand, но runtime строит граф/события по явным `equivalents[]` и `trustlines[].equivalent`.
 2) `trustlines[].status` не является полем schema; если нужно переносить статус из fixtures, его можно сохранять внутри `trustlines[].policy` (например `policy.status`).
+
+3) Откуда runtime берёт сценарии:
+	- fixtures: `fixtures/simulator/*/scenario.json`
+	- uploaded: `.local-run/simulator/scenarios/<scenario_id>/scenario.json`
+
+4) Видимость сценариев в UI может быть отфильтрована allowlist’ом:
+	- по умолчанию показываются только демо-пресеты
+	- переопределение: `SIMULATOR_SCENARIO_ALLOWLIST=all` или список через запятую
 
 ## Что дальше
 - Добавить примеры валидных сценариев в `fixtures/simulator/*/scenario.json`.

@@ -141,7 +141,8 @@ MVP цель:
 - `actions_per_tick_max = 20`
 
 Примечание (текущая реализация):
-- `actions_per_tick_max` сейчас фиксирован как `ACTIONS_PER_TICK_MAX = 20`.
+- `actions_per_tick_max` имеет дефолт `ACTIONS_PER_TICK_MAX = 20`, но может быть переопределён env-переменной `SIMULATOR_ACTIONS_PER_TICK_MAX` (см. runtime).
+- `tick_ms_base` имеет дефолт `TICK_MS_BASE = 1000`, но может быть переопределён `SIMULATOR_TICK_MS_BASE`.
 
 Линейная интерполяция:
 $$ actions\_budget = \left\lfloor actions\_per\_tick\_max \cdot \frac{intensity\_percent}{100} \right\rfloor $$
@@ -185,7 +186,8 @@ MVP включает:
    - эмитить `clearing.plan` → потом `clearing.done`
 
 Примечание (текущая реализация):
-- базовая «частота клиринга» сейчас фиксирована как `CLEARING_EVERY_N_TICKS = 25`.
+- **Real mode:** базовая «частота клиринга» по умолчанию `CLEARING_EVERY_N_TICKS = 25`, но переопределяется через `SIMULATOR_CLEARING_EVERY_N_TICKS`.
+- **Fixtures mode:** клиринг/подсветки носят демонстрационный характер и управляются таймингами внутри fixtures-runner (не “каждые N тиков”).
 
 Важно:
 - строгий контракт payload’ов событий — в `api/openapi.yaml` и `simulator-domain-model.md`.
