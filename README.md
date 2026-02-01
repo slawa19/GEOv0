@@ -337,9 +337,15 @@ python -m pytest -q tests/contract/test_openapi_contract.py
 # Simulator SSE smoke (fixtures-mode)
 python -m pytest -q tests/integration/test_simulator_sse_smoke.py
 
+# Simulator realistic-v2 smoke (real-mode) + artifacts/DB analysis
+# (requires backend running; recommended cap for realistic amounts: SIMULATOR_REAL_AMOUNT_CAP=500)
+python scripts/run_simulator_run_and_analyze.py --scenario-id greenfield-village-100-realistic-v2 --mode real --equivalent UAH --intensity 80 --run-seconds 20
+
 # Run only simulator-related tests
 python -m pytest -q tests/unit/test_simulator_*.py tests/integration/test_simulator_*.py
 ```
+
+Tip (VS Code Tasks): for realistic-v2 runs, prefer `Full Stack: restart (cap=500)` + `Simulator: run realistic-v2 smoke + analyze`.
 
 Troubleshooting:
 - If `pytest` is not found in PATH, use `python -m pytest` (it always uses the active interpreter).

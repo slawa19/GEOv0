@@ -196,12 +196,20 @@ MVP включает:
 
 ## 6) Профили поведения (behaviorProfiles) — MVP интерпретация
 
+Текущий статус и план расширения (real mode: `behaviorProfiles` + `events`, realistic amounts, receiver selection):
+- [behavior-model-spec.md](behavior-model-spec.md)
+
 Сценарий может содержать детальные `behaviorProfiles.rules`, но MVP-реализация может быть проще.
 
 Статус текущей реализации:
-- planner в real mode **не интерпретирует** `behaviorProfiles` и `events`.
-- выбор действий строится из `trustlines[]` (и `equivalents[]`) с детерминизмом по `(seed, tick_index)`.
-- суммы платежей сейчас намеренно маленькие: `amount <= 3.00` и `<= trustline.limit`.
+- planner в real mode интерпретирует `behaviorProfiles.props` (см. спецификацию):
+   - `tx_rate`, `equivalent_weights`, `recipient_group_weights`, `amount_model[eq]`.
+- выбор действий строится из `trustlines[]` с детерминизмом по `(seed, tick_index)` и prefix-stability по `intensity_percent`.
+- суммы платежей ограничены сверху:
+   - `amount <= min(trustline.limit, SIMULATOR_REAL_AMOUNT_CAP, props.amount_model[eq].max)`.
+
+Runtime knob:
+- `SIMULATOR_REAL_AMOUNT_CAP` по умолчанию `3.00` (backward-compatible). Для realistic-v2 рекомендуется запускать с `SIMULATOR_REAL_AMOUNT_CAP>=500`.
 
 ### 6.1 Пресеты по `behaviorProfileId`
 На этапе seed-сценариев (`greenfield-village-100`, `riverside-town-50`) используются ID:
@@ -212,6 +220,9 @@ MVP правило:
   - частота платежей
   - распределение суммы
   - предпочтение получателей (внутри группы vs межгрупповое)
+
+Пример сценария для ручной проверки (fixtures):
+- `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json`
 
 ### 6.2 Выбор платежа на тик (пример)
 Алгоритм планирования `payment_attempt`:

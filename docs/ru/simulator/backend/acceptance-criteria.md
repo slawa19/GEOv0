@@ -29,7 +29,7 @@
 | SB-05 | `POST /api/v1/simulator/runs/{run_id}/resume` **идемпотентно** возобновляет прогон; генерация событий продолжается | MUST | integration |
 | SB-06 | `POST /api/v1/simulator/runs/{run_id}/stop` **идемпотентно** останавливает прогон и освобождает ресурсы; stream корректно завершается | MUST | integration |
 | SB-07 | `GET /api/v1/simulator/runs/{run_id}/events` отдаёт SSE stream с событиями `SimulatorEvent` (включая `run_status`) согласно `ws-protocol.md` | MUST | integration |
-| SB-08 | Один шаг симуляции (tick) генерирует **0..N** доменных событий на основе доступных отношений (`trustlines[]`, `equivalents[]`) с детерминизмом по `seed`; `tick` как событие допускается только в debug-режиме. Примечание: `behaviorProfiles` по schema существуют, но текущий runner их не интерпретирует. | MUST | unit (детерминизм с seed) |
+| SB-08 | Один шаг симуляции (tick) генерирует **0..N** доменных событий на основе отношений (`trustlines[]`, `equivalents[]`, `participants[]`) с детерминизмом по `seed`; `tick` как событие допускается только в debug-режиме. `behaviorProfiles.props` интерпретируются в real mode planner (минимум: `tx_rate`, `recipient_group_weights`, `equivalent_weights`, `amount_model`). | MUST | unit (детерминизм с seed) |
 | SB-09 | При моделировании платежей backend вызывает **реальный** PaymentEngine / GEO Core API (не mock) и эмитит события `tx.*` по факту вызовов/ответов | MUST | integration |
 | SB-10 | При ошибке/отказе PaymentEngine backend эмитит `tx.failed` с причиной (`last_error.code`/payload), чтобы UI мог показать понятную диагностику | MUST | unit |
 
@@ -68,6 +68,7 @@
 | ID | Критерий | Приоритет | Метод проверки |
 |---:|---|:---:|---|
 | INT-01 | Прогон эталонного сценария `fixtures/simulator/greenfield-village-100/scenario.json`: старт → `run_status: running` → поток доменных событий → UI визуализирует без падений | MUST | e2e |
+| INT-01a | Прогон сценария `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json` в real mode при `SIMULATOR_REAL_AMOUNT_CAP>=500`: суммы в `tx.updated` перестают быть ограничены 1–3, регулярно видны `clearing.plan/done` (ориентир 2–5/min), и появляется заметный P2P (households↔households) | SHOULD | manual + integration |
 | INT-02 | Pause/Resume в UI на живом run: во время `paused` нет доменных событий (кроме `run_status/keep-alive`), после resume поток продолжается | MUST | e2e |
 | INT-03 | Stop в UI: сервер завершает run, UI получает `run_status: stopped` (или `error` при ошибке) и корректно завершает сессию | MUST | e2e |
 | INT-04 | `bottlenecks` и `metrics` endpoints (если включены в UI) согласованы с OpenAPI и отображаются в соответствующих панелях Real Mode | SHOULD | contract + e2e |

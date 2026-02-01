@@ -52,6 +52,9 @@ Source of truth:
 - SB-08, SB-NF-04 (seed/PRNG/порядок обхода)
 - частично SB-10 (маппинг ошибок в `tx.failed`)
 
+Отдельный инвариант (важно для UI/визуализации):
+- В Real Mode планировщик обязан выдавать действия с непрерывным `seq` внутри тика (`0..N-1`), иначе ordered-эмиттер может «залипнуть» и не выпускать `tx.updated` (возможен эффект: в БД есть COMMITTED платежи, но в SSE/`events.ndjson` нет доменных событий).
+
 Расположение (фактически в репозитории сейчас):
 - `tests/unit/test_simulator_real_planner_determinism.py`
 - `tests/unit/test_simulator_sse_replay.py`
@@ -158,6 +161,31 @@ tests/performance/simulator/
 3) `POST /.../resume` → `run_status.state=running`.
 4) `POST /.../stop` → `run_status.state=stopped` (или `error` при ошибке), stream завершается.
 
+### 5.3 Smoke: realistic-v2 суммы + артефакты (task-driven)
+
+Цель: подтвердить, что realistic-v2 действительно даёт «сотни UAH», артефакты формируются, а потолок суммы соблюдается.
+
+Рекомендуемый запуск (VS Code Tasks):
+1) Запустить/перезапустить стек с реалистичным капом:
+  - `Full Stack: restart (cap=500)`
+  - (опционально, с очисткой DB) `Full Stack: start with DB reset (greenfield, cap=500)`
+2) Запустить smoke-run + анализ:
+  - `Simulator: run realistic-v2 smoke + analyze`
+
+Что делает smoke-run:
+- создаёт run через control plane (`/simulator/runs`), ждёт `run_seconds`, затем `stop`;
+- скачивает артефакты через API в `.local-run/analysis/<run_id>/`;
+- читает `geov0.db` и печатает распределение `PAYMENT.amount` за окно run (started_at..stopped_at).
+
+Критерии успеха (минимум):
+- в выводе есть `payments.over_3 > 0` при `SIMULATOR_REAL_AMOUNT_CAP>=500` (не «залипло» на legacy 1–3);
+- `payments.over_500 == 0` (потолок соблюдается);
+- `artifacts` содержит как минимум `events.ndjson`, `summary.json`, `status.json`, `last_tick.json`.
+
+Где смотреть артефакты:
+- скачанные для анализа: `.local-run/analysis/<run_id>/events.ndjson` и соседние файлы;
+- оригинальные runtime-артефакты: `.local-run/simulator/runs/<run_id>/artifacts/`.
+
 ---
 
 ## 6) Smoke сценарии (UI-level, Playwright)
@@ -218,6 +246,13 @@ Feature: Simulator UI Real Mode
   - API: `mode=fixtures` (в UI может отображаться как `sandbox`)
   - ожидания: топология/рендер/стрим/контроль run; без «семантической» раскраски по долгам/балансам.
 - Для проверки DB enrichment и бизнес-семантики визуализации используйте `mode=real`.
+
+### 7.3 Real Mode env knobs (важно для воспроизводимости)
+
+- `SIMULATOR_REAL_AMOUNT_CAP` — верхняя граница суммы в real mode (default `3.00` для совместимости). Для realistic-v2 используйте `>=500`.
+- `SIMULATOR_REAL_ENABLE_INJECT` — включает warmup/inject (по умолчанию `0`/выключено, включать только явно).
+
+Примечание: в репозитории есть задачи VS Code, которые выставляют эти env на время запуска стека.
 
 ---
 

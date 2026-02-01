@@ -69,6 +69,11 @@ $BackendPidPath = Join-Path $StateDir 'backend.pid'
 $AdminUiPidPath = Join-Path $StateDir 'admin-ui.pid'
 $SimulatorUiPidPath = Join-Path $StateDir 'simulator-ui.pid'
 
+$AdminUiOutLogPath = Join-Path $StateDir 'admin-ui.out.log'
+$AdminUiErrLogPath = Join-Path $StateDir 'admin-ui.err.log'
+$SimulatorUiOutLogPath = Join-Path $StateDir 'simulator-ui.out.log'
+$SimulatorUiErrLogPath = Join-Path $StateDir 'simulator-ui.err.log'
+
 $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
 
 # --- Helper Functions ---
@@ -292,9 +297,20 @@ switch ($Action) {
             Remove-StalePidFile $svc.PidFile
             $savedProcId = Get-PidFromFile $svc.PidFile
             $listener = Get-ListeningPid -Port $svc.Port
-            
-            $status = if ($listener) { "Running (PID $listener)" } else { "Stopped" }
-            $color = if ($listener) { "Green" } else { "Red" }
+
+            $status = $null
+            $color = $null
+
+            if ($listener) {
+                $status = "Running (PID $listener)"
+                $color = "Green"
+            } elseif ($savedProcId) {
+                $status = "Not listening (PID file $savedProcId)"
+                $color = "Yellow"
+            } else {
+                $status = "Stopped"
+                $color = "Red"
+            }
             
             Write-Host "$($svc.Name.PadRight(15)): " -NoNewline
             Write-Host $status -ForegroundColor $color
@@ -379,11 +395,22 @@ if (-not $NoInstall) {
     Write-Host "     Dependencies ready" -ForegroundColor Gray
 } else {
     Write-Host "     Skipped (-NoInstall)" -ForegroundColor Gray
+
+    # Guardrail: if we skip install but node_modules are missing, UI starts will fail silently.
+    if (-not (Test-Path (Join-Path $AdminUiDir 'node_modules'))) {
+        throw "-NoInstall used but admin-ui/node_modules not found. Run without -NoInstall once (or run npm install in admin-ui)."
+    }
+    if (-not (Test-Path (Join-Path $SimulatorUiDir 'node_modules'))) {
+        throw "-NoInstall used but simulator-ui/v2/node_modules not found. Run without -NoInstall once (or run npm install in simulator-ui/v2)."
+    }
 }
 
 Write-Host "[7/8] Starting Admin UI (Vite on port $AdminUiPort)..." -ForegroundColor Yellow
-$adminUiArgs = @('/c', 'start', '/b', 'npm', 'run', 'dev', '--', '--port', "$AdminUiPort", '--strictPort')
-$null = Start-Process -FilePath 'cmd.exe' -ArgumentList $adminUiArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle
+$null = New-Item -ItemType File -Force -Path $AdminUiOutLogPath | Out-Null
+$null = New-Item -ItemType File -Force -Path $AdminUiErrLogPath | Out-Null
+
+$adminUiArgs = @('run', 'dev', '--', '--port', "$AdminUiPort", '--strictPort')
+$null = Start-Process -FilePath $Tools.Npm -ArgumentList $adminUiArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath
 
 # Wait for Admin UI
 $adminUiDeadline = (Get-Date).AddSeconds(60)
@@ -401,6 +428,7 @@ while ((Get-Date) -lt $adminUiDeadline) {
 }
 if (-not (Get-ListeningPid -Port $AdminUiPort)) {
     Write-Host " Timeout!" -ForegroundColor Yellow
+    Write-Host "     See logs: $AdminUiOutLogPath and $AdminUiErrLogPath" -ForegroundColor Gray
 }
 
 Write-Host "[8/8] Starting Simulator UI (Vite on port $SimulatorUiPort)..." -ForegroundColor Yellow
@@ -409,8 +437,11 @@ Write-Host "[8/8] Starting Simulator UI (Vite on port $SimulatorUiPort)..." -For
 $env:VITE_API_MODE = 'real'
 $env:VITE_GEO_BACKEND_ORIGIN = $backendUrl
 
-$simulatorUiArgs = @('/c', 'start', '/b', 'npm', 'run', 'dev', '--', '--port', "$SimulatorUiPort", '--strictPort')
-$null = Start-Process -FilePath 'cmd.exe' -ArgumentList $simulatorUiArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle
+$null = New-Item -ItemType File -Force -Path $SimulatorUiOutLogPath | Out-Null
+$null = New-Item -ItemType File -Force -Path $SimulatorUiErrLogPath | Out-Null
+
+$simulatorUiArgs = @('run', 'dev', '--', '--port', "$SimulatorUiPort", '--strictPort')
+$null = Start-Process -FilePath $Tools.Npm -ArgumentList $simulatorUiArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath
 
 # Wait for Simulator UI
 $simulatorUiDeadline = (Get-Date).AddSeconds(60)
@@ -428,6 +459,7 @@ while ((Get-Date) -lt $simulatorUiDeadline) {
 }
 if (-not (Get-ListeningPid -Port $SimulatorUiPort)) {
     Write-Host " Timeout!" -ForegroundColor Yellow
+    Write-Host "     See logs: $SimulatorUiOutLogPath and $SimulatorUiErrLogPath" -ForegroundColor Gray
 }
 
 # Summary

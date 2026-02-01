@@ -159,6 +159,13 @@
 - `SIMULATOR_ACTIONS_PER_TICK_MAX=20`
 - `SIMULATOR_CLEARING_EVERY_N_TICKS=25` (для real mode)
 
+Расширение real mode (behavior model):
+- Спецификация: [simulator/backend/behavior-model-spec.md](simulator/backend/behavior-model-spec.md)
+- Новый env (backward‑compatible): `SIMULATOR_REAL_AMOUNT_CAP=3.00`
+
+Рекомендация для realistic-v2 (чтобы выйти на целевые суммы 100–500 UAH):
+- запускать с `SIMULATOR_REAL_AMOUNT_CAP>=500`.
+
 ---
 
 ## 2. Дефолты и лимиты

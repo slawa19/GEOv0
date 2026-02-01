@@ -6,6 +6,7 @@
 
 - Сценарии и движок запуска (обзор + техподробности): [scenarios-and-engine.md](scenarios-and-engine.md)
 - Online-анализ проблем экономики сети (insights/уведомления): [network-economy-analyzer-spec.md](network-economy-analyzer-spec.md)
+- Поведенческая модель экономики (real mode: behaviorProfiles/events): [backend/behavior-model-spec.md](backend/behavior-model-spec.md)
 
 - Контракт API симулятора (snapshot + events + `viz_*`): [frontend/docs/api.md](frontend/docs/api.md)
 - Backend: интеграция с платежами/клирингом и каноничные контракты: [backend/payment-integration.md](backend/payment-integration.md)

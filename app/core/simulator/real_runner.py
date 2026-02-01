@@ -43,6 +43,19 @@ def _safe_int_env(name: str, default: int) -> int:
         return int(default)
 
 
+def _safe_decimal_env(name: str, default: Decimal) -> Decimal:
+    try:
+        raw = os.getenv(name, "")
+        if not str(raw).strip():
+            return default
+        v = Decimal(str(raw))
+        if v.is_nan() or v <= 0:
+            return default
+        return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    except (InvalidOperation, Exception):
+        return default
+
+
 def map_rejection_code(err_details: Any) -> str:
     """Map structured error details to a stable simulator rejection code.
 
@@ -134,6 +147,323 @@ class RealRunner:
         )
         self._clearing_max_depth_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_DEPTH", 6)
         self._clearing_max_fx_edges_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", 30)
+        self._real_amount_cap_limit = _safe_decimal_env("SIMULATOR_REAL_AMOUNT_CAP", Decimal("3.00"))
+        self._real_enable_inject = bool(_safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0))
+
+    def _parse_event_time_ms(self, evt: Any) -> int | None:
+        if not isinstance(evt, dict):
+            return None
+        t = evt.get("time")
+        if isinstance(t, int):
+            return max(0, int(t))
+        # MVP: token-based times are future.
+        return None
+
+    def _compute_stress_multipliers(
+        self,
+        *,
+        events: Any,
+        sim_time_ms: int,
+    ) -> tuple[float, dict[str, float], dict[str, float]]:
+        """Returns (mult_all, mult_by_group, mult_by_profile) for tx_rate.
+
+        Best-effort: ignores unknown ops/fields/scopes.
+        Deterministic: depends only on (events, sim_time_ms).
+        """
+
+        mult_all = 1.0
+        mult_by_group: dict[str, float] = {}
+        mult_by_profile: dict[str, float] = {}
+
+        if not isinstance(events, list) or not events:
+            return mult_all, mult_by_group, mult_by_profile
+
+        for evt in events:
+            if not isinstance(evt, dict):
+                continue
+            if str(evt.get("type") or "").strip() != "stress":
+                continue
+            t0 = self._parse_event_time_ms(evt)
+            if t0 is None:
+                continue
+
+            duration_ms = 0
+            try:
+                md = evt.get("metadata")
+                if isinstance(md, dict) and md.get("duration_ms") is not None:
+                    duration_ms = int(md.get("duration_ms"))
+                elif evt.get("duration_ms") is not None:
+                    duration_ms = int(evt.get("duration_ms"))
+            except Exception:
+                duration_ms = 0
+            duration_ms = max(0, int(duration_ms))
+
+            if duration_ms <= 0:
+                # Interpret as an instantaneous event at t0.
+                if int(sim_time_ms) != int(t0):
+                    continue
+            else:
+                if not (int(t0) <= int(sim_time_ms) < int(t0) + int(duration_ms)):
+                    continue
+
+            effects = evt.get("effects")
+            if not isinstance(effects, list) or not effects:
+                continue
+
+            for eff in effects:
+                if not isinstance(eff, dict):
+                    continue
+                if str(eff.get("op") or "").strip() != "mult":
+                    continue
+                if str(eff.get("field") or "").strip() != "tx_rate":
+                    continue
+                try:
+                    v = float(eff.get("value"))
+                except Exception:
+                    continue
+                if v <= 0:
+                    continue
+                # Soft clamp to avoid accidental huge multipliers; tx_rate is clamped later anyway.
+                v = max(0.0, min(10.0, float(v)))
+
+                scope = str(eff.get("scope") or "all").strip()
+                if scope == "all" or not scope:
+                    mult_all *= v
+                    continue
+                if scope.startswith("group:"):
+                    g = scope.split(":", 1)[1].strip()
+                    if g:
+                        mult_by_group[g] = float(mult_by_group.get(g, 1.0)) * v
+                    continue
+                if scope.startswith("profile:"):
+                    p = scope.split(":", 1)[1].strip()
+                    if p:
+                        mult_by_profile[p] = float(mult_by_profile.get(p, 1.0)) * v
+                    continue
+
+        return float(mult_all), mult_by_group, mult_by_profile
+
+    async def _apply_due_scenario_events(self, session, *, run_id: str, run: RunRecord, scenario: dict[str, Any]) -> None:
+        events = scenario.get("events")
+        if not isinstance(events, list) or not events:
+            return
+
+        # Build pid->id map once.
+        pid_to_participant_id: dict[str, uuid.UUID] = {}
+        if run._real_participants:
+            pid_to_participant_id = {str(pid): participant_id for (participant_id, pid) in run._real_participants}
+
+        for idx, evt in enumerate(events):
+            if idx in run._real_fired_scenario_event_indexes:
+                continue
+
+            t0 = self._parse_event_time_ms(evt)
+            if t0 is None or int(run.sim_time_ms) < int(t0):
+                continue
+
+            evt_type = str((evt or {}).get("type") or "").strip()
+
+            if evt_type == "note":
+                payload = {
+                    "type": "note",
+                    "ts": self._utc_now().isoformat(),
+                    "sim_time_ms": int(run.sim_time_ms),
+                    "tick_index": int(run.tick_index),
+                    "scenario": {
+                        "event_index": int(idx),
+                        "time": t0,
+                        "description": str((evt or {}).get("description") or ""),
+                        "metadata": (evt or {}).get("metadata") if isinstance((evt or {}).get("metadata"), dict) else None,
+                    },
+                }
+                self._artifacts.enqueue_event_artifact(run_id, payload)
+                run._real_fired_scenario_event_indexes.add(idx)
+                continue
+
+            if evt_type == "inject":
+                if not self._real_enable_inject:
+                    self._artifacts.enqueue_event_artifact(
+                        run_id,
+                        {
+                            "type": "note",
+                            "ts": self._utc_now().isoformat(),
+                            "sim_time_ms": int(run.sim_time_ms),
+                            "tick_index": int(run.tick_index),
+                            "scenario": {
+                                "event_index": int(idx),
+                                "time": t0,
+                                "description": "inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)",
+                            },
+                        },
+                    )
+                    run._real_fired_scenario_event_indexes.add(idx)
+                    continue
+
+                effects = (evt or {}).get("effects")
+                if not isinstance(effects, list) or not effects:
+                    run._real_fired_scenario_event_indexes.add(idx)
+                    continue
+
+                max_edges = 500
+                max_total_amount: Decimal | None = None
+                try:
+                    md = (evt or {}).get("metadata")
+                    if isinstance(md, dict) and md.get("max_total_amount") is not None:
+                        max_total_amount = Decimal(str(md.get("max_total_amount")))
+                except Exception:
+                    max_total_amount = None
+                if max_total_amount is not None and max_total_amount <= 0:
+                    max_total_amount = None
+
+                applied = 0
+                skipped = 0
+                total_applied = Decimal("0")
+
+                # Resolve equivalents lazily.
+                eq_id_by_code: dict[str, uuid.UUID] = {}
+
+                for eff in effects[:max_edges]:
+                    if not isinstance(eff, dict):
+                        skipped += 1
+                        continue
+                    if str(eff.get("op") or "").strip() != "inject_debt":
+                        continue
+
+                    eq = str(eff.get("equivalent") or "").strip().upper()
+                    debtor_pid = str(eff.get("debtor") or "").strip()
+                    creditor_pid = str(eff.get("creditor") or "").strip()
+                    if not eq or not debtor_pid or not creditor_pid:
+                        skipped += 1
+                        continue
+
+                    try:
+                        amount = Decimal(str(eff.get("amount")))
+                        amount = amount.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                    except Exception:
+                        skipped += 1
+                        continue
+                    if amount <= 0:
+                        skipped += 1
+                        continue
+
+                    if max_total_amount is not None and total_applied + amount > max_total_amount:
+                        skipped += 1
+                        continue
+
+                    debtor_id = pid_to_participant_id.get(debtor_pid)
+                    creditor_id = pid_to_participant_id.get(creditor_pid)
+                    if debtor_id is None or creditor_id is None:
+                        skipped += 1
+                        continue
+
+                    eq_id = eq_id_by_code.get(eq)
+                    if eq_id is None:
+                        row = (
+                            await session.execute(select(Equivalent.id).where(Equivalent.code == eq))
+                        ).scalar_one_or_none()
+                        if row is None:
+                            skipped += 1
+                            continue
+                        eq_id = row
+                        eq_id_by_code[eq] = eq_id
+
+                    tl = (
+                        await session.execute(
+                            select(TrustLine.limit, TrustLine.status).where(
+                                TrustLine.from_participant_id == creditor_id,
+                                TrustLine.to_participant_id == debtor_id,
+                                TrustLine.equivalent_id == eq_id,
+                            )
+                        )
+                    ).one_or_none()
+                    if tl is None:
+                        skipped += 1
+                        continue
+                    tl_limit, tl_status = tl
+                    if str(tl_status or "").strip().lower() != "active":
+                        skipped += 1
+                        continue
+                    try:
+                        tl_limit_amt = Decimal(str(tl_limit))
+                    except Exception:
+                        skipped += 1
+                        continue
+                    if tl_limit_amt <= 0:
+                        skipped += 1
+                        continue
+
+                    existing = (
+                        await session.execute(
+                            select(Debt).where(
+                                Debt.debtor_id == debtor_id,
+                                Debt.creditor_id == creditor_id,
+                                Debt.equivalent_id == eq_id,
+                            )
+                        )
+                    ).scalar_one_or_none()
+
+                    if existing is None:
+                        new_amt = amount
+                        if new_amt > tl_limit_amt:
+                            skipped += 1
+                            continue
+                        session.add(Debt(debtor_id=debtor_id, creditor_id=creditor_id, equivalent_id=eq_id, amount=new_amt))
+                    else:
+                        new_amt = (Decimal(str(existing.amount)) + amount).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                        if new_amt > tl_limit_amt:
+                            skipped += 1
+                            continue
+                        existing.amount = new_amt
+
+                    applied += 1
+                    total_applied += amount
+
+                try:
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    self._artifacts.enqueue_event_artifact(
+                        run_id,
+                        {
+                            "type": "note",
+                            "ts": self._utc_now().isoformat(),
+                            "sim_time_ms": int(run.sim_time_ms),
+                            "tick_index": int(run.tick_index),
+                            "scenario": {
+                                "event_index": int(idx),
+                                "time": t0,
+                                "description": "inject failed (db error)",
+                            },
+                        },
+                    )
+                    run._real_fired_scenario_event_indexes.add(idx)
+                    continue
+
+                self._artifacts.enqueue_event_artifact(
+                    run_id,
+                    {
+                        "type": "note",
+                        "ts": self._utc_now().isoformat(),
+                        "sim_time_ms": int(run.sim_time_ms),
+                        "tick_index": int(run.tick_index),
+                        "scenario": {
+                            "event_index": int(idx),
+                            "time": t0,
+                            "description": "inject applied",
+                            "stats": {
+                                "applied": int(applied),
+                                "skipped": int(skipped),
+                                "total_amount": format(total_applied, "f"),
+                            },
+                        },
+                    },
+                )
+
+                run._real_fired_scenario_event_indexes.add(idx)
+                continue
+
+            # Unknown / unsupported event types are ignored, but we still mark them fired once due.
+            run._real_fired_scenario_event_indexes.add(idx)
 
     def _should_warn_this_tick(self, run: RunRecord, *, key: str) -> bool:
         with self._lock:
@@ -166,6 +496,10 @@ class RealRunner:
                 equivalents = run._real_equivalents or []
                 if len(participants) < 2 or not equivalents:
                     return
+
+                # Apply due scenario timeline events (note/stress/inject). Best-effort.
+                # IMPORTANT: inject modifies DB state and must happen before payments.
+                await self._apply_due_scenario_events(session, run_id=run_id, run=run, scenario=scenario)
 
                 planned = self._plan_real_payments(run, scenario)
                 with self._lock:
@@ -1050,13 +1384,38 @@ class RealRunner:
         """
 
         intensity = max(0.0, min(1.0, float(run.intensity_percent) / 100.0))
-        budget = int(self._actions_per_tick_max * intensity)
-        if budget <= 0:
+        target_actions = int(self._actions_per_tick_max * intensity)
+        if target_actions <= 0:
             return []
 
         candidates = self._real_candidates_from_scenario(scenario)
         if not candidates:
             return []
+
+        profiles_props_by_id: dict[str, dict[str, Any]] = {}
+        for bp in (scenario.get("behaviorProfiles") or []):
+            if not isinstance(bp, dict):
+                continue
+            bp_id = str(bp.get("id") or "").strip()
+            if not bp_id:
+                continue
+            props = bp.get("props")
+            profiles_props_by_id[bp_id] = props if isinstance(props, dict) else {}
+
+        participant_profile_id_by_pid: dict[str, str] = {}
+        participant_group_by_pid: dict[str, str] = {}
+        for p in (scenario.get("participants") or []):
+            if not isinstance(p, dict):
+                continue
+            pid = str(p.get("id") or p.get("participant_id") or "").strip()
+            if not pid:
+                continue
+            profile_id = str(p.get("behaviorProfileId") or "").strip()
+            if profile_id:
+                participant_profile_id_by_pid[pid] = profile_id
+            group_id = str(p.get("groupId") or "").strip()
+            if group_id:
+                participant_group_by_pid[pid] = group_id
 
         tick_seed = (int(run.seed) * 1_000_003 + int(run.tick_index)) & 0xFFFFFFFF
         tick_rng = random.Random(tick_seed)
@@ -1064,37 +1423,262 @@ class RealRunner:
         order = list(candidates)
         tick_rng.shuffle(order)
 
+        # Active stress multipliers (tx_rate) for this tick.
+        mult_all, mult_by_group, mult_by_profile = self._compute_stress_multipliers(
+            events=scenario.get("events"),
+            sim_time_ms=int(run.sim_time_ms),
+        )
+
+        def _clamp01(v: Any, default: float) -> float:
+            try:
+                f = float(v)
+            except Exception:
+                return default
+            if f < 0.0:
+                return 0.0
+            if f > 1.0:
+                return 1.0
+            return f
+
+        def _norm_weight(weights: Any, key: str) -> float:
+            if not isinstance(weights, dict) or not weights:
+                return 1.0
+            try:
+                values = [float(x) for x in weights.values() if float(x) > 0]
+                if not values:
+                    return 0.0
+                max_w = max(values)
+                w = float(weights.get(key, 0.0))
+                if max_w <= 0 or w <= 0:
+                    return 0.0
+                return min(1.0, w / max_w)
+            except Exception:
+                return 1.0
+
+        # Build adjacency (payment direction debtor->creditor) and per-sender/receiver limit hints.
+        # NOTE: TrustLine direction is creditor->debtor, but candidates are already inverted to debtor->creditor.
+        adjacency_by_eq: dict[str, dict[str, list[tuple[str, Decimal]]]] = {}
+        max_outgoing_limit: dict[tuple[str, str], Decimal] = {}
+        max_incoming_limit: dict[tuple[str, str], Decimal] = {}
+        direct_edge_limit: dict[tuple[str, str, str], Decimal] = {}
+        for c in candidates:
+            eq = str(c.get("equivalent") or "").strip()
+            sender = str(c.get("sender_pid") or "").strip()
+            receiver = str(c.get("receiver_pid") or "").strip()
+            limit = c.get("limit")
+            if not eq or not sender or not receiver:
+                continue
+            if not isinstance(limit, Decimal):
+                continue
+            adjacency_by_eq.setdefault(eq, {}).setdefault(sender, []).append((receiver, limit))
+
+            direct_edge_limit[(sender, receiver, eq)] = limit
+
+            k = (sender, eq)
+            prev = max_outgoing_limit.get(k)
+            if prev is None or limit > prev:
+                max_outgoing_limit[k] = limit
+
+            k_in = (receiver, eq)
+            prev_in = max_incoming_limit.get(k_in)
+            if prev_in is None or limit > prev_in:
+                max_incoming_limit[k_in] = limit
+
+        for eq, m in adjacency_by_eq.items():
+            for sender, edges in m.items():
+                # Deterministic neighbor order.
+                edges.sort(key=lambda x: x[0])
+
+        all_group_ids = sorted({g for g in participant_group_by_pid.values() if g})
+
+        def _pick_group(rng: random.Random, sender_props: dict[str, Any]) -> str | None:
+            weights = sender_props.get("recipient_group_weights")
+            if not isinstance(weights, dict) or not weights:
+                return None
+            try:
+                items = [(str(k), float(v)) for k, v in weights.items()]
+                items = [(k, v) for (k, v) in items if k and v > 0]
+                if not items:
+                    return None
+                total = sum(v for _, v in items)
+                if total <= 0:
+                    return None
+                r = rng.random() * total
+                acc = 0.0
+                for k, v in items:
+                    acc += v
+                    if r <= acc:
+                        return k
+                return items[-1][0]
+            except Exception:
+                return None
+
+        def _reachable_nodes(eq: str, sender: str, *, max_depth: int = 3, max_nodes: int = 200) -> list[str]:
+            graph = adjacency_by_eq.get(eq) or {}
+            if sender not in graph:
+                return []
+
+            visited: set[str] = {sender}
+            # (node, depth)
+            queue: list[tuple[str, int]] = [(sender, 0)]
+            qi = 0
+            while qi < len(queue) and len(visited) < max_nodes:
+                node, depth = queue[qi]
+                qi += 1
+                if depth >= max_depth:
+                    continue
+                for nxt, _lim in (graph.get(node) or []):
+                    if nxt in visited:
+                        continue
+                    visited.add(nxt)
+                    queue.append((nxt, depth + 1))
+                    if len(visited) >= max_nodes:
+                        break
+
+            visited.discard(sender)
+            return sorted(visited)
+
+        def _choose_receiver(*, rng: random.Random, eq: str, sender: str, sender_props: dict[str, Any]) -> str | None:
+            reachable = _reachable_nodes(eq, sender)
+            if not reachable:
+                # Fallback to direct neighbors.
+                direct = [pid for (pid, _lim) in (adjacency_by_eq.get(eq) or {}).get(sender, [])]
+                reachable = sorted({p for p in direct if p and p != sender})
+            if not reachable:
+                return None
+
+            target_group = _pick_group(rng, sender_props)
+            if target_group:
+                in_group = [pid for pid in reachable if participant_group_by_pid.get(pid) == target_group]
+                if in_group:
+                    return rng.choice(in_group)
+
+            # If no group match (or no group weights), try any known group match, then any reachable.
+            if all_group_ids:
+                rng.shuffle(all_group_ids)
+                for g in all_group_ids:
+                    in_group = [pid for pid in reachable if participant_group_by_pid.get(pid) == g]
+                    if in_group:
+                        return rng.choice(in_group)
+
+            return rng.choice(reachable)
+
         planned: list[_RealPaymentAction] = []
-        for i in range(budget):
+        i = 0
+        max_iters = max(1, target_actions) * 50
+        while len(planned) < target_actions and i < max_iters:
             c = order[i % len(order)]
-            limit = c["limit"]
+
+            eq = str(c["equivalent"])
+            sender_pid = c["sender_pid"]
+            sender_profile_id = participant_profile_id_by_pid.get(sender_pid, "")
+            sender_props = profiles_props_by_id.get(sender_profile_id, {})
+
+            tx_rate_base = _clamp01(sender_props.get("tx_rate", 1.0), 1.0)
+            sender_group = participant_group_by_pid.get(sender_pid, "")
+            tx_rate_mult = float(mult_all)
+            if sender_group:
+                tx_rate_mult *= float(mult_by_group.get(sender_group, 1.0))
+            if sender_profile_id:
+                tx_rate_mult *= float(mult_by_profile.get(sender_profile_id, 1.0))
+            tx_rate = _clamp01(float(tx_rate_base) * float(tx_rate_mult), 1.0)
+            eq_weight = _norm_weight(sender_props.get("equivalent_weights"), eq)
+
+            accept_prob = tx_rate * eq_weight
+            if accept_prob <= 0.0:
+                i += 1
+                continue
 
             action_seed = (tick_seed * 1_000_003 + i) & 0xFFFFFFFF
             action_rng = random.Random(action_seed)
-            amount = self._real_pick_amount(action_rng, limit)
+
+            if action_rng.random() > accept_prob:
+                i += 1
+                continue
+
+            receiver_pid = _choose_receiver(rng=action_rng, eq=eq, sender=sender_pid, sender_props=sender_props)
+            if receiver_pid is None:
+                i += 1
+                continue
+
+            # Bound by sender-side outgoing capacity upper bound, plus receiver-side incoming upper bound.
+            # For direct neighbors, also bound by the concrete direct edge limit.
+            limit = max_outgoing_limit.get((sender_pid, eq), c["limit"])
+            recv_cap = max_incoming_limit.get((receiver_pid, eq))
+            if recv_cap is not None and recv_cap > 0:
+                limit = min(limit, recv_cap)
+            direct_cap = direct_edge_limit.get((sender_pid, receiver_pid, eq))
+            if direct_cap is not None and direct_cap > 0:
+                limit = min(limit, direct_cap)
+
+            amount_model = None
+            raw_amount_model = sender_props.get("amount_model")
+            if isinstance(raw_amount_model, dict):
+                maybe = raw_amount_model.get(eq)
+                if isinstance(maybe, dict):
+                    amount_model = maybe
+
+            amount = self._real_pick_amount(action_rng, limit, amount_model=amount_model)
             if amount is None:
+                i += 1
                 continue
 
             planned.append(
                 _RealPaymentAction(
-                    seq=i,
-                    equivalent=c["equivalent"],
-                    sender_pid=c["sender_pid"],
-                    receiver_pid=c["receiver_pid"],
+                    # `seq` must be contiguous within a tick for ordered SSE emission.
+                    seq=len(planned),
+                    equivalent=eq,
+                    sender_pid=sender_pid,
+                    receiver_pid=receiver_pid,
                     amount=amount,
                 )
             )
 
+            i += 1
+
         return planned
 
-    def _real_pick_amount(self, rng: random.Random, limit: Decimal) -> str | None:
-        # Keep it small and <= limit.
-        cap = min(limit, Decimal("3"))
+    def _real_pick_amount(self, rng: random.Random, limit: Decimal, *, amount_model: dict[str, Any] | None = None) -> str | None:
+        cap = min(limit, self._real_amount_cap_limit)
         if cap <= 0:
             return None
 
-        raw = Decimal(str(0.1 + rng.random() * float(cap)))
+        model_min: Decimal | None = None
+        if isinstance(amount_model, dict) and amount_model:
+            try:
+                m_max = amount_model.get("max")
+                if m_max is not None:
+                    cap = min(cap, Decimal(str(m_max)))
+                m_min = amount_model.get("min")
+                if m_min is not None:
+                    model_min = Decimal(str(m_min))
+            except Exception:
+                model_min = None
+
+        if cap <= 0:
+            return None
+        if model_min is not None and model_min > cap:
+            return None
+
+        if isinstance(amount_model, dict) and amount_model:
+            try:
+                low = model_min if model_min is not None else Decimal("0.10")
+                mode_raw = amount_model.get("p50")
+                mode = Decimal(str(mode_raw)) if mode_raw is not None else (low + cap) / 2
+                if mode < low:
+                    mode = low
+                if mode > cap:
+                    mode = cap
+                raw_f = rng.triangular(float(low), float(cap), float(mode))
+                raw = Decimal(str(raw_f))
+            except Exception:
+                raw = Decimal(str(0.1 + rng.random() * float(cap)))
+        else:
+            raw = Decimal(str(0.1 + rng.random() * float(cap)))
+
         amt = min(raw, cap).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        if model_min is not None and amt < model_min:
+            amt = model_min.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         if amt <= 0:
             return None
         return format(amt, "f")

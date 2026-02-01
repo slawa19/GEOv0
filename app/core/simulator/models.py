@@ -107,3 +107,6 @@ class RunRecord:
     # Stored on the run to avoid unbounded per-run dictionaries in RealRunner.
     _real_warned_tick: int = -10**9
     _real_warned_keys: set[str] = field(default_factory=set)
+
+    # Real-mode scenario timeline events state (best-effort, in-memory).
+    _real_fired_scenario_event_indexes: set[int] = field(default_factory=set)

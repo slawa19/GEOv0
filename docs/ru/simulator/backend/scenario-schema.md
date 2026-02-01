@@ -18,8 +18,10 @@
 - Время в `events[].time` — одно из:
 	- **миллисекунды от старта прогона** (integer)
 	- простой токен (string), например `day_10` (для будущей интерпретации runner)
-- `behaviorProfiles`/`events` допускаются схемой, но **текущая реализация runner (fixtures + real)** их не интерпретирует.
-  - На практике сейчас runner использует только `participants[]`, `trustlines[]`, `equivalents[]` и `intensity_percent`.
+- `behaviorProfiles`/`events` допускаются схемой как расширение поведения:
+	- **real mode:** runner интерпретирует подмножество `behaviorProfiles.props` (см. [behavior-model-spec.md](behavior-model-spec.md)).
+	- `events[]` на текущем этапе считаются future и не интерпретируются.
+	- **fixtures mode:** может игнорировать `behaviorProfiles/events` (зависит от конкретного runner’а/режима).
 - Эквиваленты (важно для совместимости с текущим runtime):
 	- **обязательно** указывать `equivalents: ["UAH", ...]` (даже если он один)
 	- `baseEquivalent` можно оставить как метаданные, но не использовать как единственный источник правды

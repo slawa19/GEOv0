@@ -70,3 +70,38 @@ def test_real_planner_is_deterministic_and_prefix_stable() -> None:
     run.tick_index = 8
     planned_c = runner._plan_real_payments(run, scenario)
     assert planned_c != planned_b
+
+
+def test_real_planner_seq_is_contiguous_per_tick() -> None:
+    scenario = _scenario_minimal()
+
+    runner = RealRunner(
+        lock=threading.RLock(),
+        get_run=lambda _run_id: (_ for _ in ()).throw(AssertionError("get_run should not be called")),
+        get_scenario_raw=lambda _scenario_id: (_ for _ in ()).throw(AssertionError("get_scenario_raw should not be called")),
+        sse=None,  # not used by _plan_real_payments
+        artifacts=None,  # not used by _plan_real_payments
+        utc_now=_utc_now,
+        publish_run_status=lambda _run_id: None,
+        db_enabled=lambda: False,
+        actions_per_tick_max=30,
+        clearing_every_n_ticks=25,
+        real_max_consec_tick_failures_default=3,
+        real_max_timeouts_per_tick_default=3,
+        real_max_errors_total_default=10,
+        logger=logging.getLogger(__name__),
+    )
+
+    run = RunRecord(
+        run_id="r",
+        scenario_id=scenario["scenario_id"],
+        mode="real",
+        state="running",
+    )
+    run.seed = 123456
+    run.tick_index = 7
+    run.intensity_percent = 80
+
+    planned = runner._plan_real_payments(run, scenario)
+    assert len(planned) > 0
+    assert [a.seq for a in planned] == list(range(len(planned)))

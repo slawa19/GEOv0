@@ -24,6 +24,26 @@ $env:GEO_TEST_ALLOW_DB_RESET='1'
 D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe -m pytest -q tests/integration/test_scenarios.py -vv
 ```
 
+## Smoke realistic-v2 (Real Mode) — быстрый прогон с анализом
+
+Цель: быстро проверить, что Real Mode realistic-v2 даёт «реалистичные» суммы (десятки/сотни UAH), пишет артефакты и не ограничен legacy-капом `3.00`.
+
+Рекомендуемо (VS Code Tasks):
+- `Full Stack: restart (cap=500)`
+- `Simulator: run realistic-v2 smoke + analyze`
+
+Что считается успехом:
+- в выводе smoke есть `payments.over_3 > 0` и `payments.over_500 == 0`;
+- список `artifacts=` содержит `events.ndjson`;
+- в `events.ndjson` есть хотя бы одно доменное событие `type=tx.updated` (а не только `run_status`).
+
+Примечание:
+- Если в окне прогона в БД видны COMMITTED платежи, но в `events.ndjson` нет `tx.updated`, это баг в цепочке «runner → SSE/артефакты → UI» и визуализация закономерно будет пустой.
+
+Где смотреть артефакты:
+- `.local-run/analysis/<run_id>/` (скачанные файлы: `events.ndjson`, `summary.json`, ...)
+- `.local-run/simulator/runs/<run_id>/artifacts/` (runtime-артефакты)
+
 ## Что считается «сценарным тестом»
 
 - Интеграционные тесты, которые требуют поднятой БД и прогоняют end-to-end путь через сервисы/репозитории.

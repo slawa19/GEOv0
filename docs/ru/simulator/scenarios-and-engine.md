@@ -53,7 +53,7 @@
 4) Запустить backend + UI, затем выбрать сценарий в UI
 
 Важно про список сценариев в UI:
-- По умолчанию UI показывает только демо-набор.
+- По умолчанию UI показывает демо-набор (включая realistic v2).
 - Если вы добавили новый сценарий и не видите его в списке, выставьте env:
   - `SIMULATOR_SCENARIO_ALLOWLIST=all`
   - или `SIMULATOR_SCENARIO_ALLOWLIST=greenfield-village-100,my-new-scenario`
@@ -66,6 +66,10 @@
 1) Выберите основу:
   - минимальный: [../../../fixtures/simulator/minimal/scenario.json](../../../fixtures/simulator/minimal/scenario.json)
   - “похож на реальный”: [../../../fixtures/simulator/greenfield-village-100/scenario.json](../../../fixtures/simulator/greenfield-village-100/scenario.json)
+  - realistic v2 (UAH-only): [../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json](../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json)
+
+Примечание для realistic v2:
+- чтобы увидеть реалистичные суммы (сотни UAH), запускайте real mode с `SIMULATOR_REAL_AMOUNT_CAP=500` (дефолт `3.00` сохраняет старое поведение).
 2) Скопируйте в новую папку:
   - `fixtures/simulator/<your-scenario-id>/scenario.json`
 3) Обязательные инварианты (частые ошибки):
@@ -260,10 +264,15 @@ flowchart LR
 ### 2.7 Что сейчас НЕ используется движком (важно для ожиданий)
 
 На текущем этапе (см. [../../../app/core/simulator/real_runner.py](../../../app/core/simulator/real_runner.py)):
-- `behaviorProfiles` и `events` присутствуют в schema, но planner real mode их не интерпретирует.
-- Подбор суммы в real mode преднамеренно “зажат”: `amount <= 3.00` и `<= trustline.limit` (см. `_real_pick_amount`).
+- `events[]` присутствуют в schema, но на текущем этапе **ещё не интерпретируются** planner’ом (см. спецификацию).
+- `behaviorProfiles[]` в **real mode** интерпретируются частично: используется подмножество `behaviorProfiles.props` (`tx_rate`, `equivalent_weights`, `recipient_group_weights`, `amount_model[eq]`).
+- Подбор суммы в real mode ограничен сверху: `amount <= min(SIMULATOR_REAL_AMOUNT_CAP, trustline.limit, props.amount_model[eq].max)`.
+  - `SIMULATOR_REAL_AMOUNT_CAP` по умолчанию `3.00` (backward-compatible). Для realistic-v2 рекомендуется запускать с `SIMULATOR_REAL_AMOUNT_CAP>=500`.
 
 Это сознательные MVP‑ограничения: сценарий описывает сеть, но «экономическая модель поведения» пока минимальна.
+
+Планируемая эволюция (спецификация, чтобы не ломать детерминизм/guardrails):
+- Поведенческая модель real mode (интерпретация `behaviorProfiles`/`events`, реалистичные суммы, выбор получателей): [backend/behavior-model-spec.md](backend/behavior-model-spec.md).
 
 ### 2.8 Где лежат сценарии и как они попадают в runtime
 
