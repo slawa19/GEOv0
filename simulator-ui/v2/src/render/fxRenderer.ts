@@ -87,14 +87,15 @@ function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1
   const { w: w0, h: h0 } = sizeForNode(n)
   const w = w0 * invZoom
   const h = h0 * invZoom
-  const isBusiness = String(n.type) === 'business'
+  const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+  const isRoundedRect = shapeKey === 'rounded-rect'
   const rr = Math.max(0, Math.min(4 * invZoom, Math.min(w, h) * 0.18))
   const ww = w * scale
   const hh = h * scale
   const x = n.__x - ww / 2
   const y = n.__y - hh / 2
 
-  if (isBusiness) {
+  if (isRoundedRect) {
     roundedRectPath(ctx, x, y, ww, hh, rr * scale)
     return
   }
@@ -106,21 +107,22 @@ function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1
 
 function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
   // Cache per-frame: this can be called multiple times for the same node.
-  const cacheKey = `${n.id}:${String(n.type)}:${n.__x}:${n.__y}:${scale}:${invZoom}`
+  const cacheKey = `${n.id}:${String((n as any).viz_shape_key ?? '')}:${n.__x}:${n.__y}:${scale}:${invZoom}`
   const cached = nodeOutlinePath2DCache.get(cacheKey)
   if (cached) return cached
 
   const { w: w0, h: h0 } = sizeForNode(n)
   const w = w0 * invZoom
   const h = h0 * invZoom
-  const isBusiness = String(n.type) === 'business'
+  const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+  const isRoundedRect = shapeKey === 'rounded-rect'
   const rr = Math.max(0, Math.min(4 * invZoom, Math.min(w, h) * 0.18))
   const ww = w * scale
   const hh = h * scale
   const x = n.__x - ww / 2
   const y = n.__y - hh / 2
 
-  if (isBusiness) {
+  if (isRoundedRect) {
     const p = roundedRectPath2D(x, y, ww, hh, rr * scale)
     nodeOutlinePath2DCache.set(cacheKey, p)
     return p

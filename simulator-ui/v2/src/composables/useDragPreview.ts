@@ -47,7 +47,8 @@ export function useDragPreview(opts: {
     node.style.background = `linear-gradient(135deg, ${fill}88, ${fill}44)`
     node.style.borderColor = `${fill}aa`
     node.style.boxShadow = `0 0 0 1px rgba(255,255,255,0.18), 0 12px 30px rgba(0,0,0,0.45), 0 0 24px ${fill}55`
-    node.style.borderRadius = String((n as any).type) === 'business' ? '5px' : '999px'
+    const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+    node.style.borderRadius = shapeKey === 'rounded-rect' ? '5px' : '999px'
   }
 
   function scheduleDragPreview() {

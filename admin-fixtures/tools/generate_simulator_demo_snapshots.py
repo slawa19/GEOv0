@@ -170,16 +170,20 @@ def build_snapshot(
         if not isinstance(p, dict):
             continue
         pid = str(safe_get(p, "pid"))
+        type_raw = p.get("type")
+        type_norm = str(type_raw or "").strip().lower()
+        viz_shape_key = "rounded-rect" if type_norm == "business" else "circle"
         node_ids.add(pid)
         nodes.append(
             {
                 "id": pid,
                 "name": p.get("display_name"),
-                "type": p.get("type"),
+                "type": type_raw,
                 "status": p.get("status"),
                 "net_balance_atoms": p.get("net_balance_atoms"),
                 "net_sign": p.get("net_sign"),
                 "viz_color_key": p.get("viz_color_key"),
+                "viz_shape_key": p.get("viz_shape_key") if isinstance(p.get("viz_shape_key"), str) else viz_shape_key,
                 "viz_size": p.get("viz_size"),
                 "viz_badge_key": None,
             }

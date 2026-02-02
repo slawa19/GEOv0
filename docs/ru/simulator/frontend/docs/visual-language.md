@@ -17,7 +17,7 @@
 
 ## 1) Ключи `viz_*` и строгий режим
 
-- `viz_color_key` / `viz_width_key` / `viz_alpha_key` должны быть известными ключами.
+- `viz_color_key` / `viz_shape_key` / `viz_width_key` / `viz_alpha_key` должны быть известными ключами.
 - В demo-fast-mock v2 неизвестный ключ считается ошибкой (fail-fast), чтобы не «утверждать визуал» на непредсказуемых фолбэках.
 
 Кодовая реализация текущего маппинга (SoT): `simulator-ui/v2/src/vizMapping.ts`
@@ -47,8 +47,8 @@
 
 ### 2.1 Узлы
 
-- `business`: зелёный (emerald), форма “квадрат/скруглённый прямоугольник”.
-- `person`: синий, форма “круг”.
+- `business`: зелёный (emerald), форма задаётся `viz_shape_key` (например `rounded-rect`).
+- `person`: синий, форма задаётся `viz_shape_key` (например `circle`).
 - `suspended/left/deleted`: серо-сланцевые оттенки (не путать с debt-градиентом).
 - `debt-0..debt-8`: градиент должника от светло-жёлтого к красному.
 

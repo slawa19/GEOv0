@@ -26,7 +26,7 @@
 ### 2.1 Snapshot (graph)
 - Тип: `SimulatorGraphSnapshot`
 - Канал доставки: `GET /api/v1/simulator/graph/snapshot` (legacy) и `GET /api/v1/simulator/runs/{run_id}/graph/snapshot`
-- Требование: поля `viz_*` задаются backend (UI не вычисляет)
+- Требование: поля `viz_*` (включая `viz_color_key`, `viz_shape_key`, `viz_size`) задаются backend (UI не вычисляет)
 
 #### 2.1.1 Минимальный контракт Snapshot (MVP)
 Контракт фиксируем по `api/openapi.yaml`:

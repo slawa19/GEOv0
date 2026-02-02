@@ -10,6 +10,7 @@
       "net_balance_atoms": "-150",
       "net_sign": -1,
       "viz_color_key": "debt-2",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 43,
         "h": 36
@@ -24,6 +25,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -38,6 +40,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -52,6 +55,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -66,6 +70,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -80,6 +85,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -94,6 +100,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -108,6 +115,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -122,6 +130,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -136,6 +145,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -150,6 +160,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -164,6 +175,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -178,6 +190,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -192,6 +205,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -206,6 +220,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -220,6 +235,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -234,6 +250,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -248,6 +265,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -262,6 +280,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -276,6 +295,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -290,6 +310,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -304,6 +325,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -318,6 +340,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -332,6 +355,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -346,6 +370,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -360,6 +385,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -374,6 +400,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -388,6 +415,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -402,6 +430,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -416,6 +445,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -430,6 +460,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -444,6 +475,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -458,6 +490,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -472,6 +505,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -486,6 +520,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -500,6 +535,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -514,6 +550,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -528,6 +565,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -542,6 +580,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -556,6 +595,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -570,6 +610,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -584,6 +625,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -598,6 +640,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -612,6 +655,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -626,6 +670,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 39,
         "h": 33
@@ -640,6 +685,7 @@
       "net_balance_atoms": "65",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -654,6 +700,7 @@
       "net_balance_atoms": "950",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -668,6 +715,7 @@
       "net_balance_atoms": "800",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -682,6 +730,7 @@
       "net_balance_atoms": "625",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -696,6 +745,7 @@
       "net_balance_atoms": "475",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -710,6 +760,7 @@
       "net_balance_atoms": "-217",
       "net_sign": -1,
       "viz_color_key": "debt-4",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -724,6 +775,7 @@
       "net_balance_atoms": "600",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -738,6 +790,7 @@
       "net_balance_atoms": "350",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -752,6 +805,7 @@
       "net_balance_atoms": "525",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -766,6 +820,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -780,6 +835,7 @@
       "net_balance_atoms": "50",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -794,6 +850,7 @@
       "net_balance_atoms": "675",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -808,6 +865,7 @@
       "net_balance_atoms": "425",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -822,6 +880,7 @@
       "net_balance_atoms": "175",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -836,6 +895,7 @@
       "net_balance_atoms": "350",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -850,6 +910,7 @@
       "net_balance_atoms": "60",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -864,6 +925,7 @@
       "net_balance_atoms": "-140",
       "net_sign": -1,
       "viz_color_key": "debt-2",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 26,
         "h": 26
@@ -878,6 +940,7 @@
       "net_balance_atoms": "-180",
       "net_sign": -1,
       "viz_color_key": "debt-3",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -892,6 +955,7 @@
       "net_balance_atoms": "-595",
       "net_sign": -1,
       "viz_color_key": "debt-7",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -906,6 +970,7 @@
       "net_balance_atoms": "-270",
       "net_sign": -1,
       "viz_color_key": "debt-6",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -920,6 +985,7 @@
       "net_balance_atoms": "367",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -934,6 +1000,7 @@
       "net_balance_atoms": "-130",
       "net_sign": -1,
       "viz_color_key": "debt-2",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 26,
         "h": 26
@@ -948,6 +1015,7 @@
       "net_balance_atoms": "-205",
       "net_sign": -1,
       "viz_color_key": "debt-4",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -962,6 +1030,7 @@
       "net_balance_atoms": "-305",
       "net_sign": -1,
       "viz_color_key": "debt-6",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -976,6 +1045,7 @@
       "net_balance_atoms": "-220",
       "net_sign": -1,
       "viz_color_key": "debt-4",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -990,6 +1060,7 @@
       "net_balance_atoms": "-235",
       "net_sign": -1,
       "viz_color_key": "debt-5",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -1004,6 +1075,7 @@
       "net_balance_atoms": "-155",
       "net_sign": -1,
       "viz_color_key": "debt-3",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -1018,6 +1090,7 @@
       "net_balance_atoms": "-255",
       "net_sign": -1,
       "viz_color_key": "debt-5",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -1032,6 +1105,7 @@
       "net_balance_atoms": "95",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 26,
         "h": 26
@@ -1046,6 +1120,7 @@
       "net_balance_atoms": "-345",
       "net_sign": -1,
       "viz_color_key": "debt-7",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -1060,6 +1135,7 @@
       "net_balance_atoms": "-240",
       "net_sign": -1,
       "viz_color_key": "debt-5",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -1074,6 +1150,7 @@
       "net_balance_atoms": "-205",
       "net_sign": -1,
       "viz_color_key": "suspended",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -1088,6 +1165,7 @@
       "net_balance_atoms": "-280",
       "net_sign": -1,
       "viz_color_key": "debt-6",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -1102,6 +1180,7 @@
       "net_balance_atoms": "45",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -1116,6 +1195,7 @@
       "net_balance_atoms": "-30",
       "net_sign": -1,
       "viz_color_key": "debt-1",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -1130,6 +1210,7 @@
       "net_balance_atoms": "-250",
       "net_sign": -1,
       "viz_color_key": "debt-5",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -1144,6 +1225,7 @@
       "net_balance_atoms": "-570",
       "net_sign": -1,
       "viz_color_key": "debt-7",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1158,6 +1240,7 @@
       "net_balance_atoms": "95",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 26,
         "h": 26
@@ -1172,6 +1255,7 @@
       "net_balance_atoms": "20",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -1186,6 +1270,7 @@
       "net_balance_atoms": "120",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 26,
         "h": 26
@@ -1200,6 +1285,7 @@
       "net_balance_atoms": "85",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 26,
         "h": 26
@@ -1214,6 +1300,7 @@
       "net_balance_atoms": "-620",
       "net_sign": -1,
       "viz_color_key": "debt-8",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1228,6 +1315,7 @@
       "net_balance_atoms": "-270",
       "net_sign": -1,
       "viz_color_key": "debt-6",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 28,
         "h": 28
@@ -1242,6 +1330,7 @@
       "net_balance_atoms": "-30",
       "net_sign": -1,
       "viz_color_key": "debt-1",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -1256,6 +1345,7 @@
       "net_balance_atoms": "-105",
       "net_sign": -1,
       "viz_color_key": "debt-2",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 26,
         "h": 26
@@ -1270,6 +1360,7 @@
       "net_balance_atoms": "75",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -1284,6 +1375,7 @@
       "net_balance_atoms": "-645",
       "net_sign": -1,
       "viz_color_key": "debt-8",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1298,6 +1390,7 @@
       "net_balance_atoms": "-320",
       "net_sign": -1,
       "viz_color_key": "debt-7",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -1312,6 +1405,7 @@
       "net_balance_atoms": "-55",
       "net_sign": -1,
       "viz_color_key": "debt-1",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
         "h": 25
@@ -1326,6 +1420,7 @@
       "net_balance_atoms": "-155",
       "net_sign": -1,
       "viz_color_key": "debt-3",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -1340,6 +1435,7 @@
       "net_balance_atoms": "-25",
       "net_sign": -1,
       "viz_color_key": "debt-1",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -1354,6 +1450,7 @@
       "net_balance_atoms": "400",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 29,
         "h": 29
@@ -1368,6 +1465,7 @@
       "net_balance_atoms": "-25",
       "net_sign": -1,
       "viz_color_key": "debt-1",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24
@@ -1382,6 +1480,7 @@
       "net_balance_atoms": "-175",
       "net_sign": -1,
       "viz_color_key": "suspended",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 27,
         "h": 27
@@ -1396,6 +1495,7 @@
       "net_balance_atoms": "-25",
       "net_sign": -1,
       "viz_color_key": "debt-1",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 24,
         "h": 24

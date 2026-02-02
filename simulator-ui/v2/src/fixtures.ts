@@ -129,6 +129,8 @@ function asNodePatchArray(value: unknown, label: string): NodePatch[] | undefine
     const vizColorKey = asOptionalNullableString(p.viz_color_key)
     if (vizColorKey) assertVizKeyKnown('viz_color_key', vizColorKey, `${label}[${idx}] node:${id}`)
 
+    const vizShapeKey = asOptionalNullableString(p.viz_shape_key)
+
     let viz_size: NodePatch['viz_size'] = undefined
     if (p.viz_size !== undefined && p.viz_size !== null) {
       if (!isRecord(p.viz_size)) throw new Error(`${label}[${idx}].viz_size must be object`)
@@ -149,6 +151,7 @@ function asNodePatchArray(value: unknown, label: string): NodePatch[] | undefine
       net_balance_atoms: normalizedNetBal,
       net_sign: netSign,
       viz_color_key: vizColorKey,
+      viz_shape_key: vizShapeKey,
       viz_size,
     }
   })
@@ -241,6 +244,8 @@ export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapsho
     const vizColorKey = asOptionalNullableString(n.viz_color_key)
     if (vizColorKey) assertVizKeyKnown('viz_color_key', vizColorKey, `node:${id} (${sourcePath})`)
 
+    const vizShapeKey = asOptionalNullableString(n.viz_shape_key)
+
     let viz_size: GraphNode['viz_size'] = undefined
     if (n.viz_size !== undefined && n.viz_size !== null) {
       if (!isRecord(n.viz_size)) throw new Error(`nodes[${idx}].viz_size must be object (${sourcePath})`)
@@ -265,6 +270,7 @@ export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapsho
       net_balance_atoms: normalizedNetBal,
       net_sign: netSign,
       viz_color_key: vizColorKey,
+      viz_shape_key: vizShapeKey,
       viz_size,
       viz_badge_key: asOptionalNullableString(n.viz_badge_key),
     }

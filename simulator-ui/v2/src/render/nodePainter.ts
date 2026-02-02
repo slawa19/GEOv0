@@ -52,7 +52,8 @@ export function drawNodeShape(
   const { w: w0, h: h0 } = sizeForNode(node)
   const w = w0 * invZ
   const h = h0 * invZ
-  const isBusiness = String(node.type) === 'business'
+  const shapeKey = String(node.viz_shape_key ?? 'circle')
+  const isRoundedRect = shapeKey === 'rounded-rect'
 
   // IMPORTANT: node appearance follows the prototypes:
   // - business: emerald square
@@ -69,7 +70,7 @@ export function drawNodeShape(
     ctx.save()
     ctx.globalCompositeOperation = 'source-over'
     ctx.fillStyle = withAlpha(fill, 0.45)
-    if (isBusiness) {
+    if (isRoundedRect) {
       roundedRectPath(ctx, x, y, w, h, rr)
       ctx.fill()
       ctx.strokeStyle = withAlpha('#ffffff', 0.7)
@@ -100,7 +101,7 @@ export function drawNodeShape(
     const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
     drawGlowSprite(ctx, {
       kind: 'bloom',
-      shape: isBusiness ? 'rounded-rect' : 'circle',
+      shape: isRoundedRect ? 'rounded-rect' : 'circle',
       x: node.__x,
       y: node.__y,
       w,
@@ -120,7 +121,7 @@ export function drawNodeShape(
     ctx.shadowBlur = r * 1.5 * blurK // Wide soft glow
     ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
 
-    if (isBusiness) {
+    if (isRoundedRect) {
       roundedRectPath(ctx, x + px(2), y + px(2), w - px(4), h - px(4), rr)
       ctx.fill()
     } else {
@@ -143,7 +144,7 @@ export function drawNodeShape(
   } else {
     ctx.fillStyle = withAlpha(fill, 0.42)
   }
-  if (isBusiness) {
+  if (isRoundedRect) {
     roundedRectPath(ctx, x, y, w, h, rr)
     ctx.fill()
   } else {
@@ -164,7 +165,7 @@ export function drawNodeShape(
     const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
     drawGlowSprite(ctx, {
       kind: 'rim',
-      shape: isBusiness ? 'rounded-rect' : 'circle',
+      shape: isRoundedRect ? 'rounded-rect' : 'circle',
       x: node.__x,
       y: node.__y,
       w,
@@ -182,7 +183,7 @@ export function drawNodeShape(
     ctx.shadowColor = fill
     ctx.shadowBlur = blurK > 0 ? Math.max(px(2), r * 0.3) * blurK : 0
 
-    if (isBusiness) {
+    if (isRoundedRect) {
       roundedRectPath(ctx, x, y, w, h, rr)
       ctx.stroke()
     } else {
@@ -197,7 +198,7 @@ export function drawNodeShape(
   ctx.lineWidth = Math.max(px(1), r * 0.05)
   ctx.shadowBlur = 0 // Sharp core
   
-  if (isBusiness) {
+  if (isRoundedRect) {
     roundedRectPath(ctx, x, y, w, h, rr)
     ctx.stroke()
   } else {
@@ -212,7 +213,7 @@ export function drawNodeShape(
   ctx.globalCompositeOperation = 'source-over'
   ctx.fillStyle = withAlpha(fill, 0.95) // Solid bright core for the icon
 
-  if (!isBusiness) {
+  if (!isRoundedRect) {
     // PERSON: "Pawn" / User silhouette
     const s = r * 0.045
     ctx.translate(node.__x, node.__y + r * 0.08)

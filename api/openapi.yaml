@@ -3249,6 +3249,9 @@ components:
         viz_color_key:
           type: string
           nullable: true
+        viz_shape_key:
+          type: string
+          nullable: true
         viz_size:
           $ref: '#/components/schemas/SimulatorVizSize'
         viz_badge_key:
@@ -3364,6 +3367,9 @@ components:
           nullable: true
           enum: [-1, 0, 1]
         viz_color_key:
+          type: string
+          nullable: true
+        viz_shape_key:
           type: string
           nullable: true
         viz_size:

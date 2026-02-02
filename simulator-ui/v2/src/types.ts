@@ -22,6 +22,7 @@ export type GraphNode = {
   // Backend-authoritative signed major-units value (preferred for display).
   net_balance?: string | null
   viz_color_key?: string | null
+  viz_shape_key?: string | null
   viz_size?: { w: number; h: number } | null
   viz_badge_key?: string | null
 }
@@ -45,6 +46,7 @@ export type NodePatch = {
   net_sign?: -1 | 0 | 1 | null
   net_balance?: string | null
   viz_color_key?: string | null
+  viz_shape_key?: string | null
   viz_size?: { w: number; h: number } | null
 }
 

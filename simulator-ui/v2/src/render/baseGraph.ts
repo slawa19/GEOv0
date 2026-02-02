@@ -156,7 +156,8 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const nw = nw0 * invZ
       const nh = nh0 * invZ
       const glow = fillForNode(n as GraphNode, mapping)
-      const isBusiness = n.type === 'business'
+      const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+      const isRoundedRect = shapeKey === 'rounded-rect'
       
       const r = Math.max(nw, nh) / 2
       const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
@@ -174,7 +175,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
         ctx.globalAlpha = 1.0
 
         ctx.beginPath()
-        if (isBusiness) {
+        if (isRoundedRect) {
           const offset = 0
           ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
         } else {
@@ -199,7 +200,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
         ctx.globalAlpha = 1.0
 
         ctx.beginPath()
-        if (isBusiness) {
+        if (isRoundedRect) {
           const offset = Math.max(1.5 * invZ, r * 0.08)
           ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
         } else {

@@ -139,6 +139,7 @@ export type GraphNode = {
 
   // Визуальные поля (источник правды для рендера).
   viz_color_key?: string | null
+  viz_shape_key?: string | null
   viz_size?: { w: number; h: number } | null // размер примитива (UI применяет как есть)
   viz_badge_key?: string | null
 }
@@ -190,6 +191,10 @@ export type GraphLink = {
 - `muted`
 - `active`
 - `hi`
+
+### 3.4 Узлы: `viz_shape_key`
+- `circle`
+- `rounded-rect`
 
 ---
 
@@ -296,7 +301,7 @@ export type GraphLink = {
 ## 5) Патчи (опционально, для FPS)
 
 Если snapshot большой, обновление после клиринга можно делать патчами:
-- `node_patch`: `{ id, net_balance, net_balance_atoms, net_sign, viz_color_key, viz_size }`
+- `node_patch`: `{ id, net_balance, net_balance_atoms, net_sign, viz_color_key, viz_shape_key, viz_size }`
 - `edge_patch`: `{ source, target, used/available, viz_*_key }`
 
 Примечание: `viz_size` в `node_patch` — это тот же размер примитива (w/h). Если баланс/класс изменился,

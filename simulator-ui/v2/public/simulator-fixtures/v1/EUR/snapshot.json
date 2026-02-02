@@ -10,6 +10,7 @@
       "net_balance_atoms": "-7250",
       "net_sign": -1,
       "viz_color_key": "debt-0",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 42
@@ -24,6 +25,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -38,6 +40,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -52,6 +55,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -66,6 +70,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -80,6 +85,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -94,6 +100,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -108,6 +115,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -122,6 +130,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -136,6 +145,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -150,6 +160,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -164,6 +175,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -178,6 +190,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -192,6 +205,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -206,6 +220,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -220,6 +235,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -234,6 +250,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -248,6 +265,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -262,6 +280,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -276,6 +295,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -290,6 +310,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -304,6 +325,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -318,6 +340,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -332,6 +355,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -346,6 +370,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -360,6 +385,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -374,6 +400,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -388,6 +415,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -402,6 +430,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -416,6 +445,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -430,6 +460,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -444,6 +475,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -458,6 +490,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -472,6 +505,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -486,6 +520,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -500,6 +535,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -514,6 +550,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -528,6 +565,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -542,6 +580,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -556,6 +595,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -570,6 +610,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -584,6 +625,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -598,6 +640,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -612,6 +655,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -626,6 +670,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "business",
+      "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 49,
         "h": 41
@@ -640,6 +685,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -654,6 +700,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -668,6 +715,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -682,6 +730,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -696,6 +745,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -710,6 +760,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -724,6 +775,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -738,6 +790,7 @@
       "net_balance_atoms": "4000",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -752,6 +805,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -766,6 +820,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -780,6 +835,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -794,6 +850,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -808,6 +865,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -822,6 +880,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -836,6 +895,7 @@
       "net_balance_atoms": "3250",
       "net_sign": 1,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -850,6 +910,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -864,6 +925,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -878,6 +940,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -892,6 +955,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -906,6 +970,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -920,6 +985,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -934,6 +1000,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -948,6 +1015,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -962,6 +1030,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -976,6 +1045,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -990,6 +1060,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1004,6 +1075,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1018,6 +1090,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1032,6 +1105,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1046,6 +1120,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1060,6 +1135,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1074,6 +1150,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1088,6 +1165,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1102,6 +1180,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1116,6 +1195,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1130,6 +1210,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1144,6 +1225,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1158,6 +1240,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1172,6 +1255,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1186,6 +1270,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1200,6 +1285,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1214,6 +1300,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1228,6 +1315,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1242,6 +1330,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1256,6 +1345,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1270,6 +1360,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1284,6 +1375,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1298,6 +1390,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1312,6 +1405,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1326,6 +1420,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1340,6 +1435,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1354,6 +1450,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1368,6 +1465,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1382,6 +1480,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "suspended",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30
@@ -1396,6 +1495,7 @@
       "net_balance_atoms": "0",
       "net_sign": 0,
       "viz_color_key": "person",
+      "viz_shape_key": "circle",
       "viz_size": {
         "w": 30,
         "h": 30

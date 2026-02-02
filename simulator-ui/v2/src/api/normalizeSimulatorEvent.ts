@@ -32,6 +32,7 @@ function normalizeNodePatchArray(v: unknown): NodePatch[] | undefined {
     if (raw.net_sign === -1 || raw.net_sign === 0 || raw.net_sign === 1 || raw.net_sign === null) p.net_sign = raw.net_sign
     if (typeof raw.net_balance === 'string' || raw.net_balance === null) p.net_balance = raw.net_balance
     if (typeof raw.viz_color_key === 'string' || raw.viz_color_key === null) p.viz_color_key = raw.viz_color_key
+    if (typeof raw.viz_shape_key === 'string' || raw.viz_shape_key === null) p.viz_shape_key = raw.viz_shape_key
 
     if (raw.viz_size === null) p.viz_size = null
     else if (isRecord(raw.viz_size)) {

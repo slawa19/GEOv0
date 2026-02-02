@@ -61,12 +61,13 @@ const ADAPTIVE_PERF = {
   sampleWindowMs: 900,
 
   // Grace period before resetting quality after activity ends (avoids instant flip-back).
-  qualityResetDelayMs: 800,
+  // Keep long enough that physics stop → restart cycles don't cause visible quality flicker.
+  qualityResetDelayMs: 2000,
 
   // Warmup period after activity starts before allowing quality downgrade.
   // This prevents short FX bursts from triggering quality changes.
-  // Keep short enough that physics can trigger quality downgrade if needed.
-  warmupMs: 600,
+  // Keep long enough to cover physics stabilization (~1.5-2s).
+  warmupMs: 2000,
 
   // How long to keep full-speed rendering after activity ends.
   holdActiveMs: 250,

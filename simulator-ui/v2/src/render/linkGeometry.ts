@@ -12,8 +12,11 @@ export function getLinkTermination(n: LayoutNode, target: { __x: number; __y: nu
   const w = w0 * invZoom
   const h = h0 * invZoom
 
+  const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+  const isRoundedRect = shapeKey === 'rounded-rect'
+
   // Person = circle
-  if (String(n.type) !== 'business') {
+  if (!isRoundedRect) {
     const r = Math.max(w, h) / 2
     return { x: n.__x + ux * r, y: n.__y + uy * r }
   }
