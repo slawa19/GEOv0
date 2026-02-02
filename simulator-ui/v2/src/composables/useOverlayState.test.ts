@@ -49,6 +49,53 @@ describe('useOverlayState', () => {
     expect(overlay.floatingLabels.length).toBe(2)
   })
 
+  it('pushFloatingLabel auto-generates unique ids even within the same nowMs tick', () => {
+    let now = 123.4
+
+    const overlay = useOverlayState({
+      getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
+      sizeForNode: () => ({ w: 40, h: 40 }),
+      getCameraZoom: () => 1,
+      setFlash: () => undefined,
+      resetFxState: () => undefined,
+      nowMs: () => now,
+    })
+
+    // Same timestamp, no explicit id.
+    overlay.pushFloatingLabel({ nodeId: 'A', text: '1', color: '#fff' })
+    overlay.pushFloatingLabel({ nodeId: 'A', text: '2', color: '#fff' })
+
+    expect(overlay.floatingLabels).toHaveLength(2)
+    expect(overlay.floatingLabels[0]!.id).not.toBe(overlay.floatingLabels[1]!.id)
+  })
+
+  it('pushFloatingLabel does not drop throttle-window events when prior label is missing', () => {
+    let now = 0
+
+    const overlay = useOverlayState({
+      getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
+      sizeForNode: () => ({ w: 40, h: 40 }),
+      getCameraZoom: () => 1,
+      setFlash: () => undefined,
+      resetFxState: () => undefined,
+      nowMs: () => now,
+    })
+
+    overlay.pushFloatingLabel({ nodeId: 'A', text: 't1', color: '#fff', throttleKey: 'k', throttleMs: 100 })
+    expect(overlay.floatingLabels.length).toBe(1)
+
+    // Simulate eviction/prune of the label, but keep throttle map state.
+    overlay.floatingLabels.splice(0, overlay.floatingLabels.length)
+    expect(overlay.floatingLabels.length).toBe(0)
+
+    now = 50
+    overlay.pushFloatingLabel({ nodeId: 'A', text: 't2', color: '#fff', throttleKey: 'k', throttleMs: 100 })
+
+    // Event happens within throttle window; should still emit a new label if none exists.
+    expect(overlay.floatingLabels.length).toBe(1)
+    expect(overlay.floatingLabels[0]!.text).toBe('t2')
+  })
+
   it('pushFloatingLabel enforces maxFloatingLabels', () => {
     let now = 0
 

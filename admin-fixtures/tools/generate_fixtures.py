@@ -6,6 +6,8 @@ Goal: a single entry point to generate *canonical* Admin UI fixture datasets.
 Seeds:
 - greenfield-village-100
 - riverside-town-50
+ - greenfield-village-100-v2
+ - riverside-town-50-v2
 
 By default this writes into admin-fixtures/v1 (the canonical pack that Admin UI syncs).
 
@@ -44,6 +46,10 @@ def _load_seed_module(seed_id: str):
         path = TOOLS_DIR / "generate_seed_greenfield_village_100.py"
     elif seed_id == "riverside-town-50":
         path = TOOLS_DIR / "generate_seed_riverside_town_50.py"
+    elif seed_id == "greenfield-village-100-v2":
+        path = TOOLS_DIR / "generate_seed_greenfield_village_100_v2.py"
+    elif seed_id == "riverside-town-50-v2":
+        path = TOOLS_DIR / "generate_seed_riverside_town_50_v2.py"
     else:
         raise ValueError(f"Unknown seed_id: {seed_id}")
 
@@ -70,7 +76,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--seed",
         required=True,
-        choices=["greenfield-village-100", "riverside-town-50"],
+        choices=[
+            "greenfield-village-100",
+            "riverside-town-50",
+            "greenfield-village-100-v2",
+            "riverside-town-50-v2",
+        ],
         help="Which canonical community seed to generate",
     )
     p.add_argument(

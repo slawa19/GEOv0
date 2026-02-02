@@ -42,7 +42,7 @@ param(
 
     [switch]$ResetDb,
     
-    [ValidateSet('greenfield-village-100', 'riverside-town-50')]
+    [ValidateSet('greenfield-village-100', 'riverside-town-50', 'greenfield-village-100-v2', 'riverside-town-50-v2')]
     [string]$FixturesCommunity = 'greenfield-village-100',
     
     [switch]$ShowWindows,
@@ -197,14 +197,37 @@ function Get-ProjectTools {
         throw "Python venv not found at $venvPython"
     }
     
-    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    # NOTE: In PowerShell, `Get-Command npm` can resolve to `npm.ps1` (a PowerShell shim).
+    # `Start-Process` cannot execute a .ps1 directly and fails with: "%1 is not a valid Win32 application".
+    # Prefer Win32 shims (`npm.cmd`/`npm.exe`) when present.
+    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (-not $npm) {
+        $npm = Get-Command npm.exe -ErrorAction SilentlyContinue
+    }
+    if (-not $npm) {
+        $npm = Get-Command npm -ErrorAction SilentlyContinue
+    }
     if (-not $npm) {
         throw "npm not found in PATH"
     }
 
+    $npmPath = $npm.Source
+    if ($npmPath -and $npmPath.ToLowerInvariant().EndsWith('.ps1')) {
+        $npmDir = Split-Path -Parent $npmPath
+        $npmCmdCandidate = Join-Path $npmDir 'npm.cmd'
+        if (Test-Path $npmCmdCandidate) {
+            $npmPath = $npmCmdCandidate
+        } else {
+            $npmExeCandidate = Join-Path $npmDir 'npm.exe'
+            if (Test-Path $npmExeCandidate) {
+                $npmPath = $npmExeCandidate
+            }
+        }
+    }
+
     return @{
         Python = $venvPython
-        Npm = $npm.Source
+        Npm = $npmPath
     }
 }
 
@@ -410,7 +433,8 @@ $null = New-Item -ItemType File -Force -Path $AdminUiOutLogPath | Out-Null
 $null = New-Item -ItemType File -Force -Path $AdminUiErrLogPath | Out-Null
 
 $adminUiArgs = @('run', 'dev', '--', '--port', "$AdminUiPort", '--strictPort')
-$null = Start-Process -FilePath $Tools.Npm -ArgumentList $adminUiArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath
+$adminUiCmdArgs = @('/c', 'npm') + $adminUiArgs
+$null = Start-Process -FilePath 'cmd.exe' -ArgumentList $adminUiCmdArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath
 
 # Wait for Admin UI
 $adminUiDeadline = (Get-Date).AddSeconds(60)
@@ -441,7 +465,8 @@ $null = New-Item -ItemType File -Force -Path $SimulatorUiOutLogPath | Out-Null
 $null = New-Item -ItemType File -Force -Path $SimulatorUiErrLogPath | Out-Null
 
 $simulatorUiArgs = @('run', 'dev', '--', '--port', "$SimulatorUiPort", '--strictPort')
-$null = Start-Process -FilePath $Tools.Npm -ArgumentList $simulatorUiArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath
+$simulatorUiCmdArgs = @('/c', 'npm') + $simulatorUiArgs
+$null = Start-Process -FilePath 'cmd.exe' -ArgumentList $simulatorUiCmdArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath
 
 # Wait for Simulator UI
 $simulatorUiDeadline = (Get-Date).AddSeconds(60)

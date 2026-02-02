@@ -296,6 +296,8 @@ class SnapshotBuilder:
             atoms = net_decimal_to_atoms(net, precision=precision)
             node.net_balance_atoms = str(abs(atoms))
             node.net_sign = atoms_to_net_sign(atoms)
+            # Backend-first: provide signed major-units value so the UI doesn't need to convert atoms.
+            node.net_balance = _to_money_str(net)
 
             atoms_by_pid[pid] = atoms
             mags.append(abs(atoms))
@@ -407,11 +409,13 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
         if not pid:
             continue
         node_type = str(p.get("type") or "person").strip().lower()
-        # Default viz_size based on type (matches nodePainter.ts defaults)
+        # Backend-first: provide visual semantics explicitly.
         if node_type == "business":
             default_size = SimulatorVizSize(w=26.0, h=22.0)
+            default_shape_key = "rounded-rect"
         else:
             default_size = SimulatorVizSize(w=16.0, h=16.0)
+            default_shape_key = "circle"
         nodes.append(
             SimulatorGraphNode(
                 id=pid,
@@ -419,6 +423,7 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
                 type=p.get("type"),
                 status=p.get("status"),
                 viz_color_key=_node_color_key(p),
+                viz_shape_key=default_shape_key,
                 viz_size=default_size,
             )
         )

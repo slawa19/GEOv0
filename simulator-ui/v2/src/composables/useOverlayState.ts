@@ -19,6 +19,9 @@ export type FloatingLabel = {
   text: string
   color: string
   expiresAtMs: number
+
+  // Optional metadata used for throttling/coalescing.
+  throttleKey?: string
 }
 
 export type FloatingLabelView = { id: number; x: number; y: number; text: string; color: string }
@@ -97,6 +100,11 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
   const floatingLabels = reactive<FloatingLabel[]>([])
 
+  // NOTE: floating labels are keyed by `id` in Vue. In real-mode we can push multiple
+  // labels within the same millisecond, so `Math.floor(nowMs)` is not safe.
+  // Use a monotonic counter to guarantee uniqueness.
+  let nextFloatingLabelId = 1
+
   const floatingLabelThrottleAtMsByKey = new Map<string, number>()
   let lastFloatingLabelThrottlePruneAtMs = 0
 
@@ -139,33 +147,57 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     const nowMs = deps.nowMs ? deps.nowMs() : performance.now()
     pruneFloatingLabelThrottle(nowMs)
 
+    const ttlMs = opts.ttlMs ?? 2200
+
     const key = opts.throttleKey
     const throttleMs = opts.throttleMs ?? 0
-    if (key && throttleMs > 0) {
-      const lastAt = floatingLabelThrottleAtMsByKey.get(key) ?? -Infinity
-      if (nowMs - lastAt < throttleMs) return
-      // Touch for LRU.
+    const lastAt = key && throttleMs > 0 ? (floatingLabelThrottleAtMsByKey.get(key) ?? -Infinity) : -Infinity
+    const isThrottleHit = Boolean(key && throttleMs > 0 && nowMs - lastAt < throttleMs)
+
+    if (isThrottleHit && key) {
+      // Soft-throttle: if a label with the same throttleKey is already on screen,
+      // refresh/update it instead of silently dropping the update.
+      for (let i = floatingLabels.length - 1; i >= 0; i--) {
+        const fl = floatingLabels[i]!
+        if (fl.throttleKey !== key) continue
+        fl.text = opts.text
+        fl.color = opts.color
+        fl.offsetXPx = opts.offsetXPx ?? 0
+        fl.offsetYPx = opts.offsetYPx ?? 0
+        fl.expiresAtMs = Math.max(fl.expiresAtMs, nowMs + ttlMs)
+        return
+      }
+      // Throttle hit, but the previous label was already pruned/evicted.
+      // Do NOT touch the throttle timestamp (keep the window anchored), but do emit a new label.
+    }
+
+    if (!isThrottleHit && key && throttleMs > 0) {
+      // Touch for LRU (Map preserves insertion order).
       floatingLabelThrottleAtMsByKey.delete(key)
       floatingLabelThrottleAtMsByKey.set(key, nowMs)
     }
 
-    // Skip if node isn't in the current layout (prevents “teleporting” from stale coords).
-    const ln = deps.getLayoutNodeById(opts.nodeId)
-    if (!ln) return
+    // NOTE: do not drop labels when the node isn't in the layout yet.
+    // The view layer will ignore them until the node appears; this prevents losing labels
+    // during physics warmup / layout churn.
 
     const maxFloatingLabels = 60
     if (floatingLabels.length >= maxFloatingLabels) {
       floatingLabels.splice(0, floatingLabels.length - maxFloatingLabels + 1)
     }
 
+    const id = opts.id ?? nextFloatingLabelId++
+    if (opts.id != null) nextFloatingLabelId = Math.max(nextFloatingLabelId, opts.id + 1)
+
     floatingLabels.push({
-      id: opts.id ?? Math.floor(nowMs),
+      id,
       nodeId: opts.nodeId,
       offsetXPx: opts.offsetXPx ?? 0,
       offsetYPx: opts.offsetYPx ?? 0,
       text: opts.text,
       color: opts.color,
-      expiresAtMs: nowMs + (opts.ttlMs ?? 2200),
+      expiresAtMs: nowMs + ttlMs,
+      throttleKey: opts.throttleKey,
     })
   }
 

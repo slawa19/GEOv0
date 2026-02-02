@@ -60,7 +60,7 @@ param(
     [string]$SeedSource = 'fixtures',
 
     # When SeedSource=fixtures, optionally generate and seed a specific community pack into .local-run (no git changes).
-    [ValidateSet('repo', 'greenfield-village-100', 'riverside-town-50')]
+    [ValidateSet('repo', 'greenfield-village-100', 'riverside-town-50', 'greenfield-village-100-v2', 'riverside-town-50-v2')]
     [string]$FixturesCommunity = 'repo',
 
     [switch]$RegenerateFixtures,

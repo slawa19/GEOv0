@@ -1,0 +1,1274 @@
+[
+  {
+    "equivalent": "EUR",
+    "debtor": "PID_U0033_6526afd1",
+    "creditor": "PID_U0001_9e3779b1",
+    "amount": "95.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0001_9e3779b1",
+    "creditor": "PID_U0029_ec48c90d",
+    "amount": "5.85"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0001_9e3779b1",
+    "creditor": "PID_U0030_8a8042be",
+    "amount": "5.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0002_3c6ef362",
+    "creditor": "PID_U0028_4e114f5c",
+    "amount": "4.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0003_daa66d13",
+    "creditor": "PID_U0030_8a8042be",
+    "amount": "5.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0004_78dde6c4",
+    "creditor": "PID_U0039_1a7389f7",
+    "amount": "1.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0005_17156075",
+    "creditor": "PID_U0032_c6ef3620",
+    "amount": "6.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0024_d5336898",
+    "amount": "1.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0025_736ae249",
+    "amount": "10.23"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0026_11a25bfa",
+    "amount": "2.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0028_4e114f5c",
+    "amount": "3.85"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0007_538453d7",
+    "creditor": "PID_U0024_d5336898",
+    "amount": "3.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0007_538453d7",
+    "creditor": "PID_U0025_736ae249",
+    "amount": "3.30"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0007_538453d7",
+    "creditor": "PID_U0026_11a25bfa",
+    "amount": "4.55"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0007_538453d7",
+    "creditor": "PID_U0028_4e114f5c",
+    "amount": "4.20"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0009_8ff34739",
+    "creditor": "PID_U0024_d5336898",
+    "amount": "6.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0009_8ff34739",
+    "creditor": "PID_U0025_736ae249",
+    "amount": "4.95"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0009_8ff34739",
+    "creditor": "PID_U0026_11a25bfa",
+    "amount": "6.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0011_cc623a9b",
+    "creditor": "PID_U0024_d5336898",
+    "amount": "8.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0011_cc623a9b",
+    "creditor": "PID_U0025_736ae249",
+    "amount": "6.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0011_cc623a9b",
+    "creditor": "PID_U0026_11a25bfa",
+    "amount": "8.45"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0017_81af14c1",
+    "creditor": "PID_U0029_ec48c90d",
+    "amount": "4.90"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0024_d5336898",
+    "creditor": "PID_U0050_e6d5c492",
+    "amount": "2.80"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0025_736ae249",
+    "creditor": "PID_U0050_e6d5c492",
+    "amount": "3.85"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0031_28b7bc6f",
+    "creditor": "PID_U0050_e6d5c492",
+    "amount": "3.15"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0032_c6ef3620",
+    "creditor": "PID_U0050_e6d5c492",
+    "amount": "3.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "2.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "0.90"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "6.30"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0032_c6ef3620",
+    "amount": "4.55"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0047_0c2f577f",
+    "amount": "1.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "2.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "0.35"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "6.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0048_aa66d130",
+    "amount": "2.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "2.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "3.85"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "7.20"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0032_c6ef3620",
+    "amount": "4.90"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0034_035e2982",
+    "amount": "0.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "3.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "0.70"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "7.65"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0035_a195a333",
+    "amount": "1.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "3.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "4.20"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "4.05"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "0.45"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0032_c6ef3620",
+    "amount": "6.51"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0036_3fcd1ce4",
+    "amount": "2.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "3.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "3.15"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "0.90"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0037_de049695",
+    "amount": "2.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "3.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "4.55"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "2.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "1.35"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0032_c6ef3620",
+    "amount": "5.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0038_7c3c1046",
+    "amount": "3.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "4.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "1.35"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "1.80"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0039_1a7389f7",
+    "amount": "4.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "4.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "4.90"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "2.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0032_c6ef3620",
+    "amount": "5.95"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0040_b8ab03a8",
+    "amount": "0.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "0.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "2.70"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0041_56e27d59",
+    "amount": "1.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "0.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "4.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "3.15"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0032_c6ef3620",
+    "amount": "0.35"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0042_f519f70a",
+    "amount": "2.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "0.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0045_cfc0641d",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "3.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0045_cfc0641d",
+    "creditor": "PID_U0043_935170bb",
+    "amount": "3.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0045_cfc0641d",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "1.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "5.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "3.60"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "4.05"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0044_3188ea6c",
+    "amount": "3.75"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "1.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "2.70"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "4.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0045_cfc0641d",
+    "amount": "0.25"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "1.50"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0004_78dde6c4",
+    "amount": "6.51"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0027_afd9d5ab",
+    "amount": "1.80"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0031_28b7bc6f",
+    "amount": "4.95"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0046_6df7ddce",
+    "amount": "1.00"
+  },
+  {
+    "equivalent": "HOUR",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0049_489e4ae1",
+    "amount": "1.75"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0001_9e3779b1",
+    "creditor": "PID_U0002_3c6ef362",
+    "amount": "2281.67"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0001_9e3779b1",
+    "creditor": "PID_U0008_f1bbcd88",
+    "amount": "68.80"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0001_9e3779b1",
+    "creditor": "PID_U0015_4540215f",
+    "amount": "8.91"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0002_3c6ef362",
+    "creditor": "PID_U0006_b54cda26",
+    "amount": "1196.08"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0002_3c6ef362",
+    "creditor": "PID_U0007_538453d7",
+    "amount": "1029.32"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0002_3c6ef362",
+    "creditor": "PID_U0008_f1bbcd88",
+    "amount": "3.26"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0002_3c6ef362",
+    "creditor": "PID_U0009_8ff34739",
+    "amount": "2260.39"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0003_daa66d13",
+    "creditor": "PID_U0001_9e3779b1",
+    "amount": "805.42"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0003_daa66d13",
+    "creditor": "PID_U0002_3c6ef362",
+    "amount": "3283.39"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0003_daa66d13",
+    "creditor": "PID_U0005_17156075",
+    "amount": "2840.11"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0003_daa66d13",
+    "creditor": "PID_U0015_4540215f",
+    "amount": "2939.92"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0005_17156075",
+    "creditor": "PID_U0001_9e3779b1",
+    "amount": "738.76"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0005_17156075",
+    "creditor": "PID_U0011_cc623a9b",
+    "amount": "1296.32"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0011_cc623a9b",
+    "amount": "46.10"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0034_035e2982",
+    "amount": "1.96"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0037_de049695",
+    "amount": "89.79"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0006_b54cda26",
+    "creditor": "PID_U0043_935170bb",
+    "amount": "66.43"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0007_538453d7",
+    "creditor": "PID_U0011_cc623a9b",
+    "amount": "41.55"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0007_538453d7",
+    "creditor": "PID_U0037_de049695",
+    "amount": "71.15"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0007_538453d7",
+    "creditor": "PID_U0046_6df7ddce",
+    "amount": "36.29"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0008_f1bbcd88",
+    "creditor": "PID_U0006_b54cda26",
+    "amount": "86.61"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0008_f1bbcd88",
+    "creditor": "PID_U0007_538453d7",
+    "amount": "35.52"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0008_f1bbcd88",
+    "creditor": "PID_U0009_8ff34739",
+    "amount": "36.95"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0009_8ff34739",
+    "creditor": "PID_U0012_6a99b44c",
+    "amount": "15.05"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0009_8ff34739",
+    "creditor": "PID_U0034_035e2982",
+    "amount": "73.43"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0009_8ff34739",
+    "creditor": "PID_U0040_b8ab03a8",
+    "amount": "55.54"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0016_e3779b10",
+    "creditor": "PID_U0002_3c6ef362",
+    "amount": "2717.20"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0016_e3779b10",
+    "creditor": "PID_U0008_f1bbcd88",
+    "amount": "46.62"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0017_81af14c1",
+    "creditor": "PID_U0002_3c6ef362",
+    "amount": "4136.92"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0018_1fe68e72",
+    "creditor": "PID_U0002_3c6ef362",
+    "amount": "6312.59"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0018_1fe68e72",
+    "creditor": "PID_U0008_f1bbcd88",
+    "amount": "918.41"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0019_be1e0823",
+    "creditor": "PID_U0001_9e3779b1",
+    "amount": "2648.22"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0020_5c5581d4",
+    "creditor": "PID_U0003_daa66d13",
+    "amount": "3412.67"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0021_fa8cfb85",
+    "creditor": "PID_U0001_9e3779b1",
+    "amount": "1537.60"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0022_98c47536",
+    "creditor": "PID_U0002_3c6ef362",
+    "amount": "1641.76"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0023_36fbeee7",
+    "creditor": "PID_U0002_3c6ef362",
+    "amount": "1510.37"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0023_36fbeee7",
+    "creditor": "PID_U0012_6a99b44c",
+    "amount": "778.36"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "82.82"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0017_81af14c1",
+    "amount": "2282.56"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "42.69"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "100.28"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0021_fa8cfb85",
+    "amount": "112.10"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0045_cfc0641d",
+    "amount": "17.01"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0034_035e2982",
+    "creditor": "PID_U0048_aa66d130",
+    "amount": "26.42"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0007_538453d7",
+    "amount": "85.13"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "2126.94"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "4.91"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "105.07"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0034_035e2982",
+    "amount": "55.64"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0035_a195a333",
+    "creditor": "PID_U0046_6df7ddce",
+    "amount": "47.74"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0009_8ff34739",
+    "amount": "93.13"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "2133.35"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "13.91"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0035_a195a333",
+    "amount": "90.14"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0036_3fcd1ce4",
+    "creditor": "PID_U0047_0c2f577f",
+    "amount": "44.97"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "98.66"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "2827.26"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0021_fa8cfb85",
+    "amount": "54.40"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0036_3fcd1ce4",
+    "amount": "62.90"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0037_de049695",
+    "creditor": "PID_U0048_aa66d130",
+    "amount": "23.56"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0007_538453d7",
+    "amount": "25.27"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "96.08"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "1809.68"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "118.81"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0034_035e2982",
+    "amount": "42.19"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0038_7c3c1046",
+    "creditor": "PID_U0037_de049695",
+    "amount": "75.60"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0009_8ff34739",
+    "amount": "10.20"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "61.29"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0017_81af14c1",
+    "amount": "25.13"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "1237.31"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "74.27"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0035_a195a333",
+    "amount": "99.49"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0039_1a7389f7",
+    "creditor": "PID_U0038_7c3c1046",
+    "amount": "96.91"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "109.44"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "1184.10"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0021_fa8cfb85",
+    "amount": "22.31"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0036_3fcd1ce4",
+    "amount": "61.44"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0040_b8ab03a8",
+    "creditor": "PID_U0039_1a7389f7",
+    "amount": "58.05"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "42.46"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "1849.14"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0037_de049695",
+    "amount": "24.13"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0041_56e27d59",
+    "creditor": "PID_U0040_b8ab03a8",
+    "amount": "57.82"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0009_8ff34739",
+    "amount": "89.50"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "1099.19"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "90.58"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "20.89"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0038_7c3c1046",
+    "amount": "42.74"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0042_f519f70a",
+    "creditor": "PID_U0041_56e27d59",
+    "amount": "93.51"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "1031.19"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "69.58"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0021_fa8cfb85",
+    "amount": "42.18"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0039_1a7389f7",
+    "amount": "96.45"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0043_935170bb",
+    "creditor": "PID_U0042_f519f70a",
+    "amount": "86.10"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "5.31"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0017_81af14c1",
+    "amount": "116.79"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "1795.70"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0040_b8ab03a8",
+    "amount": "63.57"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0044_3188ea6c",
+    "creditor": "PID_U0043_935170bb",
+    "amount": "18.48"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0045_cfc0641d",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "2961.32"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0045_cfc0641d",
+    "creditor": "PID_U0041_56e27d59",
+    "amount": "40.74"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0045_cfc0641d",
+    "creditor": "PID_U0044_3188ea6c",
+    "amount": "67.25"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0006_b54cda26",
+    "amount": "86.05"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "74.57"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "71.03"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "1652.37"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0021_fa8cfb85",
+    "amount": "29.28"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0042_f519f70a",
+    "amount": "94.61"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0046_6df7ddce",
+    "creditor": "PID_U0045_cfc0641d",
+    "amount": "71.46"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0007_538453d7",
+    "amount": "12.22"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "92.71"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0018_1fe68e72",
+    "amount": "2347.28"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0043_935170bb",
+    "amount": "72.95"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0047_0c2f577f",
+    "creditor": "PID_U0046_6df7ddce",
+    "amount": "80.05"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0016_e3779b10",
+    "amount": "1948.89"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0019_be1e0823",
+    "amount": "78.92"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0044_3188ea6c",
+    "amount": "68.62"
+  },
+  {
+    "equivalent": "UAH",
+    "debtor": "PID_U0048_aa66d130",
+    "creditor": "PID_U0047_0c2f577f",
+    "amount": "78.32"
+  }
+]

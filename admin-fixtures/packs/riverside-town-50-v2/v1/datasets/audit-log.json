@@ -1,0 +1,1802 @@
+[
+  {
+    "id": "AUD_00001",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-02T00:00:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00002",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T23:53:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00003",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0035_a195a333",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T23:46:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00004",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0002_3c6ef362",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T23:39:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00005",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_00418916",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T23:32:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00006",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T23:25:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00007",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T23:18:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00008",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0020_5c5581d4",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T23:11:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00009",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0037_de049695",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T23:04:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00010",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_00942561",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T22:57:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00011",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T22:50:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00012",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T22:43:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00013",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0005_17156075",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T22:36:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00014",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0022_98c47536",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T22:29:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00015",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_01466206",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T22:22:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00016",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T22:15:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00017",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T22:08:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00018",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0040_b8ab03a8",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T22:01:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00019",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0007_538453d7",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T21:54:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00020",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_01989851",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T21:47:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00021",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T21:40:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00022",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T21:33:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00023",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0025_736ae249",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T21:26:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00024",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0042_f519f70a",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T21:19:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00025",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_02513496",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T21:12:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00026",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T21:05:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00027",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T20:58:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00028",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0010_2e2ac0ea",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T20:51:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00029",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0027_afd9d5ab",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T20:44:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00030",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_03037141",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T20:37:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00031",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T20:30:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00032",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T20:23:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00033",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0045_cfc0641d",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T20:16:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00034",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0012_6a99b44c",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T20:09:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00035",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_03560786",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T20:02:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00036",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T19:55:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00037",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T19:48:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00038",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0030_8a8042be",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T19:41:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00039",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0047_0c2f577f",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T19:34:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00040",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_04084431",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T19:27:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00041",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T19:20:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00042",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T19:13:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00043",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0015_4540215f",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T19:06:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00044",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0032_c6ef3620",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T18:59:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00045",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_04608076",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T18:52:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00046",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T18:45:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00047",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T18:38:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00048",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0050_e6d5c492",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T18:31:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00049",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0017_81af14c1",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T18:24:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00050",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_05131721",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T18:17:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00051",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T18:10:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00052",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T18:03:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00053",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0035_a195a333",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T17:56:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00054",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0002_3c6ef362",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T17:49:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00055",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_05655366",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T17:42:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00056",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T17:35:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00057",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T17:28:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00058",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0020_5c5581d4",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T17:21:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00059",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0037_de049695",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T17:14:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00060",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_06179011",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T17:07:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00061",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T17:00:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00062",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T16:53:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00063",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0005_17156075",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T16:46:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00064",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0022_98c47536",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T16:39:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00065",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_06702656",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T16:32:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00066",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T16:25:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00067",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T16:18:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00068",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0040_b8ab03a8",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T16:11:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00069",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0007_538453d7",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T16:04:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00070",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_07226301",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T15:57:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00071",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T15:50:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00072",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T15:43:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00073",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0025_736ae249",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T15:36:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00074",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0042_f519f70a",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T15:29:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00075",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_07749946",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T15:22:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00076",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T15:15:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00077",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T15:08:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00078",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0010_2e2ac0ea",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T15:01:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00079",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0027_afd9d5ab",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T14:54:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00080",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_08273591",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T14:47:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00081",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T14:40:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00082",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T14:33:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00083",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0045_cfc0641d",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T14:26:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00084",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0012_6a99b44c",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T14:19:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00085",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_08797236",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T14:12:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00086",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T14:05:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00087",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T13:58:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00088",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0030_8a8042be",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T13:51:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00089",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0047_0c2f577f",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T13:44:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00090",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_09320881",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T13:37:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00091",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T13:30:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00092",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T13:23:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00093",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0015_4540215f",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T13:16:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00094",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0032_c6ef3620",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T13:09:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00095",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_09844526",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T13:02:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00096",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T12:55:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00097",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T12:48:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00098",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0050_e6d5c492",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T12:41:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00099",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0017_81af14c1",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T12:34:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00100",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_10368171",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T12:27:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00101",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T12:20:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00102",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T12:13:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00103",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0035_a195a333",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T12:06:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00104",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0002_3c6ef362",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T11:59:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00105",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_10891816",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T11:52:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00106",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T11:45:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00107",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T11:38:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00108",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0020_5c5581d4",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T11:31:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00109",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0037_de049695",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T11:24:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00110",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_11415461",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T11:17:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00111",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T11:10:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00112",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T11:03:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00113",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0005_17156075",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T10:56:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00114",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0022_98c47536",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T10:49:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00115",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_11939106",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T10:42:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00116",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T10:35:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00117",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T10:28:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00118",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0040_b8ab03a8",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T10:21:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00119",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0007_538453d7",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T10:14:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00120",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_12462751",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T10:07:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00121",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T10:00:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00122",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T09:53:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00123",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0025_736ae249",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T09:46:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00124",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0042_f519f70a",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T09:39:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00125",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_12986396",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T09:32:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00126",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T09:25:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00127",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T09:18:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00128",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0010_2e2ac0ea",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T09:11:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00129",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0027_afd9d5ab",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T09:04:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00130",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_13510041",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T08:57:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00131",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T08:50:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00132",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T08:43:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00133",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0045_cfc0641d",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T08:36:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00134",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0012_6a99b44c",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T08:29:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00135",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_14033686",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T08:22:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00136",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T08:15:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00137",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T08:08:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00138",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0030_8a8042be",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T08:01:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00139",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0047_0c2f577f",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T07:54:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00140",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_14557331",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T07:47:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00141",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T07:40:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00142",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T07:33:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00143",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0015_4540215f",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T07:26:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00144",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0032_c6ef3620",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T07:19:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00145",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_15080976",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T07:12:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00146",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T07:05:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00147",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T06:58:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00148",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0050_e6d5c492",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T06:51:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00149",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0017_81af14c1",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T06:44:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00150",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_15604621",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T06:37:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00151",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T06:30:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00152",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T06:23:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00153",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0035_a195a333",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T06:16:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00154",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0002_3c6ef362",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T06:09:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00155",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_16128266",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T06:02:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00156",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T05:55:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00157",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T05:48:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00158",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0020_5c5581d4",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T05:41:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00159",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0037_de049695",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T05:34:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00160",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_16651911",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T05:27:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00161",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T05:20:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00162",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T05:13:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00163",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0005_17156075",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T05:06:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00164",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0022_98c47536",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T04:59:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00165",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_17175556",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T04:52:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00166",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T04:45:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00167",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T04:38:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00168",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0040_b8ab03a8",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T04:31:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00169",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0007_538453d7",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T04:24:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00170",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_17699201",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T04:17:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00171",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T04:10:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00172",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T04:03:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00173",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0025_736ae249",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T03:56:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00174",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0042_f519f70a",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T03:49:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00175",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_18222846",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T03:42:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00176",
+    "action": "CONFIG_PATCH",
+    "object": "config",
+    "object_id": "routing.max_paths_per_payment",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T03:35:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00177",
+    "action": "FEATURE_FLAG_SET",
+    "object": "feature_flag",
+    "object_id": "multipath_enabled",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T03:28:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00178",
+    "action": "PARTICIPANT_FREEZE",
+    "object": "participant",
+    "object_id": "PID_U0010_2e2ac0ea",
+    "actor_id": "admin:root",
+    "actor_role": "admin",
+    "created_at": "2026-02-01T03:21:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00179",
+    "action": "PARTICIPANT_UNFREEZE",
+    "object": "participant",
+    "object_id": "PID_U0027_afd9d5ab",
+    "actor_id": "operator:ops-1",
+    "actor_role": "operator",
+    "created_at": "2026-02-01T03:14:00Z",
+    "details": {}
+  },
+  {
+    "id": "AUD_00180",
+    "action": "TX_ABORT",
+    "object": "transaction",
+    "object_id": "TX_18746491",
+    "actor_id": "auditor:audit-1",
+    "actor_role": "auditor",
+    "created_at": "2026-02-01T03:07:00Z",
+    "details": {}
+  }
+]

@@ -38,6 +38,8 @@ Seed‑документ — это НЕ:
 |------|-----------:|---------------|-------------|----------------------------------|----------|
 | [seed-greenfield-village-100.md](seed-greenfield-village-100.md) | 100 | «Село/громада» (кооператив, склад, закупка, рынок, пекарня, сервисы) | `UAH`, `EUR`, `HOUR` | Разделы про экономическую логику и degree‑summary | `admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100` |
 | [seed-riverside-town-50.md](seed-riverside-town-50.md) | 50 | «Приречный городок» (рыболовство, порт/кооп, рынок, сервисы в `HOUR`) | `UAH`, `EUR`, `HOUR` | Разделы `Economic Logic`, `Clearing Cycles Examples` | `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50` |
+| [seed-greenfield-village-100-v2.md](seed-greenfield-village-100-v2.md) | 100 | Greenfield v1, but with realistic person caps + clearing-first policy | `UAH`, `EUR`, `HOUR` | Что изменилось vs v1 (caps, auto_clearing, intermediates) | `admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100-v2` |
+| [seed-riverside-town-50-v2.md](seed-riverside-town-50-v2.md) | 50 | Riverside v1, but with realistic person caps + clearing-first policy | `UAH`, `EUR`, `HOUR` | Что изменилось vs v1 (caps, auto_clearing, intermediates) | `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50-v2` |
 
 Примечание:
 - Единственный «активный» набор фикстур для Admin UI — `admin-fixtures/v1`.

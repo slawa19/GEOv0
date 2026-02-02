@@ -206,6 +206,12 @@ Real Mode guardrails:
 - `SIMULATOR_REAL_MAX_ERRORS_TOTAL` (по умолчанию 200)
 - `SIMULATOR_CLEARING_MAX_DEPTH` (по умолчанию 6)
 
+Real Mode: тюнинг дисковой нагрузки (артефакты) для dev/UI:
+- `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS` — как часто обновлять `last_tick.json` (по умолчанию `500`).
+  - `<=0` отключает запись `last_tick.json` на каждом тике.
+- `SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS` — как часто синхронизировать индекс артефактов в БД (по умолчанию `5000`).
+  - `<=0` отключает `sync_artifacts` (уменьшает IO, но список артефактов может обновляться реже/только при finalize).
+
 Где искать артефакты прогона локально:
 - `.local-run/simulator/runs/<run_id>/artifacts/` (включая `events.ndjson`)
 

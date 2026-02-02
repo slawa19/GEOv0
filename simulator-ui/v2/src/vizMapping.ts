@@ -20,14 +20,15 @@ export type VizMapping = {
 export const VIZ_MAPPING: VizMapping = {
   node: {
     color: {
+      unknown: { fill: '#94a3b8' },
       business: { fill: '#10b981' },
       person: { fill: '#3b82f6' },
       suspended: { fill: '#e6a23c' },  // aligned with admin-ui (warning orange)
       left: { fill: '#909399' },
       deleted: { fill: '#606266' },
 
-      // Debt bins: debt-0 uses base type color (person/business), so not listed here.
-      // Gradient: light yellow -> red (aligned with admin-ui)
+      // Debt bins (backend computes binning; UI maps keys to colors)
+      'debt-0': { fill: '#cbd5e1' },
       'debt-1': { fill: '#eadca8' },
       'debt-2': { fill: '#e2cf8d' },
       'debt-3': { fill: '#d8c073' },

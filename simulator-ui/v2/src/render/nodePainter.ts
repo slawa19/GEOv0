@@ -11,24 +11,23 @@ const sizeCache = new WeakMap<GraphNode, { key: string; size: { w: number; h: nu
 
 export function sizeForNode(n: GraphNode): { w: number; h: number } {
   const s = n.viz_size
-  const key = `${String(n.type)}:${String(s?.w ?? '')}:${String(s?.h ?? '')}`
+  const key = `${String(s?.w ?? '')}:${String(s?.h ?? '')}`
   const cached = sizeCache.get(n)
   if (cached && cached.key === key) return cached.size
 
-  const w = Math.max(6, Number(s?.w ?? (n.type === 'business' ? 14 : 10)))
-  const h = Math.max(6, Number(s?.h ?? (n.type === 'business' ? 14 : 10)))
+  // Backend-first: do not derive visual size from domain fields like `type`.
+  // If `viz_size` is missing, use a neutral default.
+  const w = Math.max(6, Number(s?.w ?? 12))
+  const h = Math.max(6, Number(s?.h ?? 12))
   const size = { w, h }
   sizeCache.set(n, { key, size })
   return size
 }
 
 export function fillForNode(n: GraphNode, mapping: VizMapping): string {
-  const key = String(n.viz_color_key ?? (n.type === 'business' ? 'business' : 'person'))
-  const hit = mapping.node.color[key]
-  if (hit) return hit.fill
-  // Fallback for unknown keys (e.g. debt-0): use type-based color per vizMapping contract.
-  const typeKey = n.type === 'business' ? 'business' : 'person'
-  return mapping.node.color[typeKey]?.fill ?? mapping.node.color.person.fill
+  // Backend-first: UI only interprets viz keys; never derives colors from `type`.
+  const key = String(n.viz_color_key ?? 'unknown')
+  return mapping.node.color[key]?.fill ?? mapping.node.color.unknown.fill
 }
 
 export function drawNodeShape(

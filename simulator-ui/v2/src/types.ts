@@ -19,6 +19,8 @@ export type GraphNode = {
   links_count?: number
   net_balance_atoms?: string | null
   net_sign?: -1 | 0 | 1 | null
+  // Backend-authoritative signed major-units value (preferred for display).
+  net_balance?: string | null
   viz_color_key?: string | null
   viz_size?: { w: number; h: number } | null
   viz_badge_key?: string | null
@@ -41,6 +43,7 @@ export type NodePatch = {
   id: string
   net_balance_atoms?: string | null
   net_sign?: -1 | 0 | 1 | null
+  net_balance?: string | null
   viz_color_key?: string | null
   viz_size?: { w: number; h: number } | null
 }
@@ -60,6 +63,10 @@ export type TxUpdatedEvent = {
   ts: string
   type: 'tx.updated'
   equivalent: string
+  // Optional explicit endpoints + amount in major units (backend-first).
+  from?: string
+  to?: string
+  amount?: string
   ttl_ms: number
   intensity_key?: string
   edges: Array<{ from: string; to: string; style?: { viz_width_key?: string; viz_alpha_key?: string } }>
@@ -88,6 +95,8 @@ export type ClearingDoneEvent = {
   type: 'clearing.done'
   equivalent: string
   plan_id: string
+  cleared_cycles?: number
+  cleared_amount?: string
   node_patch?: NodePatch[]
   edge_patch?: EdgePatch[]
 }

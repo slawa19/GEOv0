@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "tx_id": "TX_STUCK_RIVER_0001",
+      "state": "PREPARE_IN_PROGRESS",
+      "initiator_pid": "PID_U0001_9e3779b1",
+      "equivalent": "UAH",
+      "age_seconds": 4200,
+      "created_at": "2026-01-11T20:40:00Z",
+      "sla_seconds": 1800
+    },
+    {
+      "tx_id": "TX_STUCK_RIVER_0002",
+      "state": "COMMIT_IN_PROGRESS",
+      "initiator_pid": "PID_U0002_3c6ef362",
+      "equivalent": "HOUR",
+      "age_seconds": 2100,
+      "created_at": "2026-01-11T22:55:00Z",
+      "sla_seconds": 1800
+    },
+    {
+      "tx_id": "TX_STUCK_RIVER_0003",
+      "state": "PREPARE_IN_PROGRESS",
+      "initiator_pid": "PID_U0033_6526afd1",
+      "equivalent": "EUR",
+      "age_seconds": 3800,
+      "created_at": "2026-01-11T19:50:00Z",
+      "sla_seconds": 2400
+    }
+  ]
+}

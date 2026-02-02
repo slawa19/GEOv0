@@ -3,7 +3,7 @@ from __future__ import annotations
 import bisect
 import uuid
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Iterable
 
 from sqlalchemy import func, select
@@ -261,11 +261,21 @@ class VizPatchHelper:
 
         precision = int(self.precision)
         scale10 = Decimal(10) ** precision
+        money_quant = Decimal(1) / scale10
+
+        def _to_money_str(v: Decimal) -> str:
+            return format(v.quantize(money_quant, rounding=ROUND_DOWN), "f")
         out: list[dict[str, Any]] = []
         for pid in pid_list:
             p = pid_to_participant.get(pid)
             if p is None:
                 continue
+
+            p_type = getattr(p, "type", None)
+            if str(p_type).strip().lower() == "business":
+                viz_shape_key = "rounded-rect"
+            else:
+                viz_shape_key = "circle"
 
             net = credit_sum.get(p.id, Decimal("0")) - debit_sum.get(p.id, Decimal("0"))
             atoms = net_decimal_to_atoms(net, precision=precision)
@@ -276,7 +286,9 @@ class VizPatchHelper:
                     "id": pid,
                     "net_balance_atoms": str(abs(atoms)),
                     "net_sign": net_sign,
+                    "net_balance": _to_money_str(net),
                     "viz_color_key": self._node_color_key(atoms=atoms, status=getattr(p, "status", None), type_=getattr(p, "type", None)),
+                    "viz_shape_key": viz_shape_key,
                     "viz_size": self._node_size(atoms=atoms, type_=getattr(p, "type", None)),
                 }
             )

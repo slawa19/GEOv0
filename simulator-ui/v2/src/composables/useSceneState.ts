@@ -62,26 +62,60 @@ type UseSceneStateReturn = {
 export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   let deepLinkFocusNodeId: string | null = null
 
+  // Track loaded snapshot identity to detect "incremental" updates vs. full scene changes.
+  // When node IDs are the same, we can skip costly resets (camera, overlays, layout animation).
+  let lastSnapshotNodeIds: Set<string> | null = null
+  let hasLoadedOnce = false
+
+  function snapshotNodeIdsMatch(oldIds: Set<string> | null, snapshot: GraphSnapshot): boolean {
+    if (!oldIds) return false
+    if (oldIds.size !== snapshot.nodes.length) return false
+    for (const n of snapshot.nodes) {
+      if (!oldIds.has(n.id)) return false
+    }
+    return true
+  }
+
   async function loadScene() {
+    // Only clear timers/pointers for a full reload.
     deps.clearScheduledTimeouts()
     deps.resetPlaylistPointers()
-    deps.resetCamera()
+
     deps.state.loading = true
     deps.state.error = ''
-    deps.state.sourcePath = ''
-    deps.state.eventsPath = ''
-    deps.state.snapshot = null
-    deps.resetLayoutKeyCache()
-    deps.state.demoTxEvents = []
-    deps.state.demoClearingPlan = null
-    deps.state.demoClearingDone = null
-    deps.state.selectedNodeId = null
-    deps.resetOverlays()
 
     try {
       const { snapshot, sourcePath } = await deps.loadSnapshot(deps.effectiveEq.value)
+
+      // Detect if this is an "incremental" update (same node IDs) vs. a full scene change.
+      // Incremental: skip camera reset, overlay clear, and layout cache invalidation.
+      // This prevents "explosion" animations when transitioning preview → run with the same graph.
+      const isIncrementalUpdate =
+        hasLoadedOnce && deps.state.snapshot !== null && snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
+
+      // Structural change = different node count or different link count (needs layout recalc).
+      const isStructuralChange =
+        !isIncrementalUpdate ||
+        deps.state.snapshot?.nodes.length !== snapshot.nodes.length ||
+        deps.state.snapshot?.links.length !== snapshot.links.length
+
+      if (!isIncrementalUpdate) {
+        deps.resetCamera()
+        deps.state.sourcePath = ''
+        deps.state.eventsPath = ''
+        deps.state.snapshot = null
+        deps.resetLayoutKeyCache()
+        deps.state.demoTxEvents = []
+        deps.state.demoClearingPlan = null
+        deps.state.demoClearingDone = null
+        deps.state.selectedNodeId = null
+        deps.resetOverlays()
+      }
+
       deps.state.snapshot = snapshot
       deps.state.sourcePath = sourcePath
+      lastSnapshotNodeIds = new Set(snapshot.nodes.map((n) => n.id))
+      hasLoadedOnce = true
 
       if (deepLinkFocusNodeId && snapshot.nodes.some((n) => n.id === deepLinkFocusNodeId)) {
         deps.state.selectedNodeId = deepLinkFocusNodeId
@@ -102,7 +136,10 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
         deps.state.demoClearingDone = r.events.find((e): e is ClearingDoneEvent => e.type === 'clearing.done') ?? null
       }
 
-      deps.resizeAndLayout()
+      // Only run full layout (with physics animation) if structure changed or first load.
+      if (isStructuralChange || !hasLoadedOnce) {
+        deps.resizeAndLayout()
+      }
       deps.ensureRenderLoop()
     } catch (e: any) {
       deps.state.error = String(e?.message ?? e)

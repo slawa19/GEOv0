@@ -64,7 +64,14 @@ def _scenario_allowlist() -> Optional[set[str]]:
         items = {x.strip() for x in raw.split(",") if x.strip()}
         return items or None
 
-    return {"greenfield-village-100", "greenfield-village-100-realistic-v2", "riverside-town-50"}
+    return {
+        "greenfield-village-100",
+        "greenfield-village-100-v2",
+        "greenfield-village-100-realistic-v2",
+        "riverside-town-50",
+        "riverside-town-50-v2",
+        "riverside-town-50-realistic-v2",
+    }
 
 def _safe_int_env(name: str, default: int) -> int:
     try:

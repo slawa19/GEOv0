@@ -3236,6 +3236,9 @@ components:
         links_count:
           type: integer
           nullable: true
+        net_balance:
+          type: string
+          nullable: true
         net_balance_atoms:
           type: string
           nullable: true
@@ -3344,6 +3347,69 @@ components:
           $ref: '#/components/schemas/SimulatorGraphLimits'
       additionalProperties: true
 
+    SimulatorGraphNodePatch:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        net_balance:
+          type: string
+          nullable: true
+        net_balance_atoms:
+          type: string
+          nullable: true
+        net_sign:
+          type: integer
+          nullable: true
+          enum: [-1, 0, 1]
+        viz_color_key:
+          type: string
+          nullable: true
+        viz_size:
+          $ref: '#/components/schemas/SimulatorVizSize'
+        viz_badge_key:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    SimulatorGraphLinkPatch:
+      type: object
+      required: [source, target]
+      properties:
+        source:
+          type: string
+        target:
+          type: string
+        trust_limit:
+          oneOf:
+            - type: string
+            - type: number
+          nullable: true
+        used:
+          oneOf:
+            - type: string
+            - type: number
+          nullable: true
+        available:
+          oneOf:
+            - type: string
+            - type: number
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        viz_color_key:
+          type: string
+          nullable: true
+        viz_width_key:
+          type: string
+          nullable: true
+        viz_alpha_key:
+          type: string
+          nullable: true
+      additionalProperties: true
+
     SimulatorEventEdgeRef:
       type: object
       required: [from, to]
@@ -3379,6 +3445,15 @@ components:
           enum: [tx.updated]
         equivalent:
           $ref: '#/components/schemas/EquivalentCode'
+        from:
+          type: string
+          nullable: true
+        to:
+          type: string
+          nullable: true
+        amount:
+          type: string
+          nullable: true
         ttl_ms:
           type: integer
           nullable: true
@@ -3412,6 +3487,16 @@ components:
                 type: string
                 nullable: true
             additionalProperties: true
+        node_patch:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimulatorGraphNodePatch'
+        edge_patch:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimulatorGraphLinkPatch'
       additionalProperties: true
 
     SimulatorTxFailedEvent:
@@ -3509,6 +3594,25 @@ components:
           enum: [clearing.done]
         equivalent:
           $ref: '#/components/schemas/EquivalentCode'
+        plan_id:
+          type: string
+          nullable: true
+        cleared_cycles:
+          type: integer
+          nullable: true
+        cleared_amount:
+          type: string
+          nullable: true
+        node_patch:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimulatorGraphNodePatch'
+        edge_patch:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimulatorGraphLinkPatch'
       additionalProperties: true
 
     SimulatorEvent:

@@ -26,8 +26,11 @@ class SimulatorGraphNode(BaseModel):
     links_count: Optional[int] = None
     net_balance_atoms: Optional[str] = None
     net_sign: Optional[Literal[-1, 0, 1]] = None
+    # Signed major-units string (backend-authoritative), e.g. "-123.45".
+    net_balance: Optional[str] = None
 
     viz_color_key: Optional[str] = None
+    viz_shape_key: Optional[str] = None
     viz_size: Optional[SimulatorVizSize] = None
     viz_badge_key: Optional[str] = None
 
@@ -90,7 +93,6 @@ class SimulatorEventEdgeRef(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-
 class SimulatorEventEdgeStyle(BaseModel):
     viz_width_key: Optional[str] = None
     viz_alpha_key: Optional[str] = None
@@ -119,13 +121,20 @@ class SimulatorTxUpdatedEvent(BaseModel):
     type: Literal["tx.updated"]
     equivalent: str
 
+    # Optional explicit endpoints (do not replace routed edges; provided for UI convenience).
+    from_: Optional[str] = Field(default=None, alias="from")
+    to: Optional[str] = None
+
+    # Backend-authoritative transaction amount in major units (string), e.g. "150.00".
+    amount: Optional[str] = None
+
     ttl_ms: Optional[int] = None
     intensity_key: Optional[str] = None
 
     edges: Optional[List[SimulatorTxUpdatedEventEdge]] = None
     node_badges: Optional[List[SimulatorTxUpdatedNodeBadge]] = None
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class SimulatorTxFailedError(BaseModel):
@@ -181,6 +190,16 @@ class SimulatorClearingDoneEvent(BaseModel):
     # Links clearing.done back to the previously emitted clearing.plan.
     # UI uses this to drive the clearing animation lifecycle.
     plan_id: str
+
+    # Optional: stats useful for UI/analytics.
+    cleared_cycles: Optional[int] = None
+    # Total cleared volume in major units (string), e.g. "120.00".
+    cleared_amount: Optional[str] = None
+
+    # Optional patches to update the graph without a full snapshot refresh.
+    # Shape matches NodePatch/EdgePatch used by the Simulator UI.
+    node_patch: Optional[List[Dict[str, Any]]] = None
+    edge_patch: Optional[List[Dict[str, Any]]] = None
 
     model_config = ConfigDict(extra="allow")
 

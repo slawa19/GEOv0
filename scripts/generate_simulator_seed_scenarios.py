@@ -94,6 +94,11 @@ def _pid_index(pid: str) -> int | None:
 
 
 def _group_for_seed(seed_id: str, pid: str) -> str | None:
+    if seed_id.endswith("-realistic-v2"):
+        seed_id = seed_id[: -len("-realistic-v2")]
+    if seed_id.endswith("-v2"):
+        seed_id = seed_id[: -len("-v2")]
+
     idx = _pid_index(pid)
     if idx is None:
         return None
@@ -161,6 +166,88 @@ def _make_behavior_profiles() -> list[dict[str, Any]]:
         {"id": "service"},
         {"id": "household"},
         {"id": "agent"},
+    ]
+
+
+def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
+    # Realistic-v2 intent:
+    # - payments are typically 50..1500 UAH (bounded)
+    # - lower tx_rate to avoid runaway balances over time
+    return [
+        {
+            "id": "anchor_hub",
+            "props": {
+                "tx_rate": 0.02,
+                "equivalent_weights": {"UAH": 1.0},
+                "amount_model": {
+                    "UAH": {"p50": 900, "p90": 1400, "min": 80, "max": 1500},
+                },
+            },
+        },
+        {
+            "id": "producer",
+            "props": {
+                "tx_rate": 0.08,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {
+                    "retail": 0.35,
+                    "services": 0.25,
+                    "households": 0.25,
+                    "anchors": 0.15,
+                },
+                "amount_model": {
+                    "UAH": {"p50": 350, "p90": 1100, "min": 50, "max": 1500},
+                },
+            },
+        },
+        {
+            "id": "retail",
+            "props": {
+                "tx_rate": 0.10,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {"anchors": 0.35, "producers": 0.4, "services": 0.25},
+                "amount_model": {
+                    "UAH": {"p50": 500, "p90": 1300, "min": 50, "max": 1500},
+                },
+            },
+        },
+        {
+            "id": "service",
+            "props": {
+                "tx_rate": 0.06,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {"households": 0.45, "retail": 0.35, "anchors": 0.2},
+                "amount_model": {
+                    "UAH": {"p50": 300, "p90": 1000, "min": 50, "max": 1500},
+                },
+            },
+        },
+        {
+            "id": "household",
+            "props": {
+                "tx_rate": 0.09,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {
+                    "retail": 0.6,
+                    "services": 0.2,
+                    "producers": 0.1,
+                    "households": 0.1,
+                },
+                "amount_model": {
+                    "UAH": {"p50": 180, "p90": 650, "min": 50, "max": 1500},
+                },
+            },
+        },
+        {
+            "id": "agent",
+            "props": {
+                "tx_rate": 0.04,
+                "equivalent_weights": {"UAH": 1.0},
+                "amount_model": {
+                    "UAH": {"p50": 500, "p90": 1300, "min": 50, "max": 1500},
+                },
+            },
+        },
     ]
 
 
@@ -260,18 +347,22 @@ def _generate_greenfield() -> None:
     print(" greenfield equivalents", scenario["equivalents"])
 
 
-def _generate_riverside() -> None:
-    tools_dir = ROOT / "admin-fixtures" / "tools"
-    seed_path = tools_dir / "generate_seed_riverside_town_50.py"
-    spec = importlib.util.spec_from_file_location("_seed_riverside_town_50", seed_path)
+def _seed_module_by_path(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to load module spec for {seed_path}")
-    seed = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(seed)
+        raise RuntimeError(f"Failed to load module spec for {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
-    participants_objs = seed.build_participants()
-    trustlines = seed.build_trustlines(participants_objs)
-    eq_defs = seed.EQUIVALENTS
+
+def _scenario_from_seed_module(*, seed_id: str, seed_module) -> dict[str, Any]:
+    participants_objs = seed_module.build_participants()
+    trustlines = seed_module.build_trustlines(participants_objs)
+
+    eq_defs = list(getattr(seed_module, "EQUIVALENTS", []))
+    if not eq_defs:
+        raise RuntimeError(f"Seed module has no EQUIVALENTS: {seed_module}")
 
     participants = [
         {
@@ -284,12 +375,37 @@ def _generate_riverside() -> None:
     ]
 
     scenario = _convert_to_scenario(
-        seed_id="riverside-town-50",
+        seed_id=seed_id,
         participants=participants,
         trustlines=trustlines,
         eq_defs=eq_defs,
     )
     _assert_basic_integrity(scenario)
+    return scenario
+
+
+def _generate_greenfield_v2() -> None:
+    tools_dir = ROOT / "admin-fixtures" / "tools"
+    seed_path = tools_dir / "generate_seed_greenfield_village_100_v2.py"
+    seed = _seed_module_by_path(seed_path, "_seed_greenfield_village_100_v2")
+
+    scenario = _scenario_from_seed_module(seed_id="greenfield-village-100-v2", seed_module=seed)
+
+    out_path = ROOT / "fixtures" / "simulator" / "greenfield-village-100-v2" / "scenario.json"
+    _write_json(out_path, scenario)
+    _validate_scenario_shape(out_path)
+    print("Wrote", out_path)
+    print(" greenfield-v2 participants", len(scenario["participants"]))
+    print(" greenfield-v2 trustlines", len(scenario["trustlines"]))
+    print(" greenfield-v2 equivalents", scenario["equivalents"])
+
+
+def _generate_riverside() -> None:
+    tools_dir = ROOT / "admin-fixtures" / "tools"
+    seed_path = tools_dir / "generate_seed_riverside_town_50.py"
+    seed = _seed_module_by_path(seed_path, "_seed_riverside_town_50")
+
+    scenario = _scenario_from_seed_module(seed_id="riverside-town-50", seed_module=seed)
 
     out_path = ROOT / "fixtures" / "simulator" / "riverside-town-50" / "scenario.json"
     _write_json(out_path, scenario)
@@ -300,9 +416,65 @@ def _generate_riverside() -> None:
     print(" riverside equivalents", scenario["equivalents"])
 
 
+def _generate_riverside_v2() -> None:
+    tools_dir = ROOT / "admin-fixtures" / "tools"
+    seed_path = tools_dir / "generate_seed_riverside_town_50_v2.py"
+    seed = _seed_module_by_path(seed_path, "_seed_riverside_town_50_v2")
+
+    scenario = _scenario_from_seed_module(seed_id="riverside-town-50-v2", seed_module=seed)
+
+    out_path = ROOT / "fixtures" / "simulator" / "riverside-town-50-v2" / "scenario.json"
+    _write_json(out_path, scenario)
+    _validate_scenario_shape(out_path)
+    print("Wrote", out_path)
+    print(" riverside-v2 participants", len(scenario["participants"]))
+    print(" riverside-v2 trustlines", len(scenario["trustlines"]))
+    print(" riverside-v2 equivalents", scenario["equivalents"])
+
+
+def _generate_riverside_realistic_v2() -> None:
+    tools_dir = ROOT / "admin-fixtures" / "tools"
+    seed_path = tools_dir / "generate_seed_riverside_town_50_v2.py"
+    seed = _seed_module_by_path(seed_path, "_seed_riverside_town_50_v2_realistic")
+
+    scenario = _scenario_from_seed_module(seed_id="riverside-town-50-realistic-v2", seed_module=seed)
+    scenario["name"] = "riverside-town-50-realistic-v2"
+    scenario["equivalents"] = ["UAH"]
+    # Drop non-UAH trustlines for the realistic-v2 profile.
+    scenario["trustlines"] = [t for t in scenario.get("trustlines", []) if (t.get("equivalent") or "UAH") == "UAH"]
+    scenario["behaviorProfiles"] = _make_behavior_profiles_realistic_v2()
+
+    out_path = ROOT / "fixtures" / "simulator" / "riverside-town-50-realistic-v2" / "scenario.json"
+    _write_json(out_path, scenario)
+    _validate_scenario_shape(out_path)
+    print("Wrote", out_path)
+
+
+def _generate_greenfield_realistic_v2() -> None:
+    tools_dir = ROOT / "admin-fixtures" / "tools"
+    seed_path = tools_dir / "generate_seed_greenfield_village_100_v2.py"
+    seed = _seed_module_by_path(seed_path, "_seed_greenfield_village_100_v2_realistic")
+
+    scenario = _scenario_from_seed_module(seed_id="greenfield-village-100-realistic-v2", seed_module=seed)
+    scenario["name"] = "greenfield-village-100-realistic-v2"
+    scenario["equivalents"] = ["UAH"]
+    # Drop non-UAH trustlines for the realistic-v2 profile.
+    scenario["trustlines"] = [t for t in scenario.get("trustlines", []) if (t.get("equivalent") or "UAH") == "UAH"]
+    scenario["behaviorProfiles"] = _make_behavior_profiles_realistic_v2()
+
+    out_path = ROOT / "fixtures" / "simulator" / "greenfield-village-100-realistic-v2" / "scenario.json"
+    _write_json(out_path, scenario)
+    _validate_scenario_shape(out_path)
+    print("Wrote", out_path)
+
+
 def main() -> int:
     _generate_greenfield()
+    _generate_greenfield_v2()
+    _generate_greenfield_realistic_v2()
     _generate_riverside()
+    _generate_riverside_v2()
+    _generate_riverside_realistic_v2()
     return 0
 
 

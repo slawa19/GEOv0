@@ -1,0 +1,9 @@
+{
+  "routing": {
+    "max_paths_per_payment": 6,
+    "max_hops": 6
+  },
+  "clearing": {
+    "max_cycle_len": 6
+  }
+}

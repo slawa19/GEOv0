@@ -1,0 +1,5 @@
+{
+  "multipath_enabled": true,
+  "clearing_enabled": true,
+  "audit_log_enabled": true
+}

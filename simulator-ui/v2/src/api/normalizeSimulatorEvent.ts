@@ -30,6 +30,7 @@ function normalizeNodePatchArray(v: unknown): NodePatch[] | undefined {
 
     if (typeof raw.net_balance_atoms === 'string' || raw.net_balance_atoms === null) p.net_balance_atoms = raw.net_balance_atoms
     if (raw.net_sign === -1 || raw.net_sign === 0 || raw.net_sign === 1 || raw.net_sign === null) p.net_sign = raw.net_sign
+    if (typeof raw.net_balance === 'string' || raw.net_balance === null) p.net_balance = raw.net_balance
     if (typeof raw.viz_color_key === 'string' || raw.viz_color_key === null) p.viz_color_key = raw.viz_color_key
 
     if (raw.viz_size === null) p.viz_size = null
@@ -116,6 +117,10 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     const equivalent = asString(raw.equivalent)
     if (!equivalent) return null
 
+    const from = asString(raw.from) ?? undefined
+    const to = asString(raw.to) ?? undefined
+    const amount = asString(raw.amount) ?? undefined
+
     const ttl_ms = asNumber(raw.ttl_ms) ?? 1200
     const intensity_key = asString(raw.intensity_key) ?? undefined
 
@@ -161,6 +166,9 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
       ts,
       type: 'tx.updated',
       equivalent,
+      from,
+      to,
+      amount,
       ttl_ms,
       intensity_key,
       edges,
@@ -233,12 +241,17 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     const plan_id = asString(raw.plan_id)
     if (!equivalent || !plan_id) return null
 
+    const cleared_cycles = asNumber(raw.cleared_cycles) ?? undefined
+    const cleared_amount = asString(raw.cleared_amount) ?? undefined
+
     const evt: ClearingDoneEvent = {
       event_id,
       ts,
       type: 'clearing.done',
       equivalent,
       plan_id,
+      cleared_cycles,
+      cleared_amount,
       node_patch: normalizeNodePatchArray(raw.node_patch),
       edge_patch: normalizeEdgePatchArray(raw.edge_patch),
     }

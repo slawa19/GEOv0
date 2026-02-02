@@ -42,6 +42,7 @@ export function createPatchApplier(opts: {
     if (!target) return
     if (p.net_balance_atoms !== undefined) target.net_balance_atoms = p.net_balance_atoms
     if (p.net_sign !== undefined) target.net_sign = p.net_sign
+    if (p.net_balance !== undefined) target.net_balance = p.net_balance
     if (p.viz_color_key !== undefined) target.viz_color_key = p.viz_color_key
     if (p.viz_size !== undefined) target.viz_size = p.viz_size
   }

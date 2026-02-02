@@ -55,6 +55,57 @@ type UseRenderLoopReturn = {
   renderOnce: (nowMs?: number) => void
 }
 
+// Adaptive performance tuning constants.
+const ADAPTIVE_PERF = {
+  // FPS sampling window in milliseconds.
+  sampleWindowMs: 900,
+
+  // Grace period before resetting quality after activity ends (avoids instant flip-back).
+  qualityResetDelayMs: 800,
+
+  // Warmup period after activity starts before allowing quality downgrade.
+  // This prevents short FX bursts from triggering quality changes.
+  // Keep short enough that physics can trigger quality downgrade if needed.
+  warmupMs: 600,
+
+  // How long to keep full-speed rendering after activity ends.
+  holdActiveMs: 250,
+
+  // Consecutive bad samples required before downgrading quality/DPR.
+  downgradeStreak: 2,
+
+  // Consecutive good samples required before upgrading quality/DPR.
+  upgradeStreak: 3,
+
+  // Idle rendering rate when no activity.
+  idleFps: 12,
+
+  // FPS thresholds for quality downgrade decisions.
+  fps: {
+    criticalLow: 18,   // Always drop to 'low'
+    lowFromHigh: 26,   // Drop high → low
+    medFromHigh: 34,   // Drop high → med
+    lowFromMed: 24,    // Drop med → low
+    dprCritical: 20,   // Drop DPR to 1
+    dprModerate: 28,   // Drop DPR to 1.25
+    upgradeHigh: 48,   // Upgrade to high quality
+    upgradeMed: 42,    // Upgrade to med quality
+    upgradeDprHigh: 50,
+    upgradeDprMed: 44,
+  },
+
+  // Budget scale targets based on FPS.
+  budgetScaleTargets: [
+    { fps: 22, scale: 0.45 },
+    { fps: 28, scale: 0.6 },
+    { fps: 34, scale: 0.72 },
+    { fps: 44, scale: 0.86 },
+  ],
+
+  // Exponential smoothing factor for budget scale.
+  budgetSmoothingFactor: 0.8,
+} as const
+
 export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   let rafId: number | null = null
   let timeoutId: number | null = null
@@ -82,11 +133,19 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   // with cheaper quality settings (disables blur/gradients) without changing user prefs.
   let adaptiveRenderQuality: Quality | null = null
   let qualityUpgradeStreak = 0
+  let qualityDowngradeStreak = 0 // Require multiple bad samples before downgrading
 
   // Adaptive DPR clamp: when fill-rate dominates (common in Chrome with blur/compositing),
   // reducing canvas resolution can be a much stronger lever than just lowering FX budgets.
   let adaptiveDprClamp: number | null = null
   let dprUpgradeStreak = 0
+  let dprDowngradeStreak = 0 // Require multiple bad samples before downgrading
+
+  // Track when activity ended to delay quality reset (avoid instant flip-back).
+  let activityEndedAtMs = 0
+
+  // Track when activity started (for warmup period — don't downgrade quality immediately).
+  let activityStartedAtMs = 0
 
   function clamp01(v: number) {
     return Math.max(0, Math.min(1, v))
@@ -174,6 +233,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     updateAdaptivePerf(nowMs, activeForPerf, userQuality)
 
     // Adaptive DPR downscaling: adjust canvas pixel resolution before computing dpr.
+    // During grace period after activity ends, keep DPR stable to avoid canvas resize flicker.
     if (!deps.isTestMode()) {
       const win = typeof window !== 'undefined' ? window : (globalThis as any)
       const deviceDpr = Math.max(1, Number(win.devicePixelRatio ?? 1))
@@ -186,8 +246,10 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     const dpr = canvas.width / Math.max(1, layout.w)
 
+    // Apply adaptive quality override if set — even during the grace period after activity ends.
+    // This prevents the jarring "pop" when FX finish but quality instantly reverts.
     const renderQuality: Quality =
-      deps.isTestMode() ? 'high' : activeForPerf && adaptiveRenderQuality ? adaptiveRenderQuality : userQuality
+      deps.isTestMode() ? 'high' : adaptiveRenderQuality ?? userQuality
 
     // Clear in screen-space (pan/zoom must not affect clearing).
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -310,18 +372,46 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   }
 
   function updateAdaptivePerf(nowMs: number, isActive: boolean, baseQuality: Quality) {
+    // When activity ends, don't reset immediately — delay to avoid visual flicker.
+    // The quality/DPR will stay at current levels for a grace period.
+    const { qualityResetDelayMs, warmupMs, sampleWindowMs, downgradeStreak, upgradeStreak, fps: fpsThresholds, budgetScaleTargets, budgetSmoothingFactor } = ADAPTIVE_PERF
+
     if (!isActive) {
+      // Track when activity ended.
+      if (activityEndedAtMs === 0) {
+        activityEndedAtMs = nowMs
+      }
+
+      // Reset sampling state but keep quality overrides until grace period passes.
       fpsSampleStartedAtMs = 0
       fpsSampleFrames = 0
-      qualityUpgradeStreak = 0
-      adaptiveRenderQuality = null
+      activityStartedAtMs = 0 // Reset warmup tracking
 
-      dprUpgradeStreak = 0
-      adaptiveDprClamp = null
+      const sinceStopped = nowMs - activityEndedAtMs
+      if (sinceStopped >= qualityResetDelayMs) {
+        // Grace period passed — now safe to reset quality overrides.
+        qualityUpgradeStreak = 0
+        qualityDowngradeStreak = 0
+        adaptiveRenderQuality = null
 
-      fxBudgetScale = 1
+        dprUpgradeStreak = 0
+        dprDowngradeStreak = 0
+        adaptiveDprClamp = null
+
+        fxBudgetScale = 1
+        activityEndedAtMs = 0
+      }
       return
     }
+
+    // Activity resumed — clear the ended timestamp and track start time.
+    activityEndedAtMs = 0
+    if (activityStartedAtMs === 0) {
+      activityStartedAtMs = nowMs
+    }
+
+    // During warmup period, don't allow quality/DPR downgrades (short FX bursts shouldn't trigger changes).
+    const inWarmup = nowMs - activityStartedAtMs < warmupMs
 
     if (fpsSampleStartedAtMs === 0) {
       fpsSampleStartedAtMs = nowMs
@@ -330,76 +420,89 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     fpsSampleFrames++
 
-    const windowMs = 900
     const elapsed = nowMs - fpsSampleStartedAtMs
-    if (elapsed < windowMs) return
+    if (elapsed < sampleWindowMs) return
 
     const fps = (fpsSampleFrames * 1000) / Math.max(1, elapsed)
     lastFps = fps
 
-    // 1) Budget scale (particle cap)
+    // 1) Budget scale (particle cap) — find the appropriate scale target.
     let targetScale = 1
-    if (fps < 22) targetScale = 0.45
-    else if (fps < 28) targetScale = 0.6
-    else if (fps < 34) targetScale = 0.72
-    else if (fps < 44) targetScale = 0.86
-    fxBudgetScale = fxBudgetScale * 0.8 + targetScale * 0.2
+    for (const target of budgetScaleTargets) {
+      if (fps < target.fps) {
+        targetScale = target.scale
+        break
+      }
+    }
+    fxBudgetScale = fxBudgetScale * budgetSmoothingFactor + targetScale * (1 - budgetSmoothingFactor)
 
-    // 2) Render-quality override (hysteresis)
-    // Downgrade quickly when FPS is bad; upgrade slowly when it stabilizes.
+    // 2) Render-quality override (hysteresis for BOTH downgrade and upgrade)
+    // Require multiple consecutive bad samples before downgrading to avoid
+    // single-frame FPS dips triggering visible quality changes.
     const pickDowngrade = (): Quality | null => {
       if (baseQuality === 'low') return null
 
-      if (fps < 18) return 'low'
+      if (fps < fpsThresholds.criticalLow) return 'low'
 
       if (baseQuality === 'high') {
-        if (fps < 26) return 'low'
-        if (fps < 34) return 'med'
+        if (fps < fpsThresholds.lowFromHigh) return 'low'
+        if (fps < fpsThresholds.medFromHigh) return 'med'
         return null
       }
 
       // baseQuality === 'med'
-      if (fps < 24) return 'low'
+      if (fps < fpsThresholds.lowFromMed) return 'low'
       return null
     }
 
     const wantedDowngrade = pickDowngrade()
-    if (wantedDowngrade) {
-      adaptiveRenderQuality = wantedDowngrade
-      qualityUpgradeStreak = 0
-    } else {
+    if (wantedDowngrade && !inWarmup) {
+      // Only count downgrade streaks after warmup period.
+      qualityDowngradeStreak++
+      if (qualityDowngradeStreak >= downgradeStreak) {
+        adaptiveRenderQuality = wantedDowngrade
+        qualityUpgradeStreak = 0
+      }
+    } else if (!wantedDowngrade) {
+      qualityDowngradeStreak = 0
+
       // Candidate for upgrade back to base quality.
-      const upgradeFps = baseQuality === 'high' ? 48 : 42
+      const upgradeFps = baseQuality === 'high' ? fpsThresholds.upgradeHigh : fpsThresholds.upgradeMed
       if (fps >= upgradeFps) qualityUpgradeStreak++
       else qualityUpgradeStreak = 0
 
       // Require a few consecutive good windows to avoid oscillation.
-      if (qualityUpgradeStreak >= 3) {
+      if (qualityUpgradeStreak >= upgradeStreak) {
         adaptiveRenderQuality = null
         qualityUpgradeStreak = 0
       }
     }
 
-    // 3) DPR clamp override (hysteresis)
-    // Heuristic: if FPS collapses while active, drop DPR quickly (fill-rate win),
-    // then restore slowly once stable.
+    // 3) DPR clamp override (hysteresis for BOTH downgrade and upgrade)
+    // Require multiple consecutive bad samples before downgrading DPR.
     const pickDprClamp = (): number | null => {
       if (baseQuality === 'low') return null
-      if (fps < 20) return 1
-      if (fps < 28) return 1.25
+      if (fps < fpsThresholds.dprCritical) return 1
+      if (fps < fpsThresholds.dprModerate) return 1.25
       return null
     }
 
     const wantedDpr = pickDprClamp()
-    if (wantedDpr !== null) {
-      adaptiveDprClamp = wantedDpr
-      dprUpgradeStreak = 0
-    } else {
-      const upgradeFps = baseQuality === 'high' ? 50 : 44
+    if (wantedDpr !== null && !inWarmup) {
+      // Only count downgrade streaks after warmup period.
+      dprDowngradeStreak++
+      if (dprDowngradeStreak >= downgradeStreak) {
+        adaptiveDprClamp = wantedDpr
+        dprUpgradeStreak = 0
+      }
+    } else if (wantedDpr === null) {
+      dprDowngradeStreak = 0
+
+      const upgradeFps = baseQuality === 'high' ? fpsThresholds.upgradeDprHigh : fpsThresholds.upgradeDprMed
       if (fps >= upgradeFps) dprUpgradeStreak++
       else dprUpgradeStreak = 0
 
-      if (dprUpgradeStreak >= 3) {
+      if (dprUpgradeStreak >= upgradeStreak) {
         adaptiveDprClamp = null
         dprUpgradeStreak = 0
       }
@@ -413,9 +516,9 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (!running) return
 
     const win = typeof window !== 'undefined' ? window : (globalThis as any)
+    const { holdActiveMs, idleFps } = ADAPTIVE_PERF
 
     // Keep full-speed rendering briefly after activity ends to avoid flicker.
-    const holdActiveMs = 250
     const active = isAnimatingNow()
     if (active) lastActiveAtMs = nowMs
 
@@ -425,7 +528,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       return
     }
 
-    const idleFps = 12
     const idleDelayMs = Math.max(16, Math.floor(1000 / idleFps))
 
     timeoutId = win.setTimeout(() => {

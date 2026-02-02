@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import logging
 import os
 import random
@@ -54,6 +55,19 @@ def _safe_decimal_env(name: str, default: Decimal) -> Decimal:
         return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     except (InvalidOperation, Exception):
         return default
+
+
+def _safe_optional_decimal_env(name: str) -> Decimal | None:
+    try:
+        raw = os.getenv(name, "")
+        if not str(raw).strip():
+            return None
+        v = Decimal(str(raw))
+        if v.is_nan() or v <= 0:
+            return None
+        return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    except (InvalidOperation, Exception):
+        return None
 
 
 def map_rejection_code(err_details: Any) -> str:
@@ -147,7 +161,8 @@ class RealRunner:
         )
         self._clearing_max_depth_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_DEPTH", 6)
         self._clearing_max_fx_edges_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", 30)
-        self._real_amount_cap_limit = _safe_decimal_env("SIMULATOR_REAL_AMOUNT_CAP", Decimal("3.00"))
+        # Amount cap is opt-in. Default must not override scenario amount_model bounds.
+        self._real_amount_cap_limit = _safe_optional_decimal_env("SIMULATOR_REAL_AMOUNT_CAP")
         self._real_enable_inject = bool(_safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0))
 
     def _parse_event_time_ms(self, evt: Any) -> int | None:
@@ -615,6 +630,7 @@ class RealRunner:
                                 action.equivalent,
                                 action.sender_pid,
                                 action.receiver_pid,
+                                action.amount,
                                 status,
                                 None,
                                 None,
@@ -659,6 +675,7 @@ class RealRunner:
                                 action.equivalent,
                                 action.sender_pid,
                                 action.receiver_pid,
+                                action.amount,
                                 status,
                                 code,
                                 err_details,
@@ -675,6 +692,7 @@ class RealRunner:
                 ready: dict[
                     int,
                     tuple[
+                        str,
                         str,
                         str,
                         str,
@@ -707,7 +725,7 @@ class RealRunner:
                         if item is None:
                             return
                         del ready[next_seq]
-                        eq, sender_pid, receiver_pid, status, err_code, err_details, avg_route_len, route_edges, edge_patch, node_patch = item
+                        eq, sender_pid, receiver_pid, amount, status, err_code, err_details, avg_route_len, route_edges, edge_patch, node_patch = item
 
                         edges_pairs = route_edges or [(sender_pid, receiver_pid)]
 
@@ -771,6 +789,9 @@ class RealRunner:
                                     ts=self._utc_now(),
                                     type="tx.updated",
                                     equivalent=eq,
+                                    from_=sender_pid,
+                                    to=receiver_pid,
+                                    amount=amount,
                                     ttl_ms=1200,
                                     edges=[{"from": a, "to": b} for a, b in edges_pairs],
                                     node_badges=None,
@@ -839,7 +860,7 @@ class RealRunner:
                             per_tick_quantiles_refreshed_by_eq: set[str] = set()
 
                             for t in asyncio.as_completed(tasks):
-                                seq, eq, sender_pid, receiver_pid, status, err_code, err_details, avg_route_len, route_edges = await t
+                                seq, eq, sender_pid, receiver_pid, amount, status, err_code, err_details, avg_route_len, route_edges = await t
 
                                 if run.state != "running":
                                     break
@@ -1019,6 +1040,7 @@ class RealRunner:
                                     eq,
                                     sender_pid,
                                     receiver_pid,
+                                    amount,
                                     status,
                                     err_code,
                                     err_details,
@@ -1124,19 +1146,36 @@ class RealRunner:
                             limit=50,
                         )
 
-                self._artifacts.write_real_tick_artifact(
-                    run,
-                    {
-                        "tick_index": run.tick_index,
-                        "sim_time_ms": run.sim_time_ms,
-                        "budget": len(planned),
-                        "committed": committed,
-                        "rejected": rejected,
-                        "errors": errors,
-                        "timeouts": timeouts,
-                    },
-                )
-                await simulator_storage.sync_artifacts(run)
+                # Artifacts are useful for diagnostics, but syncing them every tick is very IO-heavy.
+                # Throttle filesystem writes and DB sync to reduce HDD/SSD churn in interactive runs.
+                now_ms = int(time.time() * 1000)
+                try:
+                    tick_write_every_ms = int(os.getenv("SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS", "500") or "500")
+                except Exception:
+                    tick_write_every_ms = 500
+                try:
+                    artifacts_sync_every_ms = int(os.getenv("SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS", "5000") or "5000")
+                except Exception:
+                    artifacts_sync_every_ms = 5000
+
+                if tick_write_every_ms > 0 and (now_ms - int(getattr(run, "_artifact_last_tick_written_at_ms", 0) or 0)) >= tick_write_every_ms:
+                    self._artifacts.write_real_tick_artifact(
+                        run,
+                        {
+                            "tick_index": run.tick_index,
+                            "sim_time_ms": run.sim_time_ms,
+                            "budget": len(planned),
+                            "committed": committed,
+                            "rejected": rejected,
+                            "errors": errors,
+                            "timeouts": timeouts,
+                        },
+                    )
+                    run._artifact_last_tick_written_at_ms = now_ms
+
+                if artifacts_sync_every_ms > 0 and (now_ms - int(getattr(run, "_artifact_last_sync_at_ms", 0) or 0)) >= artifacts_sync_every_ms:
+                    await simulator_storage.sync_artifacts(run)
+                    run._artifact_last_sync_at_ms = now_ms
         except Exception as e:
             self._logger.warning(
                 "simulator.real.tick_failed run_id=%s tick=%s",
@@ -1274,7 +1313,10 @@ class RealRunner:
 
                     # Execute with stats (volume = sum of cleared amounts).
                     cleared_cycles = 0
-                    cleared_amount = 0.0
+                    cleared_amount_dec = Decimal("0")
+                    touched_nodes: set[str] = set()
+                    # Edge direction in graph is creditor -> debtor.
+                    touched_edges: set[tuple[str, str]] = set()
                     while True:
                         cycles = await service.find_cycles(eq, max_depth=max_depth)
                         if not cycles:
@@ -1284,20 +1326,36 @@ class RealRunner:
                         for cycle in cycles:
                             # Clearing amount is min edge amount in cycle.
                             try:
-                                amts: list[float] = []
+                                amts: list[Decimal] = []
                                 for edge in cycle:
                                     if isinstance(edge, dict):
-                                        amts.append(float(edge.get("amount")))
+                                        amts.append(Decimal(str(edge.get("amount"))))
                                     else:
-                                        amts.append(float(getattr(edge, "amount")))
-                                clear_amount = float(min(amts)) if amts else 0.0
+                                        amts.append(Decimal(str(getattr(edge, "amount"))))
+                                clear_amount = min(amts) if amts else Decimal("0")
                             except Exception:
-                                clear_amount = 0.0
+                                clear_amount = Decimal("0")
 
                             success = await service.execute_clearing(cycle)
                             if success:
                                 cleared_cycles += 1
-                                cleared_amount += float(max(0.0, clear_amount))
+                                if clear_amount > 0:
+                                    cleared_amount_dec += clear_amount
+
+                                try:
+                                    for edge in cycle:
+                                        if not isinstance(edge, dict):
+                                            continue
+                                        debtor_pid = str(edge.get("debtor") or "").strip()
+                                        creditor_pid = str(edge.get("creditor") or "").strip()
+                                        if debtor_pid:
+                                            touched_nodes.add(debtor_pid)
+                                        if creditor_pid:
+                                            touched_nodes.add(creditor_pid)
+                                        if creditor_pid and debtor_pid:
+                                            touched_edges.add((creditor_pid, debtor_pid))
+                                except Exception:
+                                    pass
                                 executed = True
                                 break
 
@@ -1308,7 +1366,130 @@ class RealRunner:
 
                     # NOTE: ClearingService.execute_clearing already commits on success
                     # No need for additional commit here
-                    cleared_amount_by_eq[str(eq)] = float(cleared_amount)
+                    cleared_amount_by_eq[str(eq)] = float(cleared_amount_dec)
+
+                    # Best-effort: compute patches for touched nodes/edges.
+                    node_patch_list: list[dict[str, Any]] | None = None
+                    edge_patch_list: list[dict[str, Any]] | None = None
+                    cleared_amount_str: str | None = None
+                    try:
+                        helper: VizPatchHelper | None
+                        with self._lock:
+                            helper = run._real_viz_by_eq.get(str(eq))
+
+                        if helper is None:
+                            helper = await VizPatchHelper.create(
+                                clearing_session,
+                                equivalent_code=str(eq),
+                                refresh_every_ticks=int(
+                                    getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10
+                                ),
+                            )
+                            with self._lock:
+                                run._real_viz_by_eq[str(eq)] = helper
+
+                        precision = int(getattr(helper, "precision", 2) or 2)
+                        money_quant = Decimal(1) / (Decimal(10) ** precision)
+                        cleared_amount_str = format(cleared_amount_dec.quantize(money_quant, rounding=ROUND_DOWN), "f")
+
+                        # Refresh quantiles using all participants when available.
+                        participant_ids: list[uuid.UUID] = []
+                        if run._real_participants:
+                            participant_ids = [pid for (pid, _) in run._real_participants]
+                        await helper.maybe_refresh_quantiles(
+                            clearing_session,
+                            tick_index=int(run.tick_index),
+                            participant_ids=participant_ids,
+                        )
+
+                        # Node patches for touched nodes.
+                        pids = sorted({str(x).strip() for x in touched_nodes if str(x).strip()})
+                        if pids:
+                            res = await clearing_session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                            pid_to_participant = {p.pid: p for p in res.scalars().all()}
+                            node_patch_list = await helper.compute_node_patches(
+                                clearing_session,
+                                pid_to_participant=pid_to_participant,
+                                pids=pids,
+                            )
+                            if node_patch_list == []:
+                                node_patch_list = None
+
+                            # Edge patches for touched trustlines.
+                            pairs = sorted(touched_edges)
+                            id_pairs: list[tuple[uuid.UUID, uuid.UUID]] = []
+                            for a_pid, b_pid in pairs:
+                                a = pid_to_participant.get(a_pid)
+                                b = pid_to_participant.get(b_pid)
+                                if not a or not b:
+                                    continue
+                                id_pairs.append((a.id, b.id))
+
+                            debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+                            tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {}
+                            if id_pairs:
+                                debt_cond = or_(*[and_(Debt.creditor_id == a, Debt.debtor_id == b) for a, b in id_pairs])
+                                debt_rows = (
+                                    await clearing_session.execute(
+                                        select(
+                                            Debt.creditor_id,
+                                            Debt.debtor_id,
+                                            func.coalesce(func.sum(Debt.amount), 0).label("amount"),
+                                        )
+                                        .where(Debt.equivalent_id == helper.equivalent_id, debt_cond)
+                                        .group_by(Debt.creditor_id, Debt.debtor_id)
+                                    )
+                                ).all()
+                                debt_by_pair = {
+                                    (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+                                }
+
+                                tl_cond = or_(*[and_(TrustLine.from_participant_id == a, TrustLine.to_participant_id == b) for a, b in id_pairs])
+                                tl_rows = (
+                                    await clearing_session.execute(
+                                        select(
+                                            TrustLine.from_participant_id,
+                                            TrustLine.to_participant_id,
+                                            TrustLine.limit,
+                                            TrustLine.status,
+                                        ).where(TrustLine.equivalent_id == helper.equivalent_id, tl_cond)
+                                    )
+                                ).all()
+                                tl_by_pair = {
+                                    (r.from_participant_id, r.to_participant_id): (
+                                        (r.limit or Decimal("0")),
+                                        (str(r.status) if r.status is not None else None),
+                                    )
+                                    for r in tl_rows
+                                }
+
+                            edge_patch_list = []
+                            for a_pid, b_pid in pairs:
+                                a = pid_to_participant.get(a_pid)
+                                b = pid_to_participant.get(b_pid)
+                                if not a or not b:
+                                    continue
+
+                                used_amt = debt_by_pair.get((a.id, b.id), Decimal("0"))
+                                limit_amt, tl_status = tl_by_pair.get((a.id, b.id), (Decimal("0"), None))
+                                available_amt = max(Decimal("0"), limit_amt - used_amt)
+
+                                edge_viz = helper.edge_viz(status=tl_status, used=used_amt, limit=limit_amt)
+                                edge_patch_list.append(
+                                    {
+                                        "source": a_pid,
+                                        "target": b_pid,
+                                        "used": str(used_amt),
+                                        "available": str(available_amt),
+                                        **edge_viz,
+                                    }
+                                )
+                            if edge_patch_list == []:
+                                edge_patch_list = None
+                    except Exception:
+                        node_patch_list = None
+                        edge_patch_list = None
+                        cleared_amount_str = None
 
                     done_evt = SimulatorClearingDoneEvent(
                         event_id=self._sse.next_event_id(run),
@@ -1316,6 +1497,10 @@ class RealRunner:
                         type="clearing.done",
                         equivalent=eq,
                         plan_id=plan_id,
+                        cleared_cycles=cleared_cycles,
+                        cleared_amount=cleared_amount_str,
+                        node_patch=node_patch_list,
+                        edge_patch=edge_patch_list,
                     ).model_dump(mode="json")
                     with self._lock:
                         run.last_event_type = "clearing.done"
@@ -1639,7 +1824,9 @@ class RealRunner:
         return planned
 
     def _real_pick_amount(self, rng: random.Random, limit: Decimal, *, amount_model: dict[str, Any] | None = None) -> str | None:
-        cap = min(limit, self._real_amount_cap_limit)
+        cap = limit
+        if self._real_amount_cap_limit is not None:
+            cap = min(cap, self._real_amount_cap_limit)
         if cap <= 0:
             return None
 
@@ -1661,18 +1848,57 @@ class RealRunner:
             return None
 
         if isinstance(amount_model, dict) and amount_model:
+            low = model_min if model_min is not None else Decimal("0.10")
+
+            # If p50+p90 are provided, prefer a lognormal model for more realistic variability.
+            # (p90 was previously ignored; this makes scenarios with p90 behave as intended.)
             try:
-                low = model_min if model_min is not None else Decimal("0.10")
-                mode_raw = amount_model.get("p50")
-                mode = Decimal(str(mode_raw)) if mode_raw is not None else (low + cap) / 2
-                if mode < low:
-                    mode = low
-                if mode > cap:
-                    mode = cap
-                raw_f = rng.triangular(float(low), float(cap), float(mode))
-                raw = Decimal(str(raw_f))
+                p50_raw = amount_model.get("p50")
+                p90_raw = amount_model.get("p90")
+                if p50_raw is not None and p90_raw is not None:
+                    p50 = Decimal(str(p50_raw))
+                    p90 = Decimal(str(p90_raw))
+
+                    if p50 <= 0 or p90 <= 0:
+                        raise ValueError("non_positive_percentiles")
+
+                    if p50 < low:
+                        p50 = low
+                    if p50 > cap:
+                        p50 = cap
+
+                    if p90 < p50:
+                        p90 = p50
+                    if p90 > cap:
+                        p90 = cap
+
+                    ratio = float(p90 / p50) if p50 > 0 else 1.0
+                    if ratio <= 1.0:
+                        raise ValueError("degenerate_p90")
+
+                    z90 = 1.281551565545  # approx Normal(0,1) quantile at 0.90
+                    mu = math.log(float(p50))
+                    sigma = math.log(ratio) / z90
+                    if not (math.isfinite(mu) and math.isfinite(sigma) and sigma > 0):
+                        raise ValueError("bad_lognormal_params")
+
+                    raw_f = rng.lognormvariate(mu, sigma)
+                    raw = Decimal(str(raw_f))
+                else:
+                    raise ValueError("missing_percentiles")
             except Exception:
-                raw = Decimal(str(0.1 + rng.random() * float(cap)))
+                # Fallback: triangular distribution biased towards p50 (mode).
+                try:
+                    mode_raw = amount_model.get("p50")
+                    mode = Decimal(str(mode_raw)) if mode_raw is not None else (low + cap) / 2
+                    if mode < low:
+                        mode = low
+                    if mode > cap:
+                        mode = cap
+                    raw_f = rng.triangular(float(low), float(cap), float(mode))
+                    raw = Decimal(str(raw_f))
+                except Exception:
+                    raw = Decimal(str(0.1 + rng.random() * float(cap)))
         else:
             raw = Decimal(str(0.1 + rng.random() * float(cap)))
 

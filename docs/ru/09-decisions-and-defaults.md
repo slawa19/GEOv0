@@ -163,6 +163,10 @@
 - Спецификация: [simulator/backend/behavior-model-spec.md](simulator/backend/behavior-model-spec.md)
 - Новый env (backward‑compatible): `SIMULATOR_REAL_AMOUNT_CAP=3.00`
 
+Real mode: артефакты (dev perf)
+- `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS=500` — частота записи `last_tick.json`.
+- `SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS=5000` — частота `sync_artifacts` (индексация артефактов в БД).
+
 Рекомендация для realistic-v2 (чтобы выйти на целевые суммы 100–500 UAH):
 - запускать с `SIMULATOR_REAL_AMOUNT_CAP>=500`.
 

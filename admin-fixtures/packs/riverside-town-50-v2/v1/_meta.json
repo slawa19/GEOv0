@@ -1,0 +1,18 @@
+{
+  "version": "v1",
+  "seed_id": "riverside-town-50-v2",
+  "generator": "generate_seed_riverside_town_50_v2.py",
+  "generated_at": "2026-02-02T00:00:00Z",
+  "counts": {
+    "participants": 50,
+    "equivalents": 3,
+    "trustlines": 222,
+    "incidents": 3,
+    "debts": 212
+  },
+  "notes": [
+    "TrustLine direction is creditor -> debtor (from -> to).",
+    "Debt direction is debtor -> creditor (derived from trustline.used).",
+    "Timestamps are fixed relative to 2026-02-02T00:00:00Z."
+  ]
+}

@@ -91,6 +91,10 @@ class RunRecord:
     _artifact_events_queue: "asyncio.Queue[Optional[str]]" | None = None
     _artifact_events_task: Optional[asyncio.Task[None]] = None
 
+    # Real-mode artifact IO throttling (in-memory only).
+    _artifact_last_tick_written_at_ms: int = 0
+    _artifact_last_sync_at_ms: int = 0
+
     # Real-mode in-process runner state (best-effort MVP).
     _real_seeded: bool = False
     _real_participants: list[tuple[uuid.UUID, str]] | None = None

@@ -32,12 +32,12 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
     worldToScreen: deps.worldToScreen,
   }).floatingLabelsViewFx
 
-  function scheduleTimeout(fn: () => void, delayMs: number) {
-    return timers.schedule(fn, delayMs)
+  function scheduleTimeout(fn: () => void, delayMs: number, opts?: { critical?: boolean }) {
+    return timers.schedule(fn, delayMs, opts)
   }
 
-  function clearScheduledTimeouts() {
-    timers.clearAll()
+  function clearScheduledTimeouts(opts?: { keepCritical?: boolean }) {
+    timers.clearAll(opts)
   }
 
   return {

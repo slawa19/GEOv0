@@ -70,13 +70,14 @@ export function useSimulatorRealMode(opts: {
 
   // Live patch application + FX hooks
   realPatchApplier: PatchApplier
-  signedBalanceForNodeId: (id: string) => bigint
-  pushBalanceDeltaLabels: (
-    beforeById: Map<string, bigint>,
-    nodeIds: string[],
-    equivalent: string,
-    opts?: { throttleMs?: number },
-  ) => void
+  // Backend-first tx labels (avoid frontend-derived balance deltas)
+  pushTxAmountLabel: (nodeId: string, signedAmount: string, unit: string, opts?: { throttleMs?: number }) => void
+
+  // Shared TTL clamp (single source of truth with runRealTxFx)
+  clampRealTxTtlMs: (ttlRaw: unknown, fallbackMs?: number) => number
+
+  // Managed timers (must be cleaned up via cleanupRealRunFxAndTimers -> clearScheduledTimeouts)
+  scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
   runRealTxFx: (tx: TxUpdatedEvent) => void
   runRealClearingPlanFx: (plan: ClearingPlanEvent) => void
   runRealClearingDoneFx: (plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent) => void
@@ -109,8 +110,9 @@ export function useSimulatorRealMode(opts: {
     inc,
     loadScene,
     realPatchApplier,
-    signedBalanceForNodeId,
-    pushBalanceDeltaLabels,
+    pushTxAmountLabel,
+    clampRealTxTtlMs,
+    scheduleTimeout,
     runRealTxFx,
     runRealClearingPlanFx,
     runRealClearingDoneFx,
@@ -154,7 +156,6 @@ export function useSimulatorRealMode(opts: {
     try {
       const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
       real.runStatus = st
-      real.intensityPercent = Math.round(Number(st.intensity_percent ?? real.intensityPercent))
       const le = st.last_error
       real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
     } catch (e: unknown) {
@@ -166,16 +167,55 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  async function refreshSnapshot() {
-    await loadScene()
+  // Debounce multiple rapid calls to refreshSnapshot (e.g., during startRun + watcher cascade).
+  let refreshSnapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  let refreshSnapshotInFlight = false
+  let refreshSnapshotPending = false
+  
+  // Block watchers from calling refreshSnapshot during startRun to prevent double load.
+  let startRunInProgress = false
 
-    // Scene loader stores errors in state.error; in real mode surface them in the HUD.
-    if (isRealMode.value && state.error) {
-      if (state.error.includes('HTTP 404')) {
-        resetStaleRun({ clearError: true })
-        return
+  async function refreshSnapshot() {
+    // If a refresh is already in flight, mark as pending and return — the current call will re-invoke.
+    if (refreshSnapshotInFlight) {
+      refreshSnapshotPending = true
+      return
+    }
+
+    // Debounce: if called within a short window, delay to coalesce multiple triggers.
+    if (refreshSnapshotDebounceTimer !== null) {
+      refreshSnapshotPending = true
+      return
+    }
+
+    refreshSnapshotDebounceTimer = setTimeout(() => {
+      refreshSnapshotDebounceTimer = null
+      if (refreshSnapshotPending) {
+        refreshSnapshotPending = false
+        refreshSnapshot()
       }
-      real.lastError = state.error
+    }, 80)
+
+    refreshSnapshotInFlight = true
+    try {
+      await loadScene()
+
+      // Scene loader stores errors in state.error; in real mode surface them in the HUD.
+      if (isRealMode.value && state.error) {
+        if (state.error.includes('HTTP 404')) {
+          resetStaleRun({ clearError: true })
+          return
+        }
+        real.lastError = state.error
+      }
+    } finally {
+      refreshSnapshotInFlight = false
+
+      // If another call came in while we were loading, re-invoke.
+      if (refreshSnapshotPending) {
+        refreshSnapshotPending = false
+        refreshSnapshot()
+      }
     }
   }
 
@@ -251,7 +291,6 @@ export function useSimulatorRealMode(opts: {
 
             if ((evt as any).type === 'run_status') {
               real.runStatus = evt as any
-              real.intensityPercent = Math.round(Number((evt as any).intensity_percent ?? real.intensityPercent))
               const le = (evt as any).last_error
               real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
               return
@@ -262,41 +301,41 @@ export function useSimulatorRealMode(opts: {
               real.runStats.committed += 1
 
               const tx = evt as TxUpdatedEvent
-              const beforeById = new Map<string, bigint>()
-              const nodeIds = (tx.node_patch ?? []).map((p) => p.id)
-              for (const id of nodeIds) beforeById.set(id, signedBalanceForNodeId(id))
+              const edges = Array.isArray(tx.edges) ? tx.edges : []
+              const senderId = String(tx.from ?? (edges.length > 0 ? edges[0]!.from : '') ?? '').trim()
+              const receiverId = String(tx.to ?? (edges.length > 0 ? edges[edges.length - 1]!.to : '') ?? '').trim()
 
+              // Backend-first: labels require explicit amount.
+              const amount = String((tx as any).amount ?? '').trim()
+
+              // Apply patches to keep snapshot authoritative.
               if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
               if (tx.edge_patch) realPatchApplier.applyEdgePatches(tx.edge_patch)
-
-              // Balance delta labels: sender should appear immediately, receiver should appear on spark arrival.
-              // For routed tx (multiple edges), treat the first.from as sender and last.to as receiver.
-              const edges = Array.isArray(tx.edges) ? tx.edges : []
-              const senderId = edges.length > 0 ? String(edges[0]!.from ?? '') : ''
-              const receiverId = edges.length > 0 ? String(edges[edges.length - 1]!.to ?? '') : ''
 
               // Run spark FX first so we can align timing with ttl_ms clamping logic.
               runRealTxFx(tx)
 
-              if (nodeIds.length > 0) {
-                const isSenderInPatch = !!senderId && nodeIds.includes(senderId)
-                const isReceiverInPatch = !!receiverId && nodeIds.includes(receiverId)
+              if (amount && senderId) {
+                pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: 120 })
+              }
 
-                // Immediately show sender delta.
-                if (isSenderInPatch) pushBalanceDeltaLabels(beforeById, [senderId], tx.equivalent, { throttleMs: 220 })
+              if (amount && receiverId && receiverId !== senderId) {
+                const ttlMs = clampRealTxTtlMs((tx as any).ttl_ms)
 
-                // Delay receiver delta until the spark reaches it.
-                if (isReceiverInPatch && receiverId !== senderId) {
-                  const ttlRaw = Number((tx as any).ttl_ms ?? 1200)
-                  const ttlMs = Math.max(240, Math.min(900, Number.isFinite(ttlRaw) ? ttlRaw : 1200))
-                  setTimeout(() => {
-                    pushBalanceDeltaLabels(beforeById, [receiverId], tx.equivalent, { throttleMs: 220 })
-                  }, ttlMs)
-                }
+                const runIdAtEvent = runId
+                const sseSeqAtEvent = mySeq
+                const signal = ctrl.signal
 
-                // Any other patched nodes (rare) are shown immediately.
-                const rest = nodeIds.filter((id) => id !== senderId && id !== receiverId)
-                if (rest.length > 0) pushBalanceDeltaLabels(beforeById, rest, tx.equivalent, { throttleMs: 220 })
+                scheduleTimeout(
+                  () => {
+                    if (signal.aborted) return
+                    if (sseSeq !== sseSeqAtEvent) return
+                    if (real.runId !== runIdAtEvent) return
+                    pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: 120 })
+                  },
+                  ttlMs,
+                  { critical: true },
+                )
               }
               return
             }
@@ -333,14 +372,8 @@ export function useSimulatorRealMode(opts: {
               const planId = String(done.plan_id ?? '')
               const plan = planId ? clearingPlansById.get(planId) : undefined
 
-              const beforeById = new Map<string, bigint>()
-              const nodeIds = (done.node_patch ?? []).map((p) => p.id)
-              for (const id of nodeIds) beforeById.set(id, signedBalanceForNodeId(id))
-
               if (done.node_patch) realPatchApplier.applyNodePatches(done.node_patch)
               if (done.edge_patch) realPatchApplier.applyEdgePatches(done.edge_patch)
-
-              if (nodeIds.length > 0) pushBalanceDeltaLabels(beforeById, nodeIds, done.equivalent, { throttleMs: 180 })
 
               runRealClearingDoneFx(plan, done)
               if (planId) clearingPlansById.delete(planId)
@@ -428,6 +461,7 @@ export function useSimulatorRealMode(opts: {
     }
 
     real.lastError = ''
+    startRunInProgress = true
     try {
       stopSse()
       clearingPlansById.clear()
@@ -448,6 +482,8 @@ export function useSimulatorRealMode(opts: {
       await runSseLoop()
     } catch (e: unknown) {
       real.lastError = String((e as any)?.message ?? e)
+    } finally {
+      startRunInProgress = false
     }
   }
 
@@ -478,7 +514,16 @@ export function useSimulatorRealMode(opts: {
       real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
       await refreshRunStatus()
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      const msg = String((e as any)?.message ?? e)
+
+      // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
+      // treat stop as idempotent and reset local state instead of surfacing a hard error.
+      if (msg.includes('HTTP 404') || msg.includes(' 404 ') || msg.includes('Not Found')) {
+        resetStaleRun({ clearError: true })
+        return
+      }
+
+      real.lastError = msg
     }
   }
 
@@ -574,6 +619,9 @@ export function useSimulatorRealMode(opts: {
       if (!isRealMode.value) return
       if (!scenarioId) return
       if (!real.accessToken) return
+
+      // Block watcher from calling refreshSnapshot during startRun (it handles its own refresh).
+      if (startRunInProgress) return
 
       const st = String(real.runStatus?.state ?? '').toLowerCase()
       const isActive =

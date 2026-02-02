@@ -23,7 +23,7 @@ const DEFAULT_SUBSTEPS_BY_QUALITY: Record<PhysicsQuality, number> = {
 }
 
 // Values based on v1 (GeoSimulatorMesh.vue), adjusted for baseline-started v2.
-// Increased charge and alpha for stronger repulsion and longer "life".
+// Tuned for faster stabilization (~1.5s instead of ~3.5s) while keeping organic feel.
 const PHYSICS_DEFAULTS = {
   CHARGE_STRENGTH: -150,
 
@@ -35,10 +35,12 @@ const PHYSICS_DEFAULTS = {
   CENTER_STRENGTH: 0.03,
   COLLISION_PADDING_PX: 8,
 
-  ALPHA_START: 0.8,
-  ALPHA_MIN: 0.006,
-  ALPHA_DECAY: 0.032,
-  VELOCITY_DECAY: 0.82,
+  // Faster stabilization: ~65 iterations instead of ~150
+  // At 24ms tick interval = ~1.5s instead of ~3.6s
+  ALPHA_START: 0.6,        // Was 0.8: lower start energy
+  ALPHA_MIN: 0.012,        // Was 0.006: stop earlier
+  ALPHA_DECAY: 0.055,      // Was 0.032: faster decay (0.055 → ~65 iterations)
+  VELOCITY_DECAY: 0.78,    // Was 0.82: more friction = faster settling
 
   VIEWPORT_MARGIN_PX: 30,
 } as const

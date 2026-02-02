@@ -1,0 +1,75 @@
+{
+  "status": "warning",
+  "last_check": "2026-02-01T23:58:00Z",
+  "equivalents": {
+    "UAH": {
+      "status": "warning",
+      "checksum": "",
+      "last_verified": "2026-02-01T23:50:00Z",
+      "invariants": {
+        "zero_sum": {
+          "passed": true,
+          "value": "0"
+        },
+        "trust_limits": {
+          "passed": true,
+          "violations": 0
+        },
+        "debt_symmetry": {
+          "passed": false,
+          "violations": 2,
+          "details": {
+            "sample": [
+              {
+                "debtor": "PID_SAMPLE",
+                "creditor": "PID_SAMPLE2",
+                "amount": "1.00"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "EUR": {
+      "status": "healthy",
+      "checksum": "",
+      "last_verified": "2026-02-01T23:50:00Z",
+      "invariants": {
+        "zero_sum": {
+          "passed": true,
+          "value": "0"
+        },
+        "trust_limits": {
+          "passed": true,
+          "violations": 0
+        },
+        "debt_symmetry": {
+          "passed": true,
+          "violations": 0
+        }
+      }
+    },
+    "HOUR": {
+      "status": "healthy",
+      "checksum": "",
+      "last_verified": "2026-02-01T23:50:00Z",
+      "invariants": {
+        "zero_sum": {
+          "passed": true,
+          "value": "0"
+        },
+        "trust_limits": {
+          "passed": true,
+          "violations": 0
+        },
+        "debt_symmetry": {
+          "passed": true,
+          "violations": 0
+        }
+      }
+    }
+  },
+  "alerts": [
+    "Debt symmetry violations in UAH: 2"
+  ]
+}

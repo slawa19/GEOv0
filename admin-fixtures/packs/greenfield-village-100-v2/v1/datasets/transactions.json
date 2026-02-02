@@ -1,0 +1,6585 @@
+[
+  {
+    "id": "f552643e-4371-5e14-a151-55feb058fcef",
+    "tx_id": "f552643e-4371-5e14-a151-55feb058fcef",
+    "idempotency_key": "idem_payment_0000",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0018_1fe68e72",
+      "amount": "1350.31",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0004_78dde6c4",
+            "PID_U0018_1fe68e72"
+          ],
+          "amount": "1350.31"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0000",
+        "fingerprint": "fp_payment_0000"
+      }
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2026-01-11T00:00:00Z",
+    "updated_at": "2026-01-11T00:02:00Z"
+  },
+  {
+    "id": "aed71fda-8b0f-532c-a3e9-2698c7a2b77f",
+    "tx_id": "aed71fda-8b0f-532c-a3e9-2698c7a2b77f",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0005_17156075",
+    "payload": {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0019_be1e0823",
+      "amount": "8.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0005_17156075",
+            "PID_U0019_be1e0823"
+          ],
+          "amount": "8.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-09T22:47:00Z",
+    "updated_at": "2026-01-09T22:52:00Z"
+  },
+  {
+    "id": "be7600bd-823d-5975-8f9e-0ee85ed9f200",
+    "tx_id": "be7600bd-823d-5975-8f9e-0ee85ed9f200",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0006_b54cda26",
+    "payload": {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0020_5c5581d4",
+      "amount": "11.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0006_b54cda26",
+            "PID_U0020_5c5581d4"
+          ],
+          "amount": "11.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-08T21:34:00Z",
+    "updated_at": "2026-01-08T21:39:00Z"
+  },
+  {
+    "id": "f140311a-da37-51a6-a3c4-de338373bd8e",
+    "tx_id": "f140311a-da37-51a6-a3c4-de338373bd8e",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0007_538453d7",
+    "payload": {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0021_fa8cfb85",
+      "amount": "240.70",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0007_538453d7",
+            "PID_U0021_fa8cfb85"
+          ],
+          "amount": "240.70"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-07T20:21:00Z",
+    "updated_at": "2026-01-07T20:26:00Z"
+  },
+  {
+    "id": "7f337600-cc96-5999-b68f-0cbc90507e19",
+    "tx_id": "7f337600-cc96-5999-b68f-0cbc90507e19",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0008_f1bbcd88",
+    "payload": {
+      "from": "PID_U0008_f1bbcd88",
+      "to": "PID_U0022_98c47536",
+      "amount": "17.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0008_f1bbcd88",
+            "PID_U0022_98c47536"
+          ],
+          "amount": "17.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-06T19:08:00Z",
+    "updated_at": "2026-01-06T19:13:00Z"
+  },
+  {
+    "id": "28205e6b-0cf2-5ace-b44e-c0b6b68a1a1a",
+    "tx_id": "28205e6b-0cf2-5ace-b44e-c0b6b68a1a1a",
+    "idempotency_key": "idem_payment_0005",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0009_8ff34739",
+    "payload": {
+      "from": "PID_U0009_8ff34739",
+      "to": "PID_U0023_36fbeee7",
+      "amount": "20.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0009_8ff34739",
+            "PID_U0023_36fbeee7"
+          ],
+          "amount": "20.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0005",
+        "fingerprint": "fp_payment_0005"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-05T18:55:00Z",
+    "updated_at": "2026-01-05T19:00:00Z"
+  },
+  {
+    "id": "cf4b64e0-7674-5d2b-bb4f-03340aa7e501",
+    "tx_id": "cf4b64e0-7674-5d2b-bb4f-03340aa7e501",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0010_2e2ac0ea",
+    "payload": {
+      "from": "PID_U0010_2e2ac0ea",
+      "to": "PID_U0024_d5336898",
+      "amount": "913.37",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0010_2e2ac0ea",
+            "PID_U0024_d5336898"
+          ],
+          "amount": "913.37"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-04T17:42:00Z",
+    "updated_at": "2026-01-04T17:47:00Z"
+  },
+  {
+    "id": "133cc619-aefa-5157-ad32-649d91c2a975",
+    "tx_id": "133cc619-aefa-5157-ad32-649d91c2a975",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0011_cc623a9b",
+    "payload": {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0025_736ae249",
+      "amount": "26.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0011_cc623a9b",
+            "PID_U0025_736ae249"
+          ],
+          "amount": "26.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-03T16:29:00Z",
+    "updated_at": "2026-01-03T16:34:00Z"
+  },
+  {
+    "id": "b1eefa61-c0ba-5237-ab12-6d889668007b",
+    "tx_id": "b1eefa61-c0ba-5237-ab12-6d889668007b",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0012_6a99b44c",
+    "payload": {
+      "from": "PID_U0012_6a99b44c",
+      "to": "PID_U0026_11a25bfa",
+      "amount": "29.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0012_6a99b44c",
+            "PID_U0026_11a25bfa"
+          ],
+          "amount": "29.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-02T15:16:00Z",
+    "updated_at": "2026-01-02T15:21:00Z"
+  },
+  {
+    "id": "41576fcb-563a-5217-b4ce-102d8c37090b",
+    "tx_id": "41576fcb-563a-5217-b4ce-102d8c37090b",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0013_08d12dfd",
+    "payload": {
+      "from": "PID_U0013_08d12dfd",
+      "to": "PID_U0027_afd9d5ab",
+      "amount": "836.34",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0013_08d12dfd",
+            "PID_U0027_afd9d5ab"
+          ],
+          "amount": "836.34"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-01T14:03:00Z",
+    "updated_at": "2026-01-01T14:08:00Z"
+  },
+  {
+    "id": "0def7b2f-6bd0-5f86-bbe0-654cd815262b",
+    "tx_id": "0def7b2f-6bd0-5f86-bbe0-654cd815262b",
+    "idempotency_key": "idem_payment_0010",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0014_a708a7ae",
+    "payload": {
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0028_4e114f5c",
+      "amount": "35.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0014_a708a7ae",
+            "PID_U0028_4e114f5c"
+          ],
+          "amount": "35.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0010",
+        "fingerprint": "fp_payment_0010"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-31T13:50:00Z",
+    "updated_at": "2025-12-31T13:55:00Z"
+  },
+  {
+    "id": "15cf97d0-64de-59ea-aa77-df5c412c5540",
+    "tx_id": "15cf97d0-64de-59ea-aa77-df5c412c5540",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0015_4540215f",
+    "payload": {
+      "from": "PID_U0015_4540215f",
+      "to": "PID_U0029_ec48c90d",
+      "amount": "38.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0015_4540215f",
+            "PID_U0029_ec48c90d"
+          ],
+          "amount": "38.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-12-30T12:37:00Z",
+    "updated_at": "2025-12-30T12:39:00Z"
+  },
+  {
+    "id": "5eaac4d2-d5ec-55b5-9739-e582271ddb20",
+    "tx_id": "5eaac4d2-d5ec-55b5-9739-e582271ddb20",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0016_e3779b10",
+    "payload": {
+      "from": "PID_U0016_e3779b10",
+      "to": "PID_U0030_8a8042be",
+      "amount": "369.96",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0016_e3779b10",
+            "PID_U0030_8a8042be"
+          ],
+          "amount": "369.96"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-29T11:24:00Z",
+    "updated_at": "2025-12-29T11:29:00Z"
+  },
+  {
+    "id": "33131fb5-15c7-5a49-8256-0ca12fb5ee0f",
+    "tx_id": "33131fb5-15c7-5a49-8256-0ca12fb5ee0f",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0017_81af14c1",
+    "payload": {
+      "from": "PID_U0017_81af14c1",
+      "to": "PID_U0031_28b7bc6f",
+      "amount": "44.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0017_81af14c1",
+            "PID_U0031_28b7bc6f"
+          ],
+          "amount": "44.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-28T10:11:00Z",
+    "updated_at": "2025-12-28T10:16:00Z"
+  },
+  {
+    "id": "3c08093a-13e9-5512-852d-5863eaab4852",
+    "tx_id": "3c08093a-13e9-5512-852d-5863eaab4852",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0018_1fe68e72",
+    "payload": {
+      "from": "PID_U0018_1fe68e72",
+      "to": "PID_U0032_c6ef3620",
+      "amount": "47.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0018_1fe68e72",
+            "PID_U0032_c6ef3620"
+          ],
+          "amount": "47.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-27T09:58:00Z",
+    "updated_at": "2025-12-27T10:03:00Z"
+  },
+  {
+    "id": "b2af3760-f9ce-5846-936d-cd25bdb72531",
+    "tx_id": "b2af3760-f9ce-5846-936d-cd25bdb72531",
+    "idempotency_key": "idem_payment_0015",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0019_be1e0823",
+    "payload": {
+      "from": "PID_U0019_be1e0823",
+      "to": "PID_U0033_6526afd1",
+      "amount": "1219.15",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0019_be1e0823",
+            "PID_U0033_6526afd1"
+          ],
+          "amount": "1219.15"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0015",
+        "fingerprint": "fp_payment_0015"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-26T08:45:00Z",
+    "updated_at": "2025-12-26T08:50:00Z"
+  },
+  {
+    "id": "7723cf12-74a6-5adb-8592-51feddce81df",
+    "tx_id": "7723cf12-74a6-5adb-8592-51feddce81df",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0020_5c5581d4",
+    "payload": {
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0034_035e2982",
+      "amount": "53.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0020_5c5581d4",
+            "PID_U0034_035e2982"
+          ],
+          "amount": "53.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-25T07:32:00Z",
+    "updated_at": "2025-12-25T07:37:00Z"
+  },
+  {
+    "id": "f2cff557-a395-5897-96a9-19fc0540ae19",
+    "tx_id": "f2cff557-a395-5897-96a9-19fc0540ae19",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0021_fa8cfb85",
+    "payload": {
+      "from": "PID_U0021_fa8cfb85",
+      "to": "PID_U0035_a195a333",
+      "amount": "56.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0021_fa8cfb85",
+            "PID_U0035_a195a333"
+          ],
+          "amount": "56.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-24T06:19:00Z",
+    "updated_at": "2025-12-24T06:24:00Z"
+  },
+  {
+    "id": "4e0166c9-759c-56d6-af76-bbadc3481c8f",
+    "tx_id": "4e0166c9-759c-56d6-af76-bbadc3481c8f",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0022_98c47536",
+    "payload": {
+      "from": "PID_U0022_98c47536",
+      "to": "PID_U0036_3fcd1ce4",
+      "amount": "343.86",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0022_98c47536",
+            "PID_U0036_3fcd1ce4"
+          ],
+          "amount": "343.86"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-23T05:06:00Z",
+    "updated_at": "2025-12-23T05:11:00Z"
+  },
+  {
+    "id": "0a9c183c-c743-50fa-b71a-515d404eff28",
+    "tx_id": "0a9c183c-c743-50fa-b71a-515d404eff28",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0023_36fbeee7",
+    "payload": {
+      "from": "PID_U0023_36fbeee7",
+      "to": "PID_U0037_de049695",
+      "amount": "62.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0023_36fbeee7",
+            "PID_U0037_de049695"
+          ],
+          "amount": "62.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-22T04:53:00Z",
+    "updated_at": "2025-12-22T04:58:00Z"
+  },
+  {
+    "id": "34b88d69-47cf-5acf-8015-8a22a7424bd5",
+    "tx_id": "34b88d69-47cf-5acf-8015-8a22a7424bd5",
+    "idempotency_key": "idem_payment_0020",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0024_d5336898",
+    "payload": {
+      "from": "PID_U0024_d5336898",
+      "to": "PID_U0038_7c3c1046",
+      "amount": "65.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0024_d5336898",
+            "PID_U0038_7c3c1046"
+          ],
+          "amount": "65.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0020",
+        "fingerprint": "fp_payment_0020"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-21T03:40:00Z",
+    "updated_at": "2025-12-21T03:45:00Z"
+  },
+  {
+    "id": "f8bf9fe0-4319-598c-927b-5993be4d231b",
+    "tx_id": "f8bf9fe0-4319-598c-927b-5993be4d231b",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0025_736ae249",
+    "payload": {
+      "from": "PID_U0025_736ae249",
+      "to": "PID_U0039_1a7389f7",
+      "amount": "859.94",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0025_736ae249",
+            "PID_U0039_1a7389f7"
+          ],
+          "amount": "859.94"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-20T02:27:00Z",
+    "updated_at": "2025-12-20T02:32:00Z"
+  },
+  {
+    "id": "8432ec28-5540-5256-b550-b69427cf5754",
+    "tx_id": "8432ec28-5540-5256-b550-b69427cf5754",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0026_11a25bfa",
+    "payload": {
+      "from": "PID_U0026_11a25bfa",
+      "to": "PID_U0040_b8ab03a8",
+      "amount": "71.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0026_11a25bfa",
+            "PID_U0040_b8ab03a8"
+          ],
+          "amount": "71.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-12-19T01:14:00Z",
+    "updated_at": "2025-12-19T01:16:00Z"
+  },
+  {
+    "id": "49847349-3061-538a-aa05-c579716be111",
+    "tx_id": "49847349-3061-538a-aa05-c579716be111",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0027_afd9d5ab",
+    "payload": {
+      "from": "PID_U0027_afd9d5ab",
+      "to": "PID_U0041_56e27d59",
+      "amount": "74.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0027_afd9d5ab",
+            "PID_U0041_56e27d59"
+          ],
+          "amount": "74.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-18T00:01:00Z",
+    "updated_at": "2025-12-18T00:06:00Z"
+  },
+  {
+    "id": "a1d90a87-d610-5404-93b5-ab927f979e5d",
+    "tx_id": "a1d90a87-d610-5404-93b5-ab927f979e5d",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0028_4e114f5c",
+    "payload": {
+      "from": "PID_U0028_4e114f5c",
+      "to": "PID_U0042_f519f70a",
+      "amount": "546.12",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0028_4e114f5c",
+            "PID_U0042_f519f70a"
+          ],
+          "amount": "546.12"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-17T23:48:00Z",
+    "updated_at": "2025-12-17T23:53:00Z"
+  },
+  {
+    "id": "05681b85-4fb2-5593-83d4-93331c32339d",
+    "tx_id": "05681b85-4fb2-5593-83d4-93331c32339d",
+    "idempotency_key": "idem_payment_0025",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0029_ec48c90d",
+    "payload": {
+      "from": "PID_U0029_ec48c90d",
+      "to": "PID_U0043_935170bb",
+      "amount": "80.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0029_ec48c90d",
+            "PID_U0043_935170bb"
+          ],
+          "amount": "80.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0025",
+        "fingerprint": "fp_payment_0025"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-16T22:35:00Z",
+    "updated_at": "2025-12-16T22:40:00Z"
+  },
+  {
+    "id": "b94cfd75-6d9d-5b9c-99bf-a63b4ff3a36f",
+    "tx_id": "b94cfd75-6d9d-5b9c-99bf-a63b4ff3a36f",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0030_8a8042be",
+    "payload": {
+      "from": "PID_U0030_8a8042be",
+      "to": "PID_U0044_3188ea6c",
+      "amount": "83.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0030_8a8042be",
+            "PID_U0044_3188ea6c"
+          ],
+          "amount": "83.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-15T21:22:00Z",
+    "updated_at": "2025-12-15T21:27:00Z"
+  },
+  {
+    "id": "8b144a7b-3398-5f28-ad87-27f525627cfe",
+    "tx_id": "8b144a7b-3398-5f28-ad87-27f525627cfe",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0031_28b7bc6f",
+    "payload": {
+      "from": "PID_U0031_28b7bc6f",
+      "to": "PID_U0045_cfc0641d",
+      "amount": "310.66",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0031_28b7bc6f",
+            "PID_U0045_cfc0641d"
+          ],
+          "amount": "310.66"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-14T20:09:00Z",
+    "updated_at": "2025-12-14T20:14:00Z"
+  },
+  {
+    "id": "9fc21d86-2b2e-5c01-8987-c0e0736e775a",
+    "tx_id": "9fc21d86-2b2e-5c01-8987-c0e0736e775a",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0032_c6ef3620",
+    "payload": {
+      "from": "PID_U0032_c6ef3620",
+      "to": "PID_U0046_6df7ddce",
+      "amount": "89.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0032_c6ef3620",
+            "PID_U0046_6df7ddce"
+          ],
+          "amount": "89.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-13T19:56:00Z",
+    "updated_at": "2025-12-13T20:01:00Z"
+  },
+  {
+    "id": "9dafcea2-69c3-5509-99cf-9a1132836714",
+    "tx_id": "9dafcea2-69c3-5509-99cf-9a1132836714",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0033_6526afd1",
+    "payload": {
+      "from": "PID_U0033_6526afd1",
+      "to": "PID_U0047_0c2f577f",
+      "amount": "92.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0033_6526afd1",
+            "PID_U0047_0c2f577f"
+          ],
+          "amount": "92.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-12T18:43:00Z",
+    "updated_at": "2025-12-12T18:48:00Z"
+  },
+  {
+    "id": "0091ff28-17ce-57ae-9815-5ae8ebedb165",
+    "tx_id": "0091ff28-17ce-57ae-9815-5ae8ebedb165",
+    "idempotency_key": "idem_payment_0030",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0034_035e2982",
+    "payload": {
+      "from": "PID_U0034_035e2982",
+      "to": "PID_U0048_aa66d130",
+      "amount": "792.90",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0034_035e2982",
+            "PID_U0048_aa66d130"
+          ],
+          "amount": "792.90"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0030",
+        "fingerprint": "fp_payment_0030"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-11T17:30:00Z",
+    "updated_at": "2025-12-11T17:35:00Z"
+  },
+  {
+    "id": "4f72be23-574a-5c17-971e-a5107591cd9c",
+    "tx_id": "4f72be23-574a-5c17-971e-a5107591cd9c",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0035_a195a333",
+    "payload": {
+      "from": "PID_U0035_a195a333",
+      "to": "PID_U0049_489e4ae1",
+      "amount": "98.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0035_a195a333",
+            "PID_U0049_489e4ae1"
+          ],
+          "amount": "98.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-10T16:17:00Z",
+    "updated_at": "2025-12-10T16:22:00Z"
+  },
+  {
+    "id": "f39e5b00-6a57-51ee-bfa7-beca07dd0d7a",
+    "tx_id": "f39e5b00-6a57-51ee-bfa7-beca07dd0d7a",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0036_3fcd1ce4",
+    "payload": {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0050_e6d5c492",
+      "amount": "101.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0036_3fcd1ce4",
+            "PID_U0050_e6d5c492"
+          ],
+          "amount": "101.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-09T15:04:00Z",
+    "updated_at": "2025-12-09T15:09:00Z"
+  },
+  {
+    "id": "2a700f22-6b91-5953-9f8f-2704769434e1",
+    "tx_id": "2a700f22-6b91-5953-9f8f-2704769434e1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0037_de049695",
+    "payload": {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0051_850d3e43",
+      "amount": "414.57",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0037_de049695",
+            "PID_U0051_850d3e43"
+          ],
+          "amount": "414.57"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-12-08T14:51:00Z",
+    "updated_at": "2025-12-08T14:53:00Z"
+  },
+  {
+    "id": "ed509006-f1bb-5520-882b-81c0619a47e3",
+    "tx_id": "ed509006-f1bb-5520-882b-81c0619a47e3",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0038_7c3c1046",
+    "payload": {
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0052_2344b7f4",
+      "amount": "107.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0038_7c3c1046",
+            "PID_U0052_2344b7f4"
+          ],
+          "amount": "107.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-07T13:38:00Z",
+    "updated_at": "2025-12-07T13:43:00Z"
+  },
+  {
+    "id": "f9c7c33f-8146-5ab6-b98d-5c84b47dfbcc",
+    "tx_id": "f9c7c33f-8146-5ab6-b98d-5c84b47dfbcc",
+    "idempotency_key": "idem_payment_0035",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0039_1a7389f7",
+    "payload": {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0053_c17c31a5",
+      "amount": "110.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0039_1a7389f7",
+            "PID_U0053_c17c31a5"
+          ],
+          "amount": "110.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0035",
+        "fingerprint": "fp_payment_0035"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-06T12:25:00Z",
+    "updated_at": "2025-12-06T12:30:00Z"
+  },
+  {
+    "id": "31224f17-4279-5f82-9ccd-a3511f7b1c71",
+    "tx_id": "31224f17-4279-5f82-9ccd-a3511f7b1c71",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0040_b8ab03a8",
+    "payload": {
+      "from": "PID_U0040_b8ab03a8",
+      "to": "PID_U0054_5fb3ab56",
+      "amount": "508.87",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0040_b8ab03a8",
+            "PID_U0054_5fb3ab56"
+          ],
+          "amount": "508.87"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-05T11:12:00Z",
+    "updated_at": "2025-12-05T11:17:00Z"
+  },
+  {
+    "id": "4e2581ab-8a03-59d6-8ba1-d31e69b8bfa0",
+    "tx_id": "4e2581ab-8a03-59d6-8ba1-d31e69b8bfa0",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0041_56e27d59",
+    "payload": {
+      "from": "PID_U0041_56e27d59",
+      "to": "PID_U0055_fdeb2507",
+      "amount": "5.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0041_56e27d59",
+            "PID_U0055_fdeb2507"
+          ],
+          "amount": "5.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-04T10:59:00Z",
+    "updated_at": "2025-12-04T11:04:00Z"
+  },
+  {
+    "id": "05460429-a59a-5696-8751-7e73821ce6b1",
+    "tx_id": "05460429-a59a-5696-8751-7e73821ce6b1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0042_f519f70a",
+    "payload": {
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0056_9c229eb8",
+      "amount": "8.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0042_f519f70a",
+            "PID_U0056_9c229eb8"
+          ],
+          "amount": "8.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-03T09:46:00Z",
+    "updated_at": "2025-12-03T09:51:00Z"
+  },
+  {
+    "id": "b7616215-0544-55ac-a076-b29f76b28b7b",
+    "tx_id": "b7616215-0544-55ac-a076-b29f76b28b7b",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0043_935170bb",
+    "payload": {
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0057_3a5a1869",
+      "amount": "619.00",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0043_935170bb",
+            "PID_U0057_3a5a1869"
+          ],
+          "amount": "619.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-02T08:33:00Z",
+    "updated_at": "2025-12-02T08:38:00Z"
+  },
+  {
+    "id": "03e42c29-0fbf-5e43-ab31-4698d6f949ec",
+    "tx_id": "03e42c29-0fbf-5e43-ab31-4698d6f949ec",
+    "idempotency_key": "idem_payment_0040",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0044_3188ea6c",
+    "payload": {
+      "from": "PID_U0044_3188ea6c",
+      "to": "PID_U0058_d891921a",
+      "amount": "14.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0044_3188ea6c",
+            "PID_U0058_d891921a"
+          ],
+          "amount": "14.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0040",
+        "fingerprint": "fp_payment_0040"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-01T07:20:00Z",
+    "updated_at": "2025-12-01T07:25:00Z"
+  },
+  {
+    "id": "1bb89d64-41ac-5c1e-b0dd-8c02c0af9f9e",
+    "tx_id": "1bb89d64-41ac-5c1e-b0dd-8c02c0af9f9e",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0045_cfc0641d",
+    "payload": {
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0059_76c90bcb",
+      "amount": "17.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0045_cfc0641d",
+            "PID_U0059_76c90bcb"
+          ],
+          "amount": "17.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-30T06:07:00Z",
+    "updated_at": "2025-11-30T06:12:00Z"
+  },
+  {
+    "id": "38a71e91-38c0-529a-a529-d80b2bb9aa21",
+    "tx_id": "38a71e91-38c0-529a-a529-d80b2bb9aa21",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0046_6df7ddce",
+    "payload": {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0060_1500857c",
+      "amount": "881.24",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0046_6df7ddce",
+            "PID_U0060_1500857c"
+          ],
+          "amount": "881.24"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-29T05:54:00Z",
+    "updated_at": "2025-11-29T05:59:00Z"
+  },
+  {
+    "id": "c50b9b5b-bd93-5ee9-811d-010a0ac2dc47",
+    "tx_id": "c50b9b5b-bd93-5ee9-811d-010a0ac2dc47",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0047_0c2f577f",
+    "payload": {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0061_b337ff2d",
+      "amount": "23.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0047_0c2f577f",
+            "PID_U0061_b337ff2d"
+          ],
+          "amount": "23.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-28T04:41:00Z",
+    "updated_at": "2025-11-28T04:46:00Z"
+  },
+  {
+    "id": "33369c9b-b986-5735-8ae3-118e82e104aa",
+    "tx_id": "33369c9b-b986-5735-8ae3-118e82e104aa",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0048_aa66d130",
+    "payload": {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0062_516f78de",
+      "amount": "26.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0048_aa66d130",
+            "PID_U0062_516f78de"
+          ],
+          "amount": "26.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-11-27T03:28:00Z",
+    "updated_at": "2025-11-27T03:30:00Z"
+  },
+  {
+    "id": "760b222b-3a1a-5c31-a869-adbfa9fac9af",
+    "tx_id": "760b222b-3a1a-5c31-a869-adbfa9fac9af",
+    "idempotency_key": "idem_payment_0045",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0049_489e4ae1",
+    "payload": {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0063_efa6f28f",
+      "amount": "1466.43",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0049_489e4ae1",
+            "PID_U0063_efa6f28f"
+          ],
+          "amount": "1466.43"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0045",
+        "fingerprint": "fp_payment_0045"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-26T02:15:00Z",
+    "updated_at": "2025-11-26T02:20:00Z"
+  },
+  {
+    "id": "c1cb55ef-43af-5d8c-bc1b-7675e50a008e",
+    "tx_id": "c1cb55ef-43af-5d8c-bc1b-7675e50a008e",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0050_e6d5c492",
+    "payload": {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0064_8dde6c40",
+      "amount": "32.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0050_e6d5c492",
+            "PID_U0064_8dde6c40"
+          ],
+          "amount": "32.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-25T01:02:00Z",
+    "updated_at": "2025-11-25T01:07:00Z"
+  },
+  {
+    "id": "84484264-ad8e-5a0e-8873-fbee67d95f4d",
+    "tx_id": "84484264-ad8e-5a0e-8873-fbee67d95f4d",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0051_850d3e43",
+    "payload": {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0065_2c15e5f1",
+      "amount": "35.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0051_850d3e43",
+            "PID_U0065_2c15e5f1"
+          ],
+          "amount": "35.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-24T00:49:00Z",
+    "updated_at": "2025-11-24T00:54:00Z"
+  },
+  {
+    "id": "78fe1faf-1872-5cd9-94c5-7666112c0e31",
+    "tx_id": "78fe1faf-1872-5cd9-94c5-7666112c0e31",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0052_2344b7f4",
+    "payload": {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0066_ca4d5fa2",
+      "amount": "331.85",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0052_2344b7f4",
+            "PID_U0066_ca4d5fa2"
+          ],
+          "amount": "331.85"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-23T23:36:00Z",
+    "updated_at": "2025-11-23T23:41:00Z"
+  },
+  {
+    "id": "1c648aac-8a84-52ca-bfb4-e19858c27f38",
+    "tx_id": "1c648aac-8a84-52ca-bfb4-e19858c27f38",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0053_c17c31a5",
+    "payload": {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0067_6884d953",
+      "amount": "41.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0053_c17c31a5",
+            "PID_U0067_6884d953"
+          ],
+          "amount": "41.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-22T22:23:00Z",
+    "updated_at": "2025-11-22T22:28:00Z"
+  },
+  {
+    "id": "db958b25-f18f-59dd-811b-1448a557d401",
+    "tx_id": "db958b25-f18f-59dd-811b-1448a557d401",
+    "idempotency_key": "idem_payment_0050",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0054_5fb3ab56",
+    "payload": {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0068_06bc5304",
+      "amount": "44.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0054_5fb3ab56",
+            "PID_U0068_06bc5304"
+          ],
+          "amount": "44.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0050",
+        "fingerprint": "fp_payment_0050"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-21T21:10:00Z",
+    "updated_at": "2025-11-21T21:15:00Z"
+  },
+  {
+    "id": "9cad7acd-bfcb-5fe6-a245-3d5ab29b2251",
+    "tx_id": "9cad7acd-bfcb-5fe6-a245-3d5ab29b2251",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0055_fdeb2507",
+    "payload": {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0069_a4f3ccb5",
+      "amount": "376.72",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0055_fdeb2507",
+            "PID_U0069_a4f3ccb5"
+          ],
+          "amount": "376.72"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-20T20:57:00Z",
+    "updated_at": "2025-11-20T21:02:00Z"
+  },
+  {
+    "id": "f7f7cf4d-82e2-52ef-9f7f-3d0b44ac9696",
+    "tx_id": "f7f7cf4d-82e2-52ef-9f7f-3d0b44ac9696",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0056_9c229eb8",
+    "payload": {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0070_432b4666",
+      "amount": "50.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0056_9c229eb8",
+            "PID_U0070_432b4666"
+          ],
+          "amount": "50.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-19T19:44:00Z",
+    "updated_at": "2025-11-19T19:49:00Z"
+  },
+  {
+    "id": "5fbdd807-0cbe-543d-b15d-01bba0cb7ac3",
+    "tx_id": "5fbdd807-0cbe-543d-b15d-01bba0cb7ac3",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0057_3a5a1869",
+    "payload": {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0071_e162c017",
+      "amount": "53.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0057_3a5a1869",
+            "PID_U0071_e162c017"
+          ],
+          "amount": "53.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-18T18:31:00Z",
+    "updated_at": "2025-11-18T18:36:00Z"
+  },
+  {
+    "id": "86876e90-c287-5a37-bad2-eecfaaedd4e4",
+    "tx_id": "86876e90-c287-5a37-bad2-eecfaaedd4e4",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0058_d891921a",
+    "payload": {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0072_7f9a39c8",
+      "amount": "181.71",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0058_d891921a",
+            "PID_U0072_7f9a39c8"
+          ],
+          "amount": "181.71"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-17T17:18:00Z",
+    "updated_at": "2025-11-17T17:23:00Z"
+  },
+  {
+    "id": "3919ca7e-9010-55e7-97a6-28382aba4ea0",
+    "tx_id": "3919ca7e-9010-55e7-97a6-28382aba4ea0",
+    "idempotency_key": "idem_payment_0055",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0059_76c90bcb",
+    "payload": {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0073_1dd1b379",
+      "amount": "59.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0059_76c90bcb",
+            "PID_U0073_1dd1b379"
+          ],
+          "amount": "59.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0055",
+        "fingerprint": "fp_payment_0055"
+      }
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-11-16T16:05:00Z",
+    "updated_at": "2025-11-16T16:07:00Z"
+  },
+  {
+    "id": "b3497dc8-1b4c-5894-835f-49015c3a0178",
+    "tx_id": "b3497dc8-1b4c-5894-835f-49015c3a0178",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0060_1500857c",
+    "payload": {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0074_bc092d2a",
+      "amount": "62.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0060_1500857c",
+            "PID_U0074_bc092d2a"
+          ],
+          "amount": "62.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-15T15:52:00Z",
+    "updated_at": "2025-11-15T15:57:00Z"
+  },
+  {
+    "id": "2085ae3f-21df-5094-9c07-5ff499a6492b",
+    "tx_id": "2085ae3f-21df-5094-9c07-5ff499a6492b",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0061_b337ff2d",
+    "payload": {
+      "from": "PID_U0061_b337ff2d",
+      "to": "PID_U0075_5a40a6db",
+      "amount": "209.89",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0061_b337ff2d",
+            "PID_U0075_5a40a6db"
+          ],
+          "amount": "209.89"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-14T14:39:00Z",
+    "updated_at": "2025-11-14T14:44:00Z"
+  },
+  {
+    "id": "6048fd82-ec89-51e6-b00a-c373610b5ec2",
+    "tx_id": "6048fd82-ec89-51e6-b00a-c373610b5ec2",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0062_516f78de",
+    "payload": {
+      "from": "PID_U0062_516f78de",
+      "to": "PID_U0076_f878208c",
+      "amount": "68.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0062_516f78de",
+            "PID_U0076_f878208c"
+          ],
+          "amount": "68.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-13T13:26:00Z",
+    "updated_at": "2025-11-13T13:31:00Z"
+  },
+  {
+    "id": "74636c9a-7a63-5aff-95de-a8c48c705bd6",
+    "tx_id": "74636c9a-7a63-5aff-95de-a8c48c705bd6",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0063_efa6f28f",
+    "payload": {
+      "from": "PID_U0063_efa6f28f",
+      "to": "PID_U0077_96af9a3d",
+      "amount": "71.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0063_efa6f28f",
+            "PID_U0077_96af9a3d"
+          ],
+          "amount": "71.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-12T12:13:00Z",
+    "updated_at": "2025-11-12T12:18:00Z"
+  },
+  {
+    "id": "811abf33-7044-5d4c-9d31-255f2ddd2eb4",
+    "tx_id": "811abf33-7044-5d4c-9d31-255f2ddd2eb4",
+    "idempotency_key": "idem_payment_0060",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0064_8dde6c40",
+    "payload": {
+      "from": "PID_U0064_8dde6c40",
+      "to": "PID_U0078_34e713ee",
+      "amount": "181.44",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0064_8dde6c40",
+            "PID_U0078_34e713ee"
+          ],
+          "amount": "181.44"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0060",
+        "fingerprint": "fp_payment_0060"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-11T12:00:00Z",
+    "updated_at": "2025-11-11T12:05:00Z"
+  },
+  {
+    "id": "4ebca293-579c-5df6-9413-9e8bfe14a0fe",
+    "tx_id": "4ebca293-579c-5df6-9413-9e8bfe14a0fe",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0065_2c15e5f1",
+    "payload": {
+      "from": "PID_U0065_2c15e5f1",
+      "to": "PID_U0079_d31e8d9f",
+      "amount": "77.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0065_2c15e5f1",
+            "PID_U0079_d31e8d9f"
+          ],
+          "amount": "77.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-10T10:47:00Z",
+    "updated_at": "2025-11-10T10:52:00Z"
+  },
+  {
+    "id": "951ba365-f3c9-50a7-956b-f4add1a35b88",
+    "tx_id": "951ba365-f3c9-50a7-956b-f4add1a35b88",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0066_ca4d5fa2",
+    "payload": {
+      "from": "PID_U0066_ca4d5fa2",
+      "to": "PID_U0080_71560750",
+      "amount": "80.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0066_ca4d5fa2",
+            "PID_U0080_71560750"
+          ],
+          "amount": "80.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-09T09:34:00Z",
+    "updated_at": "2025-11-09T09:39:00Z"
+  },
+  {
+    "id": "f8ea628a-34ce-5f15-9375-e80e5e3044e7",
+    "tx_id": "f8ea628a-34ce-5f15-9375-e80e5e3044e7",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0067_6884d953",
+    "payload": {
+      "from": "PID_U0067_6884d953",
+      "to": "PID_U0081_0f8d8101",
+      "amount": "1491.87",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0067_6884d953",
+            "PID_U0081_0f8d8101"
+          ],
+          "amount": "1491.87"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-08T08:21:00Z",
+    "updated_at": "2025-11-08T08:26:00Z"
+  },
+  {
+    "id": "640a5739-f10f-5fc4-b1fc-27f1f9dd4f4c",
+    "tx_id": "640a5739-f10f-5fc4-b1fc-27f1f9dd4f4c",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0068_06bc5304",
+    "payload": {
+      "from": "PID_U0068_06bc5304",
+      "to": "PID_U0082_adc4fab2",
+      "amount": "86.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0068_06bc5304",
+            "PID_U0082_adc4fab2"
+          ],
+          "amount": "86.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-07T07:08:00Z",
+    "updated_at": "2025-11-07T07:13:00Z"
+  },
+  {
+    "id": "4ee3322f-f075-5708-bbc2-7b6bcd4c6128",
+    "tx_id": "4ee3322f-f075-5708-bbc2-7b6bcd4c6128",
+    "idempotency_key": "idem_payment_0065",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0069_a4f3ccb5",
+    "payload": {
+      "from": "PID_U0069_a4f3ccb5",
+      "to": "PID_U0083_4bfc7463",
+      "amount": "89.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0069_a4f3ccb5",
+            "PID_U0083_4bfc7463"
+          ],
+          "amount": "89.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0065",
+        "fingerprint": "fp_payment_0065"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-06T06:55:00Z",
+    "updated_at": "2025-11-06T07:00:00Z"
+  },
+  {
+    "id": "193814f6-67ab-55c4-8ded-19889414a158",
+    "tx_id": "193814f6-67ab-55c4-8ded-19889414a158",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0070_432b4666",
+    "payload": {
+      "from": "PID_U0070_432b4666",
+      "to": "PID_U0084_ea33ee14",
+      "amount": "688.91",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0070_432b4666",
+            "PID_U0084_ea33ee14"
+          ],
+          "amount": "688.91"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-11-05T05:42:00Z",
+    "updated_at": "2025-11-05T05:44:00Z"
+  },
+  {
+    "id": "18193e49-44a8-5592-bce8-17f3dd11b958",
+    "tx_id": "18193e49-44a8-5592-bce8-17f3dd11b958",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0071_e162c017",
+    "payload": {
+      "from": "PID_U0071_e162c017",
+      "to": "PID_U0085_886b67c5",
+      "amount": "95.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0071_e162c017",
+            "PID_U0085_886b67c5"
+          ],
+          "amount": "95.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-04T04:29:00Z",
+    "updated_at": "2025-11-04T04:34:00Z"
+  },
+  {
+    "id": "1e06ee72-6476-5578-9bd0-f3069e3c88c0",
+    "tx_id": "1e06ee72-6476-5578-9bd0-f3069e3c88c0",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0072_7f9a39c8",
+    "payload": {
+      "from": "PID_U0072_7f9a39c8",
+      "to": "PID_U0086_26a2e176",
+      "amount": "98.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0072_7f9a39c8",
+            "PID_U0086_26a2e176"
+          ],
+          "amount": "98.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-03T03:16:00Z",
+    "updated_at": "2025-11-03T03:21:00Z"
+  },
+  {
+    "id": "876a3a90-eaf2-523e-a1ad-d239dc04a63d",
+    "tx_id": "876a3a90-eaf2-523e-a1ad-d239dc04a63d",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0073_1dd1b379",
+    "payload": {
+      "from": "PID_U0073_1dd1b379",
+      "to": "PID_U0087_c4da5b27",
+      "amount": "1398.95",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0073_1dd1b379",
+            "PID_U0087_c4da5b27"
+          ],
+          "amount": "1398.95"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-02T02:03:00Z",
+    "updated_at": "2025-11-02T02:08:00Z"
+  },
+  {
+    "id": "bf812bca-2af1-5232-adbf-2c4ea9a0deac",
+    "tx_id": "bf812bca-2af1-5232-adbf-2c4ea9a0deac",
+    "idempotency_key": "idem_payment_0070",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0074_bc092d2a",
+    "payload": {
+      "from": "PID_U0074_bc092d2a",
+      "to": "PID_U0088_6311d4d8",
+      "amount": "104.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0074_bc092d2a",
+            "PID_U0088_6311d4d8"
+          ],
+          "amount": "104.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0070",
+        "fingerprint": "fp_payment_0070"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-01T01:50:00Z",
+    "updated_at": "2025-11-01T01:55:00Z"
+  },
+  {
+    "id": "857ef6c6-9501-5c3a-bf62-8f8c50a3a179",
+    "tx_id": "857ef6c6-9501-5c3a-bf62-8f8c50a3a179",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0075_5a40a6db",
+    "payload": {
+      "from": "PID_U0075_5a40a6db",
+      "to": "PID_U0089_01494e89",
+      "amount": "107.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0075_5a40a6db",
+            "PID_U0089_01494e89"
+          ],
+          "amount": "107.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-31T00:37:00Z",
+    "updated_at": "2025-10-31T00:42:00Z"
+  },
+  {
+    "id": "814c178f-32f1-5327-925a-a9aedcb6d632",
+    "tx_id": "814c178f-32f1-5327-925a-a9aedcb6d632",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0076_f878208c",
+    "payload": {
+      "from": "PID_U0076_f878208c",
+      "to": "PID_U0090_9f80c83a",
+      "amount": "1481.42",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0076_f878208c",
+            "PID_U0090_9f80c83a"
+          ],
+          "amount": "1481.42"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-30T23:24:00Z",
+    "updated_at": "2025-10-30T23:29:00Z"
+  },
+  {
+    "id": "7779eabd-6af6-590a-85c8-88409acde275",
+    "tx_id": "7779eabd-6af6-590a-85c8-88409acde275",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0077_96af9a3d",
+    "payload": {
+      "from": "PID_U0077_96af9a3d",
+      "to": "PID_U0091_3db841eb",
+      "amount": "113.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0077_96af9a3d",
+            "PID_U0091_3db841eb"
+          ],
+          "amount": "113.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-29T22:11:00Z",
+    "updated_at": "2025-10-29T22:16:00Z"
+  },
+  {
+    "id": "5d78f4d2-cf63-5f91-b83d-d4c1fa28d4be",
+    "tx_id": "5d78f4d2-cf63-5f91-b83d-d4c1fa28d4be",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0078_34e713ee",
+    "payload": {
+      "from": "PID_U0078_34e713ee",
+      "to": "PID_U0092_dbefbb9c",
+      "amount": "5.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0078_34e713ee",
+            "PID_U0092_dbefbb9c"
+          ],
+          "amount": "5.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-28T21:58:00Z",
+    "updated_at": "2025-10-28T22:03:00Z"
+  },
+  {
+    "id": "58593b9c-dc13-5a73-a27d-9121d58bd92e",
+    "tx_id": "58593b9c-dc13-5a73-a27d-9121d58bd92e",
+    "idempotency_key": "idem_payment_0075",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0079_d31e8d9f",
+    "payload": {
+      "from": "PID_U0079_d31e8d9f",
+      "to": "PID_U0093_7a27354d",
+      "amount": "174.32",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0079_d31e8d9f",
+            "PID_U0093_7a27354d"
+          ],
+          "amount": "174.32"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0075",
+        "fingerprint": "fp_payment_0075"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-27T20:45:00Z",
+    "updated_at": "2025-10-27T20:50:00Z"
+  },
+  {
+    "id": "9b636017-5b15-54a9-b400-1671643add98",
+    "tx_id": "9b636017-5b15-54a9-b400-1671643add98",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0080_71560750",
+    "payload": {
+      "from": "PID_U0080_71560750",
+      "to": "PID_U0094_185eaefe",
+      "amount": "11.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0080_71560750",
+            "PID_U0094_185eaefe"
+          ],
+          "amount": "11.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-26T19:32:00Z",
+    "updated_at": "2025-10-26T19:37:00Z"
+  },
+  {
+    "id": "536f4749-f16f-5faf-967d-6e902c926c9b",
+    "tx_id": "536f4749-f16f-5faf-967d-6e902c926c9b",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0081_0f8d8101",
+    "payload": {
+      "from": "PID_U0081_0f8d8101",
+      "to": "PID_U0095_b69628af",
+      "amount": "14.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0081_0f8d8101",
+            "PID_U0095_b69628af"
+          ],
+          "amount": "14.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-10-25T18:19:00Z",
+    "updated_at": "2025-10-25T18:21:00Z"
+  },
+  {
+    "id": "e0bd4101-6257-56cd-9012-4c7ac34499c9",
+    "tx_id": "e0bd4101-6257-56cd-9012-4c7ac34499c9",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0082_adc4fab2",
+    "payload": {
+      "from": "PID_U0082_adc4fab2",
+      "to": "PID_U0096_54cda260",
+      "amount": "1276.47",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0082_adc4fab2",
+            "PID_U0096_54cda260"
+          ],
+          "amount": "1276.47"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-24T17:06:00Z",
+    "updated_at": "2025-10-24T17:11:00Z"
+  },
+  {
+    "id": "2816830a-d0d0-5f08-b008-06c61e2c7ff1",
+    "tx_id": "2816830a-d0d0-5f08-b008-06c61e2c7ff1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0083_4bfc7463",
+    "payload": {
+      "from": "PID_U0083_4bfc7463",
+      "to": "PID_U0097_f3051c11",
+      "amount": "20.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0083_4bfc7463",
+            "PID_U0097_f3051c11"
+          ],
+          "amount": "20.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-23T16:53:00Z",
+    "updated_at": "2025-10-23T16:58:00Z"
+  },
+  {
+    "id": "eba22a46-a906-5c70-9064-e45ad97529b3",
+    "tx_id": "eba22a46-a906-5c70-9064-e45ad97529b3",
+    "idempotency_key": "idem_payment_0080",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0084_ea33ee14",
+    "payload": {
+      "from": "PID_U0084_ea33ee14",
+      "to": "PID_U0098_913c95c2",
+      "amount": "23.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0084_ea33ee14",
+            "PID_U0098_913c95c2"
+          ],
+          "amount": "23.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0080",
+        "fingerprint": "fp_payment_0080"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-22T15:40:00Z",
+    "updated_at": "2025-10-22T15:45:00Z"
+  },
+  {
+    "id": "f6a88112-358d-5e99-8696-a691a1f60786",
+    "tx_id": "f6a88112-358d-5e99-8696-a691a1f60786",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0085_886b67c5",
+    "payload": {
+      "from": "PID_U0085_886b67c5",
+      "to": "PID_U0099_2f740f73",
+      "amount": "351.44",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0085_886b67c5",
+            "PID_U0099_2f740f73"
+          ],
+          "amount": "351.44"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-21T14:27:00Z",
+    "updated_at": "2025-10-21T14:32:00Z"
+  },
+  {
+    "id": "3880b2fa-2846-5fa8-9a62-b5b3d3865c13",
+    "tx_id": "3880b2fa-2846-5fa8-9a62-b5b3d3865c13",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0086_26a2e176",
+    "payload": {
+      "from": "PID_U0086_26a2e176",
+      "to": "PID_U0100_cdab8924",
+      "amount": "29.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0086_26a2e176",
+            "PID_U0100_cdab8924"
+          ],
+          "amount": "29.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-20T13:14:00Z",
+    "updated_at": "2025-10-20T13:19:00Z"
+  },
+  {
+    "id": "34f2e3fe-4b08-5c02-9830-d4e4aa57c5cb",
+    "tx_id": "34f2e3fe-4b08-5c02-9830-d4e4aa57c5cb",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0087_c4da5b27",
+    "payload": {
+      "from": "PID_U0087_c4da5b27",
+      "to": "PID_U0001_9e3779b1",
+      "amount": "32.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0087_c4da5b27",
+            "PID_U0001_9e3779b1"
+          ],
+          "amount": "32.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-19T12:01:00Z",
+    "updated_at": "2025-10-19T12:06:00Z"
+  },
+  {
+    "id": "9a041791-4745-57f0-b755-0f77d4e24670",
+    "tx_id": "9a041791-4745-57f0-b755-0f77d4e24670",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0088_6311d4d8",
+    "payload": {
+      "from": "PID_U0088_6311d4d8",
+      "to": "PID_U0002_3c6ef362",
+      "amount": "764.41",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0088_6311d4d8",
+            "PID_U0002_3c6ef362"
+          ],
+          "amount": "764.41"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-18T11:48:00Z",
+    "updated_at": "2025-10-18T11:53:00Z"
+  },
+  {
+    "id": "6538b8e7-85cb-587d-b747-5c39f8ab0e65",
+    "tx_id": "6538b8e7-85cb-587d-b747-5c39f8ab0e65",
+    "idempotency_key": "idem_payment_0085",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0089_01494e89",
+    "payload": {
+      "from": "PID_U0089_01494e89",
+      "to": "PID_U0003_daa66d13",
+      "amount": "38.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0089_01494e89",
+            "PID_U0003_daa66d13"
+          ],
+          "amount": "38.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0085",
+        "fingerprint": "fp_payment_0085"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-17T10:35:00Z",
+    "updated_at": "2025-10-17T10:40:00Z"
+  },
+  {
+    "id": "55b3821b-4c1d-51f1-a679-7c355d19c3b1",
+    "tx_id": "55b3821b-4c1d-51f1-a679-7c355d19c3b1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0090_9f80c83a",
+    "payload": {
+      "from": "PID_U0090_9f80c83a",
+      "to": "PID_U0004_78dde6c4",
+      "amount": "41.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0090_9f80c83a",
+            "PID_U0004_78dde6c4"
+          ],
+          "amount": "41.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-16T09:22:00Z",
+    "updated_at": "2025-10-16T09:27:00Z"
+  },
+  {
+    "id": "27c8173b-ef3b-5be2-ac5a-47c5640f79b1",
+    "tx_id": "27c8173b-ef3b-5be2-ac5a-47c5640f79b1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0091_3db841eb",
+    "payload": {
+      "from": "PID_U0091_3db841eb",
+      "to": "PID_U0005_17156075",
+      "amount": "1201.79",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0091_3db841eb",
+            "PID_U0005_17156075"
+          ],
+          "amount": "1201.79"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-15T08:09:00Z",
+    "updated_at": "2025-10-15T08:14:00Z"
+  },
+  {
+    "id": "7ac02e31-1ad5-53b3-b26a-f571e4f5da56",
+    "tx_id": "7ac02e31-1ad5-53b3-b26a-f571e4f5da56",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0092_dbefbb9c",
+    "payload": {
+      "from": "PID_U0092_dbefbb9c",
+      "to": "PID_U0006_b54cda26",
+      "amount": "47.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0092_dbefbb9c",
+            "PID_U0006_b54cda26"
+          ],
+          "amount": "47.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-10-14T07:56:00Z",
+    "updated_at": "2025-10-14T07:58:00Z"
+  },
+  {
+    "id": "2f98079e-ad54-5598-af45-936dcb9fb506",
+    "tx_id": "2f98079e-ad54-5598-af45-936dcb9fb506",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0093_7a27354d",
+    "payload": {
+      "from": "PID_U0093_7a27354d",
+      "to": "PID_U0007_538453d7",
+      "amount": "50.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0093_7a27354d",
+            "PID_U0007_538453d7"
+          ],
+          "amount": "50.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-13T06:43:00Z",
+    "updated_at": "2025-10-13T06:48:00Z"
+  },
+  {
+    "id": "2ecc9b73-6bbb-520d-9180-e5bb85f56274",
+    "tx_id": "2ecc9b73-6bbb-520d-9180-e5bb85f56274",
+    "idempotency_key": "idem_payment_0090",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0094_185eaefe",
+    "payload": {
+      "from": "PID_U0094_185eaefe",
+      "to": "PID_U0008_f1bbcd88",
+      "amount": "917.85",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0094_185eaefe",
+            "PID_U0008_f1bbcd88"
+          ],
+          "amount": "917.85"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0090",
+        "fingerprint": "fp_payment_0090"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-12T05:30:00Z",
+    "updated_at": "2025-10-12T05:35:00Z"
+  },
+  {
+    "id": "66f7dff6-eb37-5fce-af1a-652a910eca9f",
+    "tx_id": "66f7dff6-eb37-5fce-af1a-652a910eca9f",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0095_b69628af",
+    "payload": {
+      "from": "PID_U0095_b69628af",
+      "to": "PID_U0009_8ff34739",
+      "amount": "56.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0095_b69628af",
+            "PID_U0009_8ff34739"
+          ],
+          "amount": "56.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-11T04:17:00Z",
+    "updated_at": "2025-10-11T04:22:00Z"
+  },
+  {
+    "id": "091af4e8-72b5-54a3-9711-980ff100a8f5",
+    "tx_id": "091af4e8-72b5-54a3-9711-980ff100a8f5",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0096_54cda260",
+    "payload": {
+      "from": "PID_U0096_54cda260",
+      "to": "PID_U0010_2e2ac0ea",
+      "amount": "59.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0096_54cda260",
+            "PID_U0010_2e2ac0ea"
+          ],
+          "amount": "59.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-10T03:04:00Z",
+    "updated_at": "2025-10-10T03:09:00Z"
+  },
+  {
+    "id": "0776a163-7aaf-5096-b7ee-8aac2a251904",
+    "tx_id": "0776a163-7aaf-5096-b7ee-8aac2a251904",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0097_f3051c11",
+    "payload": {
+      "from": "PID_U0097_f3051c11",
+      "to": "PID_U0011_cc623a9b",
+      "amount": "79.19",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0097_f3051c11",
+            "PID_U0011_cc623a9b"
+          ],
+          "amount": "79.19"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-09T02:51:00Z",
+    "updated_at": "2025-10-09T02:56:00Z"
+  },
+  {
+    "id": "c0bdbd90-19d2-59dc-87ae-23505636a2ae",
+    "tx_id": "c0bdbd90-19d2-59dc-87ae-23505636a2ae",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0098_913c95c2",
+    "payload": {
+      "from": "PID_U0098_913c95c2",
+      "to": "PID_U0012_6a99b44c",
+      "amount": "65.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0098_913c95c2",
+            "PID_U0012_6a99b44c"
+          ],
+          "amount": "65.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-08T01:38:00Z",
+    "updated_at": "2025-10-08T01:43:00Z"
+  },
+  {
+    "id": "aadbd861-6acf-5ab0-a640-fbd081f4de0d",
+    "tx_id": "aadbd861-6acf-5ab0-a640-fbd081f4de0d",
+    "idempotency_key": "idem_payment_0095",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0099_2f740f73",
+    "payload": {
+      "from": "PID_U0099_2f740f73",
+      "to": "PID_U0013_08d12dfd",
+      "amount": "68.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0099_2f740f73",
+            "PID_U0013_08d12dfd"
+          ],
+          "amount": "68.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0095",
+        "fingerprint": "fp_payment_0095"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-07T00:25:00Z",
+    "updated_at": "2025-10-07T00:30:00Z"
+  },
+  {
+    "id": "327f0b64-aaac-50f4-a4e8-3006183680cd",
+    "tx_id": "327f0b64-aaac-50f4-a4e8-3006183680cd",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0100_cdab8924",
+    "payload": {
+      "from": "PID_U0100_cdab8924",
+      "to": "PID_U0014_a708a7ae",
+      "amount": "1100.46",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0100_cdab8924",
+            "PID_U0014_a708a7ae"
+          ],
+          "amount": "1100.46"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-10T23:12:00Z",
+    "updated_at": "2026-01-10T23:17:00Z"
+  },
+  {
+    "id": "bb2b0804-13c8-56d4-aa1f-bfd1d06239f5",
+    "tx_id": "bb2b0804-13c8-56d4-aa1f-bfd1d06239f5",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0015_4540215f",
+      "amount": "74.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0001_9e3779b1",
+            "PID_U0015_4540215f"
+          ],
+          "amount": "74.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-09T22:59:00Z",
+    "updated_at": "2026-01-09T23:04:00Z"
+  },
+  {
+    "id": "9969beb9-b6d4-520d-b6a6-b6a202776cdd",
+    "tx_id": "9969beb9-b6d4-520d-b6a6-b6a202776cdd",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0002_3c6ef362",
+    "payload": {
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0016_e3779b10",
+      "amount": "77.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0002_3c6ef362",
+            "PID_U0016_e3779b10"
+          ],
+          "amount": "77.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-08T21:46:00Z",
+    "updated_at": "2026-01-08T21:51:00Z"
+  },
+  {
+    "id": "0cb59f2a-e5ea-5db7-9d5e-ffb7a654e7d9",
+    "tx_id": "0cb59f2a-e5ea-5db7-9d5e-ffb7a654e7d9",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0017_81af14c1",
+      "amount": "565.74",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0003_daa66d13",
+            "PID_U0017_81af14c1"
+          ],
+          "amount": "565.74"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2026-01-07T20:33:00Z",
+    "updated_at": "2026-01-07T20:35:00Z"
+  },
+  {
+    "id": "ac1994ab-a746-5e1a-ad1c-99ddd629f400",
+    "tx_id": "ac1994ab-a746-5e1a-ad1c-99ddd629f400",
+    "idempotency_key": "idem_payment_0100",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0018_1fe68e72",
+      "amount": "83.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0004_78dde6c4",
+            "PID_U0018_1fe68e72"
+          ],
+          "amount": "83.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0100",
+        "fingerprint": "fp_payment_0100"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-06T19:20:00Z",
+    "updated_at": "2026-01-06T19:25:00Z"
+  },
+  {
+    "id": "37006821-5d60-5af9-a349-8d385e91bcf7",
+    "tx_id": "37006821-5d60-5af9-a349-8d385e91bcf7",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0005_17156075",
+    "payload": {
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0019_be1e0823",
+      "amount": "86.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0005_17156075",
+            "PID_U0019_be1e0823"
+          ],
+          "amount": "86.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-05T18:07:00Z",
+    "updated_at": "2026-01-05T18:12:00Z"
+  },
+  {
+    "id": "314b2da7-03f6-5185-98ea-648b7e23c147",
+    "tx_id": "314b2da7-03f6-5185-98ea-648b7e23c147",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0006_b54cda26",
+    "payload": {
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0020_5c5581d4",
+      "amount": "285.50",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0006_b54cda26",
+            "PID_U0020_5c5581d4"
+          ],
+          "amount": "285.50"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-04T17:54:00Z",
+    "updated_at": "2026-01-04T17:59:00Z"
+  },
+  {
+    "id": "b044e620-9a57-5e1e-a13c-c347bf9f1149",
+    "tx_id": "b044e620-9a57-5e1e-a13c-c347bf9f1149",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0007_538453d7",
+    "payload": {
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0021_fa8cfb85",
+      "amount": "92.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0007_538453d7",
+            "PID_U0021_fa8cfb85"
+          ],
+          "amount": "92.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-03T16:41:00Z",
+    "updated_at": "2026-01-03T16:46:00Z"
+  },
+  {
+    "id": "0c12ab41-68fe-5acb-a22d-0f67b7d19d07",
+    "tx_id": "0c12ab41-68fe-5acb-a22d-0f67b7d19d07",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0008_f1bbcd88",
+    "payload": {
+      "from": "PID_U0008_f1bbcd88",
+      "to": "PID_U0022_98c47536",
+      "amount": "95.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0008_f1bbcd88",
+            "PID_U0022_98c47536"
+          ],
+          "amount": "95.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-02T15:28:00Z",
+    "updated_at": "2026-01-02T15:33:00Z"
+  },
+  {
+    "id": "ae0a3c5a-6d3d-5665-b33b-832a6ed7a9f1",
+    "tx_id": "ae0a3c5a-6d3d-5665-b33b-832a6ed7a9f1",
+    "idempotency_key": "idem_payment_0105",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0009_8ff34739",
+    "payload": {
+      "from": "PID_U0009_8ff34739",
+      "to": "PID_U0023_36fbeee7",
+      "amount": "550.75",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0009_8ff34739",
+            "PID_U0023_36fbeee7"
+          ],
+          "amount": "550.75"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0105",
+        "fingerprint": "fp_payment_0105"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-01T14:15:00Z",
+    "updated_at": "2026-01-01T14:20:00Z"
+  },
+  {
+    "id": "b000d64f-96fc-51a3-991a-436880e1440d",
+    "tx_id": "b000d64f-96fc-51a3-991a-436880e1440d",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0010_2e2ac0ea",
+    "payload": {
+      "from": "PID_U0010_2e2ac0ea",
+      "to": "PID_U0024_d5336898",
+      "amount": "101.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0010_2e2ac0ea",
+            "PID_U0024_d5336898"
+          ],
+          "amount": "101.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-31T13:02:00Z",
+    "updated_at": "2025-12-31T13:07:00Z"
+  },
+  {
+    "id": "d18bfbd8-9a50-5ca4-be5d-b688a007653c",
+    "tx_id": "d18bfbd8-9a50-5ca4-be5d-b688a007653c",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0011_cc623a9b",
+    "payload": {
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0025_736ae249",
+      "amount": "104.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0011_cc623a9b",
+            "PID_U0025_736ae249"
+          ],
+          "amount": "104.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-30T12:49:00Z",
+    "updated_at": "2025-12-30T12:54:00Z"
+  },
+  {
+    "id": "0c59f85b-7f0e-5afd-b030-1871f8cb04b0",
+    "tx_id": "0c59f85b-7f0e-5afd-b030-1871f8cb04b0",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0012_6a99b44c",
+    "payload": {
+      "from": "PID_U0012_6a99b44c",
+      "to": "PID_U0026_11a25bfa",
+      "amount": "1341.18",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0012_6a99b44c",
+            "PID_U0026_11a25bfa"
+          ],
+          "amount": "1341.18"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-29T11:36:00Z",
+    "updated_at": "2025-12-29T11:41:00Z"
+  },
+  {
+    "id": "d1df4dd8-52db-5665-b296-7311ca6023fb",
+    "tx_id": "d1df4dd8-52db-5665-b296-7311ca6023fb",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0013_08d12dfd",
+    "payload": {
+      "from": "PID_U0013_08d12dfd",
+      "to": "PID_U0027_afd9d5ab",
+      "amount": "110.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0013_08d12dfd",
+            "PID_U0027_afd9d5ab"
+          ],
+          "amount": "110.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-28T10:23:00Z",
+    "updated_at": "2025-12-28T10:28:00Z"
+  },
+  {
+    "id": "0c861def-355c-5bda-ba87-2ff0a32d9431",
+    "tx_id": "0c861def-355c-5bda-ba87-2ff0a32d9431",
+    "idempotency_key": "idem_payment_0110",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0014_a708a7ae",
+    "payload": {
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0028_4e114f5c",
+      "amount": "113.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0014_a708a7ae",
+            "PID_U0028_4e114f5c"
+          ],
+          "amount": "113.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0110",
+        "fingerprint": "fp_payment_0110"
+      }
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-12-27T09:10:00Z",
+    "updated_at": "2025-12-27T09:12:00Z"
+  },
+  {
+    "id": "5255ce67-7d67-5d83-bd8e-7ef7e6c60c26",
+    "tx_id": "5255ce67-7d67-5d83-bd8e-7ef7e6c60c26",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0015_4540215f",
+    "payload": {
+      "from": "PID_U0015_4540215f",
+      "to": "PID_U0029_ec48c90d",
+      "amount": "326.34",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0015_4540215f",
+            "PID_U0029_ec48c90d"
+          ],
+          "amount": "326.34"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-26T08:57:00Z",
+    "updated_at": "2025-12-26T09:02:00Z"
+  },
+  {
+    "id": "1d61f596-2e5f-5223-875c-7866636fef9d",
+    "tx_id": "1d61f596-2e5f-5223-875c-7866636fef9d",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0016_e3779b10",
+    "payload": {
+      "from": "PID_U0016_e3779b10",
+      "to": "PID_U0030_8a8042be",
+      "amount": "8.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0016_e3779b10",
+            "PID_U0030_8a8042be"
+          ],
+          "amount": "8.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-25T07:44:00Z",
+    "updated_at": "2025-12-25T07:49:00Z"
+  },
+  {
+    "id": "f4efc88e-c55b-58f4-bcd4-0ffedf33a74e",
+    "tx_id": "f4efc88e-c55b-58f4-bcd4-0ffedf33a74e",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0017_81af14c1",
+    "payload": {
+      "from": "PID_U0017_81af14c1",
+      "to": "PID_U0031_28b7bc6f",
+      "amount": "11.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0017_81af14c1",
+            "PID_U0031_28b7bc6f"
+          ],
+          "amount": "11.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-24T06:31:00Z",
+    "updated_at": "2025-12-24T06:36:00Z"
+  },
+  {
+    "id": "b5b50e9c-440e-5fd2-978c-2951f35d8411",
+    "tx_id": "b5b50e9c-440e-5fd2-978c-2951f35d8411",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0018_1fe68e72",
+    "payload": {
+      "from": "PID_U0018_1fe68e72",
+      "to": "PID_U0032_c6ef3620",
+      "amount": "1376.07",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0018_1fe68e72",
+            "PID_U0032_c6ef3620"
+          ],
+          "amount": "1376.07"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-23T05:18:00Z",
+    "updated_at": "2025-12-23T05:23:00Z"
+  },
+  {
+    "id": "eecb96f2-c0ec-52e1-8815-3910fd72189e",
+    "tx_id": "eecb96f2-c0ec-52e1-8815-3910fd72189e",
+    "idempotency_key": "idem_payment_0115",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0019_be1e0823",
+    "payload": {
+      "from": "PID_U0019_be1e0823",
+      "to": "PID_U0033_6526afd1",
+      "amount": "17.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0019_be1e0823",
+            "PID_U0033_6526afd1"
+          ],
+          "amount": "17.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0115",
+        "fingerprint": "fp_payment_0115"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-22T04:05:00Z",
+    "updated_at": "2025-12-22T04:10:00Z"
+  },
+  {
+    "id": "ce27e536-d48a-54dc-83a8-b8e088c7c055",
+    "tx_id": "ce27e536-d48a-54dc-83a8-b8e088c7c055",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0020_5c5581d4",
+    "payload": {
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0034_035e2982",
+      "amount": "20.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0020_5c5581d4",
+            "PID_U0034_035e2982"
+          ],
+          "amount": "20.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-21T03:52:00Z",
+    "updated_at": "2025-12-21T03:57:00Z"
+  },
+  {
+    "id": "bb401799-ceac-564a-b49d-3cf6d6ea6ba9",
+    "tx_id": "bb401799-ceac-564a-b49d-3cf6d6ea6ba9",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0021_fa8cfb85",
+    "payload": {
+      "from": "PID_U0021_fa8cfb85",
+      "to": "PID_U0035_a195a333",
+      "amount": "1447.16",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0021_fa8cfb85",
+            "PID_U0035_a195a333"
+          ],
+          "amount": "1447.16"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-20T02:39:00Z",
+    "updated_at": "2025-12-20T02:44:00Z"
+  },
+  {
+    "id": "96aa41b4-5f69-57fe-b850-b3132dd5a481",
+    "tx_id": "96aa41b4-5f69-57fe-b850-b3132dd5a481",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0022_98c47536",
+    "payload": {
+      "from": "PID_U0022_98c47536",
+      "to": "PID_U0036_3fcd1ce4",
+      "amount": "26.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0022_98c47536",
+            "PID_U0036_3fcd1ce4"
+          ],
+          "amount": "26.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-19T01:26:00Z",
+    "updated_at": "2025-12-19T01:31:00Z"
+  },
+  {
+    "id": "80438d15-3b6c-5037-a6c1-a1c3a28e933c",
+    "tx_id": "80438d15-3b6c-5037-a6c1-a1c3a28e933c",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0023_36fbeee7",
+    "payload": {
+      "from": "PID_U0023_36fbeee7",
+      "to": "PID_U0037_de049695",
+      "amount": "29.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0023_36fbeee7",
+            "PID_U0037_de049695"
+          ],
+          "amount": "29.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-18T00:13:00Z",
+    "updated_at": "2025-12-18T00:18:00Z"
+  },
+  {
+    "id": "6114d577-a326-53ed-bbea-55fb2cfe3f37",
+    "tx_id": "6114d577-a326-53ed-bbea-55fb2cfe3f37",
+    "idempotency_key": "idem_payment_0120",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0024_d5336898",
+    "payload": {
+      "from": "PID_U0024_d5336898",
+      "to": "PID_U0038_7c3c1046",
+      "amount": "1317.31",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0024_d5336898",
+            "PID_U0038_7c3c1046"
+          ],
+          "amount": "1317.31"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0120",
+        "fingerprint": "fp_payment_0120"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-18T00:00:00Z",
+    "updated_at": "2025-12-18T00:05:00Z"
+  },
+  {
+    "id": "ec156cb1-57c5-55ae-b77e-41c50a4075f2",
+    "tx_id": "ec156cb1-57c5-55ae-b77e-41c50a4075f2",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0025_736ae249",
+    "payload": {
+      "from": "PID_U0025_736ae249",
+      "to": "PID_U0039_1a7389f7",
+      "amount": "35.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0025_736ae249",
+            "PID_U0039_1a7389f7"
+          ],
+          "amount": "35.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-12-16T22:47:00Z",
+    "updated_at": "2025-12-16T22:49:00Z"
+  },
+  {
+    "id": "35b0cf8e-567d-5692-a941-2a236dfede3f",
+    "tx_id": "35b0cf8e-567d-5692-a941-2a236dfede3f",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0026_11a25bfa",
+    "payload": {
+      "from": "PID_U0026_11a25bfa",
+      "to": "PID_U0040_b8ab03a8",
+      "amount": "38.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0026_11a25bfa",
+            "PID_U0040_b8ab03a8"
+          ],
+          "amount": "38.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-15T21:34:00Z",
+    "updated_at": "2025-12-15T21:39:00Z"
+  },
+  {
+    "id": "74865a8d-6bfd-5aa6-b1e4-bcc49531a2c1",
+    "tx_id": "74865a8d-6bfd-5aa6-b1e4-bcc49531a2c1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0027_afd9d5ab",
+    "payload": {
+      "from": "PID_U0027_afd9d5ab",
+      "to": "PID_U0041_56e27d59",
+      "amount": "508.79",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0027_afd9d5ab",
+            "PID_U0041_56e27d59"
+          ],
+          "amount": "508.79"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-14T20:21:00Z",
+    "updated_at": "2025-12-14T20:26:00Z"
+  },
+  {
+    "id": "ef385ca0-6c79-5bad-9064-2732722f3b70",
+    "tx_id": "ef385ca0-6c79-5bad-9064-2732722f3b70",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0028_4e114f5c",
+    "payload": {
+      "from": "PID_U0028_4e114f5c",
+      "to": "PID_U0042_f519f70a",
+      "amount": "44.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0028_4e114f5c",
+            "PID_U0042_f519f70a"
+          ],
+          "amount": "44.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-13T19:08:00Z",
+    "updated_at": "2025-12-13T19:13:00Z"
+  },
+  {
+    "id": "711f2d19-869a-5c1f-a40c-f545012459bd",
+    "tx_id": "711f2d19-869a-5c1f-a40c-f545012459bd",
+    "idempotency_key": "idem_payment_0125",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0029_ec48c90d",
+    "payload": {
+      "from": "PID_U0029_ec48c90d",
+      "to": "PID_U0043_935170bb",
+      "amount": "47.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0029_ec48c90d",
+            "PID_U0043_935170bb"
+          ],
+          "amount": "47.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0125",
+        "fingerprint": "fp_payment_0125"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-12T18:55:00Z",
+    "updated_at": "2025-12-12T19:00:00Z"
+  },
+  {
+    "id": "d205fe4b-6048-52cc-b537-59a87c939d40",
+    "tx_id": "d205fe4b-6048-52cc-b537-59a87c939d40",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0030_8a8042be",
+    "payload": {
+      "from": "PID_U0030_8a8042be",
+      "to": "PID_U0044_3188ea6c",
+      "amount": "219.84",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0030_8a8042be",
+            "PID_U0044_3188ea6c"
+          ],
+          "amount": "219.84"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-11T17:42:00Z",
+    "updated_at": "2025-12-11T17:47:00Z"
+  },
+  {
+    "id": "1b150f0e-808f-582e-9e2f-32958107e08c",
+    "tx_id": "1b150f0e-808f-582e-9e2f-32958107e08c",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0031_28b7bc6f",
+    "payload": {
+      "from": "PID_U0031_28b7bc6f",
+      "to": "PID_U0045_cfc0641d",
+      "amount": "53.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0031_28b7bc6f",
+            "PID_U0045_cfc0641d"
+          ],
+          "amount": "53.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-10T16:29:00Z",
+    "updated_at": "2025-12-10T16:34:00Z"
+  },
+  {
+    "id": "311ee02e-52f3-5a60-acbf-fa67ff7ef783",
+    "tx_id": "311ee02e-52f3-5a60-acbf-fa67ff7ef783",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0032_c6ef3620",
+    "payload": {
+      "from": "PID_U0032_c6ef3620",
+      "to": "PID_U0046_6df7ddce",
+      "amount": "56.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0032_c6ef3620",
+            "PID_U0046_6df7ddce"
+          ],
+          "amount": "56.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-09T15:16:00Z",
+    "updated_at": "2025-12-09T15:21:00Z"
+  },
+  {
+    "id": "1eb97380-1ce7-5736-8e78-6381007fb3f4",
+    "tx_id": "1eb97380-1ce7-5736-8e78-6381007fb3f4",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0033_6526afd1",
+    "payload": {
+      "from": "PID_U0033_6526afd1",
+      "to": "PID_U0047_0c2f577f",
+      "amount": "501.67",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0033_6526afd1",
+            "PID_U0047_0c2f577f"
+          ],
+          "amount": "501.67"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-08T14:03:00Z",
+    "updated_at": "2025-12-08T14:08:00Z"
+  },
+  {
+    "id": "16df07be-83aa-5ad7-9e98-d6715f97fe2e",
+    "tx_id": "16df07be-83aa-5ad7-9e98-d6715f97fe2e",
+    "idempotency_key": "idem_payment_0130",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0034_035e2982",
+    "payload": {
+      "from": "PID_U0034_035e2982",
+      "to": "PID_U0048_aa66d130",
+      "amount": "62.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0034_035e2982",
+            "PID_U0048_aa66d130"
+          ],
+          "amount": "62.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0130",
+        "fingerprint": "fp_payment_0130"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-07T13:50:00Z",
+    "updated_at": "2025-12-07T13:55:00Z"
+  },
+  {
+    "id": "d2e91988-8a7a-5657-9b01-7f47f3925ce1",
+    "tx_id": "d2e91988-8a7a-5657-9b01-7f47f3925ce1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0035_a195a333",
+    "payload": {
+      "from": "PID_U0035_a195a333",
+      "to": "PID_U0049_489e4ae1",
+      "amount": "65.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0035_a195a333",
+            "PID_U0049_489e4ae1"
+          ],
+          "amount": "65.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-06T12:37:00Z",
+    "updated_at": "2025-12-06T12:42:00Z"
+  },
+  {
+    "id": "bee0ce57-cd42-57ad-aa7a-32599f4296ab",
+    "tx_id": "bee0ce57-cd42-57ad-aa7a-32599f4296ab",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0036_3fcd1ce4",
+    "payload": {
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0050_e6d5c492",
+      "amount": "267.46",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0036_3fcd1ce4",
+            "PID_U0050_e6d5c492"
+          ],
+          "amount": "267.46"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-12-05T11:24:00Z",
+    "updated_at": "2025-12-05T11:26:00Z"
+  },
+  {
+    "id": "ca37ec64-b9e1-59ed-a9cb-ea980b8eaa61",
+    "tx_id": "ca37ec64-b9e1-59ed-a9cb-ea980b8eaa61",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0037_de049695",
+    "payload": {
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0051_850d3e43",
+      "amount": "71.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0037_de049695",
+            "PID_U0051_850d3e43"
+          ],
+          "amount": "71.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-04T10:11:00Z",
+    "updated_at": "2025-12-04T10:16:00Z"
+  },
+  {
+    "id": "37bca1d9-cc98-5732-9f03-703d3efd47d4",
+    "tx_id": "37bca1d9-cc98-5732-9f03-703d3efd47d4",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0038_7c3c1046",
+    "payload": {
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0052_2344b7f4",
+      "amount": "74.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0038_7c3c1046",
+            "PID_U0052_2344b7f4"
+          ],
+          "amount": "74.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-03T09:58:00Z",
+    "updated_at": "2025-12-03T10:03:00Z"
+  },
+  {
+    "id": "e4ccd621-42a1-5027-8b2a-b2e79be90939",
+    "tx_id": "e4ccd621-42a1-5027-8b2a-b2e79be90939",
+    "idempotency_key": "idem_payment_0135",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0039_1a7389f7",
+    "payload": {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0053_c17c31a5",
+      "amount": "1476.50",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0039_1a7389f7",
+            "PID_U0053_c17c31a5"
+          ],
+          "amount": "1476.50"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0135",
+        "fingerprint": "fp_payment_0135"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-02T08:45:00Z",
+    "updated_at": "2025-12-02T08:50:00Z"
+  },
+  {
+    "id": "d3911422-544c-5f60-b1d5-aa1d6a3d273e",
+    "tx_id": "d3911422-544c-5f60-b1d5-aa1d6a3d273e",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0040_b8ab03a8",
+    "payload": {
+      "from": "PID_U0040_b8ab03a8",
+      "to": "PID_U0054_5fb3ab56",
+      "amount": "80.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0040_b8ab03a8",
+            "PID_U0054_5fb3ab56"
+          ],
+          "amount": "80.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-01T07:32:00Z",
+    "updated_at": "2025-12-01T07:37:00Z"
+  },
+  {
+    "id": "6e89b94a-c7f2-5221-a8b4-a8e3d70b59f9",
+    "tx_id": "6e89b94a-c7f2-5221-a8b4-a8e3d70b59f9",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0041_56e27d59",
+    "payload": {
+      "from": "PID_U0041_56e27d59",
+      "to": "PID_U0055_fdeb2507",
+      "amount": "83.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0041_56e27d59",
+            "PID_U0055_fdeb2507"
+          ],
+          "amount": "83.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-30T06:19:00Z",
+    "updated_at": "2025-11-30T06:24:00Z"
+  },
+  {
+    "id": "27669d44-0834-509b-8b84-76c2ebda75d3",
+    "tx_id": "27669d44-0834-509b-8b84-76c2ebda75d3",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0042_f519f70a",
+    "payload": {
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0056_9c229eb8",
+      "amount": "269.57",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0042_f519f70a",
+            "PID_U0056_9c229eb8"
+          ],
+          "amount": "269.57"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-29T05:06:00Z",
+    "updated_at": "2025-11-29T05:11:00Z"
+  },
+  {
+    "id": "7bb46cb0-51fc-5755-8736-f01ec5ec404b",
+    "tx_id": "7bb46cb0-51fc-5755-8736-f01ec5ec404b",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0043_935170bb",
+    "payload": {
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0057_3a5a1869",
+      "amount": "89.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0043_935170bb",
+            "PID_U0057_3a5a1869"
+          ],
+          "amount": "89.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-28T04:53:00Z",
+    "updated_at": "2025-11-28T04:58:00Z"
+  },
+  {
+    "id": "ae52db29-7353-5484-9c48-c5c72de0549c",
+    "tx_id": "ae52db29-7353-5484-9c48-c5c72de0549c",
+    "idempotency_key": "idem_payment_0140",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0044_3188ea6c",
+    "payload": {
+      "from": "PID_U0044_3188ea6c",
+      "to": "PID_U0058_d891921a",
+      "amount": "92.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0044_3188ea6c",
+            "PID_U0058_d891921a"
+          ],
+          "amount": "92.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0140",
+        "fingerprint": "fp_payment_0140"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-27T03:40:00Z",
+    "updated_at": "2025-11-27T03:45:00Z"
+  },
+  {
+    "id": "98ab7d36-7443-5f0b-ac92-d81c2e33711e",
+    "tx_id": "98ab7d36-7443-5f0b-ac92-d81c2e33711e",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0045_cfc0641d",
+    "payload": {
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0059_76c90bcb",
+      "amount": "1290.98",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0045_cfc0641d",
+            "PID_U0059_76c90bcb"
+          ],
+          "amount": "1290.98"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-26T02:27:00Z",
+    "updated_at": "2025-11-26T02:32:00Z"
+  },
+  {
+    "id": "76715260-f776-5bf4-8808-f9eb92e3daed",
+    "tx_id": "76715260-f776-5bf4-8808-f9eb92e3daed",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0046_6df7ddce",
+    "payload": {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0060_1500857c",
+      "amount": "98.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0046_6df7ddce",
+            "PID_U0060_1500857c"
+          ],
+          "amount": "98.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-25T01:14:00Z",
+    "updated_at": "2025-11-25T01:19:00Z"
+  },
+  {
+    "id": "16b56113-f43e-5d82-8450-dc8db547d496",
+    "tx_id": "16b56113-f43e-5d82-8450-dc8db547d496",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0047_0c2f577f",
+    "payload": {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0061_b337ff2d",
+      "amount": "101.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0047_0c2f577f",
+            "PID_U0061_b337ff2d"
+          ],
+          "amount": "101.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-11-24T00:01:00Z",
+    "updated_at": "2025-11-24T00:03:00Z"
+  },
+  {
+    "id": "50bae0d1-b42a-55b8-8e2b-e3558a31754a",
+    "tx_id": "50bae0d1-b42a-55b8-8e2b-e3558a31754a",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0048_aa66d130",
+    "payload": {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0062_516f78de",
+      "amount": "1077.69",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0048_aa66d130",
+            "PID_U0062_516f78de"
+          ],
+          "amount": "1077.69"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-23T23:48:00Z",
+    "updated_at": "2025-11-23T23:53:00Z"
+  },
+  {
+    "id": "ac552f21-a380-5a99-a37c-1bc6cdfb17be",
+    "tx_id": "ac552f21-a380-5a99-a37c-1bc6cdfb17be",
+    "idempotency_key": "idem_payment_0145",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0049_489e4ae1",
+    "payload": {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0063_efa6f28f",
+      "amount": "107.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0049_489e4ae1",
+            "PID_U0063_efa6f28f"
+          ],
+          "amount": "107.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0145",
+        "fingerprint": "fp_payment_0145"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-22T22:35:00Z",
+    "updated_at": "2025-11-22T22:40:00Z"
+  },
+  {
+    "id": "88727011-36ce-53d7-8cae-b413e30c09dc",
+    "tx_id": "88727011-36ce-53d7-8cae-b413e30c09dc",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0050_e6d5c492",
+    "payload": {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0064_8dde6c40",
+      "amount": "110.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0050_e6d5c492",
+            "PID_U0064_8dde6c40"
+          ],
+          "amount": "110.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-21T21:22:00Z",
+    "updated_at": "2025-11-21T21:27:00Z"
+  },
+  {
+    "id": "264de0d3-e902-579b-8732-7a5c80fa40be",
+    "tx_id": "264de0d3-e902-579b-8732-7a5c80fa40be",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0051_850d3e43",
+    "payload": {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0065_2c15e5f1",
+      "amount": "50.63",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0051_850d3e43",
+            "PID_U0065_2c15e5f1"
+          ],
+          "amount": "50.63"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-20T20:09:00Z",
+    "updated_at": "2025-11-20T20:14:00Z"
+  },
+  {
+    "id": "5877da6e-4b43-5dc9-ab25-f28ba2d2a4be",
+    "tx_id": "5877da6e-4b43-5dc9-ab25-f28ba2d2a4be",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0052_2344b7f4",
+    "payload": {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0066_ca4d5fa2",
+      "amount": "5.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0052_2344b7f4",
+            "PID_U0066_ca4d5fa2"
+          ],
+          "amount": "5.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-19T19:56:00Z",
+    "updated_at": "2025-11-19T20:01:00Z"
+  },
+  {
+    "id": "e94faa53-4eb0-5a17-9206-fd24186390e7",
+    "tx_id": "e94faa53-4eb0-5a17-9206-fd24186390e7",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0053_c17c31a5",
+    "payload": {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0067_6884d953",
+      "amount": "8.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0053_c17c31a5",
+            "PID_U0067_6884d953"
+          ],
+          "amount": "8.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-18T18:43:00Z",
+    "updated_at": "2025-11-18T18:48:00Z"
+  },
+  {
+    "id": "d372a288-9448-5f5d-9948-f9399b7756bc",
+    "tx_id": "d372a288-9448-5f5d-9948-f9399b7756bc",
+    "idempotency_key": "idem_payment_0150",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0054_5fb3ab56",
+    "payload": {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0068_06bc5304",
+      "amount": "485.56",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0054_5fb3ab56",
+            "PID_U0068_06bc5304"
+          ],
+          "amount": "485.56"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0150",
+        "fingerprint": "fp_payment_0150"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-17T17:30:00Z",
+    "updated_at": "2025-11-17T17:35:00Z"
+  },
+  {
+    "id": "d68ed064-671b-5203-af94-9fd92c205eb7",
+    "tx_id": "d68ed064-671b-5203-af94-9fd92c205eb7",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0055_fdeb2507",
+    "payload": {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0069_a4f3ccb5",
+      "amount": "14.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0055_fdeb2507",
+            "PID_U0069_a4f3ccb5"
+          ],
+          "amount": "14.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-16T16:17:00Z",
+    "updated_at": "2025-11-16T16:22:00Z"
+  },
+  {
+    "id": "e000e1fe-c630-5c45-b447-6d74dc3b83c5",
+    "tx_id": "e000e1fe-c630-5c45-b447-6d74dc3b83c5",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0056_9c229eb8",
+    "payload": {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0070_432b4666",
+      "amount": "17.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0056_9c229eb8",
+            "PID_U0070_432b4666"
+          ],
+          "amount": "17.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-15T15:04:00Z",
+    "updated_at": "2025-11-15T15:09:00Z"
+  },
+  {
+    "id": "8b51012d-de04-5d6e-865b-fd9683443a83",
+    "tx_id": "8b51012d-de04-5d6e-865b-fd9683443a83",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0057_3a5a1869",
+    "payload": {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0071_e162c017",
+      "amount": "1293.76",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0057_3a5a1869",
+            "PID_U0071_e162c017"
+          ],
+          "amount": "1293.76"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-14T14:51:00Z",
+    "updated_at": "2025-11-14T14:56:00Z"
+  },
+  {
+    "id": "11748f14-757c-56a3-b1f3-0947c1e220c0",
+    "tx_id": "11748f14-757c-56a3-b1f3-0947c1e220c0",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0058_d891921a",
+    "payload": {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0072_7f9a39c8",
+      "amount": "23.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0058_d891921a",
+            "PID_U0072_7f9a39c8"
+          ],
+          "amount": "23.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-11-13T13:38:00Z",
+    "updated_at": "2025-11-13T13:40:00Z"
+  },
+  {
+    "id": "8b68fa30-dfee-5a8e-ab2f-0b12e8fbb720",
+    "tx_id": "8b68fa30-dfee-5a8e-ab2f-0b12e8fbb720",
+    "idempotency_key": "idem_payment_0155",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0059_76c90bcb",
+    "payload": {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0073_1dd1b379",
+      "amount": "26.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0059_76c90bcb",
+            "PID_U0073_1dd1b379"
+          ],
+          "amount": "26.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0155",
+        "fingerprint": "fp_payment_0155"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-12T12:25:00Z",
+    "updated_at": "2025-11-12T12:30:00Z"
+  },
+  {
+    "id": "63969a92-d4ef-52db-85dd-8001b9286ad1",
+    "tx_id": "63969a92-d4ef-52db-85dd-8001b9286ad1",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0060_1500857c",
+    "payload": {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0074_bc092d2a",
+      "amount": "1046.81",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0060_1500857c",
+            "PID_U0074_bc092d2a"
+          ],
+          "amount": "1046.81"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-11T11:12:00Z",
+    "updated_at": "2025-11-11T11:17:00Z"
+  },
+  {
+    "id": "69f4fdef-9b81-5d4a-bcba-c65735e4d9ca",
+    "tx_id": "69f4fdef-9b81-5d4a-bcba-c65735e4d9ca",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0061_b337ff2d",
+    "payload": {
+      "from": "PID_U0061_b337ff2d",
+      "to": "PID_U0075_5a40a6db",
+      "amount": "32.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0061_b337ff2d",
+            "PID_U0075_5a40a6db"
+          ],
+          "amount": "32.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-10T10:59:00Z",
+    "updated_at": "2025-11-10T11:04:00Z"
+  },
+  {
+    "id": "e4f99d50-9cdc-5da7-b38d-f799b4deee34",
+    "tx_id": "e4f99d50-9cdc-5da7-b38d-f799b4deee34",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0062_516f78de",
+    "payload": {
+      "from": "PID_U0062_516f78de",
+      "to": "PID_U0076_f878208c",
+      "amount": "35.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0062_516f78de",
+            "PID_U0076_f878208c"
+          ],
+          "amount": "35.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-09T09:46:00Z",
+    "updated_at": "2025-11-09T09:51:00Z"
+  },
+  {
+    "id": "09b850f4-7f30-5d9c-b63e-780a9ae9e332",
+    "tx_id": "09b850f4-7f30-5d9c-b63e-780a9ae9e332",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0063_efa6f28f",
+    "payload": {
+      "from": "PID_U0063_efa6f28f",
+      "to": "PID_U0077_96af9a3d",
+      "amount": "494.09",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0063_efa6f28f",
+            "PID_U0077_96af9a3d"
+          ],
+          "amount": "494.09"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-08T08:33:00Z",
+    "updated_at": "2025-11-08T08:38:00Z"
+  },
+  {
+    "id": "599c83b9-ce11-5c54-a178-8678d6fe02db",
+    "tx_id": "599c83b9-ce11-5c54-a178-8678d6fe02db",
+    "idempotency_key": "idem_payment_0160",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0064_8dde6c40",
+    "payload": {
+      "from": "PID_U0064_8dde6c40",
+      "to": "PID_U0078_34e713ee",
+      "amount": "41.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0064_8dde6c40",
+            "PID_U0078_34e713ee"
+          ],
+          "amount": "41.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0160",
+        "fingerprint": "fp_payment_0160"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-07T07:20:00Z",
+    "updated_at": "2025-11-07T07:25:00Z"
+  },
+  {
+    "id": "c54b9a34-ebaa-50e3-b9f9-5121a6388afd",
+    "tx_id": "c54b9a34-ebaa-50e3-b9f9-5121a6388afd",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0065_2c15e5f1",
+    "payload": {
+      "from": "PID_U0065_2c15e5f1",
+      "to": "PID_U0079_d31e8d9f",
+      "amount": "44.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0065_2c15e5f1",
+            "PID_U0079_d31e8d9f"
+          ],
+          "amount": "44.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-06T06:07:00Z",
+    "updated_at": "2025-11-06T06:12:00Z"
+  },
+  {
+    "id": "afc04c7c-ee18-5359-86d9-e71c5d1bc6fc",
+    "tx_id": "afc04c7c-ee18-5359-86d9-e71c5d1bc6fc",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0066_ca4d5fa2",
+    "payload": {
+      "from": "PID_U0066_ca4d5fa2",
+      "to": "PID_U0080_71560750",
+      "amount": "943.25",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0066_ca4d5fa2",
+            "PID_U0080_71560750"
+          ],
+          "amount": "943.25"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-05T05:54:00Z",
+    "updated_at": "2025-11-05T05:59:00Z"
+  },
+  {
+    "id": "7a6c4dbd-fc3e-5b0b-99cc-42729d5407fb",
+    "tx_id": "7a6c4dbd-fc3e-5b0b-99cc-42729d5407fb",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0067_6884d953",
+    "payload": {
+      "from": "PID_U0067_6884d953",
+      "to": "PID_U0081_0f8d8101",
+      "amount": "50.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0067_6884d953",
+            "PID_U0081_0f8d8101"
+          ],
+          "amount": "50.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-04T04:41:00Z",
+    "updated_at": "2025-11-04T04:46:00Z"
+  },
+  {
+    "id": "c2b4da6d-9975-5e91-b7d2-f90b7f30864d",
+    "tx_id": "c2b4da6d-9975-5e91-b7d2-f90b7f30864d",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0068_06bc5304",
+    "payload": {
+      "from": "PID_U0068_06bc5304",
+      "to": "PID_U0082_adc4fab2",
+      "amount": "53.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0068_06bc5304",
+            "PID_U0082_adc4fab2"
+          ],
+          "amount": "53.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-03T03:28:00Z",
+    "updated_at": "2025-11-03T03:33:00Z"
+  },
+  {
+    "id": "67186c56-b3c1-5ad5-a8d0-202f0a94311e",
+    "tx_id": "67186c56-b3c1-5ad5-a8d0-202f0a94311e",
+    "idempotency_key": "idem_payment_0165",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0069_a4f3ccb5",
+    "payload": {
+      "from": "PID_U0069_a4f3ccb5",
+      "to": "PID_U0083_4bfc7463",
+      "amount": "899.18",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0069_a4f3ccb5",
+            "PID_U0083_4bfc7463"
+          ],
+          "amount": "899.18"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0165",
+        "fingerprint": "fp_payment_0165"
+      }
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-11-02T02:15:00Z",
+    "updated_at": "2025-11-02T02:17:00Z"
+  },
+  {
+    "id": "3d02736e-11b9-533c-8cdc-3e29024ad033",
+    "tx_id": "3d02736e-11b9-533c-8cdc-3e29024ad033",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0070_432b4666",
+    "payload": {
+      "from": "PID_U0070_432b4666",
+      "to": "PID_U0084_ea33ee14",
+      "amount": "59.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0070_432b4666",
+            "PID_U0084_ea33ee14"
+          ],
+          "amount": "59.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-01T01:02:00Z",
+    "updated_at": "2025-11-01T01:07:00Z"
+  },
+  {
+    "id": "df9d4992-1979-5991-99b7-ae02fe5a21cb",
+    "tx_id": "df9d4992-1979-5991-99b7-ae02fe5a21cb",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0071_e162c017",
+    "payload": {
+      "from": "PID_U0071_e162c017",
+      "to": "PID_U0085_886b67c5",
+      "amount": "62.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0071_e162c017",
+            "PID_U0085_886b67c5"
+          ],
+          "amount": "62.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-31T00:49:00Z",
+    "updated_at": "2025-10-31T00:54:00Z"
+  },
+  {
+    "id": "a49a2291-1d37-5a8d-b3ef-6a13da01dac3",
+    "tx_id": "a49a2291-1d37-5a8d-b3ef-6a13da01dac3",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0072_7f9a39c8",
+    "payload": {
+      "from": "PID_U0072_7f9a39c8",
+      "to": "PID_U0086_26a2e176",
+      "amount": "1378.67",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0072_7f9a39c8",
+            "PID_U0086_26a2e176"
+          ],
+          "amount": "1378.67"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-30T23:36:00Z",
+    "updated_at": "2025-10-30T23:41:00Z"
+  },
+  {
+    "id": "57d2a0c2-5afb-506f-ae08-c197bd147b2a",
+    "tx_id": "57d2a0c2-5afb-506f-ae08-c197bd147b2a",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0073_1dd1b379",
+    "payload": {
+      "from": "PID_U0073_1dd1b379",
+      "to": "PID_U0087_c4da5b27",
+      "amount": "68.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0073_1dd1b379",
+            "PID_U0087_c4da5b27"
+          ],
+          "amount": "68.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-29T22:23:00Z",
+    "updated_at": "2025-10-29T22:28:00Z"
+  },
+  {
+    "id": "7fcaf981-784a-584e-ad9c-3b2fb10ad6c4",
+    "tx_id": "7fcaf981-784a-584e-ad9c-3b2fb10ad6c4",
+    "idempotency_key": "idem_payment_0170",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0074_bc092d2a",
+    "payload": {
+      "from": "PID_U0074_bc092d2a",
+      "to": "PID_U0088_6311d4d8",
+      "amount": "71.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0074_bc092d2a",
+            "PID_U0088_6311d4d8"
+          ],
+          "amount": "71.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0170",
+        "fingerprint": "fp_payment_0170"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-28T21:10:00Z",
+    "updated_at": "2025-10-28T21:15:00Z"
+  },
+  {
+    "id": "1c6eb8f4-ade8-5def-b295-f4d4c597e0bd",
+    "tx_id": "1c6eb8f4-ade8-5def-b295-f4d4c597e0bd",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0075_5a40a6db",
+    "payload": {
+      "from": "PID_U0075_5a40a6db",
+      "to": "PID_U0089_01494e89",
+      "amount": "837.21",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0075_5a40a6db",
+            "PID_U0089_01494e89"
+          ],
+          "amount": "837.21"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-27T20:57:00Z",
+    "updated_at": "2025-10-27T21:02:00Z"
+  },
+  {
+    "id": "ee109804-5a24-56f4-bf00-b06b75688510",
+    "tx_id": "ee109804-5a24-56f4-bf00-b06b75688510",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0076_f878208c",
+    "payload": {
+      "from": "PID_U0076_f878208c",
+      "to": "PID_U0090_9f80c83a",
+      "amount": "77.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0076_f878208c",
+            "PID_U0090_9f80c83a"
+          ],
+          "amount": "77.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-26T19:44:00Z",
+    "updated_at": "2025-10-26T19:49:00Z"
+  },
+  {
+    "id": "8bb67e6d-136c-5dcd-a2e7-85c9b9a35ce5",
+    "tx_id": "8bb67e6d-136c-5dcd-a2e7-85c9b9a35ce5",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0077_96af9a3d",
+    "payload": {
+      "from": "PID_U0077_96af9a3d",
+      "to": "PID_U0091_3db841eb",
+      "amount": "80.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0077_96af9a3d",
+            "PID_U0091_3db841eb"
+          ],
+          "amount": "80.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-25T18:31:00Z",
+    "updated_at": "2025-10-25T18:36:00Z"
+  },
+  {
+    "id": "f06e00f4-560d-5c72-9b39-5e63612ee88d",
+    "tx_id": "f06e00f4-560d-5c72-9b39-5e63612ee88d",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0078_34e713ee",
+    "payload": {
+      "from": "PID_U0078_34e713ee",
+      "to": "PID_U0092_dbefbb9c",
+      "amount": "478.03",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0078_34e713ee",
+            "PID_U0092_dbefbb9c"
+          ],
+          "amount": "478.03"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-24T17:18:00Z",
+    "updated_at": "2025-10-24T17:23:00Z"
+  },
+  {
+    "id": "7805c75e-8cfb-597e-ab2e-2a4bfd946f06",
+    "tx_id": "7805c75e-8cfb-597e-ab2e-2a4bfd946f06",
+    "idempotency_key": "idem_payment_0175",
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0079_d31e8d9f",
+    "payload": {
+      "from": "PID_U0079_d31e8d9f",
+      "to": "PID_U0093_7a27354d",
+      "amount": "86.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0079_d31e8d9f",
+            "PID_U0093_7a27354d"
+          ],
+          "amount": "86.00"
+        }
+      ],
+      "idempotency": {
+        "key": "idem_payment_0175",
+        "fingerprint": "fp_payment_0175"
+      }
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-23T16:05:00Z",
+    "updated_at": "2025-10-23T16:10:00Z"
+  },
+  {
+    "id": "8fd73001-0cbd-5162-83f1-8527997df5ce",
+    "tx_id": "8fd73001-0cbd-5162-83f1-8527997df5ce",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0080_71560750",
+    "payload": {
+      "from": "PID_U0080_71560750",
+      "to": "PID_U0094_185eaefe",
+      "amount": "89.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0080_71560750",
+            "PID_U0094_185eaefe"
+          ],
+          "amount": "89.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "ABORTED",
+    "error": {
+      "code": "ABORTED",
+      "message": "Simulated abort"
+    },
+    "created_at": "2025-10-22T15:52:00Z",
+    "updated_at": "2025-10-22T15:54:00Z"
+  },
+  {
+    "id": "41525e04-8855-5186-8d15-6e6029012224",
+    "tx_id": "41525e04-8855-5186-8d15-6e6029012224",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0081_0f8d8101",
+    "payload": {
+      "from": "PID_U0081_0f8d8101",
+      "to": "PID_U0095_b69628af",
+      "amount": "1422.04",
+      "equivalent": "UAH",
+      "routes": [
+        {
+          "path": [
+            "PID_U0081_0f8d8101",
+            "PID_U0095_b69628af"
+          ],
+          "amount": "1422.04"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-21T14:39:00Z",
+    "updated_at": "2025-10-21T14:44:00Z"
+  },
+  {
+    "id": "9ce7fd4e-eeab-5fa1-8b05-19bbb6e027a0",
+    "tx_id": "9ce7fd4e-eeab-5fa1-8b05-19bbb6e027a0",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0082_adc4fab2",
+    "payload": {
+      "from": "PID_U0082_adc4fab2",
+      "to": "PID_U0096_54cda260",
+      "amount": "95.00",
+      "equivalent": "EUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0082_adc4fab2",
+            "PID_U0096_54cda260"
+          ],
+          "amount": "95.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-20T13:26:00Z",
+    "updated_at": "2025-10-20T13:31:00Z"
+  },
+  {
+    "id": "b2053daa-c640-57ef-82d4-daef9a87a1cc",
+    "tx_id": "b2053daa-c640-57ef-82d4-daef9a87a1cc",
+    "idempotency_key": null,
+    "type": "PAYMENT",
+    "initiator_pid": "PID_U0083_4bfc7463",
+    "payload": {
+      "from": "PID_U0083_4bfc7463",
+      "to": "PID_U0097_f3051c11",
+      "amount": "98.00",
+      "equivalent": "HOUR",
+      "routes": [
+        {
+          "path": [
+            "PID_U0083_4bfc7463",
+            "PID_U0097_f3051c11"
+          ],
+          "amount": "98.00"
+        }
+      ],
+      "idempotency": null
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-10-19T12:13:00Z",
+    "updated_at": "2025-10-19T12:18:00Z"
+  },
+  {
+    "id": "b9e945ff-f220-5e42-a46f-bfddfe53d2f0",
+    "tx_id": "b9e945ff-f220-5e42-a46f-bfddfe53d2f0",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "cycle": [
+        "debt_0000_00",
+        "debt_0000_01",
+        "debt_0000_02"
+      ],
+      "amount": "1624.45",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0001_9e3779b1",
+          "creditor": "PID_U0043_935170bb",
+          "amount": "1624.45"
+        },
+        {
+          "debtor": "PID_U0043_935170bb",
+          "creditor": "PID_U0006_b54cda26",
+          "amount": "1164.93"
+        },
+        {
+          "debtor": "PID_U0006_b54cda26",
+          "creditor": "PID_U0001_9e3779b1",
+          "amount": "1233.28"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-11T00:00:00Z",
+    "updated_at": "2026-01-11T00:03:00Z"
+  },
+  {
+    "id": "45ee6705-3dcb-5659-a853-34cbf56e07a2",
+    "tx_id": "45ee6705-3dcb-5659-a853-34cbf56e07a2",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "cycle": [
+        "debt_0001_00",
+        "debt_0001_01",
+        "debt_0001_02"
+      ],
+      "amount": "1624.45",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0001_9e3779b1",
+          "creditor": "PID_U0043_935170bb",
+          "amount": "1624.45"
+        },
+        {
+          "debtor": "PID_U0043_935170bb",
+          "creditor": "PID_U0036_3fcd1ce4",
+          "amount": "4085.44"
+        },
+        {
+          "debtor": "PID_U0036_3fcd1ce4",
+          "creditor": "PID_U0001_9e3779b1",
+          "amount": "151.03"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-09T22:41:00Z",
+    "updated_at": "2026-01-09T22:44:00Z"
+  },
+  {
+    "id": "bcf318a7-f2e7-5c35-ac7c-8ea67a747c36",
+    "tx_id": "bcf318a7-f2e7-5c35-ac7c-8ea67a747c36",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "cycle": [
+        "debt_0002_00",
+        "debt_0002_01",
+        "debt_0002_02"
+      ],
+      "amount": "37.79",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0004_78dde6c4",
+          "creditor": "PID_U0011_cc623a9b",
+          "amount": "37.79"
+        },
+        {
+          "debtor": "PID_U0011_cc623a9b",
+          "creditor": "PID_U0083_4bfc7463",
+          "amount": "2781.17"
+        },
+        {
+          "debtor": "PID_U0083_4bfc7463",
+          "creditor": "PID_U0004_78dde6c4",
+          "amount": "49.26"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-08T21:22:00Z",
+    "updated_at": "2026-01-08T21:25:00Z"
+  },
+  {
+    "id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
+    "tx_id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "cycle": [
+        "debt_0003_00",
+        "debt_0003_01",
+        "debt_0003_02"
+      ],
+      "amount": "778.36",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0004_78dde6c4",
+          "creditor": "PID_U0012_6a99b44c",
+          "amount": "778.36"
+        },
+        {
+          "debtor": "PID_U0012_6a99b44c",
+          "creditor": "PID_U0091_3db841eb",
+          "amount": "22.82"
+        },
+        {
+          "debtor": "PID_U0091_3db841eb",
+          "creditor": "PID_U0004_78dde6c4",
+          "amount": "6.39"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-07T20:03:00Z",
+    "updated_at": "2026-01-07T20:06:00Z"
+  },
+  {
+    "id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
+    "tx_id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "cycle": [
+        "debt_0004_00",
+        "debt_0004_01",
+        "debt_0004_02"
+      ],
+      "amount": "1743.38",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0004_78dde6c4",
+          "creditor": "PID_U0017_81af14c1",
+          "amount": "1743.38"
+        },
+        {
+          "debtor": "PID_U0017_81af14c1",
+          "creditor": "PID_U0071_e162c017",
+          "amount": "23.56"
+        },
+        {
+          "debtor": "PID_U0071_e162c017",
+          "creditor": "PID_U0004_78dde6c4",
+          "amount": "51.45"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-06T19:44:00Z",
+    "updated_at": "2026-01-06T19:47:00Z"
+  },
+  {
+    "id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
+    "tx_id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "cycle": [
+        "debt_0005_00",
+        "debt_0005_01",
+        "debt_0005_02"
+      ],
+      "amount": "110.40",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0004_78dde6c4",
+          "creditor": "PID_U0020_5c5581d4",
+          "amount": "110.40"
+        },
+        {
+          "debtor": "PID_U0020_5c5581d4",
+          "creditor": "PID_U0087_c4da5b27",
+          "amount": "42.49"
+        },
+        {
+          "debtor": "PID_U0087_c4da5b27",
+          "creditor": "PID_U0004_78dde6c4",
+          "amount": "83.90"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-05T18:25:00Z",
+    "updated_at": "2026-01-05T18:28:00Z"
+  },
+  {
+    "id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
+    "tx_id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "cycle": [
+        "debt_0006_00",
+        "debt_0006_01",
+        "debt_0006_02"
+      ],
+      "amount": "83.77",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0004_78dde6c4",
+          "creditor": "PID_U0023_36fbeee7",
+          "amount": "83.77"
+        },
+        {
+          "debtor": "PID_U0023_36fbeee7",
+          "creditor": "PID_U0081_0f8d8101",
+          "amount": "49.22"
+        },
+        {
+          "debtor": "PID_U0081_0f8d8101",
+          "creditor": "PID_U0004_78dde6c4",
+          "amount": "10.97"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-04T17:06:00Z",
+    "updated_at": "2026-01-04T17:09:00Z"
+  },
+  {
+    "id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
+    "tx_id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "cycle": [
+        "debt_0007_00",
+        "debt_0007_01",
+        "debt_0007_02"
+      ],
+      "amount": "83.77",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0004_78dde6c4",
+          "creditor": "PID_U0023_36fbeee7",
+          "amount": "83.77"
+        },
+        {
+          "debtor": "PID_U0023_36fbeee7",
+          "creditor": "PID_U0089_01494e89",
+          "amount": "13.58"
+        },
+        {
+          "debtor": "PID_U0089_01494e89",
+          "creditor": "PID_U0004_78dde6c4",
+          "amount": "36.94"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-03T16:47:00Z",
+    "updated_at": "2026-01-03T16:50:00Z"
+  },
+  {
+    "id": "ddddb8eb-c828-5e64-aa0f-1fc29015d201",
+    "tx_id": "ddddb8eb-c828-5e64-aa0f-1fc29015d201",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0002_3c6ef362",
+      "limit": "1685.83"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-11T00:00:00Z",
+    "updated_at": "2026-01-11T00:01:00Z"
+  },
+  {
+    "id": "f16ef9c0-7b5f-5ad8-beb6-5229f422de6c",
+    "tx_id": "f16ef9c0-7b5f-5ad8-beb6-5229f422de6c",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0002_3c6ef362",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0002_3c6ef362",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "10749.68"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-09T23:37:00Z",
+    "updated_at": "2026-01-09T23:38:00Z"
+  },
+  {
+    "id": "4ab6bdc6-1da3-5e51-8759-e1e206a94347",
+    "tx_id": "4ab6bdc6-1da3-5e51-8759-e1e206a94347",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0003_daa66d13",
+      "limit": "8397.55"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-08T23:14:00Z",
+    "updated_at": "2026-01-08T23:15:00Z"
+  },
+  {
+    "id": "fbfad935-9943-5a5f-beb4-c237771cdc81",
+    "tx_id": "fbfad935-9943-5a5f-beb4-c237771cdc81",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "3014.08"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-07T23:51:00Z",
+    "updated_at": "2026-01-07T23:52:00Z"
+  },
+  {
+    "id": "1dbb498b-d143-527e-ad2b-7f6cc70baf9e",
+    "tx_id": "1dbb498b-d143-527e-ad2b-7f6cc70baf9e",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "9017.15"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-06T23:28:00Z",
+    "updated_at": "2026-01-06T23:29:00Z"
+  },
+  {
+    "id": "1aaf4071-a449-590b-b333-ed0555ac11f9",
+    "tx_id": "1aaf4071-a449-590b-b333-ed0555ac11f9",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0004_78dde6c4",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "2743.68"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-05T23:05:00Z",
+    "updated_at": "2026-01-05T23:06:00Z"
+  },
+  {
+    "id": "9efd15c4-9d81-576f-920c-2be130bafabd",
+    "tx_id": "9efd15c4-9d81-576f-920c-2be130bafabd",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0005_17156075",
+      "limit": "9116.78"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-04T23:42:00Z",
+    "updated_at": "2026-01-04T23:43:00Z"
+  },
+  {
+    "id": "9f3bab56-bd55-5f1d-b12e-88c0ec548d40",
+    "tx_id": "9f3bab56-bd55-5f1d-b12e-88c0ec548d40",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0005_17156075",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0005_17156075",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "8487.33"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-03T23:19:00Z",
+    "updated_at": "2026-01-03T23:20:00Z"
+  },
+  {
+    "id": "fc463a7a-b649-5a98-b696-3c0ccbdd9557",
+    "tx_id": "fc463a7a-b649-5a98-b696-3c0ccbdd9557",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0006_b54cda26",
+      "limit": "10668.62"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-02T23:56:00Z",
+    "updated_at": "2026-01-02T23:57:00Z"
+  },
+  {
+    "id": "aac2063d-b26f-5f9a-add7-9870ec40812c",
+    "tx_id": "aac2063d-b26f-5f9a-add7-9870ec40812c",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0006_b54cda26",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0006_b54cda26",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "5155.63"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-01T23:33:00Z",
+    "updated_at": "2026-01-01T23:34:00Z"
+  },
+  {
+    "id": "04c9f6bb-043b-554b-af54-13a7e77d2d6d",
+    "tx_id": "04c9f6bb-043b-554b-af54-13a7e77d2d6d",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0007_538453d7",
+      "limit": "10298.82"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-31T23:10:00Z",
+    "updated_at": "2025-12-31T23:11:00Z"
+  },
+  {
+    "id": "e9bb062d-e6f2-5271-b355-9279735cb4bb",
+    "tx_id": "e9bb062d-e6f2-5271-b355-9279735cb4bb",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0007_538453d7",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0007_538453d7",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "11472.39"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-30T23:47:00Z",
+    "updated_at": "2025-12-30T23:48:00Z"
+  },
+  {
+    "id": "9f144796-06f6-540d-8fb3-e1ed846fa9b2",
+    "tx_id": "9f144796-06f6-540d-8fb3-e1ed846fa9b2",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "11688.55"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-29T23:24:00Z",
+    "updated_at": "2025-12-29T23:25:00Z"
+  },
+  {
+    "id": "3272423a-582e-51e7-9e8f-ce335fe191b9",
+    "tx_id": "3272423a-582e-51e7-9e8f-ce335fe191b9",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0036_3fcd1ce4",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "7793.22"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-28T23:01:00Z",
+    "updated_at": "2025-12-28T23:02:00Z"
+  },
+  {
+    "id": "8cf1cc55-a996-50ff-a030-0d9dd511b921",
+    "tx_id": "8cf1cc55-a996-50ff-a030-0d9dd511b921",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0037_de049695",
+      "limit": "7833.95"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-27T23:38:00Z",
+    "updated_at": "2025-12-27T23:39:00Z"
+  },
+  {
+    "id": "a429e35f-3e64-5454-b4d4-88bea1bc1a33",
+    "tx_id": "a429e35f-3e64-5454-b4d4-88bea1bc1a33",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0037_de049695",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0037_de049695",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "1735.45"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-26T23:15:00Z",
+    "updated_at": "2025-12-26T23:16:00Z"
+  },
+  {
+    "id": "065d1100-f4ac-5e51-be26-9464b3d61011",
+    "tx_id": "065d1100-f4ac-5e51-be26-9464b3d61011",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0038_7c3c1046",
+      "limit": "9505.78"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-25T23:52:00Z",
+    "updated_at": "2025-12-25T23:53:00Z"
+  },
+  {
+    "id": "f13c6488-2e3f-5eb5-95da-045402fad979",
+    "tx_id": "f13c6488-2e3f-5eb5-95da-045402fad979",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0038_7c3c1046",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0038_7c3c1046",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "4096.17"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-24T23:29:00Z",
+    "updated_at": "2025-12-24T23:30:00Z"
+  },
+  {
+    "id": "ff46d3c2-36d6-510f-9535-b1c5e0cd55ec",
+    "tx_id": "ff46d3c2-36d6-510f-9535-b1c5e0cd55ec",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "9273.32"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-23T23:06:00Z",
+    "updated_at": "2025-12-23T23:07:00Z"
+  },
+  {
+    "id": "34ce66e2-d4ad-590d-a669-04b8550d72da",
+    "tx_id": "34ce66e2-d4ad-590d-a669-04b8550d72da",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0039_1a7389f7",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "4001.82"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-22T23:43:00Z",
+    "updated_at": "2025-12-22T23:44:00Z"
+  },
+  {
+    "id": "0b5e7d36-5bee-583a-ae8e-b7a6469219e6",
+    "tx_id": "0b5e7d36-5bee-583a-ae8e-b7a6469219e6",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0040_b8ab03a8",
+      "limit": "6023.92"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-21T23:20:00Z",
+    "updated_at": "2025-12-21T23:21:00Z"
+  },
+  {
+    "id": "7f8d2ec4-b964-511f-bce1-f270335bf4cc",
+    "tx_id": "7f8d2ec4-b964-511f-bce1-f270335bf4cc",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0040_b8ab03a8",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0040_b8ab03a8",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "1951.95"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-20T23:57:00Z",
+    "updated_at": "2025-12-20T23:58:00Z"
+  },
+  {
+    "id": "46f97bdd-a82f-5b30-9474-cc26a9047ea4",
+    "tx_id": "46f97bdd-a82f-5b30-9474-cc26a9047ea4",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0041_56e27d59",
+      "limit": "5900.66"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-19T23:34:00Z",
+    "updated_at": "2025-12-19T23:35:00Z"
+  },
+  {
+    "id": "08978c74-a67f-5a3e-8acc-4198fba27a17",
+    "tx_id": "08978c74-a67f-5a3e-8acc-4198fba27a17",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0041_56e27d59",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0041_56e27d59",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "8259.88"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-18T23:11:00Z",
+    "updated_at": "2025-12-18T23:12:00Z"
+  },
+  {
+    "id": "4fcb2572-7bb5-54e1-9978-988bf26d0198",
+    "tx_id": "4fcb2572-7bb5-54e1-9978-988bf26d0198",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0042_f519f70a",
+      "limit": "5036.01"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-17T23:48:00Z",
+    "updated_at": "2025-12-17T23:49:00Z"
+  },
+  {
+    "id": "511ac231-7952-5d12-a33b-e546afc24fe4",
+    "tx_id": "511ac231-7952-5d12-a33b-e546afc24fe4",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0042_f519f70a",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0042_f519f70a",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "4791.05"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-16T23:25:00Z",
+    "updated_at": "2025-12-16T23:26:00Z"
+  },
+  {
+    "id": "624c43a9-3263-5436-998d-d73ab9b6c1e4",
+    "tx_id": "624c43a9-3263-5436-998d-d73ab9b6c1e4",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0043_935170bb",
+      "limit": "4453.77"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-15T23:02:00Z",
+    "updated_at": "2025-12-15T23:03:00Z"
+  },
+  {
+    "id": "7d0245ee-c8cc-5e0b-a8d8-79eb2668fd58",
+    "tx_id": "7d0245ee-c8cc-5e0b-a8d8-79eb2668fd58",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0043_935170bb",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0043_935170bb",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "7520.58"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-14T23:39:00Z",
+    "updated_at": "2025-12-14T23:40:00Z"
+  },
+  {
+    "id": "80824a6f-5c2b-57bf-b7ff-51f4002ab7b6",
+    "tx_id": "80824a6f-5c2b-57bf-b7ff-51f4002ab7b6",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0044_3188ea6c",
+      "limit": "9112.31"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-13T23:16:00Z",
+    "updated_at": "2025-12-13T23:17:00Z"
+  },
+  {
+    "id": "819ff05b-a308-5080-a998-b91e473b3ad3",
+    "tx_id": "819ff05b-a308-5080-a998-b91e473b3ad3",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0044_3188ea6c",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0044_3188ea6c",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "6821.81"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-12T23:53:00Z",
+    "updated_at": "2025-12-12T23:54:00Z"
+  },
+  {
+    "id": "ba2f8f1f-6bb5-581c-9cfe-d5c33064bad7",
+    "tx_id": "ba2f8f1f-6bb5-581c-9cfe-d5c33064bad7",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0001_9e3779b1",
+      "to": "PID_U0045_cfc0641d",
+      "limit": "10616.83"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-11T23:30:00Z",
+    "updated_at": "2025-12-11T23:31:00Z"
+  },
+  {
+    "id": "8f9b9f2b-7eb6-59e2-9c0b-87266b1d2cae",
+    "tx_id": "8f9b9f2b-7eb6-59e2-9c0b-87266b1d2cae",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0045_cfc0641d",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0045_cfc0641d",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "2870.00"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-10T23:07:00Z",
+    "updated_at": "2025-12-10T23:08:00Z"
+  },
+  {
+    "id": "01ada36c-4358-5794-87e9-b3a64f39766e",
+    "tx_id": "01ada36c-4358-5794-87e9-b3a64f39766e",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0011_cc623a9b",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1707.27"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-09T23:44:00Z",
+    "updated_at": "2025-12-09T23:45:00Z"
+  },
+  {
+    "id": "fc5048e1-5093-5d41-9195-3d6cb9da5506",
+    "tx_id": "fc5048e1-5093-5d41-9195-3d6cb9da5506",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0011_cc623a9b",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "1343.39"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-08T23:21:00Z",
+    "updated_at": "2025-12-08T23:22:00Z"
+  },
+  {
+    "id": "4ac170c0-ccfe-5b3a-99cb-a7c2a5ce6714",
+    "tx_id": "4ac170c0-ccfe-5b3a-99cb-a7c2a5ce6714",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0011_cc623a9b",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0011_cc623a9b",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "1620.40"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-07T23:58:00Z",
+    "updated_at": "2025-12-07T23:59:00Z"
+  },
+  {
+    "id": "694e9798-24d4-5bed-9ee4-26dabd85adb6",
+    "tx_id": "694e9798-24d4-5bed-9ee4-26dabd85adb6",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0011_cc623a9b",
+      "limit": "1599.33"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-06T23:35:00Z",
+    "updated_at": "2025-12-06T23:36:00Z"
+  },
+  {
+    "id": "e72d4576-0a01-5f2a-a077-c5167aac8deb",
+    "tx_id": "e72d4576-0a01-5f2a-a077-c5167aac8deb",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0012_6a99b44c",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0012_6a99b44c",
+      "to": "PID_U0003_daa66d13",
+      "limit": "505.95"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-05T23:12:00Z",
+    "updated_at": "2025-12-05T23:13:00Z"
+  },
+  {
+    "id": "55e8a0ec-00cb-5f59-b990-0a39299d0b71",
+    "tx_id": "55e8a0ec-00cb-5f59-b990-0a39299d0b71",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0013_08d12dfd",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0013_08d12dfd",
+      "to": "PID_U0003_daa66d13",
+      "limit": "3173.95"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-04T23:49:00Z",
+    "updated_at": "2025-12-04T23:50:00Z"
+  },
+  {
+    "id": "13aed17f-a119-57a1-8f78-1d0d6238421e",
+    "tx_id": "13aed17f-a119-57a1-8f78-1d0d6238421e",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0014_a708a7ae",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0003_daa66d13",
+      "limit": "579.07"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-03T23:26:00Z",
+    "updated_at": "2025-12-03T23:27:00Z"
+  },
+  {
+    "id": "9c00ffe9-1766-511b-9243-abb2daa62ffb",
+    "tx_id": "9c00ffe9-1766-511b-9243-abb2daa62ffb",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0014_a708a7ae",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0014_a708a7ae",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "3196.53"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-02T23:03:00Z",
+    "updated_at": "2025-12-02T23:04:00Z"
+  },
+  {
+    "id": "c8ca25b9-65eb-5856-bc98-7bc93c817094",
+    "tx_id": "c8ca25b9-65eb-5856-bc98-7bc93c817094",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0014_a708a7ae",
+      "limit": "2930.40"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-12-01T23:40:00Z",
+    "updated_at": "2025-12-01T23:41:00Z"
+  },
+  {
+    "id": "9f57e900-dd3d-52cc-a80f-e8ad4676e9b5",
+    "tx_id": "9f57e900-dd3d-52cc-a80f-e8ad4676e9b5",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0015_4540215f",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0015_4540215f",
+      "to": "PID_U0003_daa66d13",
+      "limit": "831.55"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-30T23:17:00Z",
+    "updated_at": "2025-11-30T23:18:00Z"
+  },
+  {
+    "id": "5f837ee6-a857-523d-83a7-a1663f27809c",
+    "tx_id": "5f837ee6-a857-523d-83a7-a1663f27809c",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0016_e3779b10",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0016_e3779b10",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1143.66"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-29T23:54:00Z",
+    "updated_at": "2025-11-29T23:55:00Z"
+  },
+  {
+    "id": "e1414e0f-039f-5a40-b210-c3c0bf3e5b1c",
+    "tx_id": "e1414e0f-039f-5a40-b210-c3c0bf3e5b1c",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0017_81af14c1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0017_81af14c1",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1537.49"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-28T23:31:00Z",
+    "updated_at": "2025-11-28T23:32:00Z"
+  },
+  {
+    "id": "35075673-33a1-5dab-a843-3b9d600600aa",
+    "tx_id": "35075673-33a1-5dab-a843-3b9d600600aa",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0017_81af14c1",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0017_81af14c1",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "2179.22"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-27T23:08:00Z",
+    "updated_at": "2025-11-27T23:09:00Z"
+  },
+  {
+    "id": "9ea2c421-5c48-5555-a4fd-2daaa9448945",
+    "tx_id": "9ea2c421-5c48-5555-a4fd-2daaa9448945",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0017_81af14c1",
+      "limit": "2562.17"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-26T23:45:00Z",
+    "updated_at": "2025-11-26T23:46:00Z"
+  },
+  {
+    "id": "b5b498d1-b141-5053-8c5c-c1ea6d414dd1",
+    "tx_id": "b5b498d1-b141-5053-8c5c-c1ea6d414dd1",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0018_1fe68e72",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0018_1fe68e72",
+      "to": "PID_U0003_daa66d13",
+      "limit": "3214.07"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-25T23:22:00Z",
+    "updated_at": "2025-11-25T23:23:00Z"
+  },
+  {
+    "id": "d9e65da8-6e77-551d-b43a-f3839733b3ec",
+    "tx_id": "d9e65da8-6e77-551d-b43a-f3839733b3ec",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0018_1fe68e72",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0018_1fe68e72",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "2376.23"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-24T23:59:00Z",
+    "updated_at": "2025-11-25T00:00:00Z"
+  },
+  {
+    "id": "14ead56d-2e77-5192-bcaf-0bc0312790db",
+    "tx_id": "14ead56d-2e77-5192-bcaf-0bc0312790db",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0019_be1e0823",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0019_be1e0823",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1251.07"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-23T23:36:00Z",
+    "updated_at": "2025-11-23T23:37:00Z"
+  },
+  {
+    "id": "95bc3011-c35e-5402-99ba-64091df7d3b3",
+    "tx_id": "95bc3011-c35e-5402-99ba-64091df7d3b3",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0020_5c5581d4",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1109.01"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-22T23:13:00Z",
+    "updated_at": "2025-11-22T23:14:00Z"
+  },
+  {
+    "id": "4dd1c073-7dc7-51d4-88b3-abf16d092a33",
+    "tx_id": "4dd1c073-7dc7-51d4-88b3-abf16d092a33",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0020_5c5581d4",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0020_5c5581d4",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "777.61"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-21T23:50:00Z",
+    "updated_at": "2025-11-21T23:51:00Z"
+  },
+  {
+    "id": "739a8eae-eaf3-5732-ab1c-161918a624d8",
+    "tx_id": "739a8eae-eaf3-5732-ab1c-161918a624d8",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0020_5c5581d4",
+      "limit": "1848.46"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-20T23:27:00Z",
+    "updated_at": "2025-11-20T23:28:00Z"
+  },
+  {
+    "id": "e7a07d4e-2d9e-5aad-8343-92d620fc7014",
+    "tx_id": "e7a07d4e-2d9e-5aad-8343-92d620fc7014",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0021_fa8cfb85",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0021_fa8cfb85",
+      "to": "PID_U0003_daa66d13",
+      "limit": "800.00"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-19T23:04:00Z",
+    "updated_at": "2025-11-19T23:05:00Z"
+  },
+  {
+    "id": "69db57fa-9c2c-5279-8a99-dcacf1690c8d",
+    "tx_id": "69db57fa-9c2c-5279-8a99-dcacf1690c8d",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0022_98c47536",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0022_98c47536",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1605.56"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-18T23:41:00Z",
+    "updated_at": "2025-11-18T23:42:00Z"
+  },
+  {
+    "id": "bc02c890-9653-5561-92cf-788ef29daf51",
+    "tx_id": "bc02c890-9653-5561-92cf-788ef29daf51",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0023_36fbeee7",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0023_36fbeee7",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1200.37"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-17T23:18:00Z",
+    "updated_at": "2025-11-17T23:19:00Z"
+  },
+  {
+    "id": "5e3cf984-5798-5c5e-9eb2-f5fbf1eac7aa",
+    "tx_id": "5e3cf984-5798-5c5e-9eb2-f5fbf1eac7aa",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0023_36fbeee7",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0023_36fbeee7",
+      "to": "PID_U0004_78dde6c4",
+      "limit": "2493.09"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-16T23:55:00Z",
+    "updated_at": "2025-11-16T23:56:00Z"
+  },
+  {
+    "id": "872c3f12-8646-5bf3-b0ec-5fe26c31adda",
+    "tx_id": "872c3f12-8646-5bf3-b0ec-5fe26c31adda",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0003_daa66d13",
+      "to": "PID_U0023_36fbeee7",
+      "limit": "2324.62"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-15T23:32:00Z",
+    "updated_at": "2025-11-15T23:33:00Z"
+  },
+  {
+    "id": "7ddc3b60-1779-543d-9479-05ea170c8d35",
+    "tx_id": "7ddc3b60-1779-543d-9479-05ea170c8d35",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CREATE",
+    "initiator_pid": "PID_U0024_d5336898",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0024_d5336898",
+      "to": "PID_U0003_daa66d13",
+      "limit": "1294.93"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-14T23:09:00Z",
+    "updated_at": "2025-11-14T23:10:00Z"
+  },
+  {
+    "id": "7c490efb-30e6-58da-908f-23e5616ca202",
+    "tx_id": "7c490efb-30e6-58da-908f-23e5616ca202",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_UPDATE",
+    "initiator_pid": "PID_U0025_736ae249",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0025_736ae249",
+      "to": "PID_U0003_daa66d13",
+      "limit": "3721.43"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-13T23:46:00Z",
+    "updated_at": "2025-11-13T23:47:00Z"
+  },
+  {
+    "id": "9e4893d6-b898-5f74-b152-c99139be0a87",
+    "tx_id": "9e4893d6-b898-5f74-b152-c99139be0a87",
+    "idempotency_key": null,
+    "type": "TRUST_LINE_CLOSE",
+    "initiator_pid": "PID_U0025_736ae249",
+    "payload": {
+      "equivalent": "UAH",
+      "from": "PID_U0025_736ae249",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "2011.96"
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2025-11-12T23:23:00Z",
+    "updated_at": "2025-11-12T23:24:00Z"
+  }
+]

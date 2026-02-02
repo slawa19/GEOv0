@@ -75,9 +75,9 @@ export function createPhysicsManager(opts: {
     if (!engine.isRunning()) return
 
     // d3-force can be surprisingly expensive on large graphs; avoid ticking at full RAF rate.
-    // This keeps visuals smooth while reducing CPU pressure during demo playback.
+    // Throttle more aggressively: physics doesn't need 60fps visual update, 20-30fps is smooth enough.
     const q = getQuality()
-    const intervalMs = q === 'low' ? 32 : q === 'med' ? 24 : 20
+    const intervalMs = q === 'low' ? 50 : q === 'med' ? 40 : 33 // ~20-30 fps for physics
     const nowMs = performance.now()
     if (lastTickAtMs > 0 && nowMs - lastTickAtMs < intervalMs) return
     lastTickAtMs = nowMs

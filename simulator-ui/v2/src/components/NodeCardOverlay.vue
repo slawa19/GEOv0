@@ -56,7 +56,7 @@ defineProps<Props>()
 
       <div class="node-item">
         <span class="k">Net</span>
-        <span class="v mono">{{ node.net_balance_atoms ?? '—' }}</span>
+        <span class="v mono">{{ node.net_balance ?? node.net_balance_atoms ?? '—' }}</span>
       </div>
       <div class="node-item">
         <span class="k">Degree</span>

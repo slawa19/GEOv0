@@ -33,7 +33,7 @@ param(
 
   # Community fixture pack to seed into DB for real-mode runs.
   # 'none' disables seeding.
-  [ValidateSet('greenfield-village-100', 'riverside-town-50', 'none')]
+  [ValidateSet('greenfield-village-100', 'riverside-town-50', 'greenfield-village-100-v2', 'riverside-town-50-v2', 'none')]
   [string]$Community = 'greenfield-village-100',
 
   [switch]$RegenerateFixtures,

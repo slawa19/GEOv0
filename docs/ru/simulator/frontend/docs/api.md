@@ -133,6 +133,7 @@ export type GraphNode = {
 
   // Для HUD (UI не обязан строить визуализацию по этим числам).
   links_count?: number
+  net_balance?: string | null // signed, major units (например "-123.45"); UI отображает как есть
   net_balance_atoms?: string | null
   net_sign?: -1 | 0 | 1 | null
 
@@ -209,6 +210,9 @@ export type GraphLink = {
   "ts": "2026-01-22T12:00:01Z",
   "type": "tx.updated",
   "equivalent": "UAH",
+  "from": "user_1",
+  "to": "user_2",
+  "amount": "150.00",
   "ttl_ms": 1200,
   "intensity_key": "mid",
   "edges": [
@@ -220,6 +224,10 @@ export type GraphLink = {
   ]
 }
 ```
+
+Примечания (backend-first):
+- `from → to` — направление транзакции.
+- `amount` — **в major units** (строка, без локальных конвертаций на UI); знак выводимого дельта-лейбла на узлах задаётся UI как `-amount` у `from` и `+amount` у `to`.
 
 ### 4.3 `tx.failed` (диагностика ошибок/отказов)
 
@@ -266,12 +274,29 @@ export type GraphLink = {
   - запросить новый snapshot, либо
   - получить патчи.
 
+Рекомендуемый контракт (backend-first):
+```json
+{
+  "event_id": "evt_0002",
+  "ts": "2026-01-22T12:00:01Z",
+  "type": "clearing.done",
+  "equivalent": "UAH",
+  "plan_id": "clr_2026_01_22_0001",
+  "cleared_cycles": 2,
+  "cleared_amount": "10.00",
+  "node_patch": [{ "id": "user_1", "net_balance": "-12.50", "net_balance_atoms": "1250", "net_sign": -1 }],
+  "edge_patch": [{ "source": "user_1", "target": "user_2", "used": "1.00", "available": "9.00" }]
+}
+```
+
+Правило: если есть `node_patch/edge_patch`, UI **не вычисляет** изменения балансов/лимитов, а просто применяет патчи.
+
 ---
 
 ## 5) Патчи (опционально, для FPS)
 
 Если snapshot большой, обновление после клиринга можно делать патчами:
-- `node_patch`: `{ id, net_balance_atoms, net_sign, viz_color_key, viz_size }`
+- `node_patch`: `{ id, net_balance, net_balance_atoms, net_sign, viz_color_key, viz_size }`
 - `edge_patch`: `{ source, target, used/available, viz_*_key }`
 
 Примечание: `viz_size` в `node_patch` — это тот же размер примитива (w/h). Если баланс/класс изменился,

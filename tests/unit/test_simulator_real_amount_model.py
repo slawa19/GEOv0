@@ -33,7 +33,7 @@ def _runner() -> RealRunner:
     )
 
 
-def test_real_amount_cap_default_is_3(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_real_amount_cap_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SIMULATOR_REAL_AMOUNT_CAP", raising=False)
 
     runner = _runner()
@@ -45,11 +45,18 @@ def test_real_amount_cap_default_is_3(monkeypatch: pytest.MonkeyPatch) -> None:
             {"id": "B", "type": "person", "groupId": "retail", "behaviorProfileId": "retail"},
         ],
         "behaviorProfiles": [
-            {"id": "household", "props": {"tx_rate": 1.0, "equivalent_weights": {"UAH": 1.0}}},
+            {
+                "id": "household",
+                "props": {
+                    "tx_rate": 1.0,
+                    "equivalent_weights": {"UAH": 1.0},
+                    "amount_model": {"UAH": {"min": 50, "max": 1500, "p50": 300}},
+                },
+            },
             {"id": "retail", "props": {"tx_rate": 1.0, "equivalent_weights": {"UAH": 1.0}}},
         ],
-        # creditor->debtor: B gives A a 10 UAH limit (payment direction A->B)
-        "trustlines": [{"equivalent": "UAH", "from": "B", "to": "A", "limit": "10", "status": "active"}],
+        # creditor->debtor: B gives A a big limit so amount_model bounds are visible.
+        "trustlines": [{"equivalent": "UAH", "from": "B", "to": "A", "limit": "2000", "status": "active"}],
     }
 
     run = RunRecord(run_id="r", scenario_id="s", mode="real", state="running")
@@ -60,7 +67,9 @@ def test_real_amount_cap_default_is_3(monkeypatch: pytest.MonkeyPatch) -> None:
     planned = runner._plan_real_payments(run, scenario)
     assert planned
     for a in planned:
-        assert Decimal(a.amount) <= Decimal("3.00")
+        amt = Decimal(a.amount)
+        assert amt >= Decimal("50.00")
+        assert amt <= Decimal("1500.00")
 
 
 def test_real_amount_model_is_respected_with_env_cap(monkeypatch: pytest.MonkeyPatch) -> None:

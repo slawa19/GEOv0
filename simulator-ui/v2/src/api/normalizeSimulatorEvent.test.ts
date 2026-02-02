@@ -15,4 +15,62 @@ describe('normalizeSimulatorEvent', () => {
     expect(evt && (evt as any).type).toBe('tx.updated')
     expect((evt as any).edges).toEqual([])
   })
+  it('normalizeSimulatorEvent: tx.updated', () => {
+    const raw = {
+      event_id: 'evt_1',
+      ts: '2026-01-01T00:00:00Z',
+      type: 'tx.updated',
+      equivalent: 'UAH',
+      from: 'A',
+      to: 'B',
+      amount: '123.45',
+      ttl_ms: 1200,
+      intensity_key: 'mid',
+      edges: [{ from: 'A', to: 'B' }],
+    }
+
+    const evt = normalizeSimulatorEvent(raw)
+    expect(evt).toEqual({
+      event_id: 'evt_1',
+      ts: '2026-01-01T00:00:00Z',
+      type: 'tx.updated',
+      equivalent: 'UAH',
+      from: 'A',
+      to: 'B',
+      amount: '123.45',
+      ttl_ms: 1200,
+      intensity_key: 'mid',
+      edges: [{ from: 'A', to: 'B' }],
+      node_badges: [],
+      node_patch: undefined,
+      edge_patch: undefined,
+    })
+  })
+
+  it('normalizeSimulatorEvent: clearing.done', () => {
+    const raw = {
+      event_id: 'evt_2',
+      ts: '2026-01-01T00:00:01Z',
+      type: 'clearing.done',
+      equivalent: 'UAH',
+      plan_id: 'plan_x',
+      cleared_cycles: 2,
+      cleared_amount: '10.00',
+      node_patch: [{ id: 'A', net_balance: '1.00', net_balance_atoms: '100', net_sign: 1 }],
+      edge_patch: [{ source: 'A', target: 'B', used: '1.00', available: '9.00' }],
+    }
+
+    const evt = normalizeSimulatorEvent(raw)
+    expect(evt).toEqual({
+      event_id: 'evt_2',
+      ts: '2026-01-01T00:00:01Z',
+      type: 'clearing.done',
+      equivalent: 'UAH',
+      plan_id: 'plan_x',
+      cleared_cycles: 2,
+      cleared_amount: '10.00',
+      node_patch: [{ id: 'A', net_balance: '1.00', net_balance_atoms: '100', net_sign: 1 }],
+      edge_patch: [{ source: 'A', target: 'B', used: '1.00', available: '9.00' }],
+    })
+  })
 })

@@ -1,5 +1,4 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-
 import { loadEvents as loadEventsFixtures, loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { assertPlaylistEdgesExistInSnapshot } from '../demo/playlistValidation'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
@@ -114,7 +113,10 @@ export function useSimulatorApp() {
     selectedScenarioId: lsGet('geo.sim.v2.selectedScenarioId', ''),
     desiredMode: (lsGet('geo.sim.v2.desiredMode', 'real') === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode,
     // Default lower than demo to keep real-mode readable (avoid dozens of overlapping sparks).
-    intensityPercent: Number(lsGet('geo.sim.v2.intensityPercent', '30')) || 30,
+    intensityPercent: (() => {
+      const n = Number(lsGet('geo.sim.v2.intensityPercent', '30'))
+      return Number.isFinite(n) ? n : 30
+    })(),
     runId: lsGet('geo.sim.v2.runId', '') || null,
     runStatus: null as RunStatus | null,
     sseState: 'idle',
@@ -483,13 +485,13 @@ export function useSimulatorApp() {
     },
     mapping: VIZ_MAPPING,
     getSelectedNodeId: () => state.selectedNodeId,
-    getLinkLod: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? 'focus' : 'full'),
+    // Use 'focus' LOD during drag OR while physics is settling — both enable dragMode fast-path in baseGraph.
+    getLinkLod: () => {
+      if (dragToPin.dragState.active && dragToPin.dragState.dragging) return 'focus'
+      if (typeof (physics as any).isRunning === 'function' && (physics as any).isRunning()) return 'focus'
+      return 'full'
+    },
     getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
-    isAnimating: () =>
-      panState.active ||
-      (dragToPin.dragState.active && dragToPin.dragState.dragging) ||
-      (typeof (physics as any).isRunning === 'function' && (physics as any).isRunning()),
-    isSoftwareMode: () => !gpuAccelLikely.value,
     beforeDraw: () => {
       physics.tickAndSyncToLayout()
     },
@@ -644,6 +646,12 @@ export function useSimulatorApp() {
     minGapMs: 120,
   }
 
+  function clampRealTxTtlMs(ttlRaw: unknown, fallbackMs = 1200): number {
+    const ttlN = Number(ttlRaw ?? fallbackMs)
+    const ttl = Number.isFinite(ttlN) ? ttlN : fallbackMs
+    return Math.max(REAL_TX_FX.ttlMinMs, Math.min(REAL_TX_FX.ttlMaxMs, ttl))
+  }
+
   let txFxTokens = REAL_TX_FX.burst
   let txFxLastRefillAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
   let txFxLastSpawnAtMs = 0
@@ -678,12 +686,13 @@ export function useSimulatorApp() {
     txFxTokens -= 1
     txFxLastSpawnAtMs = nowMs
 
-    const ttlRaw = Number(evt.ttl_ms ?? 1200)
-    const ttlMs = Math.max(REAL_TX_FX.ttlMinMs, Math.min(REAL_TX_FX.ttlMaxMs, Number.isFinite(ttlRaw) ? ttlRaw : 1200))
+    const ttlMs = clampRealTxTtlMs(evt.ttl_ms)
     const k = intensityScale(evt.intensity_key)
 
-    // Keep a short-lived highlight so the spark reads as motion along an edge.
-    for (const e of sparkEdges) addActiveEdge(keyEdge(e.from, e.to), ttlMs + REAL_TX_FX.activeEdgePadMs)
+    // NOTE: We no longer add activeEdges for TX sparks — the beam itself provides
+    // sufficient visual feedback. ActiveEdges created a "stuck line" effect when
+    // combined with the shrinking beam trail.
+    // For clearing, activeEdges are still used to highlight the cycle path.
 
     spawnSparks(fxState, {
       edges: sparkEdges,
@@ -747,80 +756,48 @@ export function useSimulatorApp() {
 
   const clearingPlanFxStarted = new Set<string>()
 
-  function safeBigInt(v: unknown): bigint {
-    if (typeof v === 'bigint') return v
-    if (typeof v === 'number' && Number.isFinite(v)) return BigInt(Math.trunc(v))
-    if (typeof v === 'string') {
-      try {
-        return BigInt(v)
-      } catch {
-        return 0n
-      }
-    }
-    return 0n
-  }
-
-  function signedBalanceForNodeId(nodeId: string): bigint {
-    const n = getNodeById(nodeId)
-    if (!n) return 0n
-    const mag = n.net_balance_atoms == null ? 0n : safeBigInt(n.net_balance_atoms)
-    if (mag < 0n) throw new Error(`Invalid snapshot: net_balance_atoms must be magnitude for node '${nodeId}'`)
-
-    const s = typeof n.net_sign === 'number' && Number.isFinite(n.net_sign) ? n.net_sign : null
-    if (s === 1) return mag
-    if (s === -1) return -mag
-    return 0n
-  }
-
-  function formatBigIntCompact(v: bigint): string {
-    const abs = v < 0n ? -v : v
-    const thousand = 1_000n
-    const million = 1_000_000n
-    const billion = 1_000_000_000n
-
-    if (abs < thousand) return abs.toString()
-    if (abs < million) return `${(abs / thousand).toString()}K`
-    if (abs < billion) return `${(abs / million).toString()}M`
-    return `${(abs / billion).toString()}B`
-  }
-
   function pushFloatingLabelWhenReady(
     opts: Parameters<typeof pushFloatingLabel>[0],
     retryLeft = 6,
     retryDelayMs = 90,
   ) {
-    if (retryLeft <= 0) return
-    if (getLayoutNodeById(opts.nodeId)) {
+    // Overlay state is now tolerant to nodes missing from layout (it won't drop labels).
+    // Keep the retry mechanism to avoid “label appears later but immediately expires” in edge cases,
+    // but if we run out of retries, still push once so it can render when the node shows up.
+    if (getLayoutNodeById(opts.nodeId) || retryLeft <= 0) {
       pushFloatingLabel(opts)
       return
     }
+
     scheduleTimeout(() => pushFloatingLabelWhenReady(opts, retryLeft - 1, retryDelayMs), retryDelayMs)
   }
 
-  function pushBalanceDeltaLabels(
-    beforeById: Map<string, bigint>,
-    nodeIds: string[],
+
+  function pushTxAmountLabel(
+    nodeId: string,
+    signedAmount: string,
     unit: string,
     opts?: { throttleMs?: number },
   ) {
-    for (const id of nodeIds) {
-      const before = beforeById.get(id) ?? 0n
-      const after = signedBalanceForNodeId(id)
-      const delta = after - before
-      if (delta === 0n) continue
+    const id = String(nodeId ?? '').trim()
+    if (!id) return
 
-      const sign = delta > 0n ? '+' : '-'
-      const color = delta > 0n ? VIZ_MAPPING.fx.tx_spark.trail : VIZ_MAPPING.fx.clearing_debt
-      pushFloatingLabelWhenReady({
-        nodeId: id,
-        text: `${sign}${formatBigIntCompact(delta)} ${unit}`,
-        color: fxColorForNode(id, color),
-        ttlMs: 1900,
-        offsetYPx: -6,
-        throttleKey: `bal:${id}`,
-        throttleMs: opts?.throttleMs ?? 240,
-      })
-    }
+    const raw = String(signedAmount ?? '').trim()
+    if (!raw) return
+
+    const sign = raw.startsWith('-') ? '-' : '+'
+    const amountText = raw.replace(/^\+/, '')
+    const color = sign === '+' ? VIZ_MAPPING.fx.tx_spark.trail : VIZ_MAPPING.fx.clearing_debt
+
+    pushFloatingLabelWhenReady({
+      nodeId: id,
+      text: `${sign}${amountText.replace(/^-/, '')} ${unit}`,
+      color: fxColorForNode(id, color),
+      ttlMs: 1900,
+      offsetYPx: -6,
+      throttleKey: `amt:${id}`,
+      throttleMs: opts?.throttleMs ?? 240,
+    })
   }
 
   function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
@@ -846,8 +823,41 @@ export function useSimulatorApp() {
     clearingPlanFxStarted.add(planId)
 
     const clearingColor = VIZ_MAPPING.fx.clearing_debt
-    state.flash = Math.max(state.flash ?? 0, 0.75)
+    // REMOVED: No flash at plan start — only flash once at clearing.done
 
+    // Collect all edges from plan for highlighting (even without steps).
+    const allPlanEdges: Array<{ from: string; to: string }> = []
+    for (const step of plan.steps ?? []) {
+      for (const e of step.highlight_edges ?? []) allPlanEdges.push({ from: e.from, to: e.to })
+      for (const e of step.particles_edges ?? []) allPlanEdges.push({ from: e.from, to: e.to })
+    }
+
+    // Fallback: if plan has cycle_edges directly (some backends), use those.
+    const cycleEdges = (plan as any).cycle_edges as Array<{ from: string; to: string }> | undefined
+    if (cycleEdges && cycleEdges.length > 0) {
+      for (const e of cycleEdges) allPlanEdges.push({ from: e.from, to: e.to })
+    }
+
+    // Highlight all clearing edges immediately (so they're visible during the plan phase).
+    if (allPlanEdges.length > 0) {
+      const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      for (const e of allPlanEdges) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.highlightPulseMs + 3000)
+
+      spawnEdgePulses(fxState, {
+        edges: allPlanEdges,
+        nowMs,
+        durationMs: REAL_CLEARING_FX.highlightPulseMs,
+        color: clearingColor,
+        thickness: REAL_CLEARING_FX.highlightThickness,
+        seedPrefix: `real-clearing:plan:${planId}:${plan.equivalent}`,
+        countPerEdge: 1,
+        keyEdge,
+        seedFn: fnv1a,
+        isTestMode: isTestMode.value && isWebDriver,
+      })
+    }
+
+    // Process steps for additional FX (micro-transactions within clearing).
     for (const step of plan.steps ?? []) {
       const atMs = Math.max(0, Number(step.at_ms ?? 0))
       scheduleTimeout(() => {
@@ -856,38 +866,12 @@ export function useSimulatorApp() {
         const budgetScale =
           typeof budgetScaleRaw === 'number' && Number.isFinite(budgetScaleRaw) ? Math.max(0.25, Math.min(1, budgetScaleRaw)) : 1
 
-        const allowEdgePulses = budgetScale >= 0.65
         const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
 
         const k = intensityScale(step.intensity_key)
-        const baseCountPerEdge = k >= 1.0 ? 2 : 1
-        const countPerEdge = baseCountPerEdge > 1 && budgetScale < 0.85 ? 1 : baseCountPerEdge
-
-        const highlight = (step.highlight_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
-        if (highlight.length > 0) {
-          if (allowEdgePulses) {
-            spawnEdgePulses(fxState, {
-              edges: highlight,
-              nowMs,
-              durationMs: REAL_CLEARING_FX.highlightPulseMs,
-              color: clearingColor,
-              thickness: REAL_CLEARING_FX.highlightThickness * k * Math.min(1, 0.85 + budgetScale * 0.15),
-              seedPrefix: `real-clearing:highlight:${planId}:${plan.equivalent}:${step.at_ms}`,
-              countPerEdge,
-              keyEdge,
-              seedFn: fnv1a,
-              isTestMode: isTestMode.value && isWebDriver,
-            })
-          }
-
-          // Keep edges active even longer than the pulse itself.
-          for (const e of highlight) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.highlightPulseMs + 2200)
-        }
 
         const particles = (step.particles_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
         if (particles.length > 0) {
-          for (const e of particles) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.microTtlMs + 2200)
-
           spawnSparks(fxState, {
             edges: particles,
             nowMs,
@@ -918,8 +902,7 @@ export function useSimulatorApp() {
             })
           }
         }
-
-        state.flash = Math.max(state.flash ?? 0, 0.38)
+        // REMOVED: No flash per step
       }, atMs)
     }
 
@@ -943,14 +926,37 @@ export function useSimulatorApp() {
       typeof budgetScaleRaw === 'number' && Number.isFinite(budgetScaleRaw) ? Math.max(0.25, Math.min(1, budgetScaleRaw)) : 1
     const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
 
-    state.flash = 1
+    // Single flash at clearing completion (the only flash for entire clearing cycle).
+    state.flash = 0.85
 
+    // Collect all edges from plan (for edge highlighting).
     const planEdges: Array<{ from: string; to: string }> = []
     if (plan?.steps) {
       for (const s of plan.steps) {
         for (const e of s.highlight_edges ?? []) planEdges.push({ from: e.from, to: e.to })
+        for (const e of s.particles_edges ?? []) planEdges.push({ from: e.from, to: e.to })
       }
     }
+
+    // Fallback: use cycle_edges from plan or done if steps are empty.
+    const cycleEdges = (plan as any)?.cycle_edges ?? (done as any)?.cycle_edges
+    if (planEdges.length === 0 && Array.isArray(cycleEdges)) {
+      for (const e of cycleEdges) planEdges.push({ from: e.from, to: e.to })
+    }
+
+    // Fallback: derive edges from done.node_patch if still empty (edge between consecutive nodes).
+    if (planEdges.length === 0 && done.node_patch && done.node_patch.length >= 2) {
+      const patchIds = done.node_patch.map((p) => p.id).filter(Boolean)
+      for (let i = 0; i < patchIds.length; i++) {
+        const from = patchIds[i]!
+        const to = patchIds[(i + 1) % patchIds.length]!
+        if (from && to) planEdges.push({ from, to })
+      }
+    }
+
+    const nodeIds = nodesFromEdges(planEdges)
+
+    // Highlight edges with pulses.
     if (planEdges.length > 0) {
       spawnEdgePulses(fxState, {
         edges: planEdges,
@@ -968,7 +974,6 @@ export function useSimulatorApp() {
       for (const e of planEdges) addActiveEdge(keyEdge(e.from, e.to), 5200)
 
       if (budgetScale >= 0.55) {
-        const nodeIds = nodesFromEdges(planEdges)
         const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
         spawnNodeBursts(fxState, {
           nodeIds: capped,
@@ -979,6 +984,54 @@ export function useSimulatorApp() {
           seedPrefix: `real-clearing:done-nodes:${done.plan_id}`,
           seedFn: fnv1a,
           isTestMode: isTestMode.value && isWebDriver,
+        })
+      }
+    }
+
+    // Show total cleared amount as a single floating label in the center of the cycle.
+    // This replaces multiple per-node labels for a cleaner UX.
+    if (nodeIds.length > 0) {
+      // Compute center of cycle (average of all node positions).
+      let sumX = 0
+      let sumY = 0
+      let count = 0
+      let centerNodeId = nodeIds[0]!
+      for (const id of nodeIds) {
+        const ln = getLayoutNodeById(id)
+        if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
+          sumX += ln.__x
+          sumY += ln.__y
+          count++
+        }
+      }
+
+      // Pick the node closest to center to anchor the label.
+      if (count > 0) {
+        const cx = sumX / count
+        const cy = sumY / count
+        let minDist = Infinity
+        for (const id of nodeIds) {
+          const ln = getLayoutNodeById(id)
+          if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
+            const d = Math.hypot(ln.__x - cx, ln.__y - cy)
+            if (d < minDist) {
+              minDist = d
+              centerNodeId = id
+            }
+          }
+        }
+      }
+
+      const clearedAmount = String(done.cleared_amount ?? '').trim()
+      if (clearedAmount && clearedAmount !== '0' && clearedAmount !== '0.0' && clearedAmount !== '0.00') {
+        pushFloatingLabelWhenReady({
+          nodeId: centerNodeId,
+          text: `🔄 −${clearedAmount.replace(/^-/, '')} ${done.equivalent}`,
+          color: clearingColor,
+          ttlMs: 3200,
+          offsetYPx: -18,
+          throttleKey: `clearing-total:${done.plan_id}`,
+          throttleMs: 500,
         })
       }
     }
@@ -1138,7 +1191,9 @@ export function useSimulatorApp() {
   const clearingPlansById = new Map<string, ClearingPlanEvent>()
 
   function cleanupRealRunFxAndTimers() {
-    clearScheduledTimeouts()
+    // Keep critical timers (e.g. “arrival” labels) so quick stop/restart/cleanup doesn't silently drop them.
+    // Each critical timer must self-guard (runId / sseSeq / abort signal) before emitting UI.
+    clearScheduledTimeouts({ keepCritical: true })
     resetOverlays()
     clearHoveredEdge()
     clearingPlanFxStarted.clear()
@@ -1158,12 +1213,13 @@ export function useSimulatorApp() {
     inc,
     loadScene: () => sceneState.loadScene(),
     realPatchApplier,
-    signedBalanceForNodeId,
-    pushBalanceDeltaLabels,
+    pushTxAmountLabel,
     runRealTxFx,
+    clampRealTxTtlMs,
     runRealClearingPlanFx,
     runRealClearingDoneFx,
     clearingPlansById,
+    scheduleTimeout,
   })
 
   useAppLifecycle({

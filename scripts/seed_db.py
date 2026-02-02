@@ -197,6 +197,12 @@ def _ensure_fixture_pack(repo_root: str, *, seed_id: str, regenerate: bool) -> s
         "riverside-town-50": os.path.join(
             repo_root, "admin-fixtures", "tools", "generate_seed_riverside_town_50.py"
         ),
+        "greenfield-village-100-v2": os.path.join(
+            repo_root, "admin-fixtures", "tools", "generate_seed_greenfield_village_100_v2.py"
+        ),
+        "riverside-town-50-v2": os.path.join(
+            repo_root, "admin-fixtures", "tools", "generate_seed_riverside_town_50_v2.py"
+        ),
     }
 
     if seed_id not in generators:
@@ -591,7 +597,12 @@ async def main() -> None:
     )
     parser.add_argument(
         "--community",
-        choices=["greenfield-village-100", "riverside-town-50"],
+        choices=[
+            "greenfield-village-100",
+            "riverside-town-50",
+            "greenfield-village-100-v2",
+            "riverside-town-50-v2",
+        ],
         default=None,
         help=(
             "When --source fixtures, generate and seed from a specific community fixture pack into .local-run "

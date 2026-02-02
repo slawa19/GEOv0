@@ -78,6 +78,8 @@ MVP-контракт событий **точно равен** union `SimulatorEv
   - `event_id`, `ts`, `type="tx.updated"`, `equivalent`
 - Опциональные поля (OpenAPI, can be omitted):
   - `ttl_ms`, `intensity_key`, `edges[]`, `node_badges[]`
+  - `from`, `to`, `amount` — для backend-first подписей/FX транзакции (amount в major units, строка)
+  - `node_patch[]`, `edge_patch[]` — если backend хочет сразу прислать обновление состояния (опционально)
 
 2) `tx.failed`
 - Назначение: нормализованное событие ошибки/отказа платежа (для статистики и UX без обращения к логам).
@@ -96,9 +98,13 @@ MVP-контракт событий **точно равен** union `SimulatorEv
   - `event_id`, `ts`, `type="clearing.plan"`, `equivalent`, `plan_id`, `steps[]`
 
 4) `clearing.done`
-- Назначение: маркер завершения клиринга.
+- Назначение: завершение клиринга + (опционально) статистика и патчи для обновления графа без локальных расчётов.
 - Обязательные поля (OpenAPI):
   - `event_id`, `ts`, `type="clearing.done"`, `equivalent`
+ - Опциональные поля (OpenAPI, can be omitted):
+  - `plan_id`
+  - `cleared_cycles`, `cleared_amount` (amount в major units, строка)
+  - `node_patch[]`, `edge_patch[]`
 
 5) `run_status`
 - Назначение: мониторинг/восстановление состояния; обязательное событие для UI вкладки Run.
@@ -224,7 +230,22 @@ MVP-контракт событий **точно равен** union `SimulatorEv
 }
 ```
 
-### A.4 `tx.failed`
+### A.4 `clearing.done`
+```json
+{
+  "event_id": "evt_0250",
+  "ts": "2026-01-28T12:00:05.800Z",
+  "type": "clearing.done",
+  "equivalent": "UAH",
+  "plan_id": "plan_001",
+  "cleared_cycles": 2,
+  "cleared_amount": "10.00",
+  "node_patch": [{ "id": "p1", "net_balance": "-12.50", "net_balance_atoms": "1250", "net_sign": -1 }],
+  "edge_patch": [{ "source": "p1", "target": "h1", "used": "1.00", "available": "9.00" }]
+}
+```
+
+### A.5 `tx.failed`
 ```json
 {
   "event_id": "evt_0150",

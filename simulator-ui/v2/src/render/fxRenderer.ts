@@ -49,6 +49,9 @@ import { sizeForNode } from './nodePainter'
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 
+// Per-frame caches (cleared once per renderFxFrame call).
+const nodeOutlinePath2DCache = new Map<string, Path2D>()
+
 function worldRectForCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, padPx = 96) {
   // Current transform includes camera pan/zoom. Invert it to convert screen-space canvas bounds
   // into world-space coordinates for stable clip paths.
@@ -102,6 +105,11 @@ function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1
 }
 
 function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
+  // Cache per-frame: this can be called multiple times for the same node.
+  const cacheKey = `${n.id}:${String(n.type)}:${n.__x}:${n.__y}:${scale}:${invZoom}`
+  const cached = nodeOutlinePath2DCache.get(cacheKey)
+  if (cached) return cached
+
   const { w: w0, h: h0 } = sizeForNode(n)
   const w = w0 * invZoom
   const h = h0 * invZoom
@@ -112,11 +120,16 @@ function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
   const x = n.__x - ww / 2
   const y = n.__y - hh / 2
 
-  if (isBusiness) return roundedRectPath2D(x, y, ww, hh, rr * scale)
+  if (isBusiness) {
+    const p = roundedRectPath2D(x, y, ww, hh, rr * scale)
+    nodeOutlinePath2DCache.set(cacheKey, p)
+    return p
+  }
 
   const p = new Path2D()
   const r = Math.max(ww, hh) / 2
   p.arc(n.__x, n.__y, r, 0, Math.PI * 2)
+  nodeOutlinePath2DCache.set(cacheKey, p)
   return p
 }
 
@@ -347,6 +360,9 @@ export function renderFxFrame(opts: {
   const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
   const allowGradients = q === 'high'
 
+  // Clear per-frame caches.
+  nodeOutlinePath2DCache.clear()
+
   // Lazily computed world-space view rect (getTransform().inverse is not cheap).
   let cachedWorldView: { x: number; y: number; w: number; h: number } | null = null
   const worldView = () => (cachedWorldView ??= worldRectForCanvas(ctx, w, h))
@@ -386,42 +402,72 @@ export function renderFxFrame(opts: {
 
       if (s.kind === 'beam') {
         const t = easeOutCubic(t0)
-        const life = 1 - t0
-        const alpha = clamp01(life)
+
+        // Beam head uses easing (fast early, slow near the end).
+        // Trail has a maximum length and shrinks as head approaches target (meteor effect).
+        const lifePos = Math.max(0, 1 - t)
+        const alpha = clamp01(Math.pow(lifePos, 1.2))
 
         const th = s.thickness * invZ
 
         const headX = start.x + dx * t
         const headY = start.y + dy * t
 
+        // Trail length: limited so beam doesn't span the entire edge.
+        // As head approaches target, trail shrinks proportionally.
+        const maxTrailFraction = 0.85 // Max trail = 85% of edge length (longer for better visibility)
+        const maxTrailLen = len * maxTrailFraction
+        const distanceTraveled = len * t
+        // Trail shrinks as we approach the end (last 30% of journey)
+        const shrinkStart = 0.7
+        const shrinkFactor = t > shrinkStart ? 1 - (t - shrinkStart) / (1 - shrinkStart) : 1
+        const currentTrailLen = Math.min(maxTrailLen, distanceTraveled) * shrinkFactor
+
+        // Trail start point (follows behind head)
+        const trailStartT = Math.max(0, t - currentTrailLen / Math.max(1e-6, len))
+        const trailStartX = start.x + dx * trailStartT
+        const trailStartY = start.y + dy * trailStartT
+
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
 
-        // Trail beam (from start to head) — thin core + soft halo
+        // Trail beam (from trailStart to head) — thin core + soft halo
+        // Now the trail is limited in length and shrinks at the end.
         {
           const baseAlpha = Math.max(0, Math.min(1, alpha * 0.55))
-          const th = s.thickness * invZ
 
-          // Halo pass (only from start to head, not full edge)
-          ctx.globalAlpha = baseAlpha * 0.55
-          ctx.strokeStyle = s.colorTrail
+          const trailStroke = allowGradients
+            ? (() => {
+                const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
+                // Gradient from tail (transparent) to head (bright)
+                g.addColorStop(0, withAlpha(s.colorTrail, 0))
+                g.addColorStop(0.5, withAlpha(s.colorTrail, baseAlpha * 0.35))
+                g.addColorStop(1, withAlpha(s.colorTrail, baseAlpha))
+                return g
+              })()
+            : null
+
+          // Halo pass (from trailStart to head)
+          // If gradients are disabled (med/low quality), ensure we still fade the beam.
+          ctx.globalAlpha = trailStroke ? 1 : baseAlpha
+          ctx.strokeStyle = trailStroke ?? s.colorTrail
           ctx.lineWidth = Math.max(spx(1.2), th * 3.2)
           ctx.shadowBlur = Math.max(spx(10), th * 18) * blurK
-          ctx.shadowColor = withAlpha(s.colorTrail, 0.85)
+          ctx.shadowColor = withAlpha(s.colorTrail, Math.max(0, Math.min(1, 0.85 * (trailStroke ? 1 : baseAlpha))))
           ctx.beginPath()
-          ctx.moveTo(start.x, start.y)
+          ctx.moveTo(trailStartX, trailStartY)
           ctx.lineTo(headX, headY)
           ctx.stroke()
 
-          // Core pass (only from start to head)
+          // Core pass (from trailStart to head)
           ctx.shadowBlur = 0
-          ctx.globalAlpha = baseAlpha
-          ctx.strokeStyle = withAlpha(s.colorTrail, 0.9)
+          ctx.globalAlpha = trailStroke ? 1 : baseAlpha
+          ctx.strokeStyle = trailStroke ?? withAlpha(s.colorTrail, 0.9)
           ctx.lineWidth = Math.max(spx(0.9), th * 1.25)
           ctx.beginPath()
-          ctx.moveTo(start.x, start.y)
+          ctx.moveTo(trailStartX, trailStartY)
           ctx.lineTo(headX, headY)
           ctx.stroke()
         }
@@ -473,8 +519,8 @@ export function renderFxFrame(opts: {
       // Comet-like spark: trail length depends on edge length and ttl.
       // Small ttl => faster head => longer trail.
       const speedPxPerMs = len / Math.max(1, s.ttlMs)
-      const trailTimeMs = Math.max(120, Math.min(420, s.ttlMs * 0.28))
-      const trailLen = Math.max(12, Math.min(len * 0.55, speedPxPerMs * trailTimeMs))
+      const trailTimeMs = Math.max(150, Math.min(500, s.ttlMs * 0.35))
+      const trailLen = Math.max(16, Math.min(len * 0.75, speedPxPerMs * trailTimeMs))
 
       const seed01 = ((s.seed % 4096) / 4096)
       const wobbleFreq = 2.5 + (seed01 * 4.0)

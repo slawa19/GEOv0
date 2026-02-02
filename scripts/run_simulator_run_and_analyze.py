@@ -111,6 +111,8 @@ def main() -> int:
     ap.add_argument("--intensity", type=int, default=80)
     ap.add_argument("--run-seconds", type=int, default=20)
     ap.add_argument("--equivalent", default="UAH")
+    ap.add_argument("--min-amount", type=float, default=50.0)
+    ap.add_argument("--max-amount", type=float, default=1500.0)
     ap.add_argument("--out-dir", default=str(Path(".local-run") / "analysis"))
     args = ap.parse_args()
 
@@ -197,9 +199,12 @@ def main() -> int:
         f"{_percentile(amounts, 0.50)}/{_percentile(amounts, 0.90)}/{_percentile(amounts, 0.99)}"
     )
 
-    over_3 = sum(1 for x in amounts if x > 3.0 + 1e-9)
-    over_500 = sum(1 for x in amounts if x > 500.0 + 1e-9)
-    print(f"payments.over_3={over_3} payments.over_500={over_500}")
+    lo = float(args.min_amount)
+    hi = float(args.max_amount)
+    below = sum(1 for x in amounts if x < lo - 1e-9)
+    above = sum(1 for x in amounts if x > hi + 1e-9)
+    print(f"payments.target_range=[{lo},{hi}]")
+    print(f"payments.below_min={below} payments.above_max={above}")
 
     return 0
 

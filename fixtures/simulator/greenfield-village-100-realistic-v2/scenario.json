@@ -837,31 +837,39 @@
     {
       "id": "anchor_hub",
       "props": {
-        "tx_rate": 0.05,
+        "tx_rate": 0.02,
         "equivalent_weights": {
           "UAH": 1.0
+        },
+        "amount_model": {
+          "UAH": {
+            "p50": 900,
+            "p90": 1400,
+            "min": 80,
+            "max": 1500
+          }
         }
       }
     },
     {
       "id": "producer",
       "props": {
-        "tx_rate": 0.2,
+        "tx_rate": 0.08,
         "equivalent_weights": {
           "UAH": 1.0
         },
         "recipient_group_weights": {
-          "retail": 0.3,
-          "services": 0.3,
+          "retail": 0.35,
+          "services": 0.25,
           "households": 0.25,
           "anchors": 0.15
         },
         "amount_model": {
           "UAH": {
-            "p50": 400,
-            "p90": 2500,
+            "p50": 350,
+            "p90": 1100,
             "min": 50,
-            "max": 8000
+            "max": 1500
           }
         }
       }
@@ -869,21 +877,21 @@
     {
       "id": "retail",
       "props": {
-        "tx_rate": 0.25,
+        "tx_rate": 0.1,
         "equivalent_weights": {
           "UAH": 1.0
         },
         "recipient_group_weights": {
-          "anchors": 0.4,
-          "producers": 0.45,
-          "services": 0.15
+          "anchors": 0.35,
+          "producers": 0.4,
+          "services": 0.25
         },
         "amount_model": {
           "UAH": {
             "p50": 500,
-            "p90": 3000,
-            "min": 100,
-            "max": 10000
+            "p90": 1300,
+            "min": 50,
+            "max": 1500
           }
         }
       }
@@ -891,16 +899,29 @@
     {
       "id": "service",
       "props": {
-        "tx_rate": 0.15,
+        "tx_rate": 0.06,
         "equivalent_weights": {
           "UAH": 1.0
+        },
+        "recipient_group_weights": {
+          "households": 0.45,
+          "retail": 0.35,
+          "anchors": 0.2
+        },
+        "amount_model": {
+          "UAH": {
+            "p50": 300,
+            "p90": 1000,
+            "min": 50,
+            "max": 1500
+          }
         }
       }
     },
     {
       "id": "household",
       "props": {
-        "tx_rate": 0.35,
+        "tx_rate": 0.09,
         "equivalent_weights": {
           "UAH": 1.0
         },
@@ -912,10 +933,10 @@
         },
         "amount_model": {
           "UAH": {
-            "p50": 150,
-            "p90": 600,
-            "min": 20,
-            "max": 2000
+            "p50": 180,
+            "p90": 650,
+            "min": 50,
+            "max": 1500
           }
         }
       }
@@ -923,9 +944,17 @@
     {
       "id": "agent",
       "props": {
-        "tx_rate": 0.2,
+        "tx_rate": 0.04,
         "equivalent_weights": {
           "UAH": 1.0
+        },
+        "amount_model": {
+          "UAH": {
+            "p50": 500,
+            "p90": 1300,
+            "min": 50,
+            "max": 1500
+          }
         }
       }
     }
@@ -934,197 +963,197 @@
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0002_3c6ef362",
-      "limit": "1000.00",
+      "limit": "1685.83",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0003_daa66d13",
-      "limit": "1000.00",
+      "limit": "8397.55",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0004_78dde6c4",
-      "limit": "1000.00",
+      "limit": "9017.15",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": false
+        "auto_clearing": true,
+        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0005_17156075",
-      "limit": "1000.00",
+      "limit": "9116.78",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0006_b54cda26",
-      "limit": "1000.00",
+      "limit": "10668.62",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0007_538453d7",
-      "limit": "1000.00",
+      "limit": "10298.82",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "1000.00",
+      "limit": "11688.55",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0037_de049695",
-      "limit": "1000.00",
+      "limit": "7833.95",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": false
+        "auto_clearing": true,
+        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0038_7c3c1046",
-      "limit": "1000.00",
+      "limit": "9505.78",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0039_1a7389f7",
-      "limit": "1000.00",
+      "limit": "9273.32",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0040_b8ab03a8",
-      "limit": "1000.00",
+      "limit": "6023.92",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0041_56e27d59",
-      "limit": "1000.00",
+      "limit": "5900.66",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0042_f519f70a",
-      "limit": "1000.00",
+      "limit": "5036.01",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": false
+        "auto_clearing": true,
+        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0043_935170bb",
-      "limit": "1000.00",
+      "limit": "4453.77",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0044_3188ea6c",
-      "limit": "1000.00",
+      "limit": "9112.31",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0045_cfc0641d",
-      "limit": "1000.00",
+      "limit": "10616.83",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0046_6df7ddce",
-      "limit": "550.00",
+      "limit": "549.97",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0051_850d3e43",
-      "limit": "550.00",
+      "limit": "2177.81",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0001_9e3779b1",
       "to": "PID_U0056_9c229eb8",
-      "limit": "550.00",
+      "limit": "575.89",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "10749.68",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1134,27 +1163,27 @@
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0006_b54cda26",
-      "limit": "850.00",
+      "limit": "4981.53",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0007_538453d7",
-      "limit": "700.00",
+      "limit": "11106.67",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "700.00",
+      "limit": "6878.01",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1164,17 +1193,17 @@
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0037_de049695",
-      "limit": "700.00",
+      "limit": "6342.45",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0045_cfc0641d",
-      "limit": "700.00",
+      "limit": "1529.95",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1184,37 +1213,37 @@
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0047_0c2f577f",
-      "limit": "550.00",
+      "limit": "2268.28",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0052_2344b7f4",
-      "limit": "550.00",
+      "limit": "1777.08",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0002_3c6ef362",
       "to": "PID_U0057_3a5a1869",
-      "limit": "550.00",
+      "limit": "459.32",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "3014.08",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1224,107 +1253,107 @@
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0011_cc623a9b",
-      "limit": "550.00",
+      "limit": "1599.33",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0014_a708a7ae",
-      "limit": "550.00",
+      "limit": "2930.40",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0017_81af14c1",
-      "limit": "550.00",
+      "limit": "2562.17",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0020_5c5581d4",
-      "limit": "550.00",
+      "limit": "1848.46",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0023_36fbeee7",
-      "limit": "550.00",
+      "limit": "2324.62",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0026_11a25bfa",
-      "limit": "550.00",
+      "limit": "1956.52",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0029_ec48c90d",
-      "limit": "550.00",
+      "limit": "1112.27",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0032_c6ef3620",
-      "limit": "550.00",
+      "limit": "1553.67",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0035_a195a333",
-      "limit": "550.00",
+      "limit": "2345.55",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0003_daa66d13",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "700.00",
+      "limit": "5321.34",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "2743.68",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1334,7 +1363,7 @@
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0061_b337ff2d",
-      "limit": "400.00",
+      "limit": "2736.72",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1344,37 +1373,37 @@
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0063_efa6f28f",
-      "limit": "400.00",
+      "limit": "1561.36",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0065_2c15e5f1",
-      "limit": "400.00",
+      "limit": "3635.16",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0067_6884d953",
-      "limit": "400.00",
+      "limit": "2349.70",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0069_a4f3ccb5",
-      "limit": "400.00",
+      "limit": "2282.48",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1384,37 +1413,37 @@
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0071_e162c017",
-      "limit": "400.00",
+      "limit": "1349.13",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0073_1dd1b379",
-      "limit": "400.00",
+      "limit": "2563.06",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0075_5a40a6db",
-      "limit": "400.00",
+      "limit": "3062.68",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0077_96af9a3d",
-      "limit": "400.00",
+      "limit": "1950.86",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1424,97 +1453,97 @@
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0079_d31e8d9f",
-      "limit": "400.00",
+      "limit": "2149.77",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0081_0f8d8101",
-      "limit": "400.00",
+      "limit": "2091.13",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0083_4bfc7463",
-      "limit": "400.00",
+      "limit": "970.72",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0085_886b67c5",
-      "limit": "400.00",
+      "limit": "1093.78",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0087_c4da5b27",
-      "limit": "400.00",
+      "limit": "2242.73",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0089_01494e89",
-      "limit": "400.00",
+      "limit": "2378.03",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0091_3db841eb",
-      "limit": "400.00",
+      "limit": "2669.90",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0093_7a27354d",
-      "limit": "400.00",
+      "limit": "1455.58",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0004_78dde6c4",
       "to": "PID_U0095_b69628af",
-      "limit": "400.00",
+      "limit": "1354.04",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0005_17156075",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "8487.33",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1524,17 +1553,17 @@
     {
       "from": "PID_U0005_17156075",
       "to": "PID_U0004_78dde6c4",
-      "limit": "700.00",
+      "limit": "3736.39",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0005_17156075",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "700.00",
+      "limit": "5079.38",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1544,37 +1573,27 @@
     {
       "from": "PID_U0005_17156075",
       "to": "PID_U0050_e6d5c492",
-      "limit": "550.00",
+      "limit": "872.09",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0005_17156075",
       "to": "PID_U0055_fdeb2507",
-      "limit": "550.00",
+      "limit": "2849.01",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0005_17156075",
       "to": "PID_U0060_1500857c",
-      "limit": "550.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0006_b54cda26",
-      "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "1981.67",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1583,8 +1602,18 @@
     },
     {
       "from": "PID_U0006_b54cda26",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "5155.63",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0006_b54cda26",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "700.00",
+      "limit": "7478.39",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1594,17 +1623,17 @@
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0039_1a7389f7",
-      "limit": "550.00",
+      "limit": "9119.72",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0043_935170bb",
-      "limit": "550.00",
+      "limit": "4575.98",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1614,27 +1643,27 @@
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0048_aa66d130",
-      "limit": "550.00",
+      "limit": "2937.17",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0053_c17c31a5",
-      "limit": "550.00",
+      "limit": "570.88",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0058_d891921a",
-      "limit": "550.00",
+      "limit": "2916.13",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1644,67 +1673,67 @@
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0062_516f78de",
-      "limit": "400.00",
+      "limit": "509.78",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0070_432b4666",
-      "limit": "400.00",
+      "limit": "1516.07",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0078_34e713ee",
-      "limit": "400.00",
+      "limit": "2006.57",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0083_4bfc7463",
-      "limit": "550.00",
+      "limit": "2455.71",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0086_26a2e176",
-      "limit": "400.00",
+      "limit": "436.35",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0006_b54cda26",
       "to": "PID_U0094_185eaefe",
-      "limit": "400.00",
+      "limit": "1846.09",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "11472.39",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1714,27 +1743,27 @@
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "700.00",
+      "limit": "7696.29",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": false
+        "auto_clearing": true,
+        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0039_1a7389f7",
-      "limit": "550.00",
+      "limit": "11421.58",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0043_935170bb",
-      "limit": "550.00",
+      "limit": "5434.39",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1744,7 +1773,7 @@
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0049_489e4ae1",
-      "limit": "550.00",
+      "limit": "1642.01",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1754,187 +1783,187 @@
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0054_5fb3ab56",
-      "limit": "550.00",
+      "limit": "2481.88",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0059_76c90bcb",
-      "limit": "550.00",
+      "limit": "2660.83",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0063_efa6f28f",
-      "limit": "400.00",
+      "limit": "2766.21",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0071_e162c017",
-      "limit": "400.00",
+      "limit": "1732.54",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0079_d31e8d9f",
-      "limit": "400.00",
+      "limit": "1926.77",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0087_c4da5b27",
-      "limit": "400.00",
+      "limit": "663.46",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0007_538453d7",
       "to": "PID_U0095_b69628af",
-      "limit": "400.00",
+      "limit": "1837.09",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0011_cc623a9b",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1707.27",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0011_cc623a9b",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "1343.39",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0011_cc623a9b",
       "to": "PID_U0006_b54cda26",
-      "limit": "850.00",
+      "limit": "512.90",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0011_cc623a9b",
       "to": "PID_U0007_538453d7",
-      "limit": "700.00",
+      "limit": "2886.78",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0011_cc623a9b",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "550.00",
+      "limit": "1620.40",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0011_cc623a9b",
       "to": "PID_U0061_b337ff2d",
-      "limit": "400.00",
+      "limit": "337.03",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0011_cc623a9b",
       "to": "PID_U0081_0f8d8101",
-      "limit": "400.00",
+      "limit": "589.15",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0012_6a99b44c",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "505.95",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0012_6a99b44c",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "972.95",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0012_6a99b44c",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "700.00",
+      "limit": "809.09",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0013_08d12dfd",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "3173.95",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0013_08d12dfd",
       "to": "PID_U0007_538453d7",
-      "limit": "700.00",
+      "limit": "2462.82",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1944,27 +1973,27 @@
     {
       "from": "PID_U0013_08d12dfd",
       "to": "PID_U0045_cfc0641d",
-      "limit": "700.00",
+      "limit": "2877.84",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0014_a708a7ae",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "579.07",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0014_a708a7ae",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "3196.53",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -1974,87 +2003,87 @@
     {
       "from": "PID_U0014_a708a7ae",
       "to": "PID_U0006_b54cda26",
-      "limit": "850.00",
+      "limit": "1212.57",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0014_a708a7ae",
       "to": "PID_U0037_de049695",
-      "limit": "700.00",
+      "limit": "532.08",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0015_4540215f",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "831.55",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0015_4540215f",
       "to": "PID_U0006_b54cda26",
-      "limit": "850.00",
+      "limit": "1779.69",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0015_4540215f",
       "to": "PID_U0037_de049695",
-      "limit": "700.00",
+      "limit": "3674.90",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0016_e3779b10",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1143.66",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0016_e3779b10",
       "to": "PID_U0007_538453d7",
-      "limit": "700.00",
+      "limit": "2389.59",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0016_e3779b10",
       "to": "PID_U0065_2c15e5f1",
-      "limit": "400.00",
+      "limit": "403.38",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0016_e3779b10",
       "to": "PID_U0085_886b67c5",
-      "limit": "400.00",
+      "limit": "386.97",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2064,77 +2093,77 @@
     {
       "from": "PID_U0017_81af14c1",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1537.49",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0017_81af14c1",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "2179.22",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0017_81af14c1",
       "to": "PID_U0038_7c3c1046",
-      "limit": "700.00",
+      "limit": "1229.86",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0018_1fe68e72",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "3214.07",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0018_1fe68e72",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "550.00",
+      "limit": "2376.23",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0019_be1e0823",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1251.07",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0019_be1e0823",
       "to": "PID_U0006_b54cda26",
-      "limit": "850.00",
+      "limit": "1293.61",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0020_5c5581d4",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1109.01",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2144,127 +2173,127 @@
     {
       "from": "PID_U0020_5c5581d4",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "777.61",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0020_5c5581d4",
       "to": "PID_U0037_de049695",
-      "limit": "700.00",
+      "limit": "2950.10",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0020_5c5581d4",
       "to": "PID_U0039_1a7389f7",
-      "limit": "700.00",
+      "limit": "2629.97",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0021_fa8cfb85",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "800.00",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0021_fa8cfb85",
       "to": "PID_U0069_a4f3ccb5",
-      "limit": "400.00",
+      "limit": "666.90",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0021_fa8cfb85",
       "to": "PID_U0089_01494e89",
-      "limit": "400.00",
+      "limit": "526.83",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0022_98c47536",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1605.56",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0023_36fbeee7",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1200.37",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0023_36fbeee7",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "2493.09",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0023_36fbeee7",
       "to": "PID_U0040_b8ab03a8",
-      "limit": "700.00",
+      "limit": "2151.51",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0024_d5336898",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1294.93",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0025_736ae249",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "3721.43",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0025_736ae249",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "550.00",
+      "limit": "2011.96",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2274,117 +2303,117 @@
     {
       "from": "PID_U0026_11a25bfa",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "673.32",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0026_11a25bfa",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "1089.25",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0026_11a25bfa",
       "to": "PID_U0041_56e27d59",
-      "limit": "700.00",
+      "limit": "634.93",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0026_11a25bfa",
       "to": "PID_U0073_1dd1b379",
-      "limit": "400.00",
+      "limit": "304.39",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0026_11a25bfa",
       "to": "PID_U0093_7a27354d",
-      "limit": "400.00",
+      "limit": "667.05",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0027_afd9d5ab",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "2542.15",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0028_4e114f5c",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1156.73",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0029_ec48c90d",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "3217.18",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0029_ec48c90d",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "2823.43",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0029_ec48c90d",
       "to": "PID_U0042_f519f70a",
-      "limit": "700.00",
+      "limit": "1120.38",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0030_8a8042be",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "3336.36",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0031_28b7bc6f",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "800.00",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2394,107 +2423,107 @@
     {
       "from": "PID_U0031_28b7bc6f",
       "to": "PID_U0077_96af9a3d",
-      "limit": "400.00",
+      "limit": "394.87",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0032_c6ef3620",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "1972.38",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0032_c6ef3620",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "1726.12",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0032_c6ef3620",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "550.00",
+      "limit": "1348.85",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0032_c6ef3620",
       "to": "PID_U0043_935170bb",
-      "limit": "700.00",
+      "limit": "2013.09",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0033_6526afd1",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "2485.48",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0033_6526afd1",
       "to": "PID_U0037_de049695",
-      "limit": "700.00",
+      "limit": "2484.71",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0034_035e2982",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "2853.20",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0035_a195a333",
       "to": "PID_U0003_daa66d13",
-      "limit": "850.00",
+      "limit": "486.44",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0035_a195a333",
       "to": "PID_U0004_78dde6c4",
-      "limit": "550.00",
+      "limit": "2658.67",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0035_a195a333",
       "to": "PID_U0044_3188ea6c",
-      "limit": "700.00",
+      "limit": "2965.24",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2504,7 +2533,7 @@
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "7793.22",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2514,27 +2543,27 @@
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0011_cc623a9b",
-      "limit": "400.00",
+      "limit": "505.64",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0036_3fcd1ce4",
-      "to": "PID_U0039_1a7389f7",
-      "limit": "550.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "9943.83",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0043_935170bb",
-      "limit": "550.00",
+      "limit": "6763.44",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2544,197 +2573,197 @@
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0061_b337ff2d",
-      "limit": "550.00",
+      "limit": "1010.36",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0062_516f78de",
-      "limit": "550.00",
+      "limit": "807.45",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0063_efa6f28f",
-      "limit": "550.00",
+      "limit": "1753.40",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0064_8dde6c40",
-      "limit": "550.00",
+      "limit": "2585.77",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0065_2c15e5f1",
-      "limit": "550.00",
+      "limit": "1370.70",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0066_ca4d5fa2",
-      "limit": "550.00",
+      "limit": "668.51",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0067_6884d953",
-      "limit": "550.00",
+      "limit": "1930.63",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0068_06bc5304",
-      "limit": "550.00",
+      "limit": "1025.45",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0069_a4f3ccb5",
-      "limit": "550.00",
+      "limit": "937.35",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0070_432b4666",
-      "limit": "550.00",
+      "limit": "1587.77",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0071_e162c017",
-      "limit": "550.00",
+      "limit": "3687.55",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0072_7f9a39c8",
-      "limit": "550.00",
+      "limit": "3580.38",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0073_1dd1b379",
-      "limit": "550.00",
+      "limit": "1825.96",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0074_bc092d2a",
-      "limit": "550.00",
+      "limit": "1631.63",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0075_5a40a6db",
-      "limit": "550.00",
+      "limit": "1805.10",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0076_f878208c",
-      "limit": "550.00",
+      "limit": "2826.28",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0077_96af9a3d",
-      "limit": "550.00",
+      "limit": "765.84",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0078_34e713ee",
-      "limit": "550.00",
+      "limit": "1655.51",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0079_d31e8d9f",
-      "limit": "550.00",
+      "limit": "3128.02",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0080_71560750",
-      "limit": "550.00",
+      "limit": "1690.31",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2744,77 +2773,77 @@
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0081_0f8d8101",
-      "limit": "550.00",
+      "limit": "3659.67",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0082_adc4fab2",
-      "limit": "550.00",
+      "limit": "2127.53",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0083_4bfc7463",
-      "limit": "550.00",
+      "limit": "2904.70",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0084_ea33ee14",
-      "limit": "550.00",
+      "limit": "2130.08",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0085_886b67c5",
-      "limit": "550.00",
+      "limit": "2543.30",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0086_26a2e176",
-      "limit": "550.00",
+      "limit": "2502.45",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0087_c4da5b27",
-      "limit": "550.00",
+      "limit": "1957.30",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0088_6311d4d8",
-      "limit": "550.00",
+      "limit": "1632.18",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2824,27 +2853,27 @@
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0089_01494e89",
-      "limit": "550.00",
+      "limit": "519.55",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0090_9f80c83a",
-      "limit": "550.00",
+      "limit": "1225.66",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0091_3db841eb",
-      "limit": "550.00",
+      "limit": "1192.05",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2854,47 +2883,47 @@
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0092_dbefbb9c",
-      "limit": "550.00",
+      "limit": "1968.76",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0093_7a27354d",
-      "limit": "550.00",
+      "limit": "658.67",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0094_185eaefe",
-      "limit": "550.00",
+      "limit": "1217.47",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0036_3fcd1ce4",
       "to": "PID_U0095_b69628af",
-      "limit": "550.00",
+      "limit": "1073.85",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0037_de049695",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "1735.45",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2904,37 +2933,37 @@
     {
       "from": "PID_U0037_de049695",
       "to": "PID_U0066_ca4d5fa2",
-      "limit": "400.00",
+      "limit": "2450.81",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0037_de049695",
       "to": "PID_U0074_bc092d2a",
-      "limit": "400.00",
+      "limit": "2420.40",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0037_de049695",
       "to": "PID_U0082_adc4fab2",
-      "limit": "400.00",
+      "limit": "2317.75",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0037_de049695",
       "to": "PID_U0087_c4da5b27",
-      "limit": "550.00",
+      "limit": "2925.27",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2944,17 +2973,17 @@
     {
       "from": "PID_U0037_de049695",
       "to": "PID_U0090_9f80c83a",
-      "limit": "400.00",
+      "limit": "2975.55",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0038_7c3c1046",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "4096.17",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -2964,47 +2993,37 @@
     {
       "from": "PID_U0038_7c3c1046",
       "to": "PID_U0064_8dde6c40",
-      "limit": "400.00",
+      "limit": "2411.90",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0038_7c3c1046",
       "to": "PID_U0072_7f9a39c8",
-      "limit": "400.00",
+      "limit": "1136.56",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0038_7c3c1046",
       "to": "PID_U0080_71560750",
-      "limit": "400.00",
+      "limit": "1928.23",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0038_7c3c1046",
       "to": "PID_U0088_6311d4d8",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0039_1a7389f7",
-      "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "2797.69",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3013,38 +3032,48 @@
     },
     {
       "from": "PID_U0039_1a7389f7",
-      "to": "PID_U0061_b337ff2d",
-      "limit": "400.00",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "4001.82",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0039_1a7389f7",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "3076.03",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0039_1a7389f7",
       "to": "PID_U0069_a4f3ccb5",
-      "limit": "400.00",
+      "limit": "800.00",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0039_1a7389f7",
       "to": "PID_U0077_96af9a3d",
-      "limit": "400.00",
+      "limit": "3712.60",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0039_1a7389f7",
       "to": "PID_U0085_886b67c5",
-      "limit": "400.00",
+      "limit": "1172.11",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3054,7 +3083,7 @@
     {
       "from": "PID_U0039_1a7389f7",
       "to": "PID_U0093_7a27354d",
-      "limit": "400.00",
+      "limit": "1058.64",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3064,7 +3093,7 @@
     {
       "from": "PID_U0040_b8ab03a8",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "1951.95",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3074,17 +3103,17 @@
     {
       "from": "PID_U0040_b8ab03a8",
       "to": "PID_U0023_36fbeee7",
-      "limit": "400.00",
+      "limit": "2636.89",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0041_56e27d59",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "8259.88",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3094,7 +3123,7 @@
     {
       "from": "PID_U0042_f519f70a",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "4791.05",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3104,47 +3133,47 @@
     {
       "from": "PID_U0042_f519f70a",
       "to": "PID_U0065_2c15e5f1",
-      "limit": "400.00",
+      "limit": "2728.19",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0042_f519f70a",
       "to": "PID_U0073_1dd1b379",
-      "limit": "400.00",
+      "limit": "1372.16",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0042_f519f70a",
       "to": "PID_U0081_0f8d8101",
-      "limit": "400.00",
+      "limit": "508.38",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0042_f519f70a",
       "to": "PID_U0089_01494e89",
-      "limit": "400.00",
+      "limit": "1571.92",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0043_935170bb",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "7520.58",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3154,47 +3183,37 @@
     {
       "from": "PID_U0043_935170bb",
       "to": "PID_U0068_06bc5304",
-      "limit": "400.00",
+      "limit": "2423.23",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0043_935170bb",
       "to": "PID_U0076_f878208c",
-      "limit": "400.00",
+      "limit": "2058.46",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0043_935170bb",
       "to": "PID_U0084_ea33ee14",
-      "limit": "400.00",
+      "limit": "815.36",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0043_935170bb",
       "to": "PID_U0092_dbefbb9c",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0044_3188ea6c",
-      "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "2130.02",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3203,18 +3222,28 @@
     },
     {
       "from": "PID_U0044_3188ea6c",
-      "to": "PID_U0035_a195a333",
-      "limit": "400.00",
+      "to": "PID_U0001_9e3779b1",
+      "limit": "6821.81",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": true
+      }
+    },
+    {
+      "from": "PID_U0044_3188ea6c",
+      "to": "PID_U0035_a195a333",
+      "limit": "1784.27",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0045_cfc0641d",
       "to": "PID_U0001_9e3779b1",
-      "limit": "850.00",
+      "limit": "2870.00",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3224,177 +3253,177 @@
     {
       "from": "PID_U0045_cfc0641d",
       "to": "PID_U0067_6884d953",
-      "limit": "400.00",
+      "limit": "1593.48",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0045_cfc0641d",
       "to": "PID_U0075_5a40a6db",
-      "limit": "400.00",
+      "limit": "2102.53",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0045_cfc0641d",
       "to": "PID_U0083_4bfc7463",
-      "limit": "400.00",
+      "limit": "499.67",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0045_cfc0641d",
       "to": "PID_U0091_3db841eb",
-      "limit": "400.00",
+      "limit": "1914.76",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0046_6df7ddce",
       "to": "PID_U0001_9e3779b1",
-      "limit": "550.00",
+      "limit": "2065.46",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0047_0c2f577f",
       "to": "PID_U0002_3c6ef362",
-      "limit": "550.00",
+      "limit": "2934.10",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0048_aa66d130",
       "to": "PID_U0006_b54cda26",
-      "limit": "550.00",
+      "limit": "2436.11",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0049_489e4ae1",
       "to": "PID_U0007_538453d7",
-      "limit": "550.00",
+      "limit": "1499.80",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0050_e6d5c492",
       "to": "PID_U0005_17156075",
-      "limit": "550.00",
+      "limit": "800.00",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0051_850d3e43",
       "to": "PID_U0001_9e3779b1",
-      "limit": "550.00",
+      "limit": "2645.43",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0052_2344b7f4",
       "to": "PID_U0002_3c6ef362",
-      "limit": "550.00",
+      "limit": "2111.97",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0053_c17c31a5",
       "to": "PID_U0006_b54cda26",
-      "limit": "550.00",
+      "limit": "2031.37",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0054_5fb3ab56",
       "to": "PID_U0007_538453d7",
-      "limit": "550.00",
+      "limit": "3121.70",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0055_fdeb2507",
       "to": "PID_U0005_17156075",
-      "limit": "550.00",
+      "limit": "1993.75",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0056_9c229eb8",
       "to": "PID_U0001_9e3779b1",
-      "limit": "550.00",
+      "limit": "2557.01",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0057_3a5a1869",
       "to": "PID_U0002_3c6ef362",
-      "limit": "550.00",
+      "limit": "810.57",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0057_3a5a1869",
       "to": "PID_U0004_78dde6c4",
-      "limit": "700.00",
+      "limit": "1980.20",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0057_3a5a1869",
       "to": "PID_U0036_3fcd1ce4",
-      "limit": "700.00",
+      "limit": "1298.95",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3404,57 +3433,47 @@
     {
       "from": "PID_U0058_d891921a",
       "to": "PID_U0006_b54cda26",
-      "limit": "550.00",
+      "limit": "1864.93",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0059_76c90bcb",
       "to": "PID_U0007_538453d7",
-      "limit": "550.00",
+      "limit": "3282.82",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0060_1500857c",
       "to": "PID_U0005_17156075",
-      "limit": "550.00",
+      "limit": "2545.21",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0061_b337ff2d",
-      "to": "PID_U0011_cc623a9b",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0061_b337ff2d",
-      "to": "PID_U0028_4e114f5c",
-      "limit": "400.00",
+      "to": "PID_U0011_cc623a9b",
+      "limit": "292.74",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0061_b337ff2d",
       "to": "PID_U0062_516f78de",
-      "limit": "400.00",
+      "limit": "512.30",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3464,57 +3483,27 @@
     {
       "from": "PID_U0061_b337ff2d",
       "to": "PID_U0065_2c15e5f1",
-      "limit": "400.00",
+      "limit": "631.51",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0062_516f78de",
-      "to": "PID_U0011_cc623a9b",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0062_516f78de",
-      "to": "PID_U0029_ec48c90d",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0062_516f78de",
-      "to": "PID_U0061_b337ff2d",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0062_516f78de",
       "to": "PID_U0063_efa6f28f",
-      "limit": "400.00",
+      "limit": "630.57",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0062_516f78de",
       "to": "PID_U0066_ca4d5fa2",
-      "limit": "400.00",
+      "limit": "200.11",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3523,38 +3512,8 @@
     },
     {
       "from": "PID_U0063_efa6f28f",
-      "to": "PID_U0012_6a99b44c",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0063_efa6f28f",
-      "to": "PID_U0029_ec48c90d",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0063_efa6f28f",
-      "to": "PID_U0062_516f78de",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0063_efa6f28f",
       "to": "PID_U0064_8dde6c40",
-      "limit": "400.00",
+      "limit": "356.26",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3564,57 +3523,27 @@
     {
       "from": "PID_U0063_efa6f28f",
       "to": "PID_U0067_6884d953",
-      "limit": "400.00",
+      "limit": "884.28",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0064_8dde6c40",
-      "to": "PID_U0012_6a99b44c",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0064_8dde6c40",
-      "to": "PID_U0030_8a8042be",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0064_8dde6c40",
-      "to": "PID_U0063_efa6f28f",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0064_8dde6c40",
       "to": "PID_U0065_2c15e5f1",
-      "limit": "400.00",
+      "limit": "550.86",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0064_8dde6c40",
       "to": "PID_U0068_06bc5304",
-      "limit": "400.00",
+      "limit": "345.93",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3623,38 +3552,8 @@
     },
     {
       "from": "PID_U0065_2c15e5f1",
-      "to": "PID_U0013_08d12dfd",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0065_2c15e5f1",
-      "to": "PID_U0030_8a8042be",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0065_2c15e5f1",
-      "to": "PID_U0064_8dde6c40",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0065_2c15e5f1",
       "to": "PID_U0066_ca4d5fa2",
-      "limit": "400.00",
+      "limit": "187.04",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3664,27 +3563,17 @@
     {
       "from": "PID_U0065_2c15e5f1",
       "to": "PID_U0069_a4f3ccb5",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": false
-      }
-    },
-    {
-      "from": "PID_U0066_ca4d5fa2",
-      "to": "PID_U0013_08d12dfd",
-      "limit": "400.00",
+      "limit": "569.11",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0066_ca4d5fa2",
       "to": "PID_U0014_a708a7ae",
-      "limit": "400.00",
+      "limit": "273.54",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3693,38 +3582,18 @@
     },
     {
       "from": "PID_U0066_ca4d5fa2",
-      "to": "PID_U0031_28b7bc6f",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0066_ca4d5fa2",
-      "to": "PID_U0065_2c15e5f1",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0066_ca4d5fa2",
       "to": "PID_U0067_6884d953",
-      "limit": "400.00",
+      "limit": "783.33",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0066_ca4d5fa2",
       "to": "PID_U0070_432b4666",
-      "limit": "400.00",
+      "limit": "454.81",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3733,38 +3602,8 @@
     },
     {
       "from": "PID_U0067_6884d953",
-      "to": "PID_U0014_a708a7ae",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0067_6884d953",
-      "to": "PID_U0031_28b7bc6f",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0067_6884d953",
-      "to": "PID_U0066_ca4d5fa2",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0067_6884d953",
       "to": "PID_U0068_06bc5304",
-      "limit": "400.00",
+      "limit": "162.15",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3774,57 +3613,27 @@
     {
       "from": "PID_U0067_6884d953",
       "to": "PID_U0071_e162c017",
-      "limit": "400.00",
+      "limit": "774.52",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0068_06bc5304",
-      "to": "PID_U0014_a708a7ae",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0068_06bc5304",
-      "to": "PID_U0032_c6ef3620",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0068_06bc5304",
-      "to": "PID_U0067_6884d953",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0068_06bc5304",
       "to": "PID_U0069_a4f3ccb5",
-      "limit": "400.00",
+      "limit": "276.00",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0068_06bc5304",
       "to": "PID_U0072_7f9a39c8",
-      "limit": "400.00",
+      "limit": "652.23",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3833,38 +3642,8 @@
     },
     {
       "from": "PID_U0069_a4f3ccb5",
-      "to": "PID_U0015_4540215f",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0069_a4f3ccb5",
-      "to": "PID_U0032_c6ef3620",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0069_a4f3ccb5",
-      "to": "PID_U0068_06bc5304",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0069_a4f3ccb5",
       "to": "PID_U0070_432b4666",
-      "limit": "400.00",
+      "limit": "315.73",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3874,107 +3653,47 @@
     {
       "from": "PID_U0069_a4f3ccb5",
       "to": "PID_U0073_1dd1b379",
-      "limit": "400.00",
+      "limit": "264.78",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0070_432b4666",
-      "to": "PID_U0015_4540215f",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0070_432b4666",
-      "to": "PID_U0033_6526afd1",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0070_432b4666",
-      "to": "PID_U0069_a4f3ccb5",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0070_432b4666",
       "to": "PID_U0071_e162c017",
-      "limit": "400.00",
+      "limit": "876.10",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0070_432b4666",
       "to": "PID_U0074_bc092d2a",
-      "limit": "400.00",
+      "limit": "255.37",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": false
-      }
-    },
-    {
-      "from": "PID_U0071_e162c017",
-      "to": "PID_U0016_e3779b10",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0071_e162c017",
       "to": "PID_U0017_81af14c1",
-      "limit": "400.00",
+      "limit": "433.60",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0071_e162c017",
-      "to": "PID_U0033_6526afd1",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0071_e162c017",
-      "to": "PID_U0070_432b4666",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0071_e162c017",
       "to": "PID_U0072_7f9a39c8",
-      "limit": "400.00",
+      "limit": "527.84",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3984,57 +3703,27 @@
     {
       "from": "PID_U0071_e162c017",
       "to": "PID_U0075_5a40a6db",
-      "limit": "400.00",
+      "limit": "356.29",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0072_7f9a39c8",
-      "to": "PID_U0016_e3779b10",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0072_7f9a39c8",
-      "to": "PID_U0034_035e2982",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0072_7f9a39c8",
-      "to": "PID_U0071_e162c017",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0072_7f9a39c8",
       "to": "PID_U0073_1dd1b379",
-      "limit": "400.00",
+      "limit": "432.50",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0072_7f9a39c8",
       "to": "PID_U0076_f878208c",
-      "limit": "400.00",
+      "limit": "185.99",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4043,38 +3732,8 @@
     },
     {
       "from": "PID_U0073_1dd1b379",
-      "to": "PID_U0017_81af14c1",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0073_1dd1b379",
-      "to": "PID_U0034_035e2982",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0073_1dd1b379",
-      "to": "PID_U0072_7f9a39c8",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0073_1dd1b379",
       "to": "PID_U0074_bc092d2a",
-      "limit": "400.00",
+      "limit": "564.53",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4084,57 +3743,27 @@
     {
       "from": "PID_U0073_1dd1b379",
       "to": "PID_U0077_96af9a3d",
-      "limit": "400.00",
+      "limit": "348.00",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0074_bc092d2a",
-      "to": "PID_U0017_81af14c1",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0074_bc092d2a",
-      "to": "PID_U0035_a195a333",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0074_bc092d2a",
-      "to": "PID_U0073_1dd1b379",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0074_bc092d2a",
       "to": "PID_U0075_5a40a6db",
-      "limit": "400.00",
+      "limit": "464.89",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0074_bc092d2a",
       "to": "PID_U0078_34e713ee",
-      "limit": "400.00",
+      "limit": "336.96",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4143,38 +3772,8 @@
     },
     {
       "from": "PID_U0075_5a40a6db",
-      "to": "PID_U0018_1fe68e72",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0075_5a40a6db",
-      "to": "PID_U0035_a195a333",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0075_5a40a6db",
-      "to": "PID_U0074_bc092d2a",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0075_5a40a6db",
       "to": "PID_U0076_f878208c",
-      "limit": "400.00",
+      "limit": "561.44",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4184,27 +3783,17 @@
     {
       "from": "PID_U0075_5a40a6db",
       "to": "PID_U0079_d31e8d9f",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": false
-      }
-    },
-    {
-      "from": "PID_U0076_f878208c",
-      "to": "PID_U0018_1fe68e72",
-      "limit": "400.00",
+      "limit": "634.07",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0076_f878208c",
       "to": "PID_U0020_5c5581d4",
-      "limit": "400.00",
+      "limit": "331.95",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4213,28 +3802,18 @@
     },
     {
       "from": "PID_U0076_f878208c",
-      "to": "PID_U0075_5a40a6db",
-      "limit": "200.00",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "695.84",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0076_f878208c",
-      "to": "PID_U0077_96af9a3d",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0076_f878208c",
       "to": "PID_U0080_71560750",
-      "limit": "400.00",
+      "limit": "194.94",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4243,28 +3822,8 @@
     },
     {
       "from": "PID_U0077_96af9a3d",
-      "to": "PID_U0019_be1e0823",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0077_96af9a3d",
-      "to": "PID_U0076_f878208c",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0077_96af9a3d",
       "to": "PID_U0078_34e713ee",
-      "limit": "400.00",
+      "limit": "184.17",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4274,47 +3833,27 @@
     {
       "from": "PID_U0077_96af9a3d",
       "to": "PID_U0081_0f8d8101",
-      "limit": "400.00",
+      "limit": "240.02",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0078_34e713ee",
-      "to": "PID_U0019_be1e0823",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0078_34e713ee",
-      "to": "PID_U0077_96af9a3d",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0078_34e713ee",
       "to": "PID_U0079_d31e8d9f",
-      "limit": "400.00",
+      "limit": "697.17",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0078_34e713ee",
       "to": "PID_U0082_adc4fab2",
-      "limit": "400.00",
+      "limit": "473.43",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4323,28 +3862,8 @@
     },
     {
       "from": "PID_U0079_d31e8d9f",
-      "to": "PID_U0020_5c5581d4",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0079_d31e8d9f",
-      "to": "PID_U0078_34e713ee",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0079_d31e8d9f",
       "to": "PID_U0080_71560750",
-      "limit": "400.00",
+      "limit": "248.23",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4354,87 +3873,47 @@
     {
       "from": "PID_U0079_d31e8d9f",
       "to": "PID_U0083_4bfc7463",
-      "limit": "400.00",
+      "limit": "452.39",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0080_71560750",
-      "to": "PID_U0020_5c5581d4",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0080_71560750",
-      "to": "PID_U0079_d31e8d9f",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0080_71560750",
       "to": "PID_U0081_0f8d8101",
-      "limit": "400.00",
+      "limit": "838.16",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0080_71560750",
       "to": "PID_U0084_ea33ee14",
-      "limit": "400.00",
+      "limit": "711.93",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": false
-      }
-    },
-    {
-      "from": "PID_U0081_0f8d8101",
-      "to": "PID_U0021_fa8cfb85",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0081_0f8d8101",
       "to": "PID_U0023_36fbeee7",
-      "limit": "400.00",
+      "limit": "228.63",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0081_0f8d8101",
-      "to": "PID_U0080_71560750",
-      "limit": "200.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0081_0f8d8101",
       "to": "PID_U0082_adc4fab2",
-      "limit": "400.00",
+      "limit": "589.38",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4444,37 +3923,27 @@
     {
       "from": "PID_U0081_0f8d8101",
       "to": "PID_U0085_886b67c5",
-      "limit": "400.00",
+      "limit": "465.64",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0082_adc4fab2",
-      "to": "PID_U0021_fa8cfb85",
-      "limit": "400.00",
+      "to": "PID_U0083_4bfc7463",
+      "limit": "570.24",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0082_adc4fab2",
-      "to": "PID_U0083_4bfc7463",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0082_adc4fab2",
       "to": "PID_U0086_26a2e176",
-      "limit": "400.00",
+      "limit": "286.10",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4484,37 +3953,27 @@
     {
       "from": "PID_U0083_4bfc7463",
       "to": "PID_U0011_cc623a9b",
-      "limit": "400.00",
+      "limit": "3476.46",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0083_4bfc7463",
       "to": "PID_U0019_be1e0823",
-      "limit": "550.00",
+      "limit": "469.14",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0083_4bfc7463",
-      "to": "PID_U0022_98c47536",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0083_4bfc7463",
       "to": "PID_U0084_ea33ee14",
-      "limit": "400.00",
+      "limit": "212.12",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4524,17 +3983,17 @@
     {
       "from": "PID_U0083_4bfc7463",
       "to": "PID_U0087_c4da5b27",
-      "limit": "400.00",
+      "limit": "651.60",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0084_ea33ee14",
       "to": "PID_U0013_08d12dfd",
-      "limit": "400.00",
+      "limit": "501.43",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4543,28 +4002,18 @@
     },
     {
       "from": "PID_U0084_ea33ee14",
-      "to": "PID_U0022_98c47536",
-      "limit": "400.00",
+      "to": "PID_U0085_886b67c5",
+      "limit": "887.09",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0084_ea33ee14",
-      "to": "PID_U0085_886b67c5",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0084_ea33ee14",
       "to": "PID_U0088_6311d4d8",
-      "limit": "400.00",
+      "limit": "1010.28",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4574,27 +4023,17 @@
     {
       "from": "PID_U0085_886b67c5",
       "to": "PID_U0015_4540215f",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0085_886b67c5",
-      "to": "PID_U0023_36fbeee7",
-      "limit": "400.00",
+      "limit": "872.60",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0085_886b67c5",
       "to": "PID_U0086_26a2e176",
-      "limit": "400.00",
+      "limit": "742.72",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4604,37 +4043,27 @@
     {
       "from": "PID_U0085_886b67c5",
       "to": "PID_U0089_01494e89",
-      "limit": "400.00",
+      "limit": "2945.06",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0086_26a2e176",
       "to": "PID_U0017_81af14c1",
-      "limit": "400.00",
+      "limit": "802.35",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0086_26a2e176",
-      "to": "PID_U0023_36fbeee7",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0086_26a2e176",
       "to": "PID_U0026_11a25bfa",
-      "limit": "400.00",
+      "limit": "1228.63",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4644,17 +4073,17 @@
     {
       "from": "PID_U0086_26a2e176",
       "to": "PID_U0087_c4da5b27",
-      "limit": "400.00",
+      "limit": "578.64",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0086_26a2e176",
       "to": "PID_U0090_9f80c83a",
-      "limit": "400.00",
+      "limit": "377.94",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4664,37 +4093,27 @@
     {
       "from": "PID_U0087_c4da5b27",
       "to": "PID_U0019_be1e0823",
-      "limit": "400.00",
+      "limit": "821.45",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0087_c4da5b27",
       "to": "PID_U0020_5c5581d4",
-      "limit": "550.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0087_c4da5b27",
-      "to": "PID_U0024_d5336898",
-      "limit": "400.00",
+      "limit": "521.53",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0087_c4da5b27",
       "to": "PID_U0088_6311d4d8",
-      "limit": "400.00",
+      "limit": "1526.75",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4704,47 +4123,37 @@
     {
       "from": "PID_U0087_c4da5b27",
       "to": "PID_U0091_3db841eb",
-      "limit": "400.00",
+      "limit": "313.87",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0088_6311d4d8",
       "to": "PID_U0021_fa8cfb85",
-      "limit": "400.00",
+      "limit": "466.64",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0088_6311d4d8",
-      "to": "PID_U0024_d5336898",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0088_6311d4d8",
       "to": "PID_U0089_01494e89",
-      "limit": "400.00",
+      "limit": "640.73",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0088_6311d4d8",
       "to": "PID_U0092_dbefbb9c",
-      "limit": "400.00",
+      "limit": "3304.96",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4754,27 +4163,17 @@
     {
       "from": "PID_U0089_01494e89",
       "to": "PID_U0023_36fbeee7",
-      "limit": "400.00",
+      "limit": "229.36",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0089_01494e89",
-      "to": "PID_U0025_736ae249",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0089_01494e89",
       "to": "PID_U0090_9f80c83a",
-      "limit": "400.00",
+      "limit": "277.81",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4784,37 +4183,37 @@
     {
       "from": "PID_U0089_01494e89",
       "to": "PID_U0093_7a27354d",
-      "limit": "400.00",
+      "limit": "2026.61",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0090_9f80c83a",
       "to": "PID_U0025_736ae249",
-      "limit": "400.00",
+      "limit": "2448.86",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0090_9f80c83a",
       "to": "PID_U0091_3db841eb",
-      "limit": "400.00",
+      "limit": "649.58",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0090_9f80c83a",
       "to": "PID_U0094_185eaefe",
-      "limit": "400.00",
+      "limit": "460.04",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4824,47 +4223,37 @@
     {
       "from": "PID_U0091_3db841eb",
       "to": "PID_U0012_6a99b44c",
-      "limit": "550.00",
+      "limit": "257.70",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0091_3db841eb",
-      "to": "PID_U0026_11a25bfa",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0091_3db841eb",
       "to": "PID_U0027_afd9d5ab",
-      "limit": "400.00",
+      "limit": "629.76",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0091_3db841eb",
       "to": "PID_U0029_ec48c90d",
-      "limit": "400.00",
+      "limit": "3529.96",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0091_3db841eb",
       "to": "PID_U0092_dbefbb9c",
-      "limit": "400.00",
+      "limit": "222.58",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4874,37 +4263,27 @@
     {
       "from": "PID_U0091_3db841eb",
       "to": "PID_U0095_b69628af",
-      "limit": "400.00",
+      "limit": "625.52",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0092_dbefbb9c",
-      "to": "PID_U0026_11a25bfa",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0092_dbefbb9c",
       "to": "PID_U0029_ec48c90d",
-      "limit": "400.00",
+      "limit": "855.47",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0092_dbefbb9c",
       "to": "PID_U0061_b337ff2d",
-      "limit": "400.00",
+      "limit": "786.74",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4914,47 +4293,37 @@
     {
       "from": "PID_U0092_dbefbb9c",
       "to": "PID_U0093_7a27354d",
-      "limit": "400.00",
+      "limit": "2203.06",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0093_7a27354d",
-      "to": "PID_U0027_afd9d5ab",
-      "limit": "400.00",
+      "to": "PID_U0031_28b7bc6f",
+      "limit": "1083.06",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0093_7a27354d",
-      "to": "PID_U0031_28b7bc6f",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0093_7a27354d",
       "to": "PID_U0062_516f78de",
-      "limit": "400.00",
+      "limit": "710.39",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0093_7a27354d",
       "to": "PID_U0094_185eaefe",
-      "limit": "400.00",
+      "limit": "160.16",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4963,18 +4332,8 @@
     },
     {
       "from": "PID_U0094_185eaefe",
-      "to": "PID_U0027_afd9d5ab",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0094_185eaefe",
       "to": "PID_U0033_6526afd1",
-      "limit": "400.00",
+      "limit": "632.19",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4984,7 +4343,7 @@
     {
       "from": "PID_U0094_185eaefe",
       "to": "PID_U0063_efa6f28f",
-      "limit": "400.00",
+      "limit": "1316.43",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4994,37 +4353,27 @@
     {
       "from": "PID_U0094_185eaefe",
       "to": "PID_U0095_b69628af",
-      "limit": "400.00",
+      "limit": "826.48",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0095_b69628af",
-      "to": "PID_U0028_4e114f5c",
-      "limit": "400.00",
+      "to": "PID_U0035_a195a333",
+      "limit": "713.41",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
-      }
-    },
-    {
-      "from": "PID_U0095_b69628af",
-      "to": "PID_U0035_a195a333",
-      "limit": "400.00",
-      "equivalent": "UAH",
-      "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0095_b69628af",
       "to": "PID_U0061_b337ff2d",
-      "limit": "400.00",
+      "limit": "563.69",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -5034,65 +4383,63 @@
     {
       "from": "PID_U0095_b69628af",
       "to": "PID_U0064_8dde6c40",
-      "limit": "400.00",
+      "limit": "2390.07",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0096_54cda260",
       "to": "PID_U0001_9e3779b1",
-      "limit": "400.00",
+      "limit": "1918.62",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0097_f3051c11",
       "to": "PID_U0001_9e3779b1",
-      "limit": "400.00",
+      "limit": "2444.28",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0098_913c95c2",
       "to": "PID_U0001_9e3779b1",
-      "limit": "400.00",
+      "limit": "1063.40",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
-        "can_be_intermediate": true
+        "auto_clearing": true,
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0099_2f740f73",
       "to": "PID_U0001_9e3779b1",
-      "limit": "400.00",
+      "limit": "2954.11",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": true
+        "can_be_intermediate": false
       }
     },
     {
       "from": "PID_U0100_cdab8924",
       "to": "PID_U0001_9e3779b1",
-      "limit": "400.00",
+      "limit": "1398.47",
       "equivalent": "UAH",
       "policy": {
-        "auto_clearing": false,
+        "auto_clearing": true,
         "can_be_intermediate": false
       }
     }
   ],
-  "events": [],
-  "description": "Realistic v2 (UAH-only) scenario for Real Mode: behaviorProfiles.props + cycles for clearing.",
-  "baseEquivalent": "UAH"
+  "events": []
 }

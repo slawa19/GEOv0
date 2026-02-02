@@ -23,6 +23,12 @@ function parseArgs(argv) {
       if (!v) throw new Error('Missing value for --v1-dir')
       out.v1Dir = path.resolve(process.cwd(), v)
       i += 1
+    } else if (typeof a === 'string' && a.length > 0 && !a.startsWith('-')) {
+      // Convenience / robustness: allow passing a v1 dir as positional arg.
+      // Treat it as pack validation (no canonical/public comparison).
+      if (out.v1Dir) throw new Error('Multiple positional v1-dir args are not supported')
+      out.v1Dir = path.resolve(process.cwd(), a)
+      out.onlyPack = true
     } else {
       throw new Error(`Unknown arg: ${a}`)
     }
@@ -32,7 +38,7 @@ function parseArgs(argv) {
 }
 
 function allowedSeedIds() {
-  return ['greenfield-village-100', 'riverside-town-50']
+  return ['greenfield-village-100', 'riverside-town-50', 'greenfield-village-100-v2', 'riverside-town-50-v2']
 }
 
 function assert(condition, message) {
