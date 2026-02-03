@@ -91,7 +91,8 @@ class SimulatorEventEdgeRef(BaseModel):
     from_: str = Field(alias="from")
     to: str
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # Use 'from' (not 'from_') when serializing to JSON — frontend expects this key
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
 
 class SimulatorEventEdgeStyle(BaseModel):
     viz_width_key: Optional[str] = None
@@ -105,7 +106,8 @@ class SimulatorTxUpdatedEventEdge(BaseModel):
     to: str
     style: Optional[SimulatorEventEdgeStyle] = None
 
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    # Use 'from' (not 'from_') when serializing to JSON — frontend expects this key
+    model_config = ConfigDict(extra="allow", populate_by_name=True, serialize_by_alias=True)
 
 
 class SimulatorTxUpdatedNodeBadge(BaseModel):
@@ -166,7 +168,8 @@ class SimulatorClearingPlanStep(BaseModel):
     particles_edges: Optional[List[SimulatorEventEdgeRef]] = None
     flash: Optional[Dict[str, Any]] = None
 
-    model_config = ConfigDict(extra="allow")
+    # Ensure nested SimulatorEventEdgeRef objects serialize with alias 'from'
+    model_config = ConfigDict(extra="allow", serialize_by_alias=True)
 
 
 class SimulatorClearingPlanEvent(BaseModel):
@@ -178,7 +181,8 @@ class SimulatorClearingPlanEvent(BaseModel):
     plan_id: str
     steps: List[SimulatorClearingPlanStep]
 
-    model_config = ConfigDict(extra="allow")
+    # Ensure nested steps serialize with alias 'from' for edge refs
+    model_config = ConfigDict(extra="allow", serialize_by_alias=True)
 
 
 class SimulatorClearingDoneEvent(BaseModel):

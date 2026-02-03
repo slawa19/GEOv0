@@ -47,8 +47,9 @@ export function useSimulatorApp() {
 
   const apiMode = computed<'demo' | 'real'>(() => {
     try {
-      const p = new URLSearchParams(window.location.search).get('mode')
-      if (String(p ?? '').toLowerCase() === 'real') return 'real'
+      const p = new URLSearchParams(window.location.search).get('mode')?.toLowerCase()
+      if (p === 'real') return 'real'
+      if (p === 'demo') return 'demo'
     } catch {
       // ignore
     }

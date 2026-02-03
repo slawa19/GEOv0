@@ -43,7 +43,7 @@ class FixturesRunner:
                     type="clearing.done",
                     equivalent=eq,
                     plan_id=plan_id,
-                ).model_dump(mode="json")
+                ).model_dump(mode="json", by_alias=True)
                 run.last_event_type = "clearing.done"
                 run.current_phase = None
                 self._sse.broadcast(run_id, evt)
@@ -117,7 +117,7 @@ class FixturesRunner:
                 {"id": src, "viz_badge_key": "tx"},
                 {"id": dst, "viz_badge_key": "tx"},
             ],
-        ).model_dump(mode="json")
+        ).model_dump(mode="json", by_alias=True)
         return evt
 
     def make_clearing_plan(self, *, run_id: str, equivalent: str) -> Optional[dict[str, Any]]:
@@ -142,5 +142,5 @@ class FixturesRunner:
                 {"at_ms": 180, "particles_edges": [{"from": e2_from, "to": e2_to}], "intensity_key": "mid"},
                 {"at_ms": 420, "flash": {"kind": "clearing"}},
             ],
-        ).model_dump(mode="json")
+        ).model_dump(mode="json", by_alias=True)
         return evt

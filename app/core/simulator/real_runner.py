@@ -83,6 +83,7 @@ def map_rejection_code(err_details: Any) -> str:
 
     exc_name = str(err_details.get("exc") or "")
     geo_code = str(err_details.get("geo_code") or "")
+    msg = str(err_details.get("message") or "")
 
     if exc_name == "RoutingException":
         # E002 = insufficient capacity, E001 = generic routing not-found.
@@ -99,6 +100,38 @@ def map_rejection_code(err_details: Any) -> str:
         if geo_code == "E004":
             return "TRUSTLINE_NOT_ACTIVE"
         return "TRUSTLINE_REJECTED"
+
+    # Generic HTTP-ish application errors (GeoException subclasses)
+    # Mapped to stable UI/analytics labels.
+    if exc_name == "NotFoundException":
+        # Best-effort parsing by message. Keep this intentionally simple and
+        # stable (tests rely on these exact outcomes).
+        m = msg.lower()
+        if "equivalent" in m:
+            return "EQUIVALENT_NOT_FOUND"
+        if "participants not found" in m or "participant" in m:
+            return "PARTICIPANT_NOT_FOUND"
+        if "transaction" in m or "tx" in m:
+            return "TX_NOT_FOUND"
+        return default
+
+    if exc_name == "BadRequestException":
+        # E009 = validation error
+        if geo_code == "E009":
+            return "INVALID_INPUT"
+        return "INVALID_INPUT"
+
+    if exc_name == "ConflictException":
+        return "CONFLICT"
+
+    if exc_name == "UnauthorizedException":
+        return "UNAUTHORIZED"
+
+    if exc_name == "ForbiddenException":
+        return "FORBIDDEN"
+
+    if exc_name in {"InvalidSignatureException", "CryptoException"}:
+        return "INVALID_SIGNATURE"
 
     return default
 
@@ -1304,7 +1337,7 @@ class RealRunner:
                         equivalent=eq,
                         plan_id=plan_id,
                         steps=plan_steps,
-                    ).model_dump(mode="json")
+                    ).model_dump(mode="json", by_alias=True)
 
                     with self._lock:
                         run.last_event_type = "clearing.plan"
@@ -1501,7 +1534,7 @@ class RealRunner:
                         cleared_amount=cleared_amount_str,
                         node_patch=node_patch_list,
                         edge_patch=edge_patch_list,
-                    ).model_dump(mode="json")
+                    ).model_dump(mode="json", by_alias=True)
                     with self._lock:
                         run.last_event_type = "clearing.done"
                         run.current_phase = None

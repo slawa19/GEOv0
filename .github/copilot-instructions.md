@@ -1,5 +1,48 @@
 # Copilot instructions (GEO v0)
 
+## Quick Start — как запустить проект
+
+### Full Stack (Backend + Admin UI + Simulator UI)
+
+```powershell
+# Запуск всего стека с одной команды:
+.\scripts\run_full_stack.ps1 -Action start
+
+# С пересозданием БД и загрузкой fixtures:
+.\scripts\run_full_stack.ps1 -Action start -ResetDb -FixturesCommunity greenfield-village-100
+
+# Статус, остановка, рестарт:
+.\scripts\run_full_stack.ps1 -Action status
+.\scripts\run_full_stack.ps1 -Action stop
+.\scripts\run_full_stack.ps1 -Action restart
+```
+
+После запуска:
+- Backend API: http://127.0.0.1:18000/docs
+- Admin UI: http://localhost:5173/
+- Simulator UI: http://localhost:5176/?mode=real
+
+### Тесты
+
+```powershell
+# Все unit-тесты
+.\.venv\Scripts\python.exe -m pytest tests/unit/ -v
+
+# Конкретная группа тестов
+.\.venv\Scripts\python.exe -m pytest tests/unit/ -k "clearing" -v
+
+# С coverage
+.\.venv\Scripts\python.exe -m pytest tests/unit/ --cov=app --cov-report=term-missing
+```
+
+### Проверка БД
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_sqlite_db.py
+```
+
+---
+
 ## Where to look first (project semantics)
 
 - Protocol and semantics:
@@ -36,7 +79,26 @@
 - TrustLine direction is `from → to` = creditor → debtor (risk limit), *not* the reverse.
 - Keep changes deterministic and validate fixtures (`npm run validate:fixtures`) after regeneration.
 - Canonical decisions and data contracts must be recorded in stable docs under `docs/ru/*` (e.g. `docs/ru/09-decisions-and-defaults.md` and the relevant domain docs like `docs/ru/simulator/backend/*`). Do not leave “single source of truth” rules only in `plans/*` or code-review notes.
+### Pydantic alias serialization (CRITICAL)
 
+- **Always use `by_alias=True`** when calling `.model_dump(mode="json")` on models with `Field(alias=...)`.
+- Without `by_alias=True`, Pydantic uses Python attribute names (`from_`) instead of alias (`from`).
+- `serialize_by_alias=True` in `model_config` only affects `model_dump_json()`, NOT `model_dump()`.
+- See full explanation: `docs/ru/backend/pydantic-alias-serialization.md`
+
+```python
+# ❌ WRONG - will serialize as {"from_": "A"}
+evt.model_dump(mode="json")
+
+# ✅ CORRECT - will serialize as {"from": "A"}
+evt.model_dump(mode="json", by_alias=True)
+```
+
+### SSE Events format
+
+- Simulator events (tx.updated, clearing.plan, clearing.done) use edge refs with `from`/`to` keys.
+- Frontend in `normalizeSimulatorEvent.ts` expects `"from"` key, not `"from_"`.
+- Always test SSE event serialization when modifying Pydantic event schemas.
 ## Copilot operational notes (Windows)
 
 - Never paste Python code into PowerShell: run Python snippets via the Python interpreter (or prefer `mcp_pylance_mcp_s_pylanceRunCodeSnippet` / a dedicated script).

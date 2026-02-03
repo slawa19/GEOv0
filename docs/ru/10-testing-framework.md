@@ -13,6 +13,7 @@
 - Admin UI (каноническая точка входа): [`docs/ru/admin-ui/README.md`](docs/ru/admin-ui/README.md:1)
 - Реестр конфигурации (runtime vs restart): [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)
 - OpenAPI (должен быть согласован с каноном): [`api/openapi.yaml`](api/openapi.yaml:1)
+- **Quick Start & Debugging:** [`docs/ru/testing/quick-start-and-debugging.md`](testing/quick-start-and-debugging.md) — практическое руководство для новых участников
 
 ---
 
