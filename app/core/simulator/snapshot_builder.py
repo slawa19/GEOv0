@@ -14,6 +14,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord, ScenarioRecord
 from app.core.simulator.net_balance_utils import atoms_to_net_sign, net_decimal_to_atoms
+from app.core.simulator import viz_rules
 from app.schemas.simulator import (
     SIMULATOR_API_VERSION,
     SimulatorGraphLink,
@@ -185,40 +186,6 @@ class SnapshotBuilder:
                     return None
             return None
 
-        def _quantile(values_sorted: list[float], p: float) -> float:
-            if not values_sorted:
-                raise ValueError("values_sorted must be non-empty")
-            if p <= 0:
-                return values_sorted[0]
-            if p >= 1:
-                return values_sorted[-1]
-            n = len(values_sorted)
-            i = int(p * (n - 1))
-            return values_sorted[i]
-
-        def _link_width_key(limit: float | None, *, q33: float | None, q66: float | None) -> str:
-            if limit is None or q33 is None or q66 is None:
-                return "hairline"
-            if limit <= q33:
-                return "thin"
-            if limit <= q66:
-                return "mid"
-            return "thick"
-
-        def _link_alpha_key(status: str | None, used: float | None, limit: float | None) -> str:
-            if status and status != "active":
-                return "muted"
-            if used is None or limit is None or limit <= 0:
-                return "bg"
-            r = abs(used) / limit
-            if r >= 0.75:
-                return "hi"
-            if r >= 0.40:
-                return "active"
-            if r >= 0.15:
-                return "muted"
-            return "bg"
-
         # Compute per-node totals from debt table.
         credit_sum: dict[uuid.UUID, Decimal] = {}
         debit_sum: dict[uuid.UUID, Decimal] = {}
@@ -266,8 +233,8 @@ class SnapshotBuilder:
             link_stats.append((link, _parse_amount(limit_amt), _parse_amount(used_amt)))
 
         limits = sorted([x for _, x, _ in link_stats if x is not None])
-        q33 = _quantile(limits, 0.33) if limits else None
-        q66 = _quantile(limits, 0.66) if limits else None
+        q33 = viz_rules.quantile(limits, 0.33) if limits else None
+        q66 = viz_rules.quantile(limits, 0.66) if limits else None
 
         for link, limit_num, used_num in link_stats:
             status_key: str | None
@@ -275,8 +242,8 @@ class SnapshotBuilder:
                 status_key = link.status.strip().lower() or None
             else:
                 status_key = None
-            link.viz_width_key = _link_width_key(limit_num, q33=q33, q66=q66)
-            link.viz_alpha_key = _link_alpha_key(status_key, used=used_num, limit=limit_num)
+            link.viz_width_key = viz_rules.link_width_key(limit_num, q33=q33, q66=q66)
+            link.viz_alpha_key = viz_rules.link_alpha_key(status_key, used=used_num, limit=limit_num)
 
         # Nodes: net + viz
         atoms_by_pid: dict[str, int] = {}
@@ -313,39 +280,8 @@ class SnapshotBuilder:
                     node.type = str(rec.type)
 
         mags_sorted = sorted(mags)
-        mn = len(mags_sorted)
-
-        def _percentile_rank(sorted_mags: list[int], mag: int) -> float:
-            n = len(sorted_mags)
-            if n <= 1:
-                return 0.0
-            import bisect
-
-            i = bisect.bisect_right(sorted_mags, mag) - 1
-            i = max(0, min(i, n - 1))
-            return i / (n - 1)
-
-        def _scale_from_pct(pct: float, max_scale: float = 1.90, gamma: float = 0.75) -> float:
-            if pct <= 0:
-                return 1.0
-            if pct >= 1:
-                return max_scale
-            return 1.0 + (max_scale - 1.0) * (pct**gamma)
-
         debt_mags_sorted = sorted(debt_mags)
-        dn = len(debt_mags_sorted)
-        DEBT_BINS = 9
-
-        def _debt_bin(mag: int) -> int:
-            if dn <= 1:
-                return 0
-            import bisect
-
-            i = bisect.bisect_right(debt_mags_sorted, mag) - 1
-            i = max(0, min(i, dn - 1))
-            pct = i / (dn - 1)
-            b = int(round(pct * (DEBT_BINS - 1)))
-            return max(0, min(b, DEBT_BINS - 1))
+        mn = len(mags_sorted)
 
         for node in snap.nodes:
             pid = str(node.id or "").strip()
@@ -359,25 +295,15 @@ class SnapshotBuilder:
             status_key = str(node.status or "").strip().lower()
             type_key = str(node.type or "").strip().lower()
 
-            if status_key in {"suspended", "frozen"}:
-                node.viz_color_key = "suspended"
-            elif status_key == "left":
-                node.viz_color_key = "left"
-            elif status_key in {"deleted", "banned"}:
-                node.viz_color_key = "deleted"
-            else:
-                if atoms < 0:
-                    node.viz_color_key = f"debt-{_debt_bin(abs(atoms))}"
-                else:
-                    node.viz_color_key = "business" if type_key == "business" else "person"
-
-            pct = _percentile_rank(mags_sorted, abs(atoms)) if mn > 0 else 0.0
-            s = _scale_from_pct(pct)
-            if type_key == "business":
-                w0, h0 = 26, 22
-            else:
-                w0, h0 = 16, 16
-            node.viz_size = SimulatorVizSize(w=float(int(round(w0 * s))), h=float(int(round(h0 * s))))
+            node.viz_color_key = viz_rules.node_color_key(
+                atoms=atoms,
+                status_key=status_key,
+                type_key=type_key,
+                debt_mags_sorted=debt_mags_sorted,
+            )
+            node.viz_shape_key = viz_rules.node_shape_key(type_key)
+            w, h = viz_rules.node_size_wh(atoms_abs=abs(atoms), mags_sorted=mags_sorted, type_key=type_key)
+            node.viz_size = SimulatorVizSize(w=float(w), h=float(h))
 
         return snap
 

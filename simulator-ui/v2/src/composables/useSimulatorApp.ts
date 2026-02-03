@@ -35,6 +35,7 @@ import { useAppDragToPinWiring } from './useAppDragToPinWiring'
 import { useAppCanvasInteractionsWiring } from './useAppCanvasInteractionsWiring'
 import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
+import { getFxConfig, intensityScale } from '../config/fxConfig'
 
 export function useSimulatorApp() {
   const eq = ref('UAH')
@@ -154,24 +155,7 @@ export function useSimulatorApp() {
     map[key] = (map[key] ?? 0) + 1
   }
 
-  function intensityScale(intensityKey?: string): number {
-    const k = String(intensityKey ?? '').trim().toLowerCase()
-    if (!k) return 1
-    switch (k) {
-      case 'muted':
-      case 'low':
-        return 0.75
-      case 'active':
-      case 'mid':
-      case 'med':
-        return 1
-      case 'hi':
-      case 'high':
-        return 1.35
-      default:
-        return 1
-    }
-  }
+  
 
   // tx.failed often represents a "clean rejection" (routing capacity, trustline constraints).
   // Those should not be surfaced as global "errors" in the HUD.
@@ -738,22 +722,7 @@ export function useSimulatorApp() {
     }
   }
 
-  type RealClearingFxConfig = {
-    highlightPulseMs: number
-    highlightThickness: number
-    microTtlMs: number
-    microThickness: number
-    nodeBurstMs: number
-  }
-
-  const REAL_CLEARING_FX: RealClearingFxConfig = {
-    // Keep clearing highlights visible long enough to be noticed.
-    highlightPulseMs: 5200,
-    highlightThickness: 2.9,
-    microTtlMs: 860,
-    microThickness: 1.25,
-    nodeBurstMs: 1100,
-  }
+  const REAL_CLEARING_FX = getFxConfig('real')
 
   const clearingPlanFxStarted = new Set<string>()
 

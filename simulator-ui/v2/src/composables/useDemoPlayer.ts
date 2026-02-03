@@ -1,40 +1,9 @@
 import { reactive } from 'vue'
 import type { ClearingDoneEvent, ClearingPlanEvent, DemoEvent, TxUpdatedEvent } from '../types'
 import type { LayoutNodeWithId as BaseLayoutNodeWithId } from '../types/layout'
+import { getFxConfig, intensityScale } from '../config/fxConfig'
 
-const CLEARING_ANIMATION = {
-  microTtlMs: 780,
-  microGapMs: 110,
-  labelLifeMs: 2200,
-  // Clearing needs to be visually obvious: keep edge highlights visible longer.
-  highlightPulseMs: 2400,
-  sourceBurstMs: 360,
-  targetBurstMs: 520,
-  cleanupPadMs: 220,
-  labelThrottleMs: 80,
-} as const
-
-function intensityScale(intensityKey?: string): number {
-  const k = String(intensityKey ?? '').trim().toLowerCase()
-  if (!k) return 1
-
-  // Spec uses a loose enum (examples include: muted/active/hi and sometimes mid).
-  // Keep this conservative to avoid overblown visuals and perf regressions.
-  switch (k) {
-    case 'muted':
-    case 'low':
-      return 0.75
-    case 'active':
-    case 'mid':
-    case 'med':
-      return 1
-    case 'hi':
-    case 'high':
-      return 1.35
-    default:
-      return 1
-  }
-}
+const CLEARING_ANIMATION = getFxConfig('demo')
 
 function intensityCountPerEdge(intensityKey?: string): number {
   const s = intensityScale(intensityKey)

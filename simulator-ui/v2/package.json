@@ -4,9 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "sync:demo-fixtures": "pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/sync_demo_fixtures.ps1",
+    "sync:demo-fixtures:strict": "pwsh -NoProfile -ExecutionPolicy Bypass -File ../../scripts/sync_demo_fixtures.ps1 -Strict",
+    "predev": "npm run sync:demo-fixtures",
     "dev": "vite",
+    "prebuild": "npm run sync:demo-fixtures:strict",
+    "typecheck": "vue-tsc --noEmit",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "npm run test:unit",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots"

@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from app.core.simulator import viz_rules  # noqa: E402
 
 
 def read_json(path: Path) -> Any:
@@ -48,41 +56,25 @@ def parse_amount(v: Any) -> float | None:
     return None
 
 
-def quantile(values_sorted: list[float], p: float) -> float:
-    if not values_sorted:
-        raise ValueError("values_sorted must be non-empty")
-    if p <= 0:
-        return values_sorted[0]
-    if p >= 1:
-        return values_sorted[-1]
-    n = len(values_sorted)
-    i = int(p * (n - 1))
-    return values_sorted[i]
-
-
-def link_width_key(limit: float | None, *, q33: float | None, q66: float | None) -> str:
-    if limit is None or q33 is None or q66 is None:
-        return "hairline"
-    if limit <= q33:
-        return "thin"
-    if limit <= q66:
-        return "mid"
-    return "thick"
-
-
-def link_alpha_key(status: str | None, used: float | None, limit: float | None) -> str:
-    if status and status != "active":
-        return "muted"
-    if used is None or limit is None or limit <= 0:
-        return "bg"
-    r = abs(used) / limit
-    if r >= 0.75:
-        return "hi"
-    if r >= 0.40:
-        return "active"
-    if r >= 0.15:
-        return "muted"
-    return "bg"
+def parse_int(v: Any) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        x = int(v)
+        return x if float(x) == v else None
+    if isinstance(v, str):
+        s = v.strip().replace(",", "")
+        if not s:
+            return None
+        try:
+            return int(s)
+        except ValueError:
+            return None
+    return None
 
 
 @dataclass(frozen=True)
@@ -163,31 +155,84 @@ def build_snapshot(
     if not isinstance(trustlines, list):
         raise TypeError(f"Expected list in {trustlines_path}")
 
-    nodes: list[dict[str, Any]] = []
+    # Collect atoms first so we can compute debt bins + size scaling consistently.
+    atoms_by_pid: dict[str, int] = {}
+    meta_by_pid: dict[str, tuple[Any, Any]] = {}
     node_ids: set[str] = set()
+    mags: list[int] = []
+    debt_mags: list[int] = []
 
     for p in participants:
         if not isinstance(p, dict):
             continue
         pid = str(safe_get(p, "pid"))
-        type_raw = p.get("type")
-        type_norm = str(type_raw or "").strip().lower()
-        viz_shape_key = "rounded-rect" if type_norm == "business" else "circle"
         node_ids.add(pid)
+
+        type_raw = p.get("type")
+        status_raw = p.get("status")
+        meta_by_pid[pid] = (type_raw, status_raw)
+
+        net_sign = p.get("net_sign")
+        net_atoms_raw = p.get("net_balance_atoms")
+
+        atoms: int
+        mag = parse_int(net_atoms_raw)
+        if net_sign in (-1, 0, 1) and mag is not None and mag >= 0:
+            atoms = int(mag) * int(net_sign)
+        else:
+            atoms = parse_int(net_atoms_raw) or 0
+
+        atoms_by_pid[pid] = atoms
+        mags.append(abs(atoms))
+        if atoms < 0:
+            debt_mags.append(abs(atoms))
+
+    mags_sorted = sorted(mags)
+    debt_mags_sorted = sorted(debt_mags)
+
+    nodes: list[dict[str, Any]] = []
+    for pid in sorted(node_ids):
+        atoms = atoms_by_pid.get(pid, 0)
+        type_raw, status_raw = meta_by_pid.get(pid, (None, None))
+        type_key = str(type_raw or "").strip().lower() or None
+        status_key = str(status_raw or "").strip().lower() or None
+
+        viz_color_key = viz_rules.node_color_key(
+            atoms=atoms,
+            status_key=status_key,
+            type_key=type_key,
+            debt_mags_sorted=debt_mags_sorted,
+        )
+        viz_shape_key = viz_rules.node_shape_key(type_key)
+        w, h = viz_rules.node_size_wh(atoms_abs=abs(atoms), mags_sorted=mags_sorted, type_key=type_key)
+
         nodes.append(
             {
                 "id": pid,
-                "name": p.get("display_name"),
+                "name": None,
                 "type": type_raw,
-                "status": p.get("status"),
-                "net_balance_atoms": p.get("net_balance_atoms"),
-                "net_sign": p.get("net_sign"),
-                "viz_color_key": p.get("viz_color_key"),
-                "viz_shape_key": p.get("viz_shape_key") if isinstance(p.get("viz_shape_key"), str) else viz_shape_key,
-                "viz_size": p.get("viz_size"),
+                "status": status_raw,
+                "net_balance_atoms": str(abs(atoms)),
+                "net_sign": viz_rules.net_sign_from_atoms(atoms),
+                "viz_color_key": viz_color_key,
+                "viz_shape_key": viz_shape_key,
+                "viz_size": {"w": w, "h": h},
                 "viz_badge_key": None,
             }
         )
+
+    # Fill in display names (stable ordering above kept deterministic).
+    display_name_by_pid = {}
+    for p in participants:
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("pid") or "")
+        if pid:
+            display_name_by_pid[pid] = p.get("display_name")
+    for n in nodes:
+        pid = str(n.get("id") or "")
+        if pid in display_name_by_pid:
+            n["name"] = display_name_by_pid[pid]
 
     links: list[dict[str, Any]] = []
     link_stats: list[tuple[dict[str, Any], float | None, float | None]] = []
@@ -221,15 +266,15 @@ def build_snapshot(
         link_stats.append((link, limit_num, used_num))
 
     limits = sorted([x for _, x, _ in link_stats if x is not None])
-    q33 = quantile(limits, 0.33) if limits else None
-    q66 = quantile(limits, 0.66) if limits else None
+    q33 = viz_rules.quantile(limits, 0.33) if limits else None
+    q66 = viz_rules.quantile(limits, 0.66) if limits else None
 
     for link, limit_num, used_num in link_stats:
         status = link.get("status")
         if not isinstance(status, str):
             status = None
-        link["viz_width_key"] = link_width_key(limit_num, q33=q33, q66=q66)
-        link["viz_alpha_key"] = link_alpha_key(status, used=used_num, limit=limit_num)
+        link["viz_width_key"] = viz_rules.link_width_key(limit_num, q33=q33, q66=q66)
+        link["viz_alpha_key"] = viz_rules.link_alpha_key(status, used=used_num, limit=limit_num)
 
     snapshot: dict[str, Any] = {
         "equivalent": eq,

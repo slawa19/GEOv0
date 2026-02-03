@@ -130,6 +130,7 @@ function asNodePatchArray(value: unknown, label: string): NodePatch[] | undefine
     if (vizColorKey) assertVizKeyKnown('viz_color_key', vizColorKey, `${label}[${idx}] node:${id}`)
 
     const vizShapeKey = asOptionalNullableString(p.viz_shape_key)
+    if (vizShapeKey) assertVizKeyKnown('viz_shape_key', vizShapeKey, `${label}[${idx}] node:${id}`)
 
     let viz_size: NodePatch['viz_size'] = undefined
     if (p.viz_size !== undefined && p.viz_size !== null) {
@@ -187,12 +188,17 @@ function asEdgePatchArray(value: unknown, label: string): EdgePatch[] | undefine
   })
 }
 
-function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_width_key' | 'viz_alpha_key', key: string, context: string) {
+function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_shape_key' | 'viz_width_key' | 'viz_alpha_key', key: string, context: string) {
   const strict = String(import.meta.env.VITE_STRICT_VIZ_KEYS ?? '1') === '1'
   if (!strict) return
 
   if (kind === 'viz_color_key') {
     if (!VIZ_MAPPING.node.color[key]) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
+    return
+  }
+
+  if (kind === 'viz_shape_key') {
+    if (key !== 'circle' && key !== 'rounded-rect') throw new Error(`Unknown ${kind}='${key}' at ${context}`)
     return
   }
 
@@ -207,7 +213,8 @@ function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_width_key' | 'viz_alpha_
 }
 
 export async function loadJson<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: 'application/json' } })
+  const cache: RequestCache | undefined = import.meta.env.DEV ? 'no-store' : undefined
+  const res = await fetch(path, { headers: { Accept: 'application/json' }, cache })
   if (!res.ok) throw new Error(`Failed to fetch ${path}: ${res.status} ${res.statusText}`)
   return (await res.json()) as T
 }
@@ -245,6 +252,7 @@ export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapsho
     if (vizColorKey) assertVizKeyKnown('viz_color_key', vizColorKey, `node:${id} (${sourcePath})`)
 
     const vizShapeKey = asOptionalNullableString(n.viz_shape_key)
+    if (vizShapeKey) assertVizKeyKnown('viz_shape_key', vizShapeKey, `node:${id} (${sourcePath})`)
 
     let viz_size: GraphNode['viz_size'] = undefined
     if (n.viz_size !== undefined && n.viz_size !== null) {
