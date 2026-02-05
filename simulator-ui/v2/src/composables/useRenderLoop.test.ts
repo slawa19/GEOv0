@@ -26,6 +26,28 @@ function makeCanvas(): HTMLCanvasElement {
   } as any
 }
 
+function makeCanvasWithCtx() {
+  const ctx = {
+    setTransform: vi.fn(),
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    translate: vi.fn(),
+    scale: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    createRadialGradient: () => ({ addColorStop: vi.fn() }),
+  } as any
+
+  const canvas: HTMLCanvasElement = {
+    width: 1,
+    height: 1,
+    style: { width: '1px', height: '1px' } as any,
+    getContext: () => ctx,
+  } as any
+
+  return { canvas, ctx }
+}
+
 function makeLoop() {
   const canvas = makeCanvas()
   const fxCanvas = makeCanvas()
@@ -223,6 +245,163 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     // Now loop is in deep idle (no scheduling pending). wakeUp must schedule next RAF.
     loop.wakeUp()
     expect(win.__rafQueue.length).toBe(1)
+  })
+
+  it('does not enter deep idle before the first successful renderFrame (no snapshot yet)', () => {
+    const { canvas, ctx } = makeCanvasWithCtx()
+    const { canvas: fxCanvas } = makeCanvasWithCtx()
+
+    let snap: any = null
+
+    const loop = useRenderLoop({
+      canvasEl: { value: canvas } as any,
+      fxCanvasEl: { value: fxCanvas } as any,
+      getSnapshot: () => snap,
+      getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+      isTestMode: () => false,
+      getQuality: () => 'low',
+      getFlash: () => 0,
+      setFlash: () => undefined,
+      pruneFloatingLabels: () => undefined,
+      drawBaseGraph: () => ({}),
+      renderFxFrame: () => undefined,
+      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+      getSelectedNodeId: () => null,
+      activeEdges: new Set(),
+      getLinkLod: () => 'full',
+      getHiddenNodeId: () => null,
+      beforeDraw: () => undefined,
+      isAnimating: () => false,
+    })
+
+    const win = (globalThis as any).window
+
+    loop.ensureRenderLoop()
+    expect(win.__rafQueue.length).toBe(1)
+
+    // No snapshot => renderFrame early-return.
+    win.__rafQueue.shift()!(1000)
+    vi.runOnlyPendingTimers()
+    expect(win.__rafQueue.length).toBe(1)
+
+    // Past deep-idle delay, still no snapshot => MUST keep scheduling (no full stop).
+    win.__rafQueue.shift()!(4000)
+    vi.runOnlyPendingTimers()
+    expect(win.__rafQueue.length).toBe(1)
+
+    // Snapshot appears: first frame should render without any external wakeUp.
+    snap = { generated_at: 't1', nodes: [], links: [], palette: {} }
+    win.__rafQueue.shift()!(5000)
+    expect(ctx.clearRect).toHaveBeenCalled()
+    expect(ctx.fillRect).toHaveBeenCalled()
+  })
+
+  it('snapshot+layout appear after long wait (5s+) -> first frame renders automatically without user input', () => {
+    const { canvas, ctx } = makeCanvasWithCtx()
+    const { canvas: fxCanvas } = makeCanvasWithCtx()
+
+    let snap: any = null
+    let layout = { w: 0, h: 0, nodes: [], links: [] }
+
+    const loop = useRenderLoop({
+      canvasEl: { value: canvas } as any,
+      fxCanvasEl: { value: fxCanvas } as any,
+      getSnapshot: () => snap,
+      getLayout: () => layout,
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+      isTestMode: () => false,
+      getQuality: () => 'low',
+      getFlash: () => 0,
+      setFlash: () => undefined,
+      pruneFloatingLabels: () => undefined,
+      drawBaseGraph: () => ({}),
+      renderFxFrame: () => undefined,
+      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+      getSelectedNodeId: () => null,
+      activeEdges: new Set(),
+      getLinkLod: () => 'full',
+      getHiddenNodeId: () => null,
+      beforeDraw: () => undefined,
+      isAnimating: () => false,
+    })
+
+    const win = (globalThis as any).window
+
+    loop.ensureRenderLoop()
+    expect(win.__rafQueue.length).toBe(1)
+
+    // No snapshot/layout yet => renderFrame early-return, but loop must keep scheduling.
+    win.__rafQueue.shift()!(1000)
+    vi.runOnlyPendingTimers()
+    expect(win.__rafQueue.length).toBe(1)
+
+    // Wait well past deep-idle delay; still no snapshot/layout => MUST still schedule (idle cadence).
+    win.__rafQueue.shift()!(6000)
+    vi.runOnlyPendingTimers()
+    expect(win.__rafQueue.length).toBe(1)
+
+    // Snapshot + layout finally arrive (after 5s+). First real draw must happen automatically
+    // on the already-scheduled frame (no wakeUp / ensureRenderLoop calls).
+    snap = { generated_at: 't1', nodes: [], links: [], palette: {} }
+    layout = { w: 10, h: 10, nodes: [], links: [] }
+    win.__rafQueue.shift()!(6100)
+    expect(ctx.clearRect).toHaveBeenCalled()
+    expect(ctx.fillRect).toHaveBeenCalled()
+  })
+
+  it('after the first successful renderFrame, deep idle is allowed again (can stop scheduling)', () => {
+    const { canvas, ctx } = makeCanvasWithCtx()
+    const { canvas: fxCanvas } = makeCanvasWithCtx()
+
+    let snap: any = null
+
+    const loop = useRenderLoop({
+      canvasEl: { value: canvas } as any,
+      fxCanvasEl: { value: fxCanvas } as any,
+      getSnapshot: () => snap,
+      getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+      isTestMode: () => false,
+      getQuality: () => 'low',
+      getFlash: () => 0,
+      setFlash: () => undefined,
+      pruneFloatingLabels: () => undefined,
+      drawBaseGraph: () => ({}),
+      renderFxFrame: () => undefined,
+      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+      getSelectedNodeId: () => null,
+      activeEdges: new Set(),
+      getLinkLod: () => 'full',
+      getHiddenNodeId: () => null,
+      beforeDraw: () => undefined,
+      isAnimating: () => false,
+    })
+
+    const win = (globalThis as any).window
+
+    loop.ensureRenderLoop()
+
+    // Early-return frames while waiting for snapshot.
+    win.__rafQueue.shift()!(1000)
+    vi.runOnlyPendingTimers()
+    win.__rafQueue.shift()!(4000)
+    vi.runOnlyPendingTimers()
+
+    // Now provide snapshot: this frame is the first successful render.
+    snap = { generated_at: 't1', nodes: [], links: [], palette: {} }
+    const timeoutCallsBefore = win.setTimeout.mock.calls.length
+    win.__rafQueue.shift()!(5000)
+    expect(ctx.clearRect).toHaveBeenCalled()
+
+    // Since it's already past deep-idle delay, loop is allowed to stop completely after rendering once.
+    expect(win.__rafQueue.length).toBe(0)
+    expect(win.setTimeout.mock.calls.length).toBe(timeoutCallsBefore)
+    vi.advanceTimersByTime(10_000)
+    expect(win.__rafQueue.length).toBe(0)
   })
 })
 

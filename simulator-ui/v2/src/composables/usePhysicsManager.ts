@@ -21,8 +21,13 @@ export function createPhysicsManager(opts: {
   getLayoutLinks: () => LayoutLink[]
   getQuality: () => PhysicsQuality
   getPinnedPos: () => Iterable<[string, { x: number; y: number }]>
+  /**
+   * Wake up render loop from deep idle.
+   * Must be cheap/idempotent.
+   */
+  wakeUp?: () => void
 }): PhysicsManager {
-  const { isEnabled, getLayoutNodes, getLayoutLinks, getQuality, getPinnedPos } = opts
+  const { isEnabled, getLayoutNodes, getLayoutLinks, getQuality, getPinnedPos, wakeUp } = opts
 
   let engine: PhysicsEngine | null = null
   let lastTickAtMs = 0
@@ -59,6 +64,10 @@ export function createPhysicsManager(opts: {
     for (const [id, p] of getPinnedPos()) engine.pin(id, p.x, p.y)
 
     engine.reheat()
+
+    // Physics is now active; ensure at least one frame is scheduled even if the render loop
+    // is currently in deep idle.
+    wakeUp?.()
   }
 
   function updateViewport(w: number, h: number, reheatAlpha = 0.15) {
@@ -66,6 +75,9 @@ export function createPhysicsManager(opts: {
     if (!isEnabled()) return
     engine.updateViewport(w, h)
     engine.reheat(reheatAlpha)
+
+    // Only wake up if viewport change is meant to reheat the simulation.
+    if (reheatAlpha > 0) wakeUp?.()
   }
 
   function tickAndSyncToLayout() {
@@ -99,7 +111,12 @@ export function createPhysicsManager(opts: {
   }
 
   function reheat(alpha?: number) {
-    engine?.reheat(alpha)
+    if (!engine) return
+    if (!isEnabled()) return
+    engine.reheat(alpha)
+
+    // alpha=0 is used as a “no-op” / do-not-start impulse in some flows.
+    if (alpha === undefined || alpha > 0) wakeUp?.()
   }
 
   function isRunning() {

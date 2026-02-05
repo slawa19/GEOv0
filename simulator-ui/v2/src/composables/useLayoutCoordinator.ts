@@ -74,9 +74,12 @@ export function useLayoutCoordinator<
     h: 0,
   }) as unknown as LayoutState<N, L>
 
-  let resizeRafId: number | null = null
-  let relayoutDebounceId: number | null = null
-  let lastLayoutKey: string | null = null
+	let resizeRafId: number | null = null
+	let resizeRelayoutRafId: number | null = null
+	let relayoutDebounceId: number | null = null
+	let relayoutRafId: number | null = null
+	let relayoutAfterResizePending = false
+	let lastLayoutKey: string | null = null
 
   let listenersActive = false
 
@@ -93,38 +96,72 @@ export function useLayoutCoordinator<
     lastLayoutKey = null
   }
 
-  function resizeCanvases() {
-    const canvas = deps.canvasEl.value
-    const fxCanvas = deps.fxCanvasEl.value
-    const host = deps.hostEl.value
-    const snap = deps.snapshot.value
-    if (!canvas || !fxCanvas || !host || !snap) return
+	function resizeCanvases(): boolean {
+		const canvas = deps.canvasEl.value
+		const fxCanvas = deps.fxCanvasEl.value
+		const host = deps.hostEl.value
+		const snap = deps.snapshot.value
+		if (!canvas || !fxCanvas || !host || !snap) return false
 
-    const rect = host.getBoundingClientRect()
-    const win = getWin()
-    const dpr = Math.min(deps.dprClamp.value, win.devicePixelRatio || 1)
+		const rect = host.getBoundingClientRect()
+		const win = getWin()
+		const dpr = Math.min(deps.dprClamp.value, win.devicePixelRatio || 1)
 
     const cssW = Math.max(1, Math.floor(rect.width))
     const cssH = Math.max(1, Math.floor(rect.height))
     const pxW = Math.max(1, Math.floor(cssW * dpr))
     const pxH = Math.max(1, Math.floor(cssH * dpr))
 
-    const cssWStr = `${cssW}px`
-    const cssHStr = `${cssH}px`
+		const cssWStr = `${cssW}px`
+		const cssHStr = `${cssH}px`
 
-    if (canvas.width !== pxW) canvas.width = pxW
-    if (canvas.height !== pxH) canvas.height = pxH
-    if (canvas.style.width !== cssWStr) canvas.style.width = cssWStr
-    if (canvas.style.height !== cssHStr) canvas.style.height = cssHStr
+		let changed = false
 
-    if (fxCanvas.width !== canvas.width) fxCanvas.width = canvas.width
-    if (fxCanvas.height !== canvas.height) fxCanvas.height = canvas.height
-    if (fxCanvas.style.width !== canvas.style.width) fxCanvas.style.width = canvas.style.width
-    if (fxCanvas.style.height !== canvas.style.height) fxCanvas.style.height = canvas.style.height
+		if (canvas.width !== pxW) {
+			canvas.width = pxW
+			changed = true
+		}
+		if (canvas.height !== pxH) {
+			canvas.height = pxH
+			changed = true
+		}
+		if (canvas.style.width !== cssWStr) {
+			canvas.style.width = cssWStr
+			changed = true
+		}
+		if (canvas.style.height !== cssHStr) {
+			canvas.style.height = cssHStr
+			changed = true
+		}
 
-    layout.w = cssW
-    layout.h = cssH
-  }
+		if (fxCanvas.width !== canvas.width) {
+			fxCanvas.width = canvas.width
+			changed = true
+		}
+		if (fxCanvas.height !== canvas.height) {
+			fxCanvas.height = canvas.height
+			changed = true
+		}
+		if (fxCanvas.style.width !== canvas.style.width) {
+			fxCanvas.style.width = canvas.style.width
+			changed = true
+		}
+		if (fxCanvas.style.height !== canvas.style.height) {
+			fxCanvas.style.height = canvas.style.height
+			changed = true
+		}
+
+		if (layout.w !== cssW) {
+			layout.w = cssW
+			changed = true
+		}
+		if (layout.h !== cssH) {
+			layout.h = cssH
+			changed = true
+		}
+
+		return changed
+	}
 
   function recomputeLayout() {
     const snap = deps.snapshot.value
@@ -138,46 +175,121 @@ export function useLayoutCoordinator<
     deps.computeLayout(snap, layout.w, layout.h, deps.layoutMode.value)
   }
 
-  function resizeAndLayout() {
-    resizeCanvases()
+	function resizeAndLayout() {
+		const changed = resizeCanvases()
+
+		// If canvas/host size didn't change, avoid expensive relayout + waking the render loop.
+		// Initialization is still safe: callers that need a relayout should use requestRelayoutDebounced(0)
+		// or call resetLayoutKeyCache() before invoking resizeAndLayout().
+		if (!changed) return
+
+		recomputeLayout()
+		clampCameraPanFn()
+		deps.wakeUp?.()
+	}
+
+  function getRafScheduler(): (cb: (t: number) => void) => number {
+    const win = getWin()
+    return typeof win.requestAnimationFrame === 'function'
+      ? win.requestAnimationFrame.bind(win)
+      : (cb) => win.setTimeout(() => cb(win.performance?.now?.() ?? Date.now()), 0)
+  }
+
+  function cancelRaf(id: number) {
+    const win = getWin()
+    if (typeof win.cancelAnimationFrame === 'function') win.cancelAnimationFrame(id)
+    else win.clearTimeout(id)
+  }
+
+  function performRelayoutNow() {
     recomputeLayout()
     clampCameraPanFn()
     deps.wakeUp?.()
   }
 
-  function requestResizeAndLayout() {
-    if (resizeRafId !== null) return
+	function requestResizeAndLayout() {
+		if (resizeRafId !== null) return
 
-    const win = getWin()
-    const raf: (cb: (t: number) => void) => number =
-      typeof win.requestAnimationFrame === 'function'
-        ? win.requestAnimationFrame.bind(win)
-        : (cb) => win.setTimeout(() => cb(win.performance?.now?.() ?? Date.now()), 0)
+    const raf = getRafScheduler()
 
-    resizeRafId = raf(() => {
-      resizeRafId = null
-      // Cheap per-frame resize: update canvas sizes; avoid heavy force relayout.
-      resizeCanvases()
-      clampCameraPanFn()
-      deps.wakeUp?.()
-    })
-  }
+		resizeRafId = raf(() => {
+			resizeRafId = null
+			// Cheap per-frame resize: update canvas sizes; avoid heavy force relayout.
+			const changed = resizeCanvases()
+			if (!changed && !relayoutAfterResizePending) return
+
+      // IMPORTANT: order guarantee.
+      // If a relayout was requested (e.g. from visibilitychange / DPR watcher),
+      // it MUST run after we update layout.w/h (resizeCanvases).
+      if (relayoutAfterResizePending) {
+        relayoutAfterResizePending = false
+        performRelayoutNow()
+        return
+      }
+
+			clampCameraPanFn()
+			deps.wakeUp?.()
+		})
+	}
+
+	function requestResizeRelayoutAndWakeUpCoalesced() {
+		if (resizeRelayoutRafId !== null) return
+		const raf = getRafScheduler()
+		resizeRelayoutRafId = raf(() => {
+			resizeRelayoutRafId = null
+
+			const changed = resizeCanvases()
+			if (!changed) return
+
+			recomputeLayout()
+			clampCameraPanFn()
+			deps.wakeUp?.()
+		})
+	}
 
   function requestRelayoutDebounced(delayMs = 180) {
     const win = getWin()
+
+    // For "immediate" relayouts (visibility / DPR): ensure ordering vs resize RAF.
+    // If resize is scheduled via RAF, a setTimeout(0) relayout can fire earlier.
+    if (delayMs <= 0) {
+      if (relayoutDebounceId !== null) {
+        win.clearTimeout(relayoutDebounceId)
+        relayoutDebounceId = null
+      }
+
+      if (resizeRafId !== null) {
+        relayoutAfterResizePending = true
+        return
+      }
+
+      if (relayoutRafId !== null) return
+      const raf = getRafScheduler()
+      relayoutRafId = raf(() => {
+        relayoutRafId = null
+        performRelayoutNow()
+      })
+      return
+    }
+
     if (relayoutDebounceId !== null) win.clearTimeout(relayoutDebounceId)
     relayoutDebounceId = win.setTimeout(() => {
       relayoutDebounceId = null
-      recomputeLayout()
-      clampCameraPanFn()
-      deps.wakeUp?.()
+
+      // If a resize is still pending (RAF not flushed yet), postpone relayout until
+      // after size update to keep computeLayout keyed by fresh layout.w/h.
+      if (resizeRafId !== null) {
+        relayoutAfterResizePending = true
+        return
+      }
+
+      performRelayoutNow()
     }, delayMs)
   }
 
-  function onWindowResize() {
-    requestResizeAndLayout()
-    requestRelayoutDebounced()
-  }
+	function onWindowResize() {
+		requestResizeRelayoutAndWakeUpCoalesced()
+	}
 
   function onVisibilityChange() {
     const doc = getDoc()
@@ -219,10 +331,9 @@ export function useLayoutCoordinator<
     requestRelayoutDebounced(0)
   }
 
-  function onHostResize() {
-    requestResizeAndLayout()
-    requestRelayoutDebounced()
-  }
+	function onHostResize() {
+		requestResizeRelayoutAndWakeUpCoalesced()
+	}
 
   function setupHostResizeObserver() {
     const host = deps.hostEl.value
@@ -249,9 +360,9 @@ export function useLayoutCoordinator<
     setupHostResizeObserver()
   }
 
-  function teardownResizeListener() {
-    if (!listenersActive) return
-    listenersActive = false
+	function teardownResizeListener() {
+		if (!listenersActive) return
+		listenersActive = false
 
     const win = getWin()
     win.removeEventListener?.('resize', onWindowResize)
@@ -270,11 +381,22 @@ export function useLayoutCoordinator<
       resizeObserver = null
     }
 
-    if (resizeRafId !== null) {
-      if (typeof win.cancelAnimationFrame === 'function') win.cancelAnimationFrame(resizeRafId)
-      else win.clearTimeout(resizeRafId)
-      resizeRafId = null
+		if (resizeRafId !== null) {
+			cancelRaf(resizeRafId)
+			resizeRafId = null
+		}
+
+		if (resizeRelayoutRafId !== null) {
+			cancelRaf(resizeRelayoutRafId)
+			resizeRelayoutRafId = null
+		}
+
+    if (relayoutRafId !== null) {
+      cancelRaf(relayoutRafId)
+      relayoutRafId = null
     }
+
+    relayoutAfterResizePending = false
 
     if (relayoutDebounceId !== null) {
       win.clearTimeout(relayoutDebounceId)

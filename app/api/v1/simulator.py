@@ -6,6 +6,8 @@ import secrets
 import os
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
+from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 from fastapi import APIRouter, Depends, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse
@@ -29,6 +31,7 @@ from app.schemas.simulator import (
     SimulatorTxUpdatedEvent,
 )
 from app.utils.exceptions import GoneException, NotFoundException
+from app.utils.exceptions import ForbiddenException
 
 router = APIRouter(prefix="/simulator")
 
@@ -112,6 +115,13 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
             evt: Optional[dict[str, Any]] = None
             deadline = asyncio.get_running_loop().time() + 2.0
             while asyncio.get_running_loop().time() < deadline:
+        def _actions_enabled() -> bool:
+            return str(os.environ.get("SIMULATOR_ACTIONS_ENABLE", "") or "").strip() in {"1", "true", "TRUE", "yes"}
+
+        def _require_actions_enabled() -> None:
+            if not _actions_enabled():
+                raise ForbiddenException("Simulator actions are disabled (set SIMULATOR_ACTIONS_ENABLE=1)")
+
                 try:
                     nxt = await asyncio.wait_for(sub.queue.get(), timeout=0.25)
                 except asyncio.TimeoutError:
@@ -377,6 +387,45 @@ async def run_events_stream(
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
+@router.post("/runs/{run_id}/actions/tx-once", response_model=TxOnceResponseBody)
+async def action_tx_once(
+    run_id: str,
+    body: TxOnceRequestBody,
+    _actor=Depends(deps.require_participant_or_admin),
+):
+    _require_actions_enabled()
+    emitted = runtime.emit_debug_tx_once(
+        run_id=run_id,
+        equivalent=body.equivalent,
+        from_=body.from_,
+        to=body.to,
+        amount=body.amount,
+        ttl_ms=body.ttl_ms,
+        intensity_key=body.intensity_key,
+        seed=body.seed,
+    )
+    return TxOnceResponseBody(emitted_event_id=emitted, client_action_id=body.client_action_id)
+
+@router.post("/runs/{run_id}/actions/clearing-once", response_model=ClearingOnceResponseBody)
+async def action_clearing_once(
+    run_id: str,
+    body: ClearingOnceRequestBody,
+    _actor=Depends(deps.require_participant_or_admin),
+):
+    _require_actions_enabled()
+    plan_id, plan_event_id, done_event_id, _eq = runtime.emit_debug_clearing_once(
+        run_id=run_id,
+        equivalent=body.equivalent,
+        cycle_edges=body.cycle_edges,
+        cleared_amount=body.cleared_amount,
+        seed=body.seed,
+    )
+    return ClearingOnceResponseBody(
+        plan_id=plan_id,
+        plan_event_id=plan_event_id,
+        done_event_id=done_event_id,
+        client_action_id=body.client_action_id,
+    )
 
 @router.get("/runs/{run_id}/graph/snapshot", response_model=SimulatorGraphSnapshot)
 async def graph_snapshot_for_run(

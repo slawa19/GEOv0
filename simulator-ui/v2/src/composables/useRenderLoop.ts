@@ -196,9 +196,11 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
   let lastActiveAtMs = 0
 
-  // Deep idle state: when true, the render loop is completely stopped.
-  let deepIdle = false
   let lastActivityTime = 0
+
+  // Invariant: the render loop must NOT be allowed to enter deep-idle (0fps stop scheduling)
+  // until we've produced at least one successful frame (i.e. renderFrame did real canvas work).
+  let hasRenderedOnce = false
 
   let lastCanvas: HTMLCanvasElement | null = null
   let lastFxCanvas: HTMLCanvasElement | null = null
@@ -474,6 +476,9 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       cameraZoom: camera.zoom,
       quality: renderQuality,
     })
+
+    // Mark only after we've made it through the draw path (no early-return).
+    hasRenderedOnce = true
   }
 
   function hasActiveFxOrOverlays() {
@@ -653,20 +658,24 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     const inHold = nowMs - lastActiveAtMs < holdActiveMs
     if (active || inHold) {
-      deepIdle = false
       rafId = win.requestAnimationFrame(loop)
       return
     }
 
     // Check for deep idle: if no activity for DEEP_IDLE_DELAY_MS, stop the loop completely.
     const timeSinceActivity = nowMs - lastActivityTime
-    if (timeSinceActivity >= DEEP_IDLE_DELAY_MS) {
-      deepIdle = true
+    if (timeSinceActivity >= DEEP_IDLE_DELAY_MS && hasRenderedOnce) {
       // Do NOT schedule next frame — loop stops completely.
       // Keep `running=true` to represent "loop is enabled" (started via ensureRenderLoop),
       // but with no scheduling pending. Any external event must call wakeUp()/ensureRenderLoop
       // to schedule the next frame.
       return
+    }
+
+    // Before the first successful draw, never allow a full stop: keep at least idle cadence
+    // so the first snapshot/layout appearance can render without external wake-up.
+    if (timeSinceActivity >= DEEP_IDLE_DELAY_MS && !hasRenderedOnce) {
+      // No-op: keep scheduling below (idle cadence) until first successful draw.
     }
 
     const idleDelayMs = Math.max(16, Math.floor(1000 / idleFps))
@@ -690,7 +699,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     const nowMs = win.performance?.now?.() ?? Date.now()
     lastActiveAtMs = nowMs
     lastActivityTime = nowMs
-    deepIdle = false
     rafId = win.requestAnimationFrame(loop)
   }
 
@@ -701,7 +709,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     rafId = null
     timeoutId = null
     running = false
-    deepIdle = false
   }
 
   /**
@@ -732,8 +739,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     }
 
     // We may be in deep idle (no scheduling pending). Guarantee that a next frame is queued.
-    // (Also works as a recovery if `deepIdle` got out-of-sync.)
-    deepIdle = false
+    // (Also works as a recovery if some external code cancelled scheduling.)
     rafId = win.requestAnimationFrame(loop)
   }
 

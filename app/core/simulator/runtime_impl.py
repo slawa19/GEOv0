@@ -6,6 +6,9 @@ import os
 import threading
 from typing import Any, Optional
 from pathlib import Path
+import secrets
+import hashlib
+import random
 
 from app.schemas.simulator import (
     BottlenecksResponse,
@@ -15,6 +18,9 @@ from app.schemas.simulator import (
     ScenarioSummary,
     SimulatorGraphSnapshot,
     SimulatorRunStatusEvent,
+    SimulatorTxUpdatedEvent,
+    SimulatorClearingPlanEvent,
+    SimulatorClearingDoneEvent,
 )
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.fixtures_runner import FixturesRunner
@@ -382,6 +388,256 @@ class _SimulatorRuntimeBase:
             last_error=_dict_to_last_error(run.last_error),
         ).model_dump(mode="json")
         self._sse.broadcast(run_id, payload)
+
+    def _ensure_run_accepts_actions(self, run_id: str) -> RunRecord:
+        run = self.get_run(run_id)
+        state = str(getattr(run, "state", "") or "")
+        if state in {"stopped", "error"}:
+            raise ConflictException(
+                "Run does not accept actions in terminal state",
+                details={"run_id": run_id, "state": state},
+            )
+        return run
+
+    def emit_debug_tx_once(
+        self,
+        *,
+        run_id: str,
+        equivalent: str,
+        from_: str | None,
+        to: str | None,
+        amount: str | None,
+        ttl_ms: int | None,
+        intensity_key: str | None,
+        seed: str | int | None,
+    ) -> str:
+        run = self._ensure_run_accepts_actions(run_id)
+
+        eq = str(equivalent or "").strip().upper()
+        if not eq:
+            raise ConflictException("equivalent is required")
+
+        edges = None
+        with self._lock:
+            edges = (run._edges_by_equivalent or {}).get(eq)
+        edges = list(edges or [])
+
+        # Deterministic-ish selection for debug.
+        seed_raw = f"{run_id}:{eq}:{seed}".encode("utf-8")
+        seed_int = int.from_bytes(hashlib.sha256(seed_raw).digest()[:4], "big")
+        rng = random.Random(seed_int)
+
+        src = str(from_ or "").strip()
+        dst = str(to or "").strip()
+
+        if (not src or not dst) and edges:
+            # Pick any 1-hop edge.
+            a, b = rng.choice(edges)
+            src = src or str(a)
+            dst = dst or str(b)
+
+        if not src or not dst:
+            raise ConflictException(
+                "Cannot choose from/to for tx-once (no edges available)",
+                details={"run_id": run_id, "equivalent": eq},
+            )
+
+        if src == dst:
+            raise ConflictException("from and to must differ", details={"from": src, "to": dst})
+
+        amt = str(amount or "").strip() or "1.00"
+        ttl = int(ttl_ms) if ttl_ms is not None else 1200
+        ttl = max(50, min(ttl, 30_000))
+        ik = str(intensity_key or "").strip() or "mid"
+
+        evt = SimulatorTxUpdatedEvent(
+            event_id=self._sse.next_event_id(run),
+            ts=_utc_now(),
+            type="tx.updated",
+            equivalent=eq,
+            from_=src,
+            to=dst,
+            amount=amt,
+            ttl_ms=ttl,
+            intensity_key=ik,
+            edges=[{"from": src, "to": dst}],
+            node_badges=None,
+        ).model_dump(mode="json", by_alias=True)
+
+        with self._lock:
+            run.last_event_type = "tx.updated"
+        self._sse.broadcast(run_id, evt)
+        return str(evt.get("event_id") or "")
+
+    def emit_debug_clearing_once(
+        self,
+        *,
+        run_id: str,
+        equivalent: str,
+        cycle_edges: list[dict[str, str]] | None,
+        cleared_amount: str | None,
+        seed: str | int | None,
+    ) -> tuple[str, str, str, str]:
+        """Emits (plan_id, plan_event_id, done_event_id, equivalent)."""
+        run = self._ensure_run_accepts_actions(run_id)
+
+        eq = str(equivalent or "").strip().upper()
+        if not eq:
+            raise ConflictException("equivalent is required")
+
+        # Determine cycle edges: either user-provided, or best-effort find a small cycle.
+        picked: list[tuple[str, str]] = []
+
+        if cycle_edges:
+            for e in cycle_edges:
+                if not isinstance(e, dict):
+                    continue
+                a = str(e.get("from") or "").strip()
+                b = str(e.get("to") or "").strip()
+                if a and b and a != b:
+                    picked.append((a, b))
+
+        if not picked:
+            with self._lock:
+                edges = list(((run._edges_by_equivalent or {}).get(eq) or []))
+
+            if not edges:
+                raise ConflictException(
+                    "Cannot choose clearing cycle (no edges available)",
+                    details={"run_id": run_id, "equivalent": eq},
+                )
+
+            seed_raw = f"{run_id}:{eq}:clearing:{seed}".encode("utf-8")
+            seed_int = int.from_bytes(hashlib.sha256(seed_raw).digest()[:4], "big")
+            rng = random.Random(seed_int)
+            rng.shuffle(edges)
+
+            # Build adjacency and attempt to find a short directed cycle (3..6).
+            adj: dict[str, list[str]] = {}
+            for a, b in edges:
+                adj.setdefault(str(a), []).append(str(b))
+
+            nodes = list(adj.keys())
+            rng.shuffle(nodes)
+            max_depth = 6
+
+            def _find_cycle(start: str) -> list[tuple[str, str]] | None:
+                stack: list[str] = [start]
+                seen: set[str] = {start}
+
+                def dfs(cur: str, depth: int) -> list[str] | None:
+                    if depth > max_depth:
+                        return None
+                    for nxt in adj.get(cur, []):
+                        if nxt == start and depth >= 3:
+                            return stack + [start]
+                        if nxt in seen:
+                            continue
+                        seen.add(nxt)
+                        stack.append(nxt)
+                        res = dfs(nxt, depth + 1)
+                        if res is not None:
+                            return res
+                        stack.pop()
+                        seen.remove(nxt)
+                    return None
+
+                path = dfs(start, 1)
+                if not path:
+                    return None
+                out: list[tuple[str, str]] = []
+                for i in range(len(path) - 1):
+                    out.append((path[i], path[i + 1]))
+                return out
+
+            for start in nodes[:50]:
+                cyc = _find_cycle(str(start))
+                if cyc:
+                    picked = cyc
+                    break
+
+        if not picked:
+            # Fallback: 2-edge "cycle-like" viz (won't be a true cycle).
+            with self._lock:
+                edges = list(((run._edges_by_equivalent or {}).get(eq) or []))
+            if len(edges) >= 2:
+                picked = [(str(edges[0][0]), str(edges[0][1])), (str(edges[1][0]), str(edges[1][1]))]
+            else:
+                a, b = str(edges[0][0]), str(edges[0][1])
+                picked = [(a, b)]
+
+        plan_id = f"plan_dbg_{secrets.token_hex(6)}"
+        plan_evt = SimulatorClearingPlanEvent(
+            event_id=self._sse.next_event_id(run),
+            ts=_utc_now(),
+            type="clearing.plan",
+            equivalent=eq,
+            plan_id=plan_id,
+            steps=[
+                {
+                    "at_ms": 0,
+                    "intensity_key": "high",
+                    "highlight_edges": [{"from": a, "to": b} for a, b in picked],
+                },
+                {
+                    "at_ms": 400,
+                    "intensity_key": "mid",
+                    "particles_edges": [{"from": a, "to": b} for a, b in picked],
+                },
+                {
+                    "at_ms": 900,
+                    "flash": {"kind": "clearing"},
+                },
+            ],
+        ).model_dump(mode="json", by_alias=True)
+
+        with self._lock:
+            run.last_event_type = "clearing.plan"
+        self._sse.broadcast(run_id, plan_evt)
+
+        done_event_id = self._sse.next_event_id(run)
+        done_amt = str(cleared_amount or "").strip() or "10.00"
+
+        async def _emit_done_later() -> None:
+            try:
+                await asyncio.sleep(1.1)
+                done_evt = SimulatorClearingDoneEvent(
+                    event_id=done_event_id,
+                    ts=_utc_now(),
+                    type="clearing.done",
+                    equivalent=eq,
+                    plan_id=plan_id,
+                    cleared_cycles=1,
+                    cleared_amount=done_amt,
+                    node_patch=None,
+                    edge_patch=None,
+                ).model_dump(mode="json", by_alias=True)
+                with self._lock:
+                    run.last_event_type = "clearing.done"
+                self._sse.broadcast(run_id, done_evt)
+            except Exception:
+                logger.exception("simulator.debug_clearing_done_emit_failed run_id=%s", run_id)
+
+        try:
+            asyncio.get_running_loop().create_task(_emit_done_later())
+        except RuntimeError:
+            # No running loop (should not happen under FastAPI); fall back to immediate emit.
+            done_evt = SimulatorClearingDoneEvent(
+                event_id=done_event_id,
+                ts=_utc_now(),
+                type="clearing.done",
+                equivalent=eq,
+                plan_id=plan_id,
+                cleared_cycles=1,
+                cleared_amount=done_amt,
+                node_patch=None,
+                edge_patch=None,
+            ).model_dump(mode="json", by_alias=True)
+            with self._lock:
+                run.last_event_type = "clearing.done"
+            self._sse.broadcast(run_id, done_evt)
+
+        return plan_id, str(plan_evt.get("event_id") or ""), str(done_event_id), eq
 
     async def pause(self, run_id: str) -> RunStatus:
         return await self._run_lifecycle.pause(run_id)

@@ -586,6 +586,7 @@ export function useSimulatorApp() {
     getQuality: () => quality.value,
     getSelectedNodeId: () => state.selectedNodeId,
     getLayoutNodeById: (id) => getLayoutNodeById(id),
+    wakeUp,
   })
 
   const physics = physicsAndPinning.physics

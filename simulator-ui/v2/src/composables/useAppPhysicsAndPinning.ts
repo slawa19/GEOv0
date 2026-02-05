@@ -10,6 +10,7 @@ export function useAppPhysicsAndPinning(deps: {
   getLayoutLinks: () => LayoutLink[]
   getQuality: () => 'low' | 'med' | 'high'
   getPinnedPos: () => Map<string, { x: number; y: number }>
+  wakeUp?: () => void
 
   // Pinning state
   pinnedPos: Map<string, { x: number; y: number }>
@@ -24,6 +25,7 @@ export function useAppPhysicsAndPinning(deps: {
     getLayoutLinks: deps.getLayoutLinks,
     getQuality: deps.getQuality,
     getPinnedPos: deps.getPinnedPos,
+    wakeUp: deps.wakeUp,
   })
 
   const pinning = usePinning({

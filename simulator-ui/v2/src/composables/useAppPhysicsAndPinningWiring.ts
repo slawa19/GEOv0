@@ -12,6 +12,7 @@ export function useAppPhysicsAndPinningWiring(opts: {
   getQuality: () => Quality
   getSelectedNodeId: () => string | null
   getLayoutNodeById: (id: string) => LayoutNode | null
+  wakeUp?: () => void
 }) {
   const baselineLayoutPos = new Map<string, { x: number; y: number }>()
   const pinnedPos = reactive(new Map<string, { x: number; y: number }>())
@@ -22,6 +23,7 @@ export function useAppPhysicsAndPinningWiring(opts: {
     getLayoutLinks: opts.getLayoutLinks,
     getQuality: opts.getQuality,
     getPinnedPos: () => pinnedPos,
+    wakeUp: opts.wakeUp,
     pinnedPos,
     baselineLayoutPos,
     getSelectedNodeId: opts.getSelectedNodeId,
