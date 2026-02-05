@@ -168,6 +168,247 @@
     "ts": "2026-01-11T00:00:00Z",
     "type": "clearing.done",
     "equivalent": "UAH",
-    "plan_id": "clearing-demo-UAH"
+    "plan_id": "clearing-demo-UAH",
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "4615",
+        "net_sign": -1,
+        "viz_color_key": "debt-2",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 33,
+          "h": 28
+        }
+      },
+      {
+        "id": "PID_U0003_daa66d13",
+        "net_balance_atoms": "807403",
+        "net_sign": -1,
+        "viz_color_key": "debt-8",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      },
+      {
+        "id": "PID_U0004_78dde6c4",
+        "net_balance_atoms": "32845",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 40,
+          "h": 34
+        }
+      },
+      {
+        "id": "PID_U0006_b54cda26",
+        "net_balance_atoms": "81334",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 46,
+          "h": 39
+        }
+      },
+      {
+        "id": "PID_U0011_cc623a9b",
+        "net_balance_atoms": "102600",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 29,
+          "h": 29
+        }
+      },
+      {
+        "id": "PID_U0012_6a99b44c",
+        "net_balance_atoms": "28626",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 24,
+          "h": 24
+        }
+      },
+      {
+        "id": "PID_U0017_81af14c1",
+        "net_balance_atoms": "43709",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      },
+      {
+        "id": "PID_U0036_3fcd1ce4",
+        "net_balance_atoms": "720474",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      },
+      {
+        "id": "PID_U0039_1a7389f7",
+        "net_balance_atoms": "74301",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 45,
+          "h": 38
+        }
+      },
+      {
+        "id": "PID_U0061_b337ff2d",
+        "net_balance_atoms": "8876",
+        "net_sign": -1,
+        "viz_color_key": "debt-2",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 21,
+          "h": 21
+        }
+      },
+      {
+        "id": "PID_U0071_e162c017",
+        "net_balance_atoms": "10834",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 22,
+          "h": 22
+        }
+      },
+      {
+        "id": "PID_U0091_3db841eb",
+        "net_balance_atoms": "4709",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 21,
+          "h": 21
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0006_b54cda26",
+        "viz_alpha_key": "active",
+        "used": 460.0,
+        "available": 540.0
+      },
+      {
+        "source": "PID_U0003_daa66d13",
+        "target": "PID_U0036_3fcd1ce4",
+        "viz_alpha_key": "bg",
+        "used": 35.0,
+        "available": 665.0
+      },
+      {
+        "source": "PID_U0004_78dde6c4",
+        "target": "PID_U0061_b337ff2d",
+        "viz_alpha_key": "bg",
+        "used": 4.0,
+        "available": 396.0
+      },
+      {
+        "source": "PID_U0004_78dde6c4",
+        "target": "PID_U0071_e162c017",
+        "viz_alpha_key": "muted",
+        "used": 84.0,
+        "available": 316.0
+      },
+      {
+        "source": "PID_U0004_78dde6c4",
+        "target": "PID_U0091_3db841eb",
+        "viz_alpha_key": "active",
+        "used": 188.0,
+        "available": 212.0
+      },
+      {
+        "source": "PID_U0006_b54cda26",
+        "target": "PID_U0039_1a7389f7",
+        "viz_alpha_key": "active",
+        "used": 253.0,
+        "available": 297.0
+      },
+      {
+        "source": "PID_U0011_cc623a9b",
+        "target": "PID_U0003_daa66d13",
+        "viz_alpha_key": "hi",
+        "used": 680.0,
+        "available": 170.0
+      },
+      {
+        "source": "PID_U0011_cc623a9b",
+        "target": "PID_U0004_78dde6c4",
+        "viz_alpha_key": "bg",
+        "used": 0.0,
+        "available": 550.0
+      },
+      {
+        "source": "PID_U0012_6a99b44c",
+        "target": "PID_U0004_78dde6c4",
+        "viz_alpha_key": "bg",
+        "used": 0.0,
+        "available": 550.0
+      },
+      {
+        "source": "PID_U0017_81af14c1",
+        "target": "PID_U0004_78dde6c4",
+        "viz_alpha_key": "active",
+        "used": 280.5,
+        "available": 269.5
+      },
+      {
+        "source": "PID_U0036_3fcd1ce4",
+        "target": "PID_U0011_cc623a9b",
+        "viz_alpha_key": "active",
+        "used": 252.0,
+        "available": 148.0
+      },
+      {
+        "source": "PID_U0039_1a7389f7",
+        "target": "PID_U0001_9e3779b1",
+        "viz_alpha_key": "bg",
+        "used": 110.5,
+        "available": 739.5
+      },
+      {
+        "source": "PID_U0061_b337ff2d",
+        "target": "PID_U0011_cc623a9b",
+        "viz_alpha_key": "active",
+        "used": 188.0,
+        "available": 212.0
+      },
+      {
+        "source": "PID_U0071_e162c017",
+        "target": "PID_U0017_81af14c1",
+        "viz_alpha_key": "active",
+        "used": 244.0,
+        "available": 156.0
+      },
+      {
+        "source": "PID_U0091_3db841eb",
+        "target": "PID_U0012_6a99b44c",
+        "viz_alpha_key": "bg",
+        "used": 33.0,
+        "available": 517.0
+      }
+    ]
   }
 ]

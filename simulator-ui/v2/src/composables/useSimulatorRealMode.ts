@@ -83,6 +83,9 @@ export function useSimulatorRealMode(opts: {
   runRealClearingDoneFx: (plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent) => void
 
   clearingPlansById: Map<string, ClearingPlanEvent>
+
+  // Optional: wake up render loop after snapshot/patch/FX updates.
+  wakeUp?: () => void
 }): {
   stopSse: () => void
   resetStaleRun: (opts?: { clearError?: boolean }) => void
@@ -117,6 +120,7 @@ export function useSimulatorRealMode(opts: {
     runRealClearingPlanFx,
     runRealClearingDoneFx,
     clearingPlansById,
+    wakeUp,
   } = opts
 
   // -----------------
@@ -126,13 +130,42 @@ export function useSimulatorRealMode(opts: {
   let sseAbort: AbortController | null = null
   let sseSeq = 0
 
+  // Debounce multiple rapid calls to refreshSnapshot (e.g., during startRun + watcher cascade).
+  let refreshSnapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  let refreshSnapshotInFlight = false
+  let refreshSnapshotPending = false
+
+  // Sequence id used to invalidate pending debounced refreshes and to guard against stale context.
+  // - incremented on each *actual* refresh attempt
+  // - incremented on teardown/stop paths (invalidates delayed refreshes + post-await steps)
+  let refreshSnapshotSeq = 0
+  
+  // Block watchers from calling refreshSnapshot during startRun to prevent double load.
+  let startRunInProgress = false
+
+  function cancelPendingRefreshSnapshotDebounce() {
+    if (refreshSnapshotDebounceTimer !== null) {
+      clearTimeout(refreshSnapshotDebounceTimer)
+      refreshSnapshotDebounceTimer = null
+    }
+    refreshSnapshotPending = false
+  }
+
+  function teardownRefreshSnapshot() {
+    refreshSnapshotSeq += 1
+    cancelPendingRefreshSnapshotDebounce()
+  }
+
   function stopSse() {
+    // Ensure no delayed refreshSnapshot() can fire after SSE stop/teardown.
+    cancelPendingRefreshSnapshotDebounce()
     sseAbort?.abort()
     sseAbort = null
     real.sseState = 'idle'
   }
 
   function resetStaleRun(resetOpts?: { clearError?: boolean }) {
+    teardownRefreshSnapshot()
     real.runId = null
     real.runStatus = null
     real.lastEventId = null
@@ -167,15 +200,12 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  // Debounce multiple rapid calls to refreshSnapshot (e.g., during startRun + watcher cascade).
-  let refreshSnapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
-  let refreshSnapshotInFlight = false
-  let refreshSnapshotPending = false
-  
-  // Block watchers from calling refreshSnapshot during startRun to prevent double load.
-  let startRunInProgress = false
-
   async function refreshSnapshot() {
+    // Guard: never refresh snapshots when real mode is not active or context is missing.
+    if (!isRealMode.value) return
+    if (!real.accessToken) return
+    if (!real.runId && !real.selectedScenarioId) return
+
     // If a refresh is already in flight, mark as pending and return — the current call will re-invoke.
     if (refreshSnapshotInFlight) {
       refreshSnapshotPending = true
@@ -188,8 +218,31 @@ export function useSimulatorRealMode(opts: {
       return
     }
 
+    const mySeq = ++refreshSnapshotSeq
+    const runIdAtStart = real.runId
+
+    const isContextStillValid = () => {
+      if (!isRealMode.value) return false
+      if (!real.accessToken) return false
+
+      // Abort if a teardown/stop happened or a newer refresh started.
+      if (refreshSnapshotSeq !== mySeq) return false
+
+      // Prevent a delayed refresh from applying to a different run context.
+      if (real.runId !== runIdAtStart) return false
+
+      return true
+    }
+
     refreshSnapshotDebounceTimer = setTimeout(() => {
       refreshSnapshotDebounceTimer = null
+
+      // If context changed while we were debouncing, drop pending refresh safely.
+      if (!isContextStillValid()) {
+        refreshSnapshotPending = false
+        return
+      }
+
       if (refreshSnapshotPending) {
         refreshSnapshotPending = false
         refreshSnapshot()
@@ -198,7 +251,16 @@ export function useSimulatorRealMode(opts: {
 
     refreshSnapshotInFlight = true
     try {
+      // If we got here via a delayed debounce call, ensure we still target the same context.
+      if (!isContextStillValid()) return
+
       await loadScene()
+
+      // Context might have changed while loadScene() was in-flight.
+      if (!isContextStillValid()) return
+
+      // Snapshot change should be visible immediately even if deep idle stopped scheduling.
+      wakeUp?.()
 
       // Scene loader stores errors in state.error; in real mode surface them in the HUD.
       if (isRealMode.value && state.error) {
@@ -315,6 +377,9 @@ export function useSimulatorRealMode(opts: {
               // Run spark FX first so we can align timing with ttl_ms clamping logic.
               runRealTxFx(tx)
 
+              // Ensure canvas updates even if render loop entered deep idle.
+              wakeUp?.()
+
               if (amount && senderId) {
                 pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: 120 })
               }
@@ -363,6 +428,7 @@ export function useSimulatorRealMode(opts: {
               if (planId) {
                 clearingPlansById.set(planId, plan)
                 runRealClearingPlanFx(plan)
+                wakeUp?.()
               }
               return
             }
@@ -376,6 +442,7 @@ export function useSimulatorRealMode(opts: {
               if (done.edge_patch) realPatchApplier.applyEdgePatches(done.edge_patch)
 
               runRealClearingDoneFx(plan, done)
+              wakeUp?.()
               if (planId) clearingPlansById.delete(planId)
             }
           },
@@ -508,6 +575,7 @@ export function useSimulatorRealMode(opts: {
   async function stop() {
     if (!real.runId || !real.accessToken) return
     try {
+      teardownRefreshSnapshot()
       stopSse()
       clearingPlansById.clear()
       cleanupRealRunFxAndTimers()
@@ -577,7 +645,11 @@ export function useSimulatorRealMode(opts: {
   watch(
     () => isRealMode.value,
     (v) => {
-      if (!v) return
+      if (!v) {
+        teardownRefreshSnapshot()
+        stopSse()
+        return
+      }
       void (async () => {
         await refreshScenarios()
 

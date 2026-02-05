@@ -16,19 +16,12 @@ describe('FX_CONFIG structure', () => {
     expect(shared).not.toHaveProperty('nodeBurstMs')
   })
 
-  it('demo and real have different highlightPulseMs', () => {
-    expect(FX_CONFIG.demo.highlightPulseMs).toBeLessThan(FX_CONFIG.real.highlightPulseMs)
-  })
-
-  it('demo and real have different microTtlMs', () => {
-    expect(FX_CONFIG.demo.microTtlMs).toBeLessThan(FX_CONFIG.real.microTtlMs)
-  })
-
-  it('real has exclusive params not in demo', () => {
-    expect(FX_CONFIG.real).toHaveProperty('highlightThickness')
-    expect(FX_CONFIG.real).toHaveProperty('microThickness')
-    expect(FX_CONFIG.real).toHaveProperty('nodeBurstMs')
-    expect(FX_CONFIG.demo).not.toHaveProperty('highlightThickness')
+  it('demo and real share the same clearing FX parameters', () => {
+    expect(FX_CONFIG.demo.highlightPulseMs).toBe(FX_CONFIG.real.highlightPulseMs)
+    expect(FX_CONFIG.demo.microTtlMs).toBe(FX_CONFIG.real.microTtlMs)
+    expect(FX_CONFIG.demo.highlightThickness).toBe(FX_CONFIG.real.highlightThickness)
+    expect(FX_CONFIG.demo.microThickness).toBe(FX_CONFIG.real.microThickness)
+    expect(FX_CONFIG.demo.nodeBurstMs).toBe(FX_CONFIG.real.nodeBurstMs)
   })
 })
 

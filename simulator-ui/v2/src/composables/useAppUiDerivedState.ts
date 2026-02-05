@@ -8,11 +8,15 @@ export function useAppUiDerivedState(deps: {
   eq: Ref<string>
   scene: Ref<SceneId>
   quality: Ref<Quality>
+  apiMode: ComputedRef<'demo' | 'real'>
+  isDemoFixtures: ComputedRef<boolean>
   isTestMode: ComputedRef<boolean>
   isWebDriver: boolean
   getCameraZoom: () => number
 }) {
   const effectiveEq = computed(() => {
+    // Demo fixtures are shipped for UAH only; avoid silently requesting missing files.
+    if (deps.apiMode.value === 'demo' && deps.isDemoFixtures.value) return 'UAH'
     // Scene E must use canonical clearing cycles (UAH) per spec.
     if (deps.scene.value === 'E') return 'UAH'
     // Keep Playwright / test-mode stable even if query params are present.

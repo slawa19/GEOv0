@@ -12,6 +12,7 @@ describe('useDemoPlayer', () => {
       spawnNodeBursts: vi.fn(),
       spawnEdgePulses: vi.fn(),
       pushFloatingLabel: vi.fn(),
+      setFlash: vi.fn(),
       resetOverlays: vi.fn(),
       fxColorForNode: vi.fn((id: string, fallback: string) => fallback),
       addActiveEdge: vi.fn(),
@@ -45,16 +46,16 @@ describe('useDemoPlayer', () => {
 
     expect(deps.spawnSparks).toHaveBeenCalledTimes(1)
 
-    // schedule: destination burst at ttl, cleanup at ttl+520+50
-    expect(scheduled.some((s) => s.ms === 1200)).toBe(true)
-    expect(scheduled.some((s) => s.ms === 1200 + 520 + 50)).toBe(true)
-
-    const cleanup = scheduled.find((s) => s.ms === 1200 + 520 + 50)
-    expect(cleanup).toBeTruthy()
-
-    cleanup!.fn()
+    // Real-like behavior: apply patches immediately (not at end of animation).
     expect(deps.applyPatches).toHaveBeenCalledTimes(1)
-    expect(deps.resetOverlays).toHaveBeenCalledTimes(1)
+
+    // Real-like behavior: ttl is clamped (1200 -> 900), schedule dst burst at ttl,
+    // and a short completion callback shortly after.
+    expect(scheduled.some((s) => s.ms === 900)).toBe(true)
+    expect(scheduled.some((s) => s.ms === 900 + 60)).toBe(true)
+
+    // Real mode does not reset overlays per tx.
+    expect(deps.resetOverlays).toHaveBeenCalledTimes(0)
   })
 
   it('runTxEvent applies intensity_key to spark thickness', () => {
@@ -64,6 +65,7 @@ describe('useDemoPlayer', () => {
       spawnNodeBursts: vi.fn(),
       spawnEdgePulses: vi.fn(),
       pushFloatingLabel: vi.fn(),
+      setFlash: vi.fn(),
       resetOverlays: vi.fn(),
       fxColorForNode: vi.fn((id: string, fallback: string) => fallback),
       addActiveEdge: vi.fn(),
@@ -98,7 +100,7 @@ describe('useDemoPlayer', () => {
     expect(call.thickness).toBeGreaterThan(1.0)
   })
 
-  it('runClearingStep skips edge pulses for edges with beam sparks (avoid double glow)', () => {
+  it('runClearingStep spawns edge pulses for highlight edges (real-like)', () => {
     const scheduled: Array<{ ms: number; fn: () => void }> = []
 
     const deps = {
@@ -107,6 +109,7 @@ describe('useDemoPlayer', () => {
       spawnNodeBursts: vi.fn(),
       spawnEdgePulses: vi.fn(),
       pushFloatingLabel: vi.fn(),
+      setFlash: vi.fn(),
       resetOverlays: vi.fn(),
       fxColorForNode: vi.fn((id: string, fallback: string) => fallback),
       addActiveEdge: vi.fn(),
@@ -129,8 +132,7 @@ describe('useDemoPlayer', () => {
 
     const player = useDemoPlayer(deps)
 
-    // When highlight_edges and particles_edges have the same edges,
-    // spawnEdgePulses should NOT be called (beam sparks already render edge glow)
+    // Even if highlight_edges and particles_edges overlap, real mode highlights the plan edges.
     const planSameEdges: ClearingPlanEvent = {
       event_id: 'p1',
       ts: 't',
@@ -148,8 +150,13 @@ describe('useDemoPlayer', () => {
 
     player.runClearingStep(0, planSameEdges, null)
 
-    // Should NOT spawn edge pulses for edges that have beam sparks
-    expect(deps.spawnEdgePulses).toHaveBeenCalledTimes(0)
+    expect(deps.spawnEdgePulses).toHaveBeenCalledTimes(1)
+    expect(deps.spawnEdgePulses).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edges: [{ from: 'A', to: 'B' }],
+        countPerEdge: 1,
+      }),
+    )
 
     // schedule includes immediate micro tx timers and cleanup
     const hasCleanup = scheduled.some((s) => s.ms > 0)
@@ -165,6 +172,7 @@ describe('useDemoPlayer', () => {
       spawnNodeBursts: vi.fn(),
       spawnEdgePulses: vi.fn(),
       pushFloatingLabel: vi.fn(),
+      setFlash: vi.fn(),
       resetOverlays: vi.fn(),
       fxColorForNode: vi.fn((id: string, fallback: string) => fallback),
       addActiveEdge: vi.fn(),
@@ -187,8 +195,7 @@ describe('useDemoPlayer', () => {
 
     const player = useDemoPlayer(deps)
 
-    // When highlight_edges has edges NOT in particles_edges,
-    // spawnEdgePulses should be called for those edges only
+    // Real-like behavior: highlight pulses are applied to highlight_edges (regardless of particles).
     const planDifferentEdges: ClearingPlanEvent = {
       event_id: 'p2',
       ts: 't',
@@ -199,18 +206,18 @@ describe('useDemoPlayer', () => {
         {
           at_ms: 0,
           highlight_edges: [{ from: 'A', to: 'B' }, { from: 'C', to: 'D' }],
-          particles_edges: [{ from: 'A', to: 'B' }],  // only A→B has beam spark
+          particles_edges: [{ from: 'A', to: 'B' }],
         },
       ],
     }
 
     player.runClearingStep(0, planDifferentEdges, null)
 
-    // Should spawn edge pulse only for C→D (which has no beam spark)
+    // Should spawn pulses for both highlight edges.
     expect(deps.spawnEdgePulses).toHaveBeenCalledTimes(1)
     expect(deps.spawnEdgePulses).toHaveBeenCalledWith(
       expect.objectContaining({
-        edges: [{ from: 'C', to: 'D' }],
+        edges: [{ from: 'A', to: 'B' }, { from: 'C', to: 'D' }],
       }),
     )
   })
@@ -222,6 +229,7 @@ describe('useDemoPlayer', () => {
       spawnNodeBursts: vi.fn(),
       spawnEdgePulses: vi.fn(),
       pushFloatingLabel: vi.fn(),
+      setFlash: vi.fn(),
       resetOverlays: vi.fn(),
       fxColorForNode: vi.fn((id: string, fallback: string) => fallback),
       addActiveEdge: vi.fn(),
@@ -262,7 +270,8 @@ describe('useDemoPlayer', () => {
     expect(deps.spawnEdgePulses).toHaveBeenCalledTimes(1)
     expect(deps.spawnEdgePulses).toHaveBeenCalledWith(
       expect.objectContaining({
-        countPerEdge: 2,
+        // Real-like: no intensity-based pulse multiplicity.
+        countPerEdge: 1,
       }),
     )
   })

@@ -78,6 +78,16 @@
 - `GET /api/v1/simulator/runs/{run_id}/events?equivalent=UAH` (SSE)
   - То же, что `/api/v1/simulator/events`, но привязанное к конкретному run.
 
+### Debug/demo actions (backend-driven)
+
+Для отладки визуальных эффектов без offline demo backend может предоставлять actions endpoints,
+которые **эмитят обычные доменные события** в SSE (никакой отдельной демо-семантики).
+
+- `POST /api/v1/simulator/runs/{run_id}/actions/tx-once`
+- `POST /api/v1/simulator/runs/{run_id}/actions/clearing-once`
+
+Спецификация: [../backend/backend-driven-demo-mode-spec.md](../backend/backend-driven-demo-mode-spec.md)
+
 ### Snapshot (namespace by run)
 - `GET /api/v1/simulator/runs/{run_id}/graph/snapshot?equivalent=UAH`
   - То же, что `/api/v1/simulator/graph/snapshot`, но привязанное к конкретному run.

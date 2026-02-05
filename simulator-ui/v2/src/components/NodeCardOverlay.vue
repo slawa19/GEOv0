@@ -21,6 +21,23 @@ type Props = {
 }
 
 defineProps<Props>()
+
+function netText(node: GraphNode): string | null {
+  const major = node.net_balance
+  if (major != null && String(major).trim() !== '') return String(major)
+
+  const atoms = node.net_balance_atoms
+  if (atoms == null) return null
+
+  const s = String(atoms)
+  // Back-compat: older fixtures used signed atoms already.
+  if (s.startsWith('-')) return s
+
+  const sign = node.net_sign
+  if (sign === -1) return `-${s}`
+  if (sign === 0) return '0'
+  return s
+}
 </script>
 
 <template>
@@ -56,7 +73,7 @@ defineProps<Props>()
 
       <div class="node-item">
         <span class="k">Net</span>
-        <span class="v mono">{{ node.net_balance ?? node.net_balance_atoms ?? '—' }}</span>
+        <span class="v mono">{{ netText(node) ?? '—' }}</span>
       </div>
       <div class="node-item">
         <span class="k">Degree</span>

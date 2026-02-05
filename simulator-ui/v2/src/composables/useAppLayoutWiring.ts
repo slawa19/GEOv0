@@ -30,6 +30,9 @@ export function useAppLayoutWiring(opts: {
   getSourcePath: () => string
 
   computeLayoutForMode: typeof import('../layout/forceLayout').computeLayoutForMode
+
+  // Optional: notify render loop that layout/viewport changed.
+  wakeUp?: () => void
 }) {
   let computeLayoutImpl: ((snapshot: GraphSnapshot, w: number, h: number, mode: LayoutMode) => void) | null = null
 
@@ -48,6 +51,7 @@ export function useAppLayoutWiring(opts: {
     isTestMode: opts.isTestMode,
     getSourcePath: opts.getSourcePath,
     computeLayout,
+    wakeUp: opts.wakeUp,
   })
 
   function initComputeLayout(deps: { pinning: PinningLike; physics: PhysicsLike }) {

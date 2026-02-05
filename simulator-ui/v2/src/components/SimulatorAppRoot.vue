@@ -32,6 +32,8 @@ const {
   quality,
   labelsLod,
 
+  effectiveEq,
+
   // env
   gpuAccelLikely,
 
@@ -161,6 +163,10 @@ const {
       :is-demo-fixtures="isDemoFixtures"
       :is-test-mode="isTestMode"
       :is-web-driver="isWebDriver"
+      :effective-eq="effectiveEq"
+      :source-path="state.sourcePath"
+      :events-path="state.eventsPath"
+      :generated-at="state.snapshot?.generated_at"
       :nodes-count="state.snapshot?.nodes.length"
       :links-count="state.snapshot?.links.length"
     />

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
 import sys
 from collections import defaultdict
@@ -75,6 +77,79 @@ def parse_int(v: Any) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def seed_u32(s: str) -> int:
+    # Deterministic across runs/platforms (avoid Python's randomized hash()).
+    h = hashlib.sha1(s.encode("utf-8")).hexdigest()
+    return int(h[:8], 16)
+
+
+def atoms_from_snapshot_node(n: dict[str, Any]) -> int:
+    mag = parse_int(n.get("net_balance_atoms")) or 0
+    sign = n.get("net_sign")
+    if sign in (-1, 0, 1) and mag >= 0:
+        return int(mag) * int(sign)
+    # Back-compat: if fixtures ever contain signed atoms.
+    return parse_int(n.get("net_balance_atoms")) or 0
+
+
+def parse_float_or_none(v: Any) -> float | None:
+    return parse_amount(v)
+
+
+def compute_node_patch(
+    *,
+    pid: str,
+    atoms: int,
+    type_raw: Any,
+    status_raw: Any,
+    mags_sorted: list[int],
+    debt_mags_sorted: list[int],
+) -> dict[str, Any]:
+    type_key = str(type_raw or "").strip().lower() or None
+    status_key = str(status_raw or "").strip().lower() or None
+
+    viz_color_key = viz_rules.node_color_key(
+        atoms=atoms,
+        status_key=status_key,
+        type_key=type_key,
+        debt_mags_sorted=debt_mags_sorted,
+    )
+    viz_shape_key = viz_rules.node_shape_key(type_key)
+    w, h = viz_rules.node_size_wh(atoms_abs=abs(atoms), mags_sorted=mags_sorted, type_key=type_key)
+
+    return {
+        "id": pid,
+        "net_balance_atoms": str(abs(atoms)),
+        "net_sign": viz_rules.net_sign_from_atoms(atoms),
+        "viz_color_key": viz_color_key,
+        "viz_shape_key": viz_shape_key,
+        "viz_size": {"w": w, "h": h},
+    }
+
+
+def compute_edge_patch(
+    *,
+    source: str,
+    target: str,
+    status: Any,
+    limit: float | None,
+    used: float | None,
+    available: float | None,
+) -> dict[str, Any]:
+    status_key = str(status or "").strip().lower() or None
+    viz_alpha_key = viz_rules.link_alpha_key(status_key, used, limit)
+    patch: dict[str, Any] = {
+        "source": source,
+        "target": target,
+        "viz_alpha_key": viz_alpha_key,
+    }
+    if used is not None:
+        patch["used"] = used
+    if available is not None:
+        patch["available"] = available
+    return patch
 
 
 @dataclass(frozen=True)
@@ -428,6 +503,7 @@ def build_demo_tx_events(
             picked.append((tx_id, generated_at, [s, t]))
             picked_ids.add(tx_id)
 
+    # Note: patches are produced in main() where we have snapshot-derived state.
     events: list[dict[str, Any]] = []
     for tx_id, ts, path_ids in picked:
         edges: list[dict[str, str]] = []
@@ -608,6 +684,38 @@ def main() -> int:
 
     node_ids = {n["id"] for n in snapshot["nodes"]}
     link_keys = {l["id"] for l in snapshot["links"]}
+
+    # --- Build simulation state from snapshot (used for demo patches) ---
+    atoms0: dict[str, int] = {}
+    meta0: dict[str, tuple[Any, Any]] = {}
+    for n in snapshot["nodes"]:
+        pid = str(n.get("id") or "")
+        if not pid:
+            continue
+        atoms0[pid] = atoms_from_snapshot_node(n)
+        meta0[pid] = (n.get("type"), n.get("status"))
+
+    links0: dict[tuple[str, str], dict[str, Any]] = {}
+    for l in snapshot["links"]:
+        s = str(l.get("source") or "")
+        t = str(l.get("target") or "")
+        if not s or not t:
+            continue
+        limit = parse_float_or_none(l.get("trust_limit"))
+        used = parse_float_or_none(l.get("used"))
+        available = parse_float_or_none(l.get("available"))
+        status = l.get("status")
+        links0[(s, t)] = {
+            "limit": limit,
+            "used": used,
+            "available": available,
+            "status": status,
+        }
+
+    mags0_sorted, _debt0_sorted = viz_rules.collect_magnitudes(atoms0.values())
+    median0 = float(viz_rules.quantile([float(x) for x in mags0_sorted], 0.5)) if mags0_sorted else 1000.0
+    tx_base_atoms = max(50, int(round(median0 * 0.07)))
+    clr_base_atoms = max(20, int(round(median0 * 0.03)))
     tx_events = build_demo_tx_events(
         datasets_root=datasets_root,
         eq=args.eq,
@@ -615,6 +723,90 @@ def main() -> int:
         snapshot_node_ids=node_ids,
         snapshot_link_keys=link_keys,
     )
+
+    # Attach deterministic patches for tx.updated events.
+    atoms_tx = atoms0.copy()
+    links_tx = copy.deepcopy(links0)
+    for evt in tx_events:
+        edges = evt.get("edges") or []
+        if not edges:
+            evt["node_patch"] = []
+            evt["edge_patch"] = []
+            continue
+
+        src = str(edges[0]["from"])
+        dst = str(edges[-1]["to"])
+        amt = tx_base_atoms + (seed_u32(f"tx:amt:{args.eq}:{evt['event_id']}") % max(1, tx_base_atoms // 2))
+
+        if src in atoms_tx:
+            atoms_tx[src] = int(atoms_tx[src]) - int(amt)
+        if dst in atoms_tx:
+            atoms_tx[dst] = int(atoms_tx[dst]) + int(amt)
+
+        # Update used/available along the route (to affect link alpha).
+        edge_patches: list[dict[str, Any]] = []
+        for e in edges:
+            a = str(e["from"])
+            b = str(e["to"])
+            info = links_tx.get((a, b))
+            if not info:
+                continue
+            limit = info.get("limit")
+            used = info.get("used")
+            available = info.get("available")
+            status = info.get("status")
+
+            if isinstance(limit, (int, float)) and limit and limit > 0:
+                used0 = float(used or 0.0)
+                # Deterministic fraction of limit, bounded.
+                frac = 0.06 + (seed_u32(f"tx:used:{args.eq}:{evt['event_id']}:{a}->{b}") % 9) * 0.01
+                delta_used = max(0.0, min(limit * 0.22, limit * frac))
+                used1 = min(float(limit), used0 + delta_used)
+                avail1 = max(0.0, float(limit) - used1)
+                info["used"] = used1
+                info["available"] = avail1
+                edge_patches.append(
+                    compute_edge_patch(
+                        source=a,
+                        target=b,
+                        status=status,
+                        limit=float(limit),
+                        used=used1,
+                        available=avail1,
+                    )
+                )
+            else:
+                edge_patches.append(
+                    compute_edge_patch(
+                        source=a,
+                        target=b,
+                        status=status,
+                        limit=None,
+                        used=used if isinstance(used, (int, float)) else None,
+                        available=available if isinstance(available, (int, float)) else None,
+                    )
+                )
+
+        mags_sorted, debt_mags_sorted = viz_rules.collect_magnitudes(atoms_tx.values())
+        affected_nodes = {src, dst}
+        node_patches: list[dict[str, Any]] = []
+        for pid in sorted(affected_nodes):
+            if pid not in atoms_tx:
+                continue
+            type_raw, status_raw = meta0.get(pid, (None, None))
+            node_patches.append(
+                compute_node_patch(
+                    pid=pid,
+                    atoms=int(atoms_tx[pid]),
+                    type_raw=type_raw,
+                    status_raw=status_raw,
+                    mags_sorted=mags_sorted,
+                    debt_mags_sorted=debt_mags_sorted,
+                )
+            )
+
+        evt["node_patch"] = node_patches
+        evt["edge_patch"] = edge_patches
     write_json(eq_out / "events" / "demo-tx.json", tx_events)
 
     clearing_events = build_demo_clearing_events_from_clearing_cycles(
@@ -623,6 +815,88 @@ def main() -> int:
         generated_at=generated_at,
         snapshot_node_ids=node_ids,
     )
+
+    # Attach patches for clearing.done (final state after running the plan).
+    atoms_clr = atoms0.copy()
+    links_clr = copy.deepcopy(links0)
+    plan_evt = next((e for e in clearing_events if e.get("type") == "clearing.plan"), None)
+    done_evt = next((e for e in clearing_events if e.get("type") == "clearing.done"), None)
+    if plan_evt is not None and done_evt is not None:
+        steps = plan_evt.get("steps") or []
+        affected_nodes: set[str] = set()
+        affected_edges: set[tuple[str, str]] = set()
+
+        for s_idx, step in enumerate(steps):
+            edges = (step.get("particles_edges") or [])
+            for e_idx, e in enumerate(edges):
+                a = str(e.get("from") or "")
+                b = str(e.get("to") or "")
+                if not a or not b:
+                    continue
+
+                amt = clr_base_atoms + (seed_u32(f"clr:amt:{args.eq}:{plan_evt['plan_id']}:{s_idx}:{e_idx}:{a}->{b}") % max(1, clr_base_atoms // 2))
+
+                if a in atoms_clr:
+                    atoms_clr[a] = int(atoms_clr[a]) - int(amt)
+                if b in atoms_clr:
+                    atoms_clr[b] = int(atoms_clr[b]) + int(amt)
+
+                affected_nodes.add(a)
+                affected_nodes.add(b)
+                affected_edges.add((a, b))
+
+                info = links_clr.get((a, b))
+                if not info:
+                    continue
+                limit = info.get("limit")
+                used = info.get("used")
+                available = info.get("available")
+                if isinstance(limit, (int, float)) and limit and limit > 0:
+                    used0 = float(used or 0.0)
+                    # Clearing reduces used (debt) deterministically.
+                    frac = 0.04 + (seed_u32(f"clr:used:{args.eq}:{plan_evt['plan_id']}:{s_idx}:{a}->{b}") % 6) * 0.01
+                    delta_used = max(0.0, min(limit * 0.18, limit * frac))
+                    used1 = max(0.0, used0 - delta_used)
+                    avail1 = max(0.0, float(limit) - used1)
+                    info["used"] = used1
+                    info["available"] = avail1
+
+        mags_sorted, debt_mags_sorted = viz_rules.collect_magnitudes(atoms_clr.values())
+
+        node_patches: list[dict[str, Any]] = []
+        for pid in sorted(affected_nodes):
+            if pid not in atoms_clr:
+                continue
+            type_raw, status_raw = meta0.get(pid, (None, None))
+            node_patches.append(
+                compute_node_patch(
+                    pid=pid,
+                    atoms=int(atoms_clr[pid]),
+                    type_raw=type_raw,
+                    status_raw=status_raw,
+                    mags_sorted=mags_sorted,
+                    debt_mags_sorted=debt_mags_sorted,
+                )
+            )
+
+        edge_patches: list[dict[str, Any]] = []
+        for (a, b) in sorted(affected_edges):
+            info = links_clr.get((a, b))
+            if not info:
+                continue
+            edge_patches.append(
+                compute_edge_patch(
+                    source=a,
+                    target=b,
+                    status=info.get("status"),
+                    limit=info.get("limit"),
+                    used=info.get("used"),
+                    available=info.get("available"),
+                )
+            )
+
+        done_evt["node_patch"] = node_patches
+        done_evt["edge_patch"] = edge_patches
     write_json(eq_out / "events" / "demo-clearing.json", clearing_events)
 
     print(f"Wrote snapshot: {eq_out / 'snapshot.json'}")

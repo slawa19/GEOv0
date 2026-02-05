@@ -9,6 +9,10 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   getCameraZoom: () => number
   setFlash: (v: number) => void
 
+  // Optional: called before any scheduled FX timer callback.
+  // This is used to ensure the render loop is awake even after deep idle.
+  wakeUp?: () => void
+
   isWebDriver: () => boolean
   getLayoutNodes: () => N[]
   worldToScreen: (x: number, y: number) => { x: number; y: number }
@@ -33,7 +37,11 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   }).floatingLabelsViewFx
 
   function scheduleTimeout(fn: () => void, delayMs: number, opts?: { critical?: boolean }) {
-    return timers.schedule(fn, delayMs, opts)
+    // Ensure render loop is awake before any FX state mutation emitted by the timer.
+    return timers.schedule(() => {
+      deps.wakeUp?.()
+      fn()
+    }, delayMs, opts)
   }
 
   function clearScheduledTimeouts(opts?: { keepCritical?: boolean }) {

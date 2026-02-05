@@ -3,6 +3,9 @@ import { useCanvasInteractions, type CameraSystemLike, type DragToPinLike, type 
 export function useAppCanvasInteractionsWiring(opts: {
   isTestMode: () => boolean
 
+  // Wake up render loop on any user interaction that may affect visible state.
+  wakeUp?: () => void
+
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
   selectNode: (id: string | null) => void
   setNodeCardOpen: (open: boolean) => void
@@ -25,12 +28,32 @@ export function useAppCanvasInteractionsWiring(opts: {
     getPanActive: opts.getPanActive,
   })
 
+  const wakeUp = () => opts.wakeUp?.()
+
   return {
-    onCanvasClick: canvasInteractions.onCanvasClick,
-    onCanvasDblClick: canvasInteractions.onCanvasDblClick,
-    onCanvasPointerDown: canvasInteractions.onCanvasPointerDown,
-    onCanvasPointerMove: canvasInteractions.onCanvasPointerMove,
-    onCanvasPointerUp: canvasInteractions.onCanvasPointerUp,
-    onCanvasWheel: canvasInteractions.onCanvasWheel,
+    onCanvasClick: (ev: MouseEvent) => {
+      wakeUp()
+      canvasInteractions.onCanvasClick(ev)
+    },
+    onCanvasDblClick: (ev: MouseEvent) => {
+      wakeUp()
+      canvasInteractions.onCanvasDblClick(ev)
+    },
+    onCanvasPointerDown: (ev: PointerEvent) => {
+      wakeUp()
+      canvasInteractions.onCanvasPointerDown(ev)
+    },
+    onCanvasPointerMove: (ev: PointerEvent) => {
+      wakeUp()
+      canvasInteractions.onCanvasPointerMove(ev)
+    },
+    onCanvasPointerUp: (ev: PointerEvent) => {
+      wakeUp()
+      canvasInteractions.onCanvasPointerUp(ev)
+    },
+    onCanvasWheel: (ev: WheelEvent) => {
+      wakeUp()
+      canvasInteractions.onCanvasWheel(ev)
+    },
   }
 }

@@ -70,5 +70,6 @@ export function useAppRenderLoop(opts: {
     ensureRenderLoop: renderLoop.ensureRenderLoop,
     stopRenderLoop: renderLoop.stopRenderLoop,
     renderOnce: renderLoop.renderOnce,
+    wakeUp: renderLoop.wakeUp,
   }
 }

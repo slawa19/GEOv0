@@ -1,0 +1,384 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+
+import {
+  __cachedPosHygiene,
+  __pruneCachedPosToSnapshotNodes,
+  __shouldClearCachedPosOnSnapshotChange,
+  useRenderLoop,
+} from './useRenderLoop'
+
+function makeCanvas(): HTMLCanvasElement {
+  // Minimal canvas stub for renderLoop: getContext must exist.
+  return {
+    width: 1,
+    height: 1,
+    style: { width: '1px', height: '1px' } as any,
+    getContext: () => ({
+      setTransform: vi.fn(),
+      clearRect: vi.fn(),
+      fillRect: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      createRadialGradient: () => ({ addColorStop: vi.fn() }),
+    }) as any,
+  } as any
+}
+
+function makeLoop() {
+  const canvas = makeCanvas()
+  const fxCanvas = makeCanvas()
+
+  return useRenderLoop({
+    canvasEl: { value: canvas } as any,
+    fxCanvasEl: { value: fxCanvas } as any,
+    getSnapshot: () => ({ generated_at: 't1', nodes: [], links: [], palette: {} } as any),
+    getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
+    getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+    isTestMode: () => false,
+    getQuality: () => 'low',
+    getFlash: () => 0,
+    setFlash: () => undefined,
+    pruneFloatingLabels: () => undefined,
+    drawBaseGraph: () => ({}),
+    renderFxFrame: () => undefined,
+    mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+    fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+    getSelectedNodeId: () => null,
+    activeEdges: new Set(),
+    getLinkLod: () => 'full',
+    getHiddenNodeId: () => null,
+    beforeDraw: () => undefined,
+    isAnimating: () => false,
+  })
+}
+
+describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () => {
+  const prevWindow = (globalThis as any).window
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+
+    const rafQueue: Array<(t: number) => void> = []
+
+    const requestAnimationFrame = vi.fn((cb: (t: number) => void) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    const cancelAnimationFrame = vi.fn()
+
+    const setTimeoutSpy = vi.fn(
+      (fn: () => void, ms: number) => setTimeout(fn, ms) as unknown as number,
+    )
+    const clearTimeoutSpy = vi.fn((id: number) => clearTimeout(id as unknown as any))
+
+    ;(globalThis as any).window = {
+      performance: { now: () => 0 },
+      requestAnimationFrame,
+      cancelAnimationFrame,
+      setTimeout: setTimeoutSpy,
+      clearTimeout: clearTimeoutSpy,
+      __rafQueue: rafQueue,
+    }
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    ;(globalThis as any).window = prevWindow
+  })
+
+  it('wakeUp() is idempotent: repeated calls do not double-schedule RAF', () => {
+    const loop = makeLoop()
+    loop.ensureRenderLoop()
+    const win = (globalThis as any).window
+
+    expect(win.requestAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(win.__rafQueue.length).toBe(1)
+
+    // RAF already queued => wakeUp should not schedule another frame.
+    loop.wakeUp()
+    loop.wakeUp()
+    expect(win.requestAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(win.__rafQueue.length).toBe(1)
+  })
+
+  it('wakeUp() cancels an active idle-timeout and guarantees a frame is queued', () => {
+    const loop = makeLoop()
+    const win = (globalThis as any).window
+
+    loop.ensureRenderLoop()
+
+    // Run the first RAF sufficiently after start so we are outside "holdActive" window,
+    // otherwise scheduleNext will queue RAF immediately.
+    win.__rafQueue.shift()!(1000)
+
+    // Not active + outside hold => should be in idle-throttle mode (timeout scheduled).
+    expect(win.setTimeout).toHaveBeenCalledTimes(1)
+    expect(win.__rafQueue.length).toBe(0)
+
+    loop.wakeUp()
+
+    // Wake-up should cancel the idle timeout and enqueue a RAF immediately.
+    expect(win.clearTimeout).toHaveBeenCalledTimes(1)
+    expect(win.requestAnimationFrame).toHaveBeenCalledTimes(2)
+    expect(win.__rafQueue.length).toBe(1)
+
+    // Idempotent while RAF is pending.
+    loop.wakeUp()
+    expect(win.requestAnimationFrame).toHaveBeenCalledTimes(2)
+    expect(win.__rafQueue.length).toBe(1)
+  })
+
+  it('after reaching deep idle, no further scheduling happens until wakeUp()/ensureRenderLoop()', () => {
+    const loop = makeLoop()
+    const win = (globalThis as any).window
+
+    loop.ensureRenderLoop()
+
+    // First frame at t=1000 -> idle timeout (no RAF queued).
+    expect(win.__rafQueue.length).toBe(1)
+    win.__rafQueue.shift()!(1000)
+    expect(win.__rafQueue.length).toBe(0)
+    expect(win.setTimeout).toHaveBeenCalledTimes(1)
+
+    // Timer fires => schedules a RAF.
+    vi.runOnlyPendingTimers()
+    expect(win.__rafQueue.length).toBe(1)
+
+    // Run RAF at deep-idle time (>= 3000ms since lastActivityTime).
+    win.__rafQueue.shift()!(4000)
+
+    // Deep idle: loop stops completely (no RAF, no timeout).
+    expect(win.__rafQueue.length).toBe(0)
+    const rafCallsAtDeepIdle = win.requestAnimationFrame.mock.calls.length
+    const timeoutCallsAtDeepIdle = win.setTimeout.mock.calls.length
+
+    // Even if time passes, nothing should self-schedule.
+    vi.advanceTimersByTime(10_000)
+    expect(win.__rafQueue.length).toBe(0)
+    expect(win.requestAnimationFrame.mock.calls.length).toBe(rafCallsAtDeepIdle)
+    expect(win.setTimeout.mock.calls.length).toBe(timeoutCallsAtDeepIdle)
+
+    // wakeUp() explicitly recovers by scheduling a RAF.
+    loop.wakeUp()
+    expect(win.__rafQueue.length).toBe(1)
+  })
+
+  it('ensureRenderLoop() restores scheduling after deep idle (no user input required)', () => {
+    const loop = makeLoop()
+    const win = (globalThis as any).window
+
+    loop.ensureRenderLoop()
+    win.__rafQueue.shift()!(1000)
+    vi.runOnlyPendingTimers()
+    win.__rafQueue.shift()!(4000)
+
+    expect(win.__rafQueue.length).toBe(0)
+
+    loop.ensureRenderLoop()
+    expect(win.__rafQueue.length).toBe(1)
+  })
+
+  it('stopRenderLoop() disables the loop: wakeUp() must not resurrect scheduling', () => {
+    const loop = makeLoop()
+    const win = (globalThis as any).window
+
+    loop.ensureRenderLoop()
+    expect(win.__rafQueue.length).toBe(1)
+
+    loop.stopRenderLoop()
+    expect(win.cancelAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(win.__rafQueue.length).toBe(1) // queue is test-side; cancelAnimationFrame is the actual contract.
+
+    const rafCallsBeforeWake = win.requestAnimationFrame.mock.calls.length
+
+    loop.wakeUp()
+    expect(win.requestAnimationFrame.mock.calls.length).toBe(rafCallsBeforeWake)
+  })
+
+  it('deep idle -> wakeUp schedules next RAF', () => {
+    const loop = makeLoop()
+
+    loop.ensureRenderLoop()
+    const win = (globalThis as any).window
+
+    // First scheduled frame.
+    expect(win.__rafQueue.length).toBe(1)
+
+    // Run first frame sufficiently after start so we are outside "holdActive" window,
+    // otherwise scheduleNext will queue RAF immediately.
+    win.__rafQueue.shift()!(1000)
+    expect(win.__rafQueue.length).toBe(0)
+
+    // Deep idle triggers after 3000ms of no activity.
+    // Execute an idle-throttle tick at t=4000 that should stop scheduling.
+    // 1) run timers to fire the idle timeout -> it will schedule RAF
+    vi.runOnlyPendingTimers()
+    expect(win.__rafQueue.length).toBe(1)
+    // 2) run that RAF at deep-idle time
+    win.__rafQueue.shift()!(4000)
+    expect(win.__rafQueue.length).toBe(0)
+
+    // Now loop is in deep idle (no scheduling pending). wakeUp must schedule next RAF.
+    loop.wakeUp()
+    expect(win.__rafQueue.length).toBe(1)
+  })
+})
+
+describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
+  it('does not request clear when there is overlap with cached ids (same scene)', () => {
+    const cachedPos = new Map<string, any>([
+      ['A', { x: 1, y: 1 }],
+      ['B', { x: 2, y: 2 }],
+      ['C', { x: 3, y: 3 }],
+    ])
+
+    const snapshotNodes = [{ id: 'A' }, { id: 'B' }, { id: 'C' }]
+
+    expect(
+      __shouldClearCachedPosOnSnapshotChange({
+        cachedPos,
+        snapshotNodes,
+      }),
+    ).toBe(false)
+  })
+
+  it('requests clear when snapshot ids do not intersect with cached ids (new scene)', () => {
+    const cachedPos = new Map<string, any>([
+      ['A', { x: 1, y: 1 }],
+      ['B', { x: 2, y: 2 }],
+    ])
+
+    const snapshotNodes = [{ id: 'X' }, { id: 'Y' }, { id: 'Z' }]
+
+    expect(
+      __shouldClearCachedPosOnSnapshotChange({
+        cachedPos,
+        snapshotNodes,
+      }),
+    ).toBe(true)
+  })
+
+  it('prunes cachedPos when node composition changes but generated_at (snapshotKey) does not', () => {
+    const cachedPos = new Map<string, any>([
+      ['A', { x: 1, y: 1 }],
+      ['B', { x: 2, y: 2 }],
+      ['C', { x: 3, y: 3 }],
+    ])
+
+    // First snapshot: [A,B,C]
+    const snap1: any = { equivalent: 'UAH', generated_at: 't1', nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }], links: [] }
+    // Patch update within the same scene: [A,B] but `generated_at` stays the same.
+    const snap2: any = { equivalent: 'UAH', generated_at: 't1', nodes: [{ id: 'A' }, { id: 'B' }], links: [] }
+
+    // snapshotKey stays stable
+    const loop = makeLoop()
+    // Force two renders with different snapshots in deps.getSnapshot
+    let current = snap1
+    ;(loop as any).__deps = undefined
+
+    // Use a new loop instance with overridable getSnapshot
+    const canvas = makeCanvas()
+    const fxCanvas = makeCanvas()
+    const loop2 = useRenderLoop({
+      canvasEl: { value: canvas } as any,
+      fxCanvasEl: { value: fxCanvas } as any,
+      getSnapshot: () => current as any,
+      getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+      isTestMode: () => false,
+      getQuality: () => 'low',
+      getFlash: () => 0,
+      setFlash: () => undefined,
+      pruneFloatingLabels: () => undefined,
+      drawBaseGraph: (_ctx: any, opts: any) => {
+        // Inject our cachedPos map into the render path.
+        // The render loop passes it as opts.pos.
+        expect(opts.pos).toBeInstanceOf(Map)
+        ;(opts.pos as Map<string, any>).clear()
+        for (const [k, v] of cachedPos) (opts.pos as Map<string, any>).set(k, v)
+        return opts.pos
+      },
+      renderFxFrame: () => undefined,
+      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+      getSelectedNodeId: () => null,
+      activeEdges: new Set(),
+      getLinkLod: () => 'full',
+      getHiddenNodeId: () => null,
+      beforeDraw: () => undefined,
+      isAnimating: () => false,
+    })
+
+    // First render seeds internal cachedPos with [A,B,C]
+    loop2.renderOnce(0)
+    current = snap2
+    loop2.renderOnce(16)
+
+    // Since cachedPos is internal, we validate pruning helper directly:
+    // when snapshot nodes become [A,B], stale C must be dropped.
+    __pruneCachedPosToSnapshotNodes({ cachedPos, snapshotNodes: snap2.nodes })
+    expect([...cachedPos.keys()].sort()).toEqual(['A', 'B'])
+  })
+
+  it('does not prune every frame when composition is stable (prune called once per change)', () => {
+    const pruneSpy = vi.spyOn(__cachedPosHygiene, 'pruneToSnapshotNodes')
+
+    const cachedPos = new Map<string, any>([
+      ['A', { x: 1, y: 1 }],
+      ['B', { x: 2, y: 2 }],
+      ['C', { x: 3, y: 3 }],
+    ])
+
+    const canvas = makeCanvas()
+    const fxCanvas = makeCanvas()
+    let current: any = { equivalent: 'UAH', generated_at: 't1', nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }], links: [] }
+
+    // Wrap drawBaseGraph to keep internal pos growing like real code would.
+    const loop = useRenderLoop({
+      canvasEl: { value: canvas } as any,
+      fxCanvasEl: { value: fxCanvas } as any,
+      getSnapshot: () => current as any,
+      getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+      isTestMode: () => false,
+      getQuality: () => 'low',
+      getFlash: () => 0,
+      setFlash: () => undefined,
+      pruneFloatingLabels: () => undefined,
+      drawBaseGraph: (_ctx: any, opts: any) => {
+        // Seed with cachedPos only once; subsequent frames use same map.
+        if ((opts.pos as Map<string, any>).size === 0) {
+          for (const [k, v] of cachedPos) (opts.pos as Map<string, any>).set(k, v)
+        }
+        return opts.pos
+      },
+      renderFxFrame: () => undefined,
+      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+      getSelectedNodeId: () => null,
+      activeEdges: new Set(),
+      getLinkLod: () => 'full',
+      getHiddenNodeId: () => null,
+      beforeDraw: () => undefined,
+      isAnimating: () => false,
+    })
+
+    // First frame always establishes snapshot identity and may run hygiene once.
+    loop.renderOnce(0)
+    pruneSpy.mockClear()
+
+    // Stable frames: must not trigger additional prune work.
+    loop.renderOnce(16)
+    loop.renderOnce(32)
+    expect(pruneSpy).toHaveBeenCalledTimes(0)
+
+    // Composition change without generated_at change: should trigger exactly once.
+    current = { ...current, nodes: [{ id: 'A' }, { id: 'B' }], links: [] }
+    loop.renderOnce(48)
+    loop.renderOnce(64)
+    expect(pruneSpy).toHaveBeenCalledTimes(1)
+  })
+})
+

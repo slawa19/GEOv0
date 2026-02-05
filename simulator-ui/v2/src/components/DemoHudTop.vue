@@ -6,11 +6,19 @@ type Props = {
   isTestMode: boolean
   isWebDriver: boolean
 
+  // diagnostics (helps confirm demo is reading the expected fixtures)
+  effectiveEq?: string
+  generatedAt?: string
+  sourcePath?: string
+  eventsPath?: string
+
   nodesCount?: number
   linksCount?: number
 }
 
 defineProps<Props>()
+
+const isDev = import.meta.env.DEV
 
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
@@ -55,6 +63,19 @@ const scene = defineModel<SceneId>('scene', { required: true })
 
       <div v-if="nodesCount != null && linksCount != null" class="pill subtle" aria-label="Stats">
         <span class="mono">Nodes {{ nodesCount }} | Links {{ linksCount }}</span>
+      </div>
+
+      <div
+        v-if="isDev && !isWebDriver && (sourcePath || eventsPath || effectiveEq || generatedAt)"
+        class="pill subtle"
+        aria-label="Diagnostics"
+      >
+        <span class="mono">
+          <template v-if="effectiveEq">EQ* {{ effectiveEq }}</template>
+          <template v-if="generatedAt"> | {{ generatedAt }}</template>
+          <template v-if="sourcePath"> | {{ sourcePath }}</template>
+          <template v-if="eventsPath"> | {{ eventsPath }}</template>
+        </span>
       </div>
 
       <div v-if="isTestMode && !isWebDriver" class="pill subtle" aria-label="Mode">

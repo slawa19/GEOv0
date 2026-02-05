@@ -22,6 +22,9 @@ type UseLayoutCoordinatorDeps<N, L, M extends string, S extends { generated_at: 
   getSourcePath: () => string
   computeLayout: (snapshot: S, w: number, h: number, mode: M) => void
   clampCameraPan?: () => void
+
+  // Optional: notify render loop that visible state changed (e.g. after resize).
+  wakeUp?: () => void
 }
 
 type UseLayoutCoordinatorReturn<N, L> = {
@@ -43,6 +46,21 @@ function getWin(): any {
   return typeof window !== 'undefined' ? window : globalThis
 }
 
+function getDoc(): any {
+  return typeof document !== 'undefined' ? document : (globalThis as any).document
+}
+
+function addMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {
+  if (typeof mql.addEventListener === 'function') mql.addEventListener('change', cb)
+  // Legacy Safari.
+  else if (typeof (mql as any).addListener === 'function') (mql as any).addListener(cb)
+}
+
+function removeMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {
+  if (typeof mql.removeEventListener === 'function') mql.removeEventListener('change', cb)
+  else if (typeof (mql as any).removeListener === 'function') (mql as any).removeListener(cb)
+}
+
 export function useLayoutCoordinator<
   N,
   L,
@@ -59,6 +77,11 @@ export function useLayoutCoordinator<
   let resizeRafId: number | null = null
   let relayoutDebounceId: number | null = null
   let lastLayoutKey: string | null = null
+
+  let listenersActive = false
+
+  let dprMql: MediaQueryList | null = null
+  let resizeObserver: ResizeObserver | null = null
 
   let clampCameraPanFn: () => void = deps.clampCameraPan ?? (() => {})
 
@@ -119,6 +142,7 @@ export function useLayoutCoordinator<
     resizeCanvases()
     recomputeLayout()
     clampCameraPanFn()
+    deps.wakeUp?.()
   }
 
   function requestResizeAndLayout() {
@@ -135,6 +159,7 @@ export function useLayoutCoordinator<
       // Cheap per-frame resize: update canvas sizes; avoid heavy force relayout.
       resizeCanvases()
       clampCameraPanFn()
+      deps.wakeUp?.()
     })
   }
 
@@ -145,6 +170,7 @@ export function useLayoutCoordinator<
       relayoutDebounceId = null
       recomputeLayout()
       clampCameraPanFn()
+      deps.wakeUp?.()
     }, delayMs)
   }
 
@@ -153,14 +179,96 @@ export function useLayoutCoordinator<
     requestRelayoutDebounced()
   }
 
+  function onVisibilityChange() {
+    const doc = getDoc()
+    if (doc?.visibilityState !== 'visible') return
+
+    // Returning from background can leave the UI in deep idle + with stale canvas sizing.
+    // Force a cheap resize and queue a relayout as a safety net.
+    requestResizeAndLayout()
+    requestRelayoutDebounced(0)
+  }
+
+  function teardownDprListener() {
+    if (!dprMql) return
+    try {
+      removeMqlListener(dprMql, onDprChange)
+    } catch {
+      // ignore
+    }
+    dprMql = null
+  }
+
+  function setupDprListener() {
+    const win = getWin()
+    if (typeof win.matchMedia !== 'function') return
+
+    const dpr = win.devicePixelRatio || 1
+    dprMql = win.matchMedia(`(resolution: ${dpr}dppx)`)
+    if (!dprMql) return
+
+    addMqlListener(dprMql, onDprChange)
+  }
+
+  function onDprChange() {
+    // DPR may keep changing (zoom, moving window between screens).
+    // Recreate the media-query watcher and update canvas sizes.
+    teardownDprListener()
+    setupDprListener()
+    requestResizeAndLayout()
+    requestRelayoutDebounced(0)
+  }
+
+  function onHostResize() {
+    requestResizeAndLayout()
+    requestRelayoutDebounced()
+  }
+
+  function setupHostResizeObserver() {
+    const host = deps.hostEl.value
+    if (!host) return
+    if (typeof ResizeObserver === 'undefined') return
+
+    resizeObserver = new ResizeObserver(() => {
+      onHostResize()
+    })
+    resizeObserver.observe(host)
+  }
+
   function setupResizeListener() {
+    if (listenersActive) return
+    listenersActive = true
+
     const win = getWin()
     win.addEventListener?.('resize', onWindowResize)
+
+    const doc = getDoc()
+    doc?.addEventListener?.('visibilitychange', onVisibilityChange)
+
+    setupDprListener()
+    setupHostResizeObserver()
   }
 
   function teardownResizeListener() {
+    if (!listenersActive) return
+    listenersActive = false
+
     const win = getWin()
     win.removeEventListener?.('resize', onWindowResize)
+
+    const doc = getDoc()
+    doc?.removeEventListener?.('visibilitychange', onVisibilityChange)
+
+    teardownDprListener()
+
+    if (resizeObserver) {
+      try {
+        resizeObserver.disconnect()
+      } catch {
+        // ignore
+      }
+      resizeObserver = null
+    }
 
     if (resizeRafId !== null) {
       if (typeof win.cancelAnimationFrame === 'function') win.cancelAnimationFrame(resizeRafId)

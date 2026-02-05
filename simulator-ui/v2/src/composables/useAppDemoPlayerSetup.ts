@@ -8,6 +8,7 @@ import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
 
 import { useDemoPlayer } from './useDemoPlayer'
+import { createDemoActivityHold } from './demoActivityHold'
 
 export function useAppDemoPlayerSetup(deps: {
   getSnapshot: () => GraphSnapshot | null
@@ -28,6 +29,7 @@ export function useAppDemoPlayerSetup(deps: {
     throttleKey?: string
     throttleMs?: number
   }) => void
+  setFlash: (v: number) => void
   resetOverlays: () => void
   fxColorForNode: (id: string, fallback: string) => string
   addActiveEdge: (key: string, ttlMs?: number) => void
@@ -38,7 +40,12 @@ export function useAppDemoPlayerSetup(deps: {
   isTestMode: () => boolean
   isWebDriver: boolean
   effectiveEq: () => string
+
+  /** Optional: wake render loop from deep idle on demo events. */
+  wakeUp?: () => void
 }) {
+  const demoActivity = createDemoActivityHold({ holdMs: 350 })
+
   const patchApplier = createPatchApplier({
     getSnapshot: deps.getSnapshot,
     getLayoutNodes: deps.getLayoutNodes,
@@ -58,6 +65,10 @@ export function useAppDemoPlayerSetup(deps: {
 
   const demoPlayer = useDemoPlayer({
     applyPatches: applyPatchesFromEvent,
+    onDemoEvent: () => {
+      demoActivity.markDemoEvent()
+      deps.wakeUp?.()
+    },
     spawnSparks: (opts) => spawnSparks(deps.fxState, opts),
     spawnNodeBursts: (opts) => spawnNodeBursts(deps.fxState, opts),
     spawnEdgePulses: (opts) => spawnEdgePulses(deps.fxState, opts),
@@ -66,6 +77,7 @@ export function useAppDemoPlayerSetup(deps: {
       return typeof v === 'number' && Number.isFinite(v) ? v : 1
     },
     pushFloatingLabel: deps.pushFloatingLabel,
+    setFlash: deps.setFlash,
     resetOverlays: deps.resetOverlays,
     fxColorForNode: deps.fxColorForNode,
     addActiveEdge: deps.addActiveEdge,
@@ -83,5 +95,5 @@ export function useAppDemoPlayerSetup(deps: {
     clearingFlashFallback: VIZ_MAPPING.fx.clearing_debt,
   })
 
-  return { demoPlayer, playlist: demoPlayer.playlist }
+  return { demoPlayer, playlist: demoPlayer.playlist, demoActivity }
 }

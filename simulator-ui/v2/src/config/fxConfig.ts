@@ -40,14 +40,21 @@ export const FX_CONFIG = {
   /**
    * Demo mode overrides
    *
-   * Rationale: Demo has a dense pre-defined playlist of events.
-   * Shorter durations prevent visual clutter and keep pace with playlist.
+   * IMPORTANT: Demo visuals must match real visuals 1:1.
+   * Demo is a different *source* of events (fixtures/playlists), not a different visual language.
    */
   demo: {
-    /** Duration of edge highlight glow (ms) — shorter for dense events */
-    highlightPulseMs: 2400,
+    /** Duration of edge highlight glow (ms) */
+    highlightPulseMs: 5200,
     /** Time-to-live for beam spark particles (ms) */
-    microTtlMs: 780,
+    microTtlMs: 860,
+
+    /** Edge highlight thickness multiplier */
+    highlightThickness: 2.9,
+    /** Beam spark thickness multiplier */
+    microThickness: 1.25,
+    /** Node burst duration (ms) */
+    nodeBurstMs: 1100,
   },
 
   /**

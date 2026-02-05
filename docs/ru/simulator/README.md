@@ -12,6 +12,7 @@
 - Backend: интеграция с платежами/клирингом и каноничные контракты: [backend/payment-integration.md](backend/payment-integration.md)
 - Backend: протокол realtime (SSE/WS payload): [backend/ws-protocol.md](backend/ws-protocol.md)
 - Backend: алгоритм runner: [backend/runner-algorithm.md](backend/runner-algorithm.md)
+- Backend/UI: backend-driven demo mode (one pipeline) + Clearing Viz v2: [backend/backend-driven-demo-mode-spec.md](backend/backend-driven-demo-mode-spec.md)
 - Спеки UI/визуала:
   - [frontend/docs/specs/GEO-game-interface-spec.md](frontend/docs/specs/GEO-game-interface-spec.md)
   - [frontend/docs/specs/GEO-visual-demo-fast-mock.md](frontend/docs/specs/GEO-visual-demo-fast-mock.md)

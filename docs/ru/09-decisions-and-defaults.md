@@ -170,6 +170,14 @@ Real mode: артефакты (dev perf)
 Рекомендация для realistic-v2 (чтобы выйти на целевые суммы 100–500 UAH):
 - запускать с `SIMULATOR_REAL_AMOUNT_CAP>=500`.
 
+### 1.11. Simulator UI: demo/debug режим только через backend
+
+Решение: убрать offline demo pipeline (плейлисты JSON + плеер на фронте) и перейти к **backend-driven demo/debug**.
+
+- UI получает события только через backend SSE (единый контракт/пайплайн визуализации).
+- Демо-кнопки (Single TX / Run Clearing) реализуются как backend actions, которые эмитят те же `tx.updated` / `clearing.*`.
+- Спецификация: [simulator/backend/backend-driven-demo-mode-spec.md](simulator/backend/backend-driven-demo-mode-spec.md)
+
 ---
 
 ## 2. Дефолты и лимиты

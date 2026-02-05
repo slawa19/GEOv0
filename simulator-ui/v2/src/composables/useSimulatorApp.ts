@@ -36,6 +36,7 @@ import { useAppCanvasInteractionsWiring } from './useAppCanvasInteractionsWiring
 import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { getFxConfig, intensityScale } from '../config/fxConfig'
+import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 
 export function useSimulatorApp() {
   const eq = ref('UAH')
@@ -300,6 +301,8 @@ export function useSimulatorApp() {
     eq,
     scene,
     quality,
+    apiMode,
+    isDemoFixtures,
     isTestMode,
     isWebDriver,
     getCameraZoom: () => getCameraZoomSafe(),
@@ -313,6 +316,13 @@ export function useSimulatorApp() {
 
   const snapshotRef = computed(() => state.snapshot)
 
+  // `fxAndRender` is initialized later (it needs layout + camera), but layout/resize
+  // code may want to wake the render loop. IMPORTANT: this must be a stable wrapper.
+  // Some wirings capture the function reference at init-time; reassigning a `let wakeUp = ...`
+  // later would not update the captured reference.
+  let wakeUpImpl: () => void = () => undefined
+  const wakeUp = () => wakeUpImpl()
+
   const layoutWiring = useAppLayoutWiring({
     canvasEl,
     fxCanvasEl,
@@ -323,6 +333,7 @@ export function useSimulatorApp() {
     isTestMode,
     getSourcePath: () => state.sourcePath,
     computeLayoutForMode,
+    wakeUp,
   })
 
   const layoutCoordinator = layoutWiring.layoutCoordinator
@@ -478,8 +489,16 @@ export function useSimulatorApp() {
     },
     getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
     beforeDraw: () => {
-      physics.tickAndSyncToLayout()
+      if (physics.isRunning()) {
+        physics.tickAndSyncToLayout()
+      }
     },
+    isAnimating: createSimulatorIsAnimating({
+      isPhysicsRunning: () => physics.isRunning(),
+      isDemoHoldActive: () => demoActivity.isWithinHoldWindow(),
+      // Intentionally ignored: demo playback should NOT keep the loop at 60fps.
+      getPlaylistPlaying: () => demoPlayerSetup.playlist.playing,
+    }),
   })
 
   const fxState = fxAndRender.fxState
@@ -496,6 +515,7 @@ export function useSimulatorApp() {
   const ensureRenderLoop = fxAndRender.ensureRenderLoop
   const stopRenderLoop = fxAndRender.stopRenderLoop
   const renderOnce = fxAndRender.renderOnce
+  wakeUpImpl = fxAndRender.wakeUp
 
   const showPerfOverlay = computed(() => {
     if (isTestMode.value) return false
@@ -587,6 +607,9 @@ export function useSimulatorApp() {
     getLayoutNodeById: (id) => getLayoutNodeById(id) ?? undefined,
     fxState,
     pushFloatingLabel,
+    setFlash: (v) => {
+      state.flash = v
+    },
     resetOverlays,
     fxColorForNode,
     addActiveEdge,
@@ -595,10 +618,12 @@ export function useSimulatorApp() {
     isTestMode: () => isTestMode.value,
     isWebDriver,
     effectiveEq: () => effectiveEq.value,
+    wakeUp: () => wakeUp(),
   })
 
   const demoPlayer = demoPlayerSetup.demoPlayer
   const playlist = demoPlayerSetup.playlist
+  const demoActivity = demoPlayerSetup.demoActivity
 
   // Real-mode tx visuals must be independent from demoPlayer.
   // demoPlayer.runTxEvent() ends with resetOverlays(), which clears FX and can make
@@ -1064,6 +1089,7 @@ export function useSimulatorApp() {
 
   const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,
+    wakeUp,
     pickNodeAt,
     selectNode,
     setNodeCardOpen,
@@ -1190,6 +1216,7 @@ export function useSimulatorApp() {
     runRealClearingDoneFx,
     clearingPlansById,
     scheduleTimeout,
+    wakeUp,
   })
 
   useAppLifecycle({
@@ -1288,6 +1315,9 @@ export function useSimulatorApp() {
     onCanvasPointerMove: canvasInteractionsWiring.onCanvasPointerMove,
     onCanvasPointerUp: canvasInteractionsWiring.onCanvasPointerUp,
     onCanvasWheel: canvasInteractionsWiring.onCanvasWheel,
+
+    // render loop control (for wakeups from external events)
+    wakeUp,
 
     // demo
     playlist,

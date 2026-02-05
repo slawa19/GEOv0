@@ -85,7 +85,7 @@ function Test-BackendHealthzOk([string]$origin) {
   }
 }
 
-function Try-Detect-LocalBackendOrigin([string]$hostForUrl) {
+function Find-LocalBackendOrigin([string]$hostForUrl) {
   # Default local dev backend port is scripts/run_local.ps1 -BackendPort (default 18000)
   $origin = "http://${hostForUrl}:18000"
   if (Test-BackendHealthzOk $origin) {
@@ -94,7 +94,7 @@ function Try-Detect-LocalBackendOrigin([string]$hostForUrl) {
   return $null
 }
 
-function Try-Detect-DockerBackendOrigin([string]$hostForUrl) {
+function Find-DockerBackendOrigin([string]$hostForUrl) {
   # Detect the published host port for the API container (geov0-app:8000) and return an origin like http://127.0.0.1:18000
   $port = $null
 
@@ -200,6 +200,32 @@ if (Test-TcpOpen $HostName $selectedPort) {
   $url = "http://${HostName}:$selectedPort/"
   if (Test-HttpOk $url) {
     if (-not $RestartIfRunning) {
+      if ($Mode -eq 'fixtures') {
+        Write-Host ''
+        Write-Host 'GEO Simulator UI already running.'
+        Write-Host "Open in browser: $url"
+        Write-Host ''
+        Write-Host 'Resyncing demo fixtures (so demo visualization stays in sync)...' -ForegroundColor Yellow
+
+        try {
+          # Ensure we run it from appDir so npm scripts resolve correctly.
+          Push-Location $appDir
+          try {
+            npm run sync:demo-fixtures
+          } finally {
+            Pop-Location
+          }
+        } catch {
+          Write-Warning "Demo fixtures sync failed: $($_.Exception.Message). Using cached."
+        }
+
+        Write-Host ''
+        Write-Host 'Fixtures sync attempted. Reload the page (Ctrl+R).' -ForegroundColor Gray
+        Write-Host "Demo link: ${url}?mode=demo" -ForegroundColor Cyan
+        Write-Host ''
+        exit 0
+      }
+
       Write-Host ''
       Write-Host 'GEO Simulator UI already running.'
       Write-Host "Open in browser: $url"
@@ -276,12 +302,12 @@ if ($Mode -eq 'real') {
 }
 
 if ($Mode -eq 'real' -and [string]::IsNullOrWhiteSpace($BackendOrigin)) {
-  $detectedLocal = Try-Detect-LocalBackendOrigin -hostForUrl $HostName
+  $detectedLocal = Find-LocalBackendOrigin -hostForUrl $HostName
   if ($detectedLocal) {
     $BackendOrigin = $detectedLocal
     Write-Host "Detected backend origin from local dev backend (healthz ok): ${BackendOrigin}" -ForegroundColor DarkGray
   } else {
-    $detectedDocker = Try-Detect-DockerBackendOrigin -hostForUrl $HostName
+    $detectedDocker = Find-DockerBackendOrigin -hostForUrl $HostName
     if ($detectedDocker) {
       $BackendOrigin = $detectedDocker
       Write-Host "Detected backend origin from Docker: ${BackendOrigin}" -ForegroundColor DarkGray

@@ -4,6 +4,82 @@ import type { GraphSnapshot } from '../types'
 
 type Quality = 'low' | 'med' | 'high'
 
+export function __snapshotKeyForRenderLoop(snap: GraphSnapshot): string {
+  // Be defensive: tests and some call sites may pass partial snapshots.
+  const eq = String((snap as any)?.equivalent ?? '')
+  const ts = String((snap as any)?.generated_at ?? '')
+  return `${eq}|${ts}`
+}
+
+export function __shouldClearCachedPosOnSnapshotChange(opts: {
+  cachedPos: Map<string, any>
+  snapshotNodes: Array<{ id: string }>
+}): boolean {
+  const { cachedPos, snapshotNodes } = opts
+
+  // Nothing cached: nothing to clear.
+  if (cachedPos.size === 0) return false
+
+  const nodeCount = snapshotNodes.length
+
+  // Empty graph should not retain old positions.
+  if (nodeCount === 0) return true
+
+  // Detect a full graph change by overlap between current node IDs and cached IDs.
+  let overlap = 0
+  for (const n of snapshotNodes) {
+    if (cachedPos.has(n.id)) overlap++
+  }
+
+  // No intersection => definitely a different graph.
+  if (overlap === 0) return true
+
+  // Low overlap => likely a different scene/snapshot (avoid keeping a growing union).
+  const denom = Math.min(cachedPos.size, nodeCount)
+  const overlapRatio = overlap / Math.max(1, denom)
+  return overlapRatio < 0.2
+}
+
+export function __pruneCachedPosToSnapshotNodes(opts: {
+  cachedPos: Map<string, any>
+  snapshotNodes: Array<{ id: string }>
+}) {
+  const { cachedPos, snapshotNodes } = opts
+  if (cachedPos.size === 0) return
+
+  const currentIds = new Set<string>()
+  for (const n of snapshotNodes) currentIds.add(n.id)
+
+  for (const id of cachedPos.keys()) {
+    if (!currentIds.has(id)) cachedPos.delete(id)
+  }
+}
+
+/**
+ * Indirection layer to make cachedPos hygiene observable in tests (spy-able) while
+ * keeping the render-loop hot-path simple.
+ */
+export const __cachedPosHygiene = {
+  shouldClearOnSnapshotChange: __shouldClearCachedPosOnSnapshotChange,
+  pruneToSnapshotNodes: __pruneCachedPosToSnapshotNodes,
+} as const
+
+function __nodesSignatureForCachedPosHygiene(snapshotNodes: Array<{ id: string }>): string {
+  // Cheap O(1) heuristic to detect node set changes even when snapshotKey is stable
+  // (e.g. real-mode patches that keep `generated_at`).
+  const len = snapshotNodes.length
+  if (len <= 0) return '0'
+
+  const first = String(snapshotNodes[0]?.id ?? '')
+  const second = len > 1 ? String(snapshotNodes[1]?.id ?? '') : ''
+  const mid = String(snapshotNodes[(len / 2) | 0]?.id ?? '')
+  const penultimate = len > 1 ? String(snapshotNodes[len - 2]?.id ?? '') : ''
+  const last = String(snapshotNodes[len - 1]?.id ?? '')
+
+  // Intentionally do not include all IDs (would be O(n)).
+  return `${len}|${first}|${second}|${mid}|${penultimate}|${last}`
+}
+
 type UseRenderLoopDeps = {
   canvasEl: Ref<HTMLCanvasElement | null>
   fxCanvasEl: Ref<HTMLCanvasElement | null>
@@ -53,7 +129,12 @@ type UseRenderLoopReturn = {
   ensureRenderLoop: () => void
   stopRenderLoop: () => void
   renderOnce: (nowMs?: number) => void
+  /** Wake up from deep idle mode. Call on user interaction or animation events. */
+  wakeUp: () => void
 }
+
+// Deep idle: stop render loop completely after this delay (ms) with no activity.
+const DEEP_IDLE_DELAY_MS = 3000
 
 // Adaptive performance tuning constants.
 const ADAPTIVE_PERF = {
@@ -79,7 +160,7 @@ const ADAPTIVE_PERF = {
   upgradeStreak: 3,
 
   // Idle rendering rate when no activity.
-  idleFps: 12,
+  idleFps: 4,
 
   // FPS thresholds for quality downgrade decisions.
   fps: {
@@ -115,6 +196,10 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
   let lastActiveAtMs = 0
 
+  // Deep idle state: when true, the render loop is completely stopped.
+  let deepIdle = false
+  let lastActivityTime = 0
+
   let lastCanvas: HTMLCanvasElement | null = null
   let lastFxCanvas: HTMLCanvasElement | null = null
   let cachedCtx: CanvasRenderingContext2D | null = null
@@ -122,6 +207,15 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
   // Hot-path cache: avoid per-frame allocations for node lookup in render.
   const cachedPos = new Map<string, any>()
+
+  // Snapshot identity tracking for cache hygiene.
+  // `cachedPos` can otherwise grow unbounded across full scene changes.
+  let lastSnapshotKey: string | null = null
+
+  // Additional cheap composition detectors for patch scenarios where `generated_at` doesn't change.
+  // Keep as O(1) checks on most frames; run O(n) prune/clear only when a change is detected.
+  let lastSnapshotNodesSig: string | null = null
+  let lastSnapshotLinksCount: number | null = null
 
   // Adaptive FX budgeting (scenario playback on med/high can overwhelm Chrome).
   // We measure FPS only while the scene is animating and scale the particle cap.
@@ -213,6 +307,37 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     const snap = deps.getSnapshot()
 
     if (!canvas || !fxCanvas || !snap) return
+
+    // `cachedPos` can retain node IDs across full scene changes if the render loop persists.
+    // Primary change detector is snapshot identity (O(1) on most frames).
+    // Additionally, in real-mode patch flows `generated_at` can stay stable while node composition
+    // changes — detect that cheaply and prune once per change.
+    const key = __snapshotKeyForRenderLoop(snap)
+    const snapshotNodes = Array.isArray((snap as any).nodes) ? ((snap as any).nodes as Array<{ id: string }>) : []
+    const linksCount = Array.isArray((snap as any).links) ? ((snap as any).links as unknown[]).length : 0
+    const nodesSig = __nodesSignatureForCachedPosHygiene(snapshotNodes)
+
+    const keyChanged = lastSnapshotKey !== key
+    const compositionChanged =
+      !keyChanged && (lastSnapshotNodesSig !== nodesSig || lastSnapshotLinksCount !== linksCount)
+
+    if (keyChanged || compositionChanged) {
+      if (
+        __cachedPosHygiene.shouldClearOnSnapshotChange({
+          cachedPos,
+          snapshotNodes,
+        })
+      ) {
+        cachedPos.clear()
+      } else {
+        // Keep animations stable for unchanged nodes, but drop stale IDs so the cache stays bounded.
+        __cachedPosHygiene.pruneToSnapshotNodes({ cachedPos, snapshotNodes })
+      }
+
+      lastSnapshotKey = key
+      lastSnapshotNodesSig = nodesSig
+      lastSnapshotLinksCount = linksCount
+    }
 
     if (canvas !== lastCanvas) {
       lastCanvas = canvas
@@ -521,11 +646,26 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     // Keep full-speed rendering briefly after activity ends to avoid flicker.
     const active = isAnimatingNow()
-    if (active) lastActiveAtMs = nowMs
+    if (active) {
+      lastActiveAtMs = nowMs
+      lastActivityTime = nowMs
+    }
 
     const inHold = nowMs - lastActiveAtMs < holdActiveMs
     if (active || inHold) {
+      deepIdle = false
       rafId = win.requestAnimationFrame(loop)
+      return
+    }
+
+    // Check for deep idle: if no activity for DEEP_IDLE_DELAY_MS, stop the loop completely.
+    const timeSinceActivity = nowMs - lastActivityTime
+    if (timeSinceActivity >= DEEP_IDLE_DELAY_MS) {
+      deepIdle = true
+      // Do NOT schedule next frame — loop stops completely.
+      // Keep `running=true` to represent "loop is enabled" (started via ensureRenderLoop),
+      // but with no scheduling pending. Any external event must call wakeUp()/ensureRenderLoop
+      // to schedule the next frame.
       return
     }
 
@@ -547,7 +687,10 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (rafId !== null || timeoutId !== null) return
     const win = typeof window !== 'undefined' ? window : (globalThis as any)
     running = true
-    lastActiveAtMs = win.performance?.now?.() ?? Date.now()
+    const nowMs = win.performance?.now?.() ?? Date.now()
+    lastActiveAtMs = nowMs
+    lastActivityTime = nowMs
+    deepIdle = false
     rafId = win.requestAnimationFrame(loop)
   }
 
@@ -558,6 +701,40 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     rafId = null
     timeoutId = null
     running = false
+    deepIdle = false
+  }
+
+  /**
+   * Wake up from deep idle mode.
+   * Call this when:
+   * - Simulation starts
+   * - Any animation event occurs
+   * - User interacts with the canvas (mouse/touch)
+   */
+  function wakeUp() {
+    const win = typeof window !== 'undefined' ? window : (globalThis as any)
+    const nowMs = win.performance?.now?.() ?? Date.now()
+
+    lastActivityTime = nowMs
+    lastActiveAtMs = nowMs
+
+    // If the loop isn't enabled (explicitly stopped via stopRenderLoop), don't restart it.
+    if (!running) return
+
+    // If a RAF is already queued, nothing to do.
+    if (rafId !== null) return
+
+    // If we're in idle-throttle mode (timeout scheduled), user activity should make
+    // the UI responsive immediately: cancel the idle timeout and schedule a RAF.
+    if (timeoutId !== null) {
+      win.clearTimeout(timeoutId)
+      timeoutId = null
+    }
+
+    // We may be in deep idle (no scheduling pending). Guarantee that a next frame is queued.
+    // (Also works as a recovery if `deepIdle` got out-of-sync.)
+    deepIdle = false
+    rafId = win.requestAnimationFrame(loop)
   }
 
   function renderOnce(nowMs?: number) {
@@ -572,7 +749,11 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     // If the loop is running in idle-throttle mode, nudge it into the
     // short-lived active window so interactions feel responsive.
     lastActiveAtMs = t
+    lastActivityTime = t
+
+    // Wake up from deep idle if needed.
+    wakeUp()
   }
 
-  return { ensureRenderLoop, stopRenderLoop, renderOnce }
+  return { ensureRenderLoop, stopRenderLoop, renderOnce, wakeUp }
 }

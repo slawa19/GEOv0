@@ -54,6 +54,10 @@ export function useAppFxAndRender(opts: {
   // Optional: hint that the browser is in software-only rendering mode.
   isSoftwareMode?: () => boolean
 }) {
+  // Late-bound: we create FX overlays first (they need timers), then create render loop,
+  // then bind wakeUp so scheduled FX timers can wake the loop even after deep idle.
+  let wakeUp: (() => void) | undefined
+
   const fxOverlays = useAppFxOverlays<LayoutNode>({
     getLayoutNodeById: opts.getLayoutNodeById,
     sizeForNode: opts.sizeForNode,
@@ -62,6 +66,9 @@ export function useAppFxAndRender(opts: {
     isWebDriver: opts.isWebDriver,
     getLayoutNodes: opts.getLayoutNodes,
     worldToScreen: opts.worldToScreen,
+    // Important: FX timers must wake up render loop before mutating FX state.
+    // This prevents missed frames when the loop is in deep idle.
+    wakeUp: () => wakeUp?.(),
   })
 
   const renderLoop = useAppRenderLoop({
@@ -87,6 +94,9 @@ export function useAppFxAndRender(opts: {
     isSoftwareMode: opts.isSoftwareMode,
   })
 
+  // Bind after render loop is created.
+  wakeUp = renderLoop.wakeUp
+
   return {
     // fx overlays
     fxState: fxOverlays.fxState,
@@ -106,5 +116,6 @@ export function useAppFxAndRender(opts: {
     ensureRenderLoop: renderLoop.ensureRenderLoop,
     stopRenderLoop: renderLoop.stopRenderLoop,
     renderOnce: renderLoop.renderOnce,
+    wakeUp: renderLoop.wakeUp,
   }
 }

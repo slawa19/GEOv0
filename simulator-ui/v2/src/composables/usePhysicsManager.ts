@@ -1,4 +1,4 @@
-import { createDefaultConfig, createPhysicsEngine, type PhysicsEngine } from '../layout/physicsD3'
+ import { createDefaultConfig, createPhysicsEngine, type PhysicsEngine } from '../layout/physicsD3'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 
 export type PhysicsQuality = 'low' | 'med' | 'high'

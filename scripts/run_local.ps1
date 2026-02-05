@@ -88,8 +88,6 @@ $BackendPidPath = Join-Path $StateDir 'backend.pid'
 $UiPidPath = Join-Path $StateDir 'admin-ui.pid'
 $BackendOutLog = Join-Path $StateDir 'backend.out.log'
 $BackendErrLog = Join-Path $StateDir 'backend.err.log'
-$UiOutLog = Join-Path $StateDir 'admin-ui.out.log'
-$UiErrLog = Join-Path $StateDir 'admin-ui.err.log'
 
 # --- Helper Functions ---
 
@@ -485,12 +483,12 @@ function Get-SeedDbArgs {
         [switch]$RegenerateFixtures
     )
 
-    $args = @('--source', $SeedSource)
+    $cmdArgs = @('--source', $SeedSource)
     if ($SeedSource -eq 'fixtures' -and $FixturesCommunity -and $FixturesCommunity -ne 'repo') {
-        $args += @('--community', $FixturesCommunity)
-        if ($RegenerateFixtures) { $args += '--regenerate-fixtures' }
+        $cmdArgs += @('--community', $FixturesCommunity)
+        if ($RegenerateFixtures) { $cmdArgs += '--regenerate-fixtures' }
     }
-    return $args
+    return $cmdArgs
 }
 
 function Test-DbLooksLikeTinyTestSeed {
@@ -635,10 +633,10 @@ switch ($Action) {
     }
 
     'cleanup-simulator' {
-        $args = @('--retention-days', [string]$SimulatorRetentionDays)
-        if ($DryRun) { $args += '--dry-run' }
+        $cmdArgs = @('--retention-days', [string]$SimulatorRetentionDays)
+        if ($DryRun) { $cmdArgs += '--dry-run' }
 
-        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\cleanup_simulator_runs.py') -Arguments $args -Description "cleanup_simulator_runs.py"
+        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\cleanup_simulator_runs.py') -Arguments $cmdArgs -Description "cleanup_simulator_runs.py"
         exit 0
     }
 

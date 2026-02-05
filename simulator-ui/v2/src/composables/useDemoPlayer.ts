@@ -3,7 +3,26 @@ import type { ClearingDoneEvent, ClearingPlanEvent, DemoEvent, TxUpdatedEvent } 
 import type { LayoutNodeWithId as BaseLayoutNodeWithId } from '../types/layout'
 import { getFxConfig, intensityScale } from '../config/fxConfig'
 
-const CLEARING_ANIMATION = getFxConfig('demo')
+// Demo visuals must match real visuals 1:1.
+const CLEARING_ANIMATION = getFxConfig('real')
+
+const REAL_TX_TTL_MIN_MS = 240
+const REAL_TX_TTL_MAX_MS = 900
+
+function clampRealTxTtlMs(ttlRaw: unknown, fallbackMs = 1200): number {
+  const ttlN = Number(ttlRaw ?? fallbackMs)
+  const ttl = Number.isFinite(ttlN) ? ttlN : fallbackMs
+  return Math.max(REAL_TX_TTL_MIN_MS, Math.min(REAL_TX_TTL_MAX_MS, ttl))
+}
+
+function pickSparkEdges(edges: TxUpdatedEvent['edges']): Array<{ from: string; to: string }> {
+  if (!edges || edges.length === 0) return []
+  if (edges.length <= 2) return edges
+  const first = edges[0]!
+  const last = edges[edges.length - 1]!
+  if (first.from === last.from && first.to === last.to) return [first]
+  return [first, last]
+}
 
 function intensityCountPerEdge(intensityKey?: string): number {
   const s = intensityScale(intensityKey)
@@ -72,6 +91,7 @@ type DemoPlayerDeps = {
 
   // UI feedback
   pushFloatingLabel: (opts: FloatingLabelOpts) => void
+  setFlash: (v: number) => void
   resetOverlays: () => void
   fxColorForNode: (id: string, fallback: string) => string
   addActiveEdge: (key: string, ttlMs?: number) => void
@@ -79,6 +99,12 @@ type DemoPlayerDeps = {
   // Timing
   scheduleTimeout: (fn: () => void, ms: number) => number
   clearScheduledTimeouts: () => void
+
+  /**
+   * Optional: notify external systems that a demo event changed visual state.
+   * Used to briefly keep the render loop active and/or wake it from deep idle.
+   */
+  onDemoEvent?: () => void
 
   // Layout access (read-only)
   getLayoutNode: (id: string) => LayoutNode | undefined
@@ -128,27 +154,30 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
   }
 
   function runTxEvent(evt: TxUpdatedEvent, opts?: { onFinished?: () => void }) {
+    deps.onDemoEvent?.()
     const fxTestMode = deps.isTestMode() && deps.isWebDriver
     const runId = ++txRunSeq
+
+    // Real mode applies patches immediately upon event receipt. Keep demo identical.
+    if (!fxTestMode) deps.applyPatches(evt)
 
     const budgetScaleRaw = typeof deps.getFxBudgetScale === 'function' ? deps.getFxBudgetScale() : 1
     const budgetScale = Math.max(0.25, Math.min(1, Number.isFinite(budgetScaleRaw) ? budgetScaleRaw : 1))
     const allowBursts = budgetScale >= 0.7
 
-    // Keep a short-lived highlighted edge so the "spark flight" reads as
-    // moving along a fading line (same UX idea as clearing highlight edges).
-    for (const e of evt.edges) deps.addActiveEdge(deps.keyEdge(e.from, e.to))
+    const sparkEdges = pickSparkEdges(evt.edges)
+    if (sparkEdges.length === 0) return
 
-    const ttl = Math.max(250, evt.ttl_ms || 1200)
+    const ttl = clampRealTxTtlMs(evt.ttl_ms)
     const k = intensityScale(evt.intensity_key)
 
     deps.spawnSparks({
-      edges: evt.edges,
+      edges: sparkEdges,
       nowMs: performance.now(),
       ttlMs: ttl,
       colorCore: deps.txSparkCore,
       colorTrail: deps.txSparkTrail,
-      thickness: 1.0 * k * Math.min(1, 0.85 + budgetScale * 0.15),
+      thickness: 0.95 * k,
       kind: 'beam',
       seedPrefix: `tx:${deps.effectiveEq()}`,
       countPerEdge: 1,
@@ -157,12 +186,12 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       isTestMode: fxTestMode,
     })
 
-    if (!fxTestMode && allowBursts && evt.edges.length > 0) {
-      const sourceId = evt.edges[0]!.from
+    if (!fxTestMode && allowBursts) {
+      const sourceId = sparkEdges[0]!.from
       deps.spawnNodeBursts({
         nodeIds: [sourceId],
         nowMs: performance.now(),
-        durationMs: 360,
+        durationMs: 280,
         color: deps.fxColorForNode(sourceId, deps.txSparkTrail),
         kind: 'tx-impact',
         seedPrefix: 'burst-src',
@@ -171,9 +200,8 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
       })
     }
 
-    if (!fxTestMode && allowBursts && evt.edges.length > 0) {
-      const lastEdge = evt.edges[evt.edges.length - 1]!
-      const targetId = lastEdge.to
+    if (!fxTestMode && allowBursts) {
+      const targetId = sparkEdges[sparkEdges.length - 1]!.to
 
       deps.scheduleTimeout(() => {
         if (runId !== txRunSeq) return
@@ -181,38 +209,198 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
         deps.spawnNodeBursts({
           nodeIds: [targetId],
           nowMs: performance.now(),
-          durationMs: 520,
+          durationMs: 420,
           color: deps.fxColorForNode(targetId, deps.txSparkTrail),
           kind: 'tx-impact',
           seedPrefix: 'burst',
           seedFn: deps.seedFn,
           isTestMode: fxTestMode,
         })
-
-        const ln = deps.getLayoutNode(targetId)
-        if (ln) {
-          deps.pushFloatingLabel({
-            nodeId: targetId,
-            text: `+125 GC`,
-            color: deps.fxColorForNode(targetId, '#22d3ee'),
-            ttlMs: 2200,
-            offsetYPx: -6,
-          })
-        }
       }, ttl)
     }
 
     if (fxTestMode) return
 
-    const burstDurationMs = 520
-    const cleanupDelayMs = ttl + burstDurationMs + 50
-
+    // Real mode does not reset overlays at the end of tx — FX prunes itself.
+    // Keep a short callback for demo UI control flow.
     deps.scheduleTimeout(() => {
       if (runId !== txRunSeq) return
-      deps.applyPatches(evt)
-      deps.resetOverlays()
       opts?.onFinished?.()
-    }, cleanupDelayMs)
+    }, ttl + 60)
+  }
+
+  function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
+    const out: string[] = []
+    const seen = new Set<string>()
+    for (const e of edges) {
+      if (!seen.has(e.from)) {
+        seen.add(e.from)
+        out.push(e.from)
+      }
+      if (!seen.has(e.to)) {
+        seen.add(e.to)
+        out.push(e.to)
+      }
+    }
+    return out
+  }
+
+  function allPlanEdges(plan: ClearingPlanEvent): Array<{ from: string; to: string }> {
+    const out: Array<{ from: string; to: string }> = []
+    for (const step of plan.steps ?? []) {
+      for (const e of step.highlight_edges ?? []) out.push({ from: e.from, to: e.to })
+      for (const e of step.particles_edges ?? []) out.push({ from: e.from, to: e.to })
+    }
+
+    const cycleEdges = (plan as any).cycle_edges as Array<{ from: string; to: string }> | undefined
+    if (Array.isArray(cycleEdges) && cycleEdges.length > 0) {
+      for (const e of cycleEdges) out.push({ from: e.from, to: e.to })
+    }
+
+    return out
+  }
+
+  function runRealLikeClearingPlanFx(plan: ClearingPlanEvent, runId: number) {
+    const planId = String(plan?.plan_id ?? '')
+    if (!planId) return
+
+    const clearingColor = deps.clearingFlashFallback
+
+    const edgesAll = allPlanEdges(plan)
+    if (edgesAll.length > 0) {
+      const nowMs = performance.now()
+      for (const e of edgesAll) deps.addActiveEdge(deps.keyEdge(e.from, e.to), CLEARING_ANIMATION.highlightPulseMs + 3000)
+
+      deps.spawnEdgePulses({
+        edges: edgesAll,
+        nowMs,
+        durationMs: CLEARING_ANIMATION.highlightPulseMs,
+        color: clearingColor,
+        thickness: CLEARING_ANIMATION.highlightThickness,
+        seedPrefix: `demo-clearing:plan:${planId}:${plan.equivalent}`,
+        countPerEdge: 1,
+        keyEdge: deps.keyEdge,
+        seedFn: deps.seedFn,
+        isTestMode: deps.isTestMode() && deps.isWebDriver,
+      })
+    }
+
+    for (const step of plan.steps ?? []) {
+      const atMs = Math.max(0, Number(step.at_ms ?? 0))
+      deps.scheduleTimeout(() => {
+        if (runId !== clearingRunSeq) return
+        const nowMs = performance.now()
+        const budgetScaleRaw = typeof deps.getFxBudgetScale === 'function' ? deps.getFxBudgetScale() : 1
+        const budgetScale = Math.max(0.25, Math.min(1, Number.isFinite(budgetScaleRaw) ? budgetScaleRaw : 1))
+        const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
+
+        const k = intensityScale(step.intensity_key)
+
+        const particles = (step.particles_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
+        if (particles.length > 0) {
+          deps.spawnSparks({
+            edges: particles,
+            nowMs,
+            ttlMs: CLEARING_ANIMATION.microTtlMs,
+            colorCore: deps.txSparkCore,
+            colorTrail: clearingColor,
+            thickness: CLEARING_ANIMATION.microThickness * k,
+            kind: 'comet',
+            seedPrefix: `demo-clearing:micro:${planId}:${plan.equivalent}:${step.at_ms}`,
+            countPerEdge: 1,
+            keyEdge: deps.keyEdge,
+            seedFn: deps.seedFn,
+            isTestMode: deps.isTestMode() && deps.isWebDriver,
+          })
+
+          if (budgetScale >= 0.55) {
+            const nodeIds = nodesFromEdges(particles)
+            const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
+            deps.spawnNodeBursts({
+              nodeIds: capped,
+              nowMs,
+              durationMs: CLEARING_ANIMATION.nodeBurstMs,
+              color: clearingColor,
+              kind: 'clearing',
+              seedPrefix: `demo-clearing:nodes:${planId}:${step.at_ms}`,
+              seedFn: deps.seedFn,
+              isTestMode: deps.isTestMode() && deps.isWebDriver,
+            })
+          }
+        }
+      }, atMs)
+    }
+  }
+
+  function runRealLikeClearingDoneFx(plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent, runId: number) {
+    if (runId !== clearingRunSeq) return
+    const nowMs = performance.now()
+    const clearingColor = deps.clearingFlashFallback
+
+    const budgetScaleRaw = typeof deps.getFxBudgetScale === 'function' ? deps.getFxBudgetScale() : 1
+    const budgetScale = Math.max(0.25, Math.min(1, Number.isFinite(budgetScaleRaw) ? budgetScaleRaw : 1))
+    const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
+
+    // Match real-mode: single flash at clearing completion.
+    deps.setFlash(0.85)
+
+    const planEdges: Array<{ from: string; to: string }> = []
+    if (plan?.steps) {
+      for (const s of plan.steps) {
+        for (const e of s.highlight_edges ?? []) planEdges.push({ from: e.from, to: e.to })
+        for (const e of s.particles_edges ?? []) planEdges.push({ from: e.from, to: e.to })
+      }
+    }
+
+    const cycleEdges = (plan as any)?.cycle_edges ?? (done as any)?.cycle_edges
+    if (planEdges.length === 0 && Array.isArray(cycleEdges)) {
+      for (const e of cycleEdges) planEdges.push({ from: e.from, to: e.to })
+    }
+
+    if (planEdges.length === 0 && done.node_patch && done.node_patch.length >= 2) {
+      const patchIds = done.node_patch.map((p) => p.id).filter(Boolean)
+      for (let i = 0; i < patchIds.length; i++) {
+        const from = patchIds[i]!
+        const to = patchIds[(i + 1) % patchIds.length]!
+        if (from && to) planEdges.push({ from, to })
+      }
+    }
+
+    const nodeIds = nodesFromEdges(planEdges)
+
+    if (planEdges.length > 0) {
+      deps.spawnEdgePulses({
+        edges: planEdges,
+        nowMs,
+        durationMs: 4200,
+        color: clearingColor,
+        thickness: 3.2,
+        seedPrefix: `demo-clearing:done:${done.plan_id}`,
+        countPerEdge: 1,
+        keyEdge: deps.keyEdge,
+        seedFn: deps.seedFn,
+        isTestMode: deps.isTestMode() && deps.isWebDriver,
+      })
+
+      for (const e of planEdges) deps.addActiveEdge(deps.keyEdge(e.from, e.to), 5200)
+
+      if (budgetScale >= 0.55) {
+        const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
+        deps.spawnNodeBursts({
+          nodeIds: capped,
+          nowMs,
+          durationMs: 900,
+          color: clearingColor,
+          kind: 'clearing',
+          seedPrefix: `demo-clearing:done-nodes:${done.plan_id}`,
+          seedFn: deps.seedFn,
+          isTestMode: deps.isTestMode() && deps.isWebDriver,
+        })
+      }
+    }
+
+    // Match real-mode: only show total label when backend provides cleared_amount.
+    // Demo fixtures do not have it, so do not invent amounts.
   }
 
   function runClearingStep(
@@ -221,6 +409,7 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     done: ClearingDoneEvent | null,
     opts?: { onFinished?: () => void },
   ) {
+    deps.onDemoEvent?.()
     const step = plan.steps[stepIndex]
     if (!step) return
 
@@ -231,138 +420,81 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     }
 
     const runId = ++clearingRunSeq
+
+    // Step-level preview: mimic real plan behavior, but scoped to this step.
     const clearingColor = deps.clearingFlashFallback
-    const { microTtlMs, microGapMs, labelLifeMs } = CLEARING_ANIMATION
+    const highlightEdges = (step.highlight_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
+    const particles = (step.particles_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
 
-    const formatDemoDebtAmount = (from: string, to: string, seedAtMs: number) => {
-      const h = deps.seedFn(`clearing:amt:${deps.effectiveEq()}:${seedAtMs}:${deps.keyEdge(from, to)}`)
-      const amt = 10 + (h % 197) * 5
-      return `${amt} GC`
+    const k = intensityScale(step.intensity_key)
+
+    if (highlightEdges.length > 0) {
+      const nowMs = performance.now()
+      for (const e of highlightEdges) deps.addActiveEdge(deps.keyEdge(e.from, e.to), CLEARING_ANIMATION.highlightPulseMs + 3000)
+      deps.spawnEdgePulses({
+        edges: highlightEdges,
+        nowMs,
+        durationMs: CLEARING_ANIMATION.highlightPulseMs,
+        color: clearingColor,
+        thickness: CLEARING_ANIMATION.highlightThickness,
+        seedPrefix: `demo-clearing:step:${plan.plan_id}:${step.at_ms}`,
+        countPerEdge: 1,
+        keyEdge: deps.keyEdge,
+        seedFn: deps.seedFn,
+        isTestMode: false,
+      })
     }
 
-    const edges = step.particles_edges ?? []
+    if (particles.length > 0) {
+      deps.spawnSparks({
+        edges: particles,
+        nowMs: performance.now(),
+        ttlMs: CLEARING_ANIMATION.microTtlMs,
+        colorCore: deps.txSparkCore,
+        colorTrail: clearingColor,
+        thickness: CLEARING_ANIMATION.microThickness * k,
+        kind: 'comet',
+        seedPrefix: `demo-clearing:step-micro:${plan.plan_id}:${step.at_ms}`,
+        countPerEdge: 1,
+        keyEdge: deps.keyEdge,
+        seedFn: deps.seedFn,
+        isTestMode: fxTestMode,
+      })
 
-    const stepIntensityKey = step.intensity_key
-    const k = intensityScale(stepIntensityKey)
-
-    const budgetScaleRaw = typeof deps.getFxBudgetScale === 'function' ? deps.getFxBudgetScale() : 1
-    const budgetScale = Math.max(0.25, Math.min(1, Number.isFinite(budgetScaleRaw) ? budgetScaleRaw : 1))
-    const allowEdgePulses = budgetScale >= 0.65
-    const allowSourceBurst = budgetScale >= 0.8
-    const allowTargetBurst = budgetScale >= 0.7
-
-    // Build set of particle edge keys to avoid double-animation.
-    // Beam sparks already render edge glow, so don't add EdgePulses for same edges.
-    const particleEdgeKeys = new Set(edges.map(e => deps.keyEdge(e.from, e.to)))
-
-    if (step.highlight_edges && step.highlight_edges.length > 0) {
-      // Filter out edges that will have beam sparks (to avoid double glow)
-      const highlightOnly = step.highlight_edges.filter(e => !particleEdgeKeys.has(deps.keyEdge(e.from, e.to)))
-      if (highlightOnly.length > 0) {
-        // Keep edges "active" longer than the pulse itself so they fade slower.
-        for (const e of highlightOnly) deps.addActiveEdge(deps.keyEdge(e.from, e.to), CLEARING_ANIMATION.highlightPulseMs + 900)
-
-        if (allowEdgePulses) {
-          const base = intensityCountPerEdge(stepIntensityKey)
-          const countPerEdge = base > 1 && budgetScale < 0.85 ? 1 : base
-          deps.spawnEdgePulses({
-            edges: highlightOnly,
-            nowMs: performance.now(),
-            durationMs: CLEARING_ANIMATION.highlightPulseMs,
-            color: clearingColor,
-            thickness: 1.0 * k * Math.min(1, 0.85 + budgetScale * 0.15),
-            seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
-            countPerEdge,
-            keyEdge: deps.keyEdge,
-            seedFn: deps.seedFn,
-            isTestMode: false,
-          })
-        }
-      }
-    }
-
-    for (let i = 0; i < edges.length; i++) {
-      const e = edges[i]!
-      const delayMs = i * microGapMs
-
-      deps.scheduleTimeout(() => {
-        if (runId !== clearingRunSeq) return
-
-        // Keep micro edges highlighted a bit longer than the particle itself.
-        deps.addActiveEdge(deps.keyEdge(e.from, e.to), microTtlMs + 900)
-
-        if (allowSourceBurst) {
-          deps.spawnNodeBursts({
-            nodeIds: [e.from],
-            nowMs: performance.now(),
-            durationMs: CLEARING_ANIMATION.sourceBurstMs,
-            color: deps.fxColorForNode(e.from, clearingColor),
-            kind: 'tx-impact',
-            seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${step.at_ms}:${i}`,
-            seedFn: deps.seedFn,
-            isTestMode: false,
-          })
-        }
-
-        deps.spawnSparks({
-          edges: [e],
+      const budgetScaleRaw = typeof deps.getFxBudgetScale === 'function' ? deps.getFxBudgetScale() : 1
+      const budgetScale = Math.max(0.25, Math.min(1, Number.isFinite(budgetScaleRaw) ? budgetScaleRaw : 1))
+      const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
+      if (budgetScale >= 0.55) {
+        const nodeIds = nodesFromEdges(particles)
+        const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
+        deps.spawnNodeBursts({
+          nodeIds: capped,
           nowMs: performance.now(),
-          ttlMs: microTtlMs,
-          colorCore: '#ffffff',
-          colorTrail: clearingColor,
-          thickness: 1.1 * k * Math.min(1, 0.85 + budgetScale * 0.15),
-          kind: 'beam',
-          seedPrefix: `clearing:micro:${deps.effectiveEq()}:${step.at_ms}:${i}`,
-          countPerEdge: 1,
-          keyEdge: deps.keyEdge,
+          durationMs: CLEARING_ANIMATION.nodeBurstMs,
+          color: clearingColor,
+          kind: 'clearing',
+          seedPrefix: `demo-clearing:step-nodes:${plan.plan_id}:${step.at_ms}`,
           seedFn: deps.seedFn,
           isTestMode: fxTestMode,
         })
-      }, delayMs)
-
-      deps.scheduleTimeout(() => {
-        if (runId !== clearingRunSeq) return
-
-        if (allowTargetBurst) {
-          deps.spawnNodeBursts({
-            nodeIds: [e.to],
-            nowMs: performance.now(),
-            durationMs: CLEARING_ANIMATION.targetBurstMs,
-            color: deps.fxColorForNode(e.to, clearingColor),
-            kind: 'tx-impact',
-            seedPrefix: `clearing:impact:${deps.effectiveEq()}:${step.at_ms}:${i}`,
-            seedFn: deps.seedFn,
-            isTestMode: false,
-          })
-        }
-
-        deps.pushFloatingLabel({
-          nodeId: e.to,
-          id: Math.floor(performance.now()) + deps.seedFn(`lbl:${step.at_ms}:${i}:${deps.keyEdge(e.from, e.to)}`),
-          text: `${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
-          color: deps.fxColorForNode(e.to, clearingColor),
-          ttlMs: labelLifeMs,
-          offsetYPx: -6,
-          throttleKey: `clearing:${e.to}`,
-          throttleMs: CLEARING_ANIMATION.labelThrottleMs,
-        })
-      }, delayMs + microTtlMs)
+      }
     }
 
     const isLast = stepIndex >= plan.steps.length - 1
-    const targetBurstDurationMs = CLEARING_ANIMATION.targetBurstMs
-    const particlesEndsAt = edges.length > 0 ? (edges.length - 1) * microGapMs + microTtlMs + targetBurstDurationMs : 0
-    const cleanupDelayMs = Math.max(CLEARING_ANIMATION.highlightPulseMs, particlesEndsAt) + CLEARING_ANIMATION.cleanupPadMs
+    const cleanupDelayMs = Math.max(350, CLEARING_ANIMATION.microTtlMs + 120)
 
     deps.scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
-      if (isLast && done) deps.applyPatches(done)
-      deps.resetOverlays()
+      if (isLast && done) {
+        deps.applyPatches(done)
+        runRealLikeClearingDoneFx(plan, done, runId)
+      }
       opts?.onFinished?.()
     }, cleanupDelayMs)
   }
 
   function runClearingOnce(plan: ClearingPlanEvent, done: ClearingDoneEvent | null) {
+    deps.onDemoEvent?.()
     // In Playwright test-mode, apply the first highlight step deterministically (no timers/FX).
     const fxTestMode = deps.isTestMode() && deps.isWebDriver
     if (fxTestMode) {
@@ -372,185 +504,22 @@ export function useDemoPlayer(deps: DemoPlayerDeps) {
     }
 
     const runId = ++clearingRunSeq
-    const clearingColor = deps.clearingFlashFallback
-    const { microTtlMs, microGapMs, labelLifeMs } = CLEARING_ANIMATION
 
-    const formatDemoDebtAmount = (from: string, to: string, atMs: number) => {
-      const h = deps.seedFn(`clearing:amt:${deps.effectiveEq()}:${atMs}:${deps.keyEdge(from, to)}`)
-      const amt = 10 + (h % 197) * 5
-      return `${amt} GC`
-    }
+    runRealLikeClearingPlanFx(plan, runId)
 
-    const animateEdge = (e: { from: string; to: string }, delayMs: number, stepAtMs: number, idx: number) => {
-      deps.scheduleTimeout(() => {
-        if (runId !== clearingRunSeq) return
-
-        deps.addActiveEdge(deps.keyEdge(e.from, e.to), microTtlMs + 900)
-
-        deps.spawnNodeBursts({
-          nodeIds: [e.from],
-          nowMs: performance.now(),
-          durationMs: CLEARING_ANIMATION.sourceBurstMs,
-          color: deps.fxColorForNode(e.from, clearingColor),
-          kind: 'tx-impact',
-          seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${stepAtMs}:${idx}`,
-          seedFn: deps.seedFn,
-          isTestMode: false,
-        })
-
-        deps.spawnSparks({
-          edges: [e],
-          nowMs: performance.now(),
-          ttlMs: microTtlMs,
-          colorCore: '#ffffff',
-          colorTrail: clearingColor,
-          thickness: 1.1,
-          kind: 'beam',
-          seedPrefix: `clearing:micro:${deps.effectiveEq()}:${stepAtMs}:${idx}`,
-          countPerEdge: 1,
-          keyEdge: deps.keyEdge,
-          seedFn: deps.seedFn,
-          isTestMode: fxTestMode,
-        })
-      }, delayMs)
-
-      deps.scheduleTimeout(() => {
-        if (runId !== clearingRunSeq) return
-
-        deps.spawnNodeBursts({
-          nodeIds: [e.to],
-          nowMs: performance.now(),
-          durationMs: CLEARING_ANIMATION.targetBurstMs,
-          color: deps.fxColorForNode(e.to, clearingColor),
-          kind: 'tx-impact',
-          seedPrefix: `clearing:impact:${deps.effectiveEq()}:${stepAtMs}:${idx}`,
-          seedFn: deps.seedFn,
-          isTestMode: false,
-        })
-
-        deps.pushFloatingLabel({
-          nodeId: e.to,
-          id: Math.floor(performance.now()) + deps.seedFn(`lbl:${stepAtMs}:${idx}:${deps.keyEdge(e.from, e.to)}`),
-          text: `${formatDemoDebtAmount(e.from, e.to, stepAtMs)}`,
-          color: deps.fxColorForNode(e.to, clearingColor),
-          ttlMs: labelLifeMs,
-          offsetYPx: -6,
-          throttleKey: `clearing:${e.to}`,
-          throttleMs: CLEARING_ANIMATION.labelThrottleMs,
-        })
-      }, delayMs + microTtlMs)
-    }
-
-    for (const step of plan.steps) {
-      deps.scheduleTimeout(() => {
-        if (runId !== clearingRunSeq) return
-
-        const stepIntensityKey = step.intensity_key
-        const k = intensityScale(stepIntensityKey)
-
-        const particleEdges = step.particles_edges ?? []
-
-        // Build set of particle edge keys to avoid double-animation.
-        // Beam sparks already render edge glow, so don't add EdgePulses for same edges.
-        const particleEdgeKeys = new Set(particleEdges.map(e => deps.keyEdge(e.from, e.to)))
-
-        if (step.highlight_edges && step.highlight_edges.length > 0) {
-          // Filter out edges that will have beam sparks (to avoid double glow)
-          const highlightOnly = step.highlight_edges.filter(e => !particleEdgeKeys.has(deps.keyEdge(e.from, e.to)))
-          if (highlightOnly.length > 0) {
-            deps.spawnEdgePulses({
-              edges: highlightOnly,
-              nowMs: performance.now(),
-              durationMs: CLEARING_ANIMATION.highlightPulseMs,
-              color: clearingColor,
-              thickness: 1.0 * k,
-              seedPrefix: `clearing:highlight:${deps.effectiveEq()}:${step.at_ms}`,
-              countPerEdge: intensityCountPerEdge(stepIntensityKey),
-              keyEdge: deps.keyEdge,
-              seedFn: deps.seedFn,
-              isTestMode: false,
-            })
-          }
-        }
-
-        for (let i = 0; i < particleEdges.length; i++) {
-          const e = particleEdges[i]!
-          const delayMs = i * microGapMs
-          // Inline version of animateEdge so we can apply intensity scaling.
-          deps.scheduleTimeout(() => {
-            if (runId !== clearingRunSeq) return
-
-            deps.spawnNodeBursts({
-              nodeIds: [e.from],
-              nowMs: performance.now(),
-              durationMs: CLEARING_ANIMATION.sourceBurstMs,
-              color: deps.fxColorForNode(e.from, clearingColor),
-              kind: 'tx-impact',
-              seedPrefix: `clearing:fromGlow:${deps.effectiveEq()}:${step.at_ms}:${i}`,
-              seedFn: deps.seedFn,
-              isTestMode: false,
-            })
-
-            deps.spawnSparks({
-              edges: [e],
-              nowMs: performance.now(),
-              ttlMs: microTtlMs,
-              colorCore: '#ffffff',
-              colorTrail: clearingColor,
-              thickness: 1.1 * k,
-              kind: 'beam',
-              seedPrefix: `clearing:micro:${deps.effectiveEq()}:${step.at_ms}:${i}`,
-              countPerEdge: 1,
-              keyEdge: deps.keyEdge,
-              seedFn: deps.seedFn,
-              isTestMode: fxTestMode,
-            })
-          }, delayMs)
-
-          deps.scheduleTimeout(() => {
-            if (runId !== clearingRunSeq) return
-
-            deps.spawnNodeBursts({
-              nodeIds: [e.to],
-              nowMs: performance.now(),
-              durationMs: CLEARING_ANIMATION.targetBurstMs,
-              color: deps.fxColorForNode(e.to, clearingColor),
-              kind: 'tx-impact',
-              seedPrefix: `clearing:impact:${deps.effectiveEq()}:${step.at_ms}:${i}`,
-              seedFn: deps.seedFn,
-              isTestMode: false,
-            })
-
-            deps.pushFloatingLabel({
-              nodeId: e.to,
-              id: Math.floor(performance.now()) + deps.seedFn(`lbl:${step.at_ms}:${i}:${deps.keyEdge(e.from, e.to)}`),
-              text: `${formatDemoDebtAmount(e.from, e.to, step.at_ms)}`,
-              color: deps.fxColorForNode(e.to, clearingColor),
-              ttlMs: labelLifeMs,
-              offsetYPx: -6,
-              throttleKey: `clearing:${e.to}`,
-              throttleMs: CLEARING_ANIMATION.labelThrottleMs,
-            })
-          }, delayMs + microTtlMs)
-        }
-      }, Math.max(0, step.at_ms))
-    }
-
-    const targetBurstDurationMs = CLEARING_ANIMATION.targetBurstMs
-    let doneAt = 0
-    for (const s of plan.steps) {
-      const base = Math.max(0, s.at_ms)
-      const count = s.particles_edges?.length ?? 0
-      const lastBurstEndsAt = count > 0 ? (count - 1) * microGapMs + microTtlMs + targetBurstDurationMs : 0
-      doneAt = Math.max(doneAt, base + CLEARING_ANIMATION.highlightPulseMs, base + lastBurstEndsAt)
-    }
-    const cleanupDelayMs = doneAt + CLEARING_ANIMATION.cleanupPadMs
+    const maxAt = Math.max(
+      0,
+      ...((plan.steps ?? []).map((s) => Number(s.at_ms ?? 0)).filter((v) => Number.isFinite(v))),
+    )
+    const doneDelayMs = Math.max(1200, maxAt + CLEARING_ANIMATION.microTtlMs + 350)
 
     deps.scheduleTimeout(() => {
       if (runId !== clearingRunSeq) return
-      if (done) deps.applyPatches(done)
-      deps.resetOverlays()
-    }, cleanupDelayMs)
+      if (done) {
+        deps.applyPatches(done)
+        runRealLikeClearingDoneFx(plan, done, runId)
+      }
+    }, doneDelayMs)
   }
 
   function demoStepOnce(scene: SceneId, txEvents: TxUpdatedEvent[], clearingPlan: ClearingPlanEvent | null, clearingDone: ClearingDoneEvent | null) {

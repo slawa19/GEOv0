@@ -10,6 +10,39 @@
         "from": "PID_U0003_daa66d13",
         "to": "PID_U0017_81af14c1"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0003_daa66d13",
+        "net_balance_atoms": "810409",
+        "net_sign": -1,
+        "viz_color_key": "debt-8",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      },
+      {
+        "id": "PID_U0017_81af14c1",
+        "net_balance_atoms": "47109",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0003_daa66d13",
+        "target": "PID_U0017_81af14c1",
+        "viz_alpha_key": "hi",
+        "used": 429.0,
+        "available": 121.0
+      }
     ]
   },
   {
@@ -30,6 +63,53 @@
       {
         "from": "PID_U0006_b54cda26",
         "to": "PID_U0036_3fcd1ce4"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "7402",
+        "net_sign": -1,
+        "viz_color_key": "debt-2",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 34,
+          "h": 28
+        }
+      },
+      {
+        "id": "PID_U0036_3fcd1ce4",
+        "net_balance_atoms": "723102",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0002_3c6ef362",
+        "viz_alpha_key": "muted",
+        "used": 160.0,
+        "available": 840.0
+      },
+      {
+        "source": "PID_U0002_3c6ef362",
+        "target": "PID_U0006_b54cda26",
+        "viz_alpha_key": "hi",
+        "used": 654.5,
+        "available": 195.5
+      },
+      {
+        "source": "PID_U0006_b54cda26",
+        "target": "PID_U0036_3fcd1ce4",
+        "viz_alpha_key": "muted",
+        "used": 154.0,
+        "available": 546.0
       }
     ]
   },
@@ -52,6 +132,53 @@
         "from": "PID_U0006_b54cda26",
         "to": "PID_U0036_3fcd1ce4"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "10817",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 36,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0036_3fcd1ce4",
+        "net_balance_atoms": "726517",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0002_3c6ef362",
+        "viz_alpha_key": "muted",
+        "used": 280.0,
+        "available": 720.0
+      },
+      {
+        "source": "PID_U0002_3c6ef362",
+        "target": "PID_U0006_b54cda26",
+        "viz_alpha_key": "hi",
+        "used": 739.5,
+        "available": 110.5
+      },
+      {
+        "source": "PID_U0006_b54cda26",
+        "target": "PID_U0036_3fcd1ce4",
+        "viz_alpha_key": "muted",
+        "used": 252.0,
+        "available": 448.0
+      }
     ]
   },
   {
@@ -64,6 +191,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0002_3c6ef362"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "14095",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 37,
+          "h": 31
+        }
+      },
+      {
+        "id": "PID_U0002_3c6ef362",
+        "net_balance_atoms": "176778",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 41
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0002_3c6ef362",
+        "viz_alpha_key": "muted",
+        "used": 390.0,
+        "available": 610.0
       }
     ]
   },
@@ -78,6 +238,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0003_daa66d13"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "17621",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 37,
+          "h": 32
+        }
+      },
+      {
+        "id": "PID_U0003_daa66d13",
+        "net_balance_atoms": "806883",
+        "net_sign": -1,
+        "viz_color_key": "debt-8",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0003_daa66d13",
+        "viz_alpha_key": "muted",
+        "used": 290.0,
+        "available": 710.0
+      }
     ]
   },
   {
@@ -90,6 +283,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0004_78dde6c4"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "20394",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 38,
+          "h": 32
+        }
+      },
+      {
+        "id": "PID_U0004_78dde6c4",
+        "net_balance_atoms": "34773",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 40,
+          "h": 34
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0004_78dde6c4",
+        "viz_alpha_key": "active",
+        "used": 400.0,
+        "available": 600.0
       }
     ]
   },
@@ -104,6 +330,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0005_17156075"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "23590",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 38,
+          "h": 32
+        }
+      },
+      {
+        "id": "PID_U0005_17156075",
+        "net_balance_atoms": "118946",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 48,
+          "h": 41
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0005_17156075",
+        "viz_alpha_key": "active",
+        "used": 520.0,
+        "available": 480.0
+      }
     ]
   },
   {
@@ -116,6 +375,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0006_b54cda26"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "26941",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 38,
+          "h": 32
+        }
+      },
+      {
+        "id": "PID_U0006_b54cda26",
+        "net_balance_atoms": "77949",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 46,
+          "h": 39
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0006_b54cda26",
+        "viz_alpha_key": "active",
+        "used": 640.0,
+        "available": 360.0
       }
     ]
   },
@@ -130,6 +422,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0007_538453d7"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "29592",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 39,
+          "h": 33
+        }
+      },
+      {
+        "id": "PID_U0007_538453d7",
+        "net_balance_atoms": "6899",
+        "net_sign": -1,
+        "viz_color_key": "debt-2",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 34,
+          "h": 28
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0007_538453d7",
+        "viz_alpha_key": "active",
+        "used": 730.0,
+        "available": 270.0
+      }
     ]
   },
   {
@@ -142,6 +467,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0036_3fcd1ce4"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "33021",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 39,
+          "h": 33
+        }
+      },
+      {
+        "id": "PID_U0036_3fcd1ce4",
+        "net_balance_atoms": "729946",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0036_3fcd1ce4",
+        "viz_alpha_key": "hi",
+        "used": 790.0,
+        "available": 210.0
       }
     ]
   },
@@ -156,6 +514,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0037_de049695"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "35619",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 40,
+          "h": 34
+        }
+      },
+      {
+        "id": "PID_U0037_de049695",
+        "net_balance_atoms": "34652",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 40,
+          "h": 34
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0037_de049695",
+        "viz_alpha_key": "hi",
+        "used": 890.0,
+        "available": 110.0
+      }
     ]
   },
   {
@@ -168,6 +559,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0038_7c3c1046"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "38513",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 41,
+          "h": 35
+        }
+      },
+      {
+        "id": "PID_U0038_7c3c1046",
+        "net_balance_atoms": "10394",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 35,
+          "h": 29
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0038_7c3c1046",
+        "viz_alpha_key": "muted",
+        "used": 160.0,
+        "available": 840.0
       }
     ]
   },
@@ -182,6 +606,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0039_1a7389f7"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "41415",
+        "net_sign": -1,
+        "viz_color_key": "debt-5",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 41,
+          "h": 35
+        }
+      },
+      {
+        "id": "PID_U0039_1a7389f7",
+        "net_balance_atoms": "71598",
+        "net_sign": -1,
+        "viz_color_key": "debt-6",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 45,
+          "h": 38
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0039_1a7389f7",
+        "viz_alpha_key": "muted",
+        "used": 230.0,
+        "available": 770.0
+      }
     ]
   },
   {
@@ -194,6 +651,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0040_b8ab03a8"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "44429",
+        "net_sign": -1,
+        "viz_color_key": "debt-5",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 41,
+          "h": 35
+        }
+      },
+      {
+        "id": "PID_U0040_b8ab03a8",
+        "net_balance_atoms": "4014",
+        "net_sign": 1,
+        "viz_color_key": "business",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 33,
+          "h": 28
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0040_b8ab03a8",
+        "viz_alpha_key": "muted",
+        "used": 350.0,
+        "available": 650.0
       }
     ]
   },
@@ -208,6 +698,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0041_56e27d59"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "47607",
+        "net_sign": -1,
+        "viz_color_key": "debt-5",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 42,
+          "h": 36
+        }
+      },
+      {
+        "id": "PID_U0041_56e27d59",
+        "net_balance_atoms": "8322",
+        "net_sign": -1,
+        "viz_color_key": "debt-2",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 34,
+          "h": 29
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0041_56e27d59",
+        "viz_alpha_key": "active",
+        "used": 490.0,
+        "available": 510.0
+      }
     ]
   },
   {
@@ -220,6 +743,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0042_f519f70a"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "50233",
+        "net_sign": -1,
+        "viz_color_key": "debt-6",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 43,
+          "h": 37
+        }
+      },
+      {
+        "id": "PID_U0042_f519f70a",
+        "net_balance_atoms": "28374",
+        "net_sign": -1,
+        "viz_color_key": "suspended",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 39,
+          "h": 33
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0042_f519f70a",
+        "viz_alpha_key": "active",
+        "used": 510.0,
+        "available": 490.0
       }
     ]
   },
@@ -234,6 +790,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0043_935170bb"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "53445",
+        "net_sign": -1,
+        "viz_color_key": "debt-6",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 44,
+          "h": 37
+        }
+      },
+      {
+        "id": "PID_U0043_935170bb",
+        "net_balance_atoms": "49538",
+        "net_sign": -1,
+        "viz_color_key": "debt-5",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 43,
+          "h": 36
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0043_935170bb",
+        "viz_alpha_key": "active",
+        "used": 670.0,
+        "available": 330.0
+      }
     ]
   },
   {
@@ -246,6 +835,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0044_3188ea6c"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "55866",
+        "net_sign": -1,
+        "viz_color_key": "debt-6",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 44,
+          "h": 37
+        }
+      },
+      {
+        "id": "PID_U0044_3188ea6c",
+        "net_balance_atoms": "10079",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 35,
+          "h": 30
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0044_3188ea6c",
+        "viz_alpha_key": "hi",
+        "used": 770.0,
+        "available": 230.0
       }
     ]
   },
@@ -260,6 +882,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0045_cfc0641d"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "58303",
+        "net_sign": -1,
+        "viz_color_key": "debt-6",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 44,
+          "h": 37
+        }
+      },
+      {
+        "id": "PID_U0045_cfc0641d",
+        "net_balance_atoms": "8063",
+        "net_sign": -1,
+        "viz_color_key": "debt-2",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 34,
+          "h": 29
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0045_cfc0641d",
+        "viz_alpha_key": "hi",
+        "used": 850.0,
+        "available": 150.0
+      }
     ]
   },
   {
@@ -272,6 +927,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0046_6df7ddce"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "60725",
+        "net_sign": -1,
+        "viz_color_key": "debt-6",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 44,
+          "h": 37
+        }
+      },
+      {
+        "id": "PID_U0046_6df7ddce",
+        "net_balance_atoms": "328",
+        "net_sign": -1,
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 17,
+          "h": 17
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0046_6df7ddce",
+        "viz_alpha_key": "active",
+        "used": 346.5,
+        "available": 203.5
       }
     ]
   }
