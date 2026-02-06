@@ -1,7 +1,7 @@
 # Аудит визуальных элементов рендера Simulator UI
 
 > **Дата актуализации:** 2026-02-06  
-> **Источники:** текущий код после всех рефакторов interaction quality v2
+> **Источники:** текущий код после cleanup (Фаза 2)
 
 ---
 
@@ -28,15 +28,14 @@
 - Idle → Deep Idle: после `3000ms` без какой-либо активности
 - Deep Idle → Active: вызов [`wakeUp()`](simulator-ui/v2/src/composables/useRenderLoop.ts:768)
 
-### Interaction Quality ([`interactionHold.ts`](simulator-ui/v2/src/composables/interactionHold.ts))
+### Управление качеством при взаимодействиях
 
-Система плавного управления качеством при взаимодействии пользователя:
+Отдельной системы «interaction quality» больше нет.
 
-- [`markInteraction()`](simulator-ui/v2/src/composables/interactionHold.ts:143) устанавливает дедлайн `holdMs=250ms`
-- [`getIntensity()`](simulator-ui/v2/src/composables/interactionHold.ts:114) возвращает `0.0–1.0` с плавным easing
-- `intensity` влияет на `blurK`: [`blurK = baseBlurK * (1 - intensity)`](simulator-ui/v2/src/render/nodePainter.ts:144)
-- При `intensity=1.0` → `blurK=0` → все shadowBlur отключены (дешёвый рендер)
-- При `intensity=0.0` → `blurK=baseBlurK` → полное качество
+Качество и производительность регулируются через:
+
+- пользовательский пресет качества (low/med/high)
+- адаптивный механизм в render loop (сбор FPS, DPR clamp, временные override'ы)
 
 ---
 
@@ -46,21 +45,14 @@
 
 | Уровень | `baseBlurK` (nodes) | `baseBlurK` (base/fx) | Body fill | Градиенты FX | DPR clamp |
 |---------|---------------------|----------------------|-----------|--------------|-----------|
-| **High** | `1.0` ([`nodePainter.ts:142`](simulator-ui/v2/src/render/nodePainter.ts:142)) | `1.0` ([`baseGraph.ts:66`](simulator-ui/v2/src/render/baseGraph.ts:66)) | `createLinearGradient` ([`:243`](simulator-ui/v2/src/render/nodePainter.ts:243)) | Да (`allowGradients`) | `2.0` |
-| **Med** | `0.75` | `0` (baseGraph), `0.75` (FX) | Solid `withAlpha(fill, 0.42)` | Нет при `intensity≥0.5` | `1.5` |
-| **Low** | `0` | `0` | Solid | Нет | `1.0` |
+| **High** | `1.0` ([`nodePainter.ts:142`](simulator-ui/v2/src/render/nodePainter.ts:142)) | `1.0` ([`baseGraph.ts:66`](simulator-ui/v2/src/render/baseGraph.ts:66)) | `createLinearGradient` ([`:243`](simulator-ui/v2/src/render/nodePainter.ts:243)) | Да | `2.0` |
+| **Med** | `0.75` | `0` (baseGraph), `0.75` (FX) | Solid `withAlpha(fill, 0.42)` | Да | `1.5` |
+| **Low** | `0` | `0` | Solid | Да | `1.0` |
 
-### Interaction Intensity (0.0–1.0)
+### Взаимодействия пользователя
 
-Фазовая машина [`createInteractionHold()`](simulator-ui/v2/src/composables/interactionHold.ts:55):
-
-| Фаза | Intensity | Длительность |
-|------|-----------|-------------|
-| `idle` | `0.0` | — |
-| `ramping-up` | `0→1.0` | [`easeInMs=100`](simulator-ui/v2/src/composables/interactionHold.ts:57) |
-| `holding` | `1.0` | пока `markInteraction()` вызывается |
-| `delaying` | фиксированная (последнее значение) | [`easeOutDelayMs=200`](simulator-ui/v2/src/composables/interactionHold.ts:58) |
-| `ramping-down` | `value→0.0` | [`easeOutMs=150`](simulator-ui/v2/src/composables/interactionHold.ts:59) |
+Пользовательские события (mouse/pointer/wheel) будят render loop через `wakeUp('user')`.
+Отдельного «интенсивити» взаимодействия больше нет.
 
 ### Adaptive Quality / DPR Degradation
 
@@ -92,23 +84,22 @@
 
 Источник: [`useAppCanvasInteractionsWiring.ts`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts)
 
-| UI Event | `mark()` | `wakeUp()` | Комментарий |
-|----------|----------|-----------|-------------|
-| **click** | ❌ нет ([`:42`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts:42)) | `'user'` | Мгновенное действие, не нужно снижать качество |
-| **dblclick** | ❌ нет ([`:47`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts:47)) | `'user'` | Аналогично click |
-| **pointerdown** | ❌ нет ([`:51`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts:51)) | `'user'` | Начало взаимодействия, ещё не continuous |
-| **pointermove** (hover) | ❌ нет ([`:59`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts:59)) | `'user'` | `ev.buttons === 0` → без `mark()` |
-| **pointermove** (drag) | ✅ `mark()` ([`:59`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts:59)) | `'user'` | `ev.buttons !== 0` → `mark()` без instant |
-| **pointerup** | ❌ нет ([`:63`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts:63)) | `'user'` | Конец взаимодействия, hold timer обрабатывает |
-| **wheel** | ✅ `mark({instant:true})` ([`:69`](simulator-ui/v2/src/composables/useAppCanvasInteractionsWiring.ts:69)) | через camera.onCameraChanged | Instant для мгновенного `intensity=1` |
+| UI Event | `wakeUp()` | Комментарий |
+|----------|-----------|-------------|
+| **click** | `'user'` | Мгновенное действие (selection) |
+| **dblclick** | `'user'` | Мгновенное действие (node card / camera) |
+| **pointerdown** | `'user'` | Старт взаимодействия |
+| **pointermove** | `'user'` | Движение курсора/drag — гарантируем своевременный рендер |
+| **pointerup** | `'user'` | Завершение взаимодействия |
+| **wheel** | через camera.onCameraChanged | Zoom применяется в RAF (см. `useCamera`) |
 
 ### Что происходит при каждом взаимодействии
 
-- **Hover**: `wakeUp('user')` будит loop из deep idle; edge hover detection; **качество НЕ снижается**
-- **Click**: `wakeUp('user')` + выбор ноды/снятие выделения; отрисовка Selection Glow; **без mark()**
-- **Drag**: `mark()` на каждый pointermove → `intensity` нарастает → `blurK` уменьшается → blur отключается; `dragMode=true` → ноды рисуются упрощённо
-- **Wheel**: `mark({instant:true})` → мгновенно `intensity=1, blurK=0`; камера масштабируется
-- **Dblclick**: zoom-to-fit или открытие node card; **без mark()**
+- **Hover**: `wakeUp('user')` будит loop из deep idle; edge hover detection
+- **Click**: `wakeUp('user')` + выбор ноды/снятие выделения; отрисовка Selection Glow
+- **Drag**: `wakeUp('user')` + drag fast-path (LOD) в base graph
+- **Wheel**: wakeUp делается через camera.onCameraChanged (чтобы не рисовать «лишний» кадр со старой камерой)
+- **Dblclick**: `wakeUp('user')` + zoom-to-fit или открытие node card
 
 ---
 

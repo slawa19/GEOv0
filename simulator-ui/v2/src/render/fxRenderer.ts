@@ -43,6 +43,7 @@
 import type { VizMapping } from '../vizMapping'
 import type { LayoutNode } from './nodePainter'
 import { withAlpha } from './color'
+import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
 import { roundedRectPath, roundedRectPath2D } from './roundedRect'
 import { sizeForNode } from './nodePainter'
@@ -353,22 +354,16 @@ export function renderFxFrame(opts: {
   isTestMode: boolean
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
-  /** Interaction Quality hint (legacy boolean). */
-  interaction?: boolean
-  /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
-  interactionIntensity?: number
 }): void {
   const { nowMs, ctx, pos, w, h, mapping, fxState, isTestMode } = opts
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const spx = (v: number) => v * invZ
   const q = opts.quality ?? 'high'
-  const interaction = !!opts.interaction
-  const baseBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
-  const fxIntensity = opts.interactionIntensity ?? (interaction ? 1.0 : 0.0)
-  const blurK = baseBlurK * (1 - fxIntensity)
-  // During high interaction intensity, fall back to solid colors (cheaper).
-  const allowGradients = q === 'high' && fxIntensity < 0.5
+  // Keep the same visuals as before for each quality preset,
+  // but remove Interaction Quality dependencies from the FX stack.
+  const shadowBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  // Gradients are always allowed (Phase 2 cleanup: remove dead branch).
 
   // Clear per-frame caches.
   nodeOutlinePath2DCache.clear()
@@ -385,8 +380,6 @@ export function renderFxFrame(opts: {
   if (fxState.sparks.length === 0 && fxState.edgePulses.length === 0 && fxState.nodeBursts.length === 0) return
 
   // FX are always rendered (no early return on interaction).
-  // During interaction, blurK→0 and allowGradients→false give cheaper rendering
-  // while keeping FX visible (no jarring disappearance).
 
   // Tx sparks / comets
   if (fxState.sparks.length > 0) {
@@ -452,33 +445,27 @@ export function renderFxFrame(opts: {
         {
           const baseAlpha = Math.max(0, Math.min(1, alpha * 0.55))
 
-          const trailStroke = allowGradients
-            ? (() => {
-                const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
-                // Gradient from tail (transparent) to head (bright)
-                g.addColorStop(0, withAlpha(s.colorTrail, 0))
-                g.addColorStop(0.5, withAlpha(s.colorTrail, baseAlpha * 0.35))
-                g.addColorStop(1, withAlpha(s.colorTrail, baseAlpha))
-                return g
-              })()
-            : null
+          const trailStroke = (() => {
+            const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
+            // Gradient from tail (transparent) to head (bright)
+            g.addColorStop(0, withAlpha(s.colorTrail, 0))
+            g.addColorStop(0.5, withAlpha(s.colorTrail, baseAlpha * 0.35))
+            g.addColorStop(1, withAlpha(s.colorTrail, baseAlpha))
+            return g
+          })()
 
-          // Halo pass (from trailStart to head)
-          // If gradients are disabled (med/low quality), ensure we still fade the beam.
-          ctx.globalAlpha = trailStroke ? 1 : baseAlpha
-          ctx.strokeStyle = trailStroke ?? s.colorTrail
-          ctx.lineWidth = Math.max(spx(1.2), th * 3.2)
-          ctx.shadowBlur = Math.max(spx(10), th * 18) * blurK
-          ctx.shadowColor = withAlpha(s.colorTrail, Math.max(0, Math.min(1, 0.85 * (trailStroke ? 1 : baseAlpha))))
+          // Halo approximation: thicker stroke + `lighter` (no on-screen shadowBlur).
+          ctx.globalAlpha = 0.9
+          ctx.strokeStyle = trailStroke
+          ctx.lineWidth = Math.max(spx(1.8), th * 4.6)
           ctx.beginPath()
           ctx.moveTo(trailStartX, trailStartY)
           ctx.lineTo(headX, headY)
           ctx.stroke()
 
           // Core pass (from trailStart to head)
-          ctx.shadowBlur = 0
-          ctx.globalAlpha = trailStroke ? 1 : baseAlpha
-          ctx.strokeStyle = trailStroke ?? withAlpha(s.colorTrail, 0.9)
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = trailStroke
           ctx.lineWidth = Math.max(spx(0.9), th * 1.25)
           ctx.beginPath()
           ctx.moveTo(trailStartX, trailStartY)
@@ -492,18 +479,20 @@ export function renderFxFrame(opts: {
           const tailX = headX - ux * segLen
           const tailY = headY - uy * segLen
           ctx.globalAlpha = 1
-          if (allowGradients) {
-            const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
-            grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
-            grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * 0.55))
-            grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-            ctx.strokeStyle = grad
-          } else {
-            ctx.strokeStyle = withAlpha(s.colorCore, alpha * 0.65)
-          }
-          ctx.lineWidth = Math.max(spx(1.4), th * 4.2)
-          ctx.shadowBlur = Math.max(spx(12), th * 20) * blurK
-          ctx.shadowColor = withAlpha(s.colorTrail, 0.9)
+          const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
+          grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
+          grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * 0.55))
+          grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+          ctx.strokeStyle = grad
+          // Halo approximation: thicker segment stroke (no on-screen shadowBlur).
+          ctx.lineWidth = Math.max(spx(2.0), th * 5.2)
+          ctx.beginPath()
+          ctx.moveTo(tailX, tailY)
+          ctx.lineTo(headX, headY)
+          ctx.stroke()
+
+          // Core segment pass
+          ctx.lineWidth = Math.max(spx(1.2), th * 3.0)
           ctx.beginPath()
           ctx.moveTo(tailX, tailY)
           ctx.lineTo(headX, headY)
@@ -514,13 +503,17 @@ export function renderFxFrame(opts: {
         {
           const r = Math.max(spx(2.2), th * 3.2)
 
-          ctx.shadowBlur = Math.max(spx(14), r * 5) * blurK
-          ctx.shadowColor = withAlpha(s.colorCore, 0.95)
-          ctx.globalAlpha = 1
-          ctx.fillStyle = withAlpha(s.colorCore, alpha)
-          ctx.beginPath()
-          ctx.arc(headX, headY, r, 0, Math.PI * 2)
-          ctx.fill()
+          // Replace arc+shadowBlur with pre-rendered FX dot sprite.
+          ctx.globalAlpha = alpha
+          drawGlowSprite(ctx, {
+            kind: 'fx-dot',
+            x: headX,
+            y: headY,
+            color: s.colorCore,
+            r,
+            blurPx: Math.max(spx(14), r * 5) * shadowBlurK,
+            composite: 'lighter',
+          })
         }
 
         ctx.restore()
@@ -560,20 +553,15 @@ export function renderFxFrame(opts: {
       {
         const th = s.thickness * invZ
         ctx.globalAlpha = 1
-        if (allowGradients) {
-          const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-          grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail * 0.9))
-          grad.addColorStop(0.25, withAlpha(s.colorTrail, alphaTrail * 0.55))
-          grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-          ctx.strokeStyle = grad
-        } else {
-          ctx.strokeStyle = withAlpha(s.colorTrail, alphaTrail * 0.75)
-        }
+        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
+        grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail * 0.9))
+        grad.addColorStop(0.25, withAlpha(s.colorTrail, alphaTrail * 0.55))
+        grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+        ctx.strokeStyle = grad
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
-        ctx.lineWidth = Math.max(spx(1.2), th * 3.0)
-        ctx.shadowBlur = Math.max(spx(6), th * 10) * blurK
-        ctx.shadowColor = withAlpha(s.colorTrail, 0.85)
+        // Halo approximation: thicker stroke (no on-screen shadowBlur).
+        ctx.lineWidth = Math.max(spx(1.8), th * 4.2)
         ctx.beginPath()
         ctx.moveTo(tailX, tailY)
         ctx.lineTo(x, y)
@@ -583,17 +571,12 @@ export function renderFxFrame(opts: {
       // Trail (core pass)
       {
         const th = s.thickness * invZ
-        ctx.shadowBlur = 0
         ctx.globalAlpha = 1
-        if (allowGradients) {
-          const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-          grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail))
-          grad.addColorStop(0.35, withAlpha(s.colorTrail, alphaTrail * 0.35))
-          grad.addColorStop(1, withAlpha(s.colorTrail, 0))
-          ctx.strokeStyle = grad
-        } else {
-          ctx.strokeStyle = withAlpha(s.colorTrail, alphaTrail * 0.85)
-        }
+        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
+        grad.addColorStop(0, withAlpha(s.colorTrail, alphaTrail))
+        grad.addColorStop(0.35, withAlpha(s.colorTrail, alphaTrail * 0.35))
+        grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+        ctx.strokeStyle = grad
         ctx.lineWidth = Math.max(spx(0.9), th * 1.9)
         ctx.beginPath()
         ctx.moveTo(tailX, tailY)
@@ -605,19 +588,22 @@ export function renderFxFrame(opts: {
       {
         const th = s.thickness * invZ
         const r = Math.max(spx(1.6), th * 2.4)
-        ctx.globalAlpha = 1
-        ctx.shadowBlur = Math.max(spx(10), r * 6) * blurK
-        ctx.shadowColor = withAlpha(s.colorCore, 0.9)
-        ctx.fillStyle = withAlpha(s.colorCore, alphaCore)
-        ctx.beginPath()
-        ctx.arc(x, y, r, 0, Math.PI * 2)
-        ctx.fill()
+
+        ctx.globalAlpha = alphaCore
+        drawGlowSprite(ctx, {
+          kind: 'fx-dot',
+          x,
+          y,
+          color: s.colorCore,
+          r,
+          blurPx: Math.max(spx(10), r * 6) * shadowBlurK,
+          composite: 'lighter',
+        })
       }
 
       // Small embers behind the head
       {
         const th = s.thickness * invZ
-        ctx.shadowBlur = 0
         ctx.fillStyle = withAlpha(s.colorTrail, alphaTrail * 0.55)
         for (let j = 1; j <= 3; j++) {
           const tt = j / 4
@@ -689,29 +675,36 @@ export function renderFxFrame(opts: {
 
       // Moving pulse head + tail.
       ctx.globalAlpha = 1
-      if (allowGradients) {
-        const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-        grad.addColorStop(0, withAlpha(p.color, alpha * 0.95))
-        grad.addColorStop(0.35, withAlpha(p.color, alpha * 0.35))
-        grad.addColorStop(1, withAlpha(p.color, 0))
-        ctx.strokeStyle = grad
-      } else {
-        ctx.strokeStyle = withAlpha(p.color, alpha * 0.85)
-      }
-      ctx.lineWidth = Math.max(spx(1.2), (p.thickness * invZ) * 2.8)
-      ctx.shadowBlur = Math.max(spx(10), (p.thickness * invZ) * 14) * blurK
-      ctx.shadowColor = withAlpha(p.color, 0.9)
+      const grad = ctx.createLinearGradient(x, y, tailX, tailY)
+      grad.addColorStop(0, withAlpha(p.color, alpha * 0.95))
+      grad.addColorStop(0.35, withAlpha(p.color, alpha * 0.35))
+      grad.addColorStop(1, withAlpha(p.color, 0))
+      ctx.strokeStyle = grad
+      // Halo approximation: thicker stroke (no on-screen shadowBlur).
+      ctx.lineWidth = Math.max(spx(1.8), (p.thickness * invZ) * 4.0)
       ctx.beginPath()
       ctx.moveTo(tailX, tailY)
       ctx.lineTo(x, y)
       ctx.stroke()
 
-      ctx.shadowBlur = 0
-      ctx.globalAlpha = alpha
-      ctx.fillStyle = p.color
+      // Core pulse stroke
+      ctx.lineWidth = Math.max(spx(1.0), (p.thickness * invZ) * 2.2)
       ctx.beginPath()
-      ctx.arc(x, y, Math.max(spx(1.5), (p.thickness * invZ) * 2.2), 0, Math.PI * 2)
-      ctx.fill()
+      ctx.moveTo(tailX, tailY)
+      ctx.lineTo(x, y)
+      ctx.stroke()
+
+      // Pulse head
+      ctx.globalAlpha = alpha
+      drawGlowSprite(ctx, {
+        kind: 'fx-dot',
+        x,
+        y,
+        color: p.color,
+        r: Math.max(spx(1.5), (p.thickness * invZ) * 2.2),
+        blurPx: Math.max(spx(10), (p.thickness * invZ) * 14) * shadowBlurK,
+        composite: 'lighter',
+      })
 
       ctx.restore()
     }
@@ -754,27 +747,26 @@ export function renderFxFrame(opts: {
         const outline = nodeOutlinePath2D(n, 1.0, invZ)
         const baseWidth = Math.max(spx(2), nodeR * 0.15)
 
-        // Layer 1: Wide outer glow (largest blur, lowest alpha)
-        ctx.shadowColor = b.color
-        ctx.shadowBlur = Math.max(spx(12), nodeR * 0.8) * alpha * blurK
-        ctx.strokeStyle = withAlpha(b.color, 0.4 * alpha)
-        ctx.lineWidth = baseWidth * 3
-        ctx.stroke(outline)
+        // Replace multi-layer on-screen shadowBlur with a single pre-rendered ring glow.
+        // IMPORTANT: alpha controls intensity via ctx.globalAlpha (not blur radius).
+        ctx.globalAlpha = alpha
+        drawGlowSprite(ctx, {
+          kind: 'fx-ring',
+          x: n.__x,
+          y: n.__y,
+          color: b.color,
+          r: nodeR * 1.02,
+          thicknessPx: baseWidth * 1.6,
+          blurPx: Math.max(spx(12), nodeR * 0.8) * shadowBlurK,
+          composite: 'lighter',
+        })
 
-        // Layer 2: Medium glow
-        ctx.shadowBlur = Math.max(spx(8), nodeR * 0.5) * alpha * blurK
-        ctx.strokeStyle = withAlpha(b.color, 0.6 * alpha)
-        ctx.lineWidth = baseWidth * 1.8
-        ctx.stroke(outline)
-
-        // Layer 3: Bright inner stroke (crisp edge)
-        ctx.shadowBlur = Math.max(spx(4), nodeR * 0.25) * alpha * blurK
-        ctx.strokeStyle = withAlpha(b.color, 0.9 * alpha)
+        // Crisp contour strokes (no blur).
+        ctx.globalAlpha = 1
+        ctx.strokeStyle = withAlpha(b.color, 0.65 * alpha)
         ctx.lineWidth = baseWidth
         ctx.stroke(outline)
 
-        // Layer 4: Hot white core (very thin, bright)
-        ctx.shadowBlur = 0
         ctx.strokeStyle = withAlpha('#ffffff', 0.7 * alpha)
         ctx.lineWidth = Math.max(spx(1), baseWidth * 0.4)
         ctx.stroke(outline)
@@ -793,19 +785,17 @@ export function renderFxFrame(opts: {
 
         ctx.save()
         ctx.globalCompositeOperation = 'screen'
-        ctx.globalAlpha = 1
+        ctx.globalAlpha = a
 
-        const grad = ctx.createRadialGradient(n.__x, n.__y, 0, n.__x, n.__y, r)
-        grad.addColorStop(0, withAlpha(b.color, 0.55 * a))
-        grad.addColorStop(0.35, withAlpha(b.color, 0.22 * a))
-        grad.addColorStop(1, withAlpha(b.color, 0))
-
-        ctx.fillStyle = grad
-        ctx.shadowBlur = Math.max(spx(18), nodeR * 1.4) * a * blurK
-        ctx.shadowColor = withAlpha(b.color, 0.9)
-        ctx.beginPath()
-        ctx.arc(n.__x, n.__y, r, 0, Math.PI * 2)
-        ctx.fill()
+        drawGlowSprite(ctx, {
+          kind: 'fx-bloom',
+          x: n.__x,
+          y: n.__y,
+          color: b.color,
+          r,
+          blurPx: Math.max(spx(18), nodeR * 1.4) * shadowBlurK,
+          composite: 'screen',
+        })
 
         ctx.restore()
       } else {
@@ -817,12 +807,15 @@ export function renderFxFrame(opts: {
 
         // 1. Core bloom
         ctx.globalAlpha = alpha
-        ctx.fillStyle = withAlpha(b.color, 0.5)
-        ctx.shadowBlur = spx(30) * alpha * blurK
-        ctx.shadowColor = b.color
-        ctx.beginPath()
-        ctx.arc(n.__x, n.__y, r * 0.5, 0, Math.PI * 2)
-        ctx.fill()
+        drawGlowSprite(ctx, {
+          kind: 'fx-bloom',
+          x: n.__x,
+          y: n.__y,
+          color: b.color,
+          r: r * 0.5,
+          blurPx: spx(30) * shadowBlurK,
+          composite: 'screen',
+        })
 
         // 2. Shockwave
         ctx.globalAlpha = alpha * 0.7

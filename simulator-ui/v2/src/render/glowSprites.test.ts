@@ -87,6 +87,17 @@ describe('render/glowSprites — unit', () => {
       expect(__testing.keyFor(o)).toBe(__testing.keyFor({ ...o }))
     })
 
+    it.each(['fx-dot', 'fx-ring', 'fx-bloom'] as const)('is deterministic for %s', (kind) => {
+      const common: any = {
+        color: '#aabbcc',
+        r: 12.34,
+        blurPx: 5.67,
+      }
+
+      const o: any = kind === 'fx-ring' ? { ...common, kind, thicknessPx: 2.5 } : { ...common, kind }
+      expect(__testing.keyFor(o)).toBe(__testing.keyFor({ ...o }))
+    })
+
     it('never emits NaN/Infinity/undefined in the key string (sanitizes via q())', () => {
       const o: any = {
         kind: 'rim',
@@ -105,6 +116,24 @@ describe('render/glowSprites — unit', () => {
       expect(key).not.toContain('Infinity')
       expect(key).not.toContain('undefined')
     })
+
+    it.each(['fx-dot', 'fx-ring', 'fx-bloom'] as const)(
+      'never emits NaN/Infinity/undefined in the key string for %s',
+      (kind) => {
+        const common: any = {
+          kind,
+          color: '#00ff00',
+          r: Number.NaN,
+          blurPx: Number.POSITIVE_INFINITY,
+        }
+        const o: any = kind === 'fx-ring' ? { ...common, thicknessPx: Number.NEGATIVE_INFINITY } : common
+
+        const key = __testing.keyFor(o)
+        expect(key).not.toContain('NaN')
+        expect(key).not.toContain('Infinity')
+        expect(key).not.toContain('undefined')
+      },
+    )
 
     it.each(['bloom', 'rim', 'selection', 'active'] as const)(
       'includes kind and differentiates kinds (%s)',
@@ -130,6 +159,36 @@ describe('render/glowSprites — unit', () => {
         }
       },
     )
+
+    it('differentiates FX kinds when other parameters are the same', () => {
+      const common: any = {
+        color: '#ffffff',
+        r: 10,
+        blurPx: 2,
+        thicknessPx: 3,
+      }
+
+      const kDot = __testing.keyFor({ kind: 'fx-dot', ...common })
+      const kBloom = __testing.keyFor({ kind: 'fx-bloom', ...common })
+      const kRing = __testing.keyFor({ kind: 'fx-ring', ...common })
+
+      expect(kDot).not.toBe(kBloom)
+      expect(kDot).not.toBe(kRing)
+      expect(kBloom).not.toBe(kRing)
+    })
+
+    it('differentiates fx-ring keys by thicknessPx', () => {
+      const common: any = {
+        kind: 'fx-ring',
+        color: '#ffffff',
+        r: 10,
+        blurPx: 2,
+      }
+
+      const k1 = __testing.keyFor({ ...common, thicknessPx: 1 })
+      const k2 = __testing.keyFor({ ...common, thicknessPx: 2 })
+      expect(k2).not.toBe(k1)
+    })
   })
 
   describe('LRU eviction (MAX_CACHE)', () => {

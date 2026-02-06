@@ -3,7 +3,8 @@ import { roundedRectPath } from './roundedRect'
 
 type Shape = 'circle' | 'rounded-rect'
 
-type GlowSpriteOpts = {
+type NodeGlowSpriteOpts = {
+  kind: 'bloom' | 'rim' | 'selection' | 'active'
   shape: Shape
   // World-space coordinates in our renderer are scaled such that these sizes are effectively in px.
   w: number
@@ -11,15 +12,44 @@ type GlowSpriteOpts = {
   r: number
   rr: number
   color: string
-  /**
-   * Sprite kind.
-   * - bloom/rim: generic node glow layers used by nodePainter.
-   * - selection/active: UX glows used by baseGraph.
-   */
-  kind: 'bloom' | 'rim' | 'selection' | 'active'
   blurPx: number
   lineWidthPx: number
 }
+
+type FxGlowSpriteOpts =
+  | {
+      /**
+       * Small radial glow used for spark/comet/edge-pulse heads.
+       * Caller controls intensity via ctx.globalAlpha when drawing.
+       */
+      kind: 'fx-dot'
+      color: string
+      r: number
+      blurPx: number
+    }
+  | {
+      /**
+       * Ring glow used for tx-impact.
+       * The crisp white core stroke is drawn on-screen; the sprite provides only the glow.
+       */
+      kind: 'fx-ring'
+      color: string
+      r: number
+      thicknessPx: number
+      blurPx: number
+    }
+  | {
+      /**
+       * Radial bloom used for burst glow / clearing.
+       * Caller controls intensity via ctx.globalAlpha when drawing.
+       */
+      kind: 'fx-bloom'
+      color: string
+      r: number
+      blurPx: number
+    }
+
+type GlowSpriteOpts = NodeGlowSpriteOpts | FxGlowSpriteOpts
 
 const cache = new Map<string, HTMLCanvasElement>()
 // Phase 1: node glow sprites are used widely (node bloom/rim + selection + active).
@@ -32,6 +62,13 @@ function q(v: number, step = 0.5) {
 }
 
 function keyFor(o: GlowSpriteOpts) {
+  if (o.kind === 'fx-dot' || o.kind === 'fx-bloom') {
+    return [o.kind, o.color, q(o.r), q(o.blurPx)].join('|')
+  }
+  if (o.kind === 'fx-ring') {
+    return [o.kind, o.color, q(o.r), q(o.thicknessPx), q(o.blurPx)].join('|')
+  }
+
   return [
     o.kind,
     o.shape,
@@ -63,12 +100,28 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
   }
 
   const blur = Math.max(0, opts.blurPx)
-  const lw = Math.max(0, opts.lineWidthPx)
+  let lw = 0
+  if ('lineWidthPx' in opts) {
+    lw = Math.max(0, opts.lineWidthPx)
+  } else if (opts.kind === 'fx-ring') {
+    lw = Math.max(0, opts.thicknessPx)
+  }
 
   // Keep generous padding: shadow blur expands beyond geometry.
   const pad = Math.ceil(blur * 2.2 + lw * 1.5 + 6)
-  const baseW = opts.shape === 'circle' ? Math.max(1, opts.r * 2) : Math.max(1, opts.w)
-  const baseH = opts.shape === 'circle' ? Math.max(1, opts.r * 2) : Math.max(1, opts.h)
+
+  const baseW =
+    'shape' in opts
+      ? opts.shape === 'circle'
+        ? Math.max(1, opts.r * 2)
+        : Math.max(1, opts.w)
+      : Math.max(1, opts.r * 2)
+  const baseH =
+    'shape' in opts
+      ? opts.shape === 'circle'
+        ? Math.max(1, opts.r * 2)
+        : Math.max(1, opts.h)
+      : Math.max(1, opts.r * 2)
 
   const cw = Math.ceil(baseW + pad * 2)
   const ch = Math.ceil(baseH + pad * 2)
@@ -89,6 +142,44 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
   // NOTE: Shadow blur is allowed only here (offscreen generation).
   // We intentionally draw geometry (sometimes as black) so the sprite can be composited with `screen`:
   // black pixels become neutral under screen blending, while the colored shadow remains visible.
+  if (opts.kind === 'fx-dot') {
+    // Pass 1: glow halo (shadow-only).
+    ctx.fillStyle = withAlpha(opts.color, 0)
+    ctx.beginPath()
+    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.9), 0, Math.PI * 2)
+    ctx.fill()
+
+    // Pass 2: crisp core (no blur) so the dot doesn't look washed-out.
+    ctx.shadowBlur = 0
+    ctx.fillStyle = withAlpha(opts.color, 0.95)
+    ctx.beginPath()
+    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.55), 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  if (opts.kind === 'fx-ring') {
+    // Glow-only ring: draw neutral (black) geometry so only the shadow is visible under `screen`.
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth = Math.max(0.1, lw)
+    ctx.beginPath()
+    ctx.arc(cx, cy, Math.max(0.1, opts.r), 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  if (opts.kind === 'fx-bloom') {
+    // Shadow-only bloom + faint core fill.
+    ctx.fillStyle = withAlpha(opts.color, 0)
+    ctx.beginPath()
+    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.8), 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.shadowBlur = 0
+    ctx.fillStyle = withAlpha(opts.color, 0.22)
+    ctx.beginPath()
+    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.45), 0, Math.PI * 2)
+    ctx.fill()
+  }
+
   if (opts.kind === 'bloom') {
     // Only shadow: transparent fill.
     ctx.fillStyle = withAlpha(opts.color, 0)

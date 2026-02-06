@@ -404,12 +404,12 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     expect(win.__rafQueue.length).toBe(0)
   })
 
-  it('Interaction Quality: DPR not clamped during interaction, passes interaction hint + intensity to renderers', () => {
+  it('does not pass interaction-quality hints to renderers', () => {
     const { canvas, ctx } = makeCanvasWithCtx()
     const { canvas: fxCanvas } = makeCanvasWithCtx()
 
     const drawBaseGraph = vi.fn((_ctx: any, opts: any) => opts.pos)
-    const renderFxFrame = vi.fn(() => undefined)
+    const renderFxFrame = vi.fn((_opts: any) => undefined)
 
     ;(globalThis as any).window.devicePixelRatio = 2
 
@@ -434,7 +434,6 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getHiddenNodeId: () => null,
       beforeDraw: () => undefined,
       isAnimating: () => false,
-      isInteracting: () => true,
     })
 
     loop.renderOnce(0)
@@ -447,12 +446,13 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
     expect(ctx.clearRect).toHaveBeenCalled()
 
-    expect(drawBaseGraph).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ interaction: true, interactionIntensity: 1 }),
-    )
+    const baseOpts = drawBaseGraph.mock.calls[0]?.[1] as any
+    expect(baseOpts?.interaction).toBeUndefined()
+    expect(baseOpts?.interactionIntensity).toBeUndefined()
 
-    expect(renderFxFrame).toHaveBeenCalledWith(expect.objectContaining({ interaction: true, interactionIntensity: 1 }))
+    const fxOpts = renderFxFrame.mock.calls[0]?.[0] as any
+    expect(fxOpts?.interaction).toBeUndefined()
+    expect(fxOpts?.interactionIntensity).toBeUndefined()
   })
 })
 

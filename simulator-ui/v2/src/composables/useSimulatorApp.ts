@@ -37,7 +37,6 @@ import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
 import { getFxConfig, intensityScale } from '../config/fxConfig'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
-import { createInteractionHold } from './interactionHold'
 import { createDemoActivityHold } from './demoActivityHold'
 
 export function useSimulatorApp() {
@@ -263,9 +262,6 @@ export function useSimulatorApp() {
   const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
   const hostEl = ref<HTMLDivElement | null>(null)
   const dragPreviewEl = ref<HTMLDivElement | null>(null)
-
-  // Interaction Quality: short hold window after user input to render without blur-heavy paths.
-  const interactionHold = createInteractionHold({ holdMs: 250 })
 
   // Demo UI: keep render loop awake around sporadic SSE/debug actions.
   const demoHold = createDemoActivityHold({ holdMs: 1200 })
@@ -608,8 +604,6 @@ export function useSimulatorApp() {
       isPhysicsRunning: () => physics.isRunning(),
       isDemoHoldActive: () => isDemoUi.value && demoHold.isWithinHoldWindow(),
     }),
-    isInteracting: () => interactionHold.isInteracting.value,
-    getInteractionIntensity: () => interactionHold.getIntensity(),
   })
 
   const fxState = fxAndRender.fxState
@@ -1191,7 +1185,6 @@ export function useSimulatorApp() {
   const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,
     wakeUp,
-    markInteraction: (markOpts) => interactionHold.markInteraction(markOpts),
     pickNodeAt,
     selectNode,
     setNodeCardOpen,
@@ -1200,10 +1193,6 @@ export function useSimulatorApp() {
     cameraSystem,
     edgeHover,
     getPanActive: () => panState.active,
-  })
-
-  onUnmounted(() => {
-    interactionHold.dispose()
   })
 
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {

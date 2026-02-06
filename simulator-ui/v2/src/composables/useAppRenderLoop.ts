@@ -31,15 +31,6 @@ export function useAppRenderLoop(opts: {
 
   // Optional: hint whether the scene is actively animating (pan/zoom, physics, playback).
   isAnimating?: () => boolean
-
-  // Optional: hint that the user is actively interacting (wheel/click/drag hold window).
-  isInteracting?: () => boolean
-
-  // Optional: smooth interaction intensity 0.0–1.0 with easing transitions.
-  getInteractionIntensity?: () => number
-
-  // Optional: hint that the browser is in software-only rendering mode.
-  isSoftwareMode?: () => boolean
 }) {
   const renderLoop = useRenderLoop({
     canvasEl: opts.canvasEl,
@@ -73,9 +64,6 @@ export function useAppRenderLoop(opts: {
     getHiddenNodeId: opts.getHiddenNodeId,
     beforeDraw: opts.beforeDraw,
     isAnimating: opts.isAnimating,
-    isInteracting: opts.isInteracting,
-    getInteractionIntensity: opts.getInteractionIntensity,
-    isSoftwareMode: opts.isSoftwareMode,
   })
 
   return {

@@ -121,18 +121,6 @@ type UseRenderLoopDeps = {
   // Optional: hint whether the scene is actively animating (physics, pan/zoom, demo playback).
   // When omitted, a conservative heuristic based on FX + flash is used.
   isAnimating?: () => boolean
-
-  // Optional: hint that the user is actively interacting (wheel/click/drag hold window).
-  // Used to enable Interaction Quality overrides.
-  isInteracting?: () => boolean
-
-  // Optional: smooth interaction intensity 0.0–1.0 with easing transitions.
-  // When provided, takes precedence over boolean isInteracting for quality decisions.
-  getInteractionIntensity?: () => number
-
-  // Optional: hint that the browser is in software-only rendering mode.
-  // Used to pick cheaper rendering paths that preserve aesthetics.
-  isSoftwareMode?: () => boolean
 }
 
 type UseRenderLoopReturn = {
@@ -373,11 +361,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     const camera = deps.getCamera()
     const userQuality: Quality = deps.isTestMode() ? 'high' : deps.getQuality()
 
-    const interacting = isInteractingNow()
-    const interactionIntensity = typeof deps.getInteractionIntensity === 'function'
-      ? deps.getInteractionIntensity()
-      : (interacting ? 1.0 : 0.0)
-    const activeForPerf = isAnimatingNow() || interacting
+    const activeForPerf = isAnimatingNow()
     updateAdaptivePerf(nowMs, activeForPerf, userQuality)
 
     // Adaptive DPR downscaling: adjust canvas pixel resolution before computing dpr.
@@ -388,8 +372,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       const baseClamp = baseDprClampForQuality(userQuality)
       let clamp = baseClamp
       if (adaptiveDprClamp !== null) clamp = Math.min(clamp, adaptiveDprClamp)
-      // DPR is NOT clamped during interaction anymore.
-      // Canvas resize creates a visible flash that is worse than the latency savings.
+      // Canvas resize creates a visible flash; avoid unnecessary DPR changes.
       const desiredDpr = Math.min(deviceDpr, clamp)
       ensureCanvasDpr(layout.w, layout.h, desiredDpr)
       ;(deps.fxState as any).__dprClamp = clamp
@@ -482,8 +465,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       activeNodes: deps.activeNodes,
       cameraZoom: camera.zoom,
       quality: renderQuality,
-      interaction: interacting,
-      interactionIntensity,
       linkLod,
       dragMode: linkLod === 'focus',
       hiddenNodeId: deps.getHiddenNodeId ? deps.getHiddenNodeId() : null,
@@ -501,8 +482,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       isTestMode: deps.isTestMode(),
       cameraZoom: camera.zoom,
       quality: renderQuality,
-      interaction: interacting,
-      interactionIntensity,
     })
 
     // Mark only after we've made it through the draw path (no early-return).
@@ -529,16 +508,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       // ignore
     }
     return hasActiveFxOrOverlays()
-  }
-
-  function isInteractingNow() {
-    if (deps.isTestMode()) return false
-    try {
-      if (typeof deps.isInteracting === 'function' && deps.isInteracting()) return true
-    } catch {
-      // ignore
-    }
-    return false
   }
 
   function updateAdaptivePerf(nowMs: number, isActive: boolean, baseQuality: Quality) {

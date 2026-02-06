@@ -46,10 +46,6 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   activeNodes?: Set<string>
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
-  /** Interaction Quality hint (legacy boolean). */
-  interaction?: boolean
-  /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
-  interactionIntensity?: number
   linkLod?: 'full' | 'focus'
   dragMode?: boolean
   hiddenNodeId?: string | null
@@ -63,10 +59,6 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
-  const intensity = opts.interactionIntensity ?? (opts.interaction ? 1.0 : 0.0)
-  // Keep selection/active visible even during interaction.
-  // (We no longer scale the glow with interaction intensity here; all glow is pre-baked sprites.)
-  const interaction = !!opts.interaction
 
   const pos = opts.pos ?? new Map<string, LayoutNode>()
   pos.clear()
@@ -224,8 +216,6 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       cameraZoom: z,
       quality: q,
       dragMode,
-      interaction,
-      interactionIntensity: intensity,
     })
   }
 

@@ -127,10 +127,6 @@ export function drawNodeShape(
     cameraZoom?: number
     quality?: 'low' | 'med' | 'high'
     dragMode?: boolean
-    /** Interaction Quality hint (legacy boolean). */
-    interaction?: boolean
-    /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
-    interactionIntensity?: number
   },
 ) {
   const { mapping } = opts
@@ -211,7 +207,6 @@ export function drawNodeShape(
   ctx.save()
   ctx.globalCompositeOperation = 'source-over'
   // Linear gradients are moderately expensive; keep them for high only.
-  // Gradients stay even during interaction — their visual absence is very noticeable.
   if (q === 'high') {
     const glassGrad = ctx.createLinearGradient(x, y, x + w, y + h)
     glassGrad.addColorStop(0, withAlpha(fill, 0.55))
