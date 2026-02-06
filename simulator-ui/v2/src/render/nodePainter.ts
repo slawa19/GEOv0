@@ -127,7 +127,6 @@ export function drawNodeShape(
     cameraZoom?: number
     quality?: 'low' | 'med' | 'high'
     dragMode?: boolean
-    softwareMode?: boolean
     /** Interaction Quality hint (legacy boolean). */
     interaction?: boolean
     /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
@@ -139,10 +138,9 @@ export function drawNodeShape(
   const invZ = 1 / z
   const px = (v: number) => v * invZ
   const q = opts.quality ?? 'high'
-  const baseBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
-  const intensity = opts.interactionIntensity ?? (opts.interaction ? 1.0 : 0.0)
-  const blurK = baseBlurK * (1 - intensity)
-  const softwareMode = !!opts.softwareMode
+  // Sprite glow quality scaling.
+  // (Even in low, we keep a modest glow for readability.)
+  const glowK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
   const fill = fillForNode(node, mapping)
   const { w: w0, h: h0 } = sizeForNode(node)
   const w = w0 * invZ
@@ -193,46 +191,21 @@ export function drawNodeShape(
 
   ctx.save()
 
-  // 1) Soft bloom (underlay) - "Holographic" glow
-  // shadowBlur cost scales with blurK — at intensity=1 blurK=0 so bloom is free (no-op).
-  {
-    if (softwareMode) {
-      // Pre-baked glow sprite: preserves the "soft" look but avoids per-frame blur cost.
-      // Use a modest glow even on low to keep nodes readable in software-only Chrome.
-      const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
-      drawGlowSprite(ctx, {
-        kind: 'bloom',
-        shape: isRoundedRect ? 'rounded-rect' : 'circle',
-        x: node.__x,
-        y: node.__y,
-        w,
-        h,
-        r,
-        rr,
-        color: fill,
-        blurPx: r * 1.5 * k,
-        lineWidthPx: 0,
-        composite: 'screen',
-      })
-    } else if (blurK > 0) {
-      ctx.save()
-      // Use screen blending for "light" effect against dark background
-      ctx.globalCompositeOperation = 'screen'
-      ctx.shadowColor = fill
-      ctx.shadowBlur = r * 1.5 * blurK // Wide soft glow
-      ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
-
-      if (isRoundedRect) {
-        roundedRectPath(ctx, x + px(2), y + px(2), w - px(4), h - px(4), rr)
-        ctx.fill()
-      } else {
-        ctx.beginPath()
-        ctx.arc(node.__x, node.__y, r * 0.8, 0, Math.PI * 2)
-        ctx.fill()
-      }
-      ctx.restore()
-    }
-  }
+  // 1) Glow sprite: bloom (underlay)
+  drawGlowSprite(ctx, {
+    kind: 'bloom',
+    shape: isRoundedRect ? 'rounded-rect' : 'circle',
+    x: node.__x,
+    y: node.__y,
+    w,
+    h,
+    r,
+    rr,
+    color: fill,
+    blurPx: r * 1.5 * glowK,
+    lineWidthPx: 0,
+    composite: 'screen',
+  })
 
   // 2) Body fill - Semi-transparent glass (Darker/More Solid now)
   ctx.save()
@@ -257,49 +230,28 @@ export function drawNodeShape(
   }
   ctx.restore()
 
-  // 3) Neon Rim - The define feature
+  // 3) Glow sprite: rim (outer)
   ctx.save()
   ctx.globalCompositeOperation = 'screen'
-  // Double stroke for "core + glow" effect
-  
-  // Outer glowy stroke
   const rimLineW = Math.max(px(2), r * 0.15)
-  if (softwareMode) {
-    const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
-    drawGlowSprite(ctx, {
-      kind: 'rim',
-      shape: isRoundedRect ? 'rounded-rect' : 'circle',
-      x: node.__x,
-      y: node.__y,
-      w,
-      h,
-      r,
-      rr,
-      color: fill,
-      blurPx: Math.max(px(2), r * 0.3) * k,
-      lineWidthPx: rimLineW,
-      composite: 'screen',
-    })
-  } else {
-    ctx.strokeStyle = withAlpha(fill, 0.6)
-    ctx.lineWidth = rimLineW
-    ctx.shadowColor = fill
-    ctx.shadowBlur = blurK > 0 ? Math.max(px(2), r * 0.3) * blurK : 0
-
-    if (isRoundedRect) {
-      roundedRectPath(ctx, x, y, w, h, rr)
-      ctx.stroke()
-    } else {
-      ctx.beginPath()
-      ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
-      ctx.stroke()
-    }
-  }
+  drawGlowSprite(ctx, {
+    kind: 'rim',
+    shape: isRoundedRect ? 'rounded-rect' : 'circle',
+    x: node.__x,
+    y: node.__y,
+    w,
+    h,
+    r,
+    rr,
+    color: fill,
+    blurPx: Math.max(px(2), r * 0.3) * glowK,
+    lineWidthPx: rimLineW,
+    composite: 'screen',
+  })
 
   // Inner bright core stroke (white-ish)
   ctx.strokeStyle = withAlpha('#ffffff', 0.9)
   ctx.lineWidth = Math.max(px(1), r * 0.05)
-  ctx.shadowBlur = 0 // Sharp core
   
   if (isRoundedRect) {
     roundedRectPath(ctx, x, y, w, h, rr)

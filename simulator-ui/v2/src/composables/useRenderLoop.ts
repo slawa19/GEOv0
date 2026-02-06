@@ -372,7 +372,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     const camera = deps.getCamera()
     const userQuality: Quality = deps.isTestMode() ? 'high' : deps.getQuality()
-    const softwareMode = !deps.isTestMode() && typeof deps.isSoftwareMode === 'function' ? !!deps.isSoftwareMode() : false
 
     const interacting = isInteractingNow()
     const interactionIntensity = typeof deps.getInteractionIntensity === 'function'
@@ -483,7 +482,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       activeNodes: deps.activeNodes,
       cameraZoom: camera.zoom,
       quality: renderQuality,
-      softwareMode,
       interaction: interacting,
       interactionIntensity,
       linkLod,

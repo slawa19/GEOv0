@@ -49,7 +49,16 @@ export function useSimulatorApp() {
   const isDemoFixtures = computed(() => String(import.meta.env.VITE_DEMO_FIXTURES ?? '1') === '1')
   const isTestMode = computed(() => String(import.meta.env.VITE_TEST_MODE ?? '0') === '1')
 
+  // Playwright sets navigator.webdriver=true.
+  // Use it to keep screenshot tests stable even if someone runs the dev server with VITE_TEST_MODE=1.
+  const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
+
+  const isE2eScreenshots = computed(() => isTestMode.value && isWebDriver)
+
   const apiMode = computed<'fixtures' | 'real'>(() => {
+    // E2E screenshot tests must be fully offline/deterministic.
+    // Force fixtures pipeline regardless of a developer's local `.env.local` (which may enable real mode).
+    if (isE2eScreenshots.value) return 'fixtures'
     try {
       const p = new URLSearchParams(window.location.search).get('mode')?.toLowerCase()
       if (p === 'real') return 'real'
@@ -68,10 +77,6 @@ export function useSimulatorApp() {
   })
 
   const isRealMode = computed(() => apiMode.value === 'real')
-
-  // Playwright sets navigator.webdriver=true. Use it to keep screenshot tests stable even if
-  // someone runs the dev server with VITE_TEST_MODE=1.
-  const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
 
   const isLocalhost =
     typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
@@ -269,6 +274,31 @@ export function useSimulatorApp() {
     demoHold.markDemoEvent()
   }
 
+  async function e2eTxOnce(): Promise<void> {
+    if (!isE2eScreenshots.value) return
+    // Offline deterministic action for Playwright screenshot tests.
+    // Render something visible on the *base* canvas (not FX canvas) by using active edge overlay.
+    const snap = state.snapshot
+    if (!snap || snap.links.length === 0) return
+    const l = snap.links[0]!
+    addActiveEdge(keyEdge(l.source, l.target), 1500)
+    // Also show an "active" node glow to make the scene change more robust.
+    addActiveNode(String(l.source), 1500)
+    addActiveNode(String(l.target), 1500)
+    wakeUp('animation')
+  }
+
+  async function e2eClearingOnce(): Promise<void> {
+    if (!isE2eScreenshots.value) return
+    // Offline deterministic clearing step.
+    // Use active nodes (clearing glow in baseGraph) instead of active edges (tx color policy).
+    const snap = state.snapshot
+    if (!snap || snap.nodes.length === 0) return
+    const ids = snap.nodes.slice(0, 4).map((n) => String(n.id))
+    for (const id of ids) addActiveNode(id, 1500)
+    wakeUp('animation')
+  }
+
   const snapshotIndex = useSnapshotIndex({
     getSnapshot: () => state.snapshot,
   })
@@ -283,7 +313,9 @@ export function useSimulatorApp() {
 
   const labelsLod = ref<LabelsLod>('selection')
   // Baseline default. Persisted prefs (if any) will override this on mount.
-  const quality = ref<Quality>('med')
+  // For Playwright screenshot tests we must use the exact visuals the snapshots were recorded with.
+  // (In particular: gradients + full glow sprites are enabled only on `high`.)
+  const quality = ref<Quality>(isE2eScreenshots.value ? 'high' : 'med')
 
   // If Chrome struggles even right after opening the page (e.g. ~1 FPS),
   // auto-downgrade quality to recover responsiveness.
@@ -432,6 +464,9 @@ export function useSimulatorApp() {
     quality,
     labelsLod,
     requestResizeAndLayout,
+    // E2E screenshots must not depend on a developer's localStorage (layout/quality prefs).
+    // Otherwise snapshots become machine-specific.
+    storage: isE2eScreenshots.value ? { getItem: () => null, setItem: () => undefined } : undefined,
   })
 
   function detectGpuAccelerationLikelyAvailable(): boolean {
@@ -1430,6 +1465,7 @@ export function useSimulatorApp() {
     isDemoUi,
     isTestMode,
     isWebDriver,
+    isE2eScreenshots,
 
     // real mode
     real,
@@ -1492,6 +1528,12 @@ export function useSimulatorApp() {
       busy: fxDebugBusy,
       runTxOnce: fxDebugTxOnce,
       runClearingOnce: fxDebugClearingOnce,
+    },
+
+    // E2E-only (offline) actions for screenshot tests
+    e2e: {
+      runTxOnce: e2eTxOnce,
+      runClearingOnce: e2eClearingOnce,
     },
 
     // selection + overlays

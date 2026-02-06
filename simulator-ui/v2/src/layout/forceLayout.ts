@@ -380,11 +380,12 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   const targetHalfH = safeHalfH * 0.92
 
   if (halfW > 1 && halfH > 1) {
-    const scaleX = Math.max(0.70, Math.min(2.20, targetHalfW / halfW))
-    const scaleY = Math.max(0.70, Math.min(2.20, targetHalfH / halfH))
+    // Keep aspect ratio: avoid stretching the whole layout to match viewport ratio.
+    // This is critical for stable Playwright snapshots.
+    const scale = Math.max(0.70, Math.min(2.20, Math.min(targetHalfW / halfW, targetHalfH / halfH)))
     for (let i = 0; i < n; i++) {
-      x[i] = cx + (x[i] - cx) * scaleX
-      y[i] = cy + (y[i] - cy) * scaleY
+      x[i] = cx + (x[i] - cx) * scale
+      y[i] = cy + (y[i] - cy) * scale
     }
   }
 

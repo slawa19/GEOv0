@@ -2,6 +2,7 @@ import type { GraphLink, GraphNode } from '../types'
 import type { LayoutLink } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
+import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
 import { drawNodeShape, fillForNode, sizeForNode, type LayoutNode } from './nodePainter'
 
@@ -45,7 +46,6 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   activeNodes?: Set<string>
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
-  softwareMode?: boolean
   /** Interaction Quality hint (legacy boolean). */
   interaction?: boolean
   /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
@@ -63,9 +63,9 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
-  const baseBlurK = q === 'high' ? 1 : 0
   const intensity = opts.interactionIntensity ?? (opts.interaction ? 1.0 : 0.0)
-  const blurK = baseBlurK * (1 - intensity)
+  // Keep selection/active visible even during interaction.
+  // (We no longer scale the glow with interaction intensity here; all glow is pre-baked sprites.)
   const interaction = !!opts.interaction
 
   const pos = opts.pos ?? new Map<string, LayoutNode>()
@@ -172,55 +172,23 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const r = Math.max(nw, nh) / 2
       const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
       
-      if (q === 'high' && blurK > 0.1) {
-        ctx.save()
-        ctx.globalCompositeOperation = 'screen' // Black stroke will disappear, only colored shadow remains
-
-        ctx.shadowColor = glow
-        ctx.shadowBlur = r * 1.2 * blurK
-        // Trick: Stroke is black (invisible in Screen mode), so we don't see a "hard" contour.
-        // But the shadow (glow) is drawn.
-        ctx.strokeStyle = '#000000'
-        ctx.lineWidth = Math.max(4 * invZ, r * 0.25) // keep minimum in screen-space
-        ctx.globalAlpha = 1.0
-
-        ctx.beginPath()
-        if (isRoundedRect) {
-          const offset = 0
-          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
-        } else {
-          const offset = 0
-          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
-        }
-        ctx.stroke()
-
-        // Optional: Second pass for "core" intensity closer to the node
-        ctx.shadowBlur = r * 0.4 * blurK
-        ctx.stroke()
-
-        ctx.restore()
-      } else {
-        // Med: keep selection visible but avoid CPU-heavy blur.
-        ctx.save()
-        ctx.globalCompositeOperation = 'source-over'
-        ctx.shadowBlur = 0
-        ctx.shadowColor = 'transparent'
-        ctx.strokeStyle = withAlpha(glow, 0.9)
-        ctx.lineWidth = Math.max(2.5 * invZ, r * 0.14)
-        ctx.globalAlpha = 1.0
-
-        ctx.beginPath()
-        if (isRoundedRect) {
-          const offset = Math.max(1.5 * invZ, r * 0.08)
-          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
-        } else {
-          const offset = Math.max(1.5 * invZ, r * 0.08)
-          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
-        }
-        ctx.stroke()
-
-        ctx.restore()
-      }
+      // Phase 1: selection glow via pre-rendered sprite (no on-screen shadowBlur).
+      // Keep minimum lineWidth similar to the previous high-quality stroke.
+      drawGlowSprite(ctx, {
+        kind: 'selection',
+        shape: isRoundedRect ? 'rounded-rect' : 'circle',
+        x: n.__x,
+        y: n.__y,
+        w: nw,
+        h: nh,
+        r,
+        rr,
+        color: glow,
+        // Match the previous outer blur ~= r*1.2 (core pass is baked in glowSprites).
+        blurPx: r * 1.2,
+        lineWidthPx: Math.max(4 * invZ, r * 0.25),
+        composite: 'screen',
+      })
     }
 
     if (isActiveNode && !isSelected && !dragMode) {
@@ -234,45 +202,21 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const r = Math.max(nw, nh) / 2
       const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
 
-      if (q === 'high' && blurK > 0.1) {
-        ctx.save()
-        ctx.globalCompositeOperation = 'screen'
-        ctx.shadowColor = glow
-        ctx.shadowBlur = r * 0.55 * blurK
-        ctx.strokeStyle = '#000000'
-        ctx.lineWidth = Math.max(3.0 * invZ, r * 0.18)
-        ctx.globalAlpha = 0.85
-
-        ctx.beginPath()
-        if (isRoundedRect) {
-          const offset = Math.max(1.2 * invZ, r * 0.05)
-          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
-        } else {
-          const offset = Math.max(1.2 * invZ, r * 0.05)
-          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
-        }
-        ctx.stroke()
-        ctx.restore()
-      } else {
-        ctx.save()
-        ctx.globalCompositeOperation = 'source-over'
-        ctx.shadowBlur = 0
-        ctx.shadowColor = 'transparent'
-        ctx.strokeStyle = withAlpha(glow, 0.65)
-        ctx.lineWidth = Math.max(2.2 * invZ, r * 0.12)
-        ctx.globalAlpha = 1.0
-
-        ctx.beginPath()
-        if (isRoundedRect) {
-          const offset = Math.max(1.2 * invZ, r * 0.05)
-          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
-        } else {
-          const offset = Math.max(1.2 * invZ, r * 0.05)
-          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
-        }
-        ctx.stroke()
-        ctx.restore()
-      }
+      // Phase 1: active glow via pre-rendered sprite (no on-screen shadowBlur).
+      drawGlowSprite(ctx, {
+        kind: 'active',
+        shape: isRoundedRect ? 'rounded-rect' : 'circle',
+        x: n.__x,
+        y: n.__y,
+        w: nw,
+        h: nh,
+        r,
+        rr,
+        color: glow,
+        blurPx: r * 0.55,
+        lineWidthPx: Math.max(3.0 * invZ, r * 0.18),
+        composite: 'screen',
+      })
     }
 
     drawNodeShape(ctx, n, {
@@ -280,7 +224,6 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       cameraZoom: z,
       quality: q,
       dragMode,
-      softwareMode: !!opts.softwareMode,
       interaction,
       interactionIntensity: intensity,
     })

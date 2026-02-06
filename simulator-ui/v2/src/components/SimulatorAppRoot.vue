@@ -22,6 +22,7 @@ const {
   isDemoUi,
   isTestMode,
   isWebDriver,
+  isE2eScreenshots,
 
   // real mode
   real,
@@ -54,6 +55,8 @@ const {
   showPerfOverlay,
   perf,
   fxDebug,
+
+  e2e,
 
   // selection + overlays
   isNodeCardOpen,
@@ -340,6 +343,12 @@ function toggleDemoUi() {
       :run-clearing-once="demoRunClearingOnce"
       :reset-view="resetView"
     />
+
+    <!-- E2E screenshot tests: minimal offline controls only (match stored snapshots) -->
+    <div v-else-if="isE2eScreenshots" class="hud-bottom">
+      <button class="btn" type="button" @click="e2e.runTxOnce">Single Tx</button>
+      <button class="btn" type="button" @click="e2e.runClearingOnce">Run Clearing</button>
+    </div>
 
     <FixturesHudBottom
       v-else-if="apiMode !== 'real'"
