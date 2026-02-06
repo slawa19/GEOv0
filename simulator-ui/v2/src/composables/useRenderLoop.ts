@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
+import { clearGradientCache } from '../render/gradientCache'
 
 type Quality = 'low' | 'med' | 'high'
 
@@ -207,11 +208,21 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     const pxW = Math.max(1, Math.floor(layoutW * dpr))
     const pxH = Math.max(1, Math.floor(layoutH * dpr))
 
+    // IMPORTANT: resizing canvas clears its bitmap and resets context state.
+    // Gradients are cached per-ctx; they must be invalidated on real resize / DPR changes.
+    const prevW = canvas.width
+    const prevH = canvas.height
+
     if (canvas.width !== pxW) canvas.width = pxW
     if (canvas.height !== pxH) canvas.height = pxH
 
     if (fxCanvas.width !== canvas.width) fxCanvas.width = canvas.width
     if (fxCanvas.height !== canvas.height) fxCanvas.height = canvas.height
+
+    if (canvas.width !== prevW || canvas.height !== prevH) {
+      const ctx = canvas.getContext('2d')
+      if (ctx) clearGradientCache(ctx)
+    }
   }
 
   function pruneFxToMaxParticles(maxParticles: number) {

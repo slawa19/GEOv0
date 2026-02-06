@@ -1,11 +1,17 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
+import { clearGradientCache } from '../render/gradientCache'
+
 import {
   __cachedPosHygiene,
   __pruneCachedPosToSnapshotNodes,
   __shouldClearCachedPosOnSnapshotChange,
   useRenderLoop,
 } from './useRenderLoop'
+
+vi.mock('../render/gradientCache', () => ({
+  clearGradientCache: vi.fn(),
+}))
 
 function makeCanvas(): HTMLCanvasElement {
   // Minimal canvas stub for renderLoop: getContext must exist.
@@ -453,6 +459,47 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     const fxOpts = renderFxFrame.mock.calls[0]?.[0] as any
     expect(fxOpts?.interaction).toBeUndefined()
     expect(fxOpts?.interactionIntensity).toBeUndefined()
+  })
+
+  it('resize invalidates gradient cache (clearGradientCache called only on real resize)', () => {
+    ;(clearGradientCache as any).mockClear?.()
+
+    const { canvas, ctx } = makeCanvasWithCtx()
+    const { canvas: fxCanvas } = makeCanvasWithCtx()
+
+    ;(globalThis as any).window.devicePixelRatio = 2
+
+    const loop = useRenderLoop({
+      canvasEl: { value: canvas } as any,
+      fxCanvasEl: { value: fxCanvas } as any,
+      getSnapshot: () => ({ generated_at: 't1', nodes: [], links: [], palette: {} } as any),
+      getLayout: () => ({ w: 100, h: 80, nodes: [], links: [] }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+      isTestMode: () => false,
+      getQuality: () => 'high',
+      getFlash: () => 0,
+      setFlash: () => undefined,
+      pruneFloatingLabels: () => undefined,
+      drawBaseGraph: () => ({}),
+      renderFxFrame: () => undefined,
+      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+      getSelectedNodeId: () => null,
+      activeEdges: new Set(),
+      getLinkLod: () => 'full',
+      getHiddenNodeId: () => null,
+      beforeDraw: () => undefined,
+      isAnimating: () => false,
+    })
+
+    // First render: canvas size changes => must invalidate.
+    loop.renderOnce(0)
+    expect(clearGradientCache).toHaveBeenCalledTimes(1)
+    expect(clearGradientCache).toHaveBeenCalledWith(ctx)
+
+    // Stable size: must NOT keep clearing.
+    loop.renderOnce(16)
+    expect(clearGradientCache).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -362,7 +362,8 @@ export function renderFxFrame(opts: {
   const q = opts.quality ?? 'high'
   // Keep the same visuals as before for each quality preset,
   // but remove Interaction Quality dependencies from the FX stack.
-  const shadowBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  // Low quality should still keep a minimal blur so FX sprites don't degrade into hard geometry.
+  const shadowBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.3
   // Gradients are always allowed (Phase 2 cleanup: remove dead branch).
 
   // Clear per-frame caches.

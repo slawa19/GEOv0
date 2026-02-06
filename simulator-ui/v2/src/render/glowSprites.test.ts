@@ -135,6 +135,31 @@ describe('render/glowSprites — unit', () => {
       },
     )
 
+    it('blurPx=0 produces a deterministic, finite key; sprite generation does not crash when 2D ctx exists', () => {
+      const o: any = {
+        kind: 'fx-dot',
+        color: '#aabbcc',
+        r: 12.34,
+        blurPx: 0,
+      }
+
+      const key1 = __testing.keyFor(o)
+      const key2 = __testing.keyFor({ ...o })
+
+      expect(key2).toBe(key1)
+      expect(key1).not.toContain('NaN')
+      expect(key1).not.toContain('Infinity')
+      expect(key1).not.toContain('undefined')
+
+      // Runtime part: only execute if Canvas 2D is available in the test environment.
+      // (In Node-only envs it may be missing; keyFor invariants must still be testable.)
+      const c = (globalThis as any).document?.createElement?.('canvas')
+      const ctx = c?.getContext?.('2d')
+      if (!ctx) return
+
+      expect(() => __testing._getGlowSprite(o)).not.toThrow()
+    })
+
     it.each(['bloom', 'rim', 'selection', 'active'] as const)(
       'includes kind and differentiates kinds (%s)',
       (kind) => {
