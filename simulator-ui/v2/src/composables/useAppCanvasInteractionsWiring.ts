@@ -1,12 +1,10 @@
 import { useCanvasInteractions, type CameraSystemLike, type DragToPinLike, type EdgeHoverLike } from './useCanvasInteractions'
 
-export type WakeUpSource = 'user' | 'animation'
-
 export function useAppCanvasInteractionsWiring(opts: {
   isTestMode: () => boolean
 
   // Wake up render loop on any user interaction that may affect visible state.
-  wakeUp?: (source?: WakeUpSource) => void
+  wakeUp?: () => void
 
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
   selectNode: (id: string | null) => void
@@ -30,31 +28,31 @@ export function useAppCanvasInteractionsWiring(opts: {
     getPanActive: opts.getPanActive,
   })
 
-  const wakeUp = (source?: WakeUpSource) => opts.wakeUp?.(source)
+  const wakeUp = () => opts.wakeUp?.()
 
   return {
     onCanvasClick: (ev: MouseEvent) => {
       // Click is an instant action; wake up so selection changes render immediately.
-      wakeUp('user')
+      wakeUp()
       canvasInteractions.onCanvasClick(ev)
     },
     onCanvasDblClick: (ev: MouseEvent) => {
       // Dblclick is an instant action; wake up so node-card changes render immediately.
-      wakeUp('user')
+      wakeUp()
       canvasInteractions.onCanvasDblClick(ev)
     },
     onCanvasPointerDown: (ev: PointerEvent) => {
       // Pointerdown starts an interaction; wake up so capture/drag state is reflected.
-      wakeUp('user')
+      wakeUp()
       canvasInteractions.onCanvasPointerDown(ev)
     },
     onCanvasPointerMove: (ev: PointerEvent) => {
-      wakeUp('user')
+      wakeUp()
       canvasInteractions.onCanvasPointerMove(ev)
     },
     onCanvasPointerUp: (ev: PointerEvent) => {
       // Pointerup ends an interaction; wake up so final state is rendered promptly.
-      wakeUp('user')
+      wakeUp()
       canvasInteractions.onCanvasPointerUp(ev)
     },
     onCanvasWheel: (ev: WheelEvent) => {

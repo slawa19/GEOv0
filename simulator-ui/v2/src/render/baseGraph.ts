@@ -215,7 +215,6 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       mapping,
       cameraZoom: z,
       quality: q,
-      dragMode,
     })
   }
 

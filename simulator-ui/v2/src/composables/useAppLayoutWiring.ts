@@ -32,7 +32,7 @@ export function useAppLayoutWiring(opts: {
   computeLayoutForMode: typeof import('../layout/forceLayout').computeLayoutForMode
 
   // Optional: notify render loop that layout/viewport changed.
-  wakeUp?: (source?: 'user' | 'animation') => void
+  wakeUp?: () => void
 }) {
   let computeLayoutImpl: ((snapshot: GraphSnapshot, w: number, h: number, mode: LayoutMode) => void) | null = null
 

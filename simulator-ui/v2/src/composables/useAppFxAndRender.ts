@@ -53,7 +53,7 @@ export function useAppFxAndRender(opts: {
 }) {
   // Late-bound: we create FX overlays first (they need timers), then create render loop,
   // then bind wakeUp so scheduled FX timers can wake the loop even after deep idle.
-  let wakeUp: ((source?: 'user' | 'animation') => void) | undefined
+  let wakeUp: (() => void) | undefined
 
   const fxOverlays = useAppFxOverlays<LayoutNode>({
     getLayoutNodeById: opts.getLayoutNodeById,

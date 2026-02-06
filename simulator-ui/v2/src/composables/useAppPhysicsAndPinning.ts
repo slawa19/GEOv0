@@ -10,7 +10,7 @@ export function useAppPhysicsAndPinning(deps: {
   getLayoutLinks: () => LayoutLink[]
   getQuality: () => 'low' | 'med' | 'high'
   getPinnedPos: () => Map<string, { x: number; y: number }>
-  wakeUp?: (source?: 'user' | 'animation') => void
+  wakeUp?: () => void
 
   // Pinning state
   pinnedPos: Map<string, { x: number; y: number }>

@@ -85,7 +85,7 @@ export function useSimulatorRealMode(opts: {
   clearingPlansById: Map<string, ClearingPlanEvent>
 
   // Optional: wake up render loop after snapshot/patch/FX updates.
-  wakeUp?: (source?: 'user' | 'animation') => void
+  wakeUp?: () => void
 
   // Optional: notify on any SSE event (used to keep Demo UI render loop awake).
   onAnySseEvent?: () => void

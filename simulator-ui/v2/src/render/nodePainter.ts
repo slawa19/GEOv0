@@ -2,18 +2,19 @@ import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
+import { getLinearGradient2Stops } from './gradientCache'
 import { drawGlowSprite } from './glowSprites'
 import { roundedRectPath } from './roundedRect'
 
 export type { LayoutNode } from '../types/layout'
 
 /* ------------------------------------------------------------------ */
-/*  Lightweight icon / badge helpers — cheap enough for drag fast-path */
+/*  Lightweight icon / badge helpers                                  */
 /* ------------------------------------------------------------------ */
 
 /**
  * Draw the node's inner icon (person silhouette or building silhouette).
- * Cost ≈ a few arc/rect calls, no blur/gradient — safe for drag mode.
+ * Cost ≈ a few arc/rect calls, no blur/gradient.
  */
 function drawNodeIcon(
   ctx: CanvasRenderingContext2D,
@@ -126,7 +127,6 @@ export function drawNodeShape(
     mapping: VizMapping
     cameraZoom?: number
     quality?: 'low' | 'med' | 'high'
-    dragMode?: boolean
   },
 ) {
   const { mapping } = opts
@@ -154,36 +154,10 @@ export function drawNodeShape(
   const y = node.__y - h / 2
   const rr = Math.max(0, Math.min(px(4), Math.min(w, h) * 0.18))
 
-  // Drag fast-path: keep visuals recognizable but avoid expensive shadows/gradients.
-  if (opts.dragMode) {
-    ctx.save()
-    ctx.globalCompositeOperation = 'source-over'
-    ctx.fillStyle = withAlpha(fill, 0.45)
-    if (isRoundedRect) {
-      roundedRectPath(ctx, x, y, w, h, rr)
-      ctx.fill()
-      ctx.strokeStyle = withAlpha('#ffffff', 0.7)
-      ctx.lineWidth = Math.max(px(1), r * 0.07)
-      roundedRectPath(ctx, x, y, w, h, rr)
-      ctx.stroke()
-    } else {
-      ctx.beginPath()
-      ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.strokeStyle = withAlpha('#ffffff', 0.7)
-      ctx.lineWidth = Math.max(px(1), r * 0.07)
-      ctx.beginPath()
-      ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
-      ctx.stroke()
-    }
-    // Icon & badge are cheap (a few arcs/rects) — keep them visible during drag.
-    drawNodeIcon(ctx, fill, node.__x, node.__y, w, h, r, isRoundedRect, 0.7)
-    if (node.viz_badge_key !== undefined && node.viz_badge_key !== null) {
-      drawNodeBadge(ctx, node.__x, node.__y, r, px)
-    }
-    ctx.restore()
-    return
-  }
+  // Phase 6: node painting should use a single path (drag & non-drag).
+  // TODO(phase-6.3): if perf becomes an issue, consider a *minimal* drag fallback
+  // that only skips the bloom sprite (keep fill/rim/core/icon/badge) instead of
+  // a separate "cheap shape" fast-path.
 
   ctx.save()
 
@@ -208,10 +182,17 @@ export function drawNodeShape(
   ctx.globalCompositeOperation = 'source-over'
   // Linear gradients are moderately expensive; keep them for high only.
   if (q === 'high') {
-    const glassGrad = ctx.createLinearGradient(x, y, x + w, y + h)
-    glassGrad.addColorStop(0, withAlpha(fill, 0.55))
-    glassGrad.addColorStop(1, withAlpha(fill, 0.25))
-    ctx.fillStyle = glassGrad
+    ctx.fillStyle = getLinearGradient2Stops(
+      ctx,
+      x,
+      y,
+      x + w,
+      y + h,
+      0,
+      withAlpha(fill, 0.55),
+      1,
+      withAlpha(fill, 0.25),
+    )
   } else {
     ctx.fillStyle = withAlpha(fill, 0.42)
   }

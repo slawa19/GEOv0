@@ -281,7 +281,7 @@ export function useSimulatorApp() {
     // Also show an "active" node glow to make the scene change more robust.
     addActiveNode(String(l.source), 1500)
     addActiveNode(String(l.target), 1500)
-    wakeUp('animation')
+    wakeUp()
   }
 
   async function e2eClearingOnce(): Promise<void> {
@@ -292,7 +292,7 @@ export function useSimulatorApp() {
     if (!snap || snap.nodes.length === 0) return
     const ids = snap.nodes.slice(0, 4).map((n) => String(n.id))
     for (const id of ids) addActiveNode(id, 1500)
-    wakeUp('animation')
+    wakeUp()
   }
 
   const snapshotIndex = useSnapshotIndex({
@@ -384,8 +384,8 @@ export function useSimulatorApp() {
   // code may want to wake the render loop. IMPORTANT: this must be a stable wrapper.
   // Some wirings capture the function reference at init-time; reassigning a `let wakeUp = ...`
   // later would not update the captured reference.
-  let wakeUpImpl: (source?: 'user' | 'animation') => void = () => undefined
-  const wakeUp = (source?: 'user' | 'animation') => wakeUpImpl(source)
+  let wakeUpImpl: () => void = () => undefined
+  const wakeUp = () => wakeUpImpl()
 
   const layoutWiring = useAppLayoutWiring({
     canvasEl,
@@ -1397,7 +1397,7 @@ export function useSimulatorApp() {
     markDemoActivity()
     fxDebugBusy.value = true
     try {
-      const runId = await ensureRunForFxDebug()
+      const runId = await ensureRunForFxDebugSerialized()
       await actionTxOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
         equivalent: effectiveEq.value,
         seed: `ui-fx-debug-tx:${Date.now()}`,
@@ -1414,7 +1414,7 @@ export function useSimulatorApp() {
     markDemoActivity()
     fxDebugBusy.value = true
     try {
-      const runId = await ensureRunForFxDebug()
+      const runId = await ensureRunForFxDebugSerialized()
       await actionClearingOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
         equivalent: effectiveEq.value,
         seed: `ui-fx-debug-clearing:${Date.now()}`,
@@ -1423,6 +1423,41 @@ export function useSimulatorApp() {
     } finally {
       fxDebugBusy.value = false
     }
+  }
+
+  // ── Demo UI: eager auto-bootstrap ────────────────────────────────────
+  // When Demo UI opens (?mode=real&ui=demo), automatically create a paused run
+  // in the background right after the initial scene finishes loading.
+  // This ensures "Single TX" / "Run Clearing" buttons respond instantly on
+  // first click — no heavy startRun() cascade that causes a visual "page reload".
+  //
+  // Serialization: `_ensureRunPromise` prevents concurrent bootstrap + user-click
+  // from racing and creating duplicate runs.
+  let _ensureRunPromise: Promise<string> | null = null
+
+  function ensureRunForFxDebugSerialized(): Promise<string> {
+    if (!_ensureRunPromise) {
+      _ensureRunPromise = ensureRunForFxDebug().finally(() => {
+        _ensureRunPromise = null
+      })
+    }
+    return _ensureRunPromise
+  }
+
+  if (isDemoUi.value && isRealMode.value) {
+    const stopAutoBootstrap = watch(
+      () => !state.loading && !!real.accessToken && !!real.selectedScenarioId && !real.runId,
+      async (ready) => {
+        if (!ready) return
+        stopAutoBootstrap()
+        try {
+          await ensureRunForFxDebugSerialized()
+        } catch {
+          // Best-effort: user can still trigger manually via button click.
+        }
+      },
+      { flush: 'post' },
+    )
   }
 
   const devHook = useGeoSimDevHookSetup({

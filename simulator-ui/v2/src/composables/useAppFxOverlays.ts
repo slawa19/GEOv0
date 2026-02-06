@@ -11,7 +11,7 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
 
   // Optional: called before any scheduled FX timer callback.
   // This is used to ensure the render loop is awake even after deep idle.
-  wakeUp?: (source?: 'user' | 'animation') => void
+  wakeUp?: () => void
 
   isWebDriver: () => boolean
   getLayoutNodes: () => N[]
