@@ -98,6 +98,7 @@ type UseRenderLoopDeps = {
 
   // Optional: keep overlay sets bounded over long sessions.
   pruneActiveEdges?: (nowMs: number) => void
+  pruneActiveNodes?: (nowMs: number) => void
 
   drawBaseGraph: (ctx: CanvasRenderingContext2D, opts: any) => any
   renderFxFrame: (opts: any) => void
@@ -106,6 +107,7 @@ type UseRenderLoopDeps = {
 
   getSelectedNodeId: () => string | null
   activeEdges: Set<string>
+  activeNodes?: Set<string>
 
   // Optional: reduce link drawing cost (used during drag).
   getLinkLod?: () => 'full' | 'focus'
@@ -120,6 +122,14 @@ type UseRenderLoopDeps = {
   // When omitted, a conservative heuristic based on FX + flash is used.
   isAnimating?: () => boolean
 
+  // Optional: hint that the user is actively interacting (wheel/click/drag hold window).
+  // Used to enable Interaction Quality overrides.
+  isInteracting?: () => boolean
+
+  // Optional: smooth interaction intensity 0.0–1.0 with easing transitions.
+  // When provided, takes precedence over boolean isInteracting for quality decisions.
+  getInteractionIntensity?: () => number
+
   // Optional: hint that the browser is in software-only rendering mode.
   // Used to pick cheaper rendering paths that preserve aesthetics.
   isSoftwareMode?: () => boolean
@@ -129,8 +139,12 @@ type UseRenderLoopReturn = {
   ensureRenderLoop: () => void
   stopRenderLoop: () => void
   renderOnce: (nowMs?: number) => void
-  /** Wake up from deep idle mode. Call on user interaction or animation events. */
-  wakeUp: () => void
+  /**
+   * Wake up from deep idle mode. Call on user interaction or animation events.
+   * @param source - 'user' skips warmup period (adaptive quality can downgrade immediately).
+   *                 'animation' (or omitted) keeps warmupMs=2000 as before.
+   */
+  wakeUp: (source?: 'user' | 'animation') => void
 }
 
 // Deep idle: stop render loop completely after this delay (ms) with no activity.
@@ -243,6 +257,9 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
   // Track when activity started (for warmup period — don't downgrade quality immediately).
   let activityStartedAtMs = 0
+
+  // Track the last wakeUp source: 'user' skips warmup, 'animation' keeps warmupMs.
+  let lastWakeSource: 'user' | 'animation' = 'animation'
 
   function clamp01(v: number) {
     return Math.max(0, Math.min(1, v))
@@ -357,7 +374,11 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     const userQuality: Quality = deps.isTestMode() ? 'high' : deps.getQuality()
     const softwareMode = !deps.isTestMode() && typeof deps.isSoftwareMode === 'function' ? !!deps.isSoftwareMode() : false
 
-    const activeForPerf = isAnimatingNow()
+    const interacting = isInteractingNow()
+    const interactionIntensity = typeof deps.getInteractionIntensity === 'function'
+      ? deps.getInteractionIntensity()
+      : (interacting ? 1.0 : 0.0)
+    const activeForPerf = isAnimatingNow() || interacting
     updateAdaptivePerf(nowMs, activeForPerf, userQuality)
 
     // Adaptive DPR downscaling: adjust canvas pixel resolution before computing dpr.
@@ -366,7 +387,10 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       const win = typeof window !== 'undefined' ? window : (globalThis as any)
       const deviceDpr = Math.max(1, Number(win.devicePixelRatio ?? 1))
       const baseClamp = baseDprClampForQuality(userQuality)
-      const clamp = adaptiveDprClamp !== null ? Math.min(baseClamp, adaptiveDprClamp) : baseClamp
+      let clamp = baseClamp
+      if (adaptiveDprClamp !== null) clamp = Math.min(clamp, adaptiveDprClamp)
+      // DPR is NOT clamped during interaction anymore.
+      // Canvas resize creates a visible flash that is worse than the latency savings.
       const desiredDpr = Math.min(deviceDpr, clamp)
       ensureCanvasDpr(layout.w, layout.h, desiredDpr)
       ;(deps.fxState as any).__dprClamp = clamp
@@ -421,6 +445,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (deps.beforeDraw) deps.beforeDraw(nowMs)
 
     if (deps.pruneActiveEdges) deps.pruneActiveEdges(nowMs)
+    if (deps.pruneActiveNodes) deps.pruneActiveNodes(nowMs)
     deps.pruneFloatingLabels(nowMs)
 
     // FX hard cap:
@@ -455,9 +480,12 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       palette: snap.palette,
       selectedNodeId: deps.getSelectedNodeId(),
       activeEdges: deps.activeEdges,
+      activeNodes: deps.activeNodes,
       cameraZoom: camera.zoom,
       quality: renderQuality,
       softwareMode,
+      interaction: interacting,
+      interactionIntensity,
       linkLod,
       dragMode: linkLod === 'focus',
       hiddenNodeId: deps.getHiddenNodeId ? deps.getHiddenNodeId() : null,
@@ -475,6 +503,8 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       isTestMode: deps.isTestMode(),
       cameraZoom: camera.zoom,
       quality: renderQuality,
+      interaction: interacting,
+      interactionIntensity,
     })
 
     // Mark only after we've made it through the draw path (no early-return).
@@ -484,6 +514,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   function hasActiveFxOrOverlays() {
     if (deps.getFlash() > 0) return true
     if (deps.activeEdges && deps.activeEdges.size > 0) return true
+    if (deps.activeNodes && deps.activeNodes.size > 0) return true
 
     const fxState = deps.fxState as any
     const sparks = Array.isArray(fxState?.sparks) ? fxState.sparks.length : 0
@@ -500,6 +531,16 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       // ignore
     }
     return hasActiveFxOrOverlays()
+  }
+
+  function isInteractingNow() {
+    if (deps.isTestMode()) return false
+    try {
+      if (typeof deps.isInteracting === 'function' && deps.isInteracting()) return true
+    } catch {
+      // ignore
+    }
+    return false
   }
 
   function updateAdaptivePerf(nowMs: number, isActive: boolean, baseQuality: Quality) {
@@ -531,6 +572,9 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
         fxBudgetScale = 1
         activityEndedAtMs = 0
+
+        // Reset wake source so the next activity period gets default warmup.
+        lastWakeSource = 'animation'
       }
       return
     }
@@ -542,7 +586,8 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     }
 
     // During warmup period, don't allow quality/DPR downgrades (short FX bursts shouldn't trigger changes).
-    const inWarmup = nowMs - activityStartedAtMs < warmupMs
+    // User-initiated wakes skip warmup so adaptive quality can respond immediately.
+    const inWarmup = lastWakeSource === 'user' ? false : nowMs - activityStartedAtMs < warmupMs
 
     if (fpsSampleStartedAtMs === 0) {
       fpsSampleStartedAtMs = nowMs
@@ -717,13 +762,23 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
    * - Simulation starts
    * - Any animation event occurs
    * - User interacts with the canvas (mouse/touch)
+   *
+   * @param source - 'user' skips warmup period; 'animation' (default) keeps warmupMs.
    */
-  function wakeUp() {
+  function wakeUp(source?: 'user' | 'animation') {
     const win = typeof window !== 'undefined' ? window : (globalThis as any)
     const nowMs = win.performance?.now?.() ?? Date.now()
 
     lastActivityTime = nowMs
     lastActiveAtMs = nowMs
+
+    // Track source so updateAdaptivePerf can skip warmup for user-initiated wakes.
+    if (source === 'user') {
+      lastWakeSource = 'user'
+    } else if (source === 'animation') {
+      lastWakeSource = 'animation'
+    }
+    // When source is undefined, keep whatever was set last (conservative default).
 
     // If the loop isn't enabled (explicitly stopped via stopRenderLoop), don't restart it.
     if (!running) return

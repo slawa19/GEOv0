@@ -387,6 +387,7 @@ if ($ResetDb) {
 }
 
 Write-Host "[3/8] Starting Backend (uvicorn on port $BackendPort)..." -ForegroundColor Yellow
+$env:SIMULATOR_ACTIONS_ENABLE = '1'
 $backendCmd = "`"$Python`" -m uvicorn app.main:app --host 127.0.0.1 --port $BackendPort"
 $backendStartArgs = @('/c', 'start', '/b', 'cmd', '/c', $backendCmd)
 $null = Start-Process -FilePath 'cmd.exe' -ArgumentList $backendStartArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle

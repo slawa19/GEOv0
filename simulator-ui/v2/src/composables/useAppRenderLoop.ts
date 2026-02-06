@@ -18,17 +18,25 @@ export function useAppRenderLoop(opts: {
   getFlash: () => number
   setFlash: (v: number) => void
   pruneActiveEdges: (nowMs: number) => void
+  pruneActiveNodes: (nowMs: number) => void
   pruneFloatingLabels: (nowMs: number) => void
   mapping: VizMapping
   fxState: FxState
   getSelectedNodeId: () => string | null
   activeEdges: Set<string>
+  activeNodes: Set<string>
   getLinkLod: () => 'focus' | 'full'
   getHiddenNodeId: () => string | null
   beforeDraw: () => void
 
   // Optional: hint whether the scene is actively animating (pan/zoom, physics, playback).
   isAnimating?: () => boolean
+
+  // Optional: hint that the user is actively interacting (wheel/click/drag hold window).
+  isInteracting?: () => boolean
+
+  // Optional: smooth interaction intensity 0.0–1.0 with easing transitions.
+  getInteractionIntensity?: () => number
 
   // Optional: hint that the browser is in software-only rendering mode.
   isSoftwareMode?: () => boolean
@@ -52,6 +60,7 @@ export function useAppRenderLoop(opts: {
     getFlash: opts.getFlash,
     setFlash: opts.setFlash,
     pruneActiveEdges: opts.pruneActiveEdges,
+    pruneActiveNodes: opts.pruneActiveNodes,
     pruneFloatingLabels: opts.pruneFloatingLabels,
     drawBaseGraph,
     renderFxFrame,
@@ -59,10 +68,13 @@ export function useAppRenderLoop(opts: {
     fxState: opts.fxState,
     getSelectedNodeId: opts.getSelectedNodeId,
     activeEdges: opts.activeEdges,
+    activeNodes: opts.activeNodes,
     getLinkLod: opts.getLinkLod,
     getHiddenNodeId: opts.getHiddenNodeId,
     beforeDraw: opts.beforeDraw,
     isAnimating: opts.isAnimating,
+    isInteracting: opts.isInteracting,
+    getInteractionIntensity: opts.getInteractionIntensity,
     isSoftwareMode: opts.isSoftwareMode,
   })
 

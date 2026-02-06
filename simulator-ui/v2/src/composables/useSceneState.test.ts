@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import type { DemoEvent, GraphSnapshot } from '../types'
+import type { GraphSnapshot } from '../types'
 import { useSceneState } from './useSceneState'
 
 function makeSnapshot(): GraphSnapshot {
@@ -13,9 +13,9 @@ function makeSnapshot(): GraphSnapshot {
 }
 
 describe('useSceneState', () => {
-  it('loadScene loads snapshot and demo tx events for Scene D', async () => {
+  it('loadScene loads snapshot and updates state', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C' | 'D' | 'E'>('D')
+    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -23,27 +23,14 @@ describe('useSceneState', () => {
       loading: false,
       error: '',
       sourcePath: '',
-      eventsPath: '',
       snapshot: null as GraphSnapshot | null,
-      demoTxEvents: [] as any[],
-      demoClearingPlan: null,
-      demoClearingDone: null,
       selectedNodeId: 'A' as string | null,
     })
 
     const snapshot = makeSnapshot()
     const loadSnapshot = vi.fn(async () => ({ snapshot, sourcePath: 'snap.json' }))
 
-    const events: DemoEvent[] = [
-      { event_id: '1', ts: 't', type: 'tx.updated', equivalent: 'UAH', ttl_ms: 1, edges: [{ from: 'A', to: 'B' }] },
-      { event_id: '2', ts: 't', type: 'clearing.plan', equivalent: 'UAH', plan_id: 'p', steps: [] },
-    ]
-    const loadEvents = vi.fn(async () => ({ events, sourcePath: 'events.json' }))
-
-    const assertPlaylistEdgesExistInSnapshot = vi.fn()
-
     const clearScheduledTimeouts = vi.fn()
-    const resetPlaylistPointers = vi.fn()
     const resetCamera = vi.fn()
     const resetLayoutKeyCache = vi.fn()
     const resetOverlays = vi.fn()
@@ -62,10 +49,7 @@ describe('useSceneState', () => {
       effectiveEq,
       state,
       loadSnapshot,
-      loadEvents,
-      assertPlaylistEdgesExistInSnapshot,
       clearScheduledTimeouts,
-      resetPlaylistPointers,
       resetCamera,
       resetLayoutKeyCache,
       resetOverlays,
@@ -80,16 +64,13 @@ describe('useSceneState', () => {
 
     expect(state.snapshot).toEqual(snapshot)
     expect(state.sourcePath).toBe('snap.json')
-    expect(state.eventsPath).toBe('events.json')
-    expect(state.demoTxEvents).toHaveLength(1)
-    expect(assertPlaylistEdgesExistInSnapshot).toHaveBeenCalledTimes(1)
     expect(resizeAndLayout).toHaveBeenCalledTimes(1)
     expect(ensureRenderLoop).toHaveBeenCalledTimes(1)
   })
 
-  it('loadScene loads clearing plan/done for Scene E', async () => {
+  it('loadScene skips expensive resets for incremental update (same node IDs)', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C' | 'D' | 'E'>('E')
+    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -97,22 +78,22 @@ describe('useSceneState', () => {
       loading: false,
       error: '',
       sourcePath: '',
-      eventsPath: '',
       snapshot: null as GraphSnapshot | null,
-      demoTxEvents: [] as any[],
-      demoClearingPlan: null as any,
-      demoClearingDone: null as any,
-      selectedNodeId: 'A' as string | null,
+      selectedNodeId: null as string | null,
     })
 
-    const snapshot = makeSnapshot()
-    const loadSnapshot = vi.fn(async () => ({ snapshot, sourcePath: 'snap.json' }))
+    const snapshot1 = makeSnapshot()
+    const snapshot2: GraphSnapshot = { ...snapshot1, generated_at: '2026-01-25T00:00:01Z' }
+    const loadSnapshot = vi.fn()
+    loadSnapshot.mockResolvedValueOnce({ snapshot: snapshot1, sourcePath: 'snap1.json' })
+    loadSnapshot.mockResolvedValueOnce({ snapshot: snapshot2, sourcePath: 'snap2.json' })
 
-    const events: DemoEvent[] = [
-      { event_id: 'p', ts: 't', type: 'clearing.plan', equivalent: 'UAH', plan_id: 'p', steps: [] },
-      { event_id: 'd', ts: 't', type: 'clearing.done', equivalent: 'UAH', plan_id: 'p' },
-    ]
-    const loadEvents = vi.fn(async () => ({ events, sourcePath: 'events.json' }))
+    const clearScheduledTimeouts = vi.fn()
+    const resetCamera = vi.fn()
+    const resetLayoutKeyCache = vi.fn()
+    const resetOverlays = vi.fn()
+    const resizeAndLayout = vi.fn()
+    const ensureRenderLoop = vi.fn()
 
     const s = useSceneState({
       eq,
@@ -123,30 +104,33 @@ describe('useSceneState', () => {
       effectiveEq,
       state,
       loadSnapshot,
-      loadEvents,
-      assertPlaylistEdgesExistInSnapshot: vi.fn(),
-      clearScheduledTimeouts: vi.fn(),
-      resetPlaylistPointers: vi.fn(),
-      resetCamera: vi.fn(),
-      resetLayoutKeyCache: vi.fn(),
-      resetOverlays: vi.fn(),
-      resizeAndLayout: vi.fn(),
-      ensureRenderLoop: vi.fn(),
+      clearScheduledTimeouts,
+      resetCamera,
+      resetLayoutKeyCache,
+      resetOverlays,
+      resizeAndLayout,
+      ensureRenderLoop,
       setupResizeListener: vi.fn(),
       teardownResizeListener: vi.fn(),
       stopRenderLoop: vi.fn(),
     })
 
     await s.loadScene()
+    expect(resetCamera).toHaveBeenCalledTimes(1)
+    expect(resetOverlays).toHaveBeenCalledTimes(1)
+    expect(resetLayoutKeyCache).toHaveBeenCalledTimes(1)
 
-    expect(state.demoClearingPlan?.type).toBe('clearing.plan')
-    expect(state.demoClearingDone?.type).toBe('clearing.done')
-    expect(loadEvents).toHaveBeenCalledWith('UAH', 'demo-clearing')
+    await s.loadScene()
+    // incremental update => no expensive resets
+    expect(resetCamera).toHaveBeenCalledTimes(1)
+    expect(resetOverlays).toHaveBeenCalledTimes(1)
+    expect(resetLayoutKeyCache).toHaveBeenCalledTimes(1)
+    expect(ensureRenderLoop).toHaveBeenCalledTimes(2)
   })
 
   it('setup applies allow-listed eq and focuses existing node from URL', async () => {
     const eq = ref('UAH')
-    const scene = ref<'A' | 'B' | 'C' | 'D' | 'E'>('A')
+    const scene = ref<'A' | 'B' | 'C'>('A')
     const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
     const effectiveEq = computed(() => eq.value)
 
@@ -154,11 +138,7 @@ describe('useSceneState', () => {
       loading: false,
       error: '',
       sourcePath: '',
-      eventsPath: '',
       snapshot: null as GraphSnapshot | null,
-      demoTxEvents: [] as any[],
-      demoClearingPlan: null,
-      demoClearingDone: null,
       selectedNodeId: null as string | null,
     })
 
@@ -179,10 +159,7 @@ describe('useSceneState', () => {
         effectiveEq,
         state,
         loadSnapshot,
-        loadEvents: vi.fn(async () => ({ events: [], sourcePath: 'events.json' })),
-        assertPlaylistEdgesExistInSnapshot: vi.fn(),
         clearScheduledTimeouts: vi.fn(),
-        resetPlaylistPointers: vi.fn(),
         resetCamera: vi.fn(),
         resetLayoutKeyCache: vi.fn(),
         resetOverlays: vi.fn(),

@@ -1,6 +1,5 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { loadEvents as loadEventsFixtures, loadSnapshot as loadSnapshotFixtures } from '../fixtures'
-import { assertPlaylistEdgesExistInSnapshot } from '../demo/playlistValidation'
+import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode, sizeForNode } from '../render/nodePainter'
 import type { ClearingDoneEvent, ClearingPlanEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
@@ -13,11 +12,11 @@ import { fnv1a } from '../utils/hash'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 
-import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
+import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
+import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 
-import { useAppDemoPlayerSetup } from './useAppDemoPlayerSetup'
 import { useAppLifecycle } from './useAppLifecycle'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
 import { useLabelNodes } from './useLabelNodes'
@@ -26,7 +25,6 @@ import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
 import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
 import { useNodeSelectionAndCardOpen } from './useNodeSelectionAndCardOpen'
-import { useAppSceneAndDemo } from './useAppSceneAndDemo'
 import { useAppPickingAndHover } from './useAppPickingAndHover'
 import { useAppFxAndRender } from './useAppFxAndRender'
 import { useAppPhysicsAndPinningWiring } from './useAppPhysicsAndPinningWiring'
@@ -35,8 +33,12 @@ import { useAppDragToPinWiring } from './useAppDragToPinWiring'
 import { useAppCanvasInteractionsWiring } from './useAppCanvasInteractionsWiring'
 import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
+import { useAppSceneState } from './useAppSceneState'
+import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
 import { getFxConfig, intensityScale } from '../config/fxConfig'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
+import { createInteractionHold } from './interactionHold'
+import { createDemoActivityHold } from './demoActivityHold'
 
 export function useSimulatorApp() {
   const eq = ref('UAH')
@@ -47,16 +49,22 @@ export function useSimulatorApp() {
   const isDemoFixtures = computed(() => String(import.meta.env.VITE_DEMO_FIXTURES ?? '1') === '1')
   const isTestMode = computed(() => String(import.meta.env.VITE_TEST_MODE ?? '0') === '1')
 
-  const apiMode = computed<'demo' | 'real'>(() => {
+  const apiMode = computed<'fixtures' | 'real'>(() => {
     try {
       const p = new URLSearchParams(window.location.search).get('mode')?.toLowerCase()
       if (p === 'real') return 'real'
-      if (p === 'demo') return 'demo'
+      if (p === 'fixtures') return 'fixtures'
+      // Backward-compat: legacy param value.
+      if (p === 'demo') return 'fixtures'
     } catch {
       // ignore
     }
     const env = String(import.meta.env.VITE_API_MODE ?? '').trim().toLowerCase()
-    return env === 'real' ? 'real' : 'demo'
+    if (env === 'real') return 'real'
+    if (env === 'fixtures') return 'fixtures'
+    if (env === 'demo') return 'fixtures'
+    // Default to fixtures so UI can run without backend by default.
+    return 'fixtures'
   })
 
   const isRealMode = computed(() => apiMode.value === 'real')
@@ -67,6 +75,30 @@ export function useSimulatorApp() {
 
   const isLocalhost =
     typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+
+  const isFxDebugEnabled = computed(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+
+      // Demo UI implies FX Debug should be available (backend-driven, canonical SSE pipeline).
+      const ui = String(sp.get('ui') ?? '').toLowerCase()
+      if (ui === 'demo') return true
+
+      const p = sp.get('debug')
+      return p === '1' || String(p || '').toLowerCase() === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  const isDemoUi = computed(() => {
+    try {
+      const ui = String(new URLSearchParams(window.location.search).get('ui') ?? '').toLowerCase()
+      return ui === 'demo'
+    } catch {
+      return false
+    }
+  })
 
   const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100'
 
@@ -93,11 +125,7 @@ export function useSimulatorApp() {
     loading: true,
     error: '',
     sourcePath: '',
-    eventsPath: '',
     snapshot: null,
-    demoTxEvents: [],
-    demoClearingPlan: null,
-    demoClearingDone: null,
     selectedNodeId: null,
     flash: 0,
   })
@@ -231,6 +259,16 @@ export function useSimulatorApp() {
   const hostEl = ref<HTMLDivElement | null>(null)
   const dragPreviewEl = ref<HTMLDivElement | null>(null)
 
+  // Interaction Quality: short hold window after user input to render without blur-heavy paths.
+  const interactionHold = createInteractionHold({ holdMs: 250 })
+
+  // Demo UI: keep render loop awake around sporadic SSE/debug actions.
+  const demoHold = createDemoActivityHold({ holdMs: 1200 })
+  function markDemoActivity() {
+    if (!isDemoUi.value) return
+    demoHold.markDemoEvent()
+  }
+
   const snapshotIndex = useSnapshotIndex({
     getSnapshot: () => state.snapshot,
   })
@@ -299,7 +337,6 @@ export function useSimulatorApp() {
   let getCameraZoomSafe = () => 1
   const uiDerived = useAppUiDerivedState({
     eq,
-    scene,
     quality,
     apiMode,
     isDemoFixtures,
@@ -310,7 +347,6 @@ export function useSimulatorApp() {
 
   const effectiveEq = uiDerived.effectiveEq
   const dprClamp = uiDerived.dprClamp
-  const showDemoControls = uiDerived.showDemoControls
   const showResetView = uiDerived.showResetView
   const overlayLabelScale = uiDerived.overlayLabelScale
 
@@ -320,8 +356,8 @@ export function useSimulatorApp() {
   // code may want to wake the render loop. IMPORTANT: this must be a stable wrapper.
   // Some wirings capture the function reference at init-time; reassigning a `let wakeUp = ...`
   // later would not update the captured reference.
-  let wakeUpImpl: () => void = () => undefined
-  const wakeUp = () => wakeUpImpl()
+  let wakeUpImpl: (source?: 'user' | 'animation') => void = () => undefined
+  const wakeUp = (source?: 'user' | 'animation') => wakeUpImpl(source)
 
   const layoutWiring = useAppLayoutWiring({
     canvasEl,
@@ -352,6 +388,44 @@ export function useSimulatorApp() {
   const layoutLinkMap = layoutIndexHelpers.layoutLinkMap
   const selectedIncidentEdgeKeys = layoutIndexHelpers.selectedIncidentEdgeKeys
   const getLayoutNodeById = layoutIndexHelpers.getLayoutNodeById
+
+  function syncLayoutFromSnapshot(snapshot: GraphSnapshot) {
+    // Layout nodes/links are copies (see forceLayout.ts spreads base objects).
+    // When the scene loader decides an update is incremental (same node IDs), it may skip relayout.
+    // In that case we must sync viz fields into the existing layout objects used for rendering.
+    const snapNodeById = new Map(snapshot.nodes.map((n) => [n.id, n] as const))
+    for (const n of layout.nodes as any[]) {
+      const src = snapNodeById.get(String(n.id))
+      if (!src) continue
+      n.name = src.name
+      n.type = src.type
+      n.status = src.status
+      n.links_count = src.links_count
+      n.net_balance_atoms = src.net_balance_atoms
+      n.net_sign = src.net_sign
+      n.net_balance = src.net_balance
+      n.viz_color_key = src.viz_color_key
+      n.viz_shape_key = src.viz_shape_key
+      n.viz_size = src.viz_size
+      n.viz_badge_key = src.viz_badge_key
+    }
+
+    const snapLinkByKey = new Map(snapshot.links.map((l) => [keyEdge(l.source, l.target), l] as const))
+    for (const l of layout.links as any[]) {
+      const k = String(l.__key ?? keyEdge(String(l.source), String(l.target)))
+      const src = snapLinkByKey.get(k)
+      if (!src) continue
+      l.trust_limit = src.trust_limit
+      l.used = src.used
+      l.available = src.available
+      l.status = src.status
+      l.viz_color_key = src.viz_color_key
+      l.viz_width_key = src.viz_width_key
+      l.viz_alpha_key = src.viz_alpha_key
+    }
+
+    wakeUp()
+  }
 
   const persistedPrefs = usePersistedSimulatorPrefs({
     layoutMode,
@@ -419,6 +493,8 @@ export function useSimulatorApp() {
     getLayoutW: () => layout.w,
     getLayoutH: () => layout.h,
     isTestMode: () => isTestMode.value,
+    // Wake up render loop after camera changes are actually applied (wheel batches).
+    onCameraChanged: wakeUp,
     setClampCameraPan: (fn) => layoutCoordinator.setClampCameraPan(fn),
     selectedNodeId: computed({
       get: () => state.selectedNodeId,
@@ -495,10 +571,10 @@ export function useSimulatorApp() {
     },
     isAnimating: createSimulatorIsAnimating({
       isPhysicsRunning: () => physics.isRunning(),
-      isDemoHoldActive: () => demoActivity.isWithinHoldWindow(),
-      // Intentionally ignored: demo playback should NOT keep the loop at 60fps.
-      getPlaylistPlaying: () => demoPlayerSetup.playlist.playing,
+      isDemoHoldActive: () => isDemoUi.value && demoHold.isWithinHoldWindow(),
     }),
+    isInteracting: () => interactionHold.isInteracting.value,
+    getInteractionIntensity: () => interactionHold.getIntensity(),
   })
 
   const fxState = fxAndRender.fxState
@@ -507,6 +583,9 @@ export function useSimulatorApp() {
   const activeEdges = fxAndRender.activeEdges
   const addActiveEdge = fxAndRender.addActiveEdge
   const pruneActiveEdges = fxAndRender.pruneActiveEdges
+  const activeNodes = fxAndRender.activeNodes
+  const addActiveNode = fxAndRender.addActiveNode
+  const pruneActiveNodes = fxAndRender.pruneActiveNodes
   const pushFloatingLabel = fxAndRender.pushFloatingLabel
   const resetOverlays = fxAndRender.resetOverlays
   const floatingLabelsViewFx = fxAndRender.floatingLabelsViewFx
@@ -601,34 +680,7 @@ export function useSimulatorApp() {
     physics,
   })
 
-  const demoPlayerSetup = useAppDemoPlayerSetup({
-    getSnapshot: () => state.snapshot,
-    getLayoutNodes: () => layout.nodes,
-    getLayoutLinks: () => layout.links,
-    getLayoutNodeById: (id) => getLayoutNodeById(id) ?? undefined,
-    fxState,
-    pushFloatingLabel,
-    setFlash: (v) => {
-      state.flash = v
-    },
-    resetOverlays,
-    fxColorForNode,
-    addActiveEdge,
-    scheduleTimeout,
-    clearScheduledTimeouts,
-    isTestMode: () => isTestMode.value,
-    isWebDriver,
-    effectiveEq: () => effectiveEq.value,
-    wakeUp: () => wakeUp(),
-  })
-
-  const demoPlayer = demoPlayerSetup.demoPlayer
-  const playlist = demoPlayerSetup.playlist
-  const demoActivity = demoPlayerSetup.demoActivity
-
-  // Real-mode tx visuals must be independent from demoPlayer.
-  // demoPlayer.runTxEvent() ends with resetOverlays(), which clears FX and can make
-  // sparks effectively invisible under steady SSE.
+  // Real-mode TX visuals must be independent from any offline/demo playback.
   type RealTxFxConfig = {
     ratePerSec: number
     burst: number
@@ -834,6 +886,20 @@ export function useSimulatorApp() {
       for (const e of cycleEdges) allPlanEdges.push({ from: e.from, to: e.to })
     }
 
+    const maxAt = Math.max(
+      0,
+      ...((plan.steps ?? [])
+        .map((s) => Number(s.at_ms ?? 0))
+        .filter((v) => Number.isFinite(v))),
+    )
+    const planFxTtlMs = Math.max(1500, Math.min(30_000, maxAt + 2500))
+
+    // Clearing Viz v2: highlight all nodes in the cycle during the plan phase.
+    if (allPlanEdges.length > 0) {
+      const nodeIds = nodesFromEdges(allPlanEdges)
+      for (const id of nodeIds) addActiveNode(id, planFxTtlMs)
+    }
+
     // Highlight all clearing edges immediately (so they're visible during the plan phase).
     if (allPlanEdges.length > 0) {
       const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
@@ -902,15 +968,9 @@ export function useSimulatorApp() {
       }, atMs)
     }
 
-    const maxAt = Math.max(
-      0,
-      ...((plan.steps ?? [])
-        .map((s) => Number(s.at_ms ?? 0))
-        .filter((v) => Number.isFinite(v))),
-    )
     scheduleTimeout(() => {
       clearingPlanFxStarted.delete(planId)
-    }, Math.max(1500, Math.min(30_000, maxAt + 2500)))
+    }, planFxTtlMs)
   }
 
   function runRealClearingDoneFx(plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent) {
@@ -951,6 +1011,11 @@ export function useSimulatorApp() {
     }
 
     const nodeIds = nodesFromEdges(planEdges)
+
+    // Keep cycle nodes visible during completion flash.
+    if (nodeIds.length > 0) {
+      for (const id of nodeIds) addActiveNode(id, 5200)
+    }
 
     // Highlight edges with pulses.
     if (planEdges.length > 0) {
@@ -1091,6 +1156,7 @@ export function useSimulatorApp() {
   const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,
     wakeUp,
+    markInteraction: (markOpts) => interactionHold.markInteraction(markOpts),
     pickNodeAt,
     selectNode,
     setNodeCardOpen,
@@ -1099,6 +1165,10 @@ export function useSimulatorApp() {
     cameraSystem,
     edgeHover,
     getPanActive: () => panState.active,
+  })
+
+  onUnmounted(() => {
+    interactionHold.dispose()
   })
 
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
@@ -1150,40 +1220,26 @@ export function useSimulatorApp() {
     }
   }
 
-  async function loadEventsForUi(eq: string, playlist: string) {
-    // Real mode uses live SSE, not demo playlists.
-    if (isRealMode.value) return { events: [], sourcePath: `SSE ${real.apiBase}/simulator/runs/{run_id}/events` }
-    return loadEventsFixtures(eq, playlist)
-  }
-
-  const sceneAndDemo = useAppSceneAndDemo({
+  const sceneState = useAppSceneState({
     eq,
     scene,
     layoutMode,
     effectiveEq,
     state,
     isTestMode: () => isTestMode.value,
-    isDev: () => import.meta.env.DEV,
-    isWebDriver: () => isWebDriver,
     isEqAllowed: (v) => ALLOWED_EQS.has(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
-    loadEvents: loadEventsForUi,
-    assertPlaylistEdgesExistInSnapshot,
+    onIncrementalSnapshotLoaded: (snapshot) => syncLayoutFromSnapshot(snapshot),
     clearScheduledTimeouts,
-    resetOverlays,
     resetCamera,
     resetLayoutKeyCache: () => layoutCoordinator.resetLayoutKeyCache(),
+    resetOverlays,
     resizeAndLayout,
     ensureRenderLoop,
     setupResizeListener: () => layoutCoordinator.setupResizeListener(),
     teardownResizeListener: () => layoutCoordinator.teardownResizeListener(),
     stopRenderLoop,
-    demoPlayer,
-    setSelectedNodeId: selectNode,
-    fxState,
   })
-
-  const sceneState = sceneAndDemo.sceneState
 
   const clearingPlansById = new Map<string, ClearingPlanEvent>()
 
@@ -1194,6 +1250,12 @@ export function useSimulatorApp() {
     resetOverlays()
     clearHoveredEdge()
     clearingPlanFxStarted.clear()
+
+    // Reset token-bucket between runs so a newly started run can always show TX FX immediately.
+    txFxTokens = REAL_TX_FX.burst
+    txFxLastRefillAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    txFxLastSpawnAtMs = 0
+
     physics.stop()
   }
 
@@ -1218,13 +1280,142 @@ export function useSimulatorApp() {
     clearingPlansById,
     scheduleTimeout,
     wakeUp,
+    onAnySseEvent: markDemoActivity,
+  })
+
+  const fxDebugBusy = ref(false)
+
+  async function ensureRunForFxDebug(): Promise<string> {
+    if (real.runId) {
+      // If this is an auto-started FX debug fixtures run, keep it paused so heartbeat doesn't spam events.
+      try {
+        const isFxDebugRun = localStorage.getItem('geo.sim.v2.fxDebugRun') === '1'
+        if (isFxDebugRun) {
+          if (!real.runStatus) await realMode.refreshRunStatus()
+          const st = String(real.runStatus?.state ?? '').toLowerCase()
+          const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
+          if (shouldPause) {
+            await realMode.pause()
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return real.runId
+    }
+
+    if (!String(real.accessToken ?? '').trim()) {
+      throw new Error('Missing access token')
+    }
+
+    // FX Debug may be clicked before scenarios finish loading.
+    // Ensure a valid scenario selection exists before attempting to start a run.
+    if (!String(real.selectedScenarioId ?? '').trim()) {
+      await realMode.refreshScenarios()
+    }
+    if (!String(real.selectedScenarioId ?? '').trim()) {
+      const detail = String(real.lastError ?? '').trim()
+      throw new Error(detail ? `Failed to select scenario for FX debug: ${detail}` : 'No scenario selected for FX debug')
+    }
+
+    try {
+      localStorage.setItem('geo.sim.v2.fxDebugRun', '1')
+    } catch {
+      // ignore
+    }
+
+    // Autostart a paused fixtures run for fast FX debugging.
+    // Important: keep it paused so backend heartbeat doesn't flood tx.updated events.
+    // Use real-mode so the graph stays DB-enriched (fixtures mode is topology-only).
+    await realMode.startRun({ mode: 'real', pauseImmediately: true })
+
+    // If a run is already active server-side (e.g. another tab), the backend may reject
+    // creating a new one (SIMULATOR_MAX_ACTIVE_RUNS). In that case, attach to the active run.
+    if (!real.runId) {
+      const msg = String(real.lastError ?? '')
+      const looksLikeConflict = msg.includes('HTTP 409') || msg.includes(' 409 ') || msg.toLowerCase().includes('conflict')
+      if (looksLikeConflict) {
+        try {
+          const active = await getActiveRun({ apiBase: real.apiBase, accessToken: real.accessToken })
+          const activeRunId = String(active?.run_id ?? '').trim()
+          if (activeRunId) {
+            real.runId = activeRunId
+            await realMode.refreshRunStatus()
+            // If we attached to a running fixtures run (likely from a previous FX debug attempt), pause it.
+            try {
+              const st = String(real.runStatus?.state ?? '').toLowerCase()
+              const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
+              if (shouldPause) {
+                await realMode.pause()
+              }
+            } catch {
+              // ignore
+            }
+            await realMode.refreshSnapshot()
+            return real.runId
+          }
+        } catch {
+          // fall through to error
+        }
+      }
+    }
+
+    if (!real.runId) {
+      const detail = String(real.lastError ?? '').trim()
+      throw new Error(detail ? `Failed to start run for FX debug: ${detail}` : 'Failed to start run for FX debug')
+    }
+    return real.runId
+  }
+
+  async function fxDebugTxOnce(): Promise<void> {
+    if (!isFxDebugEnabled.value) return
+    if (!real.accessToken) throw new Error('Missing access token')
+    markDemoActivity()
+    fxDebugBusy.value = true
+    try {
+      const runId = await ensureRunForFxDebug()
+      await actionTxOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
+        equivalent: effectiveEq.value,
+        seed: `ui-fx-debug-tx:${Date.now()}`,
+        client_action_id: `ui-fx-debug-tx:${Date.now()}`,
+      })
+    } finally {
+      fxDebugBusy.value = false
+    }
+  }
+
+  async function fxDebugClearingOnce(): Promise<void> {
+    if (!isFxDebugEnabled.value) return
+    if (!real.accessToken) throw new Error('Missing access token')
+    markDemoActivity()
+    fxDebugBusy.value = true
+    try {
+      const runId = await ensureRunForFxDebug()
+      await actionClearingOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
+        equivalent: effectiveEq.value,
+        seed: `ui-fx-debug-clearing:${Date.now()}`,
+        client_action_id: `ui-fx-debug-clearing:${Date.now()}`,
+      })
+    } finally {
+      fxDebugBusy.value = false
+    }
+  }
+
+  const devHook = useGeoSimDevHookSetup({
+    isDev: () => import.meta.env.DEV,
+    isTestMode: () => isTestMode.value,
+    isWebDriver: () => isWebDriver,
+    getState: () => state,
+    fxState,
+    runTxOnce: fxDebugTxOnce,
+    runClearingOnce: fxDebugClearingOnce,
   })
 
   useAppLifecycle({
     layoutMode,
     resizeAndLayout,
     persistedPrefs,
-    setupDevHook: sceneAndDemo.setupDevHook,
+    setupDevHook: devHook.setupDevHook,
     sceneState,
     hideDragPreview,
     physics,
@@ -1236,6 +1427,7 @@ export function useSimulatorApp() {
 
     // flags
     isDemoFixtures,
+    isDemoUi,
     isTestMode,
     isWebDriver,
 
@@ -1276,6 +1468,8 @@ export function useSimulatorApp() {
     quality,
     labelsLod,
 
+    effectiveEq,
+
     // env
     gpuAccelLikely,
 
@@ -1287,12 +1481,18 @@ export function useSimulatorApp() {
 
     // derived ui
     overlayLabelScale,
-    showDemoControls,
     showResetView,
 
     // dev / diagnostics
     showPerfOverlay,
     perf,
+
+    fxDebug: {
+      enabled: isFxDebugEnabled,
+      busy: fxDebugBusy,
+      runTxOnce: fxDebugTxOnce,
+      runClearingOnce: fxDebugClearingOnce,
+    },
 
     // selection + overlays
     isNodeCardOpen,
@@ -1319,16 +1519,6 @@ export function useSimulatorApp() {
 
     // render loop control (for wakeups from external events)
     wakeUp,
-
-    // demo
-    playlist,
-    canDemoPlay: sceneAndDemo.canDemoPlay,
-    demoPlayLabel: sceneAndDemo.demoPlayLabel,
-    runTxOnce: sceneAndDemo.runTxOnce,
-    runClearingOnce: sceneAndDemo.runClearingOnce,
-    demoStepOnce: sceneAndDemo.demoStepOnce,
-    demoTogglePlay: sceneAndDemo.demoTogglePlay,
-    demoReset: sceneAndDemo.demoReset,
 
     // labels
     labelNodes,

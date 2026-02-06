@@ -112,7 +112,7 @@ export function getFxConfig(mode: 'demo' | 'real'): DemoFxConfig | RealFxConfig 
 /**
  * Unified intensity scaling function.
  *
- * Previously duplicated in useDemoPlayer.ts and useSimulatorApp.ts.
+ * Previously duplicated in the offline demo player and useSimulatorApp.ts.
  */
 export function intensityScale(intensityKey?: string): number {
   const k = String(intensityKey ?? '').trim().toLowerCase()

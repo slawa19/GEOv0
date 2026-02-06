@@ -14,6 +14,12 @@ type UseCameraDeps<N extends LayoutNodeLike> = {
   getLayoutH: () => number
 
   isTestMode: () => boolean
+
+  /**
+   * Optional: notify external wiring that camera state actually changed.
+   * Intended to be called after applying a wheel/pan batch.
+   */
+  onCameraChanged?: () => void
 }
 
 type RectLike = { left: number; top: number }
@@ -207,12 +213,19 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
 
       const k = Math.exp(-dy * 0.001)
       const nextZoom = clamp(camera.zoom * k, 0.4, 3.0)
-      if (nextZoom === camera.zoom) return
+      if (nextZoom === camera.zoom) {
+        // Still notify: user interaction happened, and wiring may need to wake up
+        // from deep-idle even if zoom is clamped.
+        deps.onCameraChanged?.()
+        return
+      }
 
       camera.zoom = nextZoom
       camera.panX = sx - before.x * camera.zoom
       camera.panY = sy - before.y * camera.zoom
       clampCameraPan()
+
+      deps.onCameraChanged?.()
     })
   }
 

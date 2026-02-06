@@ -14,6 +14,11 @@ export function useAppViewWiring(opts: {
   getLayoutH: () => number
   isTestMode: () => boolean
 
+  /**
+   * Optional: fired after camera zoom/pan is applied (e.g. after a wheel RAF batch).
+   */
+  onCameraChanged?: () => void
+
   setClampCameraPan: (fn: () => void) => void
 
   selectedNodeId: Ref<string | null>
@@ -33,6 +38,8 @@ export function useAppViewWiring(opts: {
     getLayoutW: opts.getLayoutW,
     getLayoutH: opts.getLayoutH,
     isTestMode: opts.isTestMode,
+
+    onCameraChanged: opts.onCameraChanged,
 
     setClampCameraPan: opts.setClampCameraPan,
 

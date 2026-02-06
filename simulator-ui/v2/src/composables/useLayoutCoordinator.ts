@@ -24,7 +24,7 @@ type UseLayoutCoordinatorDeps<N, L, M extends string, S extends { generated_at: 
   clampCameraPan?: () => void
 
   // Optional: notify render loop that visible state changed (e.g. after resize).
-  wakeUp?: () => void
+  wakeUp?: (source?: 'user' | 'animation') => void
 }
 
 type UseLayoutCoordinatorReturn<N, L> = {

@@ -353,14 +353,22 @@ export function renderFxFrame(opts: {
   isTestMode: boolean
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
+  /** Interaction Quality hint (legacy boolean). */
+  interaction?: boolean
+  /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
+  interactionIntensity?: number
 }): void {
   const { nowMs, ctx, pos, w, h, mapping, fxState, isTestMode } = opts
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const spx = (v: number) => v * invZ
   const q = opts.quality ?? 'high'
-  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
-  const allowGradients = q === 'high'
+  const interaction = !!opts.interaction
+  const baseBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  const fxIntensity = opts.interactionIntensity ?? (interaction ? 1.0 : 0.0)
+  const blurK = baseBlurK * (1 - fxIntensity)
+  // During high interaction intensity, fall back to solid colors (cheaper).
+  const allowGradients = q === 'high' && fxIntensity < 0.5
 
   // Clear per-frame caches.
   nodeOutlinePath2DCache.clear()
@@ -375,6 +383,10 @@ export function renderFxFrame(opts: {
   // NOTE: `withAlpha` and helpers are module-scoped with caching (perf).
 
   if (fxState.sparks.length === 0 && fxState.edgePulses.length === 0 && fxState.nodeBursts.length === 0) return
+
+  // FX are always rendered (no early return on interaction).
+  // During interaction, blurK→0 and allowGradients→false give cheaper rendering
+  // while keeping FX visible (no jarring disappearance).
 
   // Tx sparks / comets
   if (fxState.sparks.length > 0) {

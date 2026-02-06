@@ -14,6 +14,12 @@ export function useAppViewAndNodeCard(opts: {
   getLayoutH: () => number
   isTestMode: () => boolean
 
+  /**
+   * Optional: fired after camera zoom/pan is applied (e.g. after a wheel RAF batch).
+   * Used to wake up the render loop from deep-idle.
+   */
+  onCameraChanged?: () => void
+
   setClampCameraPan: (fn: () => void) => void
 
   selectedNodeId: Ref<string | null>
@@ -32,6 +38,7 @@ export function useAppViewAndNodeCard(opts: {
     getLayoutW: opts.getLayoutW,
     getLayoutH: opts.getLayoutH,
     isTestMode: opts.isTestMode,
+    onCameraChanged: opts.onCameraChanged,
   })
 
   opts.setClampCameraPan(cameraSystem.clampCameraPan)

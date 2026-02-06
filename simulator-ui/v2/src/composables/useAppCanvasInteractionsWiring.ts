@@ -1,10 +1,16 @@
 import { useCanvasInteractions, type CameraSystemLike, type DragToPinLike, type EdgeHoverLike } from './useCanvasInteractions'
+import type { MarkInteractionOpts } from './interactionHold'
+
+export type WakeUpSource = 'user' | 'animation'
 
 export function useAppCanvasInteractionsWiring(opts: {
   isTestMode: () => boolean
 
   // Wake up render loop on any user interaction that may affect visible state.
-  wakeUp?: () => void
+  wakeUp?: (source?: WakeUpSource) => void
+
+  // Optional: mark interaction for Interaction Quality hold window.
+  markInteraction?: (opts?: MarkInteractionOpts) => void
 
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
   selectNode: (id: string | null) => void
@@ -28,31 +34,43 @@ export function useAppCanvasInteractionsWiring(opts: {
     getPanActive: opts.getPanActive,
   })
 
-  const wakeUp = () => opts.wakeUp?.()
+  const wakeUp = (source?: WakeUpSource) => opts.wakeUp?.(source)
+  const mark = (markOpts?: MarkInteractionOpts) => opts.markInteraction?.(markOpts)
 
   return {
     onCanvasClick: (ev: MouseEvent) => {
-      wakeUp()
+      // No mark(): click is an instant action — no need to reduce render quality.
+      wakeUp('user')
       canvasInteractions.onCanvasClick(ev)
     },
     onCanvasDblClick: (ev: MouseEvent) => {
-      wakeUp()
+      // No mark(): dblclick is an instant action — no need to reduce render quality.
+      wakeUp('user')
       canvasInteractions.onCanvasDblClick(ev)
     },
     onCanvasPointerDown: (ev: PointerEvent) => {
-      wakeUp()
+      // No mark(): pointerdown is the start — not yet a continuous interaction.
+      wakeUp('user')
       canvasInteractions.onCanvasPointerDown(ev)
     },
     onCanvasPointerMove: (ev: PointerEvent) => {
-      wakeUp()
+      // mark() ONLY if a button is pressed (active drag/pan).
+      // Hover (buttons === 0) must NOT trigger quality reduction — root cause of the bug.
+      if (ev.buttons !== 0) mark()
+      wakeUp('user')
       canvasInteractions.onCanvasPointerMove(ev)
     },
     onCanvasPointerUp: (ev: PointerEvent) => {
-      wakeUp()
+      // No mark(): pointerup ends the interaction — hold timer handles the tail.
+      wakeUp('user')
       canvasInteractions.onCanvasPointerUp(ev)
     },
     onCanvasWheel: (ev: WheelEvent) => {
-      wakeUp()
+      mark({ instant: true })
+      // IMPORTANT:
+      // Wheel zoom is applied inside RAF (see useCamera). Calling wakeUp() *before*
+      // the camera is actually updated can cause an extra frame rendered with the
+      // old camera state. For wheel, we wake up via camera.onCameraChanged.
       canvasInteractions.onCanvasWheel(ev)
     },
   }

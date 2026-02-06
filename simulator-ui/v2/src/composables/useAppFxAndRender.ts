@@ -51,12 +51,19 @@ export function useAppFxAndRender(opts: {
   // Optional: hint whether the scene is actively animating (physics, pan/zoom, demo playback).
   isAnimating?: () => boolean
 
+  // Optional: hint that the user is actively interacting (wheel/click/drag hold window).
+  // Used to enable Interaction Quality overrides (skip blur-heavy paths + clamp DPR).
+  isInteracting?: () => boolean
+
+  // Optional: smooth interaction intensity 0.0–1.0 with easing transitions.
+  getInteractionIntensity?: () => number
+
   // Optional: hint that the browser is in software-only rendering mode.
   isSoftwareMode?: () => boolean
 }) {
   // Late-bound: we create FX overlays first (they need timers), then create render loop,
   // then bind wakeUp so scheduled FX timers can wake the loop even after deep idle.
-  let wakeUp: (() => void) | undefined
+  let wakeUp: ((source?: 'user' | 'animation') => void) | undefined
 
   const fxOverlays = useAppFxOverlays<LayoutNode>({
     getLayoutNodeById: opts.getLayoutNodeById,
@@ -82,15 +89,19 @@ export function useAppFxAndRender(opts: {
     getFlash: opts.getFlash,
     setFlash: opts.setFlash,
     pruneActiveEdges: fxOverlays.pruneActiveEdges,
+    pruneActiveNodes: fxOverlays.pruneActiveNodes,
     pruneFloatingLabels: fxOverlays.pruneFloatingLabels,
     mapping: opts.mapping,
     fxState: fxOverlays.fxState,
     getSelectedNodeId: opts.getSelectedNodeId,
     activeEdges: fxOverlays.activeEdges,
+    activeNodes: fxOverlays.activeNodes,
     getLinkLod: opts.getLinkLod,
     getHiddenNodeId: opts.getHiddenNodeId,
     beforeDraw: opts.beforeDraw,
     isAnimating: opts.isAnimating,
+    isInteracting: opts.isInteracting,
+    getInteractionIntensity: opts.getInteractionIntensity,
     isSoftwareMode: opts.isSoftwareMode,
   })
 
@@ -105,6 +116,10 @@ export function useAppFxAndRender(opts: {
     activeEdges: fxOverlays.activeEdges,
     addActiveEdge: fxOverlays.addActiveEdge,
     pruneActiveEdges: fxOverlays.pruneActiveEdges,
+
+    activeNodes: fxOverlays.activeNodes,
+    addActiveNode: fxOverlays.addActiveNode,
+    pruneActiveNodes: fxOverlays.pruneActiveNodes,
     pushFloatingLabel: fxOverlays.pushFloatingLabel,
     pruneFloatingLabels: fxOverlays.pruneFloatingLabels,
     resetOverlays: fxOverlays.resetOverlays,

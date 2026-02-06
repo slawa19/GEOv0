@@ -1,11 +1,8 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { DemoEvent, GraphSnapshot } from '../types'
 import type { LayoutMode } from '../layout/forceLayout'
 import type { SceneId } from '../scenes'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { useSceneState } from './useSceneState'
-
-type LoadEventsKind = 'demo-tx' | 'demo-clearing'
 
 export function useAppSceneState(opts: {
   eq: Ref<string>
@@ -15,16 +12,14 @@ export function useAppSceneState(opts: {
   isEqAllowed: (eq: string) => boolean
   effectiveEq: ComputedRef<string>
   state: SimulatorAppState
-  loadSnapshot: (eq: string) => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
-  loadEvents: (eq: string, kind: LoadEventsKind) => Promise<{ events: DemoEvent[]; sourcePath: string }>
-  assertPlaylistEdgesExistInSnapshot: (opts: { snapshot: GraphSnapshot; events: DemoEvent[]; eventsPath: string }) => void
+  loadSnapshot: (eq: string) => Promise<{ snapshot: import('../types').GraphSnapshot; sourcePath: string }>
   clearScheduledTimeouts: () => void
-  resetPlaylistPointers: () => void
   resetCamera: () => void
   resetLayoutKeyCache: () => void
   resetOverlays: () => void
   resizeAndLayout: () => void
   ensureRenderLoop: () => void
+  onIncrementalSnapshotLoaded?: (snapshot: import('../types').GraphSnapshot) => void
   setupResizeListener: () => void
   teardownResizeListener: () => void
   stopRenderLoop: () => void
@@ -38,15 +33,13 @@ export function useAppSceneState(opts: {
     effectiveEq: opts.effectiveEq,
     state: opts.state,
     loadSnapshot: opts.loadSnapshot,
-    loadEvents: opts.loadEvents,
-    assertPlaylistEdgesExistInSnapshot: opts.assertPlaylistEdgesExistInSnapshot,
     clearScheduledTimeouts: opts.clearScheduledTimeouts,
-    resetPlaylistPointers: opts.resetPlaylistPointers,
     resetCamera: opts.resetCamera,
     resetLayoutKeyCache: opts.resetLayoutKeyCache,
     resetOverlays: opts.resetOverlays,
     resizeAndLayout: opts.resizeAndLayout,
     ensureRenderLoop: opts.ensureRenderLoop,
+    onIncrementalSnapshotLoaded: opts.onIncrementalSnapshotLoaded,
     setupResizeListener: opts.setupResizeListener,
     teardownResizeListener: opts.teardownResizeListener,
     stopRenderLoop: opts.stopRenderLoop,

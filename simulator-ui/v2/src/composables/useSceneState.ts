@@ -1,25 +1,17 @@
 import type { ComputedRef, Ref } from 'vue'
 import { watch } from 'vue'
-import type { ClearingDoneEvent, ClearingPlanEvent, DemoEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
 import type { LayoutMode } from '../layout/forceLayout'
+import type { GraphSnapshot } from '../types'
 
-type SceneId = 'A' | 'B' | 'C' | 'D' | 'E'
+type SceneId = 'A' | 'B' | 'C'
 
 type LoadSnapshotFn = (eq: string) => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
-
-type LoadEventsKind = 'demo-tx' | 'demo-clearing'
-
-type LoadEventsFn = (eq: string, kind: LoadEventsKind) => Promise<{ events: DemoEvent[]; sourcePath: string }>
 
 type SceneState = {
   loading: boolean
   error: string
   sourcePath: string
-  eventsPath: string
   snapshot: GraphSnapshot | null
-  demoTxEvents: TxUpdatedEvent[]
-  demoClearingPlan: ClearingPlanEvent | null
-  demoClearingDone: ClearingDoneEvent | null
   selectedNodeId: string | null
 }
 
@@ -36,17 +28,19 @@ type UseSceneStateDeps = {
   state: SceneState
 
   loadSnapshot: LoadSnapshotFn
-  loadEvents: LoadEventsFn
-  assertPlaylistEdgesExistInSnapshot: (opts: { snapshot: GraphSnapshot; events: DemoEvent[]; eventsPath: string }) => void
 
   clearScheduledTimeouts: () => void
-  resetPlaylistPointers: () => void
   resetCamera: () => void
   resetLayoutKeyCache: () => void
   resetOverlays: () => void
 
   resizeAndLayout: () => void
   ensureRenderLoop: () => void
+
+  // Optional hook: when a new snapshot is loaded with the same node IDs as the current snapshot,
+  // we may skip full relayout/camera resets. In that case, the app may still need to sync
+  // visual/metrics fields into the layout node/link objects used for rendering.
+  onIncrementalSnapshotLoaded?: (snapshot: GraphSnapshot) => void
 
   setupResizeListener: () => void
   teardownResizeListener: () => void
@@ -79,7 +73,6 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   async function loadScene() {
     // Only clear timers/pointers for a full reload.
     deps.clearScheduledTimeouts()
-    deps.resetPlaylistPointers()
 
     deps.state.loading = true
     deps.state.error = ''
@@ -102,12 +95,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       if (!isIncrementalUpdate) {
         deps.resetCamera()
         deps.state.sourcePath = ''
-        deps.state.eventsPath = ''
         deps.state.snapshot = null
         deps.resetLayoutKeyCache()
-        deps.state.demoTxEvents = []
-        deps.state.demoClearingPlan = null
-        deps.state.demoClearingDone = null
         deps.state.selectedNodeId = null
         deps.resetOverlays()
       }
@@ -117,23 +106,12 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       lastSnapshotNodeIds = new Set(snapshot.nodes.map((n) => n.id))
       hasLoadedOnce = true
 
+      if (isIncrementalUpdate) {
+        deps.onIncrementalSnapshotLoaded?.(snapshot)
+      }
+
       if (deepLinkFocusNodeId && snapshot.nodes.some((n) => n.id === deepLinkFocusNodeId)) {
         deps.state.selectedNodeId = deepLinkFocusNodeId
-      }
-
-      if (deps.scene.value === 'D') {
-        const r = await deps.loadEvents(deps.effectiveEq.value, 'demo-tx')
-        deps.state.eventsPath = r.sourcePath
-        deps.assertPlaylistEdgesExistInSnapshot({ snapshot, events: r.events, eventsPath: r.sourcePath })
-        deps.state.demoTxEvents = r.events.filter((e): e is TxUpdatedEvent => e.type === 'tx.updated')
-      }
-
-      if (deps.scene.value === 'E') {
-        const r = await deps.loadEvents(deps.effectiveEq.value, 'demo-clearing')
-        deps.state.eventsPath = r.sourcePath
-        deps.assertPlaylistEdgesExistInSnapshot({ snapshot, events: r.events, eventsPath: r.sourcePath })
-        deps.state.demoClearingPlan = r.events.find((e): e is ClearingPlanEvent => e.type === 'clearing.plan') ?? null
-        deps.state.demoClearingDone = r.events.find((e): e is ClearingDoneEvent => e.type === 'clearing.done') ?? null
       }
 
       // Only run full layout (with physics animation) if structure changed or first load.
@@ -166,7 +144,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       }
 
       const s = String(params.get('scene') ?? '')
-      if (s === 'A' || s === 'B' || s === 'C' || s === 'D' || s === 'E') {
+      if (s === 'A' || s === 'B' || s === 'C') {
         deps.scene.value = s
       }
 

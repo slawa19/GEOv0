@@ -55,8 +55,13 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
   const activeEdges = reactive(new Set<string>())
 
+  const activeNodes = reactive(new Set<string>())
+
   const activeEdgeExpiresAtMsByKey = new Map<string, number>()
   let lastActiveEdgePruneAtMs = 0
+
+  const activeNodeExpiresAtMsById = new Map<string, number>()
+  let lastActiveNodePruneAtMs = 0
 
   function addActiveEdge(key: string, ttlMs = 2000) {
     const nowMs = deps.nowMs ? deps.nowMs() : performance.now()
@@ -92,6 +97,45 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       for (const k of activeEdgeExpiresAtMsByKey.keys()) {
         activeEdgeExpiresAtMsByKey.delete(k)
         activeEdges.delete(k)
+        dropped++
+        if (dropped >= overflow) break
+      }
+    }
+  }
+
+  function addActiveNode(id: string, ttlMs = 2000) {
+    const nowMs = deps.nowMs ? deps.nowMs() : performance.now()
+    const expiresAtMs = nowMs + Math.max(0, ttlMs)
+    const key = String(id ?? '').trim()
+    if (!key) return
+
+    activeNodes.add(key)
+
+    // Touch for LRU (Map preserves insertion order).
+    activeNodeExpiresAtMsById.delete(key)
+    activeNodeExpiresAtMsById.set(key, expiresAtMs)
+  }
+
+  function pruneActiveNodes(nowMs: number) {
+    const pruneEveryMs = 250
+    const maxEntries = 2500
+    if (activeNodeExpiresAtMsById.size === 0) return
+
+    if (activeNodeExpiresAtMsById.size > 500 && nowMs - lastActiveNodePruneAtMs < pruneEveryMs) return
+    lastActiveNodePruneAtMs = nowMs
+
+    for (const [id, exp] of activeNodeExpiresAtMsById) {
+      if (nowMs < exp) continue
+      activeNodeExpiresAtMsById.delete(id)
+      activeNodes.delete(id)
+    }
+
+    if (activeNodeExpiresAtMsById.size > maxEntries) {
+      const overflow = activeNodeExpiresAtMsById.size - maxEntries
+      let dropped = 0
+      for (const id of activeNodeExpiresAtMsById.keys()) {
+        activeNodeExpiresAtMsById.delete(id)
+        activeNodes.delete(id)
         dropped++
         if (dropped >= overflow) break
       }
@@ -252,6 +296,8 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
   function resetOverlays() {
     activeEdges.clear()
     activeEdgeExpiresAtMsByKey.clear()
+    activeNodes.clear()
+    activeNodeExpiresAtMsById.clear()
     floatingLabels.splice(0, floatingLabels.length)
     deps.setFlash(0)
     deps.resetFxState()
@@ -264,6 +310,10 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     activeEdges,
     addActiveEdge,
     pruneActiveEdges,
+
+    activeNodes,
+    addActiveNode,
+    pruneActiveNodes,
 
     floatingLabels,
     pushFloatingLabel,

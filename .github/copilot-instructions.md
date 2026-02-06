@@ -106,6 +106,13 @@ evt.model_dump(mode="json", by_alias=True)
 - If a terminal shows a `>>>` prompt, it is a Python REPL; exit it (`exit()`), then run PowerShell commands.
 - SQLite gotcha: column name `limit` is a SQL keyword; queries must quote it as `"limit"`.
 
+### Backend restart for UI validation (Copilot must do this)
+
+- If changes affect backend behavior that the UI depends on (routes, schemas, auth, SSE/events, config/env flags, DB/fixtures seeding, dependency changes), Copilot MUST restart the backend (or full stack) before validating in the browser.
+- Preferred command: `\.\scripts\run_full_stack.ps1 -Action restart`.
+- If only frontend code changed (UI rendering, CSS, client-only state), no restart is required.
+- When in doubt, restart first to avoid testing against stale server code.
+
 ## Local DB sanity checks
 
 - Preferred: run `scripts/check_sqlite_db.py` using `.venv\Scripts\python.exe`.

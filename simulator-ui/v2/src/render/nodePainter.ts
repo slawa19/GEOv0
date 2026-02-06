@@ -7,6 +7,95 @@ import { roundedRectPath } from './roundedRect'
 
 export type { LayoutNode } from '../types/layout'
 
+/* ------------------------------------------------------------------ */
+/*  Lightweight icon / badge helpers — cheap enough for drag fast-path */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Draw the node's inner icon (person silhouette or building silhouette).
+ * Cost ≈ a few arc/rect calls, no blur/gradient — safe for drag mode.
+ */
+function drawNodeIcon(
+  ctx: CanvasRenderingContext2D,
+  fill: string,
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  r: number,
+  isRoundedRect: boolean,
+  alpha: number = 0.95,
+) {
+  ctx.save()
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.fillStyle = withAlpha(fill, alpha)
+
+  if (!isRoundedRect) {
+    // PERSON: "Pawn" / User silhouette
+    const s = r * 0.045
+    ctx.translate(cx, cy + r * 0.08)
+
+    ctx.beginPath()
+    // Head
+    ctx.arc(0, -9 * s, 5.5 * s, 0, Math.PI * 2)
+    // Body (Shoulders)
+    ctx.moveTo(-8 * s, 1 * s)
+    ctx.quadraticCurveTo(0, -4 * s, 8 * s, 1 * s)
+    ctx.quadraticCurveTo(9 * s, 11 * s, 0, 11 * s)
+    ctx.quadraticCurveTo(-9 * s, 11 * s, -8 * s, 1 * s)
+    ctx.closePath()
+    ctx.fill()
+  } else {
+    // BUSINESS: "Building" / Briefcase silhouette
+    const s = Math.min(w, h) * 0.024
+    ctx.translate(cx, cy + h * 0.05)
+
+    ctx.beginPath()
+    // Main tower
+    const bw = 12 * s
+    const bh = 16 * s
+    ctx.rect(-bw / 2, -bh / 2, bw, bh)
+
+    // Roof detail (antenna or stepped)
+    ctx.rect(-bw / 2 + 2 * s, -bh / 2 - 2 * s, bw - 4 * s, 2 * s)
+    ctx.rect(-1 * s, -bh / 2 - 5 * s, 2 * s, 3 * s)
+
+    ctx.fill()
+
+    // Window lines (cutouts)
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.fillStyle = '#000000'
+    const winW = 2.5 * s
+    const winH = 2.5 * s
+    const gap = 1.5 * s
+    for (let row = -1; row <= 1; row++) {
+      ctx.fillRect(-bw / 2 + gap + 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
+      ctx.fillRect(0 + gap - 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
+    }
+  }
+  ctx.restore()
+}
+
+/**
+ * Draw optional badge pip. Cost ≈ one arc + fill — negligible.
+ */
+function drawNodeBadge(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  px: (v: number) => number,
+) {
+  const br = Math.max(px(1.6), r * 0.22)
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.fillStyle = withAlpha('#ffffff', 0.85)
+  ctx.beginPath()
+  ctx.arc(cx + r * 0.72, cy - r * 0.72, br, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
 const sizeCache = new WeakMap<GraphNode, { key: string; size: { w: number; h: number } }>()
 
 export function sizeForNode(n: GraphNode): { w: number; h: number } {
@@ -39,6 +128,10 @@ export function drawNodeShape(
     quality?: 'low' | 'med' | 'high'
     dragMode?: boolean
     softwareMode?: boolean
+    /** Interaction Quality hint (legacy boolean). */
+    interaction?: boolean
+    /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
+    interactionIntensity?: number
   },
 ) {
   const { mapping } = opts
@@ -46,7 +139,9 @@ export function drawNodeShape(
   const invZ = 1 / z
   const px = (v: number) => v * invZ
   const q = opts.quality ?? 'high'
-  const blurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  const baseBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0
+  const intensity = opts.interactionIntensity ?? (opts.interaction ? 1.0 : 0.0)
+  const blurK = baseBlurK * (1 - intensity)
   const softwareMode = !!opts.softwareMode
   const fill = fillForNode(node, mapping)
   const { w: w0, h: h0 } = sizeForNode(node)
@@ -87,6 +182,11 @@ export function drawNodeShape(
       ctx.arc(node.__x, node.__y, r, 0, Math.PI * 2)
       ctx.stroke()
     }
+    // Icon & badge are cheap (a few arcs/rects) — keep them visible during drag.
+    drawNodeIcon(ctx, fill, node.__x, node.__y, w, h, r, isRoundedRect, 0.7)
+    if (node.viz_badge_key !== undefined && node.viz_badge_key !== null) {
+      drawNodeBadge(ctx, node.__x, node.__y, r, px)
+    }
     ctx.restore()
     return
   }
@@ -94,48 +194,51 @@ export function drawNodeShape(
   ctx.save()
 
   // 1) Soft bloom (underlay) - "Holographic" glow
-  // Very expensive in full Chrome; keep only for med/high.
-  if (softwareMode) {
-    // Pre-baked glow sprite: preserves the "soft" look but avoids per-frame blur cost.
-    // Use a modest glow even on low to keep nodes readable in software-only Chrome.
-    const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
-    drawGlowSprite(ctx, {
-      kind: 'bloom',
-      shape: isRoundedRect ? 'rounded-rect' : 'circle',
-      x: node.__x,
-      y: node.__y,
-      w,
-      h,
-      r,
-      rr,
-      color: fill,
-      blurPx: r * 1.5 * k,
-      lineWidthPx: 0,
-      composite: 'screen',
-    })
-  } else if (blurK > 0) {
-    ctx.save()
-    // Use screen blending for "light" effect against dark background
-    ctx.globalCompositeOperation = 'screen'
-    ctx.shadowColor = fill
-    ctx.shadowBlur = r * 1.5 * blurK // Wide soft glow
-    ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
+  // shadowBlur cost scales with blurK — at intensity=1 blurK=0 so bloom is free (no-op).
+  {
+    if (softwareMode) {
+      // Pre-baked glow sprite: preserves the "soft" look but avoids per-frame blur cost.
+      // Use a modest glow even on low to keep nodes readable in software-only Chrome.
+      const k = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
+      drawGlowSprite(ctx, {
+        kind: 'bloom',
+        shape: isRoundedRect ? 'rounded-rect' : 'circle',
+        x: node.__x,
+        y: node.__y,
+        w,
+        h,
+        r,
+        rr,
+        color: fill,
+        blurPx: r * 1.5 * k,
+        lineWidthPx: 0,
+        composite: 'screen',
+      })
+    } else if (blurK > 0) {
+      ctx.save()
+      // Use screen blending for "light" effect against dark background
+      ctx.globalCompositeOperation = 'screen'
+      ctx.shadowColor = fill
+      ctx.shadowBlur = r * 1.5 * blurK // Wide soft glow
+      ctx.fillStyle = withAlpha(fill, 0.0) // Only shadow visible
 
-    if (isRoundedRect) {
-      roundedRectPath(ctx, x + px(2), y + px(2), w - px(4), h - px(4), rr)
-      ctx.fill()
-    } else {
-      ctx.beginPath()
-      ctx.arc(node.__x, node.__y, r * 0.8, 0, Math.PI * 2)
-      ctx.fill()
+      if (isRoundedRect) {
+        roundedRectPath(ctx, x + px(2), y + px(2), w - px(4), h - px(4), rr)
+        ctx.fill()
+      } else {
+        ctx.beginPath()
+        ctx.arc(node.__x, node.__y, r * 0.8, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      ctx.restore()
     }
-    ctx.restore()
   }
 
   // 2) Body fill - Semi-transparent glass (Darker/More Solid now)
   ctx.save()
   ctx.globalCompositeOperation = 'source-over'
   // Linear gradients are moderately expensive; keep them for high only.
+  // Gradients stay even during interaction — their visual absence is very noticeable.
   if (q === 'high') {
     const glassGrad = ctx.createLinearGradient(x, y, x + w, y + h)
     glassGrad.addColorStop(0, withAlpha(fill, 0.55))
@@ -209,69 +312,11 @@ export function drawNodeShape(
   ctx.restore()
 
   // 4) Icons (Holographic Projections inside)
-  ctx.save()
-  ctx.globalCompositeOperation = 'source-over'
-  ctx.fillStyle = withAlpha(fill, 0.95) // Solid bright core for the icon
-
-  if (!isRoundedRect) {
-    // PERSON: "Pawn" / User silhouette
-    const s = r * 0.045
-    ctx.translate(node.__x, node.__y + r * 0.08)
-    
-    ctx.beginPath()
-    // Head
-    ctx.arc(0, -9 * s, 5.5 * s, 0, Math.PI * 2)
-    // Body (Shoulders)
-    ctx.moveTo(-8 * s, 1 * s)
-    ctx.quadraticCurveTo(0, -4 * s, 8 * s, 1 * s)
-    ctx.quadraticCurveTo(9 * s, 11 * s, 0, 11 * s)
-    ctx.quadraticCurveTo(-9 * s, 11 * s, -8 * s, 1 * s)
-    ctx.closePath()
-    ctx.fill()
-  } else {
-    // BUSINESS: "Building" / Briefcase silhouette
-    // Let's draw a stylized high-rise building
-    const s = Math.min(w, h) * 0.024
-    ctx.translate(node.__x, node.__y + h * 0.05)
-    
-    ctx.beginPath()
-    // Main tower
-    const bw = 12 * s
-    const bh = 16 * s
-    ctx.rect(-bw / 2, -bh / 2, bw, bh)
-    
-    // Roof detail (antenna or stepped)
-    ctx.rect(-bw / 2 + 2 * s, -bh / 2 - 2 * s, bw - 4 * s, 2 * s) // Top block
-    ctx.rect(-1 * s, -bh / 2 - 5 * s, 2 * s, 3 * s) // Antenna
-    
-    // Windows (cutout effect by drawing transparent/dark over fill? 
-    // No, simpler is just solid shape acting as the "core")
-    ctx.fill()
-    
-    // Window lines (cutouts)
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.fillStyle = '#000000'
-    const winW = 2.5 * s
-    const winH = 2.5 * s
-    const gap = 1.5 * s
-    // 2 columns of windows
-    for (let row = -1; row <= 1; row++) {
-      ctx.fillRect(-bw / 2 + gap + 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
-      ctx.fillRect(0 + gap - 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
-    }
-  }
-  ctx.restore()
+  drawNodeIcon(ctx, fill, node.__x, node.__y, w, h, r, isRoundedRect)
 
   // Optional badge pip if viz_badge_key is present (no semantics, just presence).
   if (node.viz_badge_key !== undefined && node.viz_badge_key !== null) {
-    const br = Math.max(px(1.6), r * 0.22)
-    ctx.save()
-    ctx.globalCompositeOperation = 'lighter'
-    ctx.fillStyle = withAlpha('#ffffff', 0.85)
-    ctx.beginPath()
-    ctx.arc(node.__x + r * 0.72, node.__y - r * 0.72, br, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.restore()
+    drawNodeBadge(ctx, node.__x, node.__y, r, px)
   }
 
   ctx.restore()

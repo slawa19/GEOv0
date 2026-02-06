@@ -42,22 +42,31 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   palette?: Palette
   selectedNodeId: string | null
   activeEdges: Set<string>
+  activeNodes?: Set<string>
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
   softwareMode?: boolean
+  /** Interaction Quality hint (legacy boolean). */
+  interaction?: boolean
+  /** Smooth interaction intensity 0.0–1.0. Takes precedence over boolean `interaction`. */
+  interactionIntensity?: number
   linkLod?: 'full' | 'focus'
   dragMode?: boolean
   hiddenNodeId?: string | null
   pos?: Map<string, LayoutNode>
 }) {
   const { w, h, nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
+  const activeNodes = opts.activeNodes
   const linkLod = opts.linkLod ?? 'full'
   const dragMode = opts.dragMode ?? false
   const hiddenNodeId = opts.hiddenNodeId ?? null
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
-  const blurK = q === 'high' ? 1 : 0
+  const baseBlurK = q === 'high' ? 1 : 0
+  const intensity = opts.interactionIntensity ?? (opts.interaction ? 1.0 : 0.0)
+  const blurK = baseBlurK * (1 - intensity)
+  const interaction = !!opts.interaction
 
   const pos = opts.pos ?? new Map<string, LayoutNode>()
   pos.clear()
@@ -147,6 +156,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   for (const n of nodes) {
     if (hiddenNodeId && n.id === hiddenNodeId) continue
     const isSelected = selectedNodeId === n.id
+    const isActiveNode = !!activeNodes && activeNodes.has(n.id)
 
     if (isSelected && !dragMode) {
       // Focus Glow: "Light glow around the node"
@@ -162,12 +172,12 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const r = Math.max(nw, nh) / 2
       const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
       
-      if (q === 'high') {
+      if (q === 'high' && blurK > 0.1) {
         ctx.save()
         ctx.globalCompositeOperation = 'screen' // Black stroke will disappear, only colored shadow remains
 
         ctx.shadowColor = glow
-        ctx.shadowBlur = blurK > 0 ? r * 1.2 * blurK : 0
+        ctx.shadowBlur = r * 1.2 * blurK
         // Trick: Stroke is black (invisible in Screen mode), so we don't see a "hard" contour.
         // But the shadow (glow) is drawn.
         ctx.strokeStyle = '#000000'
@@ -185,7 +195,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
         ctx.stroke()
 
         // Optional: Second pass for "core" intensity closer to the node
-        ctx.shadowBlur = blurK > 0 ? r * 0.4 * blurK : 0
+        ctx.shadowBlur = r * 0.4 * blurK
         ctx.stroke()
 
         ctx.restore()
@@ -213,7 +223,67 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       }
     }
 
-    drawNodeShape(ctx, n, { mapping, cameraZoom: z, quality: q, dragMode, softwareMode: !!opts.softwareMode })
+    if (isActiveNode && !isSelected && !dragMode) {
+      const { w: nw0, h: nh0 } = sizeForNode(n as GraphNode)
+      const nw = nw0 * invZ
+      const nh = nh0 * invZ
+      const glow = mapping.fx.clearing_debt
+      const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+      const isRoundedRect = shapeKey === 'rounded-rect'
+
+      const r = Math.max(nw, nh) / 2
+      const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
+
+      if (q === 'high' && blurK > 0.1) {
+        ctx.save()
+        ctx.globalCompositeOperation = 'screen'
+        ctx.shadowColor = glow
+        ctx.shadowBlur = r * 0.55 * blurK
+        ctx.strokeStyle = '#000000'
+        ctx.lineWidth = Math.max(3.0 * invZ, r * 0.18)
+        ctx.globalAlpha = 0.85
+
+        ctx.beginPath()
+        if (isRoundedRect) {
+          const offset = Math.max(1.2 * invZ, r * 0.05)
+          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
+        } else {
+          const offset = Math.max(1.2 * invZ, r * 0.05)
+          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
+        }
+        ctx.stroke()
+        ctx.restore()
+      } else {
+        ctx.save()
+        ctx.globalCompositeOperation = 'source-over'
+        ctx.shadowBlur = 0
+        ctx.shadowColor = 'transparent'
+        ctx.strokeStyle = withAlpha(glow, 0.65)
+        ctx.lineWidth = Math.max(2.2 * invZ, r * 0.12)
+        ctx.globalAlpha = 1.0
+
+        ctx.beginPath()
+        if (isRoundedRect) {
+          const offset = Math.max(1.2 * invZ, r * 0.05)
+          ctx.roundRect(n.__x - nw / 2 - offset, n.__y - nh / 2 - offset, nw + offset * 2, nh + offset * 2, rr)
+        } else {
+          const offset = Math.max(1.2 * invZ, r * 0.05)
+          ctx.arc(n.__x, n.__y, r + offset, 0, Math.PI * 2)
+        }
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
+    drawNodeShape(ctx, n, {
+      mapping,
+      cameraZoom: z,
+      quality: q,
+      dragMode,
+      softwareMode: !!opts.softwareMode,
+      interaction,
+      interactionIntensity: intensity,
+    })
   }
 
   return pos

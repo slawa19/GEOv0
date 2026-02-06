@@ -299,6 +299,13 @@ class RunCreateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ActiveRunResponse(BaseModel):
+    api_version: str = Field(default=SIMULATOR_API_VERSION)
+    run_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class RunStatus(BaseModel):
     api_version: str = Field(default=SIMULATOR_API_VERSION)
 

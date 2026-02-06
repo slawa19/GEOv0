@@ -24,6 +24,43 @@ export type RunCreateResponse = {
   run_id: string
 }
 
+export type ActiveRunResponse = {
+  run_id: string | null
+}
+
+export type TxOnceRequest = {
+  equivalent: string
+  from?: string
+  to?: string
+  amount?: string
+  ttl_ms?: number
+  intensity_key?: string
+  seed?: unknown
+  client_action_id?: string
+}
+
+export type TxOnceResponse = {
+  ok: true
+  emitted_event_id: string
+  client_action_id?: string | null
+}
+
+export type ClearingOnceRequest = {
+  equivalent: string
+  cycle_edges?: Array<{ from: string; to: string }>
+  cleared_amount?: string
+  seed?: unknown
+  client_action_id?: string
+}
+
+export type ClearingOnceResponse = {
+  ok: true
+  plan_id: string
+  plan_event_id: string
+  done_event_id: string
+  client_action_id?: string | null
+}
+
 export type RunState = 'created' | 'running' | 'paused' | 'stopped' | 'error'
 
 export type RunError = {

@@ -403,6 +403,57 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     vi.advanceTimersByTime(10_000)
     expect(win.__rafQueue.length).toBe(0)
   })
+
+  it('Interaction Quality: DPR not clamped during interaction, passes interaction hint + intensity to renderers', () => {
+    const { canvas, ctx } = makeCanvasWithCtx()
+    const { canvas: fxCanvas } = makeCanvasWithCtx()
+
+    const drawBaseGraph = vi.fn((_ctx: any, opts: any) => opts.pos)
+    const renderFxFrame = vi.fn(() => undefined)
+
+    ;(globalThis as any).window.devicePixelRatio = 2
+
+    const loop = useRenderLoop({
+      canvasEl: { value: canvas } as any,
+      fxCanvasEl: { value: fxCanvas } as any,
+      getSnapshot: () => ({ generated_at: 't1', nodes: [], links: [], palette: {} } as any),
+      getLayout: () => ({ w: 100, h: 80, nodes: [], links: [] }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
+      isTestMode: () => false,
+      getQuality: () => 'high',
+      getFlash: () => 0,
+      setFlash: () => undefined,
+      pruneFloatingLabels: () => undefined,
+      drawBaseGraph,
+      renderFxFrame,
+      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
+      getSelectedNodeId: () => null,
+      activeEdges: new Set(),
+      getLinkLod: () => 'full',
+      getHiddenNodeId: () => null,
+      beforeDraw: () => undefined,
+      isAnimating: () => false,
+      isInteracting: () => true,
+    })
+
+    loop.renderOnce(0)
+
+    // DPR is no longer clamped during interaction — stays at full 2.0
+    expect(canvas.width).toBe(Math.floor(100 * 2))
+    expect(canvas.height).toBe(Math.floor(80 * 2))
+    expect(fxCanvas.width).toBe(canvas.width)
+    expect(fxCanvas.height).toBe(canvas.height)
+
+    expect(ctx.clearRect).toHaveBeenCalled()
+
+    expect(drawBaseGraph).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ interaction: true, interactionIntensity: 1 }),
+    )
+
+    expect(renderFxFrame).toHaveBeenCalledWith(expect.objectContaining({ interaction: true, interactionIntensity: 1 }))
+  })
 })
 
 describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {

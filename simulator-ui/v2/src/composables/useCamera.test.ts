@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { useCamera } from './useCamera'
 
 describe('useCamera', () => {
@@ -89,5 +89,40 @@ describe('useCamera', () => {
 
     const wasClick2 = cameraSystem.onPointerUp({ pointerId: 2 } as any)
     expect(wasClick2).toBe(false)
+  })
+
+  it('calls onCameraChanged exactly once per RAF-batched wheel deltas', () => {
+    vi.useFakeTimers()
+
+    // useCamera falls back to setTimeout when requestAnimationFrame is not present;
+    // with fake timers we can deterministically flush the batch.
+    const onCameraChanged = vi.fn()
+
+    const host = {
+      getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    } as unknown as HTMLElement
+
+    const cameraSystem = useCamera({
+      canvasEl: { value: null },
+      hostEl: { value: host },
+      getLayoutNodes: () => [],
+      getLayoutW: () => 1000,
+      getLayoutH: () => 1000,
+      isTestMode: () => false,
+      onCameraChanged,
+    })
+
+    // Multiple wheel events in the same tick => must coalesce into one apply.
+    cameraSystem.onWheel({ clientX: 10, clientY: 20, deltaY: 100 } as any)
+    cameraSystem.onWheel({ clientX: 10, clientY: 20, deltaY: 50 } as any)
+    cameraSystem.onWheel({ clientX: 10, clientY: 20, deltaY: -25 } as any)
+
+    expect(onCameraChanged).toHaveBeenCalledTimes(0)
+
+    vi.runAllTimers()
+
+    expect(onCameraChanged).toHaveBeenCalledTimes(1)
+
+    vi.useRealTimers()
   })
 })

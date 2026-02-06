@@ -15,6 +15,7 @@ from starlette.responses import FileResponse, Response, StreamingResponse
 from app.api import deps
 from app.core.simulator.runtime import runtime
 from app.schemas.simulator import (
+    ActiveRunResponse,
     ArtifactIndex,
     BottlenecksResponse,
     MetricsResponse,
@@ -34,6 +35,52 @@ from app.utils.exceptions import GoneException, NotFoundException
 from app.utils.exceptions import ForbiddenException
 
 router = APIRouter(prefix="/simulator")
+
+
+def _actions_enabled() -> bool:
+    return str(os.environ.get("SIMULATOR_ACTIONS_ENABLE", "") or "").strip() in {"1", "true", "TRUE", "yes"}
+
+
+def _require_actions_enabled() -> None:
+    if not _actions_enabled():
+        raise ForbiddenException("Simulator actions are disabled (set SIMULATOR_ACTIONS_ENABLE=1)")
+
+
+class TxOnceRequestBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    equivalent: str
+    from_: Optional[str] = Field(default=None, alias="from")
+    to: Optional[str] = None
+    amount: Optional[str] = None
+    ttl_ms: Optional[int] = None
+    intensity_key: Optional[str] = None
+    seed: Optional[Any] = None
+    client_action_id: Optional[str] = None
+
+
+class TxOnceResponseBody(BaseModel):
+    ok: bool = True
+    emitted_event_id: str
+    client_action_id: Optional[str] = None
+
+
+class ClearingOnceRequestBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    equivalent: str
+    cycle_edges: Optional[list[dict[str, str]]] = None
+    cleared_amount: Optional[str] = None
+    seed: Optional[Any] = None
+    client_action_id: Optional[str] = None
+
+
+class ClearingOnceResponseBody(BaseModel):
+    ok: bool = True
+    plan_id: str
+    plan_event_id: str
+    done_event_id: str
+    client_action_id: Optional[str] = None
 
 
 def _utc_now() -> datetime:
@@ -115,13 +162,6 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
             evt: Optional[dict[str, Any]] = None
             deadline = asyncio.get_running_loop().time() + 2.0
             while asyncio.get_running_loop().time() < deadline:
-        def _actions_enabled() -> bool:
-            return str(os.environ.get("SIMULATOR_ACTIONS_ENABLE", "") or "").strip() in {"1", "true", "TRUE", "yes"}
-
-        def _require_actions_enabled() -> None:
-            if not _actions_enabled():
-                raise ForbiddenException("Simulator actions are disabled (set SIMULATOR_ACTIONS_ENABLE=1)")
-
                 try:
                     nxt = await asyncio.wait_for(sub.queue.get(), timeout=0.25)
                 except asyncio.TimeoutError:
@@ -313,6 +353,33 @@ async def start_run(
         scenario_id=body.scenario_id, mode=body.mode, intensity_percent=body.intensity_percent
     )
     return RunCreateResponse(run_id=run_id)
+
+
+@router.get("/runs/active", response_model=ActiveRunResponse)
+async def get_active_run(
+    _actor=Depends(deps.require_participant_or_admin),
+):
+    """Return the current active run id (if any).
+
+    Used by the Simulator UI to recover when `SIMULATOR_MAX_ACTIVE_RUNS` prevents
+    creating a new run (e.g. another tab already has one running).
+    """
+    run_id = runtime.get_active_run_id()
+    if run_id is None:
+        return ActiveRunResponse(run_id=None)
+
+    # `runtime.get_active_run_id()` may point to the most recent run even if it is
+    # already terminal. For UI recovery we only want a currently active (non-terminal)
+    # run that could be attached to.
+    try:
+        st = runtime.get_run_status(run_id)
+    except NotFoundException:
+        return ActiveRunResponse(run_id=None)
+
+    if st.state in ("stopped", "error"):
+        return ActiveRunResponse(run_id=None)
+
+    return ActiveRunResponse(run_id=run_id)
 
 
 @router.get("/runs/{run_id}", response_model=RunStatus)

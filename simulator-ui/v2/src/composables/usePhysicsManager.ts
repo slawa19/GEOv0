@@ -25,7 +25,7 @@ export function createPhysicsManager(opts: {
    * Wake up render loop from deep idle.
    * Must be cheap/idempotent.
    */
-  wakeUp?: () => void
+  wakeUp?: (source?: 'user' | 'animation') => void
 }): PhysicsManager {
   const { isEnabled, getLayoutNodes, getLayoutLinks, getQuality, getPinnedPos, wakeUp } = opts
 

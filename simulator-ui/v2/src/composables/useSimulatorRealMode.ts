@@ -85,14 +85,17 @@ export function useSimulatorRealMode(opts: {
   clearingPlansById: Map<string, ClearingPlanEvent>
 
   // Optional: wake up render loop after snapshot/patch/FX updates.
-  wakeUp?: () => void
+  wakeUp?: (source?: 'user' | 'animation') => void
+
+  // Optional: notify on any SSE event (used to keep Demo UI render loop awake).
+  onAnySseEvent?: () => void
 }): {
   stopSse: () => void
   resetStaleRun: (opts?: { clearError?: boolean }) => void
   refreshRunStatus: () => Promise<void>
   refreshSnapshot: () => Promise<void>
   refreshScenarios: () => Promise<void>
-  startRun: () => Promise<void>
+  startRun: (opts?: { mode?: SimulatorMode; intensityPercent?: number; pauseImmediately?: boolean }) => Promise<void>
   pause: () => Promise<void>
   resume: () => Promise<void>
   stop: () => Promise<void>
@@ -121,6 +124,7 @@ export function useSimulatorRealMode(opts: {
     runRealClearingDoneFx,
     clearingPlansById,
     wakeUp,
+    onAnySseEvent,
   } = opts
 
   // -----------------
@@ -348,6 +352,8 @@ export function useSimulatorRealMode(opts: {
             const evt = normalizeSimulatorEvent(parsed)
             if (!evt) return
 
+            onAnySseEvent?.()
+
             // Prefer payload event_id when present.
             if ((evt as any).event_id) real.lastEventId = String((evt as any).event_id)
 
@@ -514,7 +520,7 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  async function startRun() {
+  async function startRun(startOpts?: { mode?: SimulatorMode; intensityPercent?: number; pauseImmediately?: boolean }) {
     if (!real.selectedScenarioId) return
     if (!real.accessToken) {
       real.lastError = 'Missing access token'
@@ -537,16 +543,43 @@ export function useSimulatorRealMode(opts: {
 
       const res = await createRun(
         { apiBase: real.apiBase, accessToken: real.accessToken },
-        { scenario_id: real.selectedScenarioId, mode: real.desiredMode, intensity_percent: real.intensityPercent },
+        {
+          scenario_id: real.selectedScenarioId,
+          mode: startOpts?.mode ?? real.desiredMode,
+          intensity_percent: startOpts?.intensityPercent ?? real.intensityPercent,
+        },
       )
       real.runId = res.run_id
       real.runStatus = null
       real.lastEventId = null
       real.artifacts = []
 
+      if (startOpts?.pauseImmediately) {
+        const delaysMs = [80, 160]
+        let paused = false
+        for (let i = 0; i < delaysMs.length + 1; i++) {
+          try {
+            real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+            paused = true
+            break
+          } catch (e: unknown) {
+            if (i === delaysMs.length) {
+              // Best-effort: still proceed so UI can show status/errors.
+              real.lastError = String((e as any)?.message ?? e)
+              break
+            }
+            await new Promise((r) => setTimeout(r, delaysMs[i]!))
+          }
+        }
+        if (!paused) {
+          // No-op: higher-level logic may pause later.
+        }
+      }
+
       await refreshRunStatus()
       await refreshSnapshot()
-      await runSseLoop()
+      // SSE loop is long-lived; do not await it.
+      void runSseLoop()
     } catch (e: unknown) {
       real.lastError = String((e as any)?.message ?? e)
     } finally {

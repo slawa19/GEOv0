@@ -1,14 +1,12 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
 
-import { isDemoScene, type SceneId } from '../scenes'
 import { clamp } from '../utils/math'
 import type { Quality } from '../types/uiPrefs'
 
 export function useAppUiDerivedState(deps: {
   eq: Ref<string>
-  scene: Ref<SceneId>
   quality: Ref<Quality>
-  apiMode: ComputedRef<'demo' | 'real'>
+  apiMode: ComputedRef<'fixtures' | 'real'>
   isDemoFixtures: ComputedRef<boolean>
   isTestMode: ComputedRef<boolean>
   isWebDriver: boolean
@@ -16,9 +14,7 @@ export function useAppUiDerivedState(deps: {
 }) {
   const effectiveEq = computed(() => {
     // Demo fixtures are shipped for UAH only; avoid silently requesting missing files.
-    if (deps.apiMode.value === 'demo' && deps.isDemoFixtures.value) return 'UAH'
-    // Scene E must use canonical clearing cycles (UAH) per spec.
-    if (deps.scene.value === 'E') return 'UAH'
+    if (deps.apiMode.value === 'fixtures' && deps.isDemoFixtures.value) return 'UAH'
     // Keep Playwright / test-mode stable even if query params are present.
     if (deps.isTestMode.value) return 'UAH'
     return deps.eq.value
@@ -31,7 +27,6 @@ export function useAppUiDerivedState(deps: {
     return 2
   })
 
-  const showDemoControls = computed(() => !deps.isTestMode.value && isDemoScene(deps.scene.value))
   const showResetView = computed(() => !deps.isTestMode.value)
 
   const overlayLabelScale = computed(() => {
@@ -43,5 +38,5 @@ export function useAppUiDerivedState(deps: {
     return clamp(z, 0.65, 1)
   })
 
-  return { effectiveEq, dprClamp, showDemoControls, showResetView, overlayLabelScale }
+  return { effectiveEq, dprClamp, showResetView, overlayLabelScale }
 }

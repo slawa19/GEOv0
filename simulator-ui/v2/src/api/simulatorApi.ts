@@ -1,7 +1,10 @@
 import { httpJson, httpUrl, type HttpConfig } from './http'
 import type {
+  ActiveRunResponse,
   ArtifactIndexResponse,
   BottlenecksResponse,
+  ClearingOnceRequest,
+  ClearingOnceResponse,
   MetricsResponse,
   RunCreateRequest,
   RunCreateResponse,
@@ -10,6 +13,8 @@ import type {
   ScenariosListResponse,
   SimulatorGraphSnapshot,
   SimulatorMode,
+  TxOnceRequest,
+  TxOnceResponse,
 } from './simulatorTypes'
 
 export function listScenarios(cfg: HttpConfig): Promise<ScenariosListResponse> {
@@ -42,6 +47,10 @@ export function createRun(cfg: HttpConfig, req: RunCreateRequest): Promise<RunCr
     method: 'POST',
     body: JSON.stringify(req),
   })
+}
+
+export function getActiveRun(cfg: HttpConfig): Promise<ActiveRunResponse> {
+  return httpJson(cfg, '/simulator/runs/active')
 }
 
 export function getRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
@@ -112,4 +121,22 @@ export function listArtifacts(cfg: HttpConfig, runId: string): Promise<ArtifactI
 export function artifactDownloadUrl(cfg: HttpConfig, runId: string, name: string): string {
   // Note: browser downloads will include Authorization only if same-origin + cookies; we use proxy + same-origin.
   return httpUrl(cfg, `/simulator/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(name)}`)
+}
+
+export function actionTxOnce(cfg: HttpConfig, runId: string, req: TxOnceRequest): Promise<TxOnceResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/tx-once`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function actionClearingOnce(
+  cfg: HttpConfig,
+  runId: string,
+  req: ClearingOnceRequest,
+): Promise<ClearingOnceResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-once`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
 }
