@@ -253,13 +253,6 @@ function toggleDemoUi() {
           <span class="demo-ui__label">SSE</span>
           <span class="demo-ui__value">{{ real.sseState }}</span>
         </div>
-
-        <div v-if="apiMode === 'real' && isDemoUi" class="demo-ui__chip" aria-label="Run status">
-          <span class="demo-ui__label">Run</span>
-          <span class="demo-ui__value">
-            {{ real.runStatus?.state ?? (real.runId ? 'unknown' : 'none') }}
-          </span>
-        </div>
       </div>
 
       <div v-if="apiMode === 'real' && isDemoUi && real.lastError" class="demo-ui__error mono">
