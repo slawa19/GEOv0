@@ -42,7 +42,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   mapping: VizMapping
   palette?: Palette
   selectedNodeId: string | null
-  activeEdges: Set<string>
+  activeEdges: Map<string, number>
   activeNodes?: Set<string>
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
@@ -131,15 +131,19 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       }
 
       // Active overlay: explicit UX color policy (matches tx sparks) but stays as a separate layer.
+      // Alpha fades smoothly via activeEdges map value (1.0 → 0.0 over last ~1.2s of TTL).
       if (isActive) {
-        const alpha = clamp01(Math.max(mapping.link.alpha.hi, baseAlpha * 4.0))
-        const width = Math.max(baseWidth, mapping.link.width_px.highlight)
-        ctx.strokeStyle = withAlpha(mapping.fx.tx_spark.trail, alpha)
-        ctx.lineWidth = width * invZ
-        ctx.beginPath()
-        ctx.moveTo(start.x, start.y)
-        ctx.lineTo(end.x, end.y)
-        ctx.stroke()
+        const edgeAlpha = activeEdges.get(link.__key) ?? 1.0
+        const alpha = clamp01(Math.max(mapping.link.alpha.hi, baseAlpha * 4.0)) * edgeAlpha
+        if (alpha > 0.003) {
+          const width = Math.max(baseWidth, mapping.link.width_px.highlight)
+          ctx.strokeStyle = withAlpha(mapping.fx.tx_spark.trail, alpha)
+          ctx.lineWidth = width * invZ
+          ctx.beginPath()
+          ctx.moveTo(start.x, start.y)
+          ctx.lineTo(end.x, end.y)
+          ctx.stroke()
+        }
       }
     }
   }

@@ -107,7 +107,7 @@ type UseRenderLoopDeps = {
   fxState: any
 
   getSelectedNodeId: () => string | null
-  activeEdges: Set<string>
+  activeEdges: Map<string, number>
   activeNodes?: Set<string>
 
   // Optional: reduce link drawing cost (used during drag).

@@ -15,6 +15,7 @@ type FloatingLabel = {
   text: string
   color: string
   glow: number
+  cssClass?: string
 }
 
 type Props = {
@@ -48,7 +49,7 @@ defineProps<Props>()
     >
       <div
         class="floating-label-inner"
-        :class="{ 'is-glow': fl.glow > 0.05 }"
+        :class="[{ 'is-glow': fl.glow > 0.05 }, fl.cssClass]"
         :style="{ color: fl.color, '--glow': String(fl.glow) }"
       >
         {{ fl.text }}

@@ -66,8 +66,8 @@ export const VIZ_MAPPING: VizMapping = {
     clearing_debt: '#f97316',
     flash: {
       clearing: {
-        from: 'rgba(34,211,238,0.70)',
-        to: 'rgba(34,211,238,0.00)',
+        from: 'rgba(251,191,36,0.45)',
+        to: 'rgba(251,191,36,0.00)',
       },
     },
   },

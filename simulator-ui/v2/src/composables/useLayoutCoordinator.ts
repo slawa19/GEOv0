@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import { reactive } from 'vue'
+import { reactive, watch } from 'vue'
 
 export type LayoutState<N, L> = {
   nodes: N[]
@@ -408,6 +408,16 @@ export function useLayoutCoordinator<
   // Test determinism is handled at the interaction layer (pan/zoom disabled), and
   // by using stable DPR clamps; keeping resize/layout active avoids surprises.
   void deps.isTestMode
+
+  // Critical: layout mode changes must trigger a relayout even if the viewport size
+  // doesn't change. Otherwise, deep-idle render loops may not redraw until focus/visibility events.
+  watch(
+    deps.layoutMode,
+    () => {
+      requestRelayoutDebounced(0)
+    },
+    { flush: 'sync' },
+  )
 
   return {
     layout,

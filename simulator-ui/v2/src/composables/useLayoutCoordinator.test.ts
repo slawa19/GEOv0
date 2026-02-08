@@ -438,6 +438,43 @@ describe('useLayoutCoordinator', () => {
 		vi.useRealTimers()
 	})
 
+  it('changing layoutMode triggers relayout and wakeUp', () => {
+    vi.useFakeTimers()
+
+    const computeLayout = vi.fn()
+    const clampCameraPan = vi.fn()
+    const wakeUp = vi.fn()
+
+    const layoutMode = ref<'admin-force' | 'type-split'>('admin-force')
+
+    const coordinator = useLayoutCoordinator({
+      canvasEl: ref(createMockCanvas()),
+      fxCanvasEl: ref(createMockCanvas()),
+      hostEl: ref(createMockHost(800, 600)),
+      snapshot: computed(() => ({ generated_at: 't1', nodes: [], links: [] })),
+      layoutMode,
+      dprClamp: computed(() => 1),
+      isTestMode: computed(() => false),
+      getSourcePath: () => 'src',
+      computeLayout,
+      clampCameraPan,
+      wakeUp,
+    })
+
+    // Initial sizing/layout.
+    coordinator.resizeAndLayout()
+    expect(computeLayout).toHaveBeenCalledTimes(1)
+
+    // Mode change must relayout even if size is unchanged.
+    layoutMode.value = 'type-split'
+    vi.runAllTimers()
+
+    expect(computeLayout).toHaveBeenCalledTimes(2)
+    expect(wakeUp).toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
   it('wakeUp handler uses latest implementation even if changed after init', () => {
     // Regression test for wiring bug: callers capture deps.wakeUp at init-time.
     // If wakeUp is implemented as `let wakeUp = () => {}` and later reassigned,

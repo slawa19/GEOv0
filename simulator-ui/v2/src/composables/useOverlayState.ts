@@ -22,9 +22,17 @@ export type FloatingLabel = {
 
   // Optional metadata used for throttling/coalescing.
   throttleKey?: string
+
+  // Optional CSS class for premium/special label styling.
+  cssClass?: string
+
+  // Internal: frozen world-space position (set once on first layout resolution).
+  // Prevents jitter from ongoing physics updates after the label spawns.
+  _frozenX?: number
+  _frozenY?: number
 }
 
-export type FloatingLabelView = { id: number; x: number; y: number; text: string; color: string }
+export type FloatingLabelView = { id: number; x: number; y: number; text: string; color: string; cssClass?: string }
 
 export type LayoutNodeLike = BaseLayoutNodeLike
 
@@ -53,7 +61,7 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     hoveredEdge.key = null
   }
 
-  const activeEdges = reactive(new Set<string>())
+  const activeEdges = reactive(new Map<string, number>())
 
   const activeNodes = reactive(new Set<string>())
 
@@ -63,11 +71,14 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
   const activeNodeExpiresAtMsById = new Map<string, number>()
   let lastActiveNodePruneAtMs = 0
 
+  // Fade duration for the smooth tail of active-edge highlights.
+  const ACTIVE_EDGE_FADE_MS = 1200
+
   function addActiveEdge(key: string, ttlMs = 2000) {
     const nowMs = deps.nowMs ? deps.nowMs() : performance.now()
     const expiresAtMs = nowMs + Math.max(0, ttlMs)
 
-    activeEdges.add(key)
+    activeEdges.set(key, 1.0)
 
     // Touch for LRU (Map preserves insertion order).
     activeEdgeExpiresAtMsByKey.delete(key)
@@ -85,9 +96,19 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     lastActiveEdgePruneAtMs = nowMs
 
     for (const [k, exp] of activeEdgeExpiresAtMsByKey) {
-      if (nowMs < exp) continue
-      activeEdgeExpiresAtMsByKey.delete(k)
-      activeEdges.delete(k)
+      if (nowMs >= exp) {
+        // Fully expired — remove.
+        activeEdgeExpiresAtMsByKey.delete(k)
+        activeEdges.delete(k)
+        continue
+      }
+      // Smooth fade: ramp alpha from 1→0 over the last ACTIVE_EDGE_FADE_MS.
+      const remaining = exp - nowMs
+      if (remaining < ACTIVE_EDGE_FADE_MS) {
+        const alpha = remaining / ACTIVE_EDGE_FADE_MS // 1→0
+        activeEdges.set(k, alpha)
+      }
+      // else: alpha stays at 1.0 (set on addActiveEdge)
     }
 
     if (activeEdgeExpiresAtMsByKey.size > maxEntries) {
@@ -187,6 +208,7 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     offsetYPx?: number
     throttleKey?: string
     throttleMs?: number
+    cssClass?: string
   }) {
     const nowMs = deps.nowMs ? deps.nowMs() : performance.now()
     pruneFloatingLabelThrottle(nowMs)
@@ -242,6 +264,7 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       color: opts.color,
       expiresAtMs: nowMs + ttlMs,
       throttleKey: opts.throttleKey,
+      cssClass: opts.cssClass,
     })
   }
 
@@ -269,6 +292,12 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     const z = Math.max(0.01, deps.getCameraZoom())
 
     for (const fl of floatingLabels) {
+      // Use frozen position if already resolved (prevents jitter from ongoing physics).
+      if (fl._frozenX != null && fl._frozenY != null) {
+        out.push({ id: fl.id, x: fl._frozenX, y: fl._frozenY, text: fl.text, color: fl.color, cssClass: fl.cssClass })
+        continue
+      }
+
       const ln = deps.getLayoutNodeById(fl.nodeId)
       if (!ln) continue
 
@@ -281,12 +310,17 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       const x = ln.__x + dxW
       const y = ln.__y + dyW
 
+      // Freeze position so subsequent frames don't jitter from physics updates.
+      fl._frozenX = x
+      fl._frozenY = y
+
       out.push({
         id: fl.id,
         x,
         y,
         text: fl.text,
         color: fl.color,
+        cssClass: fl.cssClass,
       })
     }
 

@@ -730,8 +730,8 @@ export function useSimulatorApp() {
     // Avoid animating long routes as a wall of particles.
     maxEdgesPerEvent: 2,
     // Clamp TTL to keep the scene from accumulating particles.
-    ttlMinMs: 240,
-    ttlMaxMs: 900,
+    ttlMinMs: 340,
+    ttlMaxMs: 1200,
     // Extra highlight time to make motion readable.
     activeEdgePadMs: 260,
     // Safety: prevent spamming even if tokens allow bursts.
@@ -900,7 +900,6 @@ export function useSimulatorApp() {
     clearingPlanFxStarted.add(planId)
 
     const clearingColor = VIZ_MAPPING.fx.clearing_debt
-    // REMOVED: No flash at plan start — only flash once at clearing.done
 
     // Collect all edges from plan for highlighting (even without steps).
     const allPlanEdges: Array<{ from: string; to: string }> = []
@@ -923,13 +922,13 @@ export function useSimulatorApp() {
     )
     const planFxTtlMs = Math.max(1500, Math.min(30_000, maxAt + 2500))
 
-    // Clearing Viz v2: highlight all nodes in the cycle during the plan phase.
+    // Highlight all nodes in the cycle during the plan phase.
     if (allPlanEdges.length > 0) {
       const nodeIds = nodesFromEdges(allPlanEdges)
       for (const id of nodeIds) addActiveNode(id, planFxTtlMs)
     }
 
-    // Highlight all clearing edges immediately (so they're visible during the plan phase).
+    // Highlight all clearing edges with soft pulsing glow (geometry-only, no sparks/particles).
     if (allPlanEdges.length > 0) {
       const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
       for (const e of allPlanEdges) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.highlightPulseMs + 3000)
@@ -948,52 +947,28 @@ export function useSimulatorApp() {
       })
     }
 
-    // Process steps for additional FX (micro-transactions within clearing).
+    // Process steps: only spawn additional edge pulses per step (no sparks, no node bursts).
     for (const step of plan.steps ?? []) {
       const atMs = Math.max(0, Number(step.at_ms ?? 0))
       scheduleTimeout(() => {
         const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-        const budgetScaleRaw = (fxState as any).__fxBudgetScale
-        const budgetScale =
-          typeof budgetScaleRaw === 'number' && Number.isFinite(budgetScaleRaw) ? Math.max(0.25, Math.min(1, budgetScaleRaw)) : 1
 
-        const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
-
-        const k = intensityScale(step.intensity_key)
-
-        const particles = (step.particles_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
-        if (particles.length > 0) {
-          spawnSparks(fxState, {
-            edges: particles,
+        const stepEdges = (step.particles_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
+        if (stepEdges.length > 0) {
+          // Reinforce the edge glow for this step's edges.
+          spawnEdgePulses(fxState, {
+            edges: stepEdges,
             nowMs,
-            ttlMs: REAL_CLEARING_FX.microTtlMs,
-            colorCore: VIZ_MAPPING.fx.tx_spark.core,
-            colorTrail: clearingColor,
-            thickness: REAL_CLEARING_FX.microThickness * k,
-            kind: 'comet',
-            seedPrefix: `real-clearing:micro:${planId}:${plan.equivalent}:${step.at_ms}`,
+            durationMs: REAL_CLEARING_FX.highlightPulseMs * 0.6,
+            color: clearingColor,
+            thickness: REAL_CLEARING_FX.highlightThickness * 1.1,
+            seedPrefix: `real-clearing:step:${planId}:${step.at_ms}`,
             countPerEdge: 1,
             keyEdge,
             seedFn: fnv1a,
             isTestMode: isTestMode.value && isWebDriver,
           })
-
-          if (budgetScale >= 0.55) {
-            const nodeIds = nodesFromEdges(particles)
-            const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
-            spawnNodeBursts(fxState, {
-              nodeIds: capped,
-              nowMs,
-              durationMs: REAL_CLEARING_FX.nodeBurstMs,
-              color: clearingColor,
-              kind: 'clearing',
-              seedPrefix: `real-clearing:nodes:${planId}:${step.at_ms}`,
-              seedFn: fnv1a,
-              isTestMode: isTestMode.value && isWebDriver,
-            })
-          }
         }
-        // REMOVED: No flash per step
       }, atMs)
     }
 
@@ -1006,13 +981,8 @@ export function useSimulatorApp() {
     const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const clearingColor = VIZ_MAPPING.fx.clearing_debt
 
-    const budgetScaleRaw = (fxState as any).__fxBudgetScale
-    const budgetScale =
-      typeof budgetScaleRaw === 'number' && Number.isFinite(budgetScaleRaw) ? Math.max(0.25, Math.min(1, budgetScaleRaw)) : 1
-    const burstNodeCap = budgetScale >= 0.85 ? 30 : budgetScale >= 0.7 ? 16 : 8
-
-    // Single flash at clearing completion (the only flash for entire clearing cycle).
-    state.flash = 0.85
+    // Single subtle flash at clearing completion (warm orange tint, once per event).
+    state.flash = 0.55
 
     // Collect all edges from plan (for edge highlighting).
     const planEdges: Array<{ from: string; to: string }> = []
@@ -1041,12 +1011,12 @@ export function useSimulatorApp() {
 
     const nodeIds = nodesFromEdges(planEdges)
 
-    // Keep cycle nodes visible during completion flash.
+    // Keep cycle nodes visible during completion.
     if (nodeIds.length > 0) {
       for (const id of nodeIds) addActiveNode(id, 5200)
     }
 
-    // Highlight edges with pulses.
+    // Highlight edges with pulsing glow (geometry-only, no sparks/bursts).
     if (planEdges.length > 0) {
       spawnEdgePulses(fxState, {
         edges: planEdges,
@@ -1062,66 +1032,39 @@ export function useSimulatorApp() {
       })
 
       for (const e of planEdges) addActiveEdge(keyEdge(e.from, e.to), 5200)
-
-      if (budgetScale >= 0.55) {
-        const capped = nodeIds.length > burstNodeCap ? nodeIds.slice(0, burstNodeCap) : nodeIds
-        spawnNodeBursts(fxState, {
-          nodeIds: capped,
-          nowMs,
-          durationMs: 900,
-          color: clearingColor,
-          kind: 'clearing',
-          seedPrefix: `real-clearing:done-nodes:${done.plan_id}`,
-          seedFn: fnv1a,
-          isTestMode: isTestMode.value && isWebDriver,
-        })
-      }
     }
 
-    // Show total cleared amount as a single floating label in the center of the cycle.
-    // This replaces multiple per-node labels for a cleaner UX.
+    // Show total cleared amount as a premium floating label at the TOP of the clearing figure.
     if (nodeIds.length > 0) {
-      // Compute center of cycle (average of all node positions).
-      let sumX = 0
-      let sumY = 0
-      let count = 0
-      let centerNodeId = nodeIds[0]!
+      // Find the topmost node in the cycle (smallest __y = highest on screen).
+      let topNodeId = nodeIds[0]!
+      let topY = Infinity
       for (const id of nodeIds) {
         const ln = getLayoutNodeById(id)
         if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
-          sumX += ln.__x
-          sumY += ln.__y
-          count++
-        }
-      }
-
-      // Pick the node closest to center to anchor the label.
-      if (count > 0) {
-        const cx = sumX / count
-        const cy = sumY / count
-        let minDist = Infinity
-        for (const id of nodeIds) {
-          const ln = getLayoutNodeById(id)
-          if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
-            const d = Math.hypot(ln.__x - cx, ln.__y - cy)
-            if (d < minDist) {
-              minDist = d
-              centerNodeId = id
-            }
+          if (ln.__y < topY) {
+            topY = ln.__y
+            topNodeId = id
           }
         }
       }
 
+      // Extra negative offset so the label starts above the top node's bounding box,
+      // giving the impression it originates from the top edge of the clearing figure
+      // and drifts upward into the dark background.
+      const extraUpPx = -18
+
       const clearedAmount = String(done.cleared_amount ?? '').trim()
       if (clearedAmount && clearedAmount !== '0' && clearedAmount !== '0.0' && clearedAmount !== '0.00') {
         pushFloatingLabelWhenReady({
-          nodeId: centerNodeId,
-          text: `🔄 −${clearedAmount.replace(/^-/, '')} ${done.equivalent}`,
-          color: clearingColor,
-          ttlMs: 3200,
-          offsetYPx: -18,
+          nodeId: topNodeId,
+          text: `−${clearedAmount.replace(/^-/, '')} ${done.equivalent}`,
+          color: '#fbbf24',
+          ttlMs: 3800,
+          offsetYPx: extraUpPx,
           throttleKey: `clearing-total:${done.plan_id}`,
           throttleMs: 500,
+          cssClass: 'clearing-premium',
         })
       }
     }
@@ -1311,21 +1254,38 @@ export function useSimulatorApp() {
 
   async function ensureRunForFxDebug(): Promise<string> {
     if (real.runId) {
-      // If this is an auto-started FX debug fixtures run, keep it paused so heartbeat doesn't spam events.
+      // IMPORTANT:
+      // VSCode Simple Browser has its own storage partition (localStorage/cookies) separate from your external browser.
+      // It's common to end up with a persisted `geo.sim.v2.runId` that points to a run that is already terminal
+      // server-side (e.g. `stopped`). In that case, sending actions like `/actions/tx-once` yields HTTP 409.
+      //
+      // Fix: if the persisted run is in a terminal state, clear it and fall through to creating a fresh paused run.
       try {
-        const isFxDebugRun = localStorage.getItem('geo.sim.v2.fxDebugRun') === '1'
-        if (isFxDebugRun) {
-          if (!real.runStatus) await realMode.refreshRunStatus()
-          const st = String(real.runStatus?.state ?? '').toLowerCase()
-          const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
-          if (shouldPause) {
-            await realMode.pause()
-          }
-        }
+        await realMode.refreshRunStatus()
       } catch {
-        // ignore
+        // best-effort; refreshRunStatus already handles 404 by resetting stale run
       }
-      return real.runId
+
+      const st = String(real.runStatus?.state ?? '').toLowerCase()
+      const isTerminal = st === 'stopped' || st === 'error'
+
+      if (isTerminal) {
+        realMode.resetStaleRun({ clearError: true })
+      } else {
+        // If this is an auto-started FX debug fixtures run, keep it paused so heartbeat doesn't spam events.
+        try {
+          const isFxDebugRun = localStorage.getItem('geo.sim.v2.fxDebugRun') === '1'
+          if (isFxDebugRun) {
+            const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
+            if (shouldPause) {
+              await realMode.pause()
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return real.runId
+      }
     }
 
     if (!String(real.accessToken ?? '').trim()) {

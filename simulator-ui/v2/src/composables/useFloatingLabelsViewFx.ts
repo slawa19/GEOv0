@@ -4,7 +4,7 @@ import type { LayoutNodeLike } from '../types/layout'
 import type { FloatingLabelView } from './useOverlayState'
 import { clamp01 } from '../utils/math'
 
-export type FloatingLabelFx = FloatingLabelView & { glow: number }
+export type FloatingLabelFx = FloatingLabelView & { glow: number; cssClass?: string }
 
 type UseFloatingLabelsViewFxDeps<N extends LayoutNodeLike> = {
   getFloatingLabelsView: () => FloatingLabelView[]

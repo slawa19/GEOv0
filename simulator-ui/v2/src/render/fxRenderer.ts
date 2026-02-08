@@ -502,7 +502,7 @@ export function renderFxFrame(opts: {
 
         // Head: soft glowing dot (no star/cross spikes)
         {
-          const r = Math.max(spx(2.2), th * 3.2)
+          const r = Math.max(spx(3.0), th * 4.2)
 
           // Replace arc+shadowBlur with pre-rendered FX dot sprite.
           ctx.globalAlpha = alpha
@@ -512,7 +512,7 @@ export function renderFxFrame(opts: {
             y: headY,
             color: s.colorCore,
             r,
-            blurPx: Math.max(spx(14), r * 5) * shadowBlurK,
+            blurPx: Math.max(spx(16), r * 5) * shadowBlurK,
             composite: 'lighter',
           })
         }
@@ -624,88 +624,94 @@ export function renderFxFrame(opts: {
     fxState.sparks.length = write
   }
 
-  // Clearing edge pulses
+  // Clearing edge pulses — full-edge pulsing glow (synchronous 2-pulse + afterglow)
   if (fxState.edgePulses.length > 0) {
     let write = 0
+    // Extended total lifetime = original durationMs + 30% afterglow tail.
     for (let read = 0; read < fxState.edgePulses.length; read++) {
       const p = fxState.edgePulses[read]!
       const age = nowMs - p.startedAtMs
-      if (age >= p.durationMs) continue
+      const afterglowMs = p.durationMs * 0.30
+      const totalMs = p.durationMs + afterglowMs
+      if (age >= totalMs) continue
       fxState.edgePulses[write++] = p
 
       const a = pos.get(p.from)
       const b = pos.get(p.to)
       if (!a || !b) continue
 
-      const t0 = clamp01(age / p.durationMs)
-      const seed01 = ((p.seed % 4096) / 4096)
-      const phase = seed01 * 0.12
-      const t = clamp01(t0 + phase)
-
-      const dx = b.__x - a.__x
-      const dy = b.__y - a.__y
-      const len = Math.max(1e-6, Math.hypot(dx, dy))
-      const ux = dx / len
-      const uy = dy / len
-
-      const x = a.__x + dx * t
-      const y = a.__y + dy * t
-
-      const speedPxPerMs = len / Math.max(1, p.durationMs)
-      const trailTimeMs = Math.max(90, Math.min(260, p.durationMs * 0.22))
-      const trailLen = Math.max(10, Math.min(len * 0.45, speedPxPerMs * trailTimeMs))
-      const tailX = x - ux * trailLen
-      const tailY = y - uy * trailLen
-
-      const life = 1 - t0
-      const alpha = Math.max(0, Math.min(1, life * 0.8))
+      const th = p.thickness * invZ
+      const inOrangeDuration = age < p.durationMs
 
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
 
-      // Soft whole-edge presence so the route reads as a loop.
-      ctx.globalAlpha = alpha * 0.10
-      ctx.strokeStyle = p.color
-      ctx.lineWidth = Math.max(spx(1.0), (p.thickness * invZ) * 1.1)
-      ctx.beginPath()
-      ctx.moveTo(a.__x, a.__y)
-      ctx.lineTo(b.__x, b.__y)
-      ctx.stroke()
+      if (inOrangeDuration) {
+        // --- Orange pulsing phase ---
+        const t0 = clamp01(age / p.durationMs)
 
-      // Moving pulse head + tail.
-      ctx.globalAlpha = 1
-      const grad = ctx.createLinearGradient(x, y, tailX, tailY)
-      grad.addColorStop(0, withAlpha(p.color, alpha * 0.95))
-      grad.addColorStop(0.35, withAlpha(p.color, alpha * 0.35))
-      grad.addColorStop(1, withAlpha(p.color, 0))
-      ctx.strokeStyle = grad
-      // Halo approximation: thicker stroke (no on-screen shadowBlur).
-      ctx.lineWidth = Math.max(spx(1.8), (p.thickness * invZ) * 4.0)
-      ctx.beginPath()
-      ctx.moveTo(tailX, tailY)
-      ctx.lineTo(x, y)
-      ctx.stroke()
+        // Raised cosine envelope (Hann window) — smooth from 0→1→0, no flat sustain.
+        // No hard boundary breakpoints, perfectly smooth derivative everywhere.
+        const envelope = 0.5 * (1 - Math.cos(Math.PI * 2 * Math.min(t0, 0.5)))
+        // Peaks at t0=0.5, symmetric fade-in/fade-out over the full duration.
+        // But we want the fade-out to be a bit slower, so use an asymmetric shape:
+        // fast attack (first 15%), sustained middle, gentle release.
+        const envAsym = t0 < 0.12
+          ? 0.5 * (1 - Math.cos(Math.PI * (t0 / 0.12))) // smooth rise 0→1
+          : t0 < 0.70
+            ? 1.0 // sustained
+            : 0.5 * (1 + Math.cos(Math.PI * ((t0 - 0.70) / 0.30))) // smooth fall 1→0
 
-      // Core pulse stroke
-      ctx.lineWidth = Math.max(spx(1.0), (p.thickness * invZ) * 2.2)
-      ctx.beginPath()
-      ctx.moveTo(tailX, tailY)
-      ctx.lineTo(x, y)
-      ctx.stroke()
+        // N=2 pulses: gentle sine modulation with a high floor (no zero-dips).
+        const PULSE_COUNT = 2
+        const pulse = 0.60 + 0.40 * Math.sin(t0 * PULSE_COUNT * Math.PI * 2)
 
-      // Pulse head
-      ctx.globalAlpha = alpha
-      drawGlowSprite(ctx, {
-        kind: 'fx-dot',
-        x,
-        y,
-        color: p.color,
-        r: Math.max(spx(1.5), (p.thickness * invZ) * 2.2),
-        blurPx: Math.max(spx(10), (p.thickness * invZ) * 14) * shadowBlurK,
-        composite: 'lighter',
-      })
+        const alpha = clamp01(envAsym) * pulse
+        if (alpha >= 0.005) {
+          // Outer halo.
+          ctx.globalAlpha = alpha * 0.12
+          ctx.strokeStyle = p.color
+          ctx.lineWidth = Math.max(spx(1.2), th * 2.4)
+          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+
+          // Mid glow.
+          ctx.globalAlpha = alpha * 0.28
+          ctx.strokeStyle = p.color
+          ctx.lineWidth = Math.max(spx(0.7), th * 1.3)
+          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+
+          // Core line.
+          ctx.globalAlpha = alpha * 0.55
+          ctx.strokeStyle = withAlpha(p.color, 1.0)
+          ctx.lineWidth = Math.max(spx(0.35), th * 0.6)
+          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+        }
+
+        // Afterglow seed: start fading in the base-blue line during the tail of the orange phase
+        // so there's a seamless crossfade (no abrupt transition).
+        if (t0 > 0.55) {
+          const crossfade = clamp01((t0 - 0.55) / 0.45) // 0→1 over the last 45%
+          const blueAlpha = crossfade * 0.12
+          ctx.globalAlpha = blueAlpha
+          ctx.strokeStyle = '#64748b' // base edge color (slate)
+          ctx.lineWidth = Math.max(spx(0.6), th * 1.0)
+          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+        }
+      } else {
+        // --- Afterglow phase: soft blue-gray line fading out ---
+        const afterAge = age - p.durationMs
+        const afterT = clamp01(afterAge / afterglowMs)
+        // Smooth exponential-ish decay via cosine.
+        const afterAlpha = 0.12 * 0.5 * (1 + Math.cos(Math.PI * afterT)) // 0.12 → 0
+        if (afterAlpha >= 0.003) {
+          ctx.globalAlpha = afterAlpha
+          ctx.strokeStyle = '#64748b'
+          ctx.lineWidth = Math.max(spx(0.6), th * 1.0)
+          ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
+        }
+      }
 
       ctx.restore()
     }
@@ -728,12 +734,14 @@ export function renderFxFrame(opts: {
       const alpha = Math.pow(1 - t0, 1.2) // Smooth decay
 
       if (b.kind === 'tx-impact') {
-        // Uniform contour glow: the outline itself glows evenly around the perimeter.
-        // We draw multiple strokes with increasing blur/thickness to create a soft aura.
+        // Shape-aware contour glow: matches the node's actual outline (rounded-rect or circle).
         const { w: nw0, h: nh0 } = sizeForNode(n)
         const nw = nw0 * invZ
         const nh = nh0 * invZ
         const nodeR = Math.max(nw, nh) / 2
+        const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+        const isRoundedRect = shapeKey === 'rounded-rect'
+        const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
 
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
@@ -748,17 +756,20 @@ export function renderFxFrame(opts: {
         const outline = nodeOutlinePath2D(n, 1.0, invZ)
         const baseWidth = Math.max(spx(2), nodeR * 0.15)
 
-        // Replace multi-layer on-screen shadowBlur with a single pre-rendered ring glow.
-        // IMPORTANT: alpha controls intensity via ctx.globalAlpha (not blur radius).
+        // Shape-aware glow sprite (rounded-rect or circle, matching selection highlight).
         ctx.globalAlpha = alpha
         drawGlowSprite(ctx, {
-          kind: 'fx-ring',
+          kind: 'active',
+          shape: isRoundedRect ? 'rounded-rect' : 'circle',
           x: n.__x,
           y: n.__y,
-          color: b.color,
+          w: nw,
+          h: nh,
           r: nodeR * 1.02,
-          thicknessPx: baseWidth * 1.6,
+          rr,
+          color: b.color,
           blurPx: Math.max(spx(12), nodeR * 0.8) * shadowBlurK,
+          lineWidthPx: baseWidth * 1.6,
           composite: 'lighter',
         })
 

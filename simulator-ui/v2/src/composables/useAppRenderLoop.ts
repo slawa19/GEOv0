@@ -23,7 +23,7 @@ export function useAppRenderLoop(opts: {
   mapping: VizMapping
   fxState: FxState
   getSelectedNodeId: () => string | null
-  activeEdges: Set<string>
+  activeEdges: Map<string, number>
   activeNodes: Set<string>
   getLinkLod: () => 'focus' | 'full'
   getHiddenNodeId: () => string | null
