@@ -111,6 +111,21 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
         : null,
     }
 
+    const attempts_total = asNumber(raw.attempts_total)
+    if (attempts_total != null) evt.attempts_total = attempts_total
+    const committed_total = asNumber(raw.committed_total)
+    if (committed_total != null) evt.committed_total = committed_total
+    const rejected_total = asNumber(raw.rejected_total)
+    if (rejected_total != null) evt.rejected_total = rejected_total
+    const errors_total = asNumber(raw.errors_total)
+    if (errors_total != null) evt.errors_total = errors_total
+    const timeouts_total = asNumber(raw.timeouts_total)
+    if (timeouts_total != null) evt.timeouts_total = timeouts_total
+
+    // Passthrough diagnostic field: capacity stall indicator.
+    const consec = asNumber(raw.consec_all_rejected_ticks)
+    if (consec != null && consec > 0) evt.consec_all_rejected_ticks = consec
+
     return evt
   }
 
@@ -260,5 +275,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     return evt as SimulatorEvent
   }
 
-  return raw as any
+  // Unknown event type: passthrough with the minimal validated envelope.
+  // Still typed as SimulatorEvent (catch-all branch in union).
+  return raw as SimulatorEvent
 }

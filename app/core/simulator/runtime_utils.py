@@ -88,6 +88,7 @@ def run_to_status(run: RunRecord) -> RunStatus:
     cutoff = time.time() - 60.0
     # Best-effort: timestamps are pruned on write; we only count here.
     errors_last_1m = sum(1 for ts in run._error_timestamps if ts >= cutoff)
+    consec_stall = int(run._real_consec_all_rejected_ticks or 0)
     return RunStatus(
         api_version=SIMULATOR_API_VERSION,
         run_id=run.run_id,
@@ -101,7 +102,12 @@ def run_to_status(run: RunRecord) -> RunStatus:
         ops_sec=run.ops_sec,
         queue_depth=run.queue_depth,
         errors_total=run.errors_total,
+        committed_total=run.committed_total,
+        rejected_total=run.rejected_total,
+        attempts_total=run.attempts_total,
+        timeouts_total=run.timeouts_total,
         errors_last_1m=int(errors_last_1m),
+        consec_all_rejected_ticks=(consec_stall if consec_stall > 0 else None),
         last_error=dict_to_last_error(run.last_error),
         last_event_type=run.last_event_type,
         current_phase=run.current_phase,

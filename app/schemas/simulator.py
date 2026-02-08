@@ -233,6 +233,16 @@ class SimulatorRunStatusEvent(BaseModel):
     ops_sec: Optional[float] = Field(default=None, ge=0)
     queue_depth: Optional[int] = Field(default=None, ge=0)
 
+    # Backend-first cumulative stats (authoritative source of truth).
+    attempts_total: Optional[int] = Field(default=None, ge=0)
+    committed_total: Optional[int] = Field(default=None, ge=0)
+    rejected_total: Optional[int] = Field(default=None, ge=0)
+    errors_total: Optional[int] = Field(default=None, ge=0)
+    timeouts_total: Optional[int] = Field(default=None, ge=0)
+
+    # Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
+    consec_all_rejected_ticks: Optional[int] = Field(default=None, ge=0)
+
     last_event_type: Optional[str] = None
     current_phase: Optional[str] = None
 
@@ -323,7 +333,14 @@ class RunStatus(BaseModel):
     queue_depth: Optional[int] = Field(default=None, ge=0)
 
     errors_total: Optional[int] = Field(default=None, ge=0)
+    committed_total: Optional[int] = Field(default=None, ge=0)
+    rejected_total: Optional[int] = Field(default=None, ge=0)
+    attempts_total: Optional[int] = Field(default=None, ge=0)
+    timeouts_total: Optional[int] = Field(default=None, ge=0)
     errors_last_1m: Optional[int] = Field(default=None, ge=0)
+
+    # Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
+    consec_all_rejected_ticks: Optional[int] = Field(default=None, ge=0)
 
     last_error: Optional[SimulatorLastError] = None
     last_event_type: Optional[str] = None

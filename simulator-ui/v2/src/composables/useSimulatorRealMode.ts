@@ -11,7 +11,14 @@ import {
   setIntensity,
   stopRun,
 } from '../api/simulatorApi'
-import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
+import type {
+  ArtifactIndexItem,
+  RunStatus,
+  RunStatusEvent,
+  ScenarioSummary,
+  SimulatorMode,
+  TxFailedEvent,
+} from '../api/simulatorTypes'
 import { connectSse } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
@@ -134,6 +141,34 @@ export function useSimulatorRealMode(opts: {
   let sseAbort: AbortController | null = null
   let sseSeq = 0
 
+  // Best-effort event de-duplication: prevents duplicate UI effects (labels/FX)
+  // when backend replays events after SSE reconnect.
+  const processedEventIds = new Map<string, true>()
+  let processedEventIdsRunId: string | null = null
+
+  function markEventProcessed(runId: string, eventId: string): boolean {
+    const rid = String(runId ?? '')
+    const eid = String(eventId ?? '')
+    if (!rid || !eid) return true
+
+    if (processedEventIdsRunId !== rid) {
+      processedEventIdsRunId = rid
+      processedEventIds.clear()
+    }
+
+    if (processedEventIds.has(eid)) return false
+    processedEventIds.set(eid, true)
+
+    // Bound memory: keep only the most recent event IDs.
+    const MAX = 800
+    while (processedEventIds.size > MAX) {
+      const firstKey = processedEventIds.keys().next().value as string | undefined
+      if (!firstKey) break
+      processedEventIds.delete(firstKey)
+    }
+    return true
+  }
+
   // Debounce multiple rapid calls to refreshSnapshot (e.g., during startRun + watcher cascade).
   let refreshSnapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
   let refreshSnapshotInFlight = false
@@ -178,6 +213,9 @@ export function useSimulatorRealMode(opts: {
     cleanupRealRunFxAndTimers()
     resetRunStats()
     stopSse()
+
+    processedEventIdsRunId = null
+    processedEventIds.clear()
 
     if (resetOpts?.clearError ?? true) {
       real.lastError = ''
@@ -309,6 +347,32 @@ export function useSimulatorRealMode(opts: {
     return Math.max(250, Math.round(base + jitter))
   }
 
+  function isRunStatusEvent(evt: unknown): evt is RunStatusEvent {
+    if (!evt || typeof evt !== 'object') return false
+    const e = evt as any
+    return (
+      e.type === 'run_status' &&
+      typeof e.run_id === 'string' &&
+      typeof e.scenario_id === 'string' &&
+      typeof e.sim_time_ms === 'number' &&
+      typeof e.intensity_percent === 'number' &&
+      typeof e.ops_sec === 'number' &&
+      typeof e.queue_depth === 'number'
+    )
+  }
+
+  function isTxUpdatedEvent(evt: unknown): evt is TxUpdatedEvent {
+    if (!evt || typeof evt !== 'object') return false
+    const e = evt as any
+    return e.type === 'tx.updated' && typeof e.equivalent === 'string'
+  }
+
+  function isTxFailedEvent(evt: unknown): evt is TxFailedEvent {
+    if (!evt || typeof evt !== 'object') return false
+    const e = evt as any
+    return e.type === 'tx.failed' && typeof e.equivalent === 'string'
+  }
+
   async function runSseLoop() {
     const mySeq = ++sseSeq
     stopSse()
@@ -352,29 +416,42 @@ export function useSimulatorRealMode(opts: {
             const evt = normalizeSimulatorEvent(parsed)
             if (!evt) return
 
+            // Prefer payload event_id when present.
+            real.lastEventId = evt.event_id
+
+            // Drop duplicates (SSE replay after reconnect).
+            if (!markEventProcessed(runId, evt.event_id)) return
+
             onAnySseEvent?.()
 
-            // Prefer payload event_id when present.
-            if ((evt as any).event_id) real.lastEventId = String((evt as any).event_id)
-
-            if ((evt as any).type === 'run_status') {
-              real.runStatus = evt as any
-              const le = (evt as any).last_error
+            if (isRunStatusEvent(evt)) {
+              const st = evt
+              real.runStatus = st
+              const le = st.last_error
               real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
+
+              // Backend-first: sync cumulative stats from authoritative run_status.
+              // This overwrites optimistic local increments, ensuring SSE reconnect
+              // does not lose history and classification stays consistent.
+              if (typeof st.attempts_total === 'number') real.runStats.attempts = st.attempts_total
+              if (typeof st.committed_total === 'number') real.runStats.committed = st.committed_total
+              if (typeof st.rejected_total === 'number') real.runStats.rejected = st.rejected_total
+              if (typeof st.errors_total === 'number') real.runStats.errors = st.errors_total
+              if (typeof st.timeouts_total === 'number') real.runStats.timeouts = st.timeouts_total
               return
             }
 
-            if ((evt as any).type === 'tx.updated') {
+            if (isTxUpdatedEvent(evt)) {
               real.runStats.attempts += 1
               real.runStats.committed += 1
 
-              const tx = evt as TxUpdatedEvent
+              const tx = evt
               const edges = Array.isArray(tx.edges) ? tx.edges : []
               const senderId = String(tx.from ?? (edges.length > 0 ? edges[0]!.from : '') ?? '').trim()
               const receiverId = String(tx.to ?? (edges.length > 0 ? edges[edges.length - 1]!.to : '') ?? '').trim()
 
               // Backend-first: labels require explicit amount.
-              const amount = String((tx as any).amount ?? '').trim()
+              const amount = String(tx.amount ?? '').trim()
 
               // Apply patches to keep snapshot authoritative.
               if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
@@ -387,12 +464,12 @@ export function useSimulatorRealMode(opts: {
               wakeUp?.()
 
               if (amount && senderId) {
-                pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: 120 })
+                pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: 0 })
               }
 
               // Note: self-payment (senderId === receiverId) intentionally does not emit a receiver label.
               if (amount && receiverId && receiverId !== senderId) {
-                const ttlMs = clampRealTxTtlMs((tx as any).ttl_ms)
+                const ttlMs = clampRealTxTtlMs(tx.ttl_ms)
 
                 const runIdAtEvent = runId
                 const sseSeqAtEvent = mySeq
@@ -404,7 +481,7 @@ export function useSimulatorRealMode(opts: {
                     // the old connection, but UI timers for still-valid events should still fire.
                     if (sseSeq !== sseSeqAtEvent) return
                     if (real.runId !== runIdAtEvent) return
-                    pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: 120 })
+                    pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: 0 })
                   },
                   ttlMs,
                   { critical: true },
@@ -413,8 +490,9 @@ export function useSimulatorRealMode(opts: {
               return
             }
 
-            if ((evt as any).type === 'tx.failed') {
-              const code = String((evt as any).error?.code ?? 'TX_FAILED')
+            if (isTxFailedEvent(evt)) {
+              const failed = evt
+              const code = String(failed.error?.code ?? 'TX_FAILED')
               real.runStats.attempts += 1
               if (code.toUpperCase() === 'PAYMENT_TIMEOUT') {
                 real.runStats.timeouts += 1
@@ -430,7 +508,7 @@ export function useSimulatorRealMode(opts: {
               return
             }
 
-            if ((evt as any).type === 'clearing.plan') {
+            if (evt.type === 'clearing.plan') {
               const plan = evt as ClearingPlanEvent
               const planId = String(plan.plan_id ?? '')
               if (planId) {
@@ -441,7 +519,7 @@ export function useSimulatorRealMode(opts: {
               return
             }
 
-            if ((evt as any).type === 'clearing.done') {
+            if (evt.type === 'clearing.done') {
               const done = evt as ClearingDoneEvent
               const planId = String(done.plan_id ?? '')
               const plan = planId ? clearingPlansById.get(planId) : undefined

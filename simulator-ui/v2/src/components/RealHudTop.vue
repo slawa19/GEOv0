@@ -61,6 +61,11 @@ const canStop = computed(() => {
   return s === 'running' || s === 'paused' || s === 'created'
 })
 
+const isCapacityStall = computed(() => {
+  const ticks = Number(props.runStatus?.consec_all_rejected_ticks ?? 0)
+  return ticks >= 3
+})
+
 const isRunActive = computed(() => {
   if (!props.runId) return false
   // Optimistic: when runId exists but runStatus hasn't arrived yet, treat it as active.
@@ -242,6 +247,13 @@ function short(s: string, n: number) {
         <span class="hud-label">Error</span>
         <div class="hud-alert__msg">
           <span class="mono">{{ short(lastError, 160) }}</span>
+        </div>
+      </div>
+
+      <div v-if="isCapacityStall" class="hud-alert" data-tone="warn" aria-label="Capacity stall">
+        <span class="hud-label">Stall</span>
+        <div class="hud-alert__msg">
+          <span class="mono">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
         </div>
       </div>
     </div>

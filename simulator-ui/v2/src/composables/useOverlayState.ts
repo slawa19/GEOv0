@@ -2,6 +2,8 @@ import { computed, reactive } from 'vue'
 
 import type { LayoutNodeLike as BaseLayoutNodeLike } from '../types/layout'
 
+const MAX_FLOATING_LABELS = 120
+
 export type HoveredEdgeState = {
   key: string | null
   fromId: string
@@ -249,9 +251,8 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
     // Bound memory/DOM work: keep only the most recent labels.
     // Real-mode can burst during SSE reconnects/replays; higher cap reduces UX dropouts.
-    const maxFloatingLabels = 120
-    if (floatingLabels.length >= maxFloatingLabels) {
-      floatingLabels.splice(0, floatingLabels.length - maxFloatingLabels + 1)
+      if (floatingLabels.length >= MAX_FLOATING_LABELS) {
+        floatingLabels.splice(0, floatingLabels.length - MAX_FLOATING_LABELS + 1)
     }
 
     const id = opts.id ?? nextFloatingLabelId++
@@ -281,10 +282,10 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       }
       floatingLabels.length = write
 
-      const maxFloatingLabels = 60
-      if (floatingLabels.length > maxFloatingLabels) {
-        // Drop oldest labels first.
-        floatingLabels.splice(0, floatingLabels.length - maxFloatingLabels)
+      // Must match the cap in pushFloatingLabel (120) to avoid killing fresh labels on every frame.
+        if (floatingLabels.length > MAX_FLOATING_LABELS) {
+          // Drop oldest labels first.
+          floatingLabels.splice(0, floatingLabels.length - MAX_FLOATING_LABELS)
       }
     }
   }

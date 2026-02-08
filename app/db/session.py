@@ -17,6 +17,10 @@ def _create_engine():
         return create_async_engine(
             url,
             poolclass=NullPool,
+            # timeout=10: SQLite write-lock wait time before raising "database is locked".
+            # Default is 5s which is too short for simulator clearing (two concurrent
+            # sessions: parent tick + clearing).
+            connect_args={"timeout": 10},
             **common_kwargs,
         )
 

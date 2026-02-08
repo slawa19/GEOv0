@@ -390,6 +390,7 @@ class _SimulatorRuntimeBase:
 
     def publish_run_status(self, run_id: str) -> None:
         run = self.get_run(run_id)
+        stall_ticks = int(run._real_consec_all_rejected_ticks or 0)
         payload = SimulatorRunStatusEvent(
             event_id=self._sse.next_event_id(run),
             ts=_utc_now(),
@@ -401,15 +402,22 @@ class _SimulatorRuntimeBase:
             intensity_percent=run.intensity_percent,
             ops_sec=run.ops_sec,
             queue_depth=run.queue_depth,
+            attempts_total=run.attempts_total,
+            committed_total=run.committed_total,
+            rejected_total=run.rejected_total,
+            errors_total=run.errors_total,
+            timeouts_total=run.timeouts_total,
             last_event_type=run.last_event_type,
             current_phase=run.current_phase,
             last_error=_dict_to_last_error(run.last_error),
+            consec_all_rejected_ticks=(stall_ticks if stall_ticks > 0 else None),
         ).model_dump(mode="json")
+
         self._sse.broadcast(run_id, payload)
 
     def _ensure_run_accepts_actions(self, run_id: str) -> RunRecord:
         run = self.get_run(run_id)
-        state = str(getattr(run, "state", "") or "")
+        state = str(run.state or "")
         if state in {"stopped", "error"}:
             raise ConflictException(
                 "Run does not accept actions in terminal state",
@@ -808,7 +816,16 @@ class _SimulatorRuntimeBase:
                 # Real-mode runner work is intentionally outside the lock
                 # (it can touch the DB and may take time).
                 if run.mode == "real" and run.state == "running":
+                    _t0 = time.monotonic()
                     await self._real_runner.tick_real_mode(run_id)
+                    _tick_elapsed_s = time.monotonic() - _t0
+                    if _tick_elapsed_s > 2.0:
+                        logger.warning(
+                            "simulator.heartbeat.slow_tick run_id=%s tick=%d elapsed=%.2fs",
+                            run_id,
+                            run.tick_index,
+                            _tick_elapsed_s,
+                        )
 
                 self.publish_run_status(run_id)
 

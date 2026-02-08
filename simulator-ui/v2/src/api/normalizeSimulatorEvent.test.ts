@@ -73,4 +73,50 @@ describe('normalizeSimulatorEvent', () => {
       edge_patch: [{ source: 'A', target: 'B', used: '1.00', available: '9.00' }],
     })
   })
+
+  it('normalizeSimulatorEvent: run_status parses totals + stall ticks', () => {
+    const raw = {
+      event_id: 'evt_rs_1',
+      ts: '2026-01-01T00:00:02Z',
+      type: 'run_status',
+      run_id: 'run_1',
+      scenario_id: 'sc_1',
+      state: 'running',
+      sim_time_ms: 1234,
+      intensity_percent: 50,
+      ops_sec: 12,
+      queue_depth: 0,
+
+      attempts_total: 10,
+      committed_total: 7,
+      rejected_total: 2,
+      errors_total: 1,
+      timeouts_total: 0,
+      consec_all_rejected_ticks: 3,
+    }
+
+    const evt = normalizeSimulatorEvent(raw)
+    expect(evt).toEqual({
+      event_id: 'evt_rs_1',
+      ts: '2026-01-01T00:00:02Z',
+      type: 'run_status',
+      run_id: 'run_1',
+      scenario_id: 'sc_1',
+      state: 'running',
+      sim_time_ms: 1234,
+      intensity_percent: 50,
+      ops_sec: 12,
+      queue_depth: 0,
+      last_event_type: null,
+      current_phase: null,
+      last_error: null,
+
+      attempts_total: 10,
+      committed_total: 7,
+      rejected_total: 2,
+      errors_total: 1,
+      timeouts_total: 0,
+      consec_all_rejected_ticks: 3,
+    })
+  })
 })

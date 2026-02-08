@@ -89,6 +89,14 @@ export async function connectSse(opts: SseConnectOpts): Promise<void> {
 
     const chunk = decoder.decode(value, { stream: true })
     const { messages } = parseSseChunk(state, chunk)
-    for (const m of messages) opts.onMessage(m)
+    for (const m of messages) {
+      try {
+        opts.onMessage(m)
+      } catch (err) {
+        // Prevent a single bad event from killing the SSE read loop.
+        // The caller can handle errors in onMessage if needed.
+        console.error('[SSE] onMessage error:', err, 'event:', m.event, 'id:', m.id)
+      }
+    }
   }
 }

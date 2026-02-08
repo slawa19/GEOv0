@@ -178,6 +178,12 @@ class SseBroadcast:
                             run_id,
                             exc_info=True,
                         )
+                self._logger.warning(
+                    "simulator.sse.queue_full_drop event_type=%s run_id=%s qsize=%d",
+                    event_type,
+                    run_id,
+                    sub.queue.qsize(),
+                )
                 continue
 
     async def subscribe(

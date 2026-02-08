@@ -81,6 +81,17 @@ export type RunStatus = {
   last_event_type?: string | null
   current_phase?: string | null
   last_error?: RunError | null
+
+  // Backend-first cumulative stats (authoritative; sent in every run_status event).
+  attempts_total?: number
+  committed_total?: number
+  rejected_total?: number
+  errors_total?: number
+  timeouts_total?: number
+
+  // Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
+  // Only present in SSE run_status events when > 0.
+  consec_all_rejected_ticks?: number
 }
 
 export type RunStatusEvent = RunStatus & {

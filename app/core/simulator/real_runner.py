@@ -565,7 +565,7 @@ class RealRunner:
     def _should_warn_this_tick(self, run: RunRecord, *, key: str) -> bool:
         with self._lock:
             tick = int(run.tick_index)
-            if int(getattr(run, "_real_warned_tick", -(10**9))) != tick:
+            if int(run._real_warned_tick) != tick:
                 run._real_warned_tick = tick
                 run._real_warned_keys.clear()
 
@@ -587,10 +587,10 @@ class RealRunner:
             return
 
         run = self._get_run(run_id)
-        if str(getattr(run, "mode", "")) != "real":
+        if str(run.mode) != "real":
             return
 
-        payload = getattr(run, "_real_last_tick_storage_payload", None)
+        payload = run._real_last_tick_storage_payload
         if not isinstance(payload, dict):
             return
 
@@ -598,9 +598,7 @@ class RealRunner:
         if last_tick < 0:
             return
 
-        flushed_tick = int(
-            getattr(run, "_real_last_tick_storage_flushed_tick", -1) or -1
-        )
+        flushed_tick = int(run._real_last_tick_storage_flushed_tick or -1)
         if flushed_tick >= last_tick:
             return
 
@@ -655,6 +653,16 @@ class RealRunner:
     async def tick_real_mode(self, run_id: str) -> None:
         run = self._get_run(run_id)
         scenario = self._get_scenario_raw(run.scenario_id)
+
+        tick_t0 = time.monotonic()
+        # NOTE: keep this at DEBUG to avoid log spam; we add WARNING logs around
+        # potentially blocking stages (clearing/commit).
+        self._logger.debug(
+            "simulator.real.tick_start run_id=%s tick=%s sim_time_ms=%s",
+            str(run.run_id),
+            int(run.tick_index or 0),
+            int(run.sim_time_ms or 0),
+        )
 
         try:
             async with db_session.AsyncSessionLocal() as session:
@@ -759,7 +767,8 @@ class RealRunner:
                             action.equivalent,
                             action.sender_pid,
                             action.receiver_pid,
-                            None,
+                            None,  # amount
+                            None,  # status
                             "SENDER_NOT_FOUND",
                             {"reason": "SENDER_NOT_FOUND"},
                             0.0,
@@ -961,7 +970,10 @@ class RealRunner:
                                     _edge_inc(eq, a, b, "rejected")
 
                             with self._lock:
+                                run.attempts_total += 1
                                 run.errors_total += 1
+                                if err_code == "PAYMENT_TIMEOUT":
+                                    run.timeouts_total += 1
                                 run._error_timestamps.append(time.time())
                                 cutoff = time.time() - 60.0
                                 while (
@@ -1026,6 +1038,8 @@ class RealRunner:
                                     evt_dict["node_patch"] = node_patch
                                 with self._lock:
                                     run.last_event_type = "tx.updated"
+                                    run.attempts_total += 1
+                                    run.committed_total += 1
                                 self._sse.broadcast(run_id, evt_dict)
                             else:
                                 rejected += 1
@@ -1049,6 +1063,8 @@ class RealRunner:
 
                                 with self._lock:
                                     run.last_event_type = "tx.failed"
+                                    run.attempts_total += 1
+                                    run.rejected_total += 1
 
                                 failed_evt = SimulatorTxFailedEvent(
                                     event_id=self._sse.next_event_id(run),
@@ -1085,6 +1101,8 @@ class RealRunner:
                             list[dict[str, Any]] | None,
                         ] = {}
                         per_tick_quantiles_refreshed_by_eq: set[str] = set()
+
+                        emitted_since_yield = 0
 
                         for t in asyncio.as_completed(tasks):
                             (
@@ -1366,6 +1384,11 @@ class RealRunner:
                             )
                             _emit_if_ready()
 
+                            emitted_since_yield += 1
+                            if emitted_since_yield % 5 == 0:
+                                # Give the event loop a chance to flush SSE writes and timers.
+                                await asyncio.sleep(0)
+
                             if (
                                 max_timeouts_per_tick > 0
                                 and timeouts >= max_timeouts_per_tick
@@ -1392,6 +1415,26 @@ class RealRunner:
                     run.current_phase = None
                     run._real_consec_tick_failures = 0
 
+                    # Track consecutive all-rejection ticks for stall detection.
+                    if len(planned) > 0 and committed == 0 and errors == 0:
+                        run._real_consec_all_rejected_ticks += 1
+                    else:
+                        run._real_consec_all_rejected_ticks = 0
+
+                    stall_ticks = run._real_consec_all_rejected_ticks
+
+                # Log stall warning (throttled: every 5 consecutive stall ticks).
+                if stall_ticks > 0 and stall_ticks % 5 == 0:
+                    self._logger.warning(
+                        "simulator.real.all_rejected_stall run_id=%s tick=%s "
+                        "consec_stall_ticks=%d planned=%d rejected=%d",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        stall_ticks,
+                        len(planned),
+                        rejected,
+                    )
+
                     if max_errors_total > 0 and run.errors_total >= max_errors_total:
                         # Mark error; heartbeat task will be cancelled in _fail_run.
                         pass
@@ -1404,6 +1447,26 @@ class RealRunner:
                     )
                     return
 
+                # Commit payments BEFORE clearing to release the DB write lock.
+                # Clearing uses an isolated session (separate connection) that needs
+                # write access.  On SQLite (single-writer) the clearing session would
+                # deadlock if the parent session still holds an uncommitted transaction.
+                try:
+                    commit_t0 = time.monotonic()
+                    await session.commit()
+                    commit_ms = (time.monotonic() - commit_t0) * 1000.0
+                    if commit_ms > 500.0:
+                        self._logger.warning(
+                            "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            int(commit_ms),
+                            int((time.monotonic() - tick_t0) * 1000.0),
+                        )
+                except Exception:
+                    await session.rollback()
+                    raise
+
                 # Best-effort clearing (optional MVP): once in a while, attempt clearing per equivalent.
                 clearing_volume_by_eq: dict[str, float] = {
                     str(eq): 0.0 for eq in equivalents
@@ -1413,42 +1476,101 @@ class RealRunner:
                     and run.tick_index % self._clearing_every_n_ticks == 0
                     and bool(getattr(settings, "CLEARING_ENABLED", True))
                 ):
-                    clearing_volume_by_eq = await self.tick_real_mode_clearing(
-                        session, run_id, run, equivalents
+                    self._logger.warning(
+                        "simulator.real.tick_clearing_enter run_id=%s tick=%s eqs=%s planned=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        ",".join([str(x) for x in (equivalents or [])]),
+                        int(len(planned or [])),
+                    )
+                    clearing_t0 = time.monotonic()
+                    # Hard timeout: clearing must not block the heartbeat loop indefinitely.
+                    # The soft budget (time_budget_ms) checks between iterations; this is
+                    # a safety net for single slow SQL queries (triangle JOIN on large graphs).
+                    clearing_hard_timeout_sec = max(
+                        2.0,
+                        float(self._real_clearing_time_budget_ms) / 1000.0 * 4.0,
+                    )
+                    clearing_hard_timeout_sec = min(clearing_hard_timeout_sec, float(
+                        _safe_int_env("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 8)
+                    ))
+                    try:
+                        clearing_volume_by_eq = await asyncio.wait_for(
+                            self.tick_real_mode_clearing(
+                                session, run_id, run, equivalents
+                            ),
+                            timeout=clearing_hard_timeout_sec,
+                        )
+                    except asyncio.TimeoutError:
+                        self._logger.warning(
+                            "simulator.real.tick_clearing_hard_timeout run_id=%s tick=%s timeout_sec=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            clearing_hard_timeout_sec,
+                        )
+                        # Clearing timed out — proceed with the rest of the tick.
+                        # The clearing_session's context manager will rollback/close.
+                        with self._lock:
+                            run.current_phase = None
+                    self._logger.warning(
+                        "simulator.real.tick_clearing_done run_id=%s tick=%s elapsed_ms=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        int((time.monotonic() - clearing_t0) * 1000.0),
                     )
 
                 # Real total debt snapshot (sum of all debts for the equivalent).
-                total_debt_by_eq: dict[str, float] = {
-                    str(eq): 0.0 for eq in equivalents
-                }
-                try:
-                    eq_rows = (
-                        await session.execute(
-                            select(Equivalent.id, Equivalent.code).where(
-                                Equivalent.code.in_(list(equivalents))
-                            )
-                        )
-                    ).all()
-                    eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
-                    for eq_code, eq_id in eq_id_by_code.items():
-                        total = (
+                # Throttled: aggregate SUM can become hot on large Debt tables.
+                total_debt_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+
+                metrics_every_n = int(self._real_db_metrics_every_n_ticks)
+                should_refresh_total_debt = metrics_every_n <= 1 or (
+                    int(run.tick_index) % int(metrics_every_n) == 0
+                )
+
+                if not should_refresh_total_debt:
+                    with self._lock:
+                        cached = dict(run._real_total_debt_by_eq or {})
+                    for eq in equivalents:
+                        total_debt_by_eq[str(eq)] = float(cached.get(str(eq), 0.0) or 0.0)
+
+                if should_refresh_total_debt:
+                    try:
+                        eq_rows = (
                             await session.execute(
-                                select(func.coalesce(func.sum(Debt.amount), 0)).where(
-                                    Debt.equivalent_id == eq_id
+                                select(Equivalent.id, Equivalent.code).where(
+                                    Equivalent.code.in_(list(equivalents))
                                 )
                             )
-                        ).scalar_one()
-                        total_debt_by_eq[str(eq_code)] = float(total)
-                except Exception:
-                    if self._should_warn_this_tick(
-                        run, key="total_debt_snapshot_failed"
-                    ):
-                        self._logger.debug(
-                            "simulator.real.total_debt_snapshot_failed run_id=%s tick=%s",
-                            str(run.run_id),
-                            int(run.tick_index),
-                            exc_info=True,
-                        )
+                        ).all()
+                        eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
+                        for eq_code, eq_id in eq_id_by_code.items():
+                            total = (
+                                await session.execute(
+                                    select(func.coalesce(func.sum(Debt.amount), 0)).where(
+                                        Debt.equivalent_id == eq_id
+                                    )
+                                )
+                            ).scalar_one()
+                            total_debt_by_eq[str(eq_code)] = float(total)
+
+                        with self._lock:
+                            run._real_total_debt_by_eq = dict(total_debt_by_eq)
+                            run._real_total_debt_tick = int(run.tick_index)
+                    except Exception:
+                        if self._should_warn_this_tick(run, key="total_debt_snapshot_failed"):
+                            self._logger.debug(
+                                "simulator.real.total_debt_snapshot_failed run_id=%s tick=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                exc_info=True,
+                            )
+
+                        # Fallback to the last cached values if available.
+                        with self._lock:
+                            cached = dict(run._real_total_debt_by_eq or {})
+                        for eq in equivalents:
+                            total_debt_by_eq[str(eq)] = float(cached.get(str(eq), 0.0) or 0.0)
 
                 # Avg route length for this tick (successful payments).
                 for eq in equivalents:
@@ -1522,7 +1644,17 @@ class RealRunner:
 
                 # One commit for the whole tick DB state (payments + optional snapshots).
                 try:
+                    commit_t0 = time.monotonic()
                     await session.commit()
+                    commit_ms = (time.monotonic() - commit_t0) * 1000.0
+                    if commit_ms > 500.0:
+                        self._logger.warning(
+                            "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            int(commit_ms),
+                            int((time.monotonic() - tick_t0) * 1000.0),
+                        )
                 except Exception:
                     await session.rollback()
                     raise
@@ -1537,7 +1669,7 @@ class RealRunner:
                     tick_write_every_ms > 0
                     and (
                         now_ms
-                        - int(getattr(run, "_artifact_last_tick_written_at_ms", 0) or 0)
+                        - int(run._artifact_last_tick_written_at_ms or 0)
                     )
                     >= tick_write_every_ms
                 ):
@@ -1558,7 +1690,7 @@ class RealRunner:
                 if (
                     artifacts_sync_every_ms > 0
                     and (
-                        now_ms - int(getattr(run, "_artifact_last_sync_at_ms", 0) or 0)
+                        now_ms - int(run._artifact_last_sync_at_ms or 0)
                     )
                     >= artifacts_sync_every_ms
                 ):
@@ -1568,7 +1700,7 @@ class RealRunner:
             self._logger.warning(
                 "simulator.real.tick_failed run_id=%s tick=%s",
                 str(run.run_id),
-                int(getattr(run, "tick_index", 0) or 0),
+                int(run.tick_index or 0),
                 exc_info=True,
             )
             with self._lock:
@@ -1654,8 +1786,41 @@ class RealRunner:
                 async with db_session.AsyncSessionLocal() as clearing_session:
                     service = ClearingService(clearing_session)
 
+                    eq_t0 = time.monotonic()
+                    self._logger.warning(
+                        "simulator.real.clearing_eq_enter run_id=%s tick=%s eq=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                    )
+
                     # Plan step: find at least one cycle to visualize.
+                    self._logger.warning(
+                        "simulator.real.clearing_find_cycles_start run_id=%s tick=%s eq=%s max_depth=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                        int(max_depth),
+                    )
+                    _fc_t0 = time.monotonic()
                     cycles = await service.find_cycles(eq, max_depth=max_depth)
+                    _fc_ms = int((time.monotonic() - _fc_t0) * 1000.0)
+                    if _fc_ms > 500:
+                        self._logger.warning(
+                            "simulator.real.clearing_find_cycles_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            str(eq),
+                            int(_fc_ms),
+                        )
+                    self._logger.warning(
+                        "simulator.real.clearing_find_cycles_done run_id=%s tick=%s eq=%s cycles_n=%s elapsed_ms=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                        int(len(cycles or [])),
+                        int(_fc_ms),
+                    )
                     if not cycles:
                         continue
 
@@ -1750,7 +1915,22 @@ class RealRunner:
                     # Edge direction in graph is creditor -> debtor.
                     touched_edges: set[tuple[str, str]] = set()
                     clearing_started = time.monotonic()
+                    progress_last_log = 0.0
                     while True:
+                        now = time.monotonic()
+                        if progress_last_log <= 0.0:
+                            progress_last_log = now
+                        elif (now - progress_last_log) >= 5.0:
+                            self._logger.warning(
+                                "simulator.real.clearing_progress run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                str(eq),
+                                int((now - clearing_started) * 1000.0),
+                                int(cleared_cycles),
+                            )
+                            progress_last_log = now
+
                         # Soft throttle: yield to event loop during long clearing bursts.
                         if cleared_cycles and (cleared_cycles % 5 == 0):
                             await asyncio.sleep(0)
@@ -1775,7 +1955,24 @@ class RealRunner:
                                     )
                                 break
 
+                        self._logger.debug(
+                            "simulator.real.clearing_find_cycles_loop_start run_id=%s tick=%s eq=%s cleared_cycles=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            str(eq),
+                            int(cleared_cycles),
+                        )
+                        _loop_fc_t0 = time.monotonic()
                         cycles = await service.find_cycles(eq, max_depth=max_depth)
+                        _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
+                        if _loop_fc_ms > 500:
+                            self._logger.warning(
+                                "simulator.real.clearing_find_cycles_loop_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                str(eq),
+                                int(_loop_fc_ms),
+                            )
                         if not cycles:
                             break
 
@@ -1806,7 +2003,33 @@ class RealRunner:
                                     )
                                 clear_amount = Decimal("0")
 
+                            self._logger.warning(
+                                "simulator.real.clearing_execute_start run_id=%s tick=%s eq=%s clear_amount=%s cycle_len=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                str(eq),
+                                str(clear_amount),
+                                int(len(cycle or [])),
+                            )
+                            _exec_t0 = time.monotonic()
                             success = await service.execute_clearing(cycle)
+                            _exec_ms = int((time.monotonic() - _exec_t0) * 1000.0)
+                            self._logger.warning(
+                                "simulator.real.clearing_execute_done run_id=%s tick=%s eq=%s success=%s elapsed_ms=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                str(eq),
+                                bool(success),
+                                int(_exec_ms),
+                            )
+                            if _exec_ms > 500:
+                                self._logger.warning(
+                                    "simulator.real.clearing_execute_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                                    str(run.run_id),
+                                    int(run.tick_index),
+                                    str(eq),
+                                    int(_exec_ms),
+                                )
                             if success:
                                 cleared_cycles += 1
                                 if clear_amount > 0:
@@ -1856,7 +2079,33 @@ class RealRunner:
                     # Best-effort: compute patches for touched nodes/edges.
                     node_patch_list: list[dict[str, Any]] | None = None
                     edge_patch_list: list[dict[str, Any]] | None = None
+
+                    # Compute cleared_amount BEFORE the patch try-block so a
+                    # patch-computation failure cannot wipe the amount.
+                    # The amount is derived from already-executed clearing
+                    # cycles and does not need VizPatchHelper.
                     cleared_amount_str: str | None = None
+                    if cleared_amount_dec > 0:
+                        try:
+                            cleared_amount_str = format(
+                                cleared_amount_dec.quantize(
+                                    Decimal("0.01"), rounding=ROUND_DOWN
+                                ),
+                                "f",
+                            )
+                        except Exception:
+                            cleared_amount_str = str(cleared_amount_dec)
+
+                    self._logger.warning(
+                        "simulator.real.clearing_patch_start run_id=%s tick=%s eq=%s touched_nodes=%s touched_edges=%s cleared_cycles=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                        int(len(touched_nodes)),
+                        int(len(touched_edges)),
+                        int(cleared_cycles),
+                    )
+                    _patch_t0 = time.monotonic()
                     try:
                         helper: VizPatchHelper | None
                         with self._lock:
@@ -1878,14 +2127,19 @@ class RealRunner:
                             with self._lock:
                                 run._real_viz_by_eq[str(eq)] = helper
 
-                        precision = int(getattr(helper, "precision", 2) or 2)
-                        money_quant = Decimal(1) / (Decimal(10) ** precision)
-                        cleared_amount_str = format(
-                            cleared_amount_dec.quantize(
-                                money_quant, rounding=ROUND_DOWN
-                            ),
-                            "f",
-                        )
+                        # Refine cleared_amount_str with helper's precision if available.
+                        if cleared_amount_dec > 0:
+                            try:
+                                precision = int(getattr(helper, "precision", 2) or 2)
+                                money_quant = Decimal(1) / (Decimal(10) ** precision)
+                                cleared_amount_str = format(
+                                    cleared_amount_dec.quantize(
+                                        money_quant, rounding=ROUND_DOWN
+                                    ),
+                                    "f",
+                                )
+                            except Exception:
+                                pass  # keep the pre-computed value
 
                         # Refresh quantiles using all participants when available.
                         participant_ids: list[uuid.UUID] = []
@@ -2037,7 +2291,25 @@ class RealRunner:
                             )
                         node_patch_list = None
                         edge_patch_list = None
-                        cleared_amount_str = None
+                        # NOTE: cleared_amount_str is NOT reset here; it was
+                        # computed before the patch try-block and remains valid.
+
+                    _patch_ms = int((time.monotonic() - _patch_t0) * 1000.0)
+                    if _patch_ms > 500:
+                        self._logger.warning(
+                            "simulator.real.clearing_patch_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            str(eq),
+                            int(_patch_ms),
+                        )
+                    self._logger.warning(
+                        "simulator.real.clearing_patch_done run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                        int(_patch_ms),
+                    )
 
                     done_evt = SimulatorClearingDoneEvent(
                         event_id=self._sse.next_event_id(run),
@@ -2054,6 +2326,15 @@ class RealRunner:
                         run.last_event_type = "clearing.done"
                         run.current_phase = None
                     self._sse.broadcast(run_id, done_evt)
+
+                    self._logger.warning(
+                        "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                        int((time.monotonic() - eq_t0) * 1000.0),
+                        int(cleared_cycles),
+                    )
             except Exception as e:
                 if self._should_warn_this_tick(run, key=f"clearing_failed:{eq}"):
                     self._logger.warning(

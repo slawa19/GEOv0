@@ -192,11 +192,18 @@ export function useSimulatorApp() {
 
   // tx.failed often represents a "clean rejection" (routing capacity, trustline constraints).
   // Those should not be surfaced as global "errors" in the HUD.
+  //
+  // Classification must match backend _emit_if_ready (real_runner.py):
+  //   err_code = "PAYMENT_TIMEOUT" | "INTERNAL_ERROR" → errors_total
+  //   everything else (map_rejection_code results) → rejected_total
+  //
+  // Note: backend-authoritative stats arrive in run_status every ~1s and
+  // overwrite local optimistic counters, so this is only for the gap.
   function isUserFacingRunError(code: string): boolean {
     const c = String(code ?? '').toUpperCase()
     if (!c) return false
     if (c === 'PAYMENT_TIMEOUT') return true
-    if (c === 'SENDER_NOT_FOUND') return true
+    if (c === 'INTERNAL_ERROR') return true
     // Everything else is treated as a clean rejection for UX purposes.
     return false
   }
@@ -866,13 +873,16 @@ export function useSimulatorApp() {
     const amountText = raw.replace(/^\+/, '')
     const color = sign === '+' ? VIZ_MAPPING.fx.tx_spark.trail : VIZ_MAPPING.fx.clearing_debt
 
+    // Use direction-aware throttle key so sender (−) and receiver (+) labels
+    // don't coalesce into a single label when the same node participates in
+    // rapid back-to-back transactions (e.g. as sender then immediately as receiver).
     pushFloatingLabelWhenReady({
       nodeId: id,
       text: `${sign}${amountText.replace(/^-/, '')} ${unit}`,
       color: fxColorForNode(id, color),
       ttlMs: 1900,
-      offsetYPx: -6,
-      throttleKey: `amt:${id}`,
+      offsetYPx: sign === '+' ? -18 : -6,
+      throttleKey: `amt:${sign}:${id}`,
       throttleMs: opts?.throttleMs ?? 240,
     })
   }

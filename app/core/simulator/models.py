@@ -62,6 +62,10 @@ class RunRecord:
     queue_depth: int = 0
 
     errors_total: int = 0
+    committed_total: int = 0
+    rejected_total: int = 0
+    attempts_total: int = 0
+    timeouts_total: int = 0
     last_error: Optional[dict[str, Any]] = None
 
     last_event_type: Optional[str] = None
@@ -111,12 +115,19 @@ class RunRecord:
     _real_in_flight: int = 0
     _real_consec_tick_failures: int = 0
 
+    # Consecutive ticks where all planned payments were rejected (capacity stall).
+    _real_consec_all_rejected_ticks: int = 0
+
     # Real-mode best-effort persistence flush (in-memory only).
     _real_last_tick_storage_payload: dict[str, Any] | None = None
     _real_last_tick_storage_flushed_tick: int = -1
 
     # Real-mode per-equivalent viz quantile cache for SSE node_patch/edge_patch.
     _real_viz_by_eq: dict[str, Any] = field(default_factory=dict)
+
+    # Real-mode cached total debt snapshot (throttled aggregate query).
+    _real_total_debt_by_eq: dict[str, float] = field(default_factory=dict)
+    _real_total_debt_tick: int = -1
 
     # Real-mode logging throttle state (avoid log spam within one tick).
     # Stored on the run to avoid unbounded per-run dictionaries in RealRunner.
