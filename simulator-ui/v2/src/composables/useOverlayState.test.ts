@@ -108,14 +108,14 @@ describe('useOverlayState', () => {
       nowMs: () => now,
     })
 
-    for (let i = 0; i < 61; i++) {
+    for (let i = 0; i < 121; i++) {
       now = i
       overlay.pushFloatingLabel({ nodeId: 'A', text: String(i), color: '#fff', id: i })
     }
 
-    expect(overlay.floatingLabels.length).toBe(60)
+    expect(overlay.floatingLabels.length).toBe(120)
     expect(overlay.floatingLabels[0]!.id).toBe(1)
-    expect(overlay.floatingLabels[59]!.id).toBe(60)
+    expect(overlay.floatingLabels[119]!.id).toBe(120)
   })
 
   it('pruneFloatingLabels drops expired entries', () => {

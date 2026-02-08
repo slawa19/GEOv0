@@ -247,7 +247,9 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     // The view layer will ignore them until the node appears; this prevents losing labels
     // during physics warmup / layout churn.
 
-    const maxFloatingLabels = 60
+    // Bound memory/DOM work: keep only the most recent labels.
+    // Real-mode can burst during SSE reconnects/replays; higher cap reduces UX dropouts.
+    const maxFloatingLabels = 120
     if (floatingLabels.length >= maxFloatingLabels) {
       floatingLabels.splice(0, floatingLabels.length - maxFloatingLabels + 1)
     }

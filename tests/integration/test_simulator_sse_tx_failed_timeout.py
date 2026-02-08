@@ -12,15 +12,30 @@ from app.utils.exceptions import TimeoutException
 async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
     client: AsyncClient, auth_headers, monkeypatch
 ):
-    async def _always_timeout(self, sender_id, *, to_pid, equivalent, amount, idempotency_key):
+    async def _always_timeout(
+        self,
+        sender_id,
+        *,
+        to_pid,
+        equivalent,
+        amount,
+        idempotency_key,
+        commit: bool = True,
+    ):
         raise TimeoutException("timeout")
 
-    monkeypatch.setattr(PaymentService, "create_payment_internal", _always_timeout, raising=True)
+    monkeypatch.setattr(
+        PaymentService, "create_payment_internal", _always_timeout, raising=True
+    )
 
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100", "mode": "real", "intensity_percent": 90},
+        json={
+            "scenario_id": "greenfield-village-100",
+            "mode": "real",
+            "intensity_percent": 90,
+        },
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
@@ -52,7 +67,9 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
                         error = payload.get("error")
                         assert isinstance(error, dict)
                         assert error.get("code") == "PAYMENT_TIMEOUT"
-                        assert isinstance(error.get("message"), str) and error.get("message")
+                        assert isinstance(error.get("message"), str) and error.get(
+                            "message"
+                        )
                         assert isinstance(error.get("at"), str) and error.get("at")
                     if seen_run_status and seen_failed:
                         return

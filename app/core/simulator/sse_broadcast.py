@@ -2,20 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 import threading
 from typing import Any, Callable, Optional
 
 from app.core.simulator.models import RunRecord, _Subscription
+from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.utils.exceptions import TooManyRequestsException
-
-
-def _safe_int_env(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)) or str(default))
-    except Exception:
-        return int(default)
 
 
 class SseBroadcast:
@@ -37,6 +30,13 @@ class SseBroadcast:
         self._get_sub_queue_max = get_sub_queue_max
         self._enqueue_event_artifact = enqueue_event_artifact
         self._logger = logger
+
+        # Best-effort concurrent connection limits. Cached to avoid reading env on every
+        # `subscribe()` call.
+        self._max_subs_total = _safe_int_env("SIMULATOR_SSE_MAX_CONNECTIONS", 50)
+        self._max_subs_per_run = _safe_int_env(
+            "SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", 10
+        )
 
     def _count_total_subs_locked(self) -> int:
         """Counts subscriptions across all runs.
@@ -64,7 +64,9 @@ class SseBroadcast:
         except Exception:
             return None
 
-    def prune_event_buffer_locked(self, run: RunRecord, *, now: Optional[float] = None) -> None:
+    def prune_event_buffer_locked(
+        self, run: RunRecord, *, now: Optional[float] = None
+    ) -> None:
         if now is None:
             now = time.time()
 
@@ -97,10 +99,19 @@ class SseBroadcast:
         event_equivalent = str(payload.get("equivalent") or "")
 
         with self._lock:
-            run._event_buffer.append((now, event_id, event_equivalent if event_type != "run_status" else "", payload))
+            run._event_buffer.append(
+                (
+                    now,
+                    event_id,
+                    event_equivalent if event_type != "run_status" else "",
+                    payload,
+                )
+            )
             self.prune_event_buffer_locked(run, now=now)
 
-    def replay_events(self, *, run_id: str, equivalent: str, after_event_id: str) -> list[dict[str, Any]]:
+    def replay_events(
+        self, *, run_id: str, equivalent: str, after_event_id: str
+    ) -> list[dict[str, Any]]:
         """Returns buffered events after `after_event_id` for SSE reconnect replay."""
         run = self._runs.get(run_id)
         if run is None:
@@ -115,7 +126,7 @@ class SseBroadcast:
             buf = list(run._event_buffer)
 
         out: list[dict[str, Any]] = []
-        for (_ts, event_id, event_equivalent, payload) in buf:
+        for _ts, event_id, event_equivalent, payload in buf:
             seq = self.event_seq_from_event_id(run_id=run_id, event_id=event_id)
             if seq is None or seq <= after_seq:
                 continue
@@ -138,10 +149,13 @@ class SseBroadcast:
         self.append_to_event_buffer(run_id=run_id, payload=payload)
 
         # Best-effort raw events export.
-        try:
-            self._enqueue_event_artifact(run_id, payload)
-        except Exception:
-            self._logger.exception("simulator.sse.enqueue_event_artifact_failed run_id=%s", run_id)
+        if event_type != "run_status":
+            try:
+                self._enqueue_event_artifact(run_id, payload)
+            except Exception:
+                self._logger.exception(
+                    "simulator.sse.enqueue_event_artifact_failed run_id=%s", run_id
+                )
 
         with self._lock:
             subs = list(run._subs)
@@ -160,11 +174,15 @@ class SseBroadcast:
                         continue
                     except Exception:
                         self._logger.debug(
-                            "simulator.sse.run_status_drop_failed run_id=%s", run_id, exc_info=True
+                            "simulator.sse.run_status_drop_failed run_id=%s",
+                            run_id,
+                            exc_info=True,
                         )
                 continue
 
-    async def subscribe(self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None) -> _Subscription:
+    async def subscribe(
+        self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None
+    ) -> _Subscription:
         """Creates a new SSE subscription queue.
 
         Enforces best-effort concurrent connection limits via env:
@@ -179,8 +197,8 @@ class SseBroadcast:
             if run is None:
                 return sub
 
-            max_total = _safe_int_env("SIMULATOR_SSE_MAX_CONNECTIONS", 50)
-            max_per_run = _safe_int_env("SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", 10)
+            max_total = self._max_subs_total
+            max_per_run = self._max_subs_per_run
 
             if max_total > 0:
                 total = self._count_total_subs_locked()
@@ -195,13 +213,19 @@ class SseBroadcast:
                 if cur >= max_per_run:
                     raise TooManyRequestsException(
                         "Too many concurrent SSE connections for run",
-                        details={"max_per_run": max_per_run, "run_subs": cur, "run_id": run_id},
+                        details={
+                            "max_per_run": max_per_run,
+                            "run_subs": cur,
+                            "run_id": run_id,
+                        },
                     )
 
             run._subs.append(sub)
 
         if after_event_id:
-            for evt in self.replay_events(run_id=run_id, equivalent=equivalent, after_event_id=after_event_id):
+            for evt in self.replay_events(
+                run_id=run_id, equivalent=equivalent, after_event_id=after_event_id
+            ):
                 try:
                     sub.queue.put_nowait(evt)
                 except asyncio.QueueFull:
@@ -235,7 +259,9 @@ class SseBroadcast:
                 return False
             oldest_event_id = run._event_buffer[0][1]
 
-        oldest_seq = self.event_seq_from_event_id(run_id=run_id, event_id=oldest_event_id)
+        oldest_seq = self.event_seq_from_event_id(
+            run_id=run_id, event_id=oldest_event_id
+        )
         if oldest_seq is None:
             return False
         return after_seq < oldest_seq

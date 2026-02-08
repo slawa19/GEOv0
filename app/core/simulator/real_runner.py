@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from sqlalchemy import and_, func, or_, select
 
@@ -22,6 +22,7 @@ from app.core.clearing.service import ClearingService
 from app.core.payments.service import PaymentService
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import RunRecord
+from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.core.simulator.sse_broadcast import SseBroadcast
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -35,13 +36,6 @@ from app.schemas.simulator import (
     SimulatorTxUpdatedEvent,
 )
 from app.utils.exceptions import GeoException, TimeoutException
-
-
-def _safe_int_env(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)) or str(default))
-    except Exception:
-        return int(default)
 
 
 def _safe_decimal_env(name: str, default: Decimal) -> Decimal:
@@ -174,8 +168,12 @@ class RealRunner:
         self._db_enabled = db_enabled
         self._actions_per_tick_max = int(actions_per_tick_max)
         self._clearing_every_n_ticks = int(clearing_every_n_ticks)
-        self._real_max_consec_tick_failures_default = int(real_max_consec_tick_failures_default)
-        self._real_max_timeouts_per_tick_default = int(real_max_timeouts_per_tick_default)
+        self._real_max_consec_tick_failures_default = int(
+            real_max_consec_tick_failures_default
+        )
+        self._real_max_timeouts_per_tick_default = int(
+            real_max_timeouts_per_tick_default
+        )
         self._real_max_errors_total_default = int(real_max_errors_total_default)
         self._logger = logger
 
@@ -192,11 +190,39 @@ class RealRunner:
             "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
             int(self._real_max_errors_total_default),
         )
-        self._clearing_max_depth_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_DEPTH", 6)
-        self._clearing_max_fx_edges_limit = _safe_int_env("SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", 30)
+        self._clearing_max_depth_limit = _safe_int_env(
+            "SIMULATOR_CLEARING_MAX_DEPTH", 6
+        )
+        self._clearing_max_fx_edges_limit = _safe_int_env(
+            "SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", 30
+        )
         # Amount cap is opt-in. Default must not override scenario amount_model bounds.
-        self._real_amount_cap_limit = _safe_optional_decimal_env("SIMULATOR_REAL_AMOUNT_CAP")
-        self._real_enable_inject = bool(_safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0))
+        self._real_amount_cap_limit = _safe_optional_decimal_env(
+            "SIMULATOR_REAL_AMOUNT_CAP"
+        )
+        self._real_enable_inject = bool(
+            _safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0)
+        )
+
+        # Cache env-derived throttling knobs (avoid getenv on every tick).
+        self._real_db_metrics_every_n_ticks = _safe_int_env(
+            "SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS", 5
+        )
+        self._real_db_bottlenecks_every_n_ticks = _safe_int_env(
+            "SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS", 10
+        )
+        self._real_last_tick_write_every_ms = _safe_int_env(
+            "SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS", 500
+        )
+        self._real_artifacts_sync_every_ms = _safe_int_env(
+            "SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS", 5000
+        )
+
+        # Clearing loop throttling: keep default behavior, but avoid long event-loop stalls.
+        # If budget is exceeded, clearing will continue on the next tick.
+        self._real_clearing_time_budget_ms = _safe_int_env(
+            "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250
+        )
 
     def _parse_event_time_ms(self, evt: Any) -> int | None:
         if not isinstance(evt, dict):
@@ -291,7 +317,9 @@ class RealRunner:
 
         return float(mult_all), mult_by_group, mult_by_profile
 
-    async def _apply_due_scenario_events(self, session, *, run_id: str, run: RunRecord, scenario: dict[str, Any]) -> None:
+    async def _apply_due_scenario_events(
+        self, session, *, run_id: str, run: RunRecord, scenario: dict[str, Any]
+    ) -> None:
         events = scenario.get("events")
         if not isinstance(events, list) or not events:
             return
@@ -299,7 +327,10 @@ class RealRunner:
         # Build pid->id map once.
         pid_to_participant_id: dict[str, uuid.UUID] = {}
         if run._real_participants:
-            pid_to_participant_id = {str(pid): participant_id for (participant_id, pid) in run._real_participants}
+            pid_to_participant_id = {
+                str(pid): participant_id
+                for (participant_id, pid) in run._real_participants
+            }
 
         for idx, evt in enumerate(events):
             if idx in run._real_fired_scenario_event_indexes:
@@ -321,7 +352,11 @@ class RealRunner:
                         "event_index": int(idx),
                         "time": t0,
                         "description": str((evt or {}).get("description") or ""),
-                        "metadata": (evt or {}).get("metadata") if isinstance((evt or {}).get("metadata"), dict) else None,
+                        "metadata": (
+                            (evt or {}).get("metadata")
+                            if isinstance((evt or {}).get("metadata"), dict)
+                            else None
+                        ),
                     },
                 }
                 self._artifacts.enqueue_event_artifact(run_id, payload)
@@ -394,7 +429,10 @@ class RealRunner:
                         skipped += 1
                         continue
 
-                    if max_total_amount is not None and total_applied + amount > max_total_amount:
+                    if (
+                        max_total_amount is not None
+                        and total_applied + amount > max_total_amount
+                    ):
                         skipped += 1
                         continue
 
@@ -407,7 +445,9 @@ class RealRunner:
                     eq_id = eq_id_by_code.get(eq)
                     if eq_id is None:
                         row = (
-                            await session.execute(select(Equivalent.id).where(Equivalent.code == eq))
+                            await session.execute(
+                                select(Equivalent.id).where(Equivalent.code == eq)
+                            )
                         ).scalar_one_or_none()
                         if row is None:
                             skipped += 1
@@ -455,9 +495,18 @@ class RealRunner:
                         if new_amt > tl_limit_amt:
                             skipped += 1
                             continue
-                        session.add(Debt(debtor_id=debtor_id, creditor_id=creditor_id, equivalent_id=eq_id, amount=new_amt))
+                        session.add(
+                            Debt(
+                                debtor_id=debtor_id,
+                                creditor_id=creditor_id,
+                                equivalent_id=eq_id,
+                                amount=new_amt,
+                            )
+                        )
                     else:
-                        new_amt = (Decimal(str(existing.amount)) + amount).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                        new_amt = (Decimal(str(existing.amount)) + amount).quantize(
+                            Decimal("0.01"), rounding=ROUND_DOWN
+                        )
                         if new_amt > tl_limit_amt:
                             skipped += 1
                             continue
@@ -516,7 +565,7 @@ class RealRunner:
     def _should_warn_this_tick(self, run: RunRecord, *, key: str) -> bool:
         with self._lock:
             tick = int(run.tick_index)
-            if int(getattr(run, "_real_warned_tick", -10**9)) != tick:
+            if int(getattr(run, "_real_warned_tick", -(10**9))) != tick:
                 run._real_warned_tick = tick
                 run._real_warned_keys.clear()
 
@@ -524,6 +573,84 @@ class RealRunner:
                 return False
             run._real_warned_keys.add(key)
             return True
+
+    async def flush_pending_storage(self, run_id: str) -> None:
+        """Best-effort flush of the last computed tick metrics/bottlenecks.
+
+        Used on stop/error to avoid losing the last batch when DB writes are throttled.
+
+        NOTE: Stop/error marks the run state first, then calls this flush. The cached
+        payload is stable because no further ticks will update it after stop/fail.
+        """
+
+        if not self._db_enabled():
+            return
+
+        run = self._get_run(run_id)
+        if str(getattr(run, "mode", "")) != "real":
+            return
+
+        payload = getattr(run, "_real_last_tick_storage_payload", None)
+        if not isinstance(payload, dict):
+            return
+
+        last_tick = int(payload.get("tick_index", -1) or -1)
+        if last_tick < 0:
+            return
+
+        flushed_tick = int(
+            getattr(run, "_real_last_tick_storage_flushed_tick", -1) or -1
+        )
+        if flushed_tick >= last_tick:
+            return
+
+        try:
+            async with db_session.AsyncSessionLocal() as session:
+                try:
+                    await simulator_storage.write_tick_metrics(
+                        run_id=str(payload.get("run_id") or run.run_id),
+                        t_ms=int(payload.get("t_ms") or 0),
+                        per_equivalent=payload.get("per_equivalent") or {},
+                        metric_values_by_eq=payload.get("metric_values_by_eq") or {},
+                        session=session,
+                    )
+                    if self._db_enabled() and isinstance(
+                        payload.get("bottlenecks"), dict
+                    ):
+                        computed_at = (
+                            payload.get("bottlenecks", {}).get("computed_at")
+                            or self._utc_now()
+                        )
+                        edge_stats_by_eq = (
+                            payload.get("bottlenecks", {}).get("edge_stats_by_eq") or {}
+                        )
+                        equivalents = (
+                            payload.get("bottlenecks", {}).get("equivalents") or []
+                        )
+                        for eq in equivalents:
+                            await simulator_storage.write_tick_bottlenecks(
+                                run_id=str(payload.get("run_id") or run.run_id),
+                                equivalent=str(eq),
+                                computed_at=computed_at,
+                                edge_stats=edge_stats_by_eq.get(str(eq), {}) or {},
+                                session=session,
+                                limit=50,
+                            )
+                except Exception:
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                    raise
+
+            with self._lock:
+                run._real_last_tick_storage_flushed_tick = int(last_tick)
+        except Exception:
+            self._logger.warning(
+                "simulator.real.flush_pending_storage_failed run_id=%s",
+                str(run_id),
+                exc_info=True,
+            )
 
     async def tick_real_mode(self, run_id: str) -> None:
         run = self._get_run(run_id)
@@ -537,8 +664,14 @@ class RealRunner:
                     run._real_seeded = True
 
                 if run._real_participants is None or run._real_equivalents is None:
-                    run._real_participants = await self._load_real_participants(session, scenario)
-                    run._real_equivalents = [str(x) for x in (scenario.get("equivalents") or []) if str(x).strip()]
+                    run._real_participants = await self._load_real_participants(
+                        session, scenario
+                    )
+                    run._real_equivalents = [
+                        str(x)
+                        for x in (scenario.get("equivalents") or [])
+                        if str(x).strip()
+                    ]
 
                 participants = run._real_participants or []
                 equivalents = run._real_equivalents or []
@@ -547,7 +680,9 @@ class RealRunner:
 
                 # Apply due scenario timeline events (note/stress/inject). Best-effort.
                 # IMPORTANT: inject modifies DB state and must happen before payments.
-                await self._apply_due_scenario_events(session, run_id=run_id, run=run, scenario=scenario)
+                await self._apply_due_scenario_events(
+                    session, run_id=run_id, run=run, scenario=scenario
+                )
 
                 planned = self._plan_real_payments(run, scenario)
                 with self._lock:
@@ -555,7 +690,9 @@ class RealRunner:
                     run.queue_depth = len(planned)
                     run._real_in_flight = 0
                     run.current_phase = "payments" if planned else None
-                sender_id_by_pid = {pid: participant_id for (participant_id, pid) in participants}
+                sender_id_by_pid = {
+                    pid: participant_id for (participant_id, pid) in participants
+                }
 
                 max_timeouts_per_tick = int(self._real_max_timeouts_per_tick_limit)
                 max_errors_total = int(self._real_max_errors_total_limit)
@@ -566,22 +703,37 @@ class RealRunner:
                 timeouts = 0
 
                 sem = asyncio.Semaphore(max(1, int(run._real_max_in_flight)))
+                action_db_lock = asyncio.Lock()
 
                 per_eq: dict[str, dict[str, int]] = {
-                    str(eq): {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0} for eq in equivalents
+                    str(eq): {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}
+                    for eq in equivalents
                 }
                 per_eq_route: dict[str, dict[str, float]] = {
-                    str(eq): {"route_len_sum": 0.0, "route_len_n": 0.0} for eq in equivalents
+                    str(eq): {"route_len_sum": 0.0, "route_len_n": 0.0}
+                    for eq in equivalents
                 }
-                per_eq_metric_values: dict[str, dict[str, float]] = {str(eq): {} for eq in equivalents}
+                per_eq_metric_values: dict[str, dict[str, float]] = {
+                    str(eq): {} for eq in equivalents
+                }
 
-                per_eq_edge_stats: dict[str, dict[tuple[str, str], dict[str, int]]] = {str(eq): {} for eq in equivalents}
+                per_eq_edge_stats: dict[str, dict[tuple[str, str], dict[str, int]]] = {
+                    str(eq): {} for eq in equivalents
+                }
 
-                def _edge_inc(eq: str, src: str, dst: str, key: str, n: int = 1) -> None:
+                def _edge_inc(
+                    eq: str, src: str, dst: str, key: str, n: int = 1
+                ) -> None:
                     m = per_eq_edge_stats.setdefault(str(eq), {})
                     st = m.setdefault(
                         (str(src), str(dst)),
-                        {"attempts": 0, "committed": 0, "rejected": 0, "errors": 0, "timeouts": 0},
+                        {
+                            "attempts": 0,
+                            "committed": 0,
+                            "rejected": 0,
+                            "errors": 0,
+                            "timeouts": 0,
+                        },
                     )
                     st[key] = int(st.get(key, 0)) + int(n)
 
@@ -624,21 +776,29 @@ class RealRunner:
                         seq=action.seq,
                     )
 
+                    # Single-session real-mode tick:
+                    # - One AsyncSession for the whole tick (this `session`)
+                    # - Per-action SAVEPOINT via begin_nested()
+                    # - No per-action commit (service/engine run with commit=False)
+                    # IMPORTANT: AsyncSession is not safe for concurrent use, so we serialize
+                    # DB work for actions with a lock.
+
                     async with sem:
                         with self._lock:
                             run._real_in_flight += 1
 
                         try:
-                            async with db_session.AsyncSessionLocal() as s2:
-                                service = PaymentService(s2)
-                                res = await service.create_payment_internal(
-                                    sender_id,
-                                    to_pid=action.receiver_pid,
-                                    equivalent=action.equivalent,
-                                    amount=action.amount,
-                                    idempotency_key=idem,
-                                )
-                                await s2.commit()
+                            async with action_db_lock:
+                                async with session.begin_nested():
+                                    service = PaymentService(session)
+                                    res = await service.create_payment_internal(
+                                        sender_id,
+                                        to_pid=action.receiver_pid,
+                                        equivalent=action.equivalent,
+                                        amount=action.amount,
+                                        idempotency_key=idem,
+                                        commit=False,
+                                    )
 
                             status = str(res.status or "")
 
@@ -649,12 +809,18 @@ class RealRunner:
                                 path = r.path
                                 if len(path) < 2:
                                     continue
-                                route_edges = [(str(a), str(b)) for a, b in zip(path, path[1:])]
+                                route_edges = [
+                                    (str(a), str(b)) for a, b in zip(path, path[1:])
+                                ]
                                 if route_edges:
                                     break
 
                             avg_route_len = 0.0
-                            lens = [float(len(r.path) - 1) for r in routes if len(r.path) >= 2]
+                            lens = [
+                                float(len(r.path) - 1)
+                                for r in routes
+                                if len(r.path) >= 2
+                            ]
                             if lens:
                                 avg_route_len = float(sum(lens) / len(lens))
 
@@ -747,8 +913,12 @@ class RealRunner:
                     d[key] = int(d.get(key, 0)) + int(n)
 
                 def _route_add(eq: str, route_len: float) -> None:
-                    d = per_eq_route.setdefault(str(eq), {"route_len_sum": 0.0, "route_len_n": 0.0})
-                    d["route_len_sum"] = float(d.get("route_len_sum", 0.0)) + float(route_len)
+                    d = per_eq_route.setdefault(
+                        str(eq), {"route_len_sum": 0.0, "route_len_n": 0.0}
+                    )
+                    d["route_len_sum"] = float(d.get("route_len_sum", 0.0)) + float(
+                        route_len
+                    )
                     d["route_len_n"] = float(d.get("route_len_n", 0.0)) + 1.0
 
                 def _emit_if_ready() -> None:
@@ -758,7 +928,19 @@ class RealRunner:
                         if item is None:
                             return
                         del ready[next_seq]
-                        eq, sender_pid, receiver_pid, amount, status, err_code, err_details, avg_route_len, route_edges, edge_patch, node_patch = item
+                        (
+                            eq,
+                            sender_pid,
+                            receiver_pid,
+                            amount,
+                            status,
+                            err_code,
+                            err_details,
+                            avg_route_len,
+                            route_edges,
+                            edge_patch,
+                            node_patch,
+                        ) = item
 
                         edges_pairs = route_edges or [(sender_pid, receiver_pid)]
 
@@ -782,11 +964,16 @@ class RealRunner:
                                 run.errors_total += 1
                                 run._error_timestamps.append(time.time())
                                 cutoff = time.time() - 60.0
-                                while run._error_timestamps and run._error_timestamps[0] < cutoff:
+                                while (
+                                    run._error_timestamps
+                                    and run._error_timestamps[0] < cutoff
+                                ):
                                     run._error_timestamps.popleft()
                                 run.last_error = {
                                     "code": err_code,
-                                    "message": str((err_details or {}).get("message") or err_code),
+                                    "message": str(
+                                        (err_details or {}).get("message") or err_code
+                                    ),
                                     "at": self._utc_now().isoformat(),
                                 }
                                 run.last_event_type = "tx.failed"
@@ -800,7 +987,9 @@ class RealRunner:
                                 to=receiver_pid,
                                 error={
                                     "code": err_code,
-                                    "message": str((err_details or {}).get("message") or err_code),
+                                    "message": str(
+                                        (err_details or {}).get("message") or err_code
+                                    ),
                                     "at": self._utc_now(),
                                     "details": err_details,
                                 },
@@ -826,7 +1015,9 @@ class RealRunner:
                                     to=receiver_pid,
                                     amount=amount,
                                     ttl_ms=1200,
-                                    edges=[{"from": a, "to": b} for a, b in edges_pairs],
+                                    edges=[
+                                        {"from": a, "to": b} for a, b in edges_pairs
+                                    ],
                                     node_badges=None,
                                 ).model_dump(mode="json", by_alias=True)
                                 if edge_patch:
@@ -845,7 +1036,9 @@ class RealRunner:
                                 try:
                                     rejection_code = map_rejection_code(err_details)
                                 except Exception:
-                                    if self._should_warn_this_tick(run, key="map_rejection_code_failed"):
+                                    if self._should_warn_this_tick(
+                                        run, key="map_rejection_code_failed"
+                                    ):
                                         self._logger.debug(
                                             "simulator.real.map_rejection_code_failed run_id=%s tick=%s",
                                             str(run.run_id),
@@ -880,30 +1073,47 @@ class RealRunner:
 
                 try:
                     if tasks:
-                        async with db_session.AsyncSessionLocal() as patch_session:
-                            # Per-tick caches to avoid repeated heavy work when multiple tx touch the same pids.
-                            per_tick_pid_to_participant_by_eq_and_pids: dict[
-                                tuple[str, tuple[str, ...]],
-                                dict[str, Participant],
-                            ] = {}
-                            per_tick_node_patch_by_eq_and_pids: dict[
-                                tuple[str, tuple[str, ...]],
-                                list[dict[str, Any]] | None,
-                            ] = {}
-                            per_tick_quantiles_refreshed_by_eq: set[str] = set()
+                        patch_session = session
 
-                            for t in asyncio.as_completed(tasks):
-                                seq, eq, sender_pid, receiver_pid, amount, status, err_code, err_details, avg_route_len, route_edges = await t
+                        # Per-tick caches to avoid repeated heavy work when multiple tx touch the same pids.
+                        per_tick_pid_to_participant_by_eq_and_pids: dict[
+                            tuple[str, tuple[str, ...]],
+                            dict[str, Participant],
+                        ] = {}
+                        per_tick_node_patch_by_eq_and_pids: dict[
+                            tuple[str, tuple[str, ...]],
+                            list[dict[str, Any]] | None,
+                        ] = {}
+                        per_tick_quantiles_refreshed_by_eq: set[str] = set()
 
-                                if run.state != "running":
-                                    break
+                        for t in asyncio.as_completed(tasks):
+                            (
+                                seq,
+                                eq,
+                                sender_pid,
+                                receiver_pid,
+                                amount,
+                                status,
+                                err_code,
+                                err_details,
+                                avg_route_len,
+                                route_edges,
+                            ) = await t
 
-                                # Build edge_patch for committed transactions (Variant A: SSE patches)
-                                edge_patch_list: list[dict[str, Any]] | None = None
-                                node_patch_list: list[dict[str, Any]] | None = None
+                            if run.state != "running":
+                                break
+
+                            # Build edge_patch for committed transactions (Variant A: SSE patches)
+                            edge_patch_list: list[dict[str, Any]] | None = None
+                            node_patch_list: list[dict[str, Any]] | None = None
+
+                            # Serialize patch DB reads with action DB writes: one session, one connection.
+                            async with action_db_lock:
                                 try:
                                     if status == "COMMITTED":
-                                        edges_pairs = route_edges or [(sender_pid, receiver_pid)]
+                                        edges_pairs = route_edges or [
+                                            (sender_pid, receiver_pid)
+                                        ]
 
                                         edge_patch_list = []
                                         helper: VizPatchHelper | None
@@ -915,7 +1125,12 @@ class RealRunner:
                                                 patch_session,
                                                 equivalent_code=str(eq),
                                                 refresh_every_ticks=int(
-                                                    getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10
+                                                    getattr(
+                                                        settings,
+                                                        "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS",
+                                                        10,
+                                                    )
+                                                    or 10
                                                 ),
                                             )
                                             with self._lock:
@@ -925,27 +1140,59 @@ class RealRunner:
 
                                         participant_ids: list[uuid.UUID] = []
                                         if run._real_participants:
-                                            participant_ids = [pid for (pid, _) in run._real_participants]
-                                        if str(eq) not in per_tick_quantiles_refreshed_by_eq:
+                                            participant_ids = [
+                                                pid
+                                                for (pid, _) in run._real_participants
+                                            ]
+                                        if (
+                                            str(eq)
+                                            not in per_tick_quantiles_refreshed_by_eq
+                                        ):
                                             await helper.maybe_refresh_quantiles(
                                                 patch_session,
                                                 tick_index=int(run.tick_index),
                                                 participant_ids=participant_ids,
                                             )
-                                            per_tick_quantiles_refreshed_by_eq.add(str(eq))
+                                            per_tick_quantiles_refreshed_by_eq.add(
+                                                str(eq)
+                                            )
 
                                         # Fetch participants in one query.
-                                        pids = sorted({pid for ab in edges_pairs for pid in ab if pid})
+                                        pids = sorted(
+                                            {
+                                                pid
+                                                for ab in edges_pairs
+                                                for pid in ab
+                                                if pid
+                                            }
+                                        )
                                         pids_key = (str(eq), tuple(pids))
-                                        pid_to_participant = per_tick_pid_to_participant_by_eq_and_pids.get(pids_key)
+                                        pid_to_participant = per_tick_pid_to_participant_by_eq_and_pids.get(
+                                            pids_key
+                                        )
                                         if pid_to_participant is None:
-                                            res = await patch_session.execute(select(Participant).where(Participant.pid.in_(pids)))
-                                            pid_to_participant = {p.pid: p for p in res.scalars().all()}
-                                            per_tick_pid_to_participant_by_eq_and_pids[pids_key] = pid_to_participant
+                                            res = await patch_session.execute(
+                                                select(Participant).where(
+                                                    Participant.pid.in_(pids)
+                                                )
+                                            )
+                                            pid_to_participant = {
+                                                p.pid: p for p in res.scalars().all()
+                                            }
+                                            per_tick_pid_to_participant_by_eq_and_pids[
+                                                pids_key
+                                            ] = pid_to_participant
 
                                         try:
-                                            if pids_key in per_tick_node_patch_by_eq_and_pids:
-                                                node_patch_list = per_tick_node_patch_by_eq_and_pids[pids_key]
+                                            if (
+                                                pids_key
+                                                in per_tick_node_patch_by_eq_and_pids
+                                            ):
+                                                node_patch_list = (
+                                                    per_tick_node_patch_by_eq_and_pids[
+                                                        pids_key
+                                                    ]
+                                                )
                                             else:
                                                 node_patch_list = await helper.compute_node_patches(
                                                     patch_session,
@@ -954,9 +1201,13 @@ class RealRunner:
                                                 )
                                                 if node_patch_list == []:
                                                     node_patch_list = None
-                                                per_tick_node_patch_by_eq_and_pids[pids_key] = node_patch_list
+                                                per_tick_node_patch_by_eq_and_pids[
+                                                    pids_key
+                                                ] = node_patch_list
                                         except Exception:
-                                            if self._should_warn_this_tick(run, key=f"node_patch_failed:{eq}"):
+                                            if self._should_warn_this_tick(
+                                                run, key=f"node_patch_failed:{eq}"
+                                            ):
                                                 self._logger.warning(
                                                     "simulator.real.node_patch_failed run_id=%s tick=%s eq=%s",
                                                     str(run.run_id),
@@ -975,31 +1226,56 @@ class RealRunner:
                                                 continue
                                             id_pairs.append((src_part.id, dst_part.id))
 
-                                        debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
-                                        tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {}
+                                        debt_by_pair: dict[
+                                            tuple[uuid.UUID, uuid.UUID], Decimal
+                                        ] = {}
+                                        tl_by_pair: dict[
+                                            tuple[uuid.UUID, uuid.UUID],
+                                            tuple[Decimal, str | None],
+                                        ] = {}
 
                                         if id_pairs:
-                                            debt_cond = or_(*[and_(Debt.creditor_id == a, Debt.debtor_id == b) for a, b in id_pairs])
+                                            debt_cond = or_(
+                                                *[
+                                                    and_(
+                                                        Debt.creditor_id == a,
+                                                        Debt.debtor_id == b,
+                                                    )
+                                                    for a, b in id_pairs
+                                                ]
+                                            )
                                             debt_rows = (
                                                 await patch_session.execute(
                                                     select(
                                                         Debt.creditor_id,
                                                         Debt.debtor_id,
-                                                        func.coalesce(func.sum(Debt.amount), 0).label("amount"),
+                                                        func.coalesce(
+                                                            func.sum(Debt.amount), 0
+                                                        ).label("amount"),
                                                     )
-                                                    .where(Debt.equivalent_id == eq_id, debt_cond)
-                                                    .group_by(Debt.creditor_id, Debt.debtor_id)
+                                                    .where(
+                                                        Debt.equivalent_id == eq_id,
+                                                        debt_cond,
+                                                    )
+                                                    .group_by(
+                                                        Debt.creditor_id, Debt.debtor_id
+                                                    )
                                                 )
                                             ).all()
                                             debt_by_pair = {
-                                                (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+                                                (r.creditor_id, r.debtor_id): (
+                                                    r.amount or Decimal("0")
+                                                )
+                                                for r in debt_rows
                                             }
 
                                             tl_cond = or_(
                                                 *[
                                                     and_(
-                                                        TrustLine.from_participant_id == a,
-                                                        TrustLine.to_participant_id == b,
+                                                        TrustLine.from_participant_id
+                                                        == a,
+                                                        TrustLine.to_participant_id
+                                                        == b,
                                                     )
                                                     for a, b in id_pairs
                                                 ]
@@ -1011,11 +1287,18 @@ class RealRunner:
                                                         TrustLine.to_participant_id,
                                                         TrustLine.limit,
                                                         TrustLine.status,
-                                                    ).where(TrustLine.equivalent_id == eq_id, tl_cond)
+                                                    ).where(
+                                                        TrustLine.equivalent_id
+                                                        == eq_id,
+                                                        tl_cond,
+                                                    )
                                                 )
                                             ).all()
                                             tl_by_pair = {
-                                                (r.from_participant_id, r.to_participant_id): (r.limit or Decimal("0"), r.status)
+                                                (
+                                                    r.from_participant_id,
+                                                    r.to_participant_id,
+                                                ): (r.limit or Decimal("0"), r.status)
                                                 for r in tl_rows
                                             }
 
@@ -1025,12 +1308,16 @@ class RealRunner:
                                             if not src_part or not dst_part:
                                                 continue
 
-                                            used_amt = debt_by_pair.get((src_part.id, dst_part.id), Decimal("0"))
+                                            used_amt = debt_by_pair.get(
+                                                (src_part.id, dst_part.id), Decimal("0")
+                                            )
                                             limit_amt, tl_status = tl_by_pair.get(
                                                 (src_part.id, dst_part.id),
                                                 (Decimal("0"), None),
                                             )
-                                            available_amt = max(Decimal("0"), limit_amt - used_amt)
+                                            available_amt = max(
+                                                Decimal("0"), limit_amt - used_amt
+                                            )
 
                                             edge_viz = helper.edge_viz(
                                                 status=tl_status,
@@ -1048,7 +1335,9 @@ class RealRunner:
                                                 }
                                             )
                                 except Exception:
-                                    if self._should_warn_this_tick(run, key=f"edge_patch_failed:{eq}"):
+                                    if self._should_warn_this_tick(
+                                        run, key=f"edge_patch_failed:{eq}"
+                                    ):
                                         self._logger.warning(
                                             "simulator.real.edge_patch_failed run_id=%s tick=%s eq=%s",
                                             str(run.run_id),
@@ -1058,39 +1347,35 @@ class RealRunner:
                                         )
                                     edge_patch_list = None
                                     node_patch_list = None
-                                finally:
-                                    # Important for SQLite: end the implicit read transaction so it doesn't hold a lock
-                                    # while other tasks commit writes.
-                                    try:
-                                        await patch_session.rollback()
-                                    except Exception:
-                                        pass
 
-                                if edge_patch_list == []:
-                                    edge_patch_list = None
+                            if edge_patch_list == []:
+                                edge_patch_list = None
 
-                                ready[seq] = (
-                                    eq,
-                                    sender_pid,
-                                    receiver_pid,
-                                    amount,
-                                    status,
-                                    err_code,
-                                    err_details,
-                                    avg_route_len,
-                                    route_edges,
-                                    edge_patch_list,
-                                    node_patch_list,
+                            ready[seq] = (
+                                eq,
+                                sender_pid,
+                                receiver_pid,
+                                amount,
+                                status,
+                                err_code,
+                                err_details,
+                                avg_route_len,
+                                route_edges,
+                                edge_patch_list,
+                                node_patch_list,
+                            )
+                            _emit_if_ready()
+
+                            if (
+                                max_timeouts_per_tick > 0
+                                and timeouts >= max_timeouts_per_tick
+                            ):
+                                await self.fail_run(
+                                    run_id,
+                                    code="REAL_MODE_TOO_MANY_TIMEOUTS",
+                                    message=f"Too many payment timeouts in one tick: {timeouts}",
                                 )
-                                _emit_if_ready()
-
-                                if max_timeouts_per_tick > 0 and timeouts >= max_timeouts_per_tick:
-                                    await self.fail_run(
-                                        run_id,
-                                        code="REAL_MODE_TOO_MANY_TIMEOUTS",
-                                        message=f"Too many payment timeouts in one tick: {timeouts}",
-                                    )
-                                    break
+                                break
                 finally:
                     # Cancel any remaining tasks if we bailed early.
                     for task in tasks:
@@ -1120,28 +1405,44 @@ class RealRunner:
                     return
 
                 # Best-effort clearing (optional MVP): once in a while, attempt clearing per equivalent.
-                clearing_volume_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+                clearing_volume_by_eq: dict[str, float] = {
+                    str(eq): 0.0 for eq in equivalents
+                }
                 if (
                     self._clearing_every_n_ticks > 0
                     and run.tick_index % self._clearing_every_n_ticks == 0
                     and bool(getattr(settings, "CLEARING_ENABLED", True))
                 ):
-                    clearing_volume_by_eq = await self.tick_real_mode_clearing(session, run_id, run, equivalents)
+                    clearing_volume_by_eq = await self.tick_real_mode_clearing(
+                        session, run_id, run, equivalents
+                    )
 
                 # Real total debt snapshot (sum of all debts for the equivalent).
-                total_debt_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+                total_debt_by_eq: dict[str, float] = {
+                    str(eq): 0.0 for eq in equivalents
+                }
                 try:
                     eq_rows = (
-                        await session.execute(select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(list(equivalents))))
+                        await session.execute(
+                            select(Equivalent.id, Equivalent.code).where(
+                                Equivalent.code.in_(list(equivalents))
+                            )
+                        )
                     ).all()
                     eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
                     for eq_code, eq_id in eq_id_by_code.items():
                         total = (
-                            await session.execute(select(func.coalesce(func.sum(Debt.amount), 0)).where(Debt.equivalent_id == eq_id))
+                            await session.execute(
+                                select(func.coalesce(func.sum(Debt.amount), 0)).where(
+                                    Debt.equivalent_id == eq_id
+                                )
+                            )
                         ).scalar_one()
                         total_debt_by_eq[str(eq_code)] = float(total)
                 except Exception:
-                    if self._should_warn_this_tick(run, key="total_debt_snapshot_failed"):
+                    if self._should_warn_this_tick(
+                        run, key="total_debt_snapshot_failed"
+                    ):
                         self._logger.debug(
                             "simulator.real.total_debt_snapshot_failed run_id=%s tick=%s",
                             str(run.run_id),
@@ -1154,21 +1455,56 @@ class RealRunner:
                     r = per_eq_route.get(str(eq), {})
                     n = float(r.get("route_len_n", 0.0) or 0.0)
                     s = float(r.get("route_len_sum", 0.0) or 0.0)
-                    per_eq_metric_values[str(eq)]["avg_route_length"] = float(s / n) if n > 0 else 0.0
-                    per_eq_metric_values[str(eq)]["total_debt"] = float(total_debt_by_eq.get(str(eq), 0.0) or 0.0)
-                    per_eq_metric_values[str(eq)]["clearing_volume"] = float(clearing_volume_by_eq.get(str(eq), 0.0) or 0.0)
+                    per_eq_metric_values[str(eq)]["avg_route_length"] = (
+                        float(s / n) if n > 0 else 0.0
+                    )
+                    per_eq_metric_values[str(eq)]["total_debt"] = float(
+                        total_debt_by_eq.get(str(eq), 0.0) or 0.0
+                    )
+                    per_eq_metric_values[str(eq)]["clearing_volume"] = float(
+                        clearing_volume_by_eq.get(str(eq), 0.0) or 0.0
+                    )
 
-                await simulator_storage.write_tick_metrics(
-                    run_id=run.run_id,
-                    t_ms=int(run.sim_time_ms),
-                    per_equivalent=per_eq,
-                    metric_values_by_eq=per_eq_metric_values,
-                    session=session,
+                # Cache the last computed payload to allow best-effort flush on stop/error.
+                # Keep it in-memory only (no API changes).
+                computed_at = self._utc_now()
+                with self._lock:
+                    run._real_last_tick_storage_payload = {
+                        "run_id": str(run.run_id),
+                        "tick_index": int(run.tick_index),
+                        "t_ms": int(run.sim_time_ms),
+                        "per_equivalent": per_eq,
+                        "metric_values_by_eq": per_eq_metric_values,
+                        "bottlenecks": {
+                            "computed_at": computed_at,
+                            "equivalents": list(equivalents),
+                            "edge_stats_by_eq": per_eq_edge_stats,
+                        },
+                    }
+
+                # Throttle DB writes for metrics/bottlenecks to reduce IO.
+                metrics_every_n = int(self._real_db_metrics_every_n_ticks)
+                bottlenecks_every_n = int(self._real_db_bottlenecks_every_n_ticks)
+
+                should_write_metrics = metrics_every_n <= 1 or (
+                    int(run.tick_index) % int(metrics_every_n) == 0
+                )
+                should_write_bottlenecks = bottlenecks_every_n <= 1 or (
+                    int(run.tick_index) % int(bottlenecks_every_n) == 0
                 )
 
+                if should_write_metrics:
+                    await simulator_storage.write_tick_metrics(
+                        run_id=run.run_id,
+                        t_ms=int(run.sim_time_ms),
+                        per_equivalent=per_eq,
+                        metric_values_by_eq=per_eq_metric_values,
+                        session=session,
+                        commit=False,
+                    )
+
                 # Persist bottlenecks snapshot derived from actual tick outcomes.
-                if self._db_enabled():
-                    computed_at = self._utc_now()
+                if should_write_bottlenecks and self._db_enabled():
                     for eq in equivalents:
                         await simulator_storage.write_tick_bottlenecks(
                             run_id=run.run_id,
@@ -1177,21 +1513,34 @@ class RealRunner:
                             edge_stats=per_eq_edge_stats.get(str(eq), {}),
                             session=session,
                             limit=50,
+                            commit=False,
                         )
+
+                if should_write_metrics or should_write_bottlenecks:
+                    with self._lock:
+                        run._real_last_tick_storage_flushed_tick = int(run.tick_index)
+
+                # One commit for the whole tick DB state (payments + optional snapshots).
+                try:
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
 
                 # Artifacts are useful for diagnostics, but syncing them every tick is very IO-heavy.
                 # Throttle filesystem writes and DB sync to reduce HDD/SSD churn in interactive runs.
                 now_ms = int(time.time() * 1000)
-                try:
-                    tick_write_every_ms = int(os.getenv("SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS", "500") or "500")
-                except Exception:
-                    tick_write_every_ms = 500
-                try:
-                    artifacts_sync_every_ms = int(os.getenv("SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS", "5000") or "5000")
-                except Exception:
-                    artifacts_sync_every_ms = 5000
+                tick_write_every_ms = int(self._real_last_tick_write_every_ms)
+                artifacts_sync_every_ms = int(self._real_artifacts_sync_every_ms)
 
-                if tick_write_every_ms > 0 and (now_ms - int(getattr(run, "_artifact_last_tick_written_at_ms", 0) or 0)) >= tick_write_every_ms:
+                if (
+                    tick_write_every_ms > 0
+                    and (
+                        now_ms
+                        - int(getattr(run, "_artifact_last_tick_written_at_ms", 0) or 0)
+                    )
+                    >= tick_write_every_ms
+                ):
                     self._artifacts.write_real_tick_artifact(
                         run,
                         {
@@ -1206,7 +1555,13 @@ class RealRunner:
                     )
                     run._artifact_last_tick_written_at_ms = now_ms
 
-                if artifacts_sync_every_ms > 0 and (now_ms - int(getattr(run, "_artifact_last_sync_at_ms", 0) or 0)) >= artifacts_sync_every_ms:
+                if (
+                    artifacts_sync_every_ms > 0
+                    and (
+                        now_ms - int(getattr(run, "_artifact_last_sync_at_ms", 0) or 0)
+                    )
+                    >= artifacts_sync_every_ms
+                ):
                     await simulator_storage.sync_artifacts(run)
                     run._artifact_last_sync_at_ms = now_ms
         except Exception as e:
@@ -1254,11 +1609,25 @@ class RealRunner:
             cutoff = time.time() - 60.0
             while run._error_timestamps and run._error_timestamps[0] < cutoff:
                 run._error_timestamps.popleft()
-            run.last_error = {"code": code, "message": message, "at": self._utc_now().isoformat()}
+            run.last_error = {
+                "code": code,
+                "message": message,
+                "at": self._utc_now().isoformat(),
+            }
             task = run._heartbeat_task
 
         self._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)
+
+        # Best-effort final flush for throttled tick metrics/bottlenecks.
+        try:
+            await self.flush_pending_storage(run_id)
+        except Exception:
+            self._logger.warning(
+                "simulator.real.fail_run.flush_pending_storage_failed run_id=%s",
+                str(run_id),
+                exc_info=True,
+            )
         if task is not None:
             task.cancel()
 
@@ -1270,7 +1639,7 @@ class RealRunner:
         equivalents: list[str],
     ) -> dict[str, float]:
         """Execute clearing for all equivalents using an isolated session.
-        
+
         IMPORTANT: This method uses its own session to avoid poisoning the parent
         tick_real_mode session with commit/rollback side effects. PostgreSQL marks
         a transaction as "aborted" after any error, and subsequent queries fail
@@ -1284,7 +1653,7 @@ class RealRunner:
             try:
                 async with db_session.AsyncSessionLocal() as clearing_session:
                     service = ClearingService(clearing_session)
-                    
+
                     # Plan step: find at least one cycle to visualize.
                     cycles = await service.find_cycles(eq, max_depth=max_depth)
                     if not cycles:
@@ -1298,12 +1667,24 @@ class RealRunner:
                     cycle_edges: list[dict[str, str]] = []
                     try:
                         for edge in cycles[0]:
-                            debtor_pid = str(edge.get("debtor") or "") if isinstance(edge, dict) else str(getattr(edge, "debtor", ""))
-                            creditor_pid = str(edge.get("creditor") or "") if isinstance(edge, dict) else str(getattr(edge, "creditor", ""))
+                            debtor_pid = (
+                                str(edge.get("debtor") or "")
+                                if isinstance(edge, dict)
+                                else str(getattr(edge, "debtor", ""))
+                            )
+                            creditor_pid = (
+                                str(edge.get("creditor") or "")
+                                if isinstance(edge, dict)
+                                else str(getattr(edge, "creditor", ""))
+                            )
                             if debtor_pid and creditor_pid:
-                                cycle_edges.append({"from": debtor_pid, "to": creditor_pid})
+                                cycle_edges.append(
+                                    {"from": debtor_pid, "to": creditor_pid}
+                                )
                     except Exception:
-                        if self._should_warn_this_tick(run, key=f"clearing_cycle_edges_parse_failed:{eq}"):
+                        if self._should_warn_this_tick(
+                            run, key=f"clearing_cycle_edges_parse_failed:{eq}"
+                        ):
                             self._logger.debug(
                                 "simulator.real.clearing_cycle_edges_parse_failed run_id=%s tick=%s eq=%s",
                                 str(run.run_id),
@@ -1319,16 +1700,34 @@ class RealRunner:
                     # Build steps with highlight_edges for visible clearing animation.
                     plan_steps: list[dict[str, Any]] = []
                     if cycle_edges:
-                        plan_steps.append({"at_ms": 0, "highlight_edges": cycle_edges, "intensity_key": "hi"})
-                        plan_steps.append({"at_ms": 400, "particles_edges": cycle_edges, "intensity_key": "mid"})
+                        plan_steps.append(
+                            {
+                                "at_ms": 0,
+                                "highlight_edges": cycle_edges,
+                                "intensity_key": "hi",
+                            }
+                        )
+                        plan_steps.append(
+                            {
+                                "at_ms": 400,
+                                "particles_edges": cycle_edges,
+                                "intensity_key": "mid",
+                            }
+                        )
                         plan_steps.append({"at_ms": 900, "flash": {"kind": "clearing"}})
                     else:
                         # Fallback if no edges extracted.
-                        plan_steps.append({
-                            "at_ms": 0,
-                            "intensity_key": "mid",
-                            "flash": {"kind": "info", "title": "Clearing", "detail": "Auto clearing"},
-                        })
+                        plan_steps.append(
+                            {
+                                "at_ms": 0,
+                                "intensity_key": "mid",
+                                "flash": {
+                                    "kind": "info",
+                                    "title": "Clearing",
+                                    "detail": "Auto clearing",
+                                },
+                            }
+                        )
 
                     plan_evt = SimulatorClearingPlanEvent(
                         event_id=self._sse.next_event_id(run),
@@ -1350,7 +1749,32 @@ class RealRunner:
                     touched_nodes: set[str] = set()
                     # Edge direction in graph is creditor -> debtor.
                     touched_edges: set[tuple[str, str]] = set()
+                    clearing_started = time.monotonic()
                     while True:
+                        # Soft throttle: yield to event loop during long clearing bursts.
+                        if cleared_cycles and (cleared_cycles % 5 == 0):
+                            await asyncio.sleep(0)
+
+                        # Optional time budget to avoid multi-second stalls.
+                        budget_ms = int(
+                            getattr(self, "_real_clearing_time_budget_ms", 0) or 0
+                        )
+                        if budget_ms > 0:
+                            elapsed_ms = (time.monotonic() - clearing_started) * 1000.0
+                            if elapsed_ms >= float(budget_ms):
+                                if self._should_warn_this_tick(
+                                    run, key=f"clearing_time_budget_exceeded:{eq}"
+                                ):
+                                    self._logger.warning(
+                                        "simulator.real.clearing_time_budget_exceeded run_id=%s tick=%s eq=%s budget_ms=%s elapsed_ms=%s",
+                                        str(run.run_id),
+                                        int(run.tick_index),
+                                        str(eq),
+                                        int(budget_ms),
+                                        int(elapsed_ms),
+                                    )
+                                break
+
                         cycles = await service.find_cycles(eq, max_depth=max_depth)
                         if not cycles:
                             break
@@ -1364,9 +1788,22 @@ class RealRunner:
                                     if isinstance(edge, dict):
                                         amts.append(Decimal(str(edge.get("amount"))))
                                     else:
-                                        amts.append(Decimal(str(getattr(edge, "amount"))))
+                                        amts.append(
+                                            Decimal(str(getattr(edge, "amount")))
+                                        )
                                 clear_amount = min(amts) if amts else Decimal("0")
                             except Exception:
+                                if self._should_warn_this_tick(
+                                    run,
+                                    key=f"clearing_clear_amount_parse_failed:{eq}",
+                                ):
+                                    self._logger.debug(
+                                        "simulator.real.clearing_clear_amount_parse_failed run_id=%s tick=%s eq=%s",
+                                        str(run.run_id),
+                                        int(run.tick_index),
+                                        str(eq),
+                                        exc_info=True,
+                                    )
                                 clear_amount = Decimal("0")
 
                             success = await service.execute_clearing(cycle)
@@ -1379,16 +1816,31 @@ class RealRunner:
                                     for edge in cycle:
                                         if not isinstance(edge, dict):
                                             continue
-                                        debtor_pid = str(edge.get("debtor") or "").strip()
-                                        creditor_pid = str(edge.get("creditor") or "").strip()
+                                        debtor_pid = str(
+                                            edge.get("debtor") or ""
+                                        ).strip()
+                                        creditor_pid = str(
+                                            edge.get("creditor") or ""
+                                        ).strip()
                                         if debtor_pid:
                                             touched_nodes.add(debtor_pid)
                                         if creditor_pid:
                                             touched_nodes.add(creditor_pid)
                                         if creditor_pid and debtor_pid:
-                                            touched_edges.add((creditor_pid, debtor_pid))
+                                            touched_edges.add(
+                                                (creditor_pid, debtor_pid)
+                                            )
                                 except Exception:
-                                    pass
+                                    if self._should_warn_this_tick(
+                                        run, key=f"clearing_touched_parse_failed:{eq}"
+                                    ):
+                                        self._logger.debug(
+                                            "simulator.real.clearing_touched_parse_failed run_id=%s tick=%s eq=%s",
+                                            str(run.run_id),
+                                            int(run.tick_index),
+                                            str(eq),
+                                            exc_info=True,
+                                        )
                                 executed = True
                                 break
 
@@ -1415,7 +1867,12 @@ class RealRunner:
                                 clearing_session,
                                 equivalent_code=str(eq),
                                 refresh_every_ticks=int(
-                                    getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10
+                                    getattr(
+                                        settings,
+                                        "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS",
+                                        10,
+                                    )
+                                    or 10
                                 ),
                             )
                             with self._lock:
@@ -1423,12 +1880,19 @@ class RealRunner:
 
                         precision = int(getattr(helper, "precision", 2) or 2)
                         money_quant = Decimal(1) / (Decimal(10) ** precision)
-                        cleared_amount_str = format(cleared_amount_dec.quantize(money_quant, rounding=ROUND_DOWN), "f")
+                        cleared_amount_str = format(
+                            cleared_amount_dec.quantize(
+                                money_quant, rounding=ROUND_DOWN
+                            ),
+                            "f",
+                        )
 
                         # Refresh quantiles using all participants when available.
                         participant_ids: list[uuid.UUID] = []
                         if run._real_participants:
-                            participant_ids = [pid for (pid, _) in run._real_participants]
+                            participant_ids = [
+                                pid for (pid, _) in run._real_participants
+                            ]
                         await helper.maybe_refresh_quantiles(
                             clearing_session,
                             tick_index=int(run.tick_index),
@@ -1436,9 +1900,13 @@ class RealRunner:
                         )
 
                         # Node patches for touched nodes.
-                        pids = sorted({str(x).strip() for x in touched_nodes if str(x).strip()})
+                        pids = sorted(
+                            {str(x).strip() for x in touched_nodes if str(x).strip()}
+                        )
                         if pids:
-                            res = await clearing_session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                            res = await clearing_session.execute(
+                                select(Participant).where(Participant.pid.in_(pids))
+                            )
                             pid_to_participant = {p.pid: p for p in res.scalars().all()}
                             node_patch_list = await helper.compute_node_patches(
                                 clearing_session,
@@ -1458,26 +1926,51 @@ class RealRunner:
                                     continue
                                 id_pairs.append((a.id, b.id))
 
-                            debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
-                            tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {}
+                            debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = (
+                                {}
+                            )
+                            tl_by_pair: dict[
+                                tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]
+                            ] = {}
                             if id_pairs:
-                                debt_cond = or_(*[and_(Debt.creditor_id == a, Debt.debtor_id == b) for a, b in id_pairs])
+                                debt_cond = or_(
+                                    *[
+                                        and_(Debt.creditor_id == a, Debt.debtor_id == b)
+                                        for a, b in id_pairs
+                                    ]
+                                )
                                 debt_rows = (
                                     await clearing_session.execute(
                                         select(
                                             Debt.creditor_id,
                                             Debt.debtor_id,
-                                            func.coalesce(func.sum(Debt.amount), 0).label("amount"),
+                                            func.coalesce(
+                                                func.sum(Debt.amount), 0
+                                            ).label("amount"),
                                         )
-                                        .where(Debt.equivalent_id == helper.equivalent_id, debt_cond)
+                                        .where(
+                                            Debt.equivalent_id == helper.equivalent_id,
+                                            debt_cond,
+                                        )
                                         .group_by(Debt.creditor_id, Debt.debtor_id)
                                     )
                                 ).all()
                                 debt_by_pair = {
-                                    (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+                                    (r.creditor_id, r.debtor_id): (
+                                        r.amount or Decimal("0")
+                                    )
+                                    for r in debt_rows
                                 }
 
-                                tl_cond = or_(*[and_(TrustLine.from_participant_id == a, TrustLine.to_participant_id == b) for a, b in id_pairs])
+                                tl_cond = or_(
+                                    *[
+                                        and_(
+                                            TrustLine.from_participant_id == a,
+                                            TrustLine.to_participant_id == b,
+                                        )
+                                        for a, b in id_pairs
+                                    ]
+                                )
                                 tl_rows = (
                                     await clearing_session.execute(
                                         select(
@@ -1485,13 +1978,21 @@ class RealRunner:
                                             TrustLine.to_participant_id,
                                             TrustLine.limit,
                                             TrustLine.status,
-                                        ).where(TrustLine.equivalent_id == helper.equivalent_id, tl_cond)
+                                        ).where(
+                                            TrustLine.equivalent_id
+                                            == helper.equivalent_id,
+                                            tl_cond,
+                                        )
                                     )
                                 ).all()
                                 tl_by_pair = {
                                     (r.from_participant_id, r.to_participant_id): (
                                         (r.limit or Decimal("0")),
-                                        (str(r.status) if r.status is not None else None),
+                                        (
+                                            str(r.status)
+                                            if r.status is not None
+                                            else None
+                                        ),
                                     )
                                     for r in tl_rows
                                 }
@@ -1504,10 +2005,14 @@ class RealRunner:
                                     continue
 
                                 used_amt = debt_by_pair.get((a.id, b.id), Decimal("0"))
-                                limit_amt, tl_status = tl_by_pair.get((a.id, b.id), (Decimal("0"), None))
+                                limit_amt, tl_status = tl_by_pair.get(
+                                    (a.id, b.id), (Decimal("0"), None)
+                                )
                                 available_amt = max(Decimal("0"), limit_amt - used_amt)
 
-                                edge_viz = helper.edge_viz(status=tl_status, used=used_amt, limit=limit_amt)
+                                edge_viz = helper.edge_viz(
+                                    status=tl_status, used=used_amt, limit=limit_amt
+                                )
                                 edge_patch_list.append(
                                     {
                                         "source": a_pid,
@@ -1520,6 +2025,16 @@ class RealRunner:
                             if edge_patch_list == []:
                                 edge_patch_list = None
                     except Exception:
+                        if self._should_warn_this_tick(
+                            run, key=f"clearing_done_patch_failed:{eq}"
+                        ):
+                            self._logger.debug(
+                                "simulator.real.clearing_done_patch_failed run_id=%s tick=%s eq=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                str(eq),
+                                exc_info=True,
+                            )
                         node_patch_list = None
                         edge_patch_list = None
                         cleared_amount_str = None
@@ -1563,7 +2078,9 @@ class RealRunner:
 
         return cleared_amount_by_eq
 
-    def _real_candidates_from_scenario(self, scenario: dict[str, Any]) -> list[dict[str, Any]]:
+    def _real_candidates_from_scenario(
+        self, scenario: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         tls = scenario.get("trustlines") or []
         out: list[dict[str, Any]] = []
         for tl in tls:
@@ -1587,12 +2104,21 @@ class RealRunner:
             # TrustLine direction is creditor->debtor. Payment from debtor->creditor.
             # TODO: Consider pre-filtering by DB-derived available capacity (taking current "used" into account)
             # to reduce rejected payment attempts under high load.
-            out.append({"equivalent": eq, "sender_pid": to, "receiver_pid": frm, "limit": limit})
+            out.append(
+                {
+                    "equivalent": eq,
+                    "sender_pid": to,
+                    "receiver_pid": frm,
+                    "limit": limit,
+                }
+            )
 
         out.sort(key=lambda x: (x["equivalent"], x["receiver_pid"], x["sender_pid"]))
         return out
 
-    def _plan_real_payments(self, run: RunRecord, scenario: dict[str, Any]) -> list[_RealPaymentAction]:
+    def _plan_real_payments(
+        self, run: RunRecord, scenario: dict[str, Any]
+    ) -> list[_RealPaymentAction]:
         """Deterministic planner for Real Mode payment actions.
 
         Important property for SB-NF-04:
@@ -1611,7 +2137,7 @@ class RealRunner:
             return []
 
         profiles_props_by_id: dict[str, dict[str, Any]] = {}
-        for bp in (scenario.get("behaviorProfiles") or []):
+        for bp in scenario.get("behaviorProfiles") or []:
             if not isinstance(bp, dict):
                 continue
             bp_id = str(bp.get("id") or "").strip()
@@ -1622,7 +2148,7 @@ class RealRunner:
 
         participant_profile_id_by_pid: dict[str, str] = {}
         participant_group_by_pid: dict[str, str] = {}
-        for p in (scenario.get("participants") or []):
+        for p in scenario.get("participants") or []:
             if not isinstance(p, dict):
                 continue
             pid = str(p.get("id") or p.get("participant_id") or "").strip()
@@ -1688,7 +2214,9 @@ class RealRunner:
                 continue
             if not isinstance(limit, Decimal):
                 continue
-            adjacency_by_eq.setdefault(eq, {}).setdefault(sender, []).append((receiver, limit))
+            adjacency_by_eq.setdefault(eq, {}).setdefault(sender, []).append(
+                (receiver, limit)
+            )
 
             direct_edge_limit[(sender, receiver, eq)] = limit
 
@@ -1731,7 +2259,9 @@ class RealRunner:
             except Exception:
                 return None
 
-        def _reachable_nodes(eq: str, sender: str, *, max_depth: int = 3, max_nodes: int = 200) -> list[str]:
+        def _reachable_nodes(
+            eq: str, sender: str, *, max_depth: int = 3, max_nodes: int = 200
+        ) -> list[str]:
             graph = adjacency_by_eq.get(eq) or {}
             if sender not in graph:
                 return []
@@ -1745,7 +2275,7 @@ class RealRunner:
                 qi += 1
                 if depth >= max_depth:
                     continue
-                for nxt, _lim in (graph.get(node) or []):
+                for nxt, _lim in graph.get(node) or []:
                     if nxt in visited:
                         continue
                     visited.add(nxt)
@@ -1756,18 +2286,27 @@ class RealRunner:
             visited.discard(sender)
             return sorted(visited)
 
-        def _choose_receiver(*, rng: random.Random, eq: str, sender: str, sender_props: dict[str, Any]) -> str | None:
+        def _choose_receiver(
+            *, rng: random.Random, eq: str, sender: str, sender_props: dict[str, Any]
+        ) -> str | None:
             reachable = _reachable_nodes(eq, sender)
             if not reachable:
                 # Fallback to direct neighbors.
-                direct = [pid for (pid, _lim) in (adjacency_by_eq.get(eq) or {}).get(sender, [])]
+                direct = [
+                    pid
+                    for (pid, _lim) in (adjacency_by_eq.get(eq) or {}).get(sender, [])
+                ]
                 reachable = sorted({p for p in direct if p and p != sender})
             if not reachable:
                 return None
 
             target_group = _pick_group(rng, sender_props)
             if target_group:
-                in_group = [pid for pid in reachable if participant_group_by_pid.get(pid) == target_group]
+                in_group = [
+                    pid
+                    for pid in reachable
+                    if participant_group_by_pid.get(pid) == target_group
+                ]
                 if in_group:
                     return rng.choice(in_group)
 
@@ -1775,7 +2314,11 @@ class RealRunner:
             if all_group_ids:
                 rng.shuffle(all_group_ids)
                 for g in all_group_ids:
-                    in_group = [pid for pid in reachable if participant_group_by_pid.get(pid) == g]
+                    in_group = [
+                        pid
+                        for pid in reachable
+                        if participant_group_by_pid.get(pid) == g
+                    ]
                     if in_group:
                         return rng.choice(in_group)
 
@@ -1814,7 +2357,9 @@ class RealRunner:
                 i += 1
                 continue
 
-            receiver_pid = _choose_receiver(rng=action_rng, eq=eq, sender=sender_pid, sender_props=sender_props)
+            receiver_pid = _choose_receiver(
+                rng=action_rng, eq=eq, sender=sender_pid, sender_props=sender_props
+            )
             if receiver_pid is None:
                 i += 1
                 continue
@@ -1836,7 +2381,9 @@ class RealRunner:
                 if isinstance(maybe, dict):
                     amount_model = maybe
 
-            amount = self._real_pick_amount(action_rng, limit, amount_model=amount_model)
+            amount = self._real_pick_amount(
+                action_rng, limit, amount_model=amount_model
+            )
             if amount is None:
                 i += 1
                 continue
@@ -1856,7 +2403,13 @@ class RealRunner:
 
         return planned
 
-    def _real_pick_amount(self, rng: random.Random, limit: Decimal, *, amount_model: dict[str, Any] | None = None) -> str | None:
+    def _real_pick_amount(
+        self,
+        rng: random.Random,
+        limit: Decimal,
+        *,
+        amount_model: dict[str, Any] | None = None,
+    ) -> str | None:
         cap = limit
         if self._real_amount_cap_limit is not None:
             cap = min(cap, self._real_amount_cap_limit)
@@ -1923,7 +2476,11 @@ class RealRunner:
                 # Fallback: triangular distribution biased towards p50 (mode).
                 try:
                     mode_raw = amount_model.get("p50")
-                    mode = Decimal(str(mode_raw)) if mode_raw is not None else (low + cap) / 2
+                    mode = (
+                        Decimal(str(mode_raw))
+                        if mode_raw is not None
+                        else (low + cap) / 2
+                    )
                     if mode < low:
                         mode = low
                     if mode > cap:
@@ -1956,13 +2513,25 @@ class RealRunner:
         material = f"{run_id}|{tick_ms}|{sender_pid}|{receiver_pid}|{equivalent}|{amount}|{seq}"
         return "sim:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
-    async def _load_real_participants(self, session, scenario: dict[str, Any]) -> list[tuple[uuid.UUID, str]]:
-        pids = [str(p.get("id") or "").strip() for p in (scenario.get("participants") or [])]
+    async def _load_real_participants(
+        self, session, scenario: dict[str, Any]
+    ) -> list[tuple[uuid.UUID, str]]:
+        pids = [
+            str(p.get("id") or "").strip() for p in (scenario.get("participants") or [])
+        ]
         pids = [p for p in pids if p]
         if not pids:
             return []
 
-        rows = (await session.execute(select(Participant).where(Participant.pid.in_(pids)))).scalars().all()
+        rows = (
+            (
+                await session.execute(
+                    select(Participant).where(Participant.pid.in_(pids))
+                )
+            )
+            .scalars()
+            .all()
+        )
         by_pid = {p.pid: p for p in rows}
         out: list[tuple[uuid.UUID, str]] = []
         for pid in sorted(pids):
@@ -1978,7 +2547,15 @@ class RealRunner:
         eq_codes = [c for c in eq_codes if c]
 
         if eq_codes:
-            existing_eq = (await session.execute(select(Equivalent).where(Equivalent.code.in_(eq_codes)))).scalars().all()
+            existing_eq = (
+                (
+                    await session.execute(
+                        select(Equivalent).where(Equivalent.code.in_(eq_codes))
+                    )
+                )
+                .scalars()
+                .all()
+            )
             have = {e.code for e in existing_eq}
             for code in eq_codes:
                 if code in have:
@@ -1990,7 +2567,15 @@ class RealRunner:
         pids = [str(p.get("id") or "").strip() for p in participants]
         pids = [p for p in pids if p]
         if pids:
-            existing_p = (await session.execute(select(Participant).where(Participant.pid.in_(pids)))).scalars().all()
+            existing_p = (
+                (
+                    await session.execute(
+                        select(Participant).where(Participant.pid.in_(pids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
             have_p = {p.pid for p in existing_p}
             for p in participants:
                 pid = str(p.get("id") or "").strip()
@@ -2011,7 +2596,11 @@ class RealRunner:
                         pid=pid,
                         display_name=name,
                         public_key=public_key,
-                        type=p_type if p_type in {"person", "business", "hub"} else "person",
+                        type=(
+                            p_type
+                            if p_type in {"person", "business", "hub"}
+                            else "person"
+                        ),
                         status=status,
                         profile={},
                     )
@@ -2032,10 +2621,26 @@ class RealRunner:
                 "blocked_participants": [],
             }
             # Load ids
-            eq_rows = (await session.execute(select(Equivalent).where(Equivalent.code.in_(eq_codes)))).scalars().all()
+            eq_rows = (
+                (
+                    await session.execute(
+                        select(Equivalent).where(Equivalent.code.in_(eq_codes))
+                    )
+                )
+                .scalars()
+                .all()
+            )
             eq_by_code = {e.code: e for e in eq_rows}
 
-            p_rows = (await session.execute(select(Participant).where(Participant.pid.in_(pids)))).scalars().all()
+            p_rows = (
+                (
+                    await session.execute(
+                        select(Participant).where(Participant.pid.in_(pids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
             p_by_pid = {p.pid: p for p in p_rows}
 
             for tl in trustlines:

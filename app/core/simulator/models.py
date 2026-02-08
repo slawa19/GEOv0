@@ -70,13 +70,20 @@ class RunRecord:
     # Best-effort rolling window for errors_last_1m.
     _error_timestamps: "deque[float]" = field(default_factory=deque)
 
+    # Storage persistence throttling state (in-memory only).
+    _persist_last_at_ms: int = 0
+    _persist_last_state: str = ""
+    _persist_last_sig: tuple[Any, ...] | None = None
+
     _event_seq: int = 0
     _subs: list[_Subscription] = field(default_factory=list)
     _heartbeat_task: Optional[asyncio.Task[None]] = None
 
     # Best-effort in-memory replay buffer for SSE reconnects.
     # Stores recent emitted events (both run_status and domain events).
-    _event_buffer: "deque[tuple[float, str, str, dict[str, Any]]]" = field(default_factory=deque)
+    _event_buffer: "deque[tuple[float, str, str, dict[str, Any]]]" = field(
+        default_factory=deque
+    )
 
     _rng: random.Random | None = None
     _edges_by_equivalent: dict[str, list[tuple[str, str]]] | None = None
@@ -104,12 +111,16 @@ class RunRecord:
     _real_in_flight: int = 0
     _real_consec_tick_failures: int = 0
 
+    # Real-mode best-effort persistence flush (in-memory only).
+    _real_last_tick_storage_payload: dict[str, Any] | None = None
+    _real_last_tick_storage_flushed_tick: int = -1
+
     # Real-mode per-equivalent viz quantile cache for SSE node_patch/edge_patch.
     _real_viz_by_eq: dict[str, Any] = field(default_factory=dict)
 
     # Real-mode logging throttle state (avoid log spam within one tick).
     # Stored on the run to avoid unbounded per-run dictionaries in RealRunner.
-    _real_warned_tick: int = -10**9
+    _real_warned_tick: int = -(10**9)
     _real_warned_keys: set[str] = field(default_factory=set)
 
     # Real-mode scenario timeline events state (best-effort, in-memory).

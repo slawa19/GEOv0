@@ -390,16 +390,18 @@ export function useSimulatorRealMode(opts: {
                 pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: 120 })
               }
 
+              // Note: self-payment (senderId === receiverId) intentionally does not emit a receiver label.
               if (amount && receiverId && receiverId !== senderId) {
                 const ttlMs = clampRealTxTtlMs((tx as any).ttl_ms)
 
                 const runIdAtEvent = runId
                 const sseSeqAtEvent = mySeq
-                const signal = ctrl.signal
 
                 scheduleTimeout(
                   () => {
-                    if (signal.aborted) return
+                    // IMPORTANT: do NOT guard on ctrl.signal.aborted.
+                    // AbortSignal is tied to the fetch/SSE-loop lifecycle; on reconnect we abort
+                    // the old connection, but UI timers for still-valid events should still fire.
                     if (sseSeq !== sseSeqAtEvent) return
                     if (real.runId !== runIdAtEvent) return
                     pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: 120 })

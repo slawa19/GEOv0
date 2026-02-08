@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 import time
 from datetime import datetime, timezone
@@ -37,6 +38,20 @@ REAL_MAX_IN_FLIGHT_DEFAULT = 1
 REAL_MAX_CONSEC_TICK_FAILURES_DEFAULT = 3
 REAL_MAX_TIMEOUTS_PER_TICK_DEFAULT = 5
 REAL_MAX_ERRORS_TOTAL_DEFAULT = 200
+
+
+def safe_int_env(name: str, default: int) -> int:
+    """Parse int env var with a defensive fallback.
+
+    Behavior is intentionally lenient and matches the prior local helpers:
+    - missing / empty value -> default
+    - any parsing error -> default
+    """
+
+    try:
+        return int(os.getenv(name, str(default)) or str(default))
+    except Exception:
+        return int(default)
 
 
 def new_run_id() -> str:

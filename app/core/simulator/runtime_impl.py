@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from typing import Any, Optional
 from pathlib import Path
 import secrets
@@ -43,6 +44,7 @@ from app.core.simulator.runtime_utils import (
     local_state_dir as _local_state_dir,
     new_run_id as _new_run_id,
     run_to_status as _run_to_status,
+    safe_int_env as _safe_int_env,
     utc_now as _utc_now,
 )
 from app.core.simulator.scenario_registry import ScenarioRegistry
@@ -79,13 +81,6 @@ def _scenario_allowlist() -> Optional[set[str]]:
         "riverside-town-50-realistic-v2",
     }
 
-def _safe_int_env(name: str, default: int) -> int:
-    try:
-        v = int(os.environ.get(name, str(default)) or str(default))
-        return v
-    except Exception:
-        return int(default)
-
 
 class _SimulatorRuntimeBase:
     """In-process simulator runtime (MVP).
@@ -108,10 +103,23 @@ class _SimulatorRuntimeBase:
 
         # Runtime knobs (env-configurable; defaults preserve existing behavior).
         self._tick_ms_base = _safe_int_env("SIMULATOR_TICK_MS_BASE", TICK_MS_BASE)
-        self._actions_per_tick_max = _safe_int_env("SIMULATOR_ACTIONS_PER_TICK_MAX", ACTIONS_PER_TICK_MAX)
-        self._clearing_every_n_ticks = _safe_int_env("SIMULATOR_CLEARING_EVERY_N_TICKS", CLEARING_EVERY_N_TICKS)
+        self._actions_per_tick_max = _safe_int_env(
+            "SIMULATOR_ACTIONS_PER_TICK_MAX", ACTIONS_PER_TICK_MAX
+        )
+        self._clearing_every_n_ticks = _safe_int_env(
+            "SIMULATOR_CLEARING_EVERY_N_TICKS", CLEARING_EVERY_N_TICKS
+        )
         self._max_active_runs = _safe_int_env("SIMULATOR_MAX_ACTIVE_RUNS", 1)
         self._max_run_records = _safe_int_env("SIMULATOR_MAX_RUN_RECORDS", 200)
+
+        # DB persistence throttling for run status row.
+        # Defaults reduce write amplification in heartbeat loop.
+        self._run_persist_every_ms = _safe_int_env(
+            "SIMULATOR_RUN_PERSIST_EVERY_MS", 5000
+        )
+        self._run_persist_dirty_every_ms = _safe_int_env(
+            "SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS", 1000
+        )
 
         # Local artifact retention (0 disables).
         self._artifacts_ttl_hours = _safe_int_env("SIMULATOR_ARTIFACTS_TTL_HOURS", 0)
@@ -161,7 +169,9 @@ class _SimulatorRuntimeBase:
 
         # SSE replay buffer sizing/TTL. Best-effort; does not change OpenAPI.
         self._event_buffer_max = _safe_int_env("SIMULATOR_EVENT_BUFFER_SIZE", 2000)
-        self._event_buffer_ttl_sec = _safe_int_env("SIMULATOR_EVENT_BUFFER_TTL_SEC", 600)
+        self._event_buffer_ttl_sec = _safe_int_env(
+            "SIMULATOR_EVENT_BUFFER_TTL_SEC", 600
+        )
         self._sse_sub_queue_max = _safe_int_env("SIMULATOR_SSE_SUB_QUEUE_MAX", 500)
 
         # If enabled, SSE endpoints may return 410 when Last-Event-ID is too old
@@ -191,7 +201,9 @@ class _SimulatorRuntimeBase:
             heartbeat_loop=self._heartbeat_loop,
             publish_run_status=self.publish_run_status,
             run_to_status=_run_to_status,
-            get_run_status_payload_json=lambda run_id: self.get_run_status(run_id).model_dump(mode="json"),
+            get_run_status_payload_json=lambda run_id: self.get_run_status(
+                run_id
+            ).model_dump(mode="json"),
             real_max_in_flight_default=REAL_MAX_IN_FLIGHT_DEFAULT,
             get_max_active_runs=lambda: int(self._max_active_runs),
             get_max_run_records=lambda: int(self._max_run_records),
@@ -240,7 +252,9 @@ class _SimulatorRuntimeBase:
             try:
                 await self.stop(run_id)
             except Exception:
-                logger.exception("simulator.runtime.shutdown_stop_failed run_id=%s", run_id)
+                logger.exception(
+                    "simulator.runtime.shutdown_stop_failed run_id=%s", run_id
+                )
 
         # Ensure subscriptions are cleared even if individual streams didn't unsubscribe.
         with self._lock:
@@ -301,7 +315,9 @@ class _SimulatorRuntimeBase:
         snap = scenario_to_snapshot(rec.raw, equivalent=equivalent, utc_now=_utc_now)
         if mode != "real":
             return snap
-        return await self._snapshot_builder.enrich_snapshot_from_db_if_enabled(snap, equivalent=equivalent, session=session)
+        return await self._snapshot_builder.enrich_snapshot_from_db_if_enabled(
+            snap, equivalent=equivalent, session=session
+        )
 
     # -----------------------------
     # Runs
@@ -322,7 +338,9 @@ class _SimulatorRuntimeBase:
         run = self.get_run(run_id)
         return _run_to_status(run)
 
-    async def create_run(self, *, scenario_id: str, mode: RunMode, intensity_percent: int) -> str:
+    async def create_run(
+        self, *, scenario_id: str, mode: RunMode, intensity_percent: int
+    ) -> str:
         with self._lock:
             if self._is_shutting_down:
                 raise ConflictException("Simulator runtime is shutting down")
@@ -443,7 +461,9 @@ class _SimulatorRuntimeBase:
             )
 
         if src == dst:
-            raise ConflictException("from and to must differ", details={"from": src, "to": dst})
+            raise ConflictException(
+                "from and to must differ", details={"from": src, "to": dst}
+            )
 
         amt = str(amount or "").strip() or "1.00"
         ttl = int(ttl_ms) if ttl_ms is not None else 1200
@@ -561,7 +581,10 @@ class _SimulatorRuntimeBase:
             with self._lock:
                 edges = list(((run._edges_by_equivalent or {}).get(eq) or []))
             if len(edges) >= 2:
-                picked = [(str(edges[0][0]), str(edges[0][1])), (str(edges[1][0]), str(edges[1][1]))]
+                picked = [
+                    (str(edges[0][0]), str(edges[0][1])),
+                    (str(edges[1][0]), str(edges[1][1])),
+                ]
             else:
                 a, b = str(edges[0][0]), str(edges[0][1])
                 picked = [(a, b)]
@@ -616,7 +639,9 @@ class _SimulatorRuntimeBase:
                     run.last_event_type = "clearing.done"
                 self._sse.broadcast(run_id, done_evt)
             except Exception:
-                logger.exception("simulator.debug_clearing_done_emit_failed run_id=%s", run_id)
+                logger.exception(
+                    "simulator.debug_clearing_done_emit_failed run_id=%s", run_id
+                )
 
         try:
             asyncio.get_running_loop().create_task(_emit_done_later())
@@ -646,7 +671,20 @@ class _SimulatorRuntimeBase:
         return await self._run_lifecycle.resume(run_id)
 
     async def stop(self, run_id: str) -> RunStatus:
-        return await self._run_lifecycle.stop(run_id)
+        status = await self._run_lifecycle.stop(run_id)
+
+        # Best-effort final DB flush for real-mode tick metrics/bottlenecks.
+        # Must not break stop() even if DB is unavailable.
+        try:
+            await self._real_runner.flush_pending_storage(run_id)
+        except Exception:
+            logger.warning(
+                "simulator.runtime.flush_pending_storage_failed run_id=%s",
+                run_id,
+                exc_info=True,
+            )
+
+        return status
 
     async def restart(self, run_id: str) -> RunStatus:
         return await self._run_lifecycle.restart(run_id)
@@ -660,13 +698,19 @@ class _SimulatorRuntimeBase:
         await simulator_storage.upsert_run(run)
         return _run_to_status(run)
 
-    async def subscribe(self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None) -> _Subscription:
+    async def subscribe(
+        self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None
+    ) -> _Subscription:
         run = self.get_run(run_id)
-        sub = await self._sse.subscribe(run_id, equivalent=equivalent, after_event_id=after_event_id)
+        sub = await self._sse.subscribe(
+            run_id, equivalent=equivalent, after_event_id=after_event_id
+        )
 
         # For fixtures-mode UX/tests: emit one domain event immediately after subscribe.
         if after_event_id is None and run.state == "running" and run.mode == "fixtures":
-            evt = self._fixtures_runner.maybe_make_tx_updated(run_id=run_id, equivalent=equivalent)
+            evt = self._fixtures_runner.maybe_make_tx_updated(
+                run_id=run_id, equivalent=equivalent
+            )
             if evt is not None:
                 try:
                     sub.queue.put_nowait(evt)
@@ -699,7 +743,9 @@ class _SimulatorRuntimeBase:
         depth: int,
         session=None,
     ) -> SimulatorGraphSnapshot:
-        snap = await self.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=session)
+        snap = await self.build_graph_snapshot(
+            run_id=run_id, equivalent=equivalent, session=session
+        )
         if depth <= 0:
             return snap
 
@@ -723,7 +769,11 @@ class _SimulatorRuntimeBase:
             frontier = nxt
 
         nodes = [n for n in snap.nodes if n.id in visited]
-        links = [l for l in snap.links if l.source in visited and l.target in visited]
+        links = [
+            edge
+            for edge in snap.links
+            if edge.source in visited and edge.target in visited
+        ]
         return SimulatorGraphSnapshot(
             equivalent=snap.equivalent,
             generated_at=snap.generated_at,
@@ -761,7 +811,62 @@ class _SimulatorRuntimeBase:
                     await self._real_runner.tick_real_mode(run_id)
 
                 self.publish_run_status(run_id)
-                await simulator_storage.upsert_run(run)
+
+                # Debounce DB writes to reduce disk IO.
+                now_ms = int(time.time() * 1000)
+                persist_every_ms = int(getattr(self, "_run_persist_every_ms", 0) or 0)
+                dirty_every_ms = int(
+                    getattr(self, "_run_persist_dirty_every_ms", 0) or 0
+                )
+                if dirty_every_ms <= 0:
+                    dirty_every_ms = persist_every_ms
+
+                if persist_every_ms <= 0:
+                    await simulator_storage.upsert_run(run)
+                    continue
+
+                last_sig = run._persist_last_sig
+                if last_sig is None:
+                    # Initialize baseline from current state; create_run already upserts.
+                    run._persist_last_at_ms = now_ms
+                    run._persist_last_state = str(run.state)
+                    run._persist_last_sig = (
+                        str(run.state),
+                        int(run.intensity_percent or 0),
+                        float(run.ops_sec or 0.0),
+                        int(run.queue_depth or 0),
+                        int(run.errors_total or 0),
+                        str(run.last_event_type or ""),
+                        str(run.current_phase or ""),
+                        str(run.stopped_at or ""),
+                        str(run.last_error or ""),
+                    )
+                    continue
+
+                sig = (
+                    str(run.state),
+                    int(run.intensity_percent or 0),
+                    float(run.ops_sec or 0.0),
+                    int(run.queue_depth or 0),
+                    int(run.errors_total or 0),
+                    str(run.last_event_type or ""),
+                    str(run.current_phase or ""),
+                    str(run.stopped_at or ""),
+                    str(run.last_error or ""),
+                )
+
+                last_at = int(run._persist_last_at_ms or 0)
+                last_state = str(run._persist_last_state or "")
+                state_now = str(run.state)
+                state_changed = state_now != last_state
+                dirty = sig != last_sig
+                due_ms = dirty_every_ms if dirty else persist_every_ms
+
+                if state_changed or (due_ms > 0 and (now_ms - last_at) >= due_ms):
+                    await simulator_storage.upsert_run(run)
+                    run._persist_last_at_ms = now_ms
+                    run._persist_last_state = state_now
+                    run._persist_last_sig = sig
         except asyncio.CancelledError:
             return
 

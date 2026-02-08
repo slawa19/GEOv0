@@ -6,12 +6,18 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_simulator_artifacts_include_events_ndjson(client: AsyncClient, auth_headers):
+async def test_simulator_artifacts_include_events_ndjson(
+    client: AsyncClient, auth_headers
+):
     # Start a fixtures-mode run.
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100", "mode": "fixtures", "intensity_percent": 90},
+        json={
+            "scenario_id": "greenfield-village-100",
+            "mode": "fixtures",
+            "intensity_percent": 90,
+        },
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
@@ -34,7 +40,9 @@ async def test_simulator_artifacts_include_events_ndjson(client: AsyncClient, au
         await asyncio.wait_for(_read_one_event(), timeout=5.0)
 
     # Artifacts index must include events.ndjson.
-    idx = await client.get(f"/api/v1/simulator/runs/{run_id}/artifacts", headers=auth_headers)
+    idx = await client.get(
+        f"/api/v1/simulator/runs/{run_id}/artifacts", headers=auth_headers
+    )
     assert idx.status_code == 200, idx.text
 
     items = idx.json().get("items") or []
@@ -43,7 +51,10 @@ async def test_simulator_artifacts_include_events_ndjson(client: AsyncClient, au
     assert "summary.json" in names
     assert "bundle.zip" in names
 
-    assert idx.json().get("bundle_url") == f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip"
+    assert (
+        idx.json().get("bundle_url")
+        == f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip"
+    )
 
     events_item = next(it for it in items if it.get("name") == "events.ndjson")
     assert events_item.get("content_type") == "application/x-ndjson"
@@ -57,10 +68,16 @@ async def test_simulator_artifacts_include_events_ndjson(client: AsyncClient, au
     assert len(lines) >= 1
 
     first = json.loads(lines[0])
-    assert first.get("type") == "run_status"
-    assert first.get("run_id") == run_id
+    assert str(first.get("type") or "").strip()
+    assert first.get("type") != "run_status"
+    assert str(first.get("event_id") or "").startswith("evt_")
+
+    # run_status is intentionally not exported into events.ndjson (too noisy).
+    assert all(json.loads(ln).get("type") != "run_status" for ln in lines)
 
     # Bundle.zip must be downloadable.
-    bundle = await client.get(f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip", headers=auth_headers)
+    bundle = await client.get(
+        f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip", headers=auth_headers
+    )
     assert bundle.status_code == 200
     assert bundle.content.startswith(b"PK")

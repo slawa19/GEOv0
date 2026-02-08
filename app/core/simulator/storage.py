@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import delete
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 import app.db.session as db
 from app.config import settings
@@ -49,21 +51,37 @@ async def upsert_run(run: RunRecord) -> None:
                 state=str(run.state),
                 started_at=run.started_at,
                 stopped_at=run.stopped_at,
-                sim_time_ms=int(run.sim_time_ms) if run.sim_time_ms is not None else None,
+                sim_time_ms=(
+                    int(run.sim_time_ms) if run.sim_time_ms is not None else None
+                ),
                 tick_index=int(run.tick_index) if run.tick_index is not None else None,
                 seed=int(run.seed) if run.seed is not None else None,
-                intensity_percent=int(run.intensity_percent) if run.intensity_percent is not None else None,
+                intensity_percent=(
+                    int(run.intensity_percent)
+                    if run.intensity_percent is not None
+                    else None
+                ),
                 ops_sec=float(run.ops_sec) if run.ops_sec is not None else None,
-                queue_depth=int(run.queue_depth) if run.queue_depth is not None else None,
-                errors_total=int(run.errors_total) if run.errors_total is not None else None,
+                queue_depth=(
+                    int(run.queue_depth) if run.queue_depth is not None else None
+                ),
+                errors_total=(
+                    int(run.errors_total) if run.errors_total is not None else None
+                ),
                 last_event_type=run.last_event_type,
                 current_phase=run.current_phase,
                 last_error=run.last_error,
             )
-            await session.merge(row)
-            await session.commit()
+            try:
+                await session.merge(row)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
     except Exception:
-        logger.exception("simulator.storage.upsert_run_failed run_id=%s", getattr(run, "run_id", ""))
+        logger.exception(
+            "simulator.storage.upsert_run_failed run_id=%s", getattr(run, "run_id", "")
+        )
         return
 
 
@@ -75,7 +93,9 @@ async def sync_artifacts(run: RunRecord) -> None:
         return
 
     try:
-        sha_max_bytes = int(os.getenv("SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "524288") or "524288")
+        sha_max_bytes = int(
+            os.getenv("SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "524288") or "524288"
+        )
 
         items: list[SimulatorRunArtifact] = []
         for p in sorted(base.iterdir()):
@@ -106,11 +126,18 @@ async def sync_artifacts(run: RunRecord) -> None:
             )
 
         async with db.AsyncSessionLocal() as session:
-            await session.execute(delete(SimulatorRunArtifact).where(SimulatorRunArtifact.run_id == run.run_id))
+            await session.execute(
+                delete(SimulatorRunArtifact).where(
+                    SimulatorRunArtifact.run_id == run.run_id
+                )
+            )
             session.add_all(items)
             await session.commit()
     except Exception:
-        logger.exception("simulator.storage.sync_artifacts_failed run_id=%s", getattr(run, "run_id", ""))
+        logger.exception(
+            "simulator.storage.sync_artifacts_failed run_id=%s",
+            getattr(run, "run_id", ""),
+        )
         return
 
 
@@ -121,13 +148,37 @@ async def write_tick_metrics(
     per_equivalent: dict[str, dict[str, int]],
     metric_values_by_eq: Optional[dict[str, dict[str, float]]] = None,
     session=None,
+    commit: bool = True,
 ) -> None:
     if not db_enabled():
         return
 
     try:
+
         async def _write(s) -> None:
-            for eq, counters in per_equivalent.items():
+            bind = None
+            try:
+                bind = s.get_bind()
+            except Exception:
+                bind = getattr(s, "bind", None)
+
+            dialect_name = None
+            try:
+                dialect_name = bind.dialect.name if bind is not None else None
+            except Exception:
+                dialect_name = None
+
+            if dialect_name == "sqlite":
+                insert_fn = sqlite_insert
+            elif dialect_name in {"postgresql", "postgres"}:
+                insert_fn = pg_insert
+            else:
+                raise RuntimeError(
+                    f"Unsupported SQL dialect for simulator_run_metrics upsert: {dialect_name!r}"
+                )
+
+            rows: list[dict[str, object]] = []
+            for eq, counters in (per_equivalent or {}).items():
                 committed = int(counters.get("committed", 0))
                 rejected = int(counters.get("rejected", 0))
                 errors = int(counters.get("errors", 0))
@@ -136,66 +187,102 @@ async def write_tick_metrics(
                 denom = committed + rejected
                 success_rate = (committed / denom) * 100.0 if denom > 0 else 0.0
                 attempts = committed + rejected + errors
-                bottlenecks_score = ((errors + timeouts) / attempts) * 100.0 if attempts > 0 else 0.0
+                bottlenecks_score = (
+                    ((errors + timeouts) / attempts) * 100.0 if attempts > 0 else 0.0
+                )
 
                 mv = (metric_values_by_eq or {}).get(str(eq), {})
                 avg_route_length = float(mv.get("avg_route_length", 0.0) or 0.0)
                 total_debt = float(mv.get("total_debt", 0.0) or 0.0)
                 clearing_volume = float(mv.get("clearing_volume", 0.0) or 0.0)
 
-                await s.merge(
-                    SimulatorRunMetric(
-                        run_id=run_id,
-                        equivalent_code=str(eq),
-                        key="success_rate",
-                        t_ms=int(t_ms),
-                        value=float(success_rate),
-                    )
+                eq_code = str(eq)
+                rows.extend(
+                    [
+                        {
+                            "run_id": str(run_id),
+                            "equivalent_code": eq_code,
+                            "key": "success_rate",
+                            "t_ms": int(t_ms),
+                            "value": float(success_rate),
+                        },
+                        {
+                            "run_id": str(run_id),
+                            "equivalent_code": eq_code,
+                            "key": "bottlenecks_score",
+                            "t_ms": int(t_ms),
+                            "value": float(bottlenecks_score),
+                        },
+                        {
+                            "run_id": str(run_id),
+                            "equivalent_code": eq_code,
+                            "key": "avg_route_length",
+                            "t_ms": int(t_ms),
+                            "value": float(avg_route_length),
+                        },
+                        {
+                            "run_id": str(run_id),
+                            "equivalent_code": eq_code,
+                            "key": "total_debt",
+                            "t_ms": int(t_ms),
+                            "value": float(total_debt),
+                        },
+                        {
+                            "run_id": str(run_id),
+                            "equivalent_code": eq_code,
+                            "key": "clearing_volume",
+                            "t_ms": int(t_ms),
+                            "value": float(clearing_volume),
+                        },
+                    ]
                 )
-                await s.merge(
-                    SimulatorRunMetric(
-                        run_id=run_id,
-                        equivalent_code=str(eq),
-                        key="bottlenecks_score",
-                        t_ms=int(t_ms),
-                        value=float(bottlenecks_score),
-                    )
-                )
-                await s.merge(
-                    SimulatorRunMetric(
-                        run_id=run_id,
-                        equivalent_code=str(eq),
-                        key="avg_route_length",
-                        t_ms=int(t_ms),
-                        value=float(avg_route_length),
-                    )
-                )
-                await s.merge(
-                    SimulatorRunMetric(
-                        run_id=run_id,
-                        equivalent_code=str(eq),
-                        key="total_debt",
-                        t_ms=int(t_ms),
-                        value=float(total_debt),
-                    )
-                )
-                await s.merge(
-                    SimulatorRunMetric(
-                        run_id=run_id,
-                        equivalent_code=str(eq),
-                        key="clearing_volume",
-                        t_ms=int(t_ms),
-                        value=float(clearing_volume),
-                    )
-                )
-            await s.commit()
+
+            if not rows:
+                return
+
+            table = SimulatorRunMetric.__table__
+            stmt = insert_fn(table)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    table.c.run_id,
+                    table.c.equivalent_code,
+                    table.c.key,
+                    table.c.t_ms,
+                ],
+                set_={table.c.value: stmt.excluded.value},
+            )
+            await s.execute(stmt, rows)
+
+            if commit:
+                await s.commit()
+            else:
+                await s.flush()
 
         if session is None:
             async with db.AsyncSessionLocal() as s:
-                await _write(s)
+                try:
+                    await _write(s)
+                except Exception:
+                    try:
+                        await s.rollback()
+                    except Exception:
+                        pass
+                    raise
         else:
-            await _write(session)
+            try:
+                await _write(session)
+            except Exception:
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                raise
     except Exception:
+        logger.exception(
+            "simulator.storage.write_tick_metrics_failed run_id=%s t_ms=%s",
+            str(run_id),
+            int(t_ms),
+        )
         return
 
 
@@ -207,6 +294,7 @@ async def write_tick_bottlenecks(
     edge_stats: dict[tuple[str, str], dict[str, int]],
     session,
     limit: int = 50,
+    commit: bool = True,
 ) -> None:
     if not db_enabled():
         return
@@ -267,8 +355,16 @@ async def write_tick_bottlenecks(
             return
 
         session.add_all(items)
-        await session.commit()
+        if commit:
+            await session.commit()
+        else:
+            await session.flush()
     except Exception:
+        logger.exception(
+            "simulator.storage.write_tick_bottlenecks_failed run_id=%s equivalent=%s",
+            str(run_id),
+            str(equivalent),
+        )
         try:
             await session.rollback()
         except Exception:

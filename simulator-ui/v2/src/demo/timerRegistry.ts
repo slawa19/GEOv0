@@ -7,37 +7,33 @@ export type TimerRegistry = {
 }
 
 export function createTimerRegistry(): TimerRegistry {
-  type Entry = { id: TimerId; critical: boolean }
-  const activeTimeouts: Entry[] = []
+  type Entry = { critical: boolean }
+  const activeTimeouts = new Map<TimerId, Entry>()
 
   const schedule = (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => {
     const critical = !!opts?.critical
     const id = window.setTimeout(() => {
-      const i = activeTimeouts.findIndex((e) => e.id === id)
-      if (i >= 0) activeTimeouts.splice(i, 1)
+      activeTimeouts.delete(id)
       fn()
     }, delayMs)
-    activeTimeouts.push({ id, critical })
+
+    activeTimeouts.set(id, { critical })
     return id
   }
 
   const clearAll = (opts?: { keepCritical?: boolean }) => {
-    if (activeTimeouts.length === 0) return
+    if (activeTimeouts.size === 0) return
     const keepCritical = !!opts?.keepCritical
 
-    let write = 0
-    for (let read = 0; read < activeTimeouts.length; read++) {
-      const e = activeTimeouts[read]!
-      if (keepCritical && e.critical) {
-        activeTimeouts[write++] = e
-        continue
-      }
-      window.clearTimeout(e.id)
+    // Use a stable snapshot to avoid relying on Map iterator semantics while deleting.
+    for (const [id, entry] of Array.from(activeTimeouts.entries())) {
+      if (keepCritical && entry.critical) continue
+      window.clearTimeout(id)
+      activeTimeouts.delete(id)
     }
-    activeTimeouts.length = write
   }
 
-  const size = () => activeTimeouts.length
+  const size = () => activeTimeouts.size
 
   return { schedule, clearAll, size }
 }
