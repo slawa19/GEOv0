@@ -71,6 +71,78 @@ describe('useSceneState', () => {
     expect(clearScheduledTimeouts).toHaveBeenCalled()
   })
 
+  it('non-incremental loadScene clears ALL timers (including critical) because node context changed', async () => {
+    const eq = ref('UAH')
+    const scene = ref<'A' | 'B' | 'C'>('A')
+    const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
+    const effectiveEq = computed(() => eq.value)
+
+    const state = reactive({
+      loading: false,
+      error: '',
+      sourcePath: '',
+      snapshot: null as GraphSnapshot | null,
+      selectedNodeId: null as string | null,
+    })
+
+    const snapshot1 = makeSnapshot() // nodes [A, B]
+    const snapshot2: GraphSnapshot = {
+      ...makeSnapshot(),
+      nodes: [{ id: 'X' }, { id: 'Y' }], // DIFFERENT node IDs → non-incremental
+      links: [{ source: 'X', target: 'Y' }],
+    }
+
+    const loadSnapshot = vi.fn()
+    loadSnapshot.mockResolvedValueOnce({ snapshot: snapshot1, sourcePath: 's1' })
+    loadSnapshot.mockResolvedValueOnce({ snapshot: snapshot2, sourcePath: 's2' })
+
+    const clearScheduledTimeouts = vi.fn()
+    const resetOverlays = vi.fn()
+
+    const s = useSceneState({
+      eq,
+      scene,
+      layoutMode,
+      allowEqDeepLink: () => true,
+      isEqAllowed: () => true,
+      effectiveEq,
+      state,
+      loadSnapshot,
+      clearScheduledTimeouts,
+      resetCamera: vi.fn(),
+      resetLayoutKeyCache: vi.fn(),
+      resetOverlays,
+      resizeAndLayout: vi.fn(),
+      ensureRenderLoop: vi.fn(),
+      setupResizeListener: vi.fn(),
+      teardownResizeListener: vi.fn(),
+      stopRenderLoop: vi.fn(),
+    })
+
+    // First load: full reload (hasLoadedOnce=false).
+    await s.loadScene()
+    expect(resetOverlays).toHaveBeenCalledTimes(1)
+
+    clearScheduledTimeouts.mockClear()
+    resetOverlays.mockClear()
+
+    // Second load: node IDs changed → non-incremental → must clear ALL timers.
+    await s.loadScene()
+
+    // Non-incremental: keepCritical pass first, then unconditional clear.
+    const keepCriticalCalls = clearScheduledTimeouts.mock.calls.filter(
+      (args: any[]) => args[0]?.keepCritical === true,
+    )
+    const fullClearCalls = clearScheduledTimeouts.mock.calls.filter(
+      (args: any[]) => args[0] === undefined || args[0]?.keepCritical !== true,
+    )
+    expect(keepCriticalCalls.length).toBeGreaterThanOrEqual(1)
+    expect(fullClearCalls.length).toBeGreaterThanOrEqual(1)
+
+    // resetOverlays must be called on non-incremental path.
+    expect(resetOverlays).toHaveBeenCalledTimes(1)
+  })
+
   it('loadScene skips expensive resets for incremental update (same node IDs)', async () => {
     const eq = ref('UAH')
     const scene = ref<'A' | 'B' | 'C'>('A')

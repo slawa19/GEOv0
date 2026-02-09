@@ -215,6 +215,205 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
   })
 })
 
+describe('useSimulatorRealMode - receiver label guards', () => {
+  it('receiver label not emitted when amount is empty', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    connectSseMock.mockImplementation(async (opts: any) => {
+      const payload = {
+        event_id: 'evt_no_amount',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'tx.updated',
+        equivalent: 'EUR',
+        from: 'A',
+        to: 'B',
+        amount: '', // empty amount
+        ttl_ms: 1200,
+        edges: [{ from: 'A', to: 'B' }],
+      }
+      opts.onMessage({ id: payload.event_id, data: JSON.stringify(payload) })
+      await new Promise<void>((resolve) => {
+        if (opts?.signal?.aborted) return resolve()
+        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
+      })
+    })
+
+    const real = createRealState()
+    real.apiBase = 'http://x'
+    real.accessToken = 't'
+    real.selectedScenarioId = 'sc1'
+
+    const pushTxAmountLabel = vi.fn()
+    const scheduleTimeout = vi.fn()
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => true),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      real,
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+      loadScene: vi.fn(async () => undefined),
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      pushTxAmountLabel,
+      clampRealTxTtlMs: () => 1200,
+      scheduleTimeout,
+      runRealTxFx: vi.fn(),
+      runRealClearingPlanFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+      clearingPlansById: new Map(),
+      wakeUp: () => undefined,
+    })
+
+    await h.startRun({ mode: 'real', intensityPercent: 0 })
+
+    // No amount → no sender label, no receiver label scheduled.
+    expect(pushTxAmountLabel).toHaveBeenCalledTimes(0)
+    expect(scheduleTimeout).toHaveBeenCalledTimes(0)
+
+    h.stopSse()
+    connectSseMock.mockImplementation(prevImpl as any)
+  })
+
+  it('receiver label not emitted for self-payment (from === to)', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    connectSseMock.mockImplementation(async (opts: any) => {
+      const payload = {
+        event_id: 'evt_self_pay',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'tx.updated',
+        equivalent: 'EUR',
+        from: 'A',
+        to: 'A', // self-payment
+        amount: '5.00',
+        ttl_ms: 1200,
+        edges: [{ from: 'A', to: 'A' }],
+      }
+      opts.onMessage({ id: payload.event_id, data: JSON.stringify(payload) })
+      await new Promise<void>((resolve) => {
+        if (opts?.signal?.aborted) return resolve()
+        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
+      })
+    })
+
+    const real = createRealState()
+    real.apiBase = 'http://x'
+    real.accessToken = 't'
+    real.selectedScenarioId = 'sc1'
+
+    const pushTxAmountLabel = vi.fn()
+    const scheduleTimeout = vi.fn()
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => true),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      real,
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+      loadScene: vi.fn(async () => undefined),
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      pushTxAmountLabel,
+      clampRealTxTtlMs: () => 1200,
+      scheduleTimeout,
+      runRealTxFx: vi.fn(),
+      runRealClearingPlanFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+      clearingPlansById: new Map(),
+      wakeUp: () => undefined,
+    })
+
+    await h.startRun({ mode: 'real', intensityPercent: 0 })
+
+    // Self-payment: sender label pushed but NO receiver label scheduled.
+    expect(pushTxAmountLabel).toHaveBeenCalledTimes(1)
+    expect(pushTxAmountLabel.mock.calls[0]?.[0]).toBe('A')
+    expect(pushTxAmountLabel.mock.calls[0]?.[1]).toBe('-5.00')
+    expect(scheduleTimeout).toHaveBeenCalledTimes(0)
+
+    h.stopSse()
+    connectSseMock.mockImplementation(prevImpl as any)
+  })
+
+  it('receiver label uses resolveTxDirection when from/to missing but edges present', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    connectSseMock.mockImplementation(async (opts: any) => {
+      const payload = {
+        event_id: 'evt_edges_only',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'tx.updated',
+        equivalent: 'EUR',
+        // from/to MISSING — must infer from edges
+        amount: '3.00',
+        ttl_ms: 1200,
+        edges: [
+          { from: 'X', to: 'Y' },
+          { from: 'Y', to: 'Z' },
+        ],
+      }
+      opts.onMessage({ id: payload.event_id, data: JSON.stringify(payload) })
+      await new Promise<void>((resolve) => {
+        if (opts?.signal?.aborted) return resolve()
+        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
+      })
+    })
+
+    const real = createRealState()
+    real.apiBase = 'http://x'
+    real.accessToken = 't'
+    real.selectedScenarioId = 'sc1'
+
+    const pushTxAmountLabel = vi.fn()
+    const scheduleTimeout = vi.fn()
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => true),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      real,
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+      loadScene: vi.fn(async () => undefined),
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      pushTxAmountLabel,
+      clampRealTxTtlMs: () => 1200,
+      scheduleTimeout,
+      runRealTxFx: vi.fn(),
+      runRealClearingPlanFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+      clearingPlansById: new Map(),
+      wakeUp: () => undefined,
+    })
+
+    await h.startRun({ mode: 'real', intensityPercent: 0 })
+
+    // Sender label: inferred from edges[0].from = 'X'.
+    expect(pushTxAmountLabel).toHaveBeenCalledTimes(1)
+    expect(pushTxAmountLabel.mock.calls[0]?.[0]).toBe('X')
+    expect(pushTxAmountLabel.mock.calls[0]?.[1]).toBe('-3.00')
+
+    // Receiver label: inferred from edges[-1].to = 'Z', scheduled via timeout.
+    expect(scheduleTimeout).toHaveBeenCalledTimes(1)
+
+    h.stopSse()
+    connectSseMock.mockImplementation(prevImpl as any)
+  })
+})
+
 describe('useSimulatorRealMode - SSE replay dedup', () => {
   it('drops duplicate events by event_id (prevents duplicate labels/FX)', async () => {
     const isRealModeRef = ref(true)

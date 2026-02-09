@@ -146,6 +146,8 @@ export function useSimulatorRealMode(opts: {
     events_by_type: {} as Record<string, number>,
     tx_sender_labels: 0,
     tx_receiver_labels: 0,
+    tx_receiver_scheduled: 0,
+    tx_receiver_guard_dropped: 0,
     amount_flyout_suppressed: 0,
     burst_throttle_enabled_events: 0,
     burst_throttle_ms_last: 0,
@@ -554,13 +556,20 @@ export function useSimulatorRealMode(opts: {
                 const runIdAtEvent = runId
                 const sseSeqAtEvent = mySeq
 
+                diag.tx_receiver_scheduled += 1
                 scheduleTimeout(
                   () => {
                     // IMPORTANT: do NOT guard on ctrl.signal.aborted.
                     // AbortSignal is tied to the fetch/SSE-loop lifecycle; on reconnect we abort
                     // the old connection, but UI timers for still-valid events should still fire.
-                    if (sseSeq !== sseSeqAtEvent) return
-                    if (real.runId !== runIdAtEvent) return
+                    if (sseSeq !== sseSeqAtEvent) {
+                      diag.tx_receiver_guard_dropped += 1
+                      return
+                    }
+                    if (real.runId !== runIdAtEvent) {
+                      diag.tx_receiver_guard_dropped += 1
+                      return
+                    }
                     pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: labelThrottleMs })
                     diag.tx_receiver_labels += 1
                   },
