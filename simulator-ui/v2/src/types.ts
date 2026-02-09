@@ -69,6 +69,11 @@ export type TxUpdatedEvent = {
   from?: string
   to?: string
   amount?: string
+
+  // Explicit control from backend whether amount flyout labels should be emitted.
+  // - true: labels are expected (amount + endpoints must be resolvable)
+  // - false/undefined: best-effort/backward-compatible
+  amount_flyout?: boolean
   ttl_ms: number
   intensity_key?: string
   edges: Array<{ from: string; to: string; style?: { viz_width_key?: string; viz_alpha_key?: string } }>

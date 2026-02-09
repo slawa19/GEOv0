@@ -65,8 +65,17 @@ export function resumeRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' })
 }
 
-export function stopRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' })
+export function stopRun(
+  cfg: HttpConfig,
+  runId: string,
+  opts?: { source?: string; reason?: string },
+): Promise<RunStatus> {
+  const q = new URLSearchParams({
+    ...(opts?.source ? { source: opts.source } : {}),
+    ...(opts?.reason ? { reason: opts.reason } : {}),
+  }).toString()
+  const suffix = q ? `?${q}` : ''
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/stop${suffix}`, { method: 'POST' })
 }
 
 export function restartRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {

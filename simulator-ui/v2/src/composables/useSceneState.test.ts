@@ -66,6 +66,9 @@ describe('useSceneState', () => {
     expect(state.sourcePath).toBe('snap.json')
     expect(resizeAndLayout).toHaveBeenCalledTimes(1)
     expect(ensureRenderLoop).toHaveBeenCalledTimes(1)
+
+    // Full reload: first clear keeps critical, then clears all.
+    expect(clearScheduledTimeouts).toHaveBeenCalled()
   })
 
   it('loadScene skips expensive resets for incremental update (same node IDs)', async () => {
@@ -120,12 +123,21 @@ describe('useSceneState', () => {
     expect(resetOverlays).toHaveBeenCalledTimes(1)
     expect(resetLayoutKeyCache).toHaveBeenCalledTimes(1)
 
+    // First load is a full reload: keepCritical pass + full clear.
+    expect(clearScheduledTimeouts).toHaveBeenCalledTimes(2)
+    expect(clearScheduledTimeouts.mock.calls[0]?.[0]).toEqual({ keepCritical: true })
+    expect(clearScheduledTimeouts.mock.calls[1]?.[0]).toBeUndefined()
+
     await s.loadScene()
     // incremental update => no expensive resets
     expect(resetCamera).toHaveBeenCalledTimes(1)
     expect(resetOverlays).toHaveBeenCalledTimes(1)
     expect(resetLayoutKeyCache).toHaveBeenCalledTimes(1)
     expect(ensureRenderLoop).toHaveBeenCalledTimes(2)
+
+    // Incremental update: must not clear critical timers.
+    expect(clearScheduledTimeouts).toHaveBeenCalledTimes(3)
+    expect(clearScheduledTimeouts.mock.calls[2]?.[0]).toEqual({ keepCritical: true })
   })
 
   it('setup applies allow-listed eq and focuses existing node from URL', async () => {

@@ -71,6 +71,8 @@ $SimulatorUiPidPath = Join-Path $StateDir 'simulator-ui.pid'
 
 $AdminUiOutLogPath = Join-Path $StateDir 'admin-ui.out.log'
 $AdminUiErrLogPath = Join-Path $StateDir 'admin-ui.err.log'
+$BackendOutLogPath = Join-Path $StateDir 'backend.out.log'
+$BackendErrLogPath = Join-Path $StateDir 'backend.err.log'
 $SimulatorUiOutLogPath = Join-Path $StateDir 'simulator-ui.out.log'
 $SimulatorUiErrLogPath = Join-Path $StateDir 'simulator-ui.err.log'
 
@@ -388,9 +390,18 @@ if ($ResetDb) {
 
 Write-Host "[3/8] Starting Backend (uvicorn on port $BackendPort)..." -ForegroundColor Yellow
 $env:SIMULATOR_ACTIONS_ENABLE = '1'
-$backendCmd = "`"$Python`" -m uvicorn app.main:app --host 127.0.0.1 --port $BackendPort"
-$backendStartArgs = @('/c', 'start', '/b', 'cmd', '/c', $backendCmd)
-$null = Start-Process -FilePath 'cmd.exe' -ArgumentList $backendStartArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle
+
+# Defaults for real-mode runner knobs (do not override if the user already set them).
+# This prevents VS Code tasks from prompting for inputs.
+if ([string]::IsNullOrWhiteSpace($env:SIMULATOR_REAL_AMOUNT_CAP)) {
+    $env:SIMULATOR_REAL_AMOUNT_CAP = '500'
+}
+if ([string]::IsNullOrWhiteSpace($env:SIMULATOR_REAL_ENABLE_INJECT)) {
+    $env:SIMULATOR_REAL_ENABLE_INJECT = '0'
+}
+
+$backendArgs = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort")
+$null = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLogPath -RedirectStandardError $BackendErrLogPath
 
 if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 60)) {
     throw "Backend failed to start on port $BackendPort"

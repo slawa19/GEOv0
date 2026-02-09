@@ -31,6 +31,12 @@ class SseBroadcast:
         self._enqueue_event_artifact = enqueue_event_artifact
         self._logger = logger
 
+        # Best-effort observability counters (in-memory only).
+        # Used to make drops visible in logs, per simulator plan section 10.
+        self._queue_full_drop_total = 0
+        self._queue_full_drop_by_type: dict[str, int] = {}
+        self._queue_full_eviction_total = 0
+
         # Best-effort concurrent connection limits. Cached to avoid reading env on every
         # `subscribe()` call.
         self._max_subs_total = _safe_int_env("SIMULATOR_SSE_MAX_CONNECTIONS", 50)
@@ -171,6 +177,7 @@ class SseBroadcast:
                     try:
                         _ = sub.queue.get_nowait()
                         sub.queue.put_nowait(payload)
+                        self._queue_full_eviction_total += 1
                         continue
                     except Exception:
                         self._logger.debug(
@@ -178,11 +185,39 @@ class SseBroadcast:
                             run_id,
                             exc_info=True,
                         )
+                elif (
+                    event_type == "tx.updated"
+                    and bool(payload.get("amount_flyout")) is True
+                ):
+                    # Best-effort priority for tx.updated that are meant to produce amount flyouts.
+                    # Evict one queued item to make room (same strategy as run_status).
+                    try:
+                        _ = sub.queue.get_nowait()
+                        sub.queue.put_nowait(payload)
+                        self._queue_full_eviction_total += 1
+                        continue
+                    except Exception:
+                        self._logger.debug(
+                            "simulator.sse.amount_flyout_priority_drop_failed run_id=%s",
+                            run_id,
+                            exc_info=True,
+                        )
+
+                # Record drop counters.
+                self._queue_full_drop_total += 1
+                self._queue_full_drop_by_type[event_type] = (
+                    self._queue_full_drop_by_type.get(event_type, 0) + 1
+                )
                 self._logger.warning(
-                    "simulator.sse.queue_full_drop event_type=%s run_id=%s qsize=%d",
+                    "simulator.sse.queue_full_drop event_type=%s run_id=%s qsize=%d qmax=%d subs_total=%d drops_total=%d drops_by_type=%d evictions_total=%d",
                     event_type,
                     run_id,
                     sub.queue.qsize(),
+                    int(getattr(sub.queue, "maxsize", 0) or 0),
+                    int(self._count_total_subs_locked()),
+                    int(self._queue_full_drop_total),
+                    int(self._queue_full_drop_by_type.get(event_type, 0)),
+                    int(self._queue_full_eviction_total),
                 )
                 continue
 

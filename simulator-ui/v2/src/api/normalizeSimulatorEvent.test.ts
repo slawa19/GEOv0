@@ -24,6 +24,7 @@ describe('normalizeSimulatorEvent', () => {
       from: 'A',
       to: 'B',
       amount: '123.45',
+      amount_flyout: true,
       ttl_ms: 1200,
       intensity_key: 'mid',
       edges: [{ from: 'A', to: 'B' }],
@@ -38,6 +39,7 @@ describe('normalizeSimulatorEvent', () => {
       from: 'A',
       to: 'B',
       amount: '123.45',
+      amount_flyout: true,
       ttl_ms: 1200,
       intensity_key: 'mid',
       edges: [{ from: 'A', to: 'B' }],
@@ -45,6 +47,40 @@ describe('normalizeSimulatorEvent', () => {
       node_patch: undefined,
       edge_patch: undefined,
     })
+  })
+
+  it('normalizeSimulatorEvent: tx.updated without amount keeps event (amount undefined)', () => {
+    const evt = normalizeSimulatorEvent({
+      event_id: 'evt_3',
+      ts: '2026-01-01T00:00:00Z',
+      type: 'tx.updated',
+      equivalent: 'UAH',
+      from: 'A',
+      to: 'B',
+      edges: [{ from: 'A', to: 'B' }],
+    }) as any
+
+    expect(evt.type).toBe('tx.updated')
+    expect(evt.amount).toBeUndefined()
+    expect(evt.from).toBe('A')
+    expect(evt.to).toBe('B')
+    expect(evt.edges).toEqual([{ from: 'A', to: 'B' }])
+  })
+
+  it('normalizeSimulatorEvent: tx.updated with missing from/to and empty edges keeps event', () => {
+    const evt = normalizeSimulatorEvent({
+      event_id: 'evt_4',
+      ts: '2026-01-01T00:00:00Z',
+      type: 'tx.updated',
+      equivalent: 'UAH',
+      edges: [],
+    }) as any
+
+    expect(evt.type).toBe('tx.updated')
+    expect(evt.from).toBeUndefined()
+    expect(evt.to).toBeUndefined()
+    expect(evt.amount).toBeUndefined()
+    expect(evt.edges).toEqual([])
   })
 
   it('normalizeSimulatorEvent: clearing.done', () => {

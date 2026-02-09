@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
+import { connectSse } from '../api/sse'
 
 vi.mock('../api/simulatorApi', () => {
   return {
@@ -273,6 +274,90 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
     // Cleanup: abort SSE connection.
     h.stopSse()
+  })
+
+  it('amount_flyout=false suppresses amount labels but keeps tx FX', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    connectSseMock.mockImplementation(async (opts: any) => {
+      const payload = {
+        event_id: 'evt_tx_2',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'tx.updated',
+        equivalent: 'EUR',
+        from: 'A',
+        to: 'B',
+        amount: '1.00',
+        amount_flyout: false,
+        ttl_ms: 1200,
+        edges: [{ from: 'A', to: 'B' }],
+      }
+
+      opts.onMessage({ id: 'evt_tx_2', data: JSON.stringify(payload) })
+
+      await new Promise<void>((resolve) => {
+        if (opts?.signal?.aborted) return resolve()
+        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
+      })
+    })
+
+    const isRealModeRef = ref(true)
+    const real = createRealState()
+
+    real.apiBase = 'http://x'
+    real.accessToken = 't'
+    real.selectedScenarioId = 'sc1'
+
+    const pushTxAmountLabel = vi.fn(() => undefined)
+    const scheduleTimeout = vi.fn(() => undefined)
+    const runRealTxFx = vi.fn(() => undefined)
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => isRealModeRef.value),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: {
+        loading: false,
+        error: '',
+        sourcePath: '',
+        snapshot: null,
+        selectedNodeId: null,
+        flash: 0,
+      },
+      real,
+
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+
+      loadScene: vi.fn(async () => undefined),
+
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      pushTxAmountLabel,
+      clampRealTxTtlMs: () => 1200,
+
+      scheduleTimeout,
+      runRealTxFx,
+      runRealClearingPlanFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+
+      clearingPlansById: new Map(),
+      wakeUp: () => undefined,
+    })
+
+    await h.startRun({ mode: 'real', intensityPercent: 0 })
+
+    expect(runRealTxFx).toHaveBeenCalledTimes(1)
+    expect(pushTxAmountLabel).toHaveBeenCalledTimes(0)
+    expect(scheduleTimeout).toHaveBeenCalledTimes(0)
+
+    h.stopSse()
+
+    // Restore default mock for other tests.
+    connectSseMock.mockImplementation(prevImpl as any)
   })
 })
 

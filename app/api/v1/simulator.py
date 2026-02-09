@@ -4,6 +4,7 @@ import asyncio
 import json
 import secrets
 import os
+import logging
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
 from pydantic import BaseModel, Field
@@ -35,6 +36,9 @@ from app.utils.exceptions import GoneException, NotFoundException
 from app.utils.exceptions import ForbiddenException
 
 router = APIRouter(prefix="/simulator")
+
+# Uvicorn typically configures this logger at INFO level.
+logger = logging.getLogger("uvicorn.error")
 
 
 def _actions_enabled() -> bool:
@@ -135,7 +139,7 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
                 last_event_type=run.last_event_type,
                 current_phase=run.current_phase,
                 last_error=run.last_error,
-            ).model_dump(mode="json")
+            ).model_dump(mode="json", by_alias=True)
             yield _sse_format(payload=init_event, event_id=str(init_event["event_id"]))
         else:
             event_id = str(status_evt.get("event_id") or "")
@@ -178,11 +182,12 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
                     ts=_utc_now(),
                     type="tx.updated",
                     equivalent=equivalent,
+                    amount_flyout=False,
                     ttl_ms=1200,
                     intensity_key="mid",
                     edges=None,
                     node_badges=None,
-                ).model_dump(mode="json")
+                ).model_dump(mode="json", by_alias=True)
 
             event_id = str(evt.get("event_id") or evt.get("event") or "")
             if not event_id:
@@ -409,9 +414,32 @@ async def resume_run(
 @router.post("/runs/{run_id}/stop", response_model=RunStatus)
 async def stop_run(
     run_id: str,
+    request: Request,
+    source: Optional[str] = Query(default=None, description="Client source (e.g. ui, cli, script)"),
+    reason: Optional[str] = Query(default=None, description="Human-readable stop reason"),
     _actor=Depends(deps.require_participant_or_admin),
 ):
-    return await runtime.stop(run_id)
+    client = getattr(request, "client", None)
+    client_host = getattr(client, "host", None)
+    source_s = str(source) if source else "<unspecified>"
+    reason_s = str(reason) if reason else "<unspecified>"
+    client_s = str(client_host) if client_host else "<unknown>"
+
+    # Avoid logging any sensitive auth material; admin token is a header.
+    print(f"simulator.run_stop_requested run_id={run_id} source={source_s} reason={reason_s} client={client_s}")
+    logger.info(
+        "simulator.run_stop_requested run_id=%s source=%s reason=%s client=%s",
+        str(run_id),
+        source_s,
+        reason_s,
+        client_s,
+    )
+    return await runtime.stop(
+        run_id,
+        source=(source if source is not None else None),
+        reason=(reason if reason is not None else None),
+        client=(client_host if client_host is not None else None),
+    )
 
 
 @router.post("/runs/{run_id}/restart", response_model=RunStatus)

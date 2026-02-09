@@ -13,6 +13,10 @@ function asNumber(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+function asBoolean(v: unknown): boolean | null {
+  return typeof v === 'boolean' ? v : null
+}
+
 function asArray(v: unknown): unknown[] | null {
   return Array.isArray(v) ? v : null
 }
@@ -111,6 +115,15 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
         : null,
     }
 
+      const stop_requested_at = asString(raw.stop_requested_at)
+      if (stop_requested_at) (evt as any).stop_requested_at = stop_requested_at
+      const stop_source = asString(raw.stop_source)
+      if (stop_source != null) (evt as any).stop_source = stop_source
+      const stop_reason = asString(raw.stop_reason)
+      if (stop_reason != null) (evt as any).stop_reason = stop_reason
+      const stop_client = asString(raw.stop_client)
+      if (stop_client != null) (evt as any).stop_client = stop_client
+
     const attempts_total = asNumber(raw.attempts_total)
     if (attempts_total != null) evt.attempts_total = attempts_total
     const committed_total = asNumber(raw.committed_total)
@@ -136,6 +149,8 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     const from = asString(raw.from) ?? undefined
     const to = asString(raw.to) ?? undefined
     const amount = asString(raw.amount) ?? undefined
+
+    const amount_flyout = asBoolean(raw.amount_flyout) ?? undefined
 
     const ttl_ms = asNumber(raw.ttl_ms) ?? 1200
     const intensity_key = asString(raw.intensity_key) ?? undefined
@@ -185,6 +200,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
       from,
       to,
       amount,
+      amount_flyout,
       ttl_ms,
       intensity_key,
       edges,

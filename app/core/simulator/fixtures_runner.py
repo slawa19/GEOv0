@@ -104,6 +104,7 @@ class FixturesRunner:
             ts=self._utc_now(),
             type="tx.updated",
             equivalent=equivalent,
+            amount_flyout=False,
             ttl_ms=1200,
             intensity_key="mid" if run.intensity_percent < 70 else "hi",
             edges=[

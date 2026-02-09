@@ -203,7 +203,7 @@ class _SimulatorRuntimeBase:
             run_to_status=_run_to_status,
             get_run_status_payload_json=lambda run_id: self.get_run_status(
                 run_id
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
             real_max_in_flight_default=REAL_MAX_IN_FLIGHT_DEFAULT,
             get_max_active_runs=lambda: int(self._max_active_runs),
             get_max_run_records=lambda: int(self._max_run_records),
@@ -411,7 +411,7 @@ class _SimulatorRuntimeBase:
             current_phase=run.current_phase,
             last_error=_dict_to_last_error(run.last_error),
             consec_all_rejected_ticks=(stall_ticks if stall_ticks > 0 else None),
-        ).model_dump(mode="json")
+        ).model_dump(mode="json", by_alias=True)
 
         self._sse.broadcast(run_id, payload)
 
@@ -486,6 +486,7 @@ class _SimulatorRuntimeBase:
             from_=src,
             to=dst,
             amount=amt,
+            amount_flyout=True,
             ttl_ms=ttl,
             intensity_key=ik,
             edges=[{"from": src, "to": dst}],
@@ -678,8 +679,17 @@ class _SimulatorRuntimeBase:
     async def resume(self, run_id: str) -> RunStatus:
         return await self._run_lifecycle.resume(run_id)
 
-    async def stop(self, run_id: str) -> RunStatus:
-        status = await self._run_lifecycle.stop(run_id)
+    async def stop(
+        self,
+        run_id: str,
+        *,
+        source: Optional[str] = None,
+        reason: Optional[str] = None,
+        client: Optional[str] = None,
+    ) -> RunStatus:
+        status = await self._run_lifecycle.stop(
+            run_id, source=source, reason=reason, client=client
+        )
 
         # Best-effort final DB flush for real-mode tick metrics/bottlenecks.
         # Must not break stop() even if DB is unavailable.

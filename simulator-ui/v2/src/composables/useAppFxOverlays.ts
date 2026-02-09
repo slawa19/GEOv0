@@ -20,6 +20,17 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   const fxState = createFxState()
   const timers = createTimerRegistry()
 
+  // Dev-only diagnostics (plan §10): expose timer stats on localhost.
+  // This helps validate keepCritical behavior during snapshot refreshes.
+  try {
+    const host = globalThis?.location?.hostname
+    if (host === 'localhost' || host === '127.0.0.1') {
+      ;(globalThis as any).__geo_timers_stats = () => timers.getStats()
+    }
+  } catch {
+    // ignore
+  }
+
   const overlayState = useOverlayState<N>({
     getLayoutNodeById: deps.getLayoutNodeById,
     sizeForNode: deps.sizeForNode,

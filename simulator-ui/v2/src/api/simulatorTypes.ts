@@ -74,6 +74,14 @@ export type RunStatus = {
   scenario_id: string
   mode?: SimulatorMode
   state: RunState | string
+  started_at?: string
+  stopped_at?: string
+
+  // Why/where stop was requested (best-effort).
+  stop_requested_at?: string
+  stop_source?: string | null
+  stop_reason?: string | null
+  stop_client?: string | null
   sim_time_ms: number
   intensity_percent: number
   ops_sec: number

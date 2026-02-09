@@ -81,6 +81,15 @@ const successRatePct = computed(() => {
   return Math.round((ok / a) * 100)
 })
 
+const stopSummary = computed(() => {
+  const st = props.runStatus
+  if (!st) return ''
+  const src = String((st as any).stop_source ?? '').trim()
+  const reason = String((st as any).stop_reason ?? '').trim()
+  if (!src && !reason) return ''
+  return `${src || 'unknown'}${reason ? `: ${reason}` : ''}`
+})
+
 // Show the actual mode from runStatus if running, otherwise show desired mode
 const currentMode = computed(() => {
   const actualMode = props.runStatus?.mode
@@ -224,6 +233,15 @@ function short(s: string, n: number) {
         <div class="hudbar" style="justify-content: flex-end">
           <span class="hud-badge" :data-tone="sseTone">SSE {{ sseState }}</span>
           <span class="hud-badge" :data-tone="runTone">Run {{ runStatus?.state ?? (runId ? '…' : '—') }}</span>
+          <span
+            v-if="runStatus?.state === 'stopped' && stopSummary"
+            class="hud-chip subtle"
+            style="gap: 6px"
+            aria-label="Stop reason"
+          >
+            <span class="hud-label">Stop</span>
+            <span class="hud-value mono" style="opacity: 0.9">{{ short(stopSummary, 64) }}</span>
+          </span>
           <span class="hud-chip subtle" style="gap: 8px" aria-label="Stats">
             <span class="hud-label">Tx</span>
             <span class="hud-value">ok {{ runStats.committed }}</span>

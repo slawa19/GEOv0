@@ -41,6 +41,14 @@ def _http_json(*, base_url: str, method: str, path: str, headers: dict[str, str]
         raise RuntimeError(f"HTTP {e.code} {method} {path}: {detail}") from e
 
 
+def _try_parse_error_detail(detail: str) -> dict[str, Any] | None:
+    try:
+        v = json.loads(str(detail or ""))
+        return v if isinstance(v, dict) else None
+    except Exception:
+        return None
+
+
 def _download(*, origin: str, url_path: str, headers: dict[str, str], out_path: Path) -> None:
     url = origin.rstrip("/") + "/" + url_path.lstrip("/")
     req = urllib.request.Request(url, method="GET")
@@ -101,6 +109,31 @@ def _percentile(sorted_values: list[float], p: float) -> float:
     return sorted_values[max(0, min(len(sorted_values) - 1, i))]
 
 
+def _tick_from_status(st: dict[str, Any]) -> tuple[int | None, str]:
+    """Best-effort tick extraction.
+
+    RunStatus currently doesn't expose tick_index, so we fall back to
+    deriving tick from sim_time_ms (1 tick = 1000ms in simulator MVP).
+    """
+
+    tick = st.get("tick_index")
+    if isinstance(tick, int):
+        return tick, "api"
+    tick = st.get("tick")
+    if isinstance(tick, int):
+        return tick, "api"
+
+    sim_time_ms = st.get("sim_time_ms")
+    if isinstance(sim_time_ms, int):
+        return max(0, int(sim_time_ms) // 1000), "derived"
+    try:
+        if sim_time_ms is not None:
+            return max(0, int(float(str(sim_time_ms))) // 1000), "derived"
+    except Exception:
+        pass
+    return None, "missing"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--origin", default="http://127.0.0.1:18000", help="Backend origin (no /api/v1)")
@@ -126,29 +159,69 @@ def main() -> int:
     if args.scenario_id not in scenario_ids:
         raise SystemExit(f"Scenario not found: {args.scenario_id}")
 
-    run = _http_json(
-        base_url=args.base_url,
-        method="POST",
-        path="/simulator/runs",
-        headers=headers,
-        body={
-            "scenario_id": args.scenario_id,
-            "mode": args.mode,
-            "intensity_percent": int(args.intensity),
-        },
-    )
+    # NOTE: RuntimeError from _http_json includes raw JSON detail in the message.
+    # We keep this script dependency-free (no requests) and parse it best-effort.
+    try:
+        run = _http_json(
+            base_url=args.base_url,
+            method="POST",
+            path="/simulator/runs",
+            headers=headers,
+            body={
+                "scenario_id": args.scenario_id,
+                "mode": args.mode,
+                "intensity_percent": int(args.intensity),
+            },
+        )
+    except RuntimeError as e:
+        msg = str(e)
+        prefix = "HTTP 409 POST /simulator/runs:"
+        if msg.startswith(prefix):
+            detail_raw = msg[len(prefix) :].strip()
+            detail = _try_parse_error_detail(detail_raw) or {}
+            if str(detail.get("code")) == "E008":
+                active_run_id = None
+                try:
+                    active = _http_json(
+                        base_url=args.base_url, method="GET", path="/simulator/runs/active", headers=headers
+                    )
+                    active_run_id = active.get("run_id") if isinstance(active, dict) else None
+                except Exception:
+                    active_run_id = None
+
+                print("cannot start run: too many active simulator runs (E008)")
+                if active_run_id:
+                    print(f"active_run_id={active_run_id}")
+                    print(
+                        "stop it explicitly via: POST /api/v1/simulator/runs/<run_id>/stop?source=cli&reason=free_slot"
+                    )
+                else:
+                    print("could not fetch active run id via GET /api/v1/simulator/runs/active")
+                return 2
+        raise
+
     run_id = run["run_id"]
     print(f"run_id={run_id}")
 
     end_at = time.time() + max(1, int(args.run_seconds))
     while time.time() < end_at:
         st = _http_json(base_url=args.base_url, method="GET", path=f"/simulator/runs/{run_id}", headers=headers)
+        tick, tick_src = _tick_from_status(st)
+        tick_s = str(tick) if tick is not None else "None"
+        if tick_src == "derived":
+            tick_s = tick_s + "~"
         print(
-            f"state={st.get('state')} sim_time_ms={st.get('sim_time_ms')} tick={st.get('tick_index')} ops_sec={st.get('ops_sec')}"
+            f"state={st.get('state')} sim_time_ms={st.get('sim_time_ms')} tick={tick_s} ops_sec={st.get('ops_sec')}"
         )
         time.sleep(2)
 
-    _http_json(base_url=args.base_url, method="POST", path=f"/simulator/runs/{run_id}/stop", headers=headers)
+    print(f"stopping: reason=run_seconds_elapsed seconds={int(args.run_seconds)}")
+    _http_json(
+        base_url=args.base_url,
+        method="POST",
+        path=f"/simulator/runs/{run_id}/stop?source=cli&reason=run_seconds_elapsed",
+        headers=headers,
+    )
 
     deadline = time.time() + 30
     last = None
@@ -159,7 +232,11 @@ def main() -> int:
             break
         time.sleep(1)
 
-    print(f"final_state={last.get('state')} sim_time_ms={last.get('sim_time_ms')} tick={last.get('tick_index')}")
+    tick, tick_src = _tick_from_status(last or {})
+    tick_s = str(tick) if tick is not None else "None"
+    if tick_src == "derived":
+        tick_s = tick_s + "~"
+    print(f"final_state={last.get('state')} sim_time_ms={last.get('sim_time_ms')} tick={tick_s}")
 
     idx = _http_json(base_url=args.base_url, method="GET", path=f"/simulator/runs/{run_id}/artifacts", headers=headers)
     items = {it["name"]: it for it in idx.get("items", [])}

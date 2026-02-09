@@ -135,6 +135,41 @@ export function useSimulatorRealMode(opts: {
   } = opts
 
   // -----------------
+  // Diagnostics (dev-only, per plan section 10)
+  // -----------------
+
+  const diag = {
+    rx_messages: 0,
+    json_parse_errors: 0,
+    normalize_dropped: 0,
+    events_by_type: {} as Record<string, number>,
+    tx_sender_labels: 0,
+    tx_receiver_labels: 0,
+    amount_flyout_suppressed: 0,
+    burst_throttle_enabled_events: 0,
+    burst_throttle_ms_last: 0,
+  }
+
+  if (isLocalhost) {
+    ;(globalThis as any).__geo_real_mode_diag = diag
+  }
+
+  function incDiag(map: Record<string, number>, key: string) {
+    map[key] = (map[key] ?? 0) + 1
+  }
+
+  function getBurstLabelThrottleMs(): number {
+    const ops = Number(real.runStatus?.ops_sec ?? 0)
+    const qd = Number(real.runStatus?.queue_depth ?? 0)
+
+    // Degradation policy (P2.2): when backend indicates bursts/overload, enable
+    // overlay throttling to reduce cap evictions and perceived dropouts.
+    if (ops >= 40 || qd >= 200) return 240
+    if (ops >= 20 || qd >= 100) return 120
+    return 0
+  }
+
+  // -----------------
   // Real Mode: SSE loop
   // -----------------
 
@@ -145,6 +180,11 @@ export function useSimulatorRealMode(opts: {
   // when backend replays events after SSE reconnect.
   const processedEventIds = new Map<string, true>()
   let processedEventIdsRunId: string | null = null
+
+  // Bound memory while keeping enough history to dedup large SSE replays.
+  // Too small -> duplicates slip through -> extra labels -> cap eviction -> perceived dropouts.
+  const PROCESSED_EVENT_IDS_MAX = 5000
+  const PROCESSED_EVENT_IDS_PRUNE_BATCH = 500
 
   function markEventProcessed(runId: string, eventId: string): boolean {
     const rid = String(runId ?? '')
@@ -159,12 +199,15 @@ export function useSimulatorRealMode(opts: {
     if (processedEventIds.has(eid)) return false
     processedEventIds.set(eid, true)
 
-    // Bound memory: keep only the most recent event IDs.
-    const MAX = 800
-    while (processedEventIds.size > MAX) {
-      const firstKey = processedEventIds.keys().next().value as string | undefined
-      if (!firstKey) break
-      processedEventIds.delete(firstKey)
+    // Bound memory: keep only the most recent event IDs (Map preserves insertion order).
+    // Prune in batches to keep the loop cheap under bursts.
+    if (processedEventIds.size > PROCESSED_EVENT_IDS_MAX) {
+      const targetSize = Math.max(0, PROCESSED_EVENT_IDS_MAX - PROCESSED_EVENT_IDS_PRUNE_BATCH)
+      while (processedEventIds.size > targetSize) {
+        const firstKey = processedEventIds.keys().next().value as string | undefined
+        if (!firstKey) break
+        processedEventIds.delete(firstKey)
+      }
     }
     return true
   }
@@ -410,11 +453,20 @@ export function useSimulatorRealMode(opts: {
             try {
               parsed = JSON.parse(msg.data)
             } catch {
+              diag.rx_messages += 1
+              diag.json_parse_errors += 1
               return
             }
 
+            diag.rx_messages += 1
+
             const evt = normalizeSimulatorEvent(parsed)
-            if (!evt) return
+            if (!evt) {
+              diag.normalize_dropped += 1
+              return
+            }
+
+            incDiag(diag.events_by_type, String((evt as any).type ?? 'unknown'))
 
             // Prefer payload event_id when present.
             real.lastEventId = evt.event_id
@@ -446,12 +498,29 @@ export function useSimulatorRealMode(opts: {
               real.runStats.committed += 1
 
               const tx = evt
+              // Backward compatible:
+              // - amount_flyout === false -> do not emit amount labels (even if amount is present)
+              // - amount_flyout === true/undefined -> best-effort emit based on amount+endpoints
+              const allowAmountFlyout = tx.amount_flyout !== false
               const edges = Array.isArray(tx.edges) ? tx.edges : []
               const senderId = String(tx.from ?? (edges.length > 0 ? edges[0]!.from : '') ?? '').trim()
               const receiverId = String(tx.to ?? (edges.length > 0 ? edges[edges.length - 1]!.to : '') ?? '').trim()
 
               // Backend-first: labels require explicit amount.
               const amount = String(tx.amount ?? '').trim()
+
+              // Contract diagnostic: amount_flyout=true should always include enough data
+              // for both labels. This should never trigger in healthy backend runs.
+              if (tx.amount_flyout === true && (!amount || !senderId || !receiverId)) {
+                // eslint-disable-next-line no-console
+                console.warn('tx.updated amount_flyout contract violated (missing amount/endpoints)', {
+                  event_id: tx.event_id,
+                  amount,
+                  from: tx.from,
+                  to: tx.to,
+                  edges_len: edges.length,
+                })
+              }
 
               // Apply patches to keep snapshot authoritative.
               if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
@@ -463,12 +532,21 @@ export function useSimulatorRealMode(opts: {
               // Ensure canvas updates even if render loop entered deep idle.
               wakeUp?.()
 
-              if (amount && senderId) {
-                pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: 0 })
+              const labelThrottleMs = getBurstLabelThrottleMs()
+              diag.burst_throttle_ms_last = labelThrottleMs
+              if (labelThrottleMs > 0) diag.burst_throttle_enabled_events += 1
+
+              if (!allowAmountFlyout) {
+                diag.amount_flyout_suppressed += 1
+              }
+
+              if (allowAmountFlyout && amount && senderId) {
+                pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: labelThrottleMs })
+                diag.tx_sender_labels += 1
               }
 
               // Note: self-payment (senderId === receiverId) intentionally does not emit a receiver label.
-              if (amount && receiverId && receiverId !== senderId) {
+              if (allowAmountFlyout && amount && receiverId && receiverId !== senderId) {
                 const ttlMs = clampRealTxTtlMs(tx.ttl_ms)
 
                 const runIdAtEvent = runId
@@ -481,7 +559,8 @@ export function useSimulatorRealMode(opts: {
                     // the old connection, but UI timers for still-valid events should still fire.
                     if (sseSeq !== sseSeqAtEvent) return
                     if (real.runId !== runIdAtEvent) return
-                    pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: 0 })
+                    pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: labelThrottleMs })
+                    diag.tx_receiver_labels += 1
                   },
                   ttlMs,
                   { critical: true },
@@ -692,7 +771,10 @@ export function useSimulatorRealMode(opts: {
       stopSse()
       clearingPlansById.clear()
       cleanupRealRunFxAndTimers()
-      real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+        real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
+          source: 'ui',
+          reason: 'user_stop',
+        })
       await refreshRunStatus()
     } catch (e: unknown) {
       const msg = String((e as any)?.message ?? e)

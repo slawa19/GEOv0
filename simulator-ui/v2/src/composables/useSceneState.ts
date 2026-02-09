@@ -29,7 +29,7 @@ type UseSceneStateDeps = {
 
   loadSnapshot: LoadSnapshotFn
 
-  clearScheduledTimeouts: () => void
+  clearScheduledTimeouts: (opts?: { keepCritical?: boolean }) => void
   resetCamera: () => void
   resetLayoutKeyCache: () => void
   resetOverlays: () => void
@@ -71,8 +71,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   }
 
   async function loadScene() {
-    // Only clear timers/pointers for a full reload.
-    deps.clearScheduledTimeouts()
+    // IMPORTANT:
+    // - `loadScene()` can be triggered by snapshot refreshes within the same run.
+    // - We must NOT silently drop pending critical timers (e.g. delayed receiver amount labels).
+    // Therefore we start by clearing only non-critical timers.
+    deps.clearScheduledTimeouts({ keepCritical: true })
 
     deps.state.loading = true
     deps.state.error = ''
@@ -93,6 +96,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
         deps.state.snapshot?.links.length !== snapshot.links.length
 
       if (!isIncrementalUpdate) {
+        // Full reload: clear everything (including critical timers) because we're changing scene context.
+        deps.clearScheduledTimeouts()
         deps.resetCamera()
         deps.state.sourcePath = ''
         deps.state.snapshot = null

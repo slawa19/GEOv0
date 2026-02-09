@@ -197,13 +197,29 @@ class RunLifecycle:
         await simulator_storage.upsert_run(run)
         return self._run_to_status(run)
 
-    async def stop(self, run_id: str) -> RunStatus:
+    async def stop(
+        self,
+        run_id: str,
+        *,
+        source: Optional[str] = None,
+        reason: Optional[str] = None,
+        client: Optional[str] = None,
+    ) -> RunStatus:
         run = self._get_run(run_id)
         task = None
         events_task: Optional[asyncio.Task[None]] = None
         with self._lock:
             if run.state in ("stopped",):
                 return self._run_to_status(run)
+
+            if source is not None:
+                run.stop_source = str(source)
+            if reason is not None:
+                run.stop_reason = str(reason)
+            if client is not None:
+                run.stop_client = str(client)
+            if run.stop_requested_at is None and (source is not None or reason is not None or client is not None):
+                run.stop_requested_at = self._utc_now()
 
             if run.state != "stopping":
                 run.state = "stopping"

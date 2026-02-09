@@ -33,6 +33,10 @@
   - и периодически во время `running` (например раз в 1–2 секунды)
 - событие `tick` не требуется для UI по умолчанию и допускается только как debug-режим (опционально)
 
+Dev-диагностика (localhost only):
+- `globalThis.__geo_real_mode_diag` — счётчики SSE/нормализации/лейблов и burst-throttling в real-mode.
+- `globalThis.__geo_timers_stats()` — статистика managed timers (сколько очисток, сколько keepCritical, last_clear snapshot).
+
 Примечание: на раннем MVP можно сделать polling-режим:
 - `GET /api/v1/simulator/events/poll?equivalent=UAH&after=evt_...`
   - Возвращает массив событий.
@@ -228,6 +232,7 @@ export type GraphLink = {
   "from": "user_1",
   "to": "user_2",
   "amount": "150.00",
+  "amount_flyout": true,
   "ttl_ms": 1200,
   "intensity_key": "mid",
   "edges": [
@@ -243,6 +248,10 @@ export type GraphLink = {
 Примечания (backend-first):
 - `from → to` — направление транзакции.
 - `amount` — **в major units** (строка, без локальных конвертаций на UI); знак выводимого дельта-лейбла на узлах задаётся UI как `-amount` у `from` и `+amount` у `to`.
+- `amount_flyout` — управление amount flyout (лейблы `-amount/+amount` на узлах):
+  - `true`: backend гарантирует «минимальный контракт» для лейблов: непустой `amount` и разрешимые endpoints (либо `from/to`, либо хотя бы один `edges[*]`).
+  - `false`: UI **не должен** показывать amount flyout для этого события (даже если `amount` присутствует). Используется для patch-only/fixtures/debug событий, где лейблы не нужны.
+  - `null/отсутствует`: backward compatible режим (best-effort; UI может показать лейблы, если данных достаточно).
 
 ### 4.3 `tx.failed` (диагностика ошибок/отказов)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic.config import ConfigDict
 
 
@@ -130,11 +130,41 @@ class SimulatorTxUpdatedEvent(BaseModel):
     # Backend-authoritative transaction amount in major units (string), e.g. "150.00".
     amount: Optional[str] = None
 
+    # Explicitly controls whether UI should emit amount flyout labels for this tx.updated.
+    # - True: payload is expected to have enough data for labels (amount + endpoints via from/to or edges)
+    # - False/None: label emission is optional / best-effort (backward compatible)
+    amount_flyout: Optional[bool] = None
+
     ttl_ms: Optional[int] = None
     intensity_key: Optional[str] = None
 
     edges: Optional[List[SimulatorTxUpdatedEventEdge]] = None
     node_badges: Optional[List[SimulatorTxUpdatedNodeBadge]] = None
+
+    @model_validator(mode="after")
+    def _validate_amount_flyout_contract(self) -> "SimulatorTxUpdatedEvent":
+        if self.amount_flyout is True:
+            amount = str(self.amount or "").strip()
+            if not amount:
+                raise ValueError("amount_flyout=true requires non-empty amount")
+
+            has_endpoints = bool(str(self.from_ or "").strip()) and bool(
+                str(self.to or "").strip()
+            )
+
+            has_edge = False
+            if self.edges:
+                for e in self.edges:
+                    if str(e.from_ or "").strip() and str(e.to or "").strip():
+                        has_edge = True
+                        break
+
+            if not (has_endpoints or has_edge):
+                raise ValueError(
+                    "amount_flyout=true requires endpoints via from/to or at least one edge"
+                )
+
+        return self
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -326,6 +356,12 @@ class RunStatus(BaseModel):
 
     started_at: Optional[datetime] = None
     stopped_at: Optional[datetime] = None
+
+    # Why/where stop was requested (best-effort).
+    stop_requested_at: Optional[datetime] = None
+    stop_source: Optional[str] = None
+    stop_reason: Optional[str] = None
+    stop_client: Optional[str] = None
 
     sim_time_ms: Optional[int] = Field(default=None, ge=0)
     intensity_percent: Optional[int] = Field(default=None, ge=0, le=100)

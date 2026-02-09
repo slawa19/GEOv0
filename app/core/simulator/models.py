@@ -54,6 +54,12 @@ class RunRecord:
     started_at: Optional[datetime] = None
     stopped_at: Optional[datetime] = None
 
+    # Best-effort stop context for diagnostics/UI.
+    stop_requested_at: Optional[datetime] = None
+    stop_source: Optional[str] = None
+    stop_reason: Optional[str] = None
+    stop_client: Optional[str] = None
+
     sim_time_ms: int = 0
     tick_index: int = 0
     seed: int = 0
@@ -136,3 +142,7 @@ class RunRecord:
 
     # Real-mode scenario timeline events state (best-effort, in-memory).
     _real_fired_scenario_event_indexes: set[int] = field(default_factory=set)
+
+    # Real-mode clearing execution can be slow and may be guarded by timeouts.
+    # Keep track of an in-flight clearing task to prevent overlapping clearing runs.
+    _real_clearing_task: Optional[asyncio.Task[dict[str, float]]] = None

@@ -13,7 +13,7 @@ export function useAppSceneState(opts: {
   effectiveEq: ComputedRef<string>
   state: SimulatorAppState
   loadSnapshot: (eq: string) => Promise<{ snapshot: import('../types').GraphSnapshot; sourcePath: string }>
-  clearScheduledTimeouts: () => void
+  clearScheduledTimeouts: (opts?: { keepCritical?: boolean }) => void
   resetCamera: () => void
   resetLayoutKeyCache: () => void
   resetOverlays: () => void
