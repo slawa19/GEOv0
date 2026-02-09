@@ -25,6 +25,7 @@ import { ApiError, authHeaders } from '../api/http'
 
 import type { ClearingDoneEvent, ClearingPlanEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
+import { resolveTxDirection } from '../utils/txDirection'
 
 export type RealModeState = {
   apiBase: string
@@ -503,8 +504,9 @@ export function useSimulatorRealMode(opts: {
               // - amount_flyout === true/undefined -> best-effort emit based on amount+endpoints
               const allowAmountFlyout = tx.amount_flyout !== false
               const edges = Array.isArray(tx.edges) ? tx.edges : []
-              const senderId = String(tx.from ?? (edges.length > 0 ? edges[0]!.from : '') ?? '').trim()
-              const receiverId = String(tx.to ?? (edges.length > 0 ? edges[edges.length - 1]!.to : '') ?? '').trim()
+              const resolved = resolveTxDirection({ from: tx.from, to: tx.to, edges })
+              const senderId = resolved.from
+              const receiverId = resolved.to
 
               // Backend-first: labels require explicit amount.
               const amount = String(tx.amount ?? '').trim()

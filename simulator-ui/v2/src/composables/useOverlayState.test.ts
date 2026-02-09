@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useOverlayState } from './useOverlayState'
 
 describe('useOverlayState', () => {
@@ -156,4 +156,74 @@ describe('useOverlayState', () => {
     expect(view).toHaveLength(1)
     expect(view[0]).toMatchObject({ id: 1, x: 100, y: 170 })
   })
+
+  it('floatingLabelsView retriggers for pending labels when node appears in layout later', () => {
+    vi.useFakeTimers()
+    let now = 0
+
+    // Start with node NOT in layout.
+    let nodeAvailable = false
+    const overlay = useOverlayState({
+      getLayoutNodeById: (id) => (nodeAvailable ? { __x: 50, __y: 60 } : undefined),
+      sizeForNode: () => ({ w: 20, h: 20 }),
+      getCameraZoom: () => 1,
+      setFlash: () => undefined,
+      resetFxState: () => undefined,
+      nowMs: () => now,
+    })
+
+    overlay.pushFloatingLabel({ nodeId: 'B', text: 'receiver', color: '#0f0', id: 10 })
+
+    // Label is in array but view should be empty (node not in layout).
+    expect(overlay.floatingLabels).toHaveLength(1)
+    expect(overlay.floatingLabelsView.value).toHaveLength(0)
+
+    // Simulate node becoming available in layout.
+    nodeAvailable = true
+
+    // Before retrigger timer fires — still cached empty result.
+    expect(overlay.floatingLabelsView.value).toHaveLength(0)
+
+    // Advance past the pending label retrigger delay (120ms).
+    vi.advanceTimersByTime(150)
+
+    // Now the computed should re-evaluate and find the node.
+    const view = overlay.floatingLabelsView.value
+    expect(view).toHaveLength(1)
+    expect(view[0]).toMatchObject({ id: 10, text: 'receiver', color: '#0f0' })
+
+    vi.useRealTimers()
+  })
+
+  it('resetOverlays cancels pending label retrigger timer', () => {
+    vi.useFakeTimers()
+    let now = 0
+
+    const overlay = useOverlayState({
+      getLayoutNodeById: () => undefined, // always missing
+      sizeForNode: () => ({ w: 20, h: 20 }),
+      getCameraZoom: () => 1,
+      setFlash: () => undefined,
+      resetFxState: () => undefined,
+      nowMs: () => now,
+    })
+
+    overlay.pushFloatingLabel({ nodeId: 'C', text: 'x', color: '#fff', id: 20 })
+
+    // Trigger computed to schedule retrigger.
+    expect(overlay.floatingLabelsView.value).toHaveLength(0)
+
+    // Reset clears labels and cancels timer.
+    overlay.resetOverlays()
+    expect(overlay.floatingLabels).toHaveLength(0)
+
+    // Advance past retrigger — should not throw or cause issues.
+    vi.advanceTimersByTime(200)
+
+    expect(overlay.floatingLabelsView.value).toHaveLength(0)
+
+    vi.useRealTimers()
+  })
 })
+
+

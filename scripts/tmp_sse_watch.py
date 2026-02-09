@@ -34,6 +34,8 @@ async def main() -> None:
         last_event_at = None
         last_run_status_at = None
         last_tx_at = None
+        tx_seen = 0
+        tx_mismatch = 0
 
         async def poll_status() -> None:
             nonlocal last_event_at
@@ -58,7 +60,7 @@ async def main() -> None:
                 await asyncio.sleep(5.0)
 
         async def read_sse() -> None:
-            nonlocal last_event_at, last_run_status_at, last_tx_at
+            nonlocal last_event_at, last_run_status_at, last_tx_at, tx_seen, tx_mismatch
             url = f"/api/v1/simulator/runs/{run_id}/events"
             async with client.stream("GET", url, headers=_h(), params={"equivalent": EQUIVALENT}) as resp:
                 resp.raise_for_status()
@@ -94,12 +96,42 @@ async def main() -> None:
                         )
                     elif typ in {"tx.updated", "tx.failed"}:
                         last_tx_at = time.time()
-                        print(
-                            "evt",
-                            f"t+{time.time()-t0:6.1f}s",
-                            typ,
-                            f"id={event_id}",
-                        )
+                        if typ == "tx.updated":
+                            tx_seen += 1
+                            src = str(payload.get("from") or "")
+                            dst = str(payload.get("to") or "")
+                            edges = payload.get("edges") or []
+                            e0 = edges[0] if isinstance(edges, list) and edges else None
+                            eN = edges[-1] if isinstance(edges, list) and edges else None
+                            e0f = str(e0.get("from") if isinstance(e0, dict) else "")
+                            e0t = str(e0.get("to") if isinstance(e0, dict) else "")
+                            eNf = str(eN.get("from") if isinstance(eN, dict) else "")
+                            eNt = str(eN.get("to") if isinstance(eN, dict) else "")
+                            ok = bool(src and dst and e0f and eNt and (e0f == src) and (eNt == dst))
+                            if not ok:
+                                tx_mismatch += 1
+                            # Keep output readable: always print first 20 tx.updated, then sample.
+                            if tx_seen <= 20 or (tx_seen % 25 == 0) or (not ok and tx_seen <= 100):
+                                print(
+                                    "evt",
+                                    f"t+{time.time()-t0:6.1f}s",
+                                    typ,
+                                    f"id={event_id}",
+                                    f"from={src or '<none>'}",
+                                    f"to={dst or '<none>'}",
+                                    f"edges={len(edges) if isinstance(edges, list) else '<bad>'}",
+                                    f"e0={e0f}->{e0t}" if e0f or e0t else "e0=<none>",
+                                    f"eN={eNf}->{eNt}" if eNf or eNt else "eN=<none>",
+                                    "OK" if ok else "MISMATCH",
+                                    f"mismatch_total={tx_mismatch}",
+                                )
+                        else:
+                            print(
+                                "evt",
+                                f"t+{time.time()-t0:6.1f}s",
+                                typ,
+                                f"id={event_id}",
+                            )
 
         try:
             await asyncio.gather(poll_status(), read_sse())
@@ -114,6 +146,8 @@ async def main() -> None:
                 f"last_event_age={(time.time()-last_event_at):.1f}s" if last_event_at else "last_event_age=<none>",
                 f"last_run_status_age={(time.time()-last_run_status_at):.1f}s" if last_run_status_at else "last_run_status_age=<none>",
                 f"last_tx_age={(time.time()-last_tx_at):.1f}s" if last_tx_at else "last_tx_age=<none>",
+                f"tx_seen={tx_seen}",
+                f"tx_mismatch={tx_mismatch}",
             )
 
 

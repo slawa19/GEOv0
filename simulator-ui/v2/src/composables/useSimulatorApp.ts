@@ -9,6 +9,7 @@ import { VIZ_MAPPING } from '../vizMapping'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
+import { resolveTxDirection } from '../utils/txDirection'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 
@@ -761,14 +762,21 @@ export function useSimulatorApp() {
     txFxTokens = Math.min(REAL_TX_FX.burst, txFxTokens + (dt * REAL_TX_FX.ratePerSec) / 1000)
   }
 
-  function pickSparkEdges(edges: TxUpdatedEvent['edges']): Array<{ from: string; to: string }> {
+  function pickSparkEdges(
+    edges: TxUpdatedEvent['edges'],
+    endpoints?: { from?: string; to?: string },
+  ): Array<{ from: string; to: string }> {
     if (!edges || edges.length === 0) return []
     if (edges.length <= REAL_TX_FX.maxEdgesPerEvent) return edges
 
-    const first = edges[0]!
-    const last = edges[edges.length - 1]!
-    if (first.from === last.from && first.to === last.to) return [first]
-    return [first, last]
+    // UX: for long multi-hop routes, a couple of disjoint edge sparks can look like
+    // the amount labels belong to "different" nodes. Prefer a single clear spark
+    // in the sender->receiver direction.
+    const src = String(endpoints?.from ?? edges[0]!.from ?? '').trim()
+    const dst = String(endpoints?.to ?? edges[edges.length - 1]!.to ?? '').trim()
+    if (!src || !dst) return []
+    if (src === dst) return [{ from: src, to: dst }]
+    return [{ from: src, to: dst }]
   }
 
   function runRealTxFx(evt: TxUpdatedEvent) {
@@ -779,7 +787,8 @@ export function useSimulatorApp() {
     if (txFxTokens < 1) return
     if (fxState.sparks.length >= REAL_TX_FX.maxConcurrentSparks) return
 
-    const sparkEdges = pickSparkEdges(evt.edges)
+    const resolved = resolveTxDirection({ from: evt.from, to: evt.to, edges: evt.edges })
+    const sparkEdges = pickSparkEdges(resolved.edges, { from: resolved.from, to: resolved.to })
     if (sparkEdges.length === 0) return
 
     txFxTokens -= 1
@@ -809,8 +818,8 @@ export function useSimulatorApp() {
     })
 
     if (!(isTestMode.value && isWebDriver)) {
-      const src = sparkEdges[0]!.from
-      const dst = sparkEdges[sparkEdges.length - 1]!.to
+      const src = resolved.from || sparkEdges[0]!.from
+      const dst = resolved.to || sparkEdges[sparkEdges.length - 1]!.to
       spawnNodeBursts(fxState, {
         nodeIds: [src],
         nowMs,

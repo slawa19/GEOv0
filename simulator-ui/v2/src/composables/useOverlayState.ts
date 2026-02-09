@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 
 import type { LayoutNodeLike as BaseLayoutNodeLike } from '../types/layout'
 
@@ -290,9 +290,39 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     }
   }
 
+  // Reactive gate that forces floatingLabelsView to re-evaluate when there are
+  // "pending" labels (pushed but node was not yet in layout). Without this,
+  // getLayoutNodeById is not a reactive Vue dependency, so the computed would
+  // stay cached until some other reactive dep changes — causing intermittent
+  // receiver label dropouts during layout rebuilds / physics warmup.
+  const pendingLabelGate = ref(0)
+  let pendingLabelRetriggerTimer: ReturnType<typeof setTimeout> | null = null
+  const PENDING_LABEL_RETRIGGER_MS = 120
+
+  function schedulePendingLabelRetrigger() {
+    if (pendingLabelRetriggerTimer != null) return
+    pendingLabelRetriggerTimer = setTimeout(() => {
+      pendingLabelRetriggerTimer = null
+      pendingLabelGate.value++
+    }, PENDING_LABEL_RETRIGGER_MS)
+  }
+
+  function cancelPendingLabelRetrigger() {
+    if (pendingLabelRetriggerTimer != null) {
+      clearTimeout(pendingLabelRetriggerTimer)
+      pendingLabelRetriggerTimer = null
+    }
+  }
+
   const floatingLabelsView = computed((): FloatingLabelView[] => {
+    // Read the gate so Vue tracks it as a reactive dependency.
+    // When it changes, this computed re-evaluates — giving pending labels
+    // another chance to resolve their layout node.
+    pendingLabelGate.value
+
     const out: FloatingLabelView[] = []
     const z = Math.max(0.01, deps.getCameraZoom())
+    let hasPending = false
 
     for (const fl of floatingLabels) {
       // Use frozen position if already resolved (prevents jitter from ongoing physics).
@@ -302,9 +332,12 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       }
 
       const ln = deps.getLayoutNodeById(fl.nodeId)
-      if (!ln) continue
+      if (!ln) {
+        hasPending = true
+        continue
+      }
 
-      // Anchor slightly above the node’s top edge (in screen-space px).
+      // Anchor slightly above the node's top edge (in screen-space px).
       const sz = deps.sizeForNode(ln)
       const baseOffsetYPx = -(Math.max(sz.w, sz.h) / 2 + 10)
       const dxW = (fl.offsetXPx ?? 0) / z
@@ -327,10 +360,18 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       })
     }
 
+    // If any labels couldn't resolve their node, schedule a deferred re-evaluation.
+    // The timer bumps pendingLabelGate which is a reactive dep of this computed,
+    // giving the labels another chance once the layout has caught up.
+    if (hasPending) {
+      schedulePendingLabelRetrigger()
+    }
+
     return out
   })
 
   function resetOverlays() {
+    cancelPendingLabelRetrigger()
     activeEdges.clear()
     activeEdgeExpiresAtMsByKey.clear()
     activeNodes.clear()
