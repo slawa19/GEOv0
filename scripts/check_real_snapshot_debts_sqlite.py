@@ -34,7 +34,11 @@ def main() -> None:
     )
     p.add_argument("--api", default="http://127.0.0.1:18000", help="Backend base URL")
     p.add_argument("--token", default="dev-admin-token-change-me", help="X-Admin-Token")
-    p.add_argument("--scenario", default="greenfield-village-100", help="Scenario id")
+    p.add_argument(
+        "--scenario",
+        default="greenfield-village-100-realistic-v2",
+        help="Scenario id",
+    )
     p.add_argument("--equivalent", default="UAH", help="Equivalent code")
     p.add_argument("--run-id", default=None, help="Existing run id (optional)")
     p.add_argument(

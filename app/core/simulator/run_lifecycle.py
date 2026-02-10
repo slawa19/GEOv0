@@ -79,7 +79,16 @@ class RunLifecycle:
             return
 
         # Prefer pruning stopped runs first (oldest first).
-        stopped: list[RunRecord] = [r for r in self._runs.values() if str(getattr(r, "state", "")) == "stopped"]
+        def _has_live_task(task: Optional[asyncio.Task[None]]) -> bool:
+            return task is not None and not task.done()
+
+        stopped: list[RunRecord] = [
+            r
+            for r in self._runs.values()
+            if str(getattr(r, "state", "")) == "stopped"
+            and not _has_live_task(getattr(r, "_heartbeat_task", None))
+            and not _has_live_task(getattr(r, "_artifact_events_task", None))
+        ]
 
         def _sort_key(r: RunRecord):
             ts = getattr(r, "stopped_at", None) or getattr(r, "started_at", None)
@@ -209,12 +218,8 @@ class RunLifecycle:
         client: Optional[str] = None,
     ) -> RunStatus:
         run = self._get_run(run_id)
-        task = None
-        events_task: Optional[asyncio.Task[None]] = None
+        heartbeat_task: Optional[asyncio.Task[None]] = None
         with self._lock:
-            if run.state in ("stopped",):
-                return self._run_to_status(run)
-
             if source is not None:
                 run.stop_source = str(source)
             if reason is not None:
@@ -224,43 +229,64 @@ class RunLifecycle:
             if run.stop_requested_at is None and (source is not None or reason is not None or client is not None):
                 run.stop_requested_at = self._utc_now()
 
-            if run.state != "stopping":
+            # Always detach tasks for cancellation (idempotent stop).
+            # IMPORTANT: shutdown may call stop() even if a previous stop already
+            # transitioned the run into "stopping" or even "stopped"; we still must
+            # ensure background tasks are cancelled/awaited to avoid leaks in pytest.
+            heartbeat_task = run._heartbeat_task
+
+            if run.state not in ("stopping", "stopped"):
                 run.state = "stopping"
-                task = run._heartbeat_task
-                events_task = run._artifact_events_task
 
         self._publish_run_status(run_id)
 
-        # Transition to stopped.
+        # Transition to stopped early so active-run limits are released promptly.
         with self._lock:
-            run.state = "stopped"
-            run.stopped_at = self._utc_now()
+            if run.state != "stopped":
+                run.state = "stopped"
+            if run.stopped_at is None:
+                run.stopped_at = self._utc_now()
 
         self._publish_run_status(run_id)
 
-        await simulator_storage.upsert_run(run)
+        # Best-effort: make sure background tasks are stopped even if persistence fails.
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                self._logger.exception("simulator.run.stop_heartbeat_failed run_id=%s", run_id)
+            finally:
+                with self._lock:
+                    if run._heartbeat_task is heartbeat_task:
+                        run._heartbeat_task = None
+
+        # Always attempt to stop artifacts writer (idempotent).
+        try:
+            await self._artifacts.stop_events_writer(run_id)
+        except Exception:
+            self._logger.exception("simulator.run.stop_artifacts_writer_failed run_id=%s", run_id)
+
+        try:
+            await simulator_storage.upsert_run(run)
+        except Exception:
+            self._logger.exception("simulator.run.stop_upsert_failed run_id=%s", run_id)
 
         # Enforce TTL-based pruning even if no further events are appended.
         with self._lock:
             self._sse.prune_event_buffer_locked(run)
 
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                self._logger.exception("simulator.run.stop_heartbeat_failed run_id=%s", run_id)
-
-        if events_task is not None:
-            await self._artifacts.stop_events_writer(run_id)
-
         # Finalize artifacts (best-effort): status.json, summary.json, bundle.zip.
-        await self._artifacts.finalize_run_artifacts(
-            run_id=run_id,
-            status_payload=self._get_run_status_payload_json(run_id),
-        )
+        try:
+            await self._artifacts.finalize_run_artifacts(
+                run_id=run_id,
+                status_payload=self._get_run_status_payload_json(run_id),
+            )
+        except Exception:
+            self._logger.exception("simulator.run.stop_finalize_artifacts_failed run_id=%s", run_id)
+
         return self._run_to_status(run)
 
     async def restart(self, run_id: str) -> RunStatus:

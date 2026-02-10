@@ -38,7 +38,19 @@ if (-not $RunId) {
     if (-not $ScenarioId) {
         Write-Host "🧭 Selecting scenario..." -ForegroundColor Yellow
         $scenariosResp = Invoke-RestMethod -Uri "$ApiBase/simulator/scenarios" -Headers $headers -Method Get
-        $preferred = $scenariosResp.items | Where-Object { $_.scenario_id -eq "greenfield-village-100" } | Select-Object -First 1
+        # Runtime may filter scenarios via allowlist; prefer an id that is known to be loadable by default.
+        $preferredIds = @(
+            "greenfield-village-100-realistic-v2",
+            "riverside-town-50-realistic-v2",
+            "clearing-demo-10"
+        )
+
+        $preferred = $null
+        foreach ($prefId in $preferredIds) {
+            $preferred = $scenariosResp.items | Where-Object { $_.scenario_id -eq $prefId } | Select-Object -First 1
+            if ($preferred) { break }
+        }
+
         if (-not $preferred) {
             $preferred = $scenariosResp.items | Select-Object -First 1
         }

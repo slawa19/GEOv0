@@ -3,13 +3,13 @@
 Not part of product code. Safe to delete.
 
 Usage (PowerShell):
-  .venv\Scripts\python.exe scripts\_tmp_dump_clearing_plan.py
+  .venv\\Scripts\\python.exe scripts\\_tmp_dump_clearing_plan.py
 
 Env vars:
   GEO_BASE_URL=http://127.0.0.1:18000
   GEO_EQ=UAH
   GEO_INTENSITY=90
-  GEO_SCENARIO=greenfield-village-100
+  GEO_SCENARIO=greenfield-village-100-realistic-v2
   GEO_TIMEOUT_SEC=25
 """
 
@@ -79,7 +79,7 @@ async def _auth_headers(client: httpx.AsyncClient) -> dict[str, str]:
 async def main() -> None:
     base_url = os.getenv("GEO_BASE_URL", "http://127.0.0.1:18000")
     eq = os.getenv("GEO_EQ", "UAH")
-    scenario = os.getenv("GEO_SCENARIO", "greenfield-village-100")
+    scenario = os.getenv("GEO_SCENARIO", "greenfield-village-100-realistic-v2")
     intensity = int(os.getenv("GEO_INTENSITY", "90"))
     timeout_sec = float(os.getenv("GEO_TIMEOUT_SEC", "25"))
 

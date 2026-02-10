@@ -547,12 +547,23 @@ class PaymentService:
                 )
             raise TimeoutException("Payment timed out")
 
-        # Refresh tx to get server timestamps (created_at/updated_at)
-        tx = await self.session.get(Transaction, tx_uuid)
-        created_at = tx.created_at if tx else None
+        # Fetch server timestamps (created_at/updated_at) explicitly.
+        # IMPORTANT: with SQLAlchemy AsyncSession, accessing expired ORM attributes may
+        # trigger implicit IO and raise MissingGreenlet. Avoid relying on identity-map
+        # instances here.
+        created_at = None
         committed_at = None
-        if tx and tx.state == "COMMITTED":
-            committed_at = tx.updated_at
+        tx_row = (
+            await self.session.execute(
+                select(Transaction.state, Transaction.created_at, Transaction.updated_at).where(
+                    Transaction.id == tx_uuid
+                )
+            )
+        ).one_or_none()
+        if tx_row is not None:
+            state, created_at, updated_at = tx_row
+            if state == "COMMITTED":
+                committed_at = updated_at
 
         routes = [
             PaymentRoute(path=path, amount=str(route_amount))

@@ -10,14 +10,14 @@ It:
 - stops the run.
 
 Usage (PowerShell):
-  .venv\Scripts\python.exe scripts\diagnose_simulator_sse.py
+  .venv\\Scripts\\python.exe scripts\\diagnose_simulator_sse.py
 
 Optional env vars:
   GEO_BASE_URL=http://127.0.0.1:18000
   GEO_EQ=UAH
   GEO_DURATION_SEC=8
   GEO_INTENSITY=90
-  GEO_SCENARIO=greenfield-village-100
+  GEO_SCENARIO=greenfield-village-100-realistic-v2
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ async def main() -> None:
     eq = os.getenv("GEO_EQ", "UAH")
     duration_sec = float(os.getenv("GEO_DURATION_SEC", "8") or "8")
     intensity = _env_int("GEO_INTENSITY", 90)
-    scenario = os.getenv("GEO_SCENARIO", "greenfield-village-100")
+    scenario = os.getenv("GEO_SCENARIO", "greenfield-village-100-realistic-v2")
 
     timeout = httpx.Timeout(10.0, connect=5.0)
     async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:

@@ -34,8 +34,13 @@ docker-compose.override.yaml
 # Local DB artifacts
 # =========================
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
+
+# pytest local sqlite artifacts (should never be committed)
+.pytest_geov0.db*
 
 # Allow committed test data/fixtures if the project ever stores them as DB files
 !fixtures/**/*.db

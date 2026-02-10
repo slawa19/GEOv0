@@ -244,22 +244,33 @@ class _SimulatorRuntimeBase:
             self._is_shutting_down = True
             run_ids = list(self._runs.keys())
 
-        # Stop runs sequentially to avoid amplifying load on shutdown.
-        for run_id in run_ids:
-            try:
-                await self.stop(run_id)
-            except Exception:
-                logger.exception(
-                    "simulator.runtime.shutdown_stop_failed run_id=%s", run_id
-                )
-
-        # Ensure subscriptions are cleared even if individual streams didn't unsubscribe.
-        with self._lock:
-            for run in self._runs.values():
+        try:
+            # Stop runs sequentially to avoid amplifying load on shutdown.
+            for run_id in run_ids:
                 try:
-                    run._subs.clear()
+                    await self.stop(run_id)
                 except Exception:
-                    pass
+                    logger.exception(
+                        "simulator.runtime.shutdown_stop_failed run_id=%s", run_id
+                    )
+
+            # Ensure subscriptions are cleared even if individual streams didn't unsubscribe.
+            with self._lock:
+                for run in self._runs.values():
+                    try:
+                        run._subs.clear()
+                    except Exception:
+                        pass
+
+                # IMPORTANT (pytest): runtime is a process-wide singleton. FastAPI lifespan
+                # may be started/stopped multiple times within one test process.
+                # Clear run state so the next lifespan can create runs again.
+                self._runs.clear()
+                self._active_run_id = None
+        finally:
+            # Allow re-use after graceful shutdown completes.
+            with self._lock:
+                self._is_shutting_down = False
 
     def is_sse_strict_replay_enabled(self) -> bool:
         return self._sse_strict_replay

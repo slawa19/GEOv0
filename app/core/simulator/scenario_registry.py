@@ -142,6 +142,10 @@ class ScenarioRegistry:
         for child in sorted(self._fixtures_dir.iterdir()):
             if not child.is_dir():
                 continue
+            # Guardrail: ignore archived / private dirs (e.g. `_archive/`).
+            # Runtime only treats top-level `*/scenario.json` as loadable fixtures.
+            if child.name.startswith("_"):
+                continue
             scenario_path = child / "scenario.json"
             if not scenario_path.exists():
                 continue

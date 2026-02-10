@@ -37,7 +37,12 @@ function parseArgs(argv) {
   return out
 }
 
-function allowedSeedIds() {
+function allowedAdminSeedIds() {
+  // IMPORTANT:
+  // - This validator checks **Admin UI fixtures** (admin-fixtures/* → admin-ui/public/admin-fixtures/*).
+  // - `seed_id` here refers to the **admin-fixtures seed pack id**, NOT a simulator `scenario_id`.
+  // - Legacy seeds can still be valid inputs for admin fixtures even if simulator runtime no longer loads
+  //   archived simulator scenarios.
   return ['greenfield-village-100', 'riverside-town-50', 'greenfield-village-100-v2', 'riverside-town-50-v2']
 }
 
@@ -192,7 +197,7 @@ function validateMeta(meta, label) {
   assert(typeof meta.seed_id === 'string' && meta.seed_id.length > 0, `${label} _meta.json.seed_id must be string`)
   assert(typeof meta.generator === 'string' && meta.generator.length > 0, `${label} _meta.json.generator must be string`)
 
-  const allowed = new Set(allowedSeedIds())
+  const allowed = new Set(allowedAdminSeedIds())
   assert(
     allowed.has(meta.seed_id),
     `${label} seed_id must be one of ${JSON.stringify(Array.from(allowed).sort())}. Got ${JSON.stringify(meta.seed_id)}.`,

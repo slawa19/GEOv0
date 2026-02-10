@@ -49,8 +49,5 @@
       "label": "manual_mode",
       "description": "Сценарий для ручной демонстрации клиринга. Автоплатежи отключаются установкой intensity_percent=0. Создавайте долги вручную и запускайте clearing_once."
     }
-  ],
-  "settings": {
-    "warmup": { "ticks": 0, "floor": 1.0 }
-  }
+  ]
 }
