@@ -146,7 +146,7 @@
               "minimum": 0,
               "maximum": 1,
               "default": 0.15,
-              "description": "Bonus probability for reciprocal payments (A→B more likely if B→A recently happened)"
+              "description": "Virtual reciprocity bonus as a limit multiplier: if reverse debt exists, effective limit is multiplied by (1 + reciprocity_bonus). Does not persist to DB."
             }
           }
         }
@@ -310,7 +310,7 @@
             "name": { "type": "string" },
             "type": {
               "type": "string",
-              "enum": ["person", "business", "hub", "household"]
+              "enum": ["person", "business", "hub"]
             },
             "status": { "type": "string", "default": "active" },
             "groupId": { "type": "string" },
@@ -412,12 +412,12 @@
         "from": {
           "type": "string",
           "minLength": 1,
-          "description": "PID of the debtor"
+          "description": "PID of the creditor"
         },
         "to": {
           "type": "string",
           "minLength": 1,
-          "description": "PID of the creditor"
+          "description": "PID of the debtor"
         },
         "equivalent": {
           "type": "string",

@@ -223,13 +223,10 @@ class TestWarmupRamp:
         assert len(planned_none) > 0, "Should produce actions without warmup"
 
     def test_warmup_floor_clamp(self) -> None:
-        """floor=0.0 is clamped to 0.1 by the ``or 0.1`` safety guard.
+        """floor=0.0 must be accepted as an explicit value.
 
-        The code uses ``float(warmup_cfg.get("floor", 0.1) or 0.1)``
-        which treats 0.0 (falsy) as missing and falls back to 0.1.
-        At tick_index=0:  ramp_factor = 0.1 + 0.9 * 0 = 0.1
-        target_actions = max(1, int(50 * 0.1)) = 5
-        So floor=0.0 behaves identically to floor=0.1 (safety clamp).
+        At tick_index=0: ramp_factor = 0.0 + 1.0 * 0 = 0.0
+        intensity becomes 0.0, therefore target_actions becomes 0.
         """
         runner = _runner(actions_per_tick_max=50)
 
@@ -242,18 +239,13 @@ class TestWarmupRamp:
         planned_zero = runner._plan_real_payments(run_z, scenario_zero)
         planned_point1 = runner._plan_real_payments(run_p, scenario_point1)
 
-        # floor=0.0 is clamped to 0.1, so both produce the same result.
-        assert len(planned_zero) == len(planned_point1), (
-            f"floor=0.0 should be clamped to 0.1: "
-            f"got {len(planned_zero)} vs {len(planned_point1)}"
+        assert len(planned_zero) == 0, (
+            f"floor=0.0 at tick 0 should produce 0 actions, got {len(planned_zero)}"
         )
-        # Both should produce ≤ 5 actions (target_actions = max(1, int(50*0.1)) = 5).
-        assert len(planned_zero) <= 5, (
-            f"floor=0.0 (clamped 0.1) at tick 0 should produce ≤ 5 actions, "
-            f"got {len(planned_zero)}"
-        )
-        assert len(planned_zero) >= 1, (
-            "floor clamp should produce at least 1 action (min 1 guard)"
+
+        # floor=0.1 at tick 0 yields ramp_factor=0.1 -> ≤ 5 actions (max(1,int(50*0.1)) = 5)
+        assert 1 <= len(planned_point1) <= 5, (
+            f"floor=0.1 at tick 0 should produce 1..5 actions, got {len(planned_point1)}"
         )
 
 

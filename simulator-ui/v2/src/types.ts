@@ -53,6 +53,7 @@ export type NodePatch = {
 export type EdgePatch = {
   source: string
   target: string
+  trust_limit?: string | number
   used?: string | number
   available?: string | number
   viz_color_key?: string | null

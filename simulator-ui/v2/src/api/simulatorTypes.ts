@@ -1,4 +1,4 @@
-import type { GraphSnapshot, TxUpdatedEvent, ClearingPlanEvent, ClearingDoneEvent } from '../types'
+import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingPlanEvent, ClearingDoneEvent } from '../types'
 
 export type SimulatorMode = 'fixtures' | 'real'
 
@@ -134,8 +134,14 @@ export type TopologyChangedEdgeRef = {
 export type TopologyChangedPayload = {
   added_nodes: TopologyChangedNodeRef[]
   removed_nodes: string[]
+  frozen_nodes?: string[]
   added_edges: TopologyChangedEdgeRef[]
   removed_edges: TopologyChangedEdgeRef[]
+  frozen_edges?: TopologyChangedEdgeRef[]
+
+  // Optional patches to update the graph without full snapshot refresh.
+  node_patch?: NodePatch[]
+  edge_patch?: EdgePatch[]
 }
 
 export type TopologyChangedEvent = {
@@ -144,6 +150,7 @@ export type TopologyChangedEvent = {
   type: 'topology.changed'
   equivalent: string
   payload: TopologyChangedPayload
+  reason?: string
 }
 
 export type SimulatorEvent =

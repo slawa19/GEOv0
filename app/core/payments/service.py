@@ -8,6 +8,7 @@ from typing import List, Literal
 
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
@@ -33,7 +34,7 @@ from app.utils.exceptions import (
     RoutingException,
     TimeoutException,
 )
-from app.utils.validation import validate_equivalent_code, validate_idempotency_key
+from app.utils.validation import validate_equivalent_code, validate_tx_id
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,11 @@ class PaymentService:
           in-process code.
         """
 
+        # Internal-only path: tx_id is generated in-process (or derived from idempotency_key)
+        # because no external caller is responsible for retries here.
+        tx_id = (idempotency_key or "").strip() or str(uuid.uuid4())
         req = PaymentCreateRequest(
+            tx_id=tx_id,
             to=to_pid,
             equivalent=equivalent,
             amount=amount,
@@ -140,77 +145,8 @@ class PaymentService:
 
         validate_equivalent_code(request.equivalent)
 
-        # Optional idempotency: if provided, return the existing transaction result.
-        request_fingerprint = None
-        normalized_idempotency_key = None
-        if idempotency_key is not None:
-            normalized_idempotency_key = validate_idempotency_key(idempotency_key)
-            fp_payload: dict = {
-                "to": request.to,
-                "equivalent": request.equivalent,
-                "amount": request.amount,
-            }
-            if request.description is not None:
-                fp_payload["description"] = request.description
-            if request.constraints is not None:
-                fp_payload["constraints"] = request.constraints.model_dump(
-                    exclude_unset=True
-                )
-
-            request_fingerprint = hashlib.sha256(canonical_json(fp_payload)).hexdigest()
-
-            existing_tx = (
-                await self.session.execute(
-                    select(Transaction).where(
-                        Transaction.initiator_id == sender_id,
-                        Transaction.type == "PAYMENT",
-                        Transaction.idempotency_key == normalized_idempotency_key,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing_tx is not None:
-                existing_payload = existing_tx.payload or {}
-                existing_fp = (existing_payload.get("idempotency") or {}).get(
-                    "fingerprint"
-                )
-                if (
-                    existing_fp is not None
-                    and request_fingerprint is not None
-                    and existing_fp != request_fingerprint
-                ):
-                    raise ConflictException(
-                        "Idempotency-Key already used for a different request"
-                    )
-
-                if existing_tx.state in {
-                    "NEW",
-                    "ROUTED",
-                    "PREPARE_IN_PROGRESS",
-                    "PREPARED",
-                    "PROPOSED",
-                    "WAITING",
-                }:
-                    try:
-                        from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                        PAYMENT_EVENTS_TOTAL.labels(
-                            event="create", result="conflict_in_progress"
-                        ).inc()
-                    except Exception:
-                        pass
-                    raise ConflictException(
-                        "Payment with same Idempotency-Key is in progress"
-                    )
-
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(
-                        event="create", result="idempotent_hit"
-                    ).inc()
-                except Exception:
-                    pass
-                return self._tx_to_payment_result(existing_tx)
+        # Mandatory idempotency key (client-generated).
+        tx_id_str = validate_tx_id(request.tx_id)
 
         # 1. Validation
         sender = await self.session.get(Participant, sender_id)
@@ -272,22 +208,23 @@ class PaymentService:
                 pass
             raise NotFoundException(f"Equivalent {request.equivalent} not found")
 
+        # Signature payload (canonical JSON) is part of the API contract for MVP.
+        # IMPORTANT: it must include tx_id and must exclude the `signature` field itself.
+        payload: dict = {
+            "tx_id": tx_id_str,
+            "to": request.to,
+            "equivalent": request.equivalent,
+            "amount": request.amount,
+        }
+        if request.description is not None:
+            payload["description"] = request.description
+        if request.constraints is not None:
+            payload["constraints"] = request.constraints.model_dump(exclude_unset=True)
+
+        message = canonical_json(payload)
+
         if require_signature:
             # Signature validation (proof-of-possession + binding of request fields).
-            # Canonical message is part of the API contract for MVP.
-            payload: dict = {
-                "to": request.to,
-                "equivalent": request.equivalent,
-                "amount": request.amount,
-            }
-            if request.description is not None:
-                payload["description"] = request.description
-            if request.constraints is not None:
-                payload["constraints"] = request.constraints.model_dump(
-                    exclude_unset=True
-                )
-
-            message = canonical_json(payload)
             try:
                 verify_signature(sender.public_key, message, request.signature)
             except Exception:
@@ -301,9 +238,54 @@ class PaymentService:
                     pass
                 raise InvalidSignatureException("Invalid signature")
 
+        # Idempotency: same tx_id + same canonical payload => return same result.
+        # same tx_id + different canonical payload => 409.
+        request_fingerprint = hashlib.sha256(message).hexdigest()
+        existing_tx = (
+            await self.session.execute(
+                select(Transaction).where(
+                    Transaction.tx_id == tx_id_str,
+                    Transaction.type == "PAYMENT",
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_tx is not None:
+            if existing_tx.initiator_id != sender_id:
+                raise ConflictException("tx_id already used")
+
+            existing_payload = existing_tx.payload or {}
+            existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
+            if existing_fp is not None and existing_fp != request_fingerprint:
+                raise ConflictException("tx_id already used for a different request")
+
+            if existing_tx.state in {
+                "NEW",
+                "ROUTED",
+                "PREPARE_IN_PROGRESS",
+                "PREPARED",
+                "PROPOSED",
+                "WAITING",
+            }:
+                try:
+                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                    PAYMENT_EVENTS_TOTAL.labels(
+                        event="create", result="conflict_in_progress"
+                    ).inc()
+                except Exception:
+                    pass
+                raise ConflictException("Payment with same tx_id is in progress")
+
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="create", result="idempotent_hit").inc()
+            except Exception:
+                pass
+            return self._tx_to_payment_result(existing_tx)
+
         # 2. Routing
         tx_uuid = uuid.uuid4()
-        tx_id_str = str(tx_uuid)
         tx_persisted = False
 
         routing_timeout_s = (
@@ -372,7 +354,8 @@ class PaymentService:
                 new_tx = Transaction(
                     id=tx_uuid,
                     tx_id=tx_id_str,
-                    idempotency_key=normalized_idempotency_key,
+                    # Legacy header is ignored for new requests; tx_id is the single source of truth.
+                    idempotency_key=None,
                     type="PAYMENT",
                     initiator_id=sender.id,
                     payload={
@@ -381,23 +364,41 @@ class PaymentService:
                         "amount": str(amount),
                         "equivalent": equivalent.code,
                         "routes": routes_payload,
-                        "idempotency": (
-                            {
-                                "key": normalized_idempotency_key,
-                                "fingerprint": request_fingerprint,
-                            }
-                            if normalized_idempotency_key is not None
-                            and request_fingerprint is not None
-                            else None
-                        ),
+                        "idempotency": {
+                            "key": tx_id_str,
+                            "fingerprint": request_fingerprint,
+                        },
                     },
                     state="NEW",
                 )
                 self.session.add(new_tx)
-                if commit:
-                    await self.session.commit()
-                else:
-                    await self.session.flush()
+                try:
+                    if commit:
+                        await self.session.commit()
+                    else:
+                        await self.session.flush()
+                except IntegrityError:
+                    # tx_id is globally unique; handle race by re-loading and applying idempotency rules.
+                    await self.session.rollback()
+                    existing_tx = (
+                        await self.session.execute(
+                            select(Transaction).where(
+                                Transaction.tx_id == tx_id_str,
+                                Transaction.type == "PAYMENT",
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if existing_tx is not None:
+                        existing_payload = existing_tx.payload or {}
+                        existing_fp = (existing_payload.get("idempotency") or {}).get(
+                            "fingerprint"
+                        )
+                        if existing_fp is not None and existing_fp != request_fingerprint:
+                            raise ConflictException(
+                                "tx_id already used for a different request"
+                            )
+                        return self._tx_to_payment_result(existing_tx)
+                    raise
                 tx_persisted = True
 
                 # 4. Engine Prepare

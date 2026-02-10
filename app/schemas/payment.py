@@ -37,6 +37,7 @@ class PaymentConstraints(BaseModel):
     avoid: Optional[List[str]] = None
 
 class PaymentCreateRequest(BaseModel):
+    tx_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")
     to: str
     equivalent: str
     amount: str

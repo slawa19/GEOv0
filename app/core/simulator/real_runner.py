@@ -21,6 +21,7 @@ from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
+from app.core.simulator import viz_rules
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import EdgeClearingHistory, RunRecord, TrustDriftConfig
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
@@ -205,8 +206,8 @@ class RealRunner:
         self._real_amount_cap_limit = _safe_optional_decimal_env(
             "SIMULATOR_REAL_AMOUNT_CAP"
         )
-        self._real_enable_inject = bool(
-            _safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0)
+        self._real_enable_inject = (
+            int(_safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0)) >= 1
         )
 
         # Cache env-derived throttling knobs (avoid getenv on every tick).
@@ -369,637 +370,695 @@ class RealRunner:
                 continue
 
             if evt_type == "inject":
-                if not self._real_enable_inject:
-                    self._artifacts.enqueue_event_artifact(
-                        run_id,
-                        {
-                            "type": "note",
-                            "ts": self._utc_now().isoformat(),
-                            "sim_time_ms": int(run.sim_time_ms),
-                            "tick_index": int(run.tick_index),
-                            "scenario": {
-                                "event_index": int(idx),
-                                "time": t0,
-                                "description": "inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)",
-                            },
-                        },
-                    )
-                    run._real_fired_scenario_event_indexes.add(idx)
-                    continue
-
-                effects = (evt or {}).get("effects")
-                if not isinstance(effects, list) or not effects:
-                    run._real_fired_scenario_event_indexes.add(idx)
-                    continue
-
-                max_edges = 500
-                max_total_amount: Decimal | None = None
-                try:
-                    md = (evt or {}).get("metadata")
-                    if isinstance(md, dict) and md.get("max_total_amount") is not None:
-                        max_total_amount = Decimal(str(md.get("max_total_amount")))
-                except Exception:
-                    max_total_amount = None
-                if max_total_amount is not None and max_total_amount <= 0:
-                    max_total_amount = None
-
-                applied = 0
-                skipped = 0
-                total_applied = Decimal("0")
-
-                # Resolve equivalents lazily.
-                eq_id_by_code: dict[str, uuid.UUID] = {}
-
-                # Track new entities for cache invalidation after commit.
-                _affected_equivalents: set[str] = set()
-                _new_participants_for_cache: list[tuple[uuid.UUID, str]] = []
-                _new_participants_for_scenario: list[dict[str, Any]] = []
-                _new_trustlines_for_scenario: list[dict[str, Any]] = []
-                _frozen_participant_pids: list[str] = []
-
-                async def _resolve_eq_id(eq_code: str) -> uuid.UUID | None:
-                    """Lazily resolve equivalent code → UUID from DB."""
-                    eq_upper = eq_code.strip().upper()
-                    cached = eq_id_by_code.get(eq_upper)
-                    if cached is not None:
-                        return cached
-                    row = (
-                        await session.execute(
-                            select(Equivalent.id).where(Equivalent.code == eq_upper)
-                        )
-                    ).scalar_one_or_none()
-                    if row is not None:
-                        eq_id_by_code[eq_upper] = row
-                    return row
-
-                _default_tl_policy = {
-                    "auto_clearing": True,
-                    "can_be_intermediate": True,
-                    "max_hop_usage": None,
-                    "daily_limit": None,
-                    "blocked_participants": [],
-                }
-
-                for eff in effects[:max_edges]:
-                    if not isinstance(eff, dict):
-                        skipped += 1
-                        continue
-
-                    op = str(eff.get("op") or "").strip()
-
-                    # ----------------------------------------------------------
-                    # op: inject_debt (existing behaviour)
-                    # ----------------------------------------------------------
-                    if op == "inject_debt":
-                        eq = str(eff.get("equivalent") or "").strip().upper()
-                        debtor_pid = str(eff.get("debtor") or "").strip()
-                        creditor_pid = str(eff.get("creditor") or "").strip()
-                        if not eq or not debtor_pid or not creditor_pid:
-                            skipped += 1
-                            continue
-
-                        try:
-                            amount = Decimal(str(eff.get("amount")))
-                            amount = amount.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-                        except Exception:
-                            skipped += 1
-                            continue
-                        if amount <= 0:
-                            skipped += 1
-                            continue
-
-                        if (
-                            max_total_amount is not None
-                            and total_applied + amount > max_total_amount
-                        ):
-                            skipped += 1
-                            continue
-
-                        debtor_id = pid_to_participant_id.get(debtor_pid)
-                        creditor_id = pid_to_participant_id.get(creditor_pid)
-                        if debtor_id is None or creditor_id is None:
-                            skipped += 1
-                            continue
-
-                        eq_id = await _resolve_eq_id(eq)
-                        if eq_id is None:
-                            skipped += 1
-                            continue
-
-                        tl = (
-                            await session.execute(
-                                select(TrustLine.limit, TrustLine.status).where(
-                                    TrustLine.from_participant_id == creditor_id,
-                                    TrustLine.to_participant_id == debtor_id,
-                                    TrustLine.equivalent_id == eq_id,
-                                )
-                            )
-                        ).one_or_none()
-                        if tl is None:
-                            skipped += 1
-                            continue
-                        tl_limit, tl_status = tl
-                        if str(tl_status or "").strip().lower() != "active":
-                            skipped += 1
-                            continue
-                        try:
-                            tl_limit_amt = Decimal(str(tl_limit))
-                        except Exception:
-                            skipped += 1
-                            continue
-                        if tl_limit_amt <= 0:
-                            skipped += 1
-                            continue
-
-                        existing = (
-                            await session.execute(
-                                select(Debt).where(
-                                    Debt.debtor_id == debtor_id,
-                                    Debt.creditor_id == creditor_id,
-                                    Debt.equivalent_id == eq_id,
-                                )
-                            )
-                        ).scalar_one_or_none()
-
-                        if existing is None:
-                            new_amt = amount
-                            if new_amt > tl_limit_amt:
-                                skipped += 1
-                                continue
-                            session.add(
-                                Debt(
-                                    debtor_id=debtor_id,
-                                    creditor_id=creditor_id,
-                                    equivalent_id=eq_id,
-                                    amount=new_amt,
-                                )
-                            )
-                        else:
-                            new_amt = (Decimal(str(existing.amount)) + amount).quantize(
-                                Decimal("0.01"), rounding=ROUND_DOWN
-                            )
-                            if new_amt > tl_limit_amt:
-                                skipped += 1
-                                continue
-                            existing.amount = new_amt
-
-                        applied += 1
-                        total_applied += amount
-                        continue
-
-                    # ----------------------------------------------------------
-                    # op: add_participant  (Phase 3 — Network Growth)
-                    # ----------------------------------------------------------
-                    if op == "add_participant":
-                        try:
-                            p_data = eff.get("participant")
-                            if not isinstance(p_data, dict):
-                                self._logger.warning(
-                                    "simulator.real.inject.add_participant: missing participant dict"
-                                )
-                                skipped += 1
-                                continue
-
-                            pid = str(p_data.get("id") or "").strip()
-                            if not pid:
-                                skipped += 1
-                                continue
-
-                            # Idempotency: skip if participant already exists.
-                            existing_p = (
-                                await session.execute(
-                                    select(Participant.id).where(Participant.pid == pid)
-                                )
-                            ).scalar_one_or_none()
-                            if existing_p is not None:
-                                self._logger.info(
-                                    "simulator.real.inject.add_participant.skip_exists pid=%s",
-                                    pid,
-                                )
-                                skipped += 1
-                                continue
-
-                            name = str(p_data.get("name") or pid)
-                            p_type = str(p_data.get("type") or "person").strip()
-                            if p_type not in {"person", "business", "hub"}:
-                                p_type = "person"
-                            status = str(p_data.get("status") or "active").strip().lower()
-                            if status not in {"active", "suspended", "left", "deleted"}:
-                                status = "active"
-                            public_key = hashlib.sha256(pid.encode("utf-8")).hexdigest()
-
-                            new_p = Participant(
-                                pid=pid,
-                                display_name=name,
-                                public_key=public_key,
-                                type=p_type,
-                                status=status,
-                                profile={},
-                            )
-                            session.add(new_p)
-                            await session.flush()  # materialise new_p.id
-
-                            _new_participants_for_cache.append((new_p.id, pid))
-                            _new_participants_for_scenario.append({
-                                "id": pid,
-                                "name": name,
-                                "type": p_type,
-                                "status": status,
-                                "groupId": str(p_data.get("groupId") or ""),
-                                "behaviorProfileId": str(
-                                    p_data.get("behaviorProfileId") or ""
-                                ),
-                            })
-                            pid_to_participant_id[pid] = new_p.id
-
-                            # Create initial trustlines (sponsor ↔ new participant).
-                            initial_tls = eff.get("initial_trustlines")
-                            if isinstance(initial_tls, list):
-                                for itl in initial_tls:
-                                    if not isinstance(itl, dict):
-                                        continue
-                                    sponsor_pid = str(itl.get("sponsor") or "").strip()
-                                    eq_code = str(
-                                        itl.get("equivalent") or ""
-                                    ).strip().upper()
-                                    raw_limit = itl.get("limit")
-                                    direction = str(
-                                        itl.get("direction") or "sponsor_credits_new"
-                                    ).strip()
-
-                                    if not sponsor_pid or not eq_code:
-                                        continue
-                                    try:
-                                        tl_limit_val = Decimal(str(raw_limit))
-                                    except Exception:
-                                        continue
-                                    if tl_limit_val <= 0:
-                                        continue
-
-                                    # Resolve sponsor participant ID.
-                                    sponsor_id = pid_to_participant_id.get(sponsor_pid)
-                                    if sponsor_id is None:
-                                        sponsor_row = (
-                                            await session.execute(
-                                                select(Participant.id).where(
-                                                    Participant.pid == sponsor_pid
-                                                )
-                                            )
-                                        ).scalar_one_or_none()
-                                        if sponsor_row is None:
-                                            self._logger.warning(
-                                                "simulator.real.inject.add_participant"
-                                                ".sponsor_not_found sponsor=%s",
-                                                sponsor_pid,
-                                            )
-                                            continue
-                                        sponsor_id = sponsor_row
-                                        pid_to_participant_id[sponsor_pid] = sponsor_id
-
-                                    eq_id = await _resolve_eq_id(eq_code)
-                                    if eq_id is None:
-                                        continue
-
-                                    # Determine trustline direction.
-                                    if direction == "sponsor_credits_new":
-                                        from_id = sponsor_id
-                                        to_id = new_p.id
-                                        from_pid_str = sponsor_pid
-                                        to_pid_str = pid
-                                    else:
-                                        from_id = new_p.id
-                                        to_id = sponsor_id
-                                        from_pid_str = pid
-                                        to_pid_str = sponsor_pid
-
-                                    # Idempotency: skip if trustline already exists.
-                                    existing_tl = (
-                                        await session.execute(
-                                            select(TrustLine.id).where(
-                                                TrustLine.from_participant_id == from_id,
-                                                TrustLine.to_participant_id == to_id,
-                                                TrustLine.equivalent_id == eq_id,
-                                            )
-                                        )
-                                    ).scalar_one_or_none()
-                                    if existing_tl is not None:
-                                        continue
-
-                                    session.add(
-                                        TrustLine(
-                                            from_participant_id=from_id,
-                                            to_participant_id=to_id,
-                                            equivalent_id=eq_id,
-                                            limit=tl_limit_val,
-                                            status="active",
-                                            policy=dict(_default_tl_policy),
-                                        )
-                                    )
-                                    _affected_equivalents.add(eq_code)
-                                    _new_trustlines_for_scenario.append({
-                                        "from": from_pid_str,
-                                        "to": to_pid_str,
-                                        "equivalent": eq_code,
-                                        "limit": str(tl_limit_val),
-                                        "status": "active",
-                                    })
-
-                            applied += 1
-                        except Exception as exc:
-                            self._logger.warning(
-                                "simulator.real.inject.add_participant.error: %s",
-                                exc,
-                                exc_info=True,
-                            )
-                            skipped += 1
-                        continue
-
-                    # ----------------------------------------------------------
-                    # op: create_trustline  (Phase 3 — Network Growth)
-                    # ----------------------------------------------------------
-                    if op == "create_trustline":
-                        try:
-                            from_pid_val = str(eff.get("from") or "").strip()
-                            to_pid_val = str(eff.get("to") or "").strip()
-                            eq_code = str(
-                                eff.get("equivalent") or ""
-                            ).strip().upper()
-                            raw_limit = eff.get("limit")
-
-                            if not from_pid_val or not to_pid_val or not eq_code:
-                                skipped += 1
-                                continue
-
-                            try:
-                                tl_limit_val = Decimal(str(raw_limit))
-                            except Exception:
-                                skipped += 1
-                                continue
-                            if tl_limit_val <= 0:
-                                skipped += 1
-                                continue
-
-                            # Resolve participant IDs.
-                            from_id = pid_to_participant_id.get(from_pid_val)
-                            if from_id is None:
-                                row = (
-                                    await session.execute(
-                                        select(Participant.id).where(
-                                            Participant.pid == from_pid_val
-                                        )
-                                    )
-                                ).scalar_one_or_none()
-                                if row is None:
-                                    self._logger.warning(
-                                        "simulator.real.inject.create_trustline"
-                                        ".from_not_found pid=%s",
-                                        from_pid_val,
-                                    )
-                                    skipped += 1
-                                    continue
-                                from_id = row
-                                pid_to_participant_id[from_pid_val] = from_id
-
-                            to_id = pid_to_participant_id.get(to_pid_val)
-                            if to_id is None:
-                                row = (
-                                    await session.execute(
-                                        select(Participant.id).where(
-                                            Participant.pid == to_pid_val
-                                        )
-                                    )
-                                ).scalar_one_or_none()
-                                if row is None:
-                                    self._logger.warning(
-                                        "simulator.real.inject.create_trustline"
-                                        ".to_not_found pid=%s",
-                                        to_pid_val,
-                                    )
-                                    skipped += 1
-                                    continue
-                                to_id = row
-                                pid_to_participant_id[to_pid_val] = to_id
-
-                            eq_id = await _resolve_eq_id(eq_code)
-                            if eq_id is None:
-                                skipped += 1
-                                continue
-
-                            # Idempotency: skip if trustline already exists.
-                            existing_tl = (
-                                await session.execute(
-                                    select(TrustLine.id).where(
-                                        TrustLine.from_participant_id == from_id,
-                                        TrustLine.to_participant_id == to_id,
-                                        TrustLine.equivalent_id == eq_id,
-                                    )
-                                )
-                            ).scalar_one_or_none()
-                            if existing_tl is not None:
-                                self._logger.info(
-                                    "simulator.real.inject.create_trustline"
-                                    ".skip_exists from=%s to=%s eq=%s",
-                                    from_pid_val,
-                                    to_pid_val,
-                                    eq_code,
-                                )
-                                skipped += 1
-                                continue
-
-                            session.add(
-                                TrustLine(
-                                    from_participant_id=from_id,
-                                    to_participant_id=to_id,
-                                    equivalent_id=eq_id,
-                                    limit=tl_limit_val,
-                                    status="active",
-                                    policy=dict(_default_tl_policy),
-                                )
-                            )
-                            _affected_equivalents.add(eq_code)
-                            _new_trustlines_for_scenario.append({
-                                "from": from_pid_val,
-                                "to": to_pid_val,
-                                "equivalent": eq_code,
-                                "limit": str(tl_limit_val),
-                                "status": "active",
-                            })
-                            applied += 1
-                        except Exception as exc:
-                            self._logger.warning(
-                                "simulator.real.inject.create_trustline.error: %s",
-                                exc,
-                                exc_info=True,
-                            )
-                            skipped += 1
-                        continue
-
-                    # ----------------------------------------------------------
-                    # op: freeze_participant  (Phase 3 — Network Growth)
-                    # ----------------------------------------------------------
-                    if op == "freeze_participant":
-                        try:
-                            freeze_pid = str(
-                                eff.get("participant_id") or ""
-                            ).strip()
-                            freeze_tls = bool(eff.get("freeze_trustlines", True))
-
-                            if not freeze_pid:
-                                skipped += 1
-                                continue
-
-                            # Update participant status → suspended.
-                            p_row = (
-                                await session.execute(
-                                    select(Participant).where(
-                                        Participant.pid == freeze_pid
-                                    )
-                                )
-                            ).scalar_one_or_none()
-                            if p_row is None:
-                                self._logger.warning(
-                                    "simulator.real.inject.freeze_participant"
-                                    ".not_found pid=%s",
-                                    freeze_pid,
-                                )
-                                skipped += 1
-                                continue
-
-                            if p_row.status == "suspended":
-                                self._logger.info(
-                                    "simulator.real.inject.freeze_participant"
-                                    ".already_suspended pid=%s",
-                                    freeze_pid,
-                                )
-                                skipped += 1
-                                continue
-
-                            p_row.status = "suspended"
-
-                            if freeze_tls:
-                                incident_tls = (
-                                    await session.execute(
-                                        select(TrustLine).where(
-                                            or_(
-                                                TrustLine.from_participant_id == p_row.id,
-                                                TrustLine.to_participant_id == p_row.id,
-                                            ),
-                                            TrustLine.status == "active",
-                                        )
-                                    )
-                                ).scalars().all()
-                                for frozen_tl in incident_tls:
-                                    frozen_tl.status = "frozen"
-
-                            # Invalidate all known equivalents (best-effort).
-                            if run._real_equivalents:
-                                for eq_str in run._real_equivalents:
-                                    _affected_equivalents.add(
-                                        eq_str.strip().upper()
-                                    )
-
-                            _frozen_participant_pids.append(freeze_pid)
-                            applied += 1
-                        except Exception as exc:
-                            self._logger.warning(
-                                "simulator.real.inject.freeze_participant.error: %s",
-                                exc,
-                                exc_info=True,
-                            )
-                            skipped += 1
-                        continue
-
-                    # Unknown inject op — skip silently.
-
-                # ---- commit inject effects --------------------------------
-                try:
-                    await session.commit()
-                except Exception:
-                    await session.rollback()
-                    self._artifacts.enqueue_event_artifact(
-                        run_id,
-                        {
-                            "type": "note",
-                            "ts": self._utc_now().isoformat(),
-                            "sim_time_ms": int(run.sim_time_ms),
-                            "tick_index": int(run.tick_index),
-                            "scenario": {
-                                "event_index": int(idx),
-                                "time": t0,
-                                "description": "inject failed (db error)",
-                            },
-                        },
-                    )
-                    run._real_fired_scenario_event_indexes.add(idx)
-                    continue
-
-                # ---- collect frozen edges before cache invalidation ------
-                _frozen_edges_for_sse: list[dict[str, str]] = []
-                if _frozen_participant_pids:
-                    _frozen_set = set(_frozen_participant_pids)
-                    _s_tls = scenario.get("trustlines")
-                    if isinstance(_s_tls, list):
-                        for _tl in _s_tls:
-                            if not isinstance(_tl, dict):
-                                continue
-                            _frm = str(_tl.get("from") or "").strip()
-                            _to = str(_tl.get("to") or "").strip()
-                            _eq = str(_tl.get("equivalent") or "").strip()
-                            _st = str(_tl.get("status") or "").strip().lower()
-                            if (_frm in _frozen_set or _to in _frozen_set) and _st == "active":
-                                _frozen_edges_for_sse.append({
-                                    "from_pid": _frm,
-                                    "to_pid": _to,
-                                    "equivalent_code": _eq.upper(),
-                                })
-
-                # ---- cache invalidation after successful commit -----------
-                self._invalidate_caches_after_inject(
-                    run=run,
-                    scenario=scenario,
-                    affected_equivalents=_affected_equivalents,
-                    new_participants=_new_participants_for_cache,
-                    new_participants_scenario=_new_participants_for_scenario,
-                    new_trustlines_scenario=_new_trustlines_for_scenario,
-                    frozen_pids=_frozen_participant_pids,
-                )
-
-                # ---- SSE topology.changed (per affected equivalent) -------
-                self._broadcast_topology_changed(
+                await self._apply_inject_event(
+                    session,
                     run_id=run_id,
                     run=run,
-                    affected_equivalents=_affected_equivalents,
-                    new_participants_scenario=_new_participants_for_scenario,
-                    new_trustlines_scenario=_new_trustlines_for_scenario,
-                    frozen_pids=_frozen_participant_pids,
-                    frozen_edges=_frozen_edges_for_sse,
+                    scenario=scenario,
+                    event_index=idx,
+                    event_time_ms=t0,
+                    event=evt,
+                    pid_to_participant_id=pid_to_participant_id,
                 )
-
-                self._artifacts.enqueue_event_artifact(
-                    run_id,
-                    {
-                        "type": "note",
-                        "ts": self._utc_now().isoformat(),
-                        "sim_time_ms": int(run.sim_time_ms),
-                        "tick_index": int(run.tick_index),
-                        "scenario": {
-                            "event_index": int(idx),
-                            "time": t0,
-                            "description": "inject applied",
-                            "stats": {
-                                "applied": int(applied),
-                                "skipped": int(skipped),
-                                "total_amount": format(total_applied, "f"),
-                            },
-                        },
-                    },
-                )
-
-                run._real_fired_scenario_event_indexes.add(idx)
                 continue
 
             # Unknown / unsupported event types are ignored, but we still mark them fired once due.
             run._real_fired_scenario_event_indexes.add(idx)
+
+    async def _apply_inject_event(
+        self,
+        session,
+        *,
+        run_id: str,
+        run: RunRecord,
+        scenario: dict[str, Any],
+        event_index: int,
+        event_time_ms: int,
+        event: dict[str, Any] | None,
+        pid_to_participant_id: dict[str, uuid.UUID],
+    ) -> None:
+        if not self._real_enable_inject:
+            self._artifacts.enqueue_event_artifact(
+                run_id,
+                {
+                    "type": "note",
+                    "ts": self._utc_now().isoformat(),
+                    "sim_time_ms": int(run.sim_time_ms),
+                    "tick_index": int(run.tick_index),
+                    "scenario": {
+                        "event_index": int(event_index),
+                        "time": event_time_ms,
+                        "description": "inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)",
+                    },
+                },
+            )
+            run._real_fired_scenario_event_indexes.add(event_index)
+            return
+
+        effects = (event or {}).get("effects")
+        if not isinstance(effects, list) or not effects:
+            run._real_fired_scenario_event_indexes.add(event_index)
+            return
+
+        max_edges = 500
+        max_total_amount: Decimal | None = None
+        try:
+            md = (event or {}).get("metadata")
+            if isinstance(md, dict) and md.get("max_total_amount") is not None:
+                max_total_amount = Decimal(str(md.get("max_total_amount")))
+        except Exception:
+            max_total_amount = None
+        if max_total_amount is not None and max_total_amount <= 0:
+            max_total_amount = None
+
+        applied = 0
+        skipped = 0
+        total_applied = Decimal("0")
+
+        # Resolve equivalents lazily.
+        eq_id_by_code: dict[str, uuid.UUID] = {}
+
+        # Track new entities for cache invalidation after commit.
+        affected_equivalents: set[str] = set()
+        new_participants_for_cache: list[tuple[uuid.UUID, str]] = []
+        new_participants_for_scenario: list[dict[str, Any]] = []
+        new_trustlines_for_scenario: list[dict[str, Any]] = []
+        frozen_participant_pids: list[str] = []
+        inject_debt_equivalents: set[str] = set()
+        inject_debt_edges_by_eq: dict[str, set[tuple[str, str]]] = {}
+
+        async def resolve_eq_id(eq_code: str) -> uuid.UUID | None:
+            """Lazily resolve equivalent code → UUID from DB."""
+            eq_upper = eq_code.strip().upper()
+            cached = eq_id_by_code.get(eq_upper)
+            if cached is not None:
+                return cached
+            row = (
+                await session.execute(
+                    select(Equivalent.id).where(Equivalent.code == eq_upper)
+                )
+            ).scalar_one_or_none()
+            if row is not None:
+                eq_id_by_code[eq_upper] = row
+            return row
+
+        default_tl_policy = {
+            "auto_clearing": True,
+            "can_be_intermediate": True,
+            "max_hop_usage": None,
+            "daily_limit": None,
+            "blocked_participants": [],
+        }
+
+        async def op_inject_debt(eff: dict[str, Any]) -> bool:
+            nonlocal applied, skipped, total_applied
+
+            eq = str(eff.get("equivalent") or "").strip().upper()
+            # Contract: prefer from/to (creditor->debtor), but keep
+            # backward-compatible debtor/creditor keys.
+            creditor_pid = str(eff.get("creditor") or eff.get("from") or "").strip()
+            debtor_pid = str(eff.get("debtor") or eff.get("to") or "").strip()
+            if not eq or not debtor_pid or not creditor_pid:
+                skipped += 1
+                return False
+
+            try:
+                amount = Decimal(str(eff.get("amount")))
+                amount = amount.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            except Exception:
+                skipped += 1
+                return False
+            if amount <= 0:
+                skipped += 1
+                return False
+
+            if max_total_amount is not None and total_applied + amount > max_total_amount:
+                skipped += 1
+                return False
+
+            debtor_id = pid_to_participant_id.get(debtor_pid)
+            creditor_id = pid_to_participant_id.get(creditor_pid)
+            if debtor_id is None or creditor_id is None:
+                skipped += 1
+                return False
+
+            eq_id = await resolve_eq_id(eq)
+            if eq_id is None:
+                skipped += 1
+                return False
+
+            tl = (
+                await session.execute(
+                    select(TrustLine.limit, TrustLine.status).where(
+                        TrustLine.from_participant_id == creditor_id,
+                        TrustLine.to_participant_id == debtor_id,
+                        TrustLine.equivalent_id == eq_id,
+                    )
+                )
+            ).one_or_none()
+            if tl is None:
+                skipped += 1
+                return False
+            tl_limit, tl_status = tl
+            if str(tl_status or "").strip().lower() != "active":
+                skipped += 1
+                return False
+            try:
+                tl_limit_amt = Decimal(str(tl_limit))
+            except Exception:
+                skipped += 1
+                return False
+            if tl_limit_amt <= 0:
+                skipped += 1
+                return False
+
+            existing = (
+                await session.execute(
+                    select(Debt).where(
+                        Debt.debtor_id == debtor_id,
+                        Debt.creditor_id == creditor_id,
+                        Debt.equivalent_id == eq_id,
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if existing is None:
+                new_amt = amount
+                if new_amt > tl_limit_amt:
+                    skipped += 1
+                    return False
+                session.add(
+                    Debt(
+                        debtor_id=debtor_id,
+                        creditor_id=creditor_id,
+                        equivalent_id=eq_id,
+                        amount=new_amt,
+                    )
+                )
+            else:
+                new_amt = (Decimal(str(existing.amount)) + amount).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+                if new_amt > tl_limit_amt:
+                    skipped += 1
+                    return False
+                existing.amount = new_amt
+
+            applied += 1
+            total_applied += amount
+            affected_equivalents.add(eq)
+            inject_debt_equivalents.add(eq)
+            inject_debt_edges_by_eq.setdefault(eq, set()).add((creditor_pid, debtor_pid))
+            return True
+
+        async def op_add_participant(eff: dict[str, Any]) -> bool:
+            nonlocal applied, skipped
+
+            try:
+                p_data = eff.get("participant")
+                if not isinstance(p_data, dict):
+                    self._logger.warning(
+                        "simulator.real.inject.add_participant: missing participant dict"
+                    )
+                    skipped += 1
+                    return False
+
+                pid = str(p_data.get("id") or "").strip()
+                if not pid:
+                    skipped += 1
+                    return False
+
+                # Idempotency: skip if participant already exists.
+                existing_p = (
+                    await session.execute(
+                        select(Participant.id).where(Participant.pid == pid)
+                    )
+                ).scalar_one_or_none()
+                if existing_p is not None:
+                    self._logger.info(
+                        "simulator.real.inject.add_participant.skip_exists pid=%s",
+                        pid,
+                    )
+                    skipped += 1
+                    return False
+
+                name = str(p_data.get("name") or pid)
+                p_type = str(p_data.get("type") or "person").strip()
+                if p_type not in {"person", "business", "hub"}:
+                    p_type = "person"
+                status = str(p_data.get("status") or "active").strip().lower()
+                if status not in {"active", "suspended", "left", "deleted"}:
+                    status = "active"
+                public_key = hashlib.sha256(pid.encode("utf-8")).hexdigest()
+
+                new_p = Participant(
+                    pid=pid,
+                    display_name=name,
+                    public_key=public_key,
+                    type=p_type,
+                    status=status,
+                    profile={},
+                )
+                session.add(new_p)
+                await session.flush()  # materialise new_p.id
+
+                new_participants_for_cache.append((new_p.id, pid))
+                new_participants_for_scenario.append(
+                    {
+                        "id": pid,
+                        "name": name,
+                        "type": p_type,
+                        "status": status,
+                        "groupId": str(p_data.get("groupId") or ""),
+                        "behaviorProfileId": str(p_data.get("behaviorProfileId") or ""),
+                    }
+                )
+                pid_to_participant_id[pid] = new_p.id
+
+                # Create initial trustlines (sponsor ↔ new participant).
+                initial_tls = eff.get("initial_trustlines")
+                if isinstance(initial_tls, list):
+                    for itl in initial_tls:
+                        if not isinstance(itl, dict):
+                            continue
+                        sponsor_pid = str(itl.get("sponsor") or "").strip()
+                        eq_code = str(itl.get("equivalent") or "").strip().upper()
+                        raw_limit = itl.get("limit")
+                        direction = str(itl.get("direction") or "sponsor_credits_new").strip()
+
+                        if not sponsor_pid or not eq_code:
+                            continue
+                        try:
+                            tl_limit_val = Decimal(str(raw_limit))
+                        except Exception:
+                            continue
+                        if tl_limit_val <= 0:
+                            continue
+
+                        # Resolve sponsor participant ID.
+                        sponsor_id = pid_to_participant_id.get(sponsor_pid)
+                        if sponsor_id is None:
+                            sponsor_row = (
+                                await session.execute(
+                                    select(Participant.id).where(Participant.pid == sponsor_pid)
+                                )
+                            ).scalar_one_or_none()
+                            if sponsor_row is None:
+                                self._logger.warning(
+                                    "simulator.real.inject.add_participant.sponsor_not_found sponsor=%s",
+                                    sponsor_pid,
+                                )
+                                continue
+                            sponsor_id = sponsor_row
+                            pid_to_participant_id[sponsor_pid] = sponsor_id
+
+                        eq_id = await resolve_eq_id(eq_code)
+                        if eq_id is None:
+                            continue
+
+                        # Determine trustline direction.
+                        if direction == "sponsor_credits_new":
+                            from_id = sponsor_id
+                            to_id = new_p.id
+                            from_pid_str = sponsor_pid
+                            to_pid_str = pid
+                        else:
+                            from_id = new_p.id
+                            to_id = sponsor_id
+                            from_pid_str = pid
+                            to_pid_str = sponsor_pid
+
+                        # Idempotency: skip if trustline already exists.
+                        existing_tl = (
+                            await session.execute(
+                                select(TrustLine.id).where(
+                                    TrustLine.from_participant_id == from_id,
+                                    TrustLine.to_participant_id == to_id,
+                                    TrustLine.equivalent_id == eq_id,
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if existing_tl is not None:
+                            continue
+
+                        session.add(
+                            TrustLine(
+                                from_participant_id=from_id,
+                                to_participant_id=to_id,
+                                equivalent_id=eq_id,
+                                limit=tl_limit_val,
+                                status="active",
+                                policy=dict(default_tl_policy),
+                            )
+                        )
+                        affected_equivalents.add(eq_code)
+                        new_trustlines_for_scenario.append(
+                            {
+                                "from": from_pid_str,
+                                "to": to_pid_str,
+                                "equivalent": eq_code,
+                                "limit": str(tl_limit_val),
+                                "status": "active",
+                            }
+                        )
+
+                applied += 1
+                return True
+            except Exception as exc:
+                self._logger.warning(
+                    "simulator.real.inject.add_participant.error: %s",
+                    exc,
+                    exc_info=True,
+                )
+                skipped += 1
+                return False
+
+        async def op_create_trustline(eff: dict[str, Any]) -> bool:
+            nonlocal applied, skipped
+
+            try:
+                from_pid_val = str(eff.get("from") or "").strip()
+                to_pid_val = str(eff.get("to") or "").strip()
+                eq_code = str(eff.get("equivalent") or "").strip().upper()
+                raw_limit = eff.get("limit")
+
+                if not from_pid_val or not to_pid_val or not eq_code:
+                    skipped += 1
+                    return False
+
+                try:
+                    tl_limit_val = Decimal(str(raw_limit))
+                except Exception:
+                    skipped += 1
+                    return False
+                if tl_limit_val <= 0:
+                    skipped += 1
+                    return False
+
+                # Resolve participant IDs.
+                from_id = pid_to_participant_id.get(from_pid_val)
+                if from_id is None:
+                    row = (
+                        await session.execute(
+                            select(Participant.id).where(Participant.pid == from_pid_val)
+                        )
+                    ).scalar_one_or_none()
+                    if row is None:
+                        self._logger.warning(
+                            "simulator.real.inject.create_trustline.from_not_found pid=%s",
+                            from_pid_val,
+                        )
+                        skipped += 1
+                        return False
+                    from_id = row
+                    pid_to_participant_id[from_pid_val] = from_id
+
+                to_id = pid_to_participant_id.get(to_pid_val)
+                if to_id is None:
+                    row = (
+                        await session.execute(
+                            select(Participant.id).where(Participant.pid == to_pid_val)
+                        )
+                    ).scalar_one_or_none()
+                    if row is None:
+                        self._logger.warning(
+                            "simulator.real.inject.create_trustline.to_not_found pid=%s",
+                            to_pid_val,
+                        )
+                        skipped += 1
+                        return False
+                    to_id = row
+                    pid_to_participant_id[to_pid_val] = to_id
+
+                eq_id = await resolve_eq_id(eq_code)
+                if eq_id is None:
+                    skipped += 1
+                    return False
+
+                # Idempotency: skip if trustline already exists.
+                existing_tl = (
+                    await session.execute(
+                        select(TrustLine.id).where(
+                            TrustLine.from_participant_id == from_id,
+                            TrustLine.to_participant_id == to_id,
+                            TrustLine.equivalent_id == eq_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing_tl is not None:
+                    self._logger.info(
+                        "simulator.real.inject.create_trustline.skip_exists from=%s to=%s eq=%s",
+                        from_pid_val,
+                        to_pid_val,
+                        eq_code,
+                    )
+                    skipped += 1
+                    return False
+
+                session.add(
+                    TrustLine(
+                        from_participant_id=from_id,
+                        to_participant_id=to_id,
+                        equivalent_id=eq_id,
+                        limit=tl_limit_val,
+                        status="active",
+                        policy=dict(default_tl_policy),
+                    )
+                )
+                affected_equivalents.add(eq_code)
+                new_trustlines_for_scenario.append(
+                    {
+                        "from": from_pid_val,
+                        "to": to_pid_val,
+                        "equivalent": eq_code,
+                        "limit": str(tl_limit_val),
+                        "status": "active",
+                    }
+                )
+                applied += 1
+                return True
+            except Exception as exc:
+                self._logger.warning(
+                    "simulator.real.inject.create_trustline.error: %s",
+                    exc,
+                    exc_info=True,
+                )
+                skipped += 1
+                return False
+
+        async def op_freeze_participant(eff: dict[str, Any]) -> bool:
+            nonlocal applied, skipped
+
+            try:
+                freeze_pid = str(eff.get("participant_id") or "").strip()
+                freeze_tls = bool(eff.get("freeze_trustlines", True))
+
+                if not freeze_pid:
+                    skipped += 1
+                    return False
+
+                # Update participant status → suspended.
+                p_row = (
+                    await session.execute(select(Participant).where(Participant.pid == freeze_pid))
+                ).scalar_one_or_none()
+                if p_row is None:
+                    self._logger.warning(
+                        "simulator.real.inject.freeze_participant.not_found pid=%s",
+                        freeze_pid,
+                    )
+                    skipped += 1
+                    return False
+
+                if p_row.status == "suspended":
+                    self._logger.info(
+                        "simulator.real.inject.freeze_participant.already_suspended pid=%s",
+                        freeze_pid,
+                    )
+                    skipped += 1
+                    return False
+
+                p_row.status = "suspended"
+
+                if freeze_tls:
+                    incident_tls = (
+                        await session.execute(
+                            select(TrustLine).where(
+                                or_(
+                                    TrustLine.from_participant_id == p_row.id,
+                                    TrustLine.to_participant_id == p_row.id,
+                                ),
+                                TrustLine.status == "active",
+                            )
+                        )
+                    ).scalars().all()
+                    for frozen_tl in incident_tls:
+                        frozen_tl.status = "frozen"
+
+                # Invalidate only incident equivalents (best-effort).
+                # Freezing a participant affects routing; avoid evicting all equivalents.
+                incident_eqs: set[str] = set()
+                s_tls = scenario.get("trustlines")
+                if isinstance(s_tls, list):
+                    for tl in s_tls:
+                        if not isinstance(tl, dict):
+                            continue
+                        frm = str(tl.get("from") or "").strip()
+                        to = str(tl.get("to") or "").strip()
+                        if frm != freeze_pid and to != freeze_pid:
+                            continue
+                        eq = str(tl.get("equivalent") or "").strip().upper()
+                        if eq:
+                            incident_eqs.add(eq)
+
+                if incident_eqs:
+                    affected_equivalents.update(incident_eqs)
+
+                frozen_participant_pids.append(freeze_pid)
+                applied += 1
+                return True
+            except Exception as exc:
+                self._logger.warning(
+                    "simulator.real.inject.freeze_participant.error: %s",
+                    exc,
+                    exc_info=True,
+                )
+                skipped += 1
+                return False
+
+        for eff in effects[:max_edges]:
+            if not isinstance(eff, dict):
+                skipped += 1
+                continue
+
+            op = str(eff.get("op") or "").strip()
+
+            # Unknown inject op — skip silently.
+            if op == "inject_debt":
+                await op_inject_debt(eff)
+                continue
+            if op == "add_participant":
+                await op_add_participant(eff)
+                continue
+            if op == "create_trustline":
+                await op_create_trustline(eff)
+                continue
+            if op == "freeze_participant":
+                await op_freeze_participant(eff)
+                continue
+
+        # ---- commit inject effects --------------------------------
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            self._artifacts.enqueue_event_artifact(
+                run_id,
+                {
+                    "type": "note",
+                    "ts": self._utc_now().isoformat(),
+                    "sim_time_ms": int(run.sim_time_ms),
+                    "tick_index": int(run.tick_index),
+                    "scenario": {
+                        "event_index": int(event_index),
+                        "time": event_time_ms,
+                        "description": "inject failed (db error)",
+                    },
+                },
+            )
+            run._real_fired_scenario_event_indexes.add(event_index)
+            return
+
+        # ---- collect frozen edges before cache invalidation ------
+        frozen_edges_for_sse: list[dict[str, str]] = []
+        if frozen_participant_pids:
+            frozen_set = set(frozen_participant_pids)
+            s_tls = scenario.get("trustlines")
+            if isinstance(s_tls, list):
+                for tl in s_tls:
+                    if not isinstance(tl, dict):
+                        continue
+                    frm = str(tl.get("from") or "").strip()
+                    to = str(tl.get("to") or "").strip()
+                    eq = str(tl.get("equivalent") or "").strip()
+                    st = str(tl.get("status") or "").strip().lower()
+                    if (frm in frozen_set or to in frozen_set) and st == "active":
+                        frozen_edges_for_sse.append(
+                            {
+                                "from_pid": frm,
+                                "to_pid": to,
+                                "equivalent_code": eq.upper(),
+                            }
+                        )
+
+        # ---- cache invalidation after successful commit -----------
+        self._invalidate_caches_after_inject(
+            run=run,
+            scenario=scenario,
+            affected_equivalents=affected_equivalents,
+            new_participants=new_participants_for_cache,
+            new_participants_scenario=new_participants_for_scenario,
+            new_trustlines_scenario=new_trustlines_for_scenario,
+            frozen_pids=frozen_participant_pids,
+        )
+
+        # ---- SSE topology.changed (per affected equivalent) -------
+        self._broadcast_topology_changed(
+            run_id=run_id,
+            run=run,
+            affected_equivalents=affected_equivalents,
+            new_participants_scenario=new_participants_for_scenario,
+            new_trustlines_scenario=new_trustlines_for_scenario,
+            frozen_pids=frozen_participant_pids,
+            frozen_edges=frozen_edges_for_sse,
+        )
+
+        # inject_debt affects DB debts and therefore routing capacity; emit an
+        # edge_patch so the frontend updates used/available/viz without refresh.
+        if inject_debt_equivalents:
+            try:
+                for eq in inject_debt_equivalents:
+                    edges = inject_debt_edges_by_eq.get(eq) or set()
+                    edge_patch = await self._build_edge_patch_for_equivalent(
+                        session=session,
+                        run=run,
+                        equivalent_code=str(eq),
+                        only_edges=edges,
+                        include_width_keys=False,
+                    )
+                    self._broadcast_topology_edge_patch(
+                        run_id=run_id,
+                        run=run,
+                        equivalent=str(eq),
+                        edge_patch=edge_patch,
+                        reason="inject_debt",
+                    )
+            except Exception:
+                self._logger.warning(
+                    "simulator.real.inject.inject_debt_edge_patch_failed",
+                    exc_info=True,
+                )
+
+        self._artifacts.enqueue_event_artifact(
+            run_id,
+            {
+                "type": "note",
+                "ts": self._utc_now().isoformat(),
+                "sim_time_ms": int(run.sim_time_ms),
+                "tick_index": int(run.tick_index),
+                "scenario": {
+                    "event_index": int(event_index),
+                    "time": event_time_ms,
+                    "description": "inject applied",
+                    "stats": {
+                        "applied": int(applied),
+                        "skipped": int(skipped),
+                        "total_amount": format(total_applied, "f"),
+                    },
+                },
+            },
+        )
+
+        run._real_fired_scenario_event_indexes.add(event_index)
 
     def _invalidate_caches_after_inject(
         self,
@@ -1079,7 +1138,9 @@ class RealRunner:
                             frm = str(tl_dict.get("from") or "").strip()
                             to = str(tl_dict.get("to") or "").strip()
                             if frm in frozen_set or to in frozen_set:
-                                tl_dict["status"] = "frozen"
+                                prev = str(tl_dict.get("status") or "active").strip().lower()
+                                if prev == "active":
+                                    tl_dict["status"] = "frozen"
 
                 # Remove frozen edges from run._edges_by_equivalent.
                 if run._edges_by_equivalent is not None:
@@ -1128,7 +1189,7 @@ class RealRunner:
             ]
 
             # Build removed nodes list.
-            removed_nodes = [pid for pid in frozen_pids if pid.strip()]
+            frozen_nodes = [pid for pid in frozen_pids if pid.strip()]
 
             # Build edge refs for added edges, grouped by equivalent.
             added_edges_by_eq: dict[str, list[TopologyChangedEdgeRef]] = {}
@@ -1144,8 +1205,8 @@ class RealRunner:
                 )
                 added_edges_by_eq.setdefault(eq, []).append(ref)
 
-            # Build edge refs for removed edges (frozen), grouped by equivalent.
-            removed_edges_by_eq: dict[str, list[TopologyChangedEdgeRef]] = {}
+            # Build edge refs for frozen edges, grouped by equivalent.
+            frozen_edges_by_eq: dict[str, list[TopologyChangedEdgeRef]] = {}
             for fe in frozen_edges:
                 eq = str(fe.get("equivalent_code") or "").strip().upper()
                 if not eq:
@@ -1155,24 +1216,28 @@ class RealRunner:
                     to_pid=str(fe.get("to_pid") or ""),
                     equivalent_code=eq,
                 )
-                removed_edges_by_eq.setdefault(eq, []).append(ref)
+                frozen_edges_by_eq.setdefault(eq, []).append(ref)
 
             # Emit one topology.changed event per affected equivalent.
             for eq in affected_equivalents:
                 eq_upper = eq.strip().upper()
                 payload = TopologyChangedPayload(
                     added_nodes=added_nodes,
-                    removed_nodes=removed_nodes,
+                    removed_nodes=[],
+                    frozen_nodes=frozen_nodes,
                     added_edges=added_edges_by_eq.get(eq_upper, []),
-                    removed_edges=removed_edges_by_eq.get(eq_upper, []),
+                    removed_edges=[],
+                    frozen_edges=frozen_edges_by_eq.get(eq_upper, []),
                 )
 
                 # Skip empty payloads.
                 if (
                     not payload.added_nodes
                     and not payload.removed_nodes
+                    and not payload.frozen_nodes
                     and not payload.added_edges
                     and not payload.removed_edges
+                    and not payload.frozen_edges
                 ):
                     continue
 
@@ -1248,6 +1313,180 @@ class RealRunner:
                 exc_info=True,
             )
 
+    async def _build_edge_patch_for_equivalent(
+        self,
+        *,
+        session,
+        run: RunRecord,
+        equivalent_code: str,
+        only_edges: set[tuple[str, str]] | None = None,
+        include_width_keys: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Compute backend-authoritative edge patches from DB state.
+
+        - When *only_edges* is provided, returns patches only for those (source_pid, target_pid).
+        - When *include_width_keys* is False, skips width-key recomputation (useful when limits don't change).
+        """
+
+        eq_upper = str(equivalent_code or "").strip().upper()
+        if not eq_upper:
+            return []
+
+        pid_pairs: set[tuple[str, str]] | None = None
+        if only_edges:
+            pid_pairs = {(str(s).strip(), str(d).strip()) for s, d in only_edges if str(s).strip() and str(d).strip()}
+            if not pid_pairs:
+                return []
+
+        uuid_to_pid: dict[uuid.UUID, str] = {uid: pid for uid, pid in (run._real_participants or []) if pid}
+
+        eq_row = (
+            await session.execute(
+                select(Equivalent.id, Equivalent.precision).where(Equivalent.code == eq_upper)
+            )
+        ).one_or_none()
+        if not eq_row:
+            return []
+        eq_id = eq_row[0]
+        precision = int(eq_row[1] or 2)
+
+        scale10 = Decimal(10) ** precision
+        money_quant = Decimal(1) / scale10
+
+        def _to_money_str(v: Decimal) -> str:
+            return format(v.quantize(money_quant, rounding=ROUND_DOWN), "f")
+
+        # Load trustlines for this equivalent.
+        tl_rows = (
+            await session.execute(
+                select(
+                    TrustLine.from_participant_id,
+                    TrustLine.to_participant_id,
+                    TrustLine.limit,
+                    TrustLine.status,
+                ).where(TrustLine.equivalent_id == eq_id)
+            )
+        ).all()
+
+        # Load aggregated debts for this equivalent.
+        debt_rows = (
+            await session.execute(
+                select(
+                    Debt.creditor_id,
+                    Debt.debtor_id,
+                    func.coalesce(func.sum(Debt.amount), 0).label("amount"),
+                )
+                .where(Debt.equivalent_id == eq_id)
+                .group_by(Debt.creditor_id, Debt.debtor_id)
+            )
+        ).all()
+        debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {
+            (r.creditor_id, r.debtor_id): (r.amount or Decimal("0")) for r in debt_rows
+        }
+
+        # Precompute quantiles for width keys (limits only).
+        q33: float | None = None
+        q66: float | None = None
+        if include_width_keys:
+            limits: list[float] = []
+            for r in tl_rows:
+                try:
+                    limits.append(float(r.limit or 0))
+                except Exception:
+                    continue
+            limits = sorted([x for x in limits if x == x])
+            q33 = viz_rules.quantile(limits, 0.33) if limits else None
+            q66 = viz_rules.quantile(limits, 0.66) if limits else None
+
+        patches: list[dict[str, Any]] = []
+        for r in tl_rows:
+            src_pid = uuid_to_pid.get(r.from_participant_id)
+            dst_pid = uuid_to_pid.get(r.to_participant_id)
+            if not src_pid or not dst_pid:
+                continue
+            if pid_pairs is not None and (src_pid, dst_pid) not in pid_pairs:
+                continue
+
+            try:
+                limit_amt = Decimal(str(r.limit or 0))
+            except Exception:
+                limit_amt = Decimal("0")
+
+            used_amt = debt_by_pair.get((r.from_participant_id, r.to_participant_id), Decimal("0"))
+            try:
+                used_amt = Decimal(str(used_amt or 0))
+            except Exception:
+                used_amt = Decimal("0")
+
+            avail_amt = limit_amt - used_amt
+            if avail_amt < 0:
+                avail_amt = Decimal("0")
+
+            try:
+                limit_num = float(limit_amt)
+            except Exception:
+                limit_num = None
+            try:
+                used_num = float(used_amt)
+            except Exception:
+                used_num = None
+
+            status_key: str | None
+            if isinstance(r.status, str):
+                status_key = r.status.strip().lower() or None
+            else:
+                status_key = None
+
+            p: dict[str, Any] = {
+                "source": str(src_pid),
+                "target": str(dst_pid),
+                "trust_limit": _to_money_str(limit_amt),
+                "used": _to_money_str(used_amt),
+                "available": _to_money_str(avail_amt),
+                "viz_alpha_key": viz_rules.link_alpha_key(status_key, used=used_num, limit=limit_num),
+            }
+            if include_width_keys:
+                p["viz_width_key"] = viz_rules.link_width_key(limit_num, q33=q33, q66=q66)
+
+            patches.append(p)
+
+        return patches
+
+    def _broadcast_topology_edge_patch(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        equivalent: str,
+        edge_patch: list[dict[str, Any]],
+        reason: str,
+    ) -> None:
+        """Emit topology.changed with an edge_patch payload (no full refresh needed)."""
+
+        try:
+            eq_upper = str(equivalent or "").strip().upper()
+            if not eq_upper or not edge_patch:
+                return
+
+            payload = TopologyChangedPayload(edge_patch=edge_patch)
+            evt = SimulatorTopologyChangedEvent(
+                event_id=self._sse.next_event_id(run),
+                ts=self._utc_now(),
+                type="topology.changed",
+                equivalent=eq_upper,
+                payload=payload,
+                reason=reason,
+            ).model_dump(mode="json")
+
+            self._sse.broadcast(run_id, evt)
+        except Exception:
+            self._logger.warning(
+                "simulator.real.topology_edge_patch_broadcast_error eq=%s reason=%s",
+                str(equivalent),
+                str(reason),
+                exc_info=True,
+            )
+
     def _should_warn_this_tick(self, run: RunRecord, *, key: str) -> bool:
         with self._lock:
             tick = int(run.tick_index)
@@ -1283,8 +1522,10 @@ class RealRunner:
                 continue
 
             try:
-                limit = float(tl.get("limit", 0))
-            except (ValueError, TypeError):
+                limit = Decimal(str(tl.get("limit", 0))).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+            except Exception:
                 continue
             if limit <= 0:
                 continue
@@ -1354,12 +1595,22 @@ class RealRunner:
             if not hist:
                 continue
 
+            try:
+                original_limit = Decimal(str(hist.original_limit)).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+            except Exception:
+                continue
+
             # Update history
             hist.clearing_count += 1
             hist.last_clearing_tick = tick_index
-            hist.cleared_volume += cleared_amount_per_edge.get(
-                (creditor_pid, debtor_pid), 0.0
-            )
+            try:
+                hist.cleared_volume += Decimal(
+                    str(cleared_amount_per_edge.get((creditor_pid, debtor_pid), 0.0))
+                ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            except Exception:
+                pass
 
             creditor_uuid = pid_to_uuid.get(creditor_pid)
             debtor_uuid = pid_to_uuid.get(debtor_pid)
@@ -1379,12 +1630,21 @@ class RealRunner:
             if tl_limit_row is None:
                 continue
 
-            current_limit = float(tl_limit_row)
-            new_limit = min(
-                current_limit * (1 + cfg.growth_rate),
-                hist.original_limit * cfg.max_growth,
+            try:
+                current_limit = Decimal(str(tl_limit_row)).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+            except Exception:
+                continue
+
+            rate_mult = (Decimal("1") + Decimal(str(cfg.growth_rate))).quantize(
+                Decimal("0.0000001")
             )
-            new_limit = round(new_limit, 2)
+            max_growth = Decimal(str(cfg.max_growth))
+            new_limit = min(
+                (current_limit * rate_mult),
+                (original_limit * max_growth),
+            ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
             if new_limit != current_limit:
                 await clearing_session.execute(
@@ -1394,10 +1654,10 @@ class RealRunner:
                         TrustLine.to_participant_id == debtor_uuid,
                         TrustLine.equivalent_id == eq_id,
                     )
-                    .values(limit=Decimal(str(new_limit)))
+                    .values(limit=new_limit)
                 )
                 # Update scenario trustlines in-memory
-                scenario = self._get_scenario_raw(run.scenario_id)
+                scenario = getattr(run, "_scenario_raw", None) or self._get_scenario_raw(run.scenario_id)
                 s_tls = scenario.get("trustlines") or []
                 for s_tl in s_tls:
                     if (
@@ -1406,10 +1666,10 @@ class RealRunner:
                         and str(s_tl.get("equivalent") or "").strip().upper()
                         == eq_upper
                     ):
-                        s_tl["limit"] = new_limit
+                        s_tl["limit"] = float(new_limit)
                         break
                 self._logger.info(
-                    "simulator.real.trust_drift.growth key=%s old=%.2f new=%.2f",
+                    "simulator.real.trust_drift.growth key=%s old=%s new=%s",
                     key,
                     current_limit,
                     new_limit,
@@ -1417,6 +1677,8 @@ class RealRunner:
                 updated += 1
 
         if updated:
+            # Trust drift changes limits and must invalidate routing cache.
+            PaymentRouter._graph_cache.pop(eq_upper, None)
             await clearing_session.commit()
         return updated
 
@@ -1445,6 +1707,7 @@ class RealRunner:
 
         eq_id_cache: dict[str, uuid.UUID] = {}
         updated = 0
+        touched_eq_codes: set[str] = set()
         trustlines = scenario.get("trustlines") or []
 
         for tl in trustlines:
@@ -1469,29 +1732,37 @@ class RealRunner:
 
             # Get current limit from scenario (in-memory, kept in sync by growth)
             try:
-                current_limit = float(tl.get("limit", 0))
-            except (ValueError, TypeError):
+                current_limit = Decimal(str(tl.get("limit", 0))).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+            except Exception:
                 continue
             if current_limit <= 0:
                 continue
 
             # Debt for this edge: debt_snapshot key is (debtor_pid, creditor_pid, eq_code)
-            debt_amount = float(
-                debt_snapshot.get(
-                    (debtor_pid, creditor_pid, eq_code), Decimal("0")
-                )
+            debt_amount = debt_snapshot.get(
+                (debtor_pid, creditor_pid, eq_code), Decimal("0")
             )
 
-            ratio = debt_amount / current_limit if current_limit > 0 else 0
-            if ratio < cfg.overload_threshold:
+            ratio = (debt_amount / current_limit) if current_limit > 0 else Decimal("0")
+            if ratio < Decimal(str(cfg.overload_threshold)):
                 continue
 
             # Calculate new limit
+            decay_mult = Decimal(str(1 - cfg.decay_rate))
+            min_ratio = Decimal(str(cfg.min_limit_ratio))
+
+            try:
+                original_limit = Decimal(str(hist.original_limit)).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+            except Exception:
+                continue
             new_limit = max(
-                current_limit * (1 - cfg.decay_rate),
-                hist.original_limit * cfg.min_limit_ratio,
-            )
-            new_limit = round(new_limit, 2)
+                (current_limit * decay_mult),
+                (original_limit * min_ratio),
+            ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
             if new_limit == current_limit:
                 continue
@@ -1523,20 +1794,26 @@ class RealRunner:
                     TrustLine.to_participant_id == debtor_uuid,
                     TrustLine.equivalent_id == eq_id,
                 )
-                .values(limit=Decimal(str(new_limit)))
+                .values(limit=new_limit)
             )
 
             # Update scenario trustlines in-memory
-            tl["limit"] = new_limit
+            tl["limit"] = float(new_limit)
+
+            touched_eq_codes.add(eq_code)
 
             self._logger.info(
-                "simulator.real.trust_drift.decay key=%s old=%.2f new=%.2f ratio=%.2f",
+                "simulator.real.trust_drift.decay key=%s old=%s new=%s ratio=%.2f",
                 key,
                 current_limit,
                 new_limit,
-                ratio,
+                float(ratio),
             )
             updated += 1
+
+        if touched_eq_codes:
+            for eq in touched_eq_codes:
+                PaymentRouter._graph_cache.pop(str(eq).strip().upper(), None)
 
         return updated
 
@@ -1618,7 +1895,7 @@ class RealRunner:
 
     async def tick_real_mode(self, run_id: str) -> None:
         run = self._get_run(run_id)
-        scenario = self._get_scenario_raw(run.scenario_id)
+        scenario = getattr(run, "_scenario_raw", None) or self._get_scenario_raw(run.scenario_id)
 
         tick_t0 = time.monotonic()
         # NOTE: keep this at DEBUG to avoid log spam; we add WARNING logs around
@@ -3180,18 +3457,26 @@ class RealRunner:
                                 tick_index=int(run.tick_index or 0),
                                 cleared_amount_per_edge=cleared_amount_per_edge,
                             )
-                            # Notify frontend about changed limits
+                            # Notify frontend about changed limits via edge_patch.
                             if growth_count > 0:
                                 try:
-                                    self._broadcast_trust_drift_changed(
+                                    edge_patch = await self._build_edge_patch_for_equivalent(
+                                        session=clearing_session,
+                                        run=run,
+                                        equivalent_code=str(eq),
+                                        only_edges=None,
+                                        include_width_keys=True,
+                                    )
+                                    self._broadcast_topology_edge_patch(
                                         run_id=run_id,
                                         run=run,
+                                        equivalent=str(eq),
+                                        edge_patch=edge_patch,
                                         reason="trust_drift_growth",
-                                        equivalents=[str(eq)],
                                     )
                                 except Exception:
                                     self._logger.warning(
-                                        "simulator.real.trust_drift.growth_broadcast_error",
+                                        "simulator.real.trust_drift.growth_edge_patch_failed",
                                         exc_info=True,
                                     )
                         except Exception:
@@ -3307,12 +3592,9 @@ class RealRunner:
                                     continue
                                 id_pairs.append((a.id, b.id))
 
-                            debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = (
-                                {}
-                            )
-                            tl_by_pair: dict[
-                                tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]
-                            ] = {}
+                            debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+                            tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {}
+
                             if id_pairs:
                                 debt_cond = or_(
                                     *[
@@ -3337,9 +3619,7 @@ class RealRunner:
                                     )
                                 ).all()
                                 debt_by_pair = {
-                                    (r.creditor_id, r.debtor_id): (
-                                        r.amount or Decimal("0")
-                                    )
+                                    (r.creditor_id, r.debtor_id): (r.amount or Decimal("0"))
                                     for r in debt_rows
                                 }
 
@@ -3360,8 +3640,7 @@ class RealRunner:
                                             TrustLine.limit,
                                             TrustLine.status,
                                         ).where(
-                                            TrustLine.equivalent_id
-                                            == helper.equivalent_id,
+                                            TrustLine.equivalent_id == helper.equivalent_id,
                                             tl_cond,
                                         )
                                     )
@@ -3369,11 +3648,7 @@ class RealRunner:
                                 tl_by_pair = {
                                     (r.from_participant_id, r.to_participant_id): (
                                         (r.limit or Decimal("0")),
-                                        (
-                                            str(r.status)
-                                            if r.status is not None
-                                            else None
-                                        ),
+                                        (str(r.status) if r.status is not None else None),
                                     )
                                     for r in tl_rows
                                 }
@@ -3557,7 +3832,14 @@ class RealRunner:
         warmup_cfg = (scenario.get("settings") or {}).get("warmup") or {}
         warmup_ticks = int(warmup_cfg.get("ticks", 0) or 0)
         if warmup_ticks > 0 and int(run.tick_index) < warmup_ticks:
-            warmup_floor = float(warmup_cfg.get("floor", 0.1) or 0.1)
+            # IMPORTANT: allow an explicit floor=0.0 (do not treat as missing).
+            floor_raw = warmup_cfg.get("floor", None)
+            if floor_raw is None:
+                floor_raw = 0.1
+            try:
+                warmup_floor = float(floor_raw)
+            except Exception:
+                warmup_floor = 0.1
             warmup_floor = max(0.0, min(1.0, warmup_floor))
             ramp_factor = warmup_floor + (1.0 - warmup_floor) * (
                 int(run.tick_index) / warmup_ticks
@@ -3607,15 +3889,26 @@ class RealRunner:
                 profile_by_pid[_pid] = profiles_full_by_id[_prof_id]
         # ── /Phase 4 profile_by_pid ──────────────────────────────────────────
 
+        def _clamp01(v: Any, default: float) -> float:
+            try:
+                f = float(v)
+            except Exception:
+                return default
+            if f < 0.0:
+                return 0.0
+            if f > 1.0:
+                return 1.0
+            return f
+
         # ── Phase 4: flow config (read once) ─────────────────────────────────
         _flow_cfg: dict[str, Any] = (scenario.get("settings") or {}).get("flow") or {}
         _flow_enabled: bool = bool(_flow_cfg.get("enabled", False))
-        _flow_default_affinity: float = float(_flow_cfg.get("default_affinity", 0.7))
-        _flow_reciprocity_bonus: float = 0.0
-        try:
-            _flow_reciprocity_bonus = float(_flow_cfg.get("reciprocity_bonus", 0.0))
-        except Exception:
-            _flow_reciprocity_bonus = 0.0
+        _flow_default_affinity: float = _clamp01(
+            _flow_cfg.get("default_affinity", 0.7), 0.7
+        )
+        _flow_reciprocity_bonus: float = _clamp01(
+            _flow_cfg.get("reciprocity_bonus", 0.0), 0.0
+        )
         # ── /Phase 4 flow config ─────────────────────────────────────────────
 
         tick_seed = (int(run.seed) * 1_000_003 + int(run.tick_index)) & 0xFFFFFFFF
@@ -3629,17 +3922,6 @@ class RealRunner:
             events=scenario.get("events"),
             sim_time_ms=int(run.sim_time_ms),
         )
-
-        def _clamp01(v: Any, default: float) -> float:
-            try:
-                f = float(v)
-            except Exception:
-                return default
-            if f < 0.0:
-                return 0.0
-            if f > 1.0:
-                return 1.0
-            return f
 
         def _norm_weight(weights: Any, key: str) -> float:
             if not isinstance(weights, dict) or not weights:
@@ -3969,11 +4251,14 @@ class RealRunner:
                         except Exception:
                             pass
                     if _p50_period > 0:
-                        _period_accept = 1.0 / (
-                            1.0
-                            + math.log(max(_amount_val / _p50_period, 0.1))
+                        _den = 1.0 + (
+                            math.log(max(_amount_val / _p50_period, 0.1))
                             * _periodicity_factor
                         )
+                        if _den <= 0:
+                            _period_accept = 0.0
+                        else:
+                            _period_accept = 1.0 / _den
                         _period_accept = max(0.0, min(1.0, _period_accept))
                         if action_rng.random() > _period_accept:
                             i += 1

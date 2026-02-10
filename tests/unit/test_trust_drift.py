@@ -392,13 +392,13 @@ class TestApplyTrustGrowth:
 
         assert updated == 1
         # new_limit = min(1490 * 1.05, 1000 * 1.5) = min(1564.5, 1500) = 1500.0
-        cap = run._edge_clearing_history["alice:bob:UAH"].original_limit * 1.5
+        cap = run._edge_clearing_history["alice:bob:UAH"].original_limit * Decimal("1.5")
         s_tls = scenario["trustlines"]
         ab_tl = next(
             t for t in s_tls
             if t["from"] == "alice" and t["to"] == "bob"
         )
-        assert ab_tl["limit"] == round(cap, 2)
+        assert ab_tl["limit"] == round(float(cap), 2)
 
     async def test_growth_updates_clearing_history(self) -> None:
         """After growth: clearing_count += 1, last_clearing_tick updated, cleared_volume accumulated."""

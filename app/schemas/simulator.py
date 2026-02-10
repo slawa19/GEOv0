@@ -256,10 +256,22 @@ class TopologyChangedEdgeRef(BaseModel):
 
 
 class TopologyChangedPayload(BaseModel):
-    added_nodes: List[TopologyChangedNodeRef] = []
-    removed_nodes: List[str] = []
-    added_edges: List[TopologyChangedEdgeRef] = []
-    removed_edges: List[TopologyChangedEdgeRef] = []
+    added_nodes: List[TopologyChangedNodeRef] = Field(default_factory=list)
+    # Nodes that were removed from the topology (future use).
+    removed_nodes: List[str] = Field(default_factory=list)
+    # Nodes that remain but should be considered frozen/suspended.
+    frozen_nodes: List[str] = Field(default_factory=list)
+
+    added_edges: List[TopologyChangedEdgeRef] = Field(default_factory=list)
+    # Edges that were removed from the topology (future use).
+    removed_edges: List[TopologyChangedEdgeRef] = Field(default_factory=list)
+    # Edges that remain but should be considered frozen (status change).
+    frozen_edges: List[TopologyChangedEdgeRef] = Field(default_factory=list)
+
+    # Optional patches to update the graph without a full snapshot refresh.
+    # Shape matches NodePatch/EdgePatch used by the Simulator UI.
+    node_patch: Optional[List[Dict[str, Any]]] = None
+    edge_patch: Optional[List[Dict[str, Any]]] = None
 
     model_config = ConfigDict(extra="forbid")
 

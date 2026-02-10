@@ -419,6 +419,20 @@ export function useLayoutCoordinator<
     { flush: 'sync' },
   )
 
+  // Snapshot structural changes (nodes/links) must trigger a relayout.
+  // This also supports incremental topology patches that mutate snapshot in-place.
+  watch(
+    () => {
+      const s = deps.snapshot.value
+      return [s?.generated_at ?? '', s?.nodes?.length ?? 0, s?.links?.length ?? 0] as const
+    },
+    () => {
+      if (!deps.snapshot.value) return
+      requestRelayoutDebounced(0)
+    },
+    { flush: 'post' },
+  )
+
   return {
     layout,
     resizeAndLayout,

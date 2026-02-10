@@ -116,7 +116,7 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
 
     abort_called = {"called": False}
 
-    async def _abort_noop(_tx_id: str, reason: str = "Aborted"):
+    async def _abort_noop(_tx_id: str, reason: str = "Aborted", *, commit: bool = True):
         abort_called["called"] = True
         return True
 
@@ -126,7 +126,12 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
     async def _no_commit_with_retry():
         await db_session.flush()
 
-    monkeypatch.setattr(engine, "_commit_with_retry", _no_commit_with_retry)
+    # P0.1: commit-only retry was removed; keep the test deterministic by
+    # bypassing the whole-uow retry wrapper.
+    async def _run_uow_no_retry(*, op: str, fn):
+        return await fn()
+
+    monkeypatch.setattr(engine, "_run_uow_with_retry", _run_uow_no_retry)
     monkeypatch.setattr(engine, "abort", _abort_noop)
     monkeypatch.setattr(db_session, "rollback", _rollback_noop)
 

@@ -210,7 +210,7 @@ class MetricsBottlenecks:
         min_score: Optional[float],
     ) -> BottlenecksResponse:
         run = self._get_run(run_id)
-        scenario = self._get_scenario(run.scenario_id).raw
+        scenario = getattr(run, "_scenario_raw", None) or self._get_scenario(run.scenario_id).raw
 
         # DB-first for real-mode: return persisted bottlenecks if available.
         if self._db_enabled() and run.mode == "real":

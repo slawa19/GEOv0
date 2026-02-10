@@ -63,7 +63,11 @@ class Settings(BaseSettings):
 
     # Commit retry configuration (used where applicable)
     COMMIT_RETRY_ATTEMPTS: int = 3
-    COMMIT_RETRY_DELAY_SECONDS: float = 0.5
+    # Base backoff delay (exponential with jitter). Values are intentionally small:
+    # SERIALIZABLE conflicts should be rare, and we want quick recovery.
+    COMMIT_RETRY_BASE_DELAY_MS: int = 50
+    # Cap the exponential backoff to avoid unbounded latency.
+    COMMIT_RETRY_MAX_DELAY_MS: int = 500
 
     # Max-flow diagnostics (MVP limits)
     MAX_FLOW_MAX_HOPS: int = 7

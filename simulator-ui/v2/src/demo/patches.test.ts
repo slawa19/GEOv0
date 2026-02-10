@@ -79,6 +79,7 @@ describe('demo/patches', () => {
       {
         source: 'A',
         target: 'B',
+        trust_limit: '10',
         used: '4',
         available: '6',
         viz_alpha_key: 'active',
@@ -90,6 +91,7 @@ describe('demo/patches', () => {
     expect(snapshot.links[0]).toMatchObject({
       source: 'A',
       target: 'B',
+      trust_limit: '10',
       used: '4',
       available: '6',
       viz_alpha_key: 'active',
@@ -99,6 +101,7 @@ describe('demo/patches', () => {
     expect(layoutLinks[0]).toMatchObject({
       source: 'A',
       target: 'B',
+      trust_limit: '10',
       used: '4',
       available: '6',
       viz_alpha_key: 'active',

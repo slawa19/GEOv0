@@ -229,7 +229,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 350, "p90": 1100, "min": 50, "max": 1500},
                 },
-                "flow_chains": [["producer", "retail"]],
+                "flow_chains": [["producers", "retail"]],
             },
         },
         {
@@ -246,7 +246,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 500, "p90": 1300, "min": 80, "max": 1500},
                 },
-                "flow_chains": [["producer_large", "retail"]],
+                "flow_chains": [["producers", "retail"]],
                 "periodicity_factor": 1.5,
             },
         },
@@ -264,7 +264,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 200, "p90": 600, "min": 50, "max": 1200},
                 },
-                "flow_chains": [["producer_small", "retail"]],
+                "flow_chains": [["producers", "retail"]],
             },
         },
         {
@@ -276,7 +276,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 500, "p90": 1300, "min": 50, "max": 1500},
                 },
-                "flow_chains": [["retail", "producer"], ["retail", "household"]],
+                "flow_chains": [["retail", "producers"], ["retail", "households"]],
             },
         },
         {
@@ -305,7 +305,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 180, "p90": 650, "min": 50, "max": 1500},
                 },
-                "flow_chains": [["household", "retail"]],
+                "flow_chains": [["households", "retail"]],
             },
         },
         {
@@ -322,7 +322,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 280, "p90": 900, "min": 50, "max": 1500},
                 },
-                "flow_chains": [["household_active", "retail"]],
+                "flow_chains": [["households", "retail"]],
             },
         },
         {
@@ -339,7 +339,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 120, "p90": 400, "min": 50, "max": 1000},
                 },
-                "flow_chains": [["household_frugal", "retail"]],
+                "flow_chains": [["households", "retail"]],
                 "periodicity_factor": 0.5,
             },
         },

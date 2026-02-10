@@ -624,8 +624,175 @@ export function useSimulatorRealMode(opts: {
             }
 
             if (evt.type === 'topology.changed') {
-              // MVP: full snapshot refetch to pick up topology changes.
-              void refreshSnapshot()
+              const t = evt as any
+              const payload = t?.payload as any
+              const hasPayload = !!payload && typeof payload === 'object'
+
+              const hasPatches =
+                hasPayload &&
+                (((payload.node_patch?.length ?? 0) > 0) || ((payload.edge_patch?.length ?? 0) > 0))
+
+              const isEmptyPayload =
+                !hasPayload ||
+                ((payload.added_nodes?.length ?? 0) === 0 &&
+                  (payload.removed_nodes?.length ?? 0) === 0 &&
+                  (payload.frozen_nodes?.length ?? 0) === 0 &&
+                  (payload.added_edges?.length ?? 0) === 0 &&
+                  (payload.removed_edges?.length ?? 0) === 0 &&
+                  (payload.frozen_edges?.length ?? 0) === 0 &&
+                  !hasPatches)
+
+              if ((isEmptyPayload && !hasPatches) || !state.snapshot) {
+                void refreshSnapshot()
+                return
+              }
+
+              // Incremental topology patch: update snapshot in-place.
+              const snap = state.snapshot
+              if (String(snap.equivalent ?? '').toUpperCase() !== String(t.equivalent ?? '').toUpperCase()) {
+                // If the event is for a different equivalent than the current scene,
+                // keep behavior safe and let the next refresh/load handle it.
+                return
+              }
+
+              // Patch-only event (e.g. trust drift / inject_debt): apply patches and return.
+              if (
+                hasPatches &&
+                (payload.added_nodes?.length ?? 0) === 0 &&
+                (payload.removed_nodes?.length ?? 0) === 0 &&
+                (payload.frozen_nodes?.length ?? 0) === 0 &&
+                (payload.added_edges?.length ?? 0) === 0 &&
+                (payload.removed_edges?.length ?? 0) === 0 &&
+                (payload.frozen_edges?.length ?? 0) === 0
+              ) {
+                if (payload.node_patch) realPatchApplier.applyNodePatches(payload.node_patch)
+                if (payload.edge_patch) realPatchApplier.applyEdgePatches(payload.edge_patch)
+                snap.generated_at = String(t.ts ?? new Date().toISOString())
+                wakeUp?.()
+                return
+              }
+
+              const nodeColorKey = (type?: string | null, status?: string | null): string => {
+                const st = String(status ?? '').trim().toLowerCase()
+                if (st === 'suspended' || st === 'left' || st === 'deleted') return st
+                const tp = String(type ?? '').trim().toLowerCase()
+                if (tp === 'business' || tp === 'person') return tp
+                return 'unknown'
+              }
+
+              const ensureNodeDefaults = (n: any) => {
+                if (!n) return
+                const tp = String(n.type ?? '').trim().toLowerCase()
+                const isBiz = tp === 'business'
+                if (!n.viz_shape_key) n.viz_shape_key = isBiz ? 'rounded-rect' : 'circle'
+                if (!n.viz_size) n.viz_size = isBiz ? { w: 26, h: 22 } : { w: 16, h: 16 }
+                if (!n.viz_color_key) n.viz_color_key = nodeColorKey(n.type, n.status)
+              }
+
+              const nodesById = new Map(snap.nodes.map((n) => [n.id, n] as const))
+
+              const removedNodes = new Set<string>(payload.removed_nodes ?? [])
+              const frozenNodes = new Set<string>(payload.frozen_nodes ?? [])
+
+              // Apply node additions.
+              for (const r of payload.added_nodes ?? []) {
+                const id = String(r?.pid ?? '').trim()
+                if (!id || nodesById.has(id)) continue
+                const node: any = {
+                  id,
+                  name: r?.name ?? undefined,
+                  type: r?.type ?? undefined,
+                  status: 'active',
+                }
+                ensureNodeDefaults(node)
+                snap.nodes.push(node)
+                nodesById.set(id, node)
+              }
+
+              // Apply node freeze (status change).
+              for (const id of frozenNodes) {
+                const node = nodesById.get(id)
+                if (!node) continue
+                node.status = 'suspended'
+                node.viz_color_key = nodeColorKey(node.type, node.status)
+              }
+
+              // Apply node removals.
+              if (removedNodes.size) {
+                snap.nodes = snap.nodes.filter((n) => !removedNodes.has(n.id))
+                // Remove incident links too.
+                snap.links = snap.links.filter((l) => !removedNodes.has(String(l.source)) && !removedNodes.has(String(l.target)))
+              }
+
+              // Links: use (source,target) as identity.
+              const keyEdge = (s: string, d: string) => `${s}→${d}`
+              const linksByKey = new Map(snap.links.map((l) => [keyEdge(String(l.source), String(l.target)), l] as const))
+
+              // Apply edge additions.
+              for (const r of payload.added_edges ?? []) {
+                const s = String(r?.from_pid ?? '').trim()
+                const d = String(r?.to_pid ?? '').trim()
+                if (!s || !d) continue
+                const k = keyEdge(s, d)
+                if (linksByKey.has(k)) continue
+                const limit = r?.limit ?? undefined
+                const link: any = {
+                  source: s,
+                  target: d,
+                  trust_limit: limit,
+                  used: 0,
+                  available: limit,
+                  status: 'active',
+                  viz_width_key: 'thin',
+                  viz_alpha_key: 'active',
+                }
+                snap.links.push(link)
+                linksByKey.set(k, link)
+              }
+
+              // Apply frozen edges.
+              for (const r of payload.frozen_edges ?? []) {
+                const s = String(r?.from_pid ?? '').trim()
+                const d = String(r?.to_pid ?? '').trim()
+                if (!s || !d) continue
+                const link = linksByKey.get(keyEdge(s, d))
+                if (!link) continue
+                link.status = 'frozen'
+                link.viz_alpha_key = 'muted'
+              }
+
+              // Apply removed edges.
+              const removedEdgeKeys = new Set<string>()
+              for (const r of payload.removed_edges ?? []) {
+                const s = String(r?.from_pid ?? '').trim()
+                const d = String(r?.to_pid ?? '').trim()
+                if (!s || !d) continue
+                removedEdgeKeys.add(keyEdge(s, d))
+              }
+              if (removedEdgeKeys.size) {
+                snap.links = snap.links.filter((l) => !removedEdgeKeys.has(keyEdge(String(l.source), String(l.target))))
+              }
+
+              // Recompute links_count.
+              const counts: Record<string, number> = {}
+              for (const l of snap.links) {
+                const s = String((l as any).source)
+                const d = String((l as any).target)
+                counts[s] = (counts[s] ?? 0) + 1
+                counts[d] = (counts[d] ?? 0) + 1
+              }
+              for (const n of snap.nodes) {
+                ;(n as any).links_count = counts[String((n as any).id)] ?? 0
+              }
+
+              // Bump generated_at so layout coordinator can detect updates.
+              snap.generated_at = String(t.ts ?? new Date().toISOString())
+
+              // Apply backend-authoritative patches (limits/used/available/viz keys) if provided.
+              if (payload.node_patch) realPatchApplier.applyNodePatches(payload.node_patch)
+              if (payload.edge_patch) realPatchApplier.applyEdgePatches(payload.edge_patch)
+
+              wakeUp?.()
             }
           },
         })
@@ -788,10 +955,10 @@ export function useSimulatorRealMode(opts: {
       stopSse()
       clearingPlansById.clear()
       cleanupRealRunFxAndTimers()
-        real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
-          source: 'ui',
-          reason: 'user_stop',
-        })
+      real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
+        source: 'ui',
+        reason: 'user_stop',
+      })
       await refreshRunStatus()
     } catch (e: unknown) {
       const msg = String((e as any)?.message ?? e)

@@ -6,6 +6,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 
@@ -48,10 +49,10 @@ class _Subscription:
 class EdgeClearingHistory:
     """Per-edge clearing history for trust drift calculation."""
 
-    original_limit: float  # лимит при создании trustline
+    original_limit: Decimal  # лимит при создании trustline
     clearing_count: int = 0  # кол-во клирингов через это ребро
     last_clearing_tick: int = -1  # тик последнего клиринга
-    cleared_volume: float = 0.0  # суммарный объём клиринга
+    cleared_volume: Decimal = Decimal("0")  # суммарный объём клиринга
 
 
 @dataclass
@@ -132,6 +133,10 @@ class RunRecord:
     _event_buffer: "deque[tuple[float, str, str, dict[str, Any]]]" = field(
         default_factory=deque
     )
+
+    # Per-run scenario raw dict (deep-copied from ScenarioRecord.raw on run creation).
+    # Used to avoid cross-run conflicts when the runner mutates scenario topology in-memory.
+    _scenario_raw: dict[str, Any] | None = None
 
     _rng: random.Random | None = None
     _edges_by_equivalent: dict[str, list[tuple[str, str]]] | None = None

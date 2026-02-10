@@ -50,6 +50,7 @@ export function createPatchApplier(opts: {
 
   function applyEdgePatchInPlace(target: any, p: EdgePatch) {
     if (!target) return
+    if (p.trust_limit !== undefined) target.trust_limit = p.trust_limit
     if (p.used !== undefined) target.used = p.used
     if (p.available !== undefined) target.available = p.available
     if (p.viz_color_key !== undefined) target.viz_color_key = p.viz_color_key

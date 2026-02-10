@@ -61,6 +61,7 @@ function normalizeEdgePatchArray(v: unknown): EdgePatch[] | undefined {
     if (!source || !target) continue
 
     const p: EdgePatch = { source, target }
+    if (typeof raw.trust_limit === 'string' || typeof raw.trust_limit === 'number') p.trust_limit = raw.trust_limit
     if (typeof raw.used === 'string' || typeof raw.used === 'number') p.used = raw.used
     if (typeof raw.available === 'string' || typeof raw.available === 'number') p.available = raw.available
     if (typeof raw.viz_color_key === 'string' || raw.viz_color_key === null) p.viz_color_key = raw.viz_color_key
@@ -315,6 +316,11 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
       if (typeof n === 'string' && n) removed_nodes.push(n)
     }
 
+    const frozen_nodes: string[] = []
+    for (const n of asArray((payloadRaw as any).frozen_nodes) ?? []) {
+      if (typeof n === 'string' && n) frozen_nodes.push(n)
+    }
+
     const added_edges: TopologyChangedEdgeRef[] = []
     for (const e of asArray(payloadRaw.added_edges) ?? []) {
       if (!isRecord(e)) continue
@@ -345,12 +351,39 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
       })
     }
 
+    const frozen_edges: TopologyChangedEdgeRef[] = []
+    for (const e of asArray((payloadRaw as any).frozen_edges) ?? []) {
+      if (!isRecord(e)) continue
+      const from_pid = asString(e.from_pid)
+      const to_pid = asString(e.to_pid)
+      const equivalent_code = asString(e.equivalent_code)
+      if (!from_pid || !to_pid || !equivalent_code) continue
+      frozen_edges.push({
+        from_pid,
+        to_pid,
+        equivalent_code,
+        limit: asString(e.limit) ?? undefined,
+      })
+    }
+
+    const reason = asString((raw as any).reason) ?? undefined
+
     const evt: TopologyChangedEvent = {
       event_id,
       ts,
       type: 'topology.changed',
       equivalent,
-      payload: { added_nodes, removed_nodes, added_edges, removed_edges },
+      payload: {
+        added_nodes,
+        removed_nodes,
+        frozen_nodes: frozen_nodes.length ? frozen_nodes : undefined,
+        added_edges,
+        removed_edges,
+        frozen_edges: frozen_edges.length ? frozen_edges : undefined,
+        node_patch: normalizeNodePatchArray((payloadRaw as any).node_patch),
+        edge_patch: normalizeEdgePatchArray((payloadRaw as any).edge_patch),
+      },
+      reason,
     }
     return evt
   }

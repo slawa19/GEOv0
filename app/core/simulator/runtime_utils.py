@@ -63,6 +63,9 @@ def edges_by_equivalent(raw: dict[str, Any]) -> dict[str, list[tuple[str, str]]]
     trustlines = raw.get("trustlines") or []
     out: dict[str, list[tuple[str, str]]] = {}
     for tl in trustlines:
+        status = str(tl.get("status") or "active").strip().lower()
+        if status != "active":
+            continue
         eq = str(tl.get("equivalent") or "").strip()
         if not eq:
             continue

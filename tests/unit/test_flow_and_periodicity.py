@@ -11,10 +11,13 @@ RealRunner with no DB, direct calls to _plan_real_payments().
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
+from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -80,18 +83,18 @@ def _flow_scenario(
     household_flow_chains: list[Any] | None = None,
     household_flow_affinity: float | None = None,
 ) -> dict[str, Any]:
-    """Scenario with 3 groups: household (H1, H2), retail (R1, R2), producer (P1).
+    """Scenario with 3 groups: households (H1, H2), retail (R1, R2), producers (P1).
 
     Full mesh of trustlines so every participant can reach every other
     (via direct neighbors and multi-hop BFS).  This ensures _choose_receiver()
     has a rich reachable set containing multiple groups.
     """
     participants = [
-        {"id": "H1", "groupId": "household", "behaviorProfileId": "hp"},
-        {"id": "H2", "groupId": "household", "behaviorProfileId": "hp"},
+        {"id": "H1", "groupId": "households", "behaviorProfileId": "hp"},
+        {"id": "H2", "groupId": "households", "behaviorProfileId": "hp"},
         {"id": "R1", "groupId": "retail", "behaviorProfileId": "rp"},
         {"id": "R2", "groupId": "retail", "behaviorProfileId": "rp"},
-        {"id": "P1", "groupId": "producer", "behaviorProfileId": "pp"},
+        {"id": "P1", "groupId": "producers", "behaviorProfileId": "pp"},
     ]
 
     hp_props: dict[str, Any] = {
@@ -266,12 +269,12 @@ class TestFlowDirectionality:
     """Tests for flow_chains-based receiver selection in _choose_receiver()."""
 
     def test_flow_directs_household_to_retail(self) -> None:
-        """With affinity=1.0 and flow_chains=[["household","retail"]],
+        """With affinity=1.0 and flow_chains=[["households","retail"]],
         all household senders must pick a retail receiver."""
         runner = _runner(actions_per_tick_max=100)
         scenario = _flow_scenario(
             flow_enabled=True,
-            household_flow_chains=[["household", "retail"]],
+            household_flow_chains=[["households", "retail"]],
             household_flow_affinity=1.0,
         )
         run = _make_run(seed=42)
@@ -316,7 +319,7 @@ class TestFlowDirectionality:
         runner = _runner(actions_per_tick_max=100)
         scenario = _flow_scenario(
             flow_enabled=True,
-            household_flow_chains=[["household", "retail"]],
+            household_flow_chains=[["households", "retail"]],
             household_flow_affinity=0.0,
         )
         run = _make_run(seed=42)
@@ -346,7 +349,7 @@ class TestFlowDirectionality:
         runner = _runner(actions_per_tick_max=100)
         scenario = _flow_scenario(
             flow_enabled=False,  # disabled
-            household_flow_chains=[["household", "retail"]],
+            household_flow_chains=[["households", "retail"]],
             household_flow_affinity=1.0,
         )
         run = _make_run(seed=42)
@@ -368,6 +371,59 @@ class TestFlowDirectionality:
             "With flow disabled, household senders should not be restricted "
             "to retail receivers — standard logic applies"
         )
+
+
+def test_realistic_v2_fixture_flow_chains_match_group_ids() -> None:
+    """Realistic-v2 fixtures must have flow_chains referencing existing group IDs.
+
+    This guards against the historical singular/plural mismatch (e.g. "producer" vs
+    "producers") which would silently disable flow directionality.
+    """
+
+    root = Path(__file__).resolve().parents[2]
+    scenario_path = root / "fixtures" / "simulator" / "greenfield-village-100-realistic-v2" / "scenario.json"
+    scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+
+    groups = {g.get("id") for g in (scenario.get("groups") or []) if isinstance(g, dict)}
+    groups.discard(None)
+    assert groups, "Fixture must define groups[] with ids"
+
+    participants = scenario.get("participants") or []
+    by_group = Counter(
+        p.get("groupId")
+        for p in participants
+        if isinstance(p, dict) and isinstance(p.get("groupId"), str)
+    )
+
+    referenced: set[str] = set()
+    for bp in scenario.get("behaviorProfiles") or []:
+        if not isinstance(bp, dict):
+            continue
+        props = bp.get("props")
+        if not isinstance(props, dict):
+            continue
+        chains = props.get("flow_chains")
+        if not isinstance(chains, list):
+            continue
+        for chain in chains:
+            if not (isinstance(chain, list) and len(chain) == 2):
+                continue
+            a, b = chain
+            if isinstance(a, str):
+                referenced.add(a)
+            if isinstance(b, str):
+                referenced.add(b)
+
+    assert referenced, "Expected at least one flow_chains reference in realistic-v2 fixture"
+
+    missing_groups = referenced - groups
+    assert not missing_groups, f"flow_chains references missing group ids: {sorted(missing_groups)}"
+
+    missing_participants = {gid for gid in referenced if by_group.get(gid, 0) <= 0}
+    assert not missing_participants, (
+        "flow_chains references group ids with no participants: "
+        f"{sorted(missing_participants)}"
+    )
 
 
 # ===================================================================

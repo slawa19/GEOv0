@@ -41,6 +41,32 @@ def validate_idempotency_key(key: str) -> str:
     return normalized
 
 
+_TX_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+
+
+def validate_tx_id(tx_id: str) -> str:
+    """Validate client-generated tx_id (idempotency key).
+
+    MVP constraints:
+    - required non-empty string
+    - max length 64 (matches DB column)
+    - limited charset to avoid whitespace/control chars
+    """
+
+    if not isinstance(tx_id, str):
+        raise BadRequestException("Invalid tx_id")
+
+    normalized = tx_id.strip()
+    if not normalized:
+        raise BadRequestException("Invalid tx_id")
+    if len(normalized) > 64:
+        raise BadRequestException("tx_id too long")
+    if not _TX_ID_RE.fullmatch(normalized):
+        raise BadRequestException("Invalid tx_id")
+
+    return normalized
+
+
 _ALLOWED_TRUSTLINE_POLICY_KEYS = {
     "auto_clearing",
     "can_be_intermediate",

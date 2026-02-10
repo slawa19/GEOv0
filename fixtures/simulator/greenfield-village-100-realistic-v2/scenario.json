@@ -874,7 +874,7 @@
         },
         "flow_chains": [
           [
-            "producer",
+            "producers",
             "retail"
           ]
         ]
@@ -903,7 +903,7 @@
         },
         "flow_chains": [
           [
-            "producer_large",
+            "producers",
             "retail"
           ]
         ],
@@ -933,7 +933,7 @@
         },
         "flow_chains": [
           [
-            "producer_small",
+            "producers",
             "retail"
           ]
         ]
@@ -962,11 +962,11 @@
         "flow_chains": [
           [
             "retail",
-            "producer"
+            "producers"
           ],
           [
             "retail",
-            "household"
+            "households"
           ]
         ]
       }
@@ -1016,7 +1016,7 @@
         },
         "flow_chains": [
           [
-            "household",
+            "households",
             "retail"
           ]
         ]
@@ -1045,7 +1045,7 @@
         },
         "flow_chains": [
           [
-            "household_active",
+            "households",
             "retail"
           ]
         ]
@@ -1074,7 +1074,7 @@
         },
         "flow_chains": [
           [
-            "household_frugal",
+            "households",
             "retail"
           ]
         ],
@@ -4583,238 +4583,77 @@
   ],
   "events": [
     {
-      "time": 0,
-      "type": "note",
-      "description": "Network launched: 100 participants, UAH equivalent"
-    },
-    {
-      "time": 25000,
+      "time": 80000,
       "type": "stress",
-      "description": "Farmers' market day — households buy from producers/retail",
+      "label": "weekend_market",
+      "description": "Weekend market day — increased consumer activity",
+      "params": {
+        "multiplier": 1.3,
+        "duration_ms": 30000,
+        "label": "weekend_market"
+      },
       "effects": [
         {
           "op": "mult",
           "field": "tx_rate",
           "scope": "group:households",
-          "value": 2.0
-        },
-        {
-          "op": "mult",
-          "field": "tx_rate",
-          "scope": "group:retail",
           "value": 1.5
         },
         {
           "op": "mult",
           "field": "tx_rate",
-          "scope": "group:producers",
+          "scope": "group:retail",
           "value": 1.3
         }
       ],
       "metadata": {
-        "duration_ms": 8000
+        "duration_ms": 30000
       }
     },
     {
-      "time": 40000,
+      "time": 150000,
       "type": "stress",
-      "description": "Midweek — only essential purchases",
+      "label": "quiet_period",
+      "description": "Midweek quiet period — reduced economic activity",
+      "params": {
+        "multiplier": 0.7,
+        "duration_ms": 20000,
+        "label": "quiet_period"
+      },
       "effects": [
         {
           "op": "mult",
           "field": "tx_rate",
           "scope": "all",
-          "value": 0.4
+          "value": 0.7
         }
       ],
       "metadata": {
-        "duration_ms": 8000
+        "duration_ms": 20000
       }
     },
     {
-      "time": 55000,
-      "type": "inject",
-      "description": "Wave 2: Five new families join the village network",
-      "effects": [
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0101_eaeaab2f",
-            "name": "The Brown Family (Household)",
-            "type": "person",
-            "status": "active",
-            "groupId": "households",
-            "behaviorProfileId": "household"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0036_3fcd1ce4",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "500"
-            },
-            {
-              "sponsor": "PID_U0061_b337ff2d",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "300"
-            }
-          ]
-        },
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0102_34c15778",
-            "name": "The Wilson Family (Household)",
-            "type": "person",
-            "status": "active",
-            "groupId": "households",
-            "behaviorProfileId": "household"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0036_3fcd1ce4",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "400"
-            },
-            {
-              "sponsor": "PID_U0001_9e3779b1",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "500"
-            }
-          ]
-        },
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0103_56f3e4e1",
-            "name": "The Murphy Family (Household)",
-            "type": "person",
-            "status": "active",
-            "groupId": "households",
-            "behaviorProfileId": "household"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0039_1a7389f7",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "350"
-            }
-          ]
-        },
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0104_a36db879",
-            "name": "The O'Brien Family (Household)",
-            "type": "person",
-            "status": "active",
-            "groupId": "households",
-            "behaviorProfileId": "household"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0037_de049695",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "300"
-            },
-            {
-              "sponsor": "PID_U0004_78dde6c4",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "600"
-            }
-          ]
-        },
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0105_8a70153e",
-            "name": "The Kelly Family (Household)",
-            "type": "person",
-            "status": "active",
-            "groupId": "households",
-            "behaviorProfileId": "household"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0006_b54cda26",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "450"
-            },
-            {
-              "sponsor": "PID_U0040_b8ab03a8",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "250"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "time": 80000,
-      "type": "inject",
-      "description": "New families earn trust from local shops and co-op",
-      "effects": [
-        {
-          "op": "create_trustline",
-          "from": "PID_U0036_3fcd1ce4",
-          "to": "PID_W0101_eaeaab2f",
-          "equivalent": "UAH",
-          "limit": "600"
-        },
-        {
-          "op": "create_trustline",
-          "from": "PID_U0037_de049695",
-          "to": "PID_W0102_34c15778",
-          "equivalent": "UAH",
-          "limit": "500"
-        },
-        {
-          "op": "create_trustline",
-          "from": "PID_U0001_9e3779b1",
-          "to": "PID_W0103_56f3e4e1",
-          "equivalent": "UAH",
-          "limit": "400"
-        },
-        {
-          "op": "create_trustline",
-          "from": "PID_U0039_1a7389f7",
-          "to": "PID_W0104_a36db879",
-          "equivalent": "UAH",
-          "limit": "350"
-        },
-        {
-          "op": "create_trustline",
-          "from": "PID_U0036_3fcd1ce4",
-          "to": "PID_W0105_8a70153e",
-          "equivalent": "UAH",
-          "limit": "450"
-        }
-      ]
-    },
-    {
-      "time": 100000,
+      "time": 200000,
       "type": "stress",
-      "description": "Harvest season — producers flood market, retail busy",
+      "label": "harvest_festival",
+      "description": "Harvest festival — peak seasonal demand, producers and retail booming",
+      "params": {
+        "multiplier": 1.8,
+        "duration_ms": 40000,
+        "label": "harvest_festival"
+      },
       "effects": [
         {
           "op": "mult",
           "field": "tx_rate",
           "scope": "group:producers",
-          "value": 2.5
+          "value": 2.0
         },
         {
           "op": "mult",
           "field": "tx_rate",
           "scope": "group:retail",
-          "value": 2.0
+          "value": 1.8
         },
         {
           "op": "mult",
@@ -4824,214 +4663,29 @@
         }
       ],
       "metadata": {
-        "duration_ms": 15000
+        "duration_ms": 40000
       }
     },
     {
-      "time": 130000,
-      "type": "inject",
-      "description": "Wave 3: Three new producers join (farmers who saw the co-op works)",
-      "effects": [
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0106_80743bbb",
-            "name": "Oksana Vynohrad (Grape Farmer)",
-            "type": "person",
-            "status": "active",
-            "groupId": "producers",
-            "behaviorProfileId": "producer"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0001_9e3779b1",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "2000"
-            },
-            {
-              "sponsor": "PID_U0003_daa66d13",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "1500"
-            }
-          ]
-        },
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0107_089a55ff",
-            "name": "Petro Yabluko (Apple Orchard)",
-            "type": "person",
-            "status": "active",
-            "groupId": "producers",
-            "behaviorProfileId": "producer"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0001_9e3779b1",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "1800"
-            },
-            {
-              "sponsor": "PID_U0002_3c6ef362",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "1000"
-            }
-          ]
-        },
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0108_89ccf6d9",
-            "name": "Halyna Kvitka (Flower & Herb Garden)",
-            "type": "person",
-            "status": "active",
-            "groupId": "producers",
-            "behaviorProfileId": "producer"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0004_78dde6c4",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "1200"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "time": 160000,
-      "type": "inject",
-      "description": "Wave 4: New veterinarian joins (needed for livestock farmers)",
-      "effects": [
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0109_c86a0428",
-            "name": "Dr. Yaroslav Veter (Veterinarian)",
-            "type": "person",
-            "status": "active",
-            "groupId": "services",
-            "behaviorProfileId": "service"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0001_9e3779b1",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "2500"
-            },
-            {
-              "sponsor": "PID_U0007_538453d7",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "1500"
-            },
-            {
-              "sponsor": "PID_U0015_4540215f",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "1000"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "time": 200000,
+      "time": 250000,
       "type": "stress",
-      "description": "Winter preparation — stocking up, preserving, repairing",
+      "label": "winter_lull",
+      "description": "Winter lull — minimal economic activity, people stay home",
+      "params": {
+        "multiplier": 0.5,
+        "duration_ms": 15000,
+        "label": "winter_lull"
+      },
       "effects": [
         {
           "op": "mult",
           "field": "tx_rate",
-          "scope": "group:services",
-          "value": 2.0
-        },
-        {
-          "op": "mult",
-          "field": "tx_rate",
-          "scope": "group:producers",
+          "scope": "all",
           "value": 0.5
         }
       ],
       "metadata": {
         "duration_ms": 15000
-      }
-    },
-    {
-      "time": 250000,
-      "type": "inject",
-      "description": "The Walker family moves out; HomeGoods Mini-Mart closes",
-      "effects": [
-        {
-          "op": "freeze_participant",
-          "participant_id": "PID_U0081_0f8d8101",
-          "freeze_trustlines": true
-        },
-        {
-          "op": "freeze_participant",
-          "participant_id": "PID_U0041_56e27d59",
-          "freeze_trustlines": true
-        }
-      ]
-    },
-    {
-      "time": 280000,
-      "type": "inject",
-      "description": "Wave 5: New mini-market opens (replacing HomeGoods)",
-      "effects": [
-        {
-          "op": "add_participant",
-          "participant": {
-            "id": "PID_W0110_7c0ca7ef",
-            "name": "Village Essentials Shop",
-            "type": "business",
-            "status": "active",
-            "groupId": "retail",
-            "behaviorProfileId": "retail"
-          },
-          "initial_trustlines": [
-            {
-              "sponsor": "PID_U0001_9e3779b1",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "5000"
-            },
-            {
-              "sponsor": "PID_U0003_daa66d13",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "3000"
-            },
-            {
-              "sponsor": "PID_U0036_3fcd1ce4",
-              "direction": "sponsor_credits_new",
-              "equivalent": "UAH",
-              "limit": "2000"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "time": 320000,
-      "type": "stress",
-      "description": "Spring planting festival — community celebration and seed exchange",
-      "effects": [
-        {
-          "op": "mult",
-          "field": "tx_rate",
-          "scope": "all",
-          "value": 2.5
-        }
-      ],
-      "metadata": {
-        "duration_ms": 6000
       }
     }
   ],

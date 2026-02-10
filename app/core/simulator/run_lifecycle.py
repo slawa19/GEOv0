@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import os
 import random
@@ -128,8 +129,10 @@ class RunLifecycle:
                 run._real_max_in_flight = self._real_max_in_flight_default
 
         # Precompute per-equivalent edges for quick event generation.
+        # (Needed for both fixtures + real runners.)
         scenario = self._get_scenario_raw(scenario_id)
-        run._edges_by_equivalent = self._edges_by_equivalent(scenario)
+        run._scenario_raw = copy.deepcopy(scenario)
+        run._edges_by_equivalent = self._edges_by_equivalent(run._scenario_raw)
         run._rng = random.Random(run_id)
         run._next_tx_at_ms = 0
         run._next_clearing_at_ms = 25_000
