@@ -4,7 +4,7 @@ import hashlib
 import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Tuple, Awaitable, Callable, TypeVar
+from typing import Any, List, Tuple, Awaitable, Callable, TypeVar
 from uuid import UUID
 
 from sqlalchemy import select, and_, delete, update, func, text
@@ -18,6 +18,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.db.models.audit_log import IntegrityAuditLog
+from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
 from app.utils.exceptions import GeoException, ConflictException, RoutingException
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
@@ -357,7 +358,7 @@ class PaymentEngine:
             await self.session.execute(
                 update(Transaction)
                 .where(Transaction.tx_id == tx_id)
-                .values(state="PREPARED")
+                .values(state="PREPARED", updated_at=func.now())
             )
 
             if commit:
@@ -593,7 +594,7 @@ class PaymentEngine:
             await self.session.execute(
                 update(Transaction)
                 .where(Transaction.tx_id == tx_id)
-                .values(state="PREPARED")
+                .values(state="PREPARED", updated_at=func.now())
             )
             if commit:
                 await self.session.commit()
@@ -811,7 +812,7 @@ class PaymentEngine:
             update_stmt = (
                 update(Transaction)
                 .where(Transaction.tx_id == tx_id)
-                .values(state="COMMITTED")
+                .values(state="COMMITTED", updated_at=func.now())
             )
             await self.session.execute(update_stmt)
 
@@ -912,10 +913,29 @@ class PaymentEngine:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def abort(self, tx_id: str, reason: str = "Aborted", *, commit: bool = True):
+    async def abort(
+        self,
+        tx_id: str,
+        reason: str = "Aborted",
+        *,
+        commit: bool = True,
+        error_code: ErrorCode | str | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         """
         Abort transaction: Delete locks, set state to ABORTED.
         """
+
+        def _normalize_code(value: ErrorCode | str | None) -> ErrorCode:
+            if value is None:
+                return ErrorCode.E010
+            if isinstance(value, ErrorCode):
+                return value
+            try:
+                return ErrorCode(str(value))
+            except Exception:
+                return ErrorCode.E010
+
         async def _uow() -> bool:
             logger.info("event=payment.abort tx_id=%s reason=%s", tx_id, reason)
             try:
@@ -924,6 +944,21 @@ class PaymentEngine:
                 pass
 
             tx = await self._get_tx(tx_id)
+
+            existing_error: dict[str, Any] = (tx.error if tx and isinstance(tx.error, dict) else {}) or {}
+            normalized_code = _normalize_code(error_code or existing_error.get("code"))
+            normalized_details: dict[str, Any] = (
+                details
+                if details is not None
+                else (existing_error.get("details") if isinstance(existing_error.get("details"), dict) else {})
+            ) or {}
+            # Always persist a stable error schema for aborted transactions.
+            error_payload: dict[str, Any] = {
+                "code": normalized_code.value,
+                "message": str(existing_error.get("message") or reason or ERROR_MESSAGES[normalized_code]),
+                "details": normalized_details,
+            }
+
             if tx and tx.state == "COMMITTED":
                 # Safety guard: never transition a committed transaction back to ABORTED.
                 # This can happen in the service layer under timeout uncertainty (commit may
@@ -945,6 +980,13 @@ class PaymentEngine:
                 # Idempotency: ensure locks are gone as well.
                 delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
                 await self.session.execute(delete_stmt)
+
+                # Ensure error code is present even on idempotent aborts.
+                await self.session.execute(
+                    update(Transaction)
+                    .where(Transaction.tx_id == tx_id)
+                    .values(error=error_payload)
+                )
                 if commit:
                     await self.session.commit()
                 else:
@@ -965,7 +1007,7 @@ class PaymentEngine:
             update_stmt = (
                 update(Transaction)
                 .where(Transaction.tx_id == tx_id)
-                .values(state="ABORTED", error={"message": reason})
+                .values(state="ABORTED", error=error_payload, updated_at=func.now())
             )
             await self.session.execute(update_stmt)
 

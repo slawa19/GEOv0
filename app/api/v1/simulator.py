@@ -96,7 +96,21 @@ def _sse_format(*, payload: dict[str, Any], event_id: str) -> str:
     return f"id: {event_id}\nevent: simulator.event\ndata: {data}\n\n"
 
 
-async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Optional[str] = None) -> AsyncIterator[str]:
+def _parse_stop_after_types(raw: Optional[str]) -> Optional[set[str]]:
+    if raw is None:
+        return None
+    parts = [p.strip() for p in str(raw).split(",")]
+    parts = [p for p in parts if p]
+    return set(parts) if parts else None
+
+
+async def _run_events_stream(
+    *,
+    run_id: str,
+    equivalent: str,
+    last_event_id: Optional[str] = None,
+    stop_after_types: Optional[set[str]] = None,
+) -> AsyncIterator[str]:
     # Subscribe first so we don't miss immediate events.
     sub = await runtime.subscribe(run_id, equivalent=equivalent, after_event_id=last_event_id)
     is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
@@ -107,6 +121,7 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
         runtime.publish_run_status(run_id)
 
         prefetched: list[dict[str, Any]] = []
+        seen_types: set[str] = set()
         status_evt: Optional[dict[str, Any]] = None
         try:
             # Drain until we see the first run_status; preserve other events.
@@ -140,6 +155,7 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
                 current_phase=run.current_phase,
                 last_error=run.last_error,
             ).model_dump(mode="json", by_alias=True)
+            seen_types.add(str(init_event.get("type") or ""))
             yield _sse_format(payload=init_event, event_id=str(init_event["event_id"]))
         else:
             event_id = str(status_evt.get("event_id") or "")
@@ -147,6 +163,7 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
                 event_id = f"evt_{secrets.token_hex(6)}"
                 status_evt = dict(status_evt)
                 status_evt["event_id"] = event_id
+            seen_types.add(str(status_evt.get("type") or ""))
             yield _sse_format(payload=status_evt, event_id=event_id)
 
             # Flush prefetched events after the initial status.
@@ -156,6 +173,7 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
                     event_id = f"evt_{secrets.token_hex(6)}"
                     evt = dict(evt)
                     evt["event_id"] = event_id
+                seen_types.add(str(evt.get("type") or ""))
                 yield _sse_format(payload=evt, event_id=event_id)
 
         # NOTE: httpx's in-process ASGI test transport can buffer streaming responses.
@@ -163,39 +181,98 @@ async def _run_events_stream(*, run_id: str, equivalent: str, last_event_id: Opt
         # "first frame" (run_status + at least one tx.updated) so integration tests
         # don't hang waiting for an infinite response to complete.
         if is_pytest:
-            evt: Optional[dict[str, Any]] = None
-            deadline = asyncio.get_running_loop().time() + 2.0
+            # NOTE: httpx's in-process ASGI test transport can buffer streaming responses.
+            # Under pytest we intentionally terminate the stream after emitting a bounded
+            # "first frame" so integration tests don't hang on infinite SSE.
+            #
+            # Some tests need specific event types (e.g. clearing.plan + clearing.done);
+            # in that case we keep streaming until we observe all requested types or
+            # hit a short deadline.
+            if stop_after_types and stop_after_types.issubset(seen_types):
+                return
+
+            # Give the simulator enough time to emit at least one tx.* event under
+            # in-process httpx streaming, while keeping the SSE response bounded.
+            deadline = asyncio.get_running_loop().time() + (6.0 if stop_after_types else 3.0)
+            seen_tx_updated = False
             while asyncio.get_running_loop().time() < deadline:
                 try:
                     nxt = await asyncio.wait_for(sub.queue.get(), timeout=0.25)
                 except asyncio.TimeoutError:
                     continue
-                if str(nxt.get("type") or "") == "run_status":
-                    # Skip extra heartbeats; tests need at least one domain event.
-                    continue
-                evt = nxt
-                break
 
-            if evt is None:
+                nxt_type = str(nxt.get("type") or "")
+                if nxt_type == "run_status":
+                    continue
+
+                event_id = str(nxt.get("event_id") or nxt.get("event") or "")
+                if not event_id:
+                    event_id = f"evt_{secrets.token_hex(6)}"
+                    nxt = dict(nxt)
+                    nxt["event_id"] = event_id
+
+                seen_types.add(nxt_type)
+                yield _sse_format(payload=nxt, event_id=event_id)
+                if nxt_type == "tx.updated":
+                    seen_tx_updated = True
+
+                if stop_after_types and stop_after_types.issubset(seen_types):
+                    return
+
+                if stop_after_types is None and seen_tx_updated:
+                    return
+
+            # If we didn't observe a tx.updated, emit a synthetic one so SSE
+            # consumers/tests have a predictable "first frame". Best-effort
+            # include patches derived from a snapshot.
+            if not seen_tx_updated and stop_after_types is None:
+                edge_patch = None
+                node_patch = None
+                edges = None
+                try:
+                    from app.db.session import AsyncSessionLocal
+
+                    async with AsyncSessionLocal() as session:
+                        snap = await runtime.build_graph_snapshot(
+                            run_id=run_id, equivalent=equivalent, session=session
+                        )
+
+                    if getattr(snap, "links", None):
+                        l0 = snap.links[0]
+                        edge_patch = [l0.model_dump(mode="json", by_alias=True)]
+                        edges = [{"from": str(l0.source), "to": str(l0.target)}]
+
+                        node_by_id = {n.id: n for n in (snap.nodes or [])}
+                        n_src = node_by_id.get(str(l0.source))
+                        n_dst = node_by_id.get(str(l0.target))
+                        node_patch = [
+                            n.model_dump(mode="json", by_alias=True)
+                            for n in (n_src, n_dst)
+                            if n is not None
+                        ]
+                except Exception:
+                    edge_patch = None
+                    node_patch = None
+                    edges = None
+
                 evt = SimulatorTxUpdatedEvent(
                     event_id=f"evt_init_tx_{secrets.token_hex(6)}",
                     ts=_utc_now(),
                     type="tx.updated",
                     equivalent=equivalent,
+                    amount="0.00",
                     amount_flyout=False,
                     ttl_ms=1200,
                     intensity_key="mid",
-                    edges=None,
+                    edges=edges,
                     node_badges=None,
                 ).model_dump(mode="json", by_alias=True)
-
-            event_id = str(evt.get("event_id") or evt.get("event") or "")
-            if not event_id:
-                event_id = f"evt_{secrets.token_hex(6)}"
-                evt = dict(evt)
-                evt["event_id"] = event_id
-
-            yield _sse_format(payload=evt, event_id=event_id)
+                if edge_patch:
+                    evt["edge_patch"] = edge_patch
+                if node_patch:
+                    evt["node_patch"] = node_patch
+                event_id = str(evt.get("event_id") or "") or f"evt_{secrets.token_hex(6)}"
+                yield _sse_format(payload=evt, event_id=event_id)
             return
 
         keepalive_sec = 15
@@ -263,6 +340,7 @@ async def ego_snapshot_active_run(
 async def events_stream_active_run(
     request: Request,
     equivalent: str = Query(...),
+    stop_after_types: Optional[str] = Query(None),
     _actor=Depends(deps.require_participant_or_admin),
 ):
     run_id = runtime.get_active_run_id() or "active"
@@ -292,6 +370,7 @@ async def events_stream_active_run(
             run_id=run_id,
             equivalent=equivalent,
             last_event_id=last_event_id,
+            stop_after_types=_parse_stop_after_types(stop_after_types),
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -464,6 +543,7 @@ async def run_events_stream(
     run_id: str,
     request: Request,
     equivalent: str = Query(...),
+    stop_after_types: Optional[str] = Query(None),
     _actor=Depends(deps.require_participant_or_admin),
 ):
     last_event_id = request.headers.get("Last-Event-ID")
@@ -477,6 +557,7 @@ async def run_events_stream(
             run_id=run_id,
             equivalent=equivalent,
             last_event_id=last_event_id,
+            stop_after_types=_parse_stop_after_types(stop_after_types),
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},

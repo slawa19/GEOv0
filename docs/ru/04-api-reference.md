@@ -480,10 +480,10 @@ Authorization: Bearer {token}
 ```http
 POST /payments
 Authorization: Bearer {token}
-Idempotency-Key: {key}   # optional
 Content-Type: application/json
 
 {
+  "tx_id": "client-generated-unique-id",
   "to": "recipient_pid",
   "equivalent": "UAH",
   "amount": "100.00",
@@ -498,13 +498,20 @@ Content-Type: application/json
 }
 ```
 
+**`tx_id` (обязательно):** уникальный идентификатор транзакции, генерируемый клиентом. Используется для идемпотентности и дедупликации (см. [Приложение E протокола](02-protocol-spec.md)).
+
+- Повтор запроса с тем же `tx_id` и тем же payload → сервер возвращает тот же результат (идемпотентный ответ).
+- Повтор с тем же `tx_id` и другим payload → `409 Conflict`.
+- Формат: строка 1–64 символа, допустимые символы: `[A-Za-z0-9._:-]`.
+- `tx_id` **включается в подпись** (canonical JSON payload).
+
 **`constraints` (опционально):**
 - `max_hops` — ограничение на число hops в маршруте
 - `max_paths` — ограничение на количество альтернативных путей
 - `timeout_ms` — бюджет времени на маршрутизацию/выполнение
 - `avoid` — список PID, которых следует избегать при построении маршрутов
 
-**Idempotency-Key (опционально):** если повторить запрос с тем же ключом, сервер вернёт тот же результат. Если ключ повторно используется с другим payload — вернётся `409 Conflict`.
+> **Deprecated:** заголовок `Idempotency-Key` принимается сервером, но **игнорируется**. Для идемпотентности используйте обязательное поле `tx_id` в теле запроса. `Idempotency-Key` будет удалён в будущей версии API.
 
 **Response (success):**
 ```json

@@ -34,6 +34,7 @@ from app.utils.exceptions import (
     RoutingException,
     TimeoutException,
 )
+from app.utils.error_codes import ErrorCode
 from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_amount_decimal
 
 logger = logging.getLogger(__name__)
@@ -280,10 +281,44 @@ class PaymentService:
         tx_uuid = uuid.uuid4()
         tx_persisted = False
 
-        routing_timeout_s = (
-            float(getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 500) or 500)
-            / 1000.0
+        # Effective routing constraints (signed client request is the source of truth;
+        # hub settings may cap it from above).
+        client_constraints: PaymentConstraints | None = request.constraints
+
+        multipath_enabled = bool(getattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", True))
+
+        server_max_hops = int(getattr(settings, "ROUTING_MAX_HOPS", 6) or 6)
+        server_max_paths = int(getattr(settings, "ROUTING_MAX_PATHS", 3) or 3)
+        if not multipath_enabled:
+            server_max_paths = 1
+
+        server_timeout_ms = int(
+            getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 500) or 500
         )
+
+        def _effective_int(*, client_value: int | None, server_default: int) -> int:
+            if client_value is None:
+                return int(server_default)
+            return int(min(int(client_value), int(server_default)))
+
+        effective_max_hops = _effective_int(
+            client_value=(client_constraints.max_hops if client_constraints else None),
+            server_default=server_max_hops,
+        )
+        effective_max_paths = _effective_int(
+            client_value=(client_constraints.max_paths if client_constraints else None),
+            server_default=server_max_paths,
+        )
+        effective_timeout_ms = _effective_int(
+            client_value=(client_constraints.timeout_ms if client_constraints else None),
+            server_default=server_timeout_ms,
+        )
+
+        effective_avoid: list[str] | None = None
+        if client_constraints is not None and client_constraints.avoid:
+            effective_avoid = [str(x) for x in client_constraints.avoid if isinstance(x, str) and x]
+
+        routing_timeout_s = float(max(1, effective_timeout_ms)) / 1000.0
         prepare_timeout_s = float(getattr(settings, "PREPARE_TIMEOUT_SECONDS", 3) or 3)
         commit_timeout_s = float(getattr(settings, "COMMIT_TIMEOUT_SECONDS", 5) or 5)
         total_timeout_s = float(
@@ -293,29 +328,29 @@ class PaymentService:
         try:
             async with asyncio.timeout(total_timeout_s):
                 # Build routing graph + compute routes under spec-aligned timeout budget.
-                await asyncio.wait_for(
-                    self.router.build_graph(equivalent.code), timeout=routing_timeout_s
-                )
+                try:
+                    await asyncio.wait_for(
+                        self.router.build_graph(equivalent.code), timeout=routing_timeout_s
+                    )
+                except asyncio.TimeoutError:
+                    raise TimeoutException("Routing timed out")
 
-                routes_found = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.router.find_flow_routes,
-                        sender.pid,
-                        receiver.pid,
-                        amount,
-                        max_hops=settings.ROUTING_MAX_HOPS,
-                        max_paths=(
-                            settings.ROUTING_MAX_PATHS
-                            if bool(
-                                getattr(
-                                    settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", True
-                                )
-                            )
-                            else 1
+                try:
+                    routes_found = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.router.find_flow_routes,
+                            sender.pid,
+                            receiver.pid,
+                            amount,
+                            max_hops=effective_max_hops,
+                            max_paths=effective_max_paths,
+                            timeout_ms=effective_timeout_ms,
+                            avoid_participants=effective_avoid,
                         ),
-                    ),
-                    timeout=routing_timeout_s,
-                )
+                        timeout=routing_timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    raise TimeoutException("Routing timed out")
 
                 if not routes_found:
                     try:
@@ -433,7 +468,9 @@ class PaymentService:
                         pass
                     # Abort is idempotent and also cleans up any partial locks.
                     await self.engine.abort(
-                        tx_id_str, reason=f"Prepare failed: {str(e)}"
+                        tx_id_str,
+                        reason=f"Prepare failed: {str(e)}",
+                        error_code=ErrorCode.E010,
                     )
                     raise BadRequestException(f"Payment preparation failed: {str(e)}")
 
@@ -477,7 +514,9 @@ class PaymentService:
 
                     # Abort is idempotent; if commit failed before applying changes, this releases locks.
                     await self.engine.abort(
-                        tx_id_str, reason=f"Commit failed: {str(e)}"
+                        tx_id_str,
+                        reason=f"Commit failed: {str(e)}",
+                        error_code=ErrorCode.E010,
                     )
                     raise GeoException(f"Payment commit failed: {str(e)}")
         except asyncio.TimeoutError:
@@ -500,7 +539,10 @@ class PaymentService:
                 # Ensure abort isn't cancelled due to the timeout cancellation context.
                 await asyncio.shield(
                     self.engine.abort(
-                        tx_id_str, reason="Payment timeout", commit=commit
+                        tx_id_str,
+                        reason="Payment timeout",
+                        commit=commit,
+                        error_code=ErrorCode.E007,
                     )
                 )
             raise TimeoutException("Payment timed out")
@@ -601,7 +643,7 @@ class PaymentService:
         error = None
         if tx.error:
             error = PaymentError(
-                code=str(tx.error.get("code", "ERROR")),
+                code=str(tx.error.get("code") or ErrorCode.E010.value),
                 message=str(tx.error.get("message", "")),
                 details=tx.error.get("details"),
             )

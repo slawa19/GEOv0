@@ -1,6 +1,9 @@
 from decimal import Decimal
 
+import pytest
+
 from app.core.auth.canonical import canonical_json
+from app.utils.exceptions import BadRequestException
 
 
 def test_canonical_json_is_deterministic_and_compact():
@@ -20,3 +23,21 @@ def test_canonical_json_normalizes_decimal_string_form():
 
     # Decimals are represented deterministically without trailing zeros.
     assert out == b'{"amount":"100","small":"0.01","zero":"0"}'
+
+
+def test_canonical_json_rejects_float_anywhere_in_payload():
+    payload = {"nested": {"x": [1, 2.0]}}
+
+    with pytest.raises(BadRequestException) as exc:
+        canonical_json(payload)
+
+    assert exc.value.code == "E009"
+
+
+def test_canonical_json_rejects_decimal_exponent_notation():
+    payload = {"amount": Decimal("1E+3")}
+
+    with pytest.raises(BadRequestException) as exc:
+        canonical_json(payload)
+
+    assert exc.value.code == "E009"

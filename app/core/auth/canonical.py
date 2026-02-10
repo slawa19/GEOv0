@@ -6,6 +6,8 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from app.utils.exceptions import BadRequestException
+
 
 def _format_decimal(value: Decimal) -> str:
     # Normalize to remove exponent and trailing zeros.
@@ -15,6 +17,13 @@ def _format_decimal(value: Decimal) -> str:
         s = s.rstrip("0").rstrip(".")
     if s == "-0":
         s = "0"
+    # Canonical JSON must never emit exponent notation.
+    # (format(..., "f") should already guarantee this, but keep a hard check.)
+    if "e" in s.lower():
+        raise BadRequestException(
+            "Exponent notation is not allowed in canonical JSON",
+            details={"value": str(value)},
+        )
     return s
 
 
@@ -33,6 +42,21 @@ def _normalize(value: Any) -> Any:
         return [_normalize(v) for v in value]
 
     if isinstance(value, Decimal):
+        # Disallow special decimal values (NaN / +/-Infinity).
+        # Even though project payloads usually carry amounts as strings,
+        # canonical_json() can be used in other contexts.
+        if not value.is_finite():
+            raise BadRequestException(
+                "Non-finite Decimal is not allowed in canonical JSON",
+                details={"value": str(value)},
+            )
+        # Disallow exponent notation (e.g. Decimal('1E+3')).
+        # This avoids ambiguous numeric spellings and potential DoS from huge expansions.
+        if "e" in str(value).lower():
+            raise BadRequestException(
+                "Exponent notation is not allowed in canonical JSON",
+                details={"value": str(value)},
+            )
         return _format_decimal(value)
 
     if isinstance(value, UUID):
@@ -49,8 +73,12 @@ def _normalize(value: Any) -> Any:
         return value
 
     if isinstance(value, float):
-        # Avoid float JSON instability; represent as normalized string.
-        return _format_decimal(Decimal(repr(value)))
+        # Avoid float JSON instability and JSON exponent notation.
+        # Float must never appear in canonical payload.
+        raise BadRequestException(
+            "Float is not allowed in canonical JSON",
+            details={"value": repr(value)},
+        )
 
     return str(value)
 

@@ -11,17 +11,23 @@ async def test_simulator_fixtures_mode_emits_clearing_plan_and_done_with_same_pl
     auth_headers,
     monkeypatch,
 ):
+    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100-realistic-v2", "mode": "fixtures", "intensity_percent": 50},
+        json={"scenario_id": "greenfield-village-100-realistic-v2", "mode": "fixtures", "intensity_percent": 0},
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
 
-    # clearing.plan is emitted very early (often before we attach SSE).
-    # Give the heartbeat loop time to emit clearing.plan + clearing.done, then use SSE replay.
-    await asyncio.sleep(3.5)
+    # Trigger a deterministic clearing animation pair (plan + done) via debug action endpoint.
+    resp = await client.post(
+        f"/api/v1/simulator/runs/{run_id}/actions/clearing-once",
+        headers=auth_headers,
+        json={"equivalent": "UAH"},
+    )
+    assert resp.status_code == 200, resp.text
 
     url = f"/api/v1/simulator/runs/{run_id}/events"
 
@@ -29,15 +35,11 @@ async def test_simulator_fixtures_mode_emits_clearing_plan_and_done_with_same_pl
     seen_plan = False
     seen_done = False
 
-    # This endpoint intentionally short-circuits under pytest to avoid hanging streams.
-    # For this test we need both clearing.plan and clearing.done.
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-
     async with client.stream(
         "GET",
         url,
         headers={**auth_headers, "Last-Event-ID": f"evt_{run_id}_000000"},
-        params={"equivalent": "UAH"},
+        params={"equivalent": "UAH", "stop_after_types": "clearing.plan,clearing.done"},
     ) as r:
         assert r.status_code == 200
 

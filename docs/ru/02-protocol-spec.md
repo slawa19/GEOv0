@@ -422,9 +422,10 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
   "msg_type": "PAYMENT_REQUEST",
   "from": "PID_A",
   "payload": {
+    "tx_id": "client-generated-unique-id",
     "to": "PID_B",
     "equivalent": "UAH",
-    "amount": 100.00,
+    "amount": "100.00",
     "description": "Оплата за услуги",
     "constraints": {
       "max_hops": 4,
@@ -436,6 +437,8 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
   "signature": "..."
 }
 ```
+
+> **`tx_id`** — обязательный идентификатор транзакции, генерируемый инициатором. Используется для идемпотентности и дедупликации (см. Приложение E). Включается в подписываемый canonical JSON payload. Формат: строка 1–64, `[A-Za-z0-9._:-]`. Значение `amount` передаётся как строка (decimal-string без экспонент).
 
 **Constraints:**
 

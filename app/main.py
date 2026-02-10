@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
@@ -15,6 +16,7 @@ from sqlalchemy import text
 from app.api.router import api_router
 from app.config import settings
 from app.db.session import engine
+from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
 from app.utils.exceptions import GeoException
 
 
@@ -172,9 +174,10 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    from app.utils.request_id import request_id_var, new_request_id
+    from app.utils.request_id import request_id_var, new_request_id, validate_request_id
 
-    rid = request.headers.get("X-Request-ID") or new_request_id()
+    incoming_rid = request.headers.get("X-Request-ID")
+    rid = validate_request_id(incoming_rid) or new_request_id()
     token = request_id_var.set(rid)
     try:
         response = await call_next(request)
@@ -198,7 +201,14 @@ async def metrics_middleware(request: Request, call_next):
         from app.utils.metrics import HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION_SECONDS
 
         route = request.scope.get("route")
-        path_label = getattr(route, "path", request.url.path)
+        # IMPORTANT: keep Prometheus label cardinality low.
+        # - Matched routes: use the route template (e.g. "/api/v1/payments/{payment_id}").
+        # - Unmatched routes (no route in scope / no template): use a fixed label.
+        route_path = getattr(route, "path", None)
+        if isinstance(route_path, str) and route_path:
+            path_label = route_path
+        else:
+            path_label = "__unmatched__"
         method = request.method
         status = str(getattr(response, "status_code", 0))
 
@@ -213,6 +223,24 @@ async def metrics_middleware(request: Request, call_next):
 @app.exception_handler(GeoException)
 async def geo_exception_handler(request: Request, exc: GeoException):
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+):
+    # Unify FastAPI/Pydantic validation errors into GEO error envelope.
+    # Spec: E009 (Invalid input).
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": ErrorCode.E009.value,
+                "message": ERROR_MESSAGES[ErrorCode.E009],
+                "details": {"errors": exc.errors()},
+            }
+        },
+    )
 
 
 app.include_router(api_router, prefix="/api/v1")

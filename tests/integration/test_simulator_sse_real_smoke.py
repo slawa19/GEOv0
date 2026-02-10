@@ -13,7 +13,11 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100-realistic-v2", "mode": "real", "intensity_percent": 90},
+        json={
+            "scenario_id": "greenfield-village-100-realistic-v2",
+            "mode": "real",
+            "intensity_percent": 90,
+        },
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
@@ -48,7 +52,9 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
                         edges = payload.get("edges")
                         if isinstance(edges, list) and edges:
                             e0 = edges[0]
-                            if isinstance(e0, dict) and isinstance(e0.get("from"), str) and isinstance(e0.get("to"), str):
+                            if isinstance(e0, dict) and isinstance(e0.get("from"), str) and isinstance(
+                                e0.get("to"), str
+                            ):
                                 seen_tx_with_edges = True
 
                         edge_patch = payload.get("edge_patch")

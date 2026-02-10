@@ -50,7 +50,7 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
             "GET",
             url,
             headers=auth_headers,
-            params={"equivalent": "UAH"},
+            params={"equivalent": "UAH", "stop_after_types": "tx.failed"},
         ) as r:
             assert r.status_code == 200
 

@@ -75,7 +75,16 @@ async def test_payment_prepare_timeout_aborts_transaction(db_session, monkeypatc
     async def _build_graph(_code: str) -> None:
         return None
 
-    def _find_flow_routes(_from: str, _to: str, _amount, *, max_hops: int, max_paths: int):
+    def _find_flow_routes(
+        _from: str,
+        _to: str,
+        _amount,
+        *,
+        max_hops: int,
+        max_paths: int,
+        timeout_ms: int | None = None,
+        avoid_participants=None,
+    ):
         return [([sender_pid, receiver_pid], _amount)]
 
     async def _slow_prepare(*_args, **_kwargs):
@@ -159,7 +168,16 @@ async def test_payment_commit_timeout_returns_committed_when_tx_already_committe
     async def _build_graph(_code: str) -> None:
         return None
 
-    def _find_flow_routes(_from: str, _to: str, _amount, *, max_hops: int, max_paths: int):
+    def _find_flow_routes(
+        _from: str,
+        _to: str,
+        _amount,
+        *,
+        max_hops: int,
+        max_paths: int,
+        timeout_ms: int | None = None,
+        avoid_participants=None,
+    ):
         return [([sender_pid, receiver_pid], _amount)]
 
     async def _fast_prepare(*_args, **_kwargs):

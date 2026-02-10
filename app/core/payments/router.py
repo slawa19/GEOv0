@@ -19,6 +19,7 @@ from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath, 
 from app.config import settings
 from app.utils.metrics import ROUTING_FAILURES_TOTAL
 from app.utils.validation import validate_equivalent_code
+from app.utils.exceptions import TimeoutException
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,7 @@ class PaymentRouter:
         forbidden_edges: Set[Tuple[str, str]] | None = None,
         forbidden_nodes: Set[str] | None = None,
         graph_override: Dict[str, Dict[str, Decimal]] | None = None,
+        deadline: float | None = None,
     ) -> Optional[List[str]]:
         graph = graph_override or self.graph
 
@@ -288,6 +290,9 @@ class PaymentRouter:
         queue: List[Tuple[str, List[str], Set[str]]] = [(from_pid, [from_pid], set())]
 
         while queue:
+            if deadline is not None and time.perf_counter() >= deadline:
+                raise TimeoutException("Routing timed out")
+
             current, path, blocked_so_far = queue.pop(0)
             if current == to_pid:
                 return path
@@ -351,6 +356,8 @@ class PaymentRouter:
         *,
         max_hops: int = 6,
         max_paths: int = 3,
+        timeout_ms: int | None = None,
+        avoid_participants: Iterable[str] | None = None,
     ) -> List[Tuple[List[str], Decimal]]:
         """Find up to max_paths routes that sum to amount.
 
@@ -361,8 +368,21 @@ class PaymentRouter:
         if amount <= 0 or max_paths <= 0:
             return []
 
-        timeout_ms = int(getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 50) or 50)
-        deadline = time.perf_counter() + (max(1, timeout_ms) / 1000.0)
+        effective_timeout_ms = int(
+            timeout_ms
+            if timeout_ms is not None
+            else (getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 50) or 50)
+        )
+        effective_timeout_ms = max(1, effective_timeout_ms)
+        deadline = time.perf_counter() + (effective_timeout_ms / 1000.0)
+
+        forbidden_nodes: Set[str] = set()
+        if avoid_participants:
+            forbidden_nodes = {
+                str(x)
+                for x in avoid_participants
+                if isinstance(x, str) and x.strip()
+            }
 
         # Working copy; subtract allocations to avoid over-committing shared edges.
         residual: Dict[str, Dict[str, Decimal]] = {u: d.copy() for u, d in self.graph.items()}
@@ -377,12 +397,12 @@ class PaymentRouter:
                 except Exception:
                     pass
                 logger.info(
-                    "event=routing.timeout from_pid=%s to_pid=%s equivalent_timeout_ms=%s",
+                    "event=routing.timeout from_pid=%s to_pid=%s timeout_ms=%s",
                     from_pid,
                     to_pid,
-                    timeout_ms,
+                    effective_timeout_ms,
                 )
-                return []
+                raise TimeoutException("Routing timed out")
 
             path = self._bfs_single_path(
                 from_pid,
@@ -390,6 +410,8 @@ class PaymentRouter:
                 Decimal('0'),
                 max_hops=max_hops,
                 graph_override=residual,
+                forbidden_nodes=forbidden_nodes,
+                deadline=deadline,
             )
             if not path:
                 break

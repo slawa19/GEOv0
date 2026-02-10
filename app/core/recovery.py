@@ -11,6 +11,7 @@ from app.config import settings
 from app.core.payments.engine import PaymentEngine
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
+from app.utils.error_codes import ErrorCode
 from app.utils.metrics import RECOVERY_EVENTS_TOTAL
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ async def cleanup_expired_prepare_locks(session: AsyncSession) -> int:
     engine = PaymentEngine(session)
     for tx_id in tx_ids:
         try:
-            await engine.abort(tx_id, reason="Prepare lock expired")
+            await engine.abort(tx_id, reason="Prepare lock expired", error_code=ErrorCode.E007)
         except Exception:
             logger.exception("recovery.abort_expired_prepare_lock_tx_failed tx_id=%s", tx_id)
 
@@ -106,7 +107,11 @@ async def abort_stale_payment_transactions(session: AsyncSession) -> int:
     aborted = 0
     for tx_id in tx_ids:
         try:
-            await engine.abort(tx_id, reason="Recovered stale payment transaction")
+            await engine.abort(
+                tx_id,
+                reason="Recovered stale payment transaction",
+                error_code=ErrorCode.E007,
+            )
             aborted += 1
         except Exception:
             logger.exception("recovery.abort_failed tx_id=%s", tx_id)
