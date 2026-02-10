@@ -18,7 +18,7 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100", "mode": "real", "intensity_percent": 0},
+        json={"scenario_id": "greenfield-village-100-realistic-v2", "mode": "real", "intensity_percent": 0},
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]

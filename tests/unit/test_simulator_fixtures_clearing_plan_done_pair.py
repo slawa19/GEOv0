@@ -8,7 +8,7 @@ from app.core.simulator.runtime import runtime
 @pytest.mark.asyncio
 async def test_fixtures_mode_emits_clearing_plan_and_done_with_matching_plan_id() -> None:
     run_id = await runtime.create_run(
-        scenario_id="greenfield-village-100",
+        scenario_id="greenfield-village-100-realistic-v2",
         mode="fixtures",
         intensity_percent=50,
     )

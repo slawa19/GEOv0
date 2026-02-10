@@ -64,3 +64,24 @@ async def test_commit_is_idempotent_when_already_committed(db_session):
 
     engine = PaymentEngine(db_session)
     assert await engine.commit(tx_id) is True
+
+
+@pytest.mark.asyncio
+async def test_abort_is_noop_when_already_committed(db_session):
+    tx_id = str(uuid.uuid4())
+    tx = Transaction(
+        id=uuid.uuid4(),
+        tx_id=tx_id,
+        type="PAYMENT",
+        initiator_id=uuid.uuid4(),
+        payload={"from": "A", "to": "B", "amount": "1", "equivalent": "USD", "path": ["A", "B"]},
+        state="COMMITTED",
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    engine = PaymentEngine(db_session)
+    assert await engine.abort(tx_id, reason="should-not-abort") is True
+
+    await db_session.refresh(tx)
+    assert tx.state == "COMMITTED"

@@ -67,6 +67,112 @@ def validate_tx_id(tx_id: str) -> str:
     return normalized
 
 
+# --- Amount validation ---
+#
+# Canonical JSON constraints for numeric values (protocol) require us to be strict about
+# special values and representation:
+# - forbid NaN/Infinity
+# - forbid exponent notation (e/E)
+#
+# Additionally we enforce conservative scale/precision bounds to avoid pathological inputs
+# (e.g. extremely long fractions).
+
+DEFAULT_MAX_AMOUNT_SCALE = 18
+DEFAULT_MAX_AMOUNT_PRECISION = 50  # total digits in the decimal string (excluding sign and '.')
+
+_AMOUNT_STR_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+_FORBIDDEN_AMOUNT_LITERALS = {
+    "nan",
+    "inf",
+    "+inf",
+    "-inf",
+    "infinity",
+    "+infinity",
+    "-infinity",
+}
+
+
+def parse_amount_decimal(
+    amount: Any,
+    *,
+    max_scale: int | None = DEFAULT_MAX_AMOUNT_SCALE,
+    max_precision: int | None = DEFAULT_MAX_AMOUNT_PRECISION,
+    require_positive: bool = False,
+) -> Decimal:
+    """Parse and validate an API amount as a strict decimal string.
+
+    Accepts only plain decimal strings like: 0, 0.1, 10.00, 0001.23
+
+    Rejects:
+    - NaN / Infinity / -Infinity
+    - exponent notation (e/E)
+    - leading/trailing whitespace
+    - empty / non-numeric strings
+    - excessive scale/precision (conservative limits)
+
+    If require_positive=True, enforces amount > 0.
+
+    Raises BadRequestException("Invalid amount format") or
+    BadRequestException("Amount must be positive").
+    """
+
+    if amount is None:
+        raise BadRequestException("Invalid amount format")
+
+    amount_str = amount if isinstance(amount, str) else str(amount)
+
+    if not amount_str:
+        raise BadRequestException("Invalid amount format")
+
+    # No implicit normalization: reject any surrounding whitespace.
+    if amount_str != amount_str.strip():
+        raise BadRequestException("Invalid amount format")
+
+    lowered = amount_str.lower()
+
+    # Explicitly forbid special float-like literals even if some callers pass them as strings.
+    if lowered in _FORBIDDEN_AMOUNT_LITERALS:
+        raise BadRequestException("Invalid amount format")
+
+    # Exponent notation is forbidden (canonical JSON recommendation and DoS hardening).
+    if "e" in lowered:
+        raise BadRequestException("Invalid amount format")
+
+    # Strict decimal string: optional '-' then digits, optional fraction with at least 1 digit.
+    # Note: '+' is intentionally NOT supported.
+    if _AMOUNT_STR_RE.fullmatch(amount_str) is None:
+        raise BadRequestException("Invalid amount format")
+
+    unsigned = amount_str[1:] if amount_str.startswith("-") else amount_str
+    if "." in unsigned:
+        int_part, frac_part = unsigned.split(".", 1)
+        scale = len(frac_part)
+    else:
+        int_part, frac_part = unsigned, ""
+        scale = 0
+
+    if max_scale is not None and scale > max_scale:
+        raise BadRequestException("Invalid amount format")
+
+    if max_precision is not None and (len(int_part) + len(frac_part)) > max_precision:
+        raise BadRequestException("Invalid amount format")
+
+    try:
+        as_decimal = Decimal(amount_str)
+    except (InvalidOperation, ValueError):
+        raise BadRequestException("Invalid amount format")
+
+    # Decimal() could still theoretically produce non-finite values for special inputs,
+    # so keep an explicit guard.
+    if not as_decimal.is_finite():
+        raise BadRequestException("Invalid amount format")
+
+    if require_positive and as_decimal <= 0:
+        raise BadRequestException("Amount must be positive")
+
+    return as_decimal
+
+
 _ALLOWED_TRUSTLINE_POLICY_KEYS = {
     "auto_clearing",
     "can_be_intermediate",

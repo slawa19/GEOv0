@@ -1,0 +1,97 @@
+{
+  "schema_version": "scenario/1",
+  "scenario_id": "golden-7_2-like",
+  "name": "Golden scenario (7.2-like)",
+  "description": "Scenario shape aligned with the illustrative example from GEO-community-simulator-application.md (7.2).",
+  "baseEquivalent": "UAH",
+  "participants": [
+    {
+      "id": "p1",
+      "name": "Иван",
+      "type": "person",
+      "groupId": "A",
+      "behaviorProfileId": "normal_consumer"
+    },
+    {
+      "id": "p2",
+      "name": "Анна",
+      "type": "person",
+      "groupId": "B",
+      "behaviorProfileId": "panic_prone"
+    },
+    {
+      "id": "p3",
+      "name": "Олег",
+      "type": "person",
+      "groupId": "B",
+      "behaviorProfileId": "normal_consumer"
+    },
+    {
+      "id": "h1",
+      "name": "Магазин у дома",
+      "type": "hub",
+      "groupId": "center",
+      "behaviorProfileId": "merchant"
+    }
+  ],
+  "trustlines": [
+    { "from": "p1", "to": "h1", "limit": 1000 },
+    { "from": "p2", "to": "h1", "limit": 700 },
+    { "from": "p3", "to": "h1", "limit": 500 },
+    { "from": "h1", "to": "p1", "limit": 200 },
+    { "from": "h1", "to": "p2", "limit": 200 }
+  ],
+  "behaviorProfiles": [
+    {
+      "id": "normal_consumer",
+      "props": {
+        "riskTolerance": 0.5,
+        "trustPropensity": 0.5,
+        "panicSensitivity": 0.3,
+        "hoardingTendency": 0.4,
+        "localismBias": 0.6
+      },
+      "rules": [
+        {
+          "trigger": "each_day",
+          "action": "random_payment_within_cluster",
+          "params": { "avgAmount": 100, "variance": 0.3 }
+        }
+      ]
+    },
+    {
+      "id": "panic_prone",
+      "extends": "normal_consumer",
+      "props": {
+        "panicSensitivity": 0.9,
+        "hoardingTendency": 0.7
+      },
+      "rules": [
+        {
+          "trigger": "metric_drop(network_success_rate,0.8)",
+          "action": "reduce_outgoing_payments",
+          "params": { "factor": 0.5 }
+        }
+      ]
+    },
+    {
+      "id": "merchant",
+      "props": {
+        "pricingPower": 0.5
+      }
+    }
+  ],
+  "groups": [
+    { "id": "A", "label": "Район А" },
+    { "id": "B", "label": "Район B" },
+    { "id": "center", "label": "Центральные хабы" }
+  ],
+  "events": [
+    {
+      "time": "day_10",
+      "type": "stress",
+      "description": "Паника в районе B",
+      "effects": [{ "targetGroup": "B", "applyBehaviorProfile": "panic_prone" }]
+    }
+  ]
+}

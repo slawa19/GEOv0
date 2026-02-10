@@ -73,13 +73,9 @@ def _scenario_allowlist() -> Optional[set[str]]:
         return items or None
 
     return {
-        "greenfield-village-100",
-        "greenfield-village-100-v2",
         "greenfield-village-100-realistic-v2",
-        "riverside-town-50",
-        "riverside-town-50-v2",
         "riverside-town-50-realistic-v2",
-        "clearing-demo-manual",
+        "clearing-demo-10",
     }
 
 

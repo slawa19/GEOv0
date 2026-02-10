@@ -1,0 +1,56 @@
+{
+  "schema_version": "scenario/1",
+  "scenario_id": "clearing-demo-10",
+  "name": "Демо клиринга (10 участников)",
+  "description": "Минимальный сценарий для интерактивной демонстрации клиринга. Запускать с intensity_percent=0.",
+  "equivalents": ["UAH"],
+  "participants": [
+    { "id": "shop", "name": "Магазин", "type": "hub", "status": "active", "groupId": "business" },
+    { "id": "bakery", "name": "Пекарня", "type": "business", "status": "active", "groupId": "business" },
+    { "id": "farmer", "name": "Фермер", "type": "business", "status": "active", "groupId": "business" },
+    { "id": "workshop", "name": "Майстерня", "type": "business", "status": "active", "groupId": "business" },
+
+    { "id": "alice", "name": "Алиса", "type": "person", "status": "active", "groupId": "people" },
+    { "id": "bob", "name": "Боб", "type": "person", "status": "active", "groupId": "people" },
+    { "id": "olena", "name": "Олена", "type": "person", "status": "active", "groupId": "people" },
+    { "id": "dmytro", "name": "Дмитро", "type": "person", "status": "active", "groupId": "people" },
+    { "id": "natalya", "name": "Наталя", "type": "person", "status": "active", "groupId": "people" },
+    { "id": "vasyl", "name": "Василь", "type": "person", "status": "active", "groupId": "people" }
+  ],
+  "groups": [
+    { "id": "people", "label": "Люди" },
+    { "id": "business", "label": "Бизнес" }
+  ],
+  "trustlines": [
+    { "from": "shop", "to": "alice", "equivalent": "UAH", "limit": 1000 },
+    { "from": "shop", "to": "bob", "equivalent": "UAH", "limit": 1000 },
+    { "from": "shop", "to": "olena", "equivalent": "UAH", "limit": 800 },
+    { "from": "shop", "to": "dmytro", "equivalent": "UAH", "limit": 800 },
+
+    { "from": "farmer", "to": "shop", "equivalent": "UAH", "limit": 1500 },
+    { "from": "bakery", "to": "shop", "equivalent": "UAH", "limit": 1200 },
+    { "from": "workshop", "to": "shop", "equivalent": "UAH", "limit": 1000 },
+
+    { "from": "alice", "to": "farmer", "equivalent": "UAH", "limit": 500 },
+    { "from": "bob", "to": "bakery", "equivalent": "UAH", "limit": 600 },
+    { "from": "olena", "to": "workshop", "equivalent": "UAH", "limit": 500 },
+    { "from": "dmytro", "to": "workshop", "equivalent": "UAH", "limit": 500 },
+
+    { "from": "natalya", "to": "shop", "equivalent": "UAH", "limit": 700 },
+    { "from": "natalya", "to": "bob", "equivalent": "UAH", "limit": 400 },
+
+    { "from": "vasyl", "to": "farmer", "equivalent": "UAH", "limit": 500 },
+    { "from": "vasyl", "to": "bakery", "equivalent": "UAH", "limit": 400 }
+  ],
+  "events": [
+    {
+      "time": 0,
+      "type": "note",
+      "label": "manual_mode",
+      "description": "Сценарий для ручной демонстрации клиринга. Автоплатежи отключаются установкой intensity_percent=0. Создавайте долги вручную и запускайте clearing_once."
+    }
+  ],
+  "settings": {
+    "warmup": { "ticks": 0, "floor": 1.0 }
+  }
+}

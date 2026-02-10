@@ -32,7 +32,7 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
         "/api/v1/simulator/runs",
         headers=auth_headers,
         json={
-            "scenario_id": "greenfield-village-100",
+            "scenario_id": "greenfield-village-100-realistic-v2",
             "mode": "real",
             "intensity_percent": 90,
         },

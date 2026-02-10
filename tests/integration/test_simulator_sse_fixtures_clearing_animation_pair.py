@@ -14,7 +14,7 @@ async def test_simulator_fixtures_mode_emits_clearing_plan_and_done_with_same_pl
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100", "mode": "fixtures", "intensity_percent": 50},
+        json={"scenario_id": "greenfield-village-100-realistic-v2", "mode": "fixtures", "intensity_percent": 50},
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]

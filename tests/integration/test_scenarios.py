@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient
 import base64
 import json
+import uuid
 from app.core.auth.crypto import generate_keypair
 from app.core.auth.canonical import canonical_json
 from nacl.signing import SigningKey
@@ -10,6 +11,7 @@ from nacl.signing import SigningKey
 def _sign_payment_request(
     *,
     signing_key: SigningKey,
+    tx_id: str,
     from_pid: str,
     to_pid: str,
     equivalent: str,
@@ -18,6 +20,7 @@ def _sign_payment_request(
     constraints=None,
 ) -> str:
     payload = {
+        "tx_id": tx_id,
         "to": to_pid,
         "equivalent": equivalent,
         "amount": amount,
@@ -317,12 +320,15 @@ async def test_direct_payment(client: AsyncClient, db_session):
     
     # Execute Payment
     alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    tx_id = str(uuid.uuid4())
     pay_data = {
+        "tx_id": tx_id,
         "to": bob["pid"],
         "equivalent": "USD",
         "amount": "10.00",
         "signature": _sign_payment_request(
             signing_key=alice_signing_key,
+            tx_id=tx_id,
             from_pid=alice["pid"],
             to_pid=bob["pid"],
             equivalent="USD",
@@ -412,12 +418,15 @@ async def test_multihop_payment(client: AsyncClient, db_session):
     
     # A pays C
     alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    tx_id = str(uuid.uuid4())
     pay_data = {
+        "tx_id": tx_id,
         "to": carol["pid"],
         "equivalent": "USD",
         "amount": "50.00",
         "signature": _sign_payment_request(
             signing_key=alice_signing_key,
+            tx_id=tx_id,
             from_pid=alice["pid"],
             to_pid=carol["pid"],
             equivalent="USD",
@@ -525,12 +534,15 @@ async def test_multipath_payment(client: AsyncClient, db_session):
 
     # Payment should succeed via multipath.
     a_signing_key = SigningKey(base64.b64decode(a["priv"]))
+    tx_id = str(uuid.uuid4())
     pay_data = {
+        "tx_id": tx_id,
         "to": d["pid"],
         "equivalent": "USD",
         "amount": "50.00",
         "signature": _sign_payment_request(
             signing_key=a_signing_key,
+            tx_id=tx_id,
             from_pid=a["pid"],
             to_pid=d["pid"],
             equivalent="USD",
@@ -625,15 +637,18 @@ async def test_clearing(client: AsyncClient, db_session):
     # Create Cycle of Debts
     # A pays B 10
     alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    tx_id = str(uuid.uuid4())
     await client.post(
         "/api/v1/payments",
         headers=alice["headers"],
         json={
+            "tx_id": tx_id,
             "to": bob["pid"],
             "equivalent": "USD",
             "amount": "10.00",
             "signature": _sign_payment_request(
                 signing_key=alice_signing_key,
+                tx_id=tx_id,
                 from_pid=alice["pid"],
                 to_pid=bob["pid"],
                 equivalent="USD",
@@ -643,15 +658,18 @@ async def test_clearing(client: AsyncClient, db_session):
     )
     # B pays C 10
     bob_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+    tx_id = str(uuid.uuid4())
     await client.post(
         "/api/v1/payments",
         headers=bob["headers"],
         json={
+            "tx_id": tx_id,
             "to": carol["pid"],
             "equivalent": "USD",
             "amount": "10.00",
             "signature": _sign_payment_request(
                 signing_key=bob_signing_key,
+                tx_id=tx_id,
                 from_pid=bob["pid"],
                 to_pid=carol["pid"],
                 equivalent="USD",
@@ -661,15 +679,18 @@ async def test_clearing(client: AsyncClient, db_session):
     )
     # C pays A 10
     carol_signing_key = SigningKey(base64.b64decode(carol["priv"]))
+    tx_id = str(uuid.uuid4())
     await client.post(
         "/api/v1/payments",
         headers=carol["headers"],
         json={
+            "tx_id": tx_id,
             "to": alice["pid"],
             "equivalent": "USD",
             "amount": "10.00",
             "signature": _sign_payment_request(
                 signing_key=carol_signing_key,
+                tx_id=tx_id,
                 from_pid=carol["pid"],
                 to_pid=alice["pid"],
                 equivalent="USD",

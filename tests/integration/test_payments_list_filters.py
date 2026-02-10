@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 
 import base64
+import uuid
 import pytest
 from httpx import AsyncClient
 from nacl.signing import SigningKey
@@ -94,14 +95,17 @@ async def test_list_payments_filters(client: AsyncClient, db_session):
     bob_signing_key = SigningKey(base64.b64decode(bob["priv"]))
 
     # Payment 1: Alice -> Bob (USD)
+    tx_id = str(uuid.uuid4())
     resp = await client.post(
         "/api/v1/payments",
         json={
+            "tx_id": tx_id,
             "to": bob["pid"],
             "equivalent": "USD",
             "amount": "10.00",
             "signature": _sign_payment_request(
                 signing_key=alice_signing_key,
+                tx_id=tx_id,
                 from_pid=alice["pid"],
                 to_pid=bob["pid"],
                 equivalent="USD",
@@ -117,14 +121,17 @@ async def test_list_payments_filters(client: AsyncClient, db_session):
     await asyncio.sleep(1.1)
 
     # Payment 2: Alice -> Bob (EUR)
+    tx_id = str(uuid.uuid4())
     resp = await client.post(
         "/api/v1/payments",
         json={
+            "tx_id": tx_id,
             "to": bob["pid"],
             "equivalent": "EUR",
             "amount": "2.00",
             "signature": _sign_payment_request(
                 signing_key=alice_signing_key,
+                tx_id=tx_id,
                 from_pid=alice["pid"],
                 to_pid=bob["pid"],
                 equivalent="EUR",
@@ -140,14 +147,17 @@ async def test_list_payments_filters(client: AsyncClient, db_session):
     await asyncio.sleep(1.1)
 
     # Payment 3: Bob -> Alice (USD)
+    tx_id = str(uuid.uuid4())
     resp = await client.post(
         "/api/v1/payments",
         json={
+            "tx_id": tx_id,
             "to": alice["pid"],
             "equivalent": "USD",
             "amount": "5.00",
             "signature": _sign_payment_request(
                 signing_key=bob_signing_key,
+                tx_id=tx_id,
                 from_pid=bob["pid"],
                 to_pid=alice["pid"],
                 equivalent="USD",

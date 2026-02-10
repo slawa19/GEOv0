@@ -924,6 +924,23 @@ class PaymentEngine:
                 pass
 
             tx = await self._get_tx(tx_id)
+            if tx and tx.state == "COMMITTED":
+                # Safety guard: never transition a committed transaction back to ABORTED.
+                # This can happen in the service layer under timeout uncertainty (commit may
+                # have finished, but the caller timed out).
+                delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
+                await self.session.execute(delete_stmt)
+                if commit:
+                    await self.session.commit()
+                else:
+                    await self.session.flush()
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(
+                        event="abort", result="already_committed"
+                    ).inc()
+                except Exception:
+                    pass
+                return True
             if tx and tx.state == "ABORTED":
                 # Idempotency: ensure locks are gone as well.
                 delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)

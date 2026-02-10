@@ -1,4 +1,5 @@
 import base64
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -25,7 +26,7 @@ async def _seed_equivalent(db_session, code: str):
 
 
 @pytest.mark.asyncio
-async def test_payments_idempotency_key_returns_same_result(client: AsyncClient, db_session):
+async def test_payments_tx_id_returns_same_result(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")
 
     alice = await register_and_login(client, "Alice_Idempotency")
@@ -52,12 +53,16 @@ async def test_payments_idempotency_key_returns_same_result(client: AsyncClient,
 
     signing_key = SigningKey(base64.b64decode(alice["priv"]))
 
+    tx_id = str(uuid.uuid4())
+
     body = {
+        "tx_id": tx_id,
         "to": bob["pid"],
         "equivalent": "USD",
         "amount": "10.00",
         "signature": _sign_payment_request(
             signing_key=signing_key,
+            tx_id=tx_id,
             from_pid=alice["pid"],
             to_pid=bob["pid"],
             equivalent="USD",
@@ -66,11 +71,11 @@ async def test_payments_idempotency_key_returns_same_result(client: AsyncClient,
     }
 
     headers = dict(alice["headers"])
-    headers["Idempotency-Key"] = "idem-001"
 
     resp1 = await client.post("/api/v1/payments", json=body, headers=headers)
     assert resp1.status_code == 200
     p1 = resp1.json()
+    assert p1["tx_id"] == tx_id
     assert p1["status"] == "COMMITTED"
 
     resp2 = await client.post("/api/v1/payments", json=body, headers=headers)
@@ -81,7 +86,7 @@ async def test_payments_idempotency_key_returns_same_result(client: AsyncClient,
 
 
 @pytest.mark.asyncio
-async def test_payments_idempotency_key_reuse_with_different_payload_conflicts(client: AsyncClient, db_session):
+async def test_payments_tx_id_reuse_with_different_payload_conflicts(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")
 
     alice = await register_and_login(client, "Alice_Idempotency_Conflict")
@@ -109,14 +114,17 @@ async def test_payments_idempotency_key_reuse_with_different_payload_conflicts(c
     signing_key = SigningKey(base64.b64decode(alice["priv"]))
 
     headers = dict(alice["headers"])
-    headers["Idempotency-Key"] = "idem-002"
+
+    tx_id = str(uuid.uuid4())
 
     body1 = {
+        "tx_id": tx_id,
         "to": bob["pid"],
         "equivalent": "USD",
         "amount": "10.00",
         "signature": _sign_payment_request(
             signing_key=signing_key,
+            tx_id=tx_id,
             from_pid=alice["pid"],
             to_pid=bob["pid"],
             equivalent="USD",
@@ -125,11 +133,13 @@ async def test_payments_idempotency_key_reuse_with_different_payload_conflicts(c
     }
 
     body2 = {
+        "tx_id": tx_id,
         "to": bob["pid"],
         "equivalent": "USD",
         "amount": "11.00",
         "signature": _sign_payment_request(
             signing_key=signing_key,
+            tx_id=tx_id,
             from_pid=alice["pid"],
             to_pid=bob["pid"],
             equivalent="USD",
@@ -144,3 +154,45 @@ async def test_payments_idempotency_key_reuse_with_different_payload_conflicts(c
     assert resp2.status_code == 409
     payload = resp2.json()
     assert payload["error"]["code"] == "E008"
+
+
+@pytest.mark.asyncio
+async def test_payments_missing_tx_id_is_bad_request(client: AsyncClient, db_session):
+    await _seed_equivalent(db_session, "USD")
+
+    alice = await register_and_login(client, "Alice_MissingTxId")
+    bob = await register_and_login(client, "Bob_MissingTxId")
+
+    # Bob must trust Alice for Alice -> Bob payments.
+    bob_signing_key = SigningKey(base64.b64decode(bob["priv"]))
+    resp = await client.post(
+        "/api/v1/trustlines",
+        json={
+            "to": alice["pid"],
+            "equivalent": "USD",
+            "limit": "100.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=bob_signing_key,
+                to_pid=alice["pid"],
+                equivalent="USD",
+                limit="100.00",
+            ),
+        },
+        headers=bob["headers"],
+    )
+    assert resp.status_code == 201
+
+    # No tx_id (and no Idempotency-Key fallback): should fail at API boundary.
+    resp = await client.post(
+        "/api/v1/payments",
+        json={
+            "to": bob["pid"],
+            "equivalent": "USD",
+            "amount": "10.00",
+            "signature": "x",
+        },
+        headers=alice["headers"],
+    )
+    assert resp.status_code == 400
+    payload = resp.json()
+    assert payload["error"]["code"] == "E009"

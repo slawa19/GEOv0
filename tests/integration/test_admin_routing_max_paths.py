@@ -1,4 +1,5 @@
 import base64
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -89,11 +90,13 @@ async def test_routing_max_paths_limits_multipath_payment(client: AsyncClient, d
             "/api/v1/payments",
             headers=alice["headers"],
             json={
+                "tx_id": (tx_id := str(uuid.uuid4())),
                 "to": dave["pid"],
                 "equivalent": "USD",
                 "amount": "10.00",
                 "signature": _sign_payment_request(
                     signing_key=alice_sk,
+                    tx_id=tx_id,
                     from_pid=alice["pid"],
                     to_pid=dave["pid"],
                     equivalent="USD",
@@ -111,11 +114,13 @@ async def test_routing_max_paths_limits_multipath_payment(client: AsyncClient, d
             "/api/v1/payments",
             headers=alice["headers"],
             json={
+                "tx_id": (tx_id := str(uuid.uuid4())),
                 "to": dave["pid"],
                 "equivalent": "USD",
                 "amount": "10.00",
                 "signature": _sign_payment_request(
                     signing_key=alice_sk,
+                    tx_id=tx_id,
                     from_pid=alice["pid"],
                     to_pid=dave["pid"],
                     equivalent="USD",

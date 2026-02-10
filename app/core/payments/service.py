@@ -34,7 +34,7 @@ from app.utils.exceptions import (
     RoutingException,
     TimeoutException,
 )
-from app.utils.validation import validate_equivalent_code, validate_tx_id
+from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_amount_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -125,23 +125,16 @@ class PaymentService:
             pass
 
         try:
-            amount = Decimal(str(request.amount))
-        except (InvalidOperation, ValueError):
+            amount = parse_amount_decimal(request.amount, require_positive=True)
+        except BadRequestException:
+            # Preserve existing metrics semantics for invalid user input.
             try:
                 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
             except Exception:
                 pass
-            raise BadRequestException("Invalid amount format")
-        if amount <= 0:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
-            except Exception:
-                pass
-            raise BadRequestException("Amount must be positive")
+            raise
 
         validate_equivalent_code(request.equivalent)
 
@@ -243,13 +236,12 @@ class PaymentService:
         request_fingerprint = hashlib.sha256(message).hexdigest()
         existing_tx = (
             await self.session.execute(
-                select(Transaction).where(
-                    Transaction.tx_id == tx_id_str,
-                    Transaction.type == "PAYMENT",
-                )
+                select(Transaction).where(Transaction.tx_id == tx_id_str)
             )
         ).scalar_one_or_none()
         if existing_tx is not None:
+            if existing_tx.type != "PAYMENT":
+                raise ConflictException("tx_id already used")
             if existing_tx.initiator_id != sender_id:
                 raise ConflictException("tx_id already used")
 
@@ -382,13 +374,12 @@ class PaymentService:
                     await self.session.rollback()
                     existing_tx = (
                         await self.session.execute(
-                            select(Transaction).where(
-                                Transaction.tx_id == tx_id_str,
-                                Transaction.type == "PAYMENT",
-                            )
+                            select(Transaction).where(Transaction.tx_id == tx_id_str)
                         )
                     ).scalar_one_or_none()
                     if existing_tx is not None:
+                        if existing_tx.type != "PAYMENT":
+                            raise ConflictException("tx_id already used")
                         existing_payload = existing_tx.payload or {}
                         existing_fp = (existing_payload.get("idempotency") or {}).get(
                             "fingerprint"
@@ -469,6 +460,21 @@ class PaymentService:
                         ).inc()
                     except Exception:
                         pass
+                    # Under uncertainty (e.g. DB/network errors), commit may have succeeded even if
+                    # the caller sees an exception. Read-before-abort to avoid COMMITTED -> ABORTED.
+                    try:
+                        await self.session.rollback()
+                    except Exception:
+                        pass
+
+                    tx_latest = (
+                        await self.session.execute(
+                            select(Transaction).where(Transaction.tx_id == tx_id_str)
+                        )
+                    ).scalar_one_or_none()
+                    if tx_latest is not None and tx_latest.state == "COMMITTED":
+                        return self._tx_to_payment_result(tx_latest)
+
                     # Abort is idempotent; if commit failed before applying changes, this releases locks.
                     await self.engine.abort(
                         tx_id_str, reason=f"Commit failed: {str(e)}"
@@ -476,6 +482,21 @@ class PaymentService:
                     raise GeoException(f"Payment commit failed: {str(e)}")
         except asyncio.TimeoutError:
             if tx_persisted:
+                # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
+                # COMMITTED -> ABORTED.
+                try:
+                    await self.session.rollback()
+                except Exception:
+                    pass
+
+                tx_latest = (
+                    await self.session.execute(
+                        select(Transaction).where(Transaction.tx_id == tx_id_str)
+                    )
+                ).scalar_one_or_none()
+                if tx_latest is not None and tx_latest.state == "COMMITTED":
+                    return self._tx_to_payment_result(tx_latest)
+
                 # Ensure abort isn't cancelled due to the timeout cancellation context.
                 await asyncio.shield(
                     self.engine.abort(

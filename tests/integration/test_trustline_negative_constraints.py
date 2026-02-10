@@ -1,5 +1,6 @@
 import base64
 from decimal import Decimal
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -53,15 +54,18 @@ async def test_trustline_update_rejects_limit_below_used(client: AsyncClient, db
 
     # Alice pays Bob 10.00 -> debt(Alice -> Bob) becomes 10.00, i.e. used on trustline (Bob -> Alice) is 10.00.
     alice_sk = SigningKey(base64.b64decode(alice["priv"]))
+    tx_id = str(uuid.uuid4())
     pay = await client.post(
         "/api/v1/payments",
         headers=alice["headers"],
         json={
+            "tx_id": tx_id,
             "to": bob["pid"],
             "equivalent": "USD",
             "amount": "10.00",
             "signature": _sign_payment_request(
                 signing_key=alice_sk,
+                tx_id=tx_id,
                 from_pid=alice["pid"],
                 to_pid=bob["pid"],
                 equivalent="USD",
@@ -118,15 +122,18 @@ async def test_trustline_close_rejects_non_zero_debt(client: AsyncClient, db_ses
     tl_id = resp.json()["id"]
 
     alice_sk = SigningKey(base64.b64decode(alice["priv"]))
+    tx_id = str(uuid.uuid4())
     pay = await client.post(
         "/api/v1/payments",
         headers=alice["headers"],
         json={
+            "tx_id": tx_id,
             "to": bob["pid"],
             "equivalent": "USD",
             "amount": "10.00",
             "signature": _sign_payment_request(
                 signing_key=alice_sk,
+                tx_id=tx_id,
                 from_pid=alice["pid"],
                 to_pid=bob["pid"],
                 equivalent="USD",

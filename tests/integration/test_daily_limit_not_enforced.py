@@ -1,4 +1,5 @@
 import base64
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -28,11 +29,12 @@ def _sign_trustline_create_request(
 def _sign_payment_request(
     *,
     signing_key: SigningKey,
+    tx_id: str,
     to_pid: str,
     equivalent: str,
     amount: str,
 ) -> str:
-    payload = {"to": to_pid, "equivalent": equivalent, "amount": amount}
+    payload = {"tx_id": tx_id, "to": to_pid, "equivalent": equivalent, "amount": amount}
     message = canonical_json(payload)
     return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
 
@@ -123,12 +125,15 @@ async def test_daily_limit_is_informational_only(client: AsyncClient, db_session
 
     # Even with daily_limit=0, MVP does not enforce it; payment should succeed.
     alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
+    tx_id = str(uuid.uuid4())
     pay_data = {
+        "tx_id": tx_id,
         "to": bob["pid"],
         "equivalent": "USD",
         "amount": "10.00",
         "signature": _sign_payment_request(
             signing_key=alice_signing_key,
+            tx_id=tx_id,
             to_pid=bob["pid"],
             equivalent="USD",
             amount="10.00",

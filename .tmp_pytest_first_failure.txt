@@ -1,0 +1,13 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.5, pytest-7.4.4, pluggy-1.6.0 -- D:\www\Projects\2025\GEOv0-PROJECT\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\www\Projects\2025\GEOv0-PROJECT
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-0.23.3, cov-4.1.0
+asyncio: mode=Mode.AUTO
+collecting ... collected 2 items
+
+tests/integration/test_admin_feature_flags_multipath.py::test_feature_flag_multipath_enabled_gates_multi_route_payment PASSED [ 50%]
+tests/integration/test_admin_feature_flags_multipath.py::test_feature_flag_full_multipath_gates_max_flow_metadata PASSED [100%]
+
+============================== 2 passed in 4.18s ==============================

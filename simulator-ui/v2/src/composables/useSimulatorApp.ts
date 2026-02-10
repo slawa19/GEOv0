@@ -105,7 +105,7 @@ export function useSimulatorApp() {
     }
   })
 
-  const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100'
+  const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100-realistic-v2'
 
   const ALLOWED_EQS = new Set(['UAH', 'HOUR', 'EUR'])
 

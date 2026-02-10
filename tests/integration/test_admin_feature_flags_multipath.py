@@ -1,5 +1,6 @@
 import base64
 from decimal import Decimal
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -84,11 +85,13 @@ async def test_feature_flag_multipath_enabled_gates_multi_route_payment(client: 
             "/api/v1/payments",
             headers=alice["headers"],
             json={
+                "tx_id": (tx_id := str(uuid.uuid4())),
                 "to": dave["pid"],
                 "equivalent": "USD",
                 "amount": "6.00",
                 "signature": _sign_payment_request(
                     signing_key=alice_sk,
+                    tx_id=tx_id,
                     from_pid=alice["pid"],
                     to_pid=dave["pid"],
                     equivalent="USD",
@@ -106,11 +109,13 @@ async def test_feature_flag_multipath_enabled_gates_multi_route_payment(client: 
             "/api/v1/payments",
             headers=alice["headers"],
             json={
+                "tx_id": (tx_id := str(uuid.uuid4())),
                 "to": dave["pid"],
                 "equivalent": "USD",
                 "amount": "6.00",
                 "signature": _sign_payment_request(
                     signing_key=alice_sk,
+                    tx_id=tx_id,
                     from_pid=alice["pid"],
                     to_pid=dave["pid"],
                     equivalent="USD",

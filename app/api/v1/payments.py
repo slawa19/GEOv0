@@ -1,9 +1,9 @@
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi import Header
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -16,6 +16,7 @@ from app.schemas.payment import (
 )
 from app.db.models.participant import Participant
 from app.utils.exceptions import BadRequestException
+from app.utils.validation import parse_amount_decimal
 
 router = APIRouter()
 
@@ -33,13 +34,7 @@ async def check_capacity(
     payment_router = PaymentRouter(session)
     await payment_router.build_graph(equivalent)
     
-    try:
-        amount_decimal = Decimal(amount)
-    except (InvalidOperation, ValueError):
-        raise BadRequestException("Invalid amount format")
-
-    if amount_decimal <= 0:
-        raise BadRequestException("Amount must be positive")
+    amount_decimal = parse_amount_decimal(amount, require_positive=True)
 
     return payment_router.check_capacity(current_participant.pid, to, amount_decimal)
 
@@ -60,7 +55,7 @@ async def get_max_flow(
 
 @router.post("", response_model=PaymentResult)
 async def create_payment(
-    payment_in: PaymentCreateRequest,
+    payment_in: dict,
     session: AsyncSession = Depends(deps.get_db),
     current_participant: Participant = Depends(deps.get_current_participant),
     redis_client=Depends(deps.get_redis_client),
@@ -69,9 +64,17 @@ async def create_payment(
     """
     Create and execute a payment.
     """
+    try:
+        payment_req = PaymentCreateRequest.model_validate(payment_in)
+    except ValidationError as exc:
+        raise BadRequestException(
+            "Validation error",
+            details={"validation": exc.errors()},
+        )
+
     service = PaymentService(session)
 
-    lock_key = f"dlock:payment:{current_participant.id}:{payment_in.equivalent}"
+    lock_key = f"dlock:payment:{current_participant.id}:{payment_req.equivalent}"
     async with redis_distributed_lock(
         redis_client,
         lock_key,
@@ -80,7 +83,8 @@ async def create_payment(
     ):
         return await service.create_payment(
             current_participant.id,
-            payment_in,
+            payment_req,
+            # Legacy header is accepted but ignored (tx_id is mandatory and signed).
             idempotency_key=idempotency_key,
         )
 

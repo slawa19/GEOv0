@@ -13,7 +13,7 @@ async def test_simulator_run_events_sse_has_run_status_and_tx_updated(
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100", "mode": "fixtures", "intensity_percent": 90},
+        json={"scenario_id": "greenfield-village-100-realistic-v2", "mode": "fixtures", "intensity_percent": 90},
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]

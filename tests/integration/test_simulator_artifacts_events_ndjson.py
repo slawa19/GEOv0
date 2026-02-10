@@ -14,7 +14,7 @@ async def test_simulator_artifacts_include_events_ndjson(
         "/api/v1/simulator/runs",
         headers=auth_headers,
         json={
-            "scenario_id": "greenfield-village-100",
+            "scenario_id": "greenfield-village-100-realistic-v2",
             "mode": "fixtures",
             "intensity_percent": 90,
         },

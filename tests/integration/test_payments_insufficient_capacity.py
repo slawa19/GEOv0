@@ -1,4 +1,5 @@
 import base64
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -49,14 +50,17 @@ async def test_payment_insufficient_capacity_returns_400_e002(client: AsyncClien
 
     alice_signing_key = SigningKey(base64.b64decode(alice["priv"]))
     pay_amount = "10.00"
+    tx_id = str(uuid.uuid4())
     resp = await client.post(
         "/api/v1/payments",
         json={
+            "tx_id": tx_id,
             "to": bob["pid"],
             "equivalent": "USD",
             "amount": pay_amount,
             "signature": _sign_payment_request(
                 signing_key=alice_signing_key,
+                tx_id=tx_id,
                 from_pid=alice["pid"],
                 to_pid=bob["pid"],
                 equivalent="USD",

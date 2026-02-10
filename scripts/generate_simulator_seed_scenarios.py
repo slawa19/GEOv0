@@ -430,29 +430,6 @@ def _assert_basic_integrity(scenario: dict[str, Any]) -> None:
             raise RuntimeError(f"trustline.to not in participants: {t['to']}")
 
 
-def _generate_greenfield() -> None:
-    datasets = ROOT / "admin-fixtures" / "v1" / "datasets"
-    participants = _read_json(datasets / "participants.json")
-    trustlines = _read_json(datasets / "trustlines.json")
-    eq_defs = _read_json(datasets / "equivalents.json")
-
-    scenario = _convert_to_scenario(
-        seed_id="greenfield-village-100",
-        participants=participants,
-        trustlines=trustlines,
-        eq_defs=eq_defs,
-    )
-    _assert_basic_integrity(scenario)
-
-    out_path = ROOT / "fixtures" / "simulator" / "greenfield-village-100" / "scenario.json"
-    _write_json(out_path, scenario)
-    _validate_scenario_shape(out_path)
-    print("Wrote", out_path)
-    print(" greenfield participants", len(scenario["participants"]))
-    print(" greenfield trustlines", len(scenario["trustlines"]))
-    print(" greenfield equivalents", scenario["equivalents"])
-
-
 def _seed_module_by_path(path: Path, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -488,54 +465,6 @@ def _scenario_from_seed_module(*, seed_id: str, seed_module) -> dict[str, Any]:
     )
     _assert_basic_integrity(scenario)
     return scenario
-
-
-def _generate_greenfield_v2() -> None:
-    tools_dir = ROOT / "admin-fixtures" / "tools"
-    seed_path = tools_dir / "generate_seed_greenfield_village_100_v2.py"
-    seed = _seed_module_by_path(seed_path, "_seed_greenfield_village_100_v2")
-
-    scenario = _scenario_from_seed_module(seed_id="greenfield-village-100-v2", seed_module=seed)
-
-    out_path = ROOT / "fixtures" / "simulator" / "greenfield-village-100-v2" / "scenario.json"
-    _write_json(out_path, scenario)
-    _validate_scenario_shape(out_path)
-    print("Wrote", out_path)
-    print(" greenfield-v2 participants", len(scenario["participants"]))
-    print(" greenfield-v2 trustlines", len(scenario["trustlines"]))
-    print(" greenfield-v2 equivalents", scenario["equivalents"])
-
-
-def _generate_riverside() -> None:
-    tools_dir = ROOT / "admin-fixtures" / "tools"
-    seed_path = tools_dir / "generate_seed_riverside_town_50.py"
-    seed = _seed_module_by_path(seed_path, "_seed_riverside_town_50")
-
-    scenario = _scenario_from_seed_module(seed_id="riverside-town-50", seed_module=seed)
-
-    out_path = ROOT / "fixtures" / "simulator" / "riverside-town-50" / "scenario.json"
-    _write_json(out_path, scenario)
-    _validate_scenario_shape(out_path)
-    print("Wrote", out_path)
-    print(" riverside participants", len(scenario["participants"]))
-    print(" riverside trustlines", len(scenario["trustlines"]))
-    print(" riverside equivalents", scenario["equivalents"])
-
-
-def _generate_riverside_v2() -> None:
-    tools_dir = ROOT / "admin-fixtures" / "tools"
-    seed_path = tools_dir / "generate_seed_riverside_town_50_v2.py"
-    seed = _seed_module_by_path(seed_path, "_seed_riverside_town_50_v2")
-
-    scenario = _scenario_from_seed_module(seed_id="riverside-town-50-v2", seed_module=seed)
-
-    out_path = ROOT / "fixtures" / "simulator" / "riverside-town-50-v2" / "scenario.json"
-    _write_json(out_path, scenario)
-    _validate_scenario_shape(out_path)
-    print("Wrote", out_path)
-    print(" riverside-v2 participants", len(scenario["participants"]))
-    print(" riverside-v2 trustlines", len(scenario["trustlines"]))
-    print(" riverside-v2 equivalents", scenario["equivalents"])
 
 
 def _make_seasonal_stress_events() -> list[dict[str, Any]]:
@@ -684,11 +613,7 @@ def _generate_greenfield_realistic_v2() -> None:
 
 
 def main() -> int:
-    _generate_greenfield()
-    _generate_greenfield_v2()
     _generate_greenfield_realistic_v2()
-    _generate_riverside()
-    _generate_riverside_v2()
     _generate_riverside_realistic_v2()
     return 0
 

@@ -17,7 +17,7 @@ async def test_simulator_sse_strict_replay_returns_410_for_too_old_last_event_id
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,
-        json={"scenario_id": "greenfield-village-100", "mode": "fixtures", "intensity_percent": 50},
+        json={"scenario_id": "greenfield-village-100-realistic-v2", "mode": "fixtures", "intensity_percent": 50},
     )
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]

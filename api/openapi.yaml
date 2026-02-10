@@ -1028,6 +1028,36 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /simulator/scenarios/{scenario_id}/graph/preview:
+    get:
+      tags: [Simulator]
+      summary: Preview scenario graph topology (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/ScenarioIdPath'
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum: [fixtures, real]
+            default: fixtures
+      responses:
+        '200':
+          description: Scenario graph snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorGraphSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /simulator/runs:
     post:
       tags: [Simulator]
@@ -1047,6 +1077,21 @@ paths:
                 $ref: '#/components/schemas/RunCreateResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /simulator/runs/active:
+    get:
+      tags: [Simulator]
+      summary: Get active simulator run id (Real Mode control plane)
+      responses:
+        '200':
+          description: Active run response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1184,6 +1229,62 @@ paths:
             text/event-stream:
               schema:
                 type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/actions/tx-once:
+    post:
+      tags: [Simulator]
+      summary: Emit one debug transaction event (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Transaction emitted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /simulator/runs/{run_id}/actions/clearing-once:
+    post:
+      tags: [Simulator]
+      summary: Emit one debug clearing event (Real Mode control plane)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Clearing emitted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2916,8 +3017,14 @@ components:
 
     PaymentCreateRequest:
       type: object
-      required: [to, equivalent, amount, signature]
+      required: [tx_id, to, equivalent, amount, signature]
       properties:
+        tx_id:
+          type: string
+          description: Client-generated transaction id for mandatory idempotency.
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9._:-]+$'
         to:
           type: string
         equivalent:
@@ -2932,7 +3039,7 @@ components:
           type: string
           description: |
             base64 Ed25519 signature of canonical JSON of this request body **excluding** `signature`.
-            Signed payload keys: `to`, `equivalent`, `amount`, optional `description`, optional `constraints`.
+            Signed payload keys: `tx_id`, `to`, `equivalent`, `amount`, optional `description`, optional `constraints`.
 
     PaymentConstraints:
       type: object

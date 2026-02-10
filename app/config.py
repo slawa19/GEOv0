@@ -1,3 +1,5 @@
+from typing import Any, ClassVar, FrozenSet
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,7 +27,9 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = False
 
     # JWT
-    JWT_SECRET: str = "dev-secret-change-me-please-32chars!!"
+    # NOTE: This default is intentionally insecure and must never be used outside dev/test.
+    DEFAULT_JWT_SECRET: ClassVar[str] = "dev-secret-change-me-please-32chars!!"
+    JWT_SECRET: str = DEFAULT_JWT_SECRET
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -94,7 +98,9 @@ class Settings(BaseSettings):
     # Admin API (minimal MVP)
     # NOTE: Shared secret to unblock Admin UI integration in MVP.
     # Replace with proper role-based auth in production.
-    ADMIN_TOKEN: str = "dev-admin-token-change-me"
+    # NOTE: This default is intentionally insecure and must never be used outside dev/test.
+    DEFAULT_ADMIN_TOKEN: ClassVar[str] = "dev-admin-token-change-me"
+    ADMIN_TOKEN: str = DEFAULT_ADMIN_TOKEN
 
     # Dev-only admin auth convenience (guarded)
     # When enabled (ENV=dev AND ADMIN_DEV_MODE=True), allow calling admin endpoints
@@ -119,6 +125,57 @@ class Settings(BaseSettings):
     # Optional: used to serialize integrity checkpoint runs across replicas (Redis lock TTL).
     # 0 = auto (defaults to max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)).
     INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS: int = 0
+
+    # --- Guardrails ---
+    # Fail-fast on obviously insecure secrets outside dev/test.
+    _SAFE_ENVS: ClassVar[FrozenSet[str]] = frozenset({"dev", "development", "test", "testing"})
+    _UNSAFE_PLACEHOLDERS: ClassVar[FrozenSet[str]] = frozenset(
+        {
+            "change-me-in-production",
+            "change-me",
+            "changeme",
+            "",
+        }
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
+        self._guardrail_default_secrets()
+
+    def _guardrail_default_secrets(self) -> None:
+        env = (self.ENV or "").strip().lower()
+        if env in self._SAFE_ENVS:
+            return
+
+        jwt_secret = (self.JWT_SECRET or "").strip()
+        admin_token = (self.ADMIN_TOKEN or "").strip()
+
+        def _is_unsafe(value: str, *, default_value: str) -> bool:
+            v = (value or "").strip()
+            vl = v.lower()
+            if v == default_value:
+                return True
+            if vl in self._UNSAFE_PLACEHOLDERS:
+                return True
+            if "change-me" in vl:
+                return True
+            return False
+
+        problems: list[str] = []
+        if _is_unsafe(jwt_secret, default_value=self.DEFAULT_JWT_SECRET):
+            problems.append("JWT_SECRET")
+        if _is_unsafe(admin_token, default_value=self.DEFAULT_ADMIN_TOKEN):
+            problems.append("ADMIN_TOKEN")
+
+        if problems:
+            fields = ", ".join(problems)
+            raise RuntimeError(
+                "Refusing to start with insecure default/placeholder secrets outside dev/test: "
+                f"{fields}. "
+                f"Got ENV={self.ENV!r}. "
+                "Set secure values via environment variables (JWT_SECRET / ADMIN_TOKEN), "
+                "or run with ENV=dev/test."
+            )
 
 
 settings = Settings()
