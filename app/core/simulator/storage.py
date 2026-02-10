@@ -195,6 +195,8 @@ async def write_tick_metrics(
                 avg_route_length = float(mv.get("avg_route_length", 0.0) or 0.0)
                 total_debt = float(mv.get("total_debt", 0.0) or 0.0)
                 clearing_volume = float(mv.get("clearing_volume", 0.0) or 0.0)
+                active_participants = float(mv.get("active_participants", 0.0) or 0.0)
+                active_trustlines = float(mv.get("active_trustlines", 0.0) or 0.0)
 
                 eq_code = str(eq)
                 rows.extend(
@@ -233,6 +235,20 @@ async def write_tick_metrics(
                             "key": "clearing_volume",
                             "t_ms": int(t_ms),
                             "value": float(clearing_volume),
+                        },
+                        {
+                            "run_id": str(run_id),
+                            "equivalent_code": eq_code,
+                            "key": "active_participants",
+                            "t_ms": int(t_ms),
+                            "value": float(active_participants),
+                        },
+                        {
+                            "run_id": str(run_id),
+                            "equivalent_code": eq_code,
+                            "key": "active_trustlines",
+                            "t_ms": int(t_ms),
+                            "value": float(active_trustlines),
                         },
                     ]
                 )

@@ -1,5 +1,5 @@
 import type { ClearingDoneEvent, ClearingPlanEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
-import type { RunStatusEvent, SimulatorEvent, TxFailedEvent } from './simulatorTypes'
+import type { RunStatusEvent, SimulatorEvent, TopologyChangedEvent, TopologyChangedEdgeRef, TopologyChangedNodeRef, TxFailedEvent } from './simulatorTypes'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -289,6 +289,70 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     }
 
     return evt as SimulatorEvent
+  }
+
+  if (type === 'topology.changed') {
+    const equivalent = asString(raw.equivalent)
+    if (!equivalent) return null
+
+    const payloadRaw = isRecord(raw.payload) ? raw.payload : null
+    if (!payloadRaw) return null
+
+    const added_nodes: TopologyChangedNodeRef[] = []
+    for (const n of asArray(payloadRaw.added_nodes) ?? []) {
+      if (!isRecord(n)) continue
+      const pid = asString(n.pid)
+      if (!pid) continue
+      added_nodes.push({
+        pid,
+        name: asString(n.name) ?? undefined,
+        type: asString(n.type) ?? undefined,
+      })
+    }
+
+    const removed_nodes: string[] = []
+    for (const n of asArray(payloadRaw.removed_nodes) ?? []) {
+      if (typeof n === 'string' && n) removed_nodes.push(n)
+    }
+
+    const added_edges: TopologyChangedEdgeRef[] = []
+    for (const e of asArray(payloadRaw.added_edges) ?? []) {
+      if (!isRecord(e)) continue
+      const from_pid = asString(e.from_pid)
+      const to_pid = asString(e.to_pid)
+      const equivalent_code = asString(e.equivalent_code)
+      if (!from_pid || !to_pid || !equivalent_code) continue
+      added_edges.push({
+        from_pid,
+        to_pid,
+        equivalent_code,
+        limit: asString(e.limit) ?? undefined,
+      })
+    }
+
+    const removed_edges: TopologyChangedEdgeRef[] = []
+    for (const e of asArray(payloadRaw.removed_edges) ?? []) {
+      if (!isRecord(e)) continue
+      const from_pid = asString(e.from_pid)
+      const to_pid = asString(e.to_pid)
+      const equivalent_code = asString(e.equivalent_code)
+      if (!from_pid || !to_pid || !equivalent_code) continue
+      removed_edges.push({
+        from_pid,
+        to_pid,
+        equivalent_code,
+        limit: asString(e.limit) ?? undefined,
+      })
+    }
+
+    const evt: TopologyChangedEvent = {
+      event_id,
+      ts,
+      type: 'topology.changed',
+      equivalent,
+      payload: { added_nodes, removed_nodes, added_edges, removed_edges },
+    }
+    return evt
   }
 
   // Unknown event type: passthrough with the minimal validated envelope.

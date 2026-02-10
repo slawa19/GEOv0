@@ -37,13 +37,15 @@ async def test_write_tick_metrics_bulk_upsert_updates_without_duplicates(
             )
         )
     ).all()
-    assert len(rows_1) == 5
+    assert len(rows_1) == 7
     assert {k for (k, _v) in rows_1} == {
         "success_rate",
         "bottlenecks_score",
         "avg_route_length",
         "total_debt",
         "clearing_volume",
+        "active_participants",
+        "active_trustlines",
     }
 
     # Write the same tick again with different values: must update (upsert), not duplicate.
@@ -72,7 +74,7 @@ async def test_write_tick_metrics_bulk_upsert_updates_without_duplicates(
             )
         )
     ).all()
-    assert len(rows_2) == 5
+    assert len(rows_2) == 7
 
     val_by_key = {k: float(v or 0.0) for (k, v) in rows_2}
     # committed=2, rejected=0 -> success_rate=100

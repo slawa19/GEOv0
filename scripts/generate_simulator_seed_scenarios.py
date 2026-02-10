@@ -136,13 +136,37 @@ def _group_for_seed(seed_id: str, pid: str) -> str | None:
     raise ValueError(f"Unknown seed_id: {seed_id}")
 
 
-def _behavior_for_group(group_id: str) -> str:
+def _behavior_for_group(group_id: str, participant_index: int = 0) -> str:
+    """Map group to behavior profile, with deterministic subtypes for large groups.
+
+    ``participant_index`` is the numeric index extracted from PID (via
+    ``_pid_index``).  It drives a deterministic assignment of subtypes so that
+    the same seed always produces the same profile distribution.
+    """
+    if group_id == "households":
+        # Distribution: 60 % base, 20 % active, 20 % frugal
+        mod = participant_index % 5
+        if mod < 3:
+            return "household"
+        elif mod < 4:
+            return "household_active"
+        else:
+            return "household_frugal"
+
+    if group_id == "producers":
+        # Distribution: 50 % base, 25 % large, 25 % small
+        mod = participant_index % 4
+        if mod < 2:
+            return "producer"
+        elif mod < 3:
+            return "producer_large"
+        else:
+            return "producer_small"
+
     return {
         "anchors": "anchor_hub",
-        "producers": "producer",
         "retail": "retail",
         "services": "service",
-        "households": "household",
         "agents": "agent",
     }[group_id]
 
@@ -162,9 +186,13 @@ def _make_behavior_profiles() -> list[dict[str, Any]]:
     return [
         {"id": "anchor_hub"},
         {"id": "producer"},
+        {"id": "producer_large"},
+        {"id": "producer_small"},
         {"id": "retail"},
         {"id": "service"},
         {"id": "household"},
+        {"id": "household_active"},
+        {"id": "household_frugal"},
         {"id": "agent"},
     ]
 
@@ -173,6 +201,8 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
     # Realistic-v2 intent:
     # - payments are typically 50..1500 UAH (bounded)
     # - lower tx_rate to avoid runaway balances over time
+    # - flow_chains define preferred payment direction (cyclic economy)
+    # - periodicity_factor: larger amounts → less frequent transactions
     return [
         {
             "id": "anchor_hub",
@@ -184,6 +214,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 },
             },
         },
+        # --- Producer subtypes ---
         {
             "id": "producer",
             "props": {
@@ -198,6 +229,42 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 350, "p90": 1100, "min": 50, "max": 1500},
                 },
+                "flow_chains": [["producer", "retail"]],
+            },
+        },
+        {
+            "id": "producer_large",
+            "props": {
+                "tx_rate": 0.10,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {
+                    "retail": 0.30,
+                    "services": 0.20,
+                    "households": 0.30,
+                    "anchors": 0.20,
+                },
+                "amount_model": {
+                    "UAH": {"p50": 500, "p90": 1300, "min": 80, "max": 1500},
+                },
+                "flow_chains": [["producer_large", "retail"]],
+                "periodicity_factor": 1.5,
+            },
+        },
+        {
+            "id": "producer_small",
+            "props": {
+                "tx_rate": 0.05,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {
+                    "retail": 0.40,
+                    "services": 0.25,
+                    "households": 0.20,
+                    "anchors": 0.15,
+                },
+                "amount_model": {
+                    "UAH": {"p50": 200, "p90": 600, "min": 50, "max": 1200},
+                },
+                "flow_chains": [["producer_small", "retail"]],
             },
         },
         {
@@ -209,6 +276,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 500, "p90": 1300, "min": 50, "max": 1500},
                 },
+                "flow_chains": [["retail", "producer"], ["retail", "household"]],
             },
         },
         {
@@ -222,6 +290,7 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 },
             },
         },
+        # --- Household subtypes ---
         {
             "id": "household",
             "props": {
@@ -236,6 +305,42 @@ def _make_behavior_profiles_realistic_v2() -> list[dict[str, Any]]:
                 "amount_model": {
                     "UAH": {"p50": 180, "p90": 650, "min": 50, "max": 1500},
                 },
+                "flow_chains": [["household", "retail"]],
+            },
+        },
+        {
+            "id": "household_active",
+            "props": {
+                "tx_rate": 0.14,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {
+                    "retail": 0.55,
+                    "services": 0.25,
+                    "producers": 0.10,
+                    "households": 0.10,
+                },
+                "amount_model": {
+                    "UAH": {"p50": 280, "p90": 900, "min": 50, "max": 1500},
+                },
+                "flow_chains": [["household_active", "retail"]],
+            },
+        },
+        {
+            "id": "household_frugal",
+            "props": {
+                "tx_rate": 0.04,
+                "equivalent_weights": {"UAH": 1.0},
+                "recipient_group_weights": {
+                    "retail": 0.65,
+                    "services": 0.15,
+                    "producers": 0.10,
+                    "households": 0.10,
+                },
+                "amount_model": {
+                    "UAH": {"p50": 120, "p90": 400, "min": 50, "max": 1000},
+                },
+                "flow_chains": [["household_frugal", "retail"]],
+                "periodicity_factor": 0.5,
             },
         },
         {
@@ -275,7 +380,8 @@ def _convert_to_scenario(*, seed_id: str, participants: list[dict[str, Any]], tr
             participant["status"] = p.get("status")
         if group_id is not None:
             participant["groupId"] = group_id
-            participant["behaviorProfileId"] = _behavior_for_group(group_id)
+            pidx = _pid_index(pid) or 0
+            participant["behaviorProfileId"] = _behavior_for_group(group_id, pidx)
 
         scenario_participants.append(participant)
 
@@ -432,6 +538,79 @@ def _generate_riverside_v2() -> None:
     print(" riverside-v2 equivalents", scenario["equivalents"])
 
 
+def _make_seasonal_stress_events() -> list[dict[str, Any]]:
+    """Seasonal stress events for realistic-v2 scenarios.
+
+    These model periodic demand fluctuations: weekend markets, quiet periods,
+    harvest festivals, and winter lulls.
+    """
+    return [
+        {
+            "time": 80000,
+            "type": "stress",
+            "label": "weekend_market",
+            "description": "Weekend market day — increased consumer activity",
+            "params": {
+                "multiplier": 1.3,
+                "duration_ms": 30000,
+                "label": "weekend_market",
+            },
+            "effects": [
+                {"op": "mult", "field": "tx_rate", "scope": "group:households", "value": 1.5},
+                {"op": "mult", "field": "tx_rate", "scope": "group:retail", "value": 1.3},
+            ],
+            "metadata": {"duration_ms": 30000},
+        },
+        {
+            "time": 150000,
+            "type": "stress",
+            "label": "quiet_period",
+            "description": "Midweek quiet period — reduced economic activity",
+            "params": {
+                "multiplier": 0.7,
+                "duration_ms": 20000,
+                "label": "quiet_period",
+            },
+            "effects": [
+                {"op": "mult", "field": "tx_rate", "scope": "all", "value": 0.7},
+            ],
+            "metadata": {"duration_ms": 20000},
+        },
+        {
+            "time": 200000,
+            "type": "stress",
+            "label": "harvest_festival",
+            "description": "Harvest festival — peak seasonal demand, producers and retail booming",
+            "params": {
+                "multiplier": 1.8,
+                "duration_ms": 40000,
+                "label": "harvest_festival",
+            },
+            "effects": [
+                {"op": "mult", "field": "tx_rate", "scope": "group:producers", "value": 2.0},
+                {"op": "mult", "field": "tx_rate", "scope": "group:retail", "value": 1.8},
+                {"op": "mult", "field": "tx_rate", "scope": "group:households", "value": 1.5},
+            ],
+            "metadata": {"duration_ms": 40000},
+        },
+        {
+            "time": 250000,
+            "type": "stress",
+            "label": "winter_lull",
+            "description": "Winter lull — minimal economic activity, people stay home",
+            "params": {
+                "multiplier": 0.5,
+                "duration_ms": 15000,
+                "label": "winter_lull",
+            },
+            "effects": [
+                {"op": "mult", "field": "tx_rate", "scope": "all", "value": 0.5},
+            ],
+            "metadata": {"duration_ms": 15000},
+        },
+    ]
+
+
 def _generate_riverside_realistic_v2() -> None:
     tools_dir = ROOT / "admin-fixtures" / "tools"
     seed_path = tools_dir / "generate_seed_riverside_town_50_v2.py"
@@ -443,6 +622,24 @@ def _generate_riverside_realistic_v2() -> None:
     # Drop non-UAH trustlines for the realistic-v2 profile.
     scenario["trustlines"] = [t for t in scenario.get("trustlines", []) if (t.get("equivalent") or "UAH") == "UAH"]
     scenario["behaviorProfiles"] = _make_behavior_profiles_realistic_v2()
+    scenario["settings"] = {
+        "warmup": {"ticks": 50, "floor": 0.1},
+        "trust_drift": {
+            "enabled": True,
+            "growth_rate": 0.05,
+            "decay_rate": 0.02,
+            "max_growth": 2.0,
+            "min_limit_ratio": 0.3,
+            "overload_threshold": 0.8,
+        },
+        "flow": {
+            "enabled": True,
+            "default_affinity": 0.7,
+            "reciprocity_bonus": 0.15,
+        },
+    }
+    # Add seasonal stress events (appended to any existing events from seed)
+    scenario.setdefault("events", []).extend(_make_seasonal_stress_events())
 
     out_path = ROOT / "fixtures" / "simulator" / "riverside-town-50-realistic-v2" / "scenario.json"
     _write_json(out_path, scenario)
@@ -461,6 +658,24 @@ def _generate_greenfield_realistic_v2() -> None:
     # Drop non-UAH trustlines for the realistic-v2 profile.
     scenario["trustlines"] = [t for t in scenario.get("trustlines", []) if (t.get("equivalent") or "UAH") == "UAH"]
     scenario["behaviorProfiles"] = _make_behavior_profiles_realistic_v2()
+    scenario["settings"] = {
+        "warmup": {"ticks": 50, "floor": 0.1},
+        "trust_drift": {
+            "enabled": True,
+            "growth_rate": 0.05,
+            "decay_rate": 0.02,
+            "max_growth": 2.0,
+            "min_limit_ratio": 0.3,
+            "overload_threshold": 0.8,
+        },
+        "flow": {
+            "enabled": True,
+            "default_affinity": 0.7,
+            "reciprocity_bonus": 0.15,
+        },
+    }
+    # Add seasonal stress events (appended to any existing events from seed)
+    scenario.setdefault("events", []).extend(_make_seasonal_stress_events())
 
     out_path = ROOT / "fixtures" / "simulator" / "greenfield-village-100-realistic-v2" / "scenario.json"
     _write_json(out_path, scenario)

@@ -62,6 +62,95 @@
     "events": {
       "type": "array",
       "items": { "$ref": "#/$defs/timelineEvent" }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "warmup": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Warm-up phase configuration: intensity ramps linearly from floor to 1.0 over the first N ticks",
+          "properties": {
+            "ticks": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of ticks for the warm-up ramp. 0 means no warm-up."
+            },
+            "floor": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.1,
+              "description": "Minimum intensity factor at tick 0 (e.g. 0.1 = 10% of target intensity)"
+            }
+          }
+        },
+        "trust_drift": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "growth_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.05,
+              "description": "Множитель роста лимита после клиринга: new_limit = limit × (1 + growth_rate)"
+            },
+            "decay_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.02,
+              "description": "Множитель уменьшения лимита при перегрузке: new_limit = limit × (1 - decay_rate)"
+            },
+            "max_growth": {
+              "type": "number",
+              "minimum": 1,
+              "default": 2.0,
+              "description": "Макс. кратность роста от original_limit"
+            },
+            "min_limit_ratio": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.3,
+              "description": "Мин. доля от original_limit при decay"
+            },
+            "overload_threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.8,
+              "description": "Порог debt/limit для активации decay"
+            }
+          }
+        },
+        "flow": {
+          "type": "object",
+          "description": "Directional flow configuration: controls payment direction preferences and reciprocity",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "default_affinity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.7,
+              "description": "Default probability of following flow_chain direction (0=random, 1=always follow chain)"
+            },
+            "reciprocity_bonus": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.15,
+              "description": "Bonus probability for reciprocal payments (A→B more likely if B→A recently happened)"
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -101,7 +190,11 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "extends": { "$ref": "#/$defs/id" },
-        "props": { "type": "object", "additionalProperties": true },
+        "props": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Profile properties. Supported keys: tx_rate (number), equivalent_weights (object), recipient_group_weights (object), amount_model (object), flow_chains (array of [fromGroupId, toGroupId] arrays — preferred payment direction chains), flow_affinity (number 0-1, default 0.7 — probability of following flow_chain), periodicity_factor (number >0, default 1.0 — multiplier for frequency: effective_rate = tx_rate / (1 + log(amount/p50) * periodicity_factor), larger amounts → less frequent)"
+        },
         "rules": {
           "type": "array",
           "items": { "$ref": "#/$defs/behaviorRule" }
@@ -139,6 +232,7 @@
         "policy": { "type": "object", "additionalProperties": true }
       }
     },
+
     "timelineEvent": {
       "type": "object",
       "additionalProperties": false,
@@ -155,12 +249,188 @@
           "type": "string",
           "enum": ["payment", "clearing", "stress", "inject", "note"]
         },
+        "op": {
+          "type": "string",
+          "description": "Operation subtype for inject events (e.g. add_participant, create_trustline, freeze_participant, inject_debt)"
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional human-readable label for the event"
+        },
         "description": { "type": "string" },
         "effects": {
           "type": "array",
           "items": { "type": "object", "additionalProperties": true }
         },
+        "params": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Event-type-specific parameters. For stress events: multiplier (number), duration_ms (integer), label (string)"
+        },
         "metadata": { "type": "object", "additionalProperties": true }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "inject" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["effects"],
+            "properties": {
+              "effects": {
+                "minItems": 1,
+                "items": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/injectEffectAddParticipant" },
+                    { "$ref": "#/$defs/injectEffectCreateTrustline" },
+                    { "$ref": "#/$defs/injectEffectFreezeParticipant" },
+                    { "$ref": "#/$defs/injectEffectInjectDebt" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "injectEffectAddParticipant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "participant"],
+      "properties": {
+        "op": { "const": "add_participant" },
+        "participant": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string" },
+            "type": {
+              "type": "string",
+              "enum": ["person", "business", "hub", "household"]
+            },
+            "status": { "type": "string", "default": "active" },
+            "groupId": { "type": "string" },
+            "behaviorProfileId": { "type": "string" }
+          }
+        },
+        "initial_trustlines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/initialTrustline" }
+        }
+      }
+    },
+
+    "initialTrustline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sponsor", "equivalent", "limit"],
+      "properties": {
+        "sponsor": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PID of the existing participant who sponsors this trustline"
+        },
+        "equivalent": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Equivalent code (e.g. 'HOUR', 'UAH')"
+        },
+        "limit": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "string" }
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["sponsor_credits_new", "new_credits_sponsor"],
+          "default": "sponsor_credits_new",
+          "description": "Direction of credit: sponsor_credits_new means sponsor extends credit to new participant"
+        }
+      }
+    },
+
+    "injectEffectCreateTrustline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "from", "to", "equivalent", "limit"],
+      "properties": {
+        "op": { "const": "create_trustline" },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PID of the creditor"
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PID of the debtor"
+        },
+        "equivalent": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Equivalent code (e.g. 'HOUR', 'UAH')"
+        },
+        "limit": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "string" }
+          ]
+        }
+      }
+    },
+
+    "injectEffectFreezeParticipant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "participant_id"],
+      "properties": {
+        "op": { "const": "freeze_participant" },
+        "participant_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PID of the participant to freeze"
+        },
+        "freeze_trustlines": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to also freeze all trustlines of this participant"
+        }
+      }
+    },
+
+    "injectEffectInjectDebt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "from", "to", "equivalent", "amount"],
+      "properties": {
+        "op": { "const": "inject_debt" },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PID of the debtor"
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PID of the creditor"
+        },
+        "equivalent": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Equivalent code"
+        },
+        "amount": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "string" }
+          ],
+          "description": "Debt amount to inject"
+        }
       }
     }
   }

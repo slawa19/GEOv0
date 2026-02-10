@@ -238,6 +238,43 @@ class SimulatorClearingDoneEvent(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class TopologyChangedNodeRef(BaseModel):
+    pid: str
+    name: Optional[str] = None
+    type: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TopologyChangedEdgeRef(BaseModel):
+    from_pid: str
+    to_pid: str
+    equivalent_code: str
+    limit: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TopologyChangedPayload(BaseModel):
+    added_nodes: List[TopologyChangedNodeRef] = []
+    removed_nodes: List[str] = []
+    added_edges: List[TopologyChangedEdgeRef] = []
+    removed_edges: List[TopologyChangedEdgeRef] = []
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorTopologyChangedEvent(BaseModel):
+    event_id: str
+    ts: datetime
+    type: Literal["topology.changed"]
+    equivalent: str
+
+    payload: TopologyChangedPayload
+
+    model_config = ConfigDict(extra="allow")
+
+
 RunState = Literal["idle", "running", "paused", "stopping", "stopped", "error"]
 
 
@@ -286,6 +323,7 @@ SimulatorEvent = Union[
     SimulatorTxFailedEvent,
     SimulatorClearingPlanEvent,
     SimulatorClearingDoneEvent,
+    SimulatorTopologyChangedEvent,
     SimulatorRunStatusEvent,
 ]
 
@@ -404,6 +442,8 @@ MetricSeriesKey = Literal[
     "total_debt",
     "clearing_volume",
     "bottlenecks_score",
+    "active_participants",
+    "active_trustlines",
 ]
 
 

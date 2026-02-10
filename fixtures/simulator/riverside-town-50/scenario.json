@@ -54,7 +54,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_large"
     },
     {
       "id": "PID_U0007_538453d7",
@@ -62,7 +62,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_small"
     },
     {
       "id": "PID_U0008_f1bbcd88",
@@ -86,7 +86,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_large"
     },
     {
       "id": "PID_U0011_cc623a9b",
@@ -94,7 +94,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_small"
     },
     {
       "id": "PID_U0012_6a99b44c",
@@ -118,7 +118,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_large"
     },
     {
       "id": "PID_U0015_4540215f",
@@ -126,7 +126,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_small"
     },
     {
       "id": "PID_U0016_e3779b10",
@@ -278,7 +278,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_frugal"
     },
     {
       "id": "PID_U0035_a195a333",
@@ -310,7 +310,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_active"
     },
     {
       "id": "PID_U0039_1a7389f7",
@@ -318,7 +318,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_frugal"
     },
     {
       "id": "PID_U0040_b8ab03a8",
@@ -350,7 +350,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_active"
     },
     {
       "id": "PID_U0044_3188ea6c",
@@ -358,7 +358,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_frugal"
     },
     {
       "id": "PID_U0045_cfc0641d",
@@ -390,7 +390,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_active"
     },
     {
       "id": "PID_U0049_489e4ae1",
@@ -443,6 +443,12 @@
       "id": "producer"
     },
     {
+      "id": "producer_large"
+    },
+    {
+      "id": "producer_small"
+    },
+    {
       "id": "retail"
     },
     {
@@ -450,6 +456,12 @@
     },
     {
       "id": "household"
+    },
+    {
+      "id": "household_active"
+    },
+    {
+      "id": "household_frugal"
     },
     {
       "id": "agent"

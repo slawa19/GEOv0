@@ -45,6 +45,44 @@ class _Subscription:
 
 
 @dataclass
+class EdgeClearingHistory:
+    """Per-edge clearing history for trust drift calculation."""
+
+    original_limit: float  # лимит при создании trustline
+    clearing_count: int = 0  # кол-во клирингов через это ребро
+    last_clearing_tick: int = -1  # тик последнего клиринга
+    cleared_volume: float = 0.0  # суммарный объём клиринга
+
+
+@dataclass
+class TrustDriftConfig:
+    """Trust drift parameters from scenario settings."""
+
+    enabled: bool = False
+    growth_rate: float = 0.05
+    decay_rate: float = 0.02
+    max_growth: float = 2.0
+    min_limit_ratio: float = 0.3
+    overload_threshold: float = 0.8
+
+    @classmethod
+    def from_scenario(cls, scenario: dict) -> "TrustDriftConfig":
+        """Parse trust_drift from scenario settings."""
+        settings = scenario.get("settings", {})
+        td = settings.get("trust_drift", {})
+        if not td or not td.get("enabled", False):
+            return cls(enabled=False)
+        return cls(
+            enabled=True,
+            growth_rate=td.get("growth_rate", 0.05),
+            decay_rate=td.get("decay_rate", 0.02),
+            max_growth=td.get("max_growth", 2.0),
+            min_limit_ratio=td.get("min_limit_ratio", 0.3),
+            overload_threshold=td.get("overload_threshold", 0.8),
+        )
+
+
+@dataclass
 class RunRecord:
     run_id: str
     scenario_id: str
@@ -146,3 +184,10 @@ class RunRecord:
     # Real-mode clearing execution can be slow and may be guarded by timeouts.
     # Keep track of an in-flight clearing task to prevent overlapping clearing runs.
     _real_clearing_task: Optional[asyncio.Task[dict[str, float]]] = None
+
+    # Trust drift: per-edge clearing history and config.
+    # Key format: "{creditor_pid}:{debtor_pid}:{equivalent_code}"
+    _edge_clearing_history: dict[str, EdgeClearingHistory] = field(
+        default_factory=dict
+    )
+    _trust_drift_config: TrustDriftConfig | None = None

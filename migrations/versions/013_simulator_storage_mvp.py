@@ -74,7 +74,7 @@ def upgrade() -> None:
         sa.Column("value", sa.Float(), nullable=True),
         sa.CheckConstraint("t_ms >= 0", name="chk_simulator_run_metrics_t_ms"),
         sa.CheckConstraint(
-            "key IN ('success_rate','avg_route_length','total_debt','clearing_volume','bottlenecks_score')",
+            "key IN ('success_rate','avg_route_length','total_debt','clearing_volume','bottlenecks_score','active_participants','active_trustlines')",
             name="chk_simulator_run_metrics_key",
         ),
     )

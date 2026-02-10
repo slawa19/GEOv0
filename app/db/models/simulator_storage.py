@@ -64,7 +64,7 @@ class SimulatorRunMetric(Base):
     __table_args__ = (
         CheckConstraint("t_ms >= 0", name="chk_simulator_run_metrics_t_ms"),
         CheckConstraint(
-            "key IN ('success_rate','avg_route_length','total_debt','clearing_volume','bottlenecks_score')",
+            "key IN ('success_rate','avg_route_length','total_debt','clearing_volume','bottlenecks_score','active_participants','active_trustlines')",
             name="chk_simulator_run_metrics_key",
         ),
         Index("ix_simulator_run_metrics_run_key", "run_id", "key"),

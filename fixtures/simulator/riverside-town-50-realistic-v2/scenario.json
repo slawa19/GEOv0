@@ -52,7 +52,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_large"
     },
     {
       "id": "PID_U0007_538453d7",
@@ -60,7 +60,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_small"
     },
     {
       "id": "PID_U0008_f1bbcd88",
@@ -84,7 +84,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_large"
     },
     {
       "id": "PID_U0011_cc623a9b",
@@ -92,7 +92,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_small"
     },
     {
       "id": "PID_U0012_6a99b44c",
@@ -116,7 +116,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_large"
     },
     {
       "id": "PID_U0015_4540215f",
@@ -124,7 +124,7 @@
       "type": "person",
       "status": "active",
       "groupId": "producers",
-      "behaviorProfileId": "producer"
+      "behaviorProfileId": "producer_small"
     },
     {
       "id": "PID_U0016_e3779b10",
@@ -276,7 +276,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_frugal"
     },
     {
       "id": "PID_U0035_a195a333",
@@ -308,7 +308,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_active"
     },
     {
       "id": "PID_U0039_1a7389f7",
@@ -316,7 +316,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_frugal"
     },
     {
       "id": "PID_U0040_b8ab03a8",
@@ -348,7 +348,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_active"
     },
     {
       "id": "PID_U0044_3188ea6c",
@@ -356,7 +356,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_frugal"
     },
     {
       "id": "PID_U0045_cfc0641d",
@@ -388,7 +388,7 @@
       "type": "person",
       "status": "active",
       "groupId": "households",
-      "behaviorProfileId": "household"
+      "behaviorProfileId": "household_active"
     },
     {
       "id": "PID_U0049_489e4ae1",
@@ -471,7 +471,72 @@
             "min": 50,
             "max": 1500
           }
-        }
+        },
+        "flow_chains": [
+          [
+            "producer",
+            "retail"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "producer_large",
+      "props": {
+        "tx_rate": 0.1,
+        "equivalent_weights": {
+          "UAH": 1.0
+        },
+        "recipient_group_weights": {
+          "retail": 0.3,
+          "services": 0.2,
+          "households": 0.3,
+          "anchors": 0.2
+        },
+        "amount_model": {
+          "UAH": {
+            "p50": 500,
+            "p90": 1300,
+            "min": 80,
+            "max": 1500
+          }
+        },
+        "flow_chains": [
+          [
+            "producer_large",
+            "retail"
+          ]
+        ],
+        "periodicity_factor": 1.5
+      }
+    },
+    {
+      "id": "producer_small",
+      "props": {
+        "tx_rate": 0.05,
+        "equivalent_weights": {
+          "UAH": 1.0
+        },
+        "recipient_group_weights": {
+          "retail": 0.4,
+          "services": 0.25,
+          "households": 0.2,
+          "anchors": 0.15
+        },
+        "amount_model": {
+          "UAH": {
+            "p50": 200,
+            "p90": 600,
+            "min": 50,
+            "max": 1200
+          }
+        },
+        "flow_chains": [
+          [
+            "producer_small",
+            "retail"
+          ]
+        ]
       }
     },
     {
@@ -493,7 +558,17 @@
             "min": 50,
             "max": 1500
           }
-        }
+        },
+        "flow_chains": [
+          [
+            "retail",
+            "producer"
+          ],
+          [
+            "retail",
+            "household"
+          ]
+        ]
       }
     },
     {
@@ -538,7 +613,72 @@
             "min": 50,
             "max": 1500
           }
-        }
+        },
+        "flow_chains": [
+          [
+            "household",
+            "retail"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "household_active",
+      "props": {
+        "tx_rate": 0.14,
+        "equivalent_weights": {
+          "UAH": 1.0
+        },
+        "recipient_group_weights": {
+          "retail": 0.55,
+          "services": 0.25,
+          "producers": 0.1,
+          "households": 0.1
+        },
+        "amount_model": {
+          "UAH": {
+            "p50": 280,
+            "p90": 900,
+            "min": 50,
+            "max": 1500
+          }
+        },
+        "flow_chains": [
+          [
+            "household_active",
+            "retail"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "household_frugal",
+      "props": {
+        "tx_rate": 0.04,
+        "equivalent_weights": {
+          "UAH": 1.0
+        },
+        "recipient_group_weights": {
+          "retail": 0.65,
+          "services": 0.15,
+          "producers": 0.1,
+          "households": 0.1
+        },
+        "amount_model": {
+          "UAH": {
+            "p50": 120,
+            "p90": 400,
+            "min": 50,
+            "max": 1000
+          }
+        },
+        "flow_chains": [
+          [
+            "household_frugal",
+            "retail"
+          ]
+        ],
+        "periodicity_factor": 0.5
       }
     },
     {
@@ -2059,5 +2199,24 @@
         "duration_ms": 5000
       }
     }
-  ]
+  ],
+  "settings": {
+    "warmup": {
+      "ticks": 50,
+      "floor": 0.1
+    },
+    "trust_drift": {
+      "enabled": true,
+      "growth_rate": 0.05,
+      "decay_rate": 0.02,
+      "max_growth": 2.0,
+      "min_limit_ratio": 0.3,
+      "overload_threshold": 0.8
+    },
+    "flow": {
+      "enabled": true,
+      "default_affinity": 0.7,
+      "reciprocity_bonus": 0.15
+    }
+  }
 }

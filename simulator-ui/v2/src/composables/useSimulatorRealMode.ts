@@ -620,6 +620,12 @@ export function useSimulatorRealMode(opts: {
               runRealClearingDoneFx(plan, done)
               wakeUp?.()
               if (planId) clearingPlansById.delete(planId)
+              return
+            }
+
+            if (evt.type === 'topology.changed') {
+              // MVP: full snapshot refetch to pick up topology changes.
+              void refreshSnapshot()
             }
           },
         })

@@ -118,12 +118,41 @@ export type TxFailedEvent = {
   error: RunError
 }
 
+export type TopologyChangedNodeRef = {
+  pid: string
+  name?: string | null
+  type?: string | null
+}
+
+export type TopologyChangedEdgeRef = {
+  from_pid: string
+  to_pid: string
+  equivalent_code: string
+  limit?: string | null
+}
+
+export type TopologyChangedPayload = {
+  added_nodes: TopologyChangedNodeRef[]
+  removed_nodes: string[]
+  added_edges: TopologyChangedEdgeRef[]
+  removed_edges: TopologyChangedEdgeRef[]
+}
+
+export type TopologyChangedEvent = {
+  event_id: string
+  ts: string
+  type: 'topology.changed'
+  equivalent: string
+  payload: TopologyChangedPayload
+}
+
 export type SimulatorEvent =
   | RunStatusEvent
   | (TxUpdatedEvent & { type: 'tx.updated' })
   | (ClearingPlanEvent & { type: 'clearing.plan' })
   | (ClearingDoneEvent & { type: 'clearing.done' })
   | TxFailedEvent
+  | TopologyChangedEvent
   | ({ event_id: string; ts: string; type: string; [k: string]: unknown } & { equivalent?: string })
 
 export type SimulatorGraphSnapshot = GraphSnapshot

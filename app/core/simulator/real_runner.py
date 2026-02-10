@@ -13,15 +13,16 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Callable
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 
 import app.db.session as db_session
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.clearing.service import ClearingService
+from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.artifacts import ArtifactsManager
-from app.core.simulator.models import RunRecord
+from app.core.simulator.models import EdgeClearingHistory, RunRecord, TrustDriftConfig
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.core.simulator.sse_broadcast import SseBroadcast
 from app.db.models.debt import Debt
@@ -32,8 +33,12 @@ from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.schemas.simulator import (
     SimulatorClearingDoneEvent,
     SimulatorClearingPlanEvent,
+    SimulatorTopologyChangedEvent,
     SimulatorTxFailedEvent,
     SimulatorTxUpdatedEvent,
+    TopologyChangedEdgeRef,
+    TopologyChangedNodeRef,
+    TopologyChangedPayload,
 )
 from app.utils.exceptions import GeoException, TimeoutException
 
@@ -405,116 +410,508 @@ class RealRunner:
                 # Resolve equivalents lazily.
                 eq_id_by_code: dict[str, uuid.UUID] = {}
 
+                # Track new entities for cache invalidation after commit.
+                _affected_equivalents: set[str] = set()
+                _new_participants_for_cache: list[tuple[uuid.UUID, str]] = []
+                _new_participants_for_scenario: list[dict[str, Any]] = []
+                _new_trustlines_for_scenario: list[dict[str, Any]] = []
+                _frozen_participant_pids: list[str] = []
+
+                async def _resolve_eq_id(eq_code: str) -> uuid.UUID | None:
+                    """Lazily resolve equivalent code → UUID from DB."""
+                    eq_upper = eq_code.strip().upper()
+                    cached = eq_id_by_code.get(eq_upper)
+                    if cached is not None:
+                        return cached
+                    row = (
+                        await session.execute(
+                            select(Equivalent.id).where(Equivalent.code == eq_upper)
+                        )
+                    ).scalar_one_or_none()
+                    if row is not None:
+                        eq_id_by_code[eq_upper] = row
+                    return row
+
+                _default_tl_policy = {
+                    "auto_clearing": True,
+                    "can_be_intermediate": True,
+                    "max_hop_usage": None,
+                    "daily_limit": None,
+                    "blocked_participants": [],
+                }
+
                 for eff in effects[:max_edges]:
                     if not isinstance(eff, dict):
                         skipped += 1
                         continue
-                    if str(eff.get("op") or "").strip() != "inject_debt":
-                        continue
 
-                    eq = str(eff.get("equivalent") or "").strip().upper()
-                    debtor_pid = str(eff.get("debtor") or "").strip()
-                    creditor_pid = str(eff.get("creditor") or "").strip()
-                    if not eq or not debtor_pid or not creditor_pid:
-                        skipped += 1
-                        continue
+                    op = str(eff.get("op") or "").strip()
 
-                    try:
-                        amount = Decimal(str(eff.get("amount")))
-                        amount = amount.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-                    except Exception:
-                        skipped += 1
-                        continue
-                    if amount <= 0:
-                        skipped += 1
-                        continue
+                    # ----------------------------------------------------------
+                    # op: inject_debt (existing behaviour)
+                    # ----------------------------------------------------------
+                    if op == "inject_debt":
+                        eq = str(eff.get("equivalent") or "").strip().upper()
+                        debtor_pid = str(eff.get("debtor") or "").strip()
+                        creditor_pid = str(eff.get("creditor") or "").strip()
+                        if not eq or not debtor_pid or not creditor_pid:
+                            skipped += 1
+                            continue
 
-                    if (
-                        max_total_amount is not None
-                        and total_applied + amount > max_total_amount
-                    ):
-                        skipped += 1
-                        continue
+                        try:
+                            amount = Decimal(str(eff.get("amount")))
+                            amount = amount.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                        except Exception:
+                            skipped += 1
+                            continue
+                        if amount <= 0:
+                            skipped += 1
+                            continue
 
-                    debtor_id = pid_to_participant_id.get(debtor_pid)
-                    creditor_id = pid_to_participant_id.get(creditor_pid)
-                    if debtor_id is None or creditor_id is None:
-                        skipped += 1
-                        continue
+                        if (
+                            max_total_amount is not None
+                            and total_applied + amount > max_total_amount
+                        ):
+                            skipped += 1
+                            continue
 
-                    eq_id = eq_id_by_code.get(eq)
-                    if eq_id is None:
-                        row = (
+                        debtor_id = pid_to_participant_id.get(debtor_pid)
+                        creditor_id = pid_to_participant_id.get(creditor_pid)
+                        if debtor_id is None or creditor_id is None:
+                            skipped += 1
+                            continue
+
+                        eq_id = await _resolve_eq_id(eq)
+                        if eq_id is None:
+                            skipped += 1
+                            continue
+
+                        tl = (
                             await session.execute(
-                                select(Equivalent.id).where(Equivalent.code == eq)
+                                select(TrustLine.limit, TrustLine.status).where(
+                                    TrustLine.from_participant_id == creditor_id,
+                                    TrustLine.to_participant_id == debtor_id,
+                                    TrustLine.equivalent_id == eq_id,
+                                )
+                            )
+                        ).one_or_none()
+                        if tl is None:
+                            skipped += 1
+                            continue
+                        tl_limit, tl_status = tl
+                        if str(tl_status or "").strip().lower() != "active":
+                            skipped += 1
+                            continue
+                        try:
+                            tl_limit_amt = Decimal(str(tl_limit))
+                        except Exception:
+                            skipped += 1
+                            continue
+                        if tl_limit_amt <= 0:
+                            skipped += 1
+                            continue
+
+                        existing = (
+                            await session.execute(
+                                select(Debt).where(
+                                    Debt.debtor_id == debtor_id,
+                                    Debt.creditor_id == creditor_id,
+                                    Debt.equivalent_id == eq_id,
+                                )
                             )
                         ).scalar_one_or_none()
-                        if row is None:
-                            skipped += 1
-                            continue
-                        eq_id = row
-                        eq_id_by_code[eq] = eq_id
 
-                    tl = (
-                        await session.execute(
-                            select(TrustLine.limit, TrustLine.status).where(
-                                TrustLine.from_participant_id == creditor_id,
-                                TrustLine.to_participant_id == debtor_id,
-                                TrustLine.equivalent_id == eq_id,
+                        if existing is None:
+                            new_amt = amount
+                            if new_amt > tl_limit_amt:
+                                skipped += 1
+                                continue
+                            session.add(
+                                Debt(
+                                    debtor_id=debtor_id,
+                                    creditor_id=creditor_id,
+                                    equivalent_id=eq_id,
+                                    amount=new_amt,
+                                )
                             )
-                        )
-                    ).one_or_none()
-                    if tl is None:
-                        skipped += 1
-                        continue
-                    tl_limit, tl_status = tl
-                    if str(tl_status or "").strip().lower() != "active":
-                        skipped += 1
-                        continue
-                    try:
-                        tl_limit_amt = Decimal(str(tl_limit))
-                    except Exception:
-                        skipped += 1
-                        continue
-                    if tl_limit_amt <= 0:
-                        skipped += 1
-                        continue
-
-                    existing = (
-                        await session.execute(
-                            select(Debt).where(
-                                Debt.debtor_id == debtor_id,
-                                Debt.creditor_id == creditor_id,
-                                Debt.equivalent_id == eq_id,
+                        else:
+                            new_amt = (Decimal(str(existing.amount)) + amount).quantize(
+                                Decimal("0.01"), rounding=ROUND_DOWN
                             )
-                        )
-                    ).scalar_one_or_none()
+                            if new_amt > tl_limit_amt:
+                                skipped += 1
+                                continue
+                            existing.amount = new_amt
 
-                    if existing is None:
-                        new_amt = amount
-                        if new_amt > tl_limit_amt:
-                            skipped += 1
-                            continue
-                        session.add(
-                            Debt(
-                                debtor_id=debtor_id,
-                                creditor_id=creditor_id,
-                                equivalent_id=eq_id,
-                                amount=new_amt,
+                        applied += 1
+                        total_applied += amount
+                        continue
+
+                    # ----------------------------------------------------------
+                    # op: add_participant  (Phase 3 — Network Growth)
+                    # ----------------------------------------------------------
+                    if op == "add_participant":
+                        try:
+                            p_data = eff.get("participant")
+                            if not isinstance(p_data, dict):
+                                self._logger.warning(
+                                    "simulator.real.inject.add_participant: missing participant dict"
+                                )
+                                skipped += 1
+                                continue
+
+                            pid = str(p_data.get("id") or "").strip()
+                            if not pid:
+                                skipped += 1
+                                continue
+
+                            # Idempotency: skip if participant already exists.
+                            existing_p = (
+                                await session.execute(
+                                    select(Participant.id).where(Participant.pid == pid)
+                                )
+                            ).scalar_one_or_none()
+                            if existing_p is not None:
+                                self._logger.info(
+                                    "simulator.real.inject.add_participant.skip_exists pid=%s",
+                                    pid,
+                                )
+                                skipped += 1
+                                continue
+
+                            name = str(p_data.get("name") or pid)
+                            p_type = str(p_data.get("type") or "person").strip()
+                            if p_type not in {"person", "business", "hub"}:
+                                p_type = "person"
+                            status = str(p_data.get("status") or "active").strip().lower()
+                            if status not in {"active", "suspended", "left", "deleted"}:
+                                status = "active"
+                            public_key = hashlib.sha256(pid.encode("utf-8")).hexdigest()
+
+                            new_p = Participant(
+                                pid=pid,
+                                display_name=name,
+                                public_key=public_key,
+                                type=p_type,
+                                status=status,
+                                profile={},
                             )
-                        )
-                    else:
-                        new_amt = (Decimal(str(existing.amount)) + amount).quantize(
-                            Decimal("0.01"), rounding=ROUND_DOWN
-                        )
-                        if new_amt > tl_limit_amt:
+                            session.add(new_p)
+                            await session.flush()  # materialise new_p.id
+
+                            _new_participants_for_cache.append((new_p.id, pid))
+                            _new_participants_for_scenario.append({
+                                "id": pid,
+                                "name": name,
+                                "type": p_type,
+                                "status": status,
+                                "groupId": str(p_data.get("groupId") or ""),
+                                "behaviorProfileId": str(
+                                    p_data.get("behaviorProfileId") or ""
+                                ),
+                            })
+                            pid_to_participant_id[pid] = new_p.id
+
+                            # Create initial trustlines (sponsor ↔ new participant).
+                            initial_tls = eff.get("initial_trustlines")
+                            if isinstance(initial_tls, list):
+                                for itl in initial_tls:
+                                    if not isinstance(itl, dict):
+                                        continue
+                                    sponsor_pid = str(itl.get("sponsor") or "").strip()
+                                    eq_code = str(
+                                        itl.get("equivalent") or ""
+                                    ).strip().upper()
+                                    raw_limit = itl.get("limit")
+                                    direction = str(
+                                        itl.get("direction") or "sponsor_credits_new"
+                                    ).strip()
+
+                                    if not sponsor_pid or not eq_code:
+                                        continue
+                                    try:
+                                        tl_limit_val = Decimal(str(raw_limit))
+                                    except Exception:
+                                        continue
+                                    if tl_limit_val <= 0:
+                                        continue
+
+                                    # Resolve sponsor participant ID.
+                                    sponsor_id = pid_to_participant_id.get(sponsor_pid)
+                                    if sponsor_id is None:
+                                        sponsor_row = (
+                                            await session.execute(
+                                                select(Participant.id).where(
+                                                    Participant.pid == sponsor_pid
+                                                )
+                                            )
+                                        ).scalar_one_or_none()
+                                        if sponsor_row is None:
+                                            self._logger.warning(
+                                                "simulator.real.inject.add_participant"
+                                                ".sponsor_not_found sponsor=%s",
+                                                sponsor_pid,
+                                            )
+                                            continue
+                                        sponsor_id = sponsor_row
+                                        pid_to_participant_id[sponsor_pid] = sponsor_id
+
+                                    eq_id = await _resolve_eq_id(eq_code)
+                                    if eq_id is None:
+                                        continue
+
+                                    # Determine trustline direction.
+                                    if direction == "sponsor_credits_new":
+                                        from_id = sponsor_id
+                                        to_id = new_p.id
+                                        from_pid_str = sponsor_pid
+                                        to_pid_str = pid
+                                    else:
+                                        from_id = new_p.id
+                                        to_id = sponsor_id
+                                        from_pid_str = pid
+                                        to_pid_str = sponsor_pid
+
+                                    # Idempotency: skip if trustline already exists.
+                                    existing_tl = (
+                                        await session.execute(
+                                            select(TrustLine.id).where(
+                                                TrustLine.from_participant_id == from_id,
+                                                TrustLine.to_participant_id == to_id,
+                                                TrustLine.equivalent_id == eq_id,
+                                            )
+                                        )
+                                    ).scalar_one_or_none()
+                                    if existing_tl is not None:
+                                        continue
+
+                                    session.add(
+                                        TrustLine(
+                                            from_participant_id=from_id,
+                                            to_participant_id=to_id,
+                                            equivalent_id=eq_id,
+                                            limit=tl_limit_val,
+                                            status="active",
+                                            policy=dict(_default_tl_policy),
+                                        )
+                                    )
+                                    _affected_equivalents.add(eq_code)
+                                    _new_trustlines_for_scenario.append({
+                                        "from": from_pid_str,
+                                        "to": to_pid_str,
+                                        "equivalent": eq_code,
+                                        "limit": str(tl_limit_val),
+                                        "status": "active",
+                                    })
+
+                            applied += 1
+                        except Exception as exc:
+                            self._logger.warning(
+                                "simulator.real.inject.add_participant.error: %s",
+                                exc,
+                                exc_info=True,
+                            )
                             skipped += 1
-                            continue
-                        existing.amount = new_amt
+                        continue
 
-                    applied += 1
-                    total_applied += amount
+                    # ----------------------------------------------------------
+                    # op: create_trustline  (Phase 3 — Network Growth)
+                    # ----------------------------------------------------------
+                    if op == "create_trustline":
+                        try:
+                            from_pid_val = str(eff.get("from") or "").strip()
+                            to_pid_val = str(eff.get("to") or "").strip()
+                            eq_code = str(
+                                eff.get("equivalent") or ""
+                            ).strip().upper()
+                            raw_limit = eff.get("limit")
 
+                            if not from_pid_val or not to_pid_val or not eq_code:
+                                skipped += 1
+                                continue
+
+                            try:
+                                tl_limit_val = Decimal(str(raw_limit))
+                            except Exception:
+                                skipped += 1
+                                continue
+                            if tl_limit_val <= 0:
+                                skipped += 1
+                                continue
+
+                            # Resolve participant IDs.
+                            from_id = pid_to_participant_id.get(from_pid_val)
+                            if from_id is None:
+                                row = (
+                                    await session.execute(
+                                        select(Participant.id).where(
+                                            Participant.pid == from_pid_val
+                                        )
+                                    )
+                                ).scalar_one_or_none()
+                                if row is None:
+                                    self._logger.warning(
+                                        "simulator.real.inject.create_trustline"
+                                        ".from_not_found pid=%s",
+                                        from_pid_val,
+                                    )
+                                    skipped += 1
+                                    continue
+                                from_id = row
+                                pid_to_participant_id[from_pid_val] = from_id
+
+                            to_id = pid_to_participant_id.get(to_pid_val)
+                            if to_id is None:
+                                row = (
+                                    await session.execute(
+                                        select(Participant.id).where(
+                                            Participant.pid == to_pid_val
+                                        )
+                                    )
+                                ).scalar_one_or_none()
+                                if row is None:
+                                    self._logger.warning(
+                                        "simulator.real.inject.create_trustline"
+                                        ".to_not_found pid=%s",
+                                        to_pid_val,
+                                    )
+                                    skipped += 1
+                                    continue
+                                to_id = row
+                                pid_to_participant_id[to_pid_val] = to_id
+
+                            eq_id = await _resolve_eq_id(eq_code)
+                            if eq_id is None:
+                                skipped += 1
+                                continue
+
+                            # Idempotency: skip if trustline already exists.
+                            existing_tl = (
+                                await session.execute(
+                                    select(TrustLine.id).where(
+                                        TrustLine.from_participant_id == from_id,
+                                        TrustLine.to_participant_id == to_id,
+                                        TrustLine.equivalent_id == eq_id,
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                            if existing_tl is not None:
+                                self._logger.info(
+                                    "simulator.real.inject.create_trustline"
+                                    ".skip_exists from=%s to=%s eq=%s",
+                                    from_pid_val,
+                                    to_pid_val,
+                                    eq_code,
+                                )
+                                skipped += 1
+                                continue
+
+                            session.add(
+                                TrustLine(
+                                    from_participant_id=from_id,
+                                    to_participant_id=to_id,
+                                    equivalent_id=eq_id,
+                                    limit=tl_limit_val,
+                                    status="active",
+                                    policy=dict(_default_tl_policy),
+                                )
+                            )
+                            _affected_equivalents.add(eq_code)
+                            _new_trustlines_for_scenario.append({
+                                "from": from_pid_val,
+                                "to": to_pid_val,
+                                "equivalent": eq_code,
+                                "limit": str(tl_limit_val),
+                                "status": "active",
+                            })
+                            applied += 1
+                        except Exception as exc:
+                            self._logger.warning(
+                                "simulator.real.inject.create_trustline.error: %s",
+                                exc,
+                                exc_info=True,
+                            )
+                            skipped += 1
+                        continue
+
+                    # ----------------------------------------------------------
+                    # op: freeze_participant  (Phase 3 — Network Growth)
+                    # ----------------------------------------------------------
+                    if op == "freeze_participant":
+                        try:
+                            freeze_pid = str(
+                                eff.get("participant_id") or ""
+                            ).strip()
+                            freeze_tls = bool(eff.get("freeze_trustlines", True))
+
+                            if not freeze_pid:
+                                skipped += 1
+                                continue
+
+                            # Update participant status → suspended.
+                            p_row = (
+                                await session.execute(
+                                    select(Participant).where(
+                                        Participant.pid == freeze_pid
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                            if p_row is None:
+                                self._logger.warning(
+                                    "simulator.real.inject.freeze_participant"
+                                    ".not_found pid=%s",
+                                    freeze_pid,
+                                )
+                                skipped += 1
+                                continue
+
+                            if p_row.status == "suspended":
+                                self._logger.info(
+                                    "simulator.real.inject.freeze_participant"
+                                    ".already_suspended pid=%s",
+                                    freeze_pid,
+                                )
+                                skipped += 1
+                                continue
+
+                            p_row.status = "suspended"
+
+                            if freeze_tls:
+                                incident_tls = (
+                                    await session.execute(
+                                        select(TrustLine).where(
+                                            or_(
+                                                TrustLine.from_participant_id == p_row.id,
+                                                TrustLine.to_participant_id == p_row.id,
+                                            ),
+                                            TrustLine.status == "active",
+                                        )
+                                    )
+                                ).scalars().all()
+                                for frozen_tl in incident_tls:
+                                    frozen_tl.status = "frozen"
+
+                            # Invalidate all known equivalents (best-effort).
+                            if run._real_equivalents:
+                                for eq_str in run._real_equivalents:
+                                    _affected_equivalents.add(
+                                        eq_str.strip().upper()
+                                    )
+
+                            _frozen_participant_pids.append(freeze_pid)
+                            applied += 1
+                        except Exception as exc:
+                            self._logger.warning(
+                                "simulator.real.inject.freeze_participant.error: %s",
+                                exc,
+                                exc_info=True,
+                            )
+                            skipped += 1
+                        continue
+
+                    # Unknown inject op — skip silently.
+
+                # ---- commit inject effects --------------------------------
                 try:
                     await session.commit()
                 except Exception:
@@ -535,6 +932,48 @@ class RealRunner:
                     )
                     run._real_fired_scenario_event_indexes.add(idx)
                     continue
+
+                # ---- collect frozen edges before cache invalidation ------
+                _frozen_edges_for_sse: list[dict[str, str]] = []
+                if _frozen_participant_pids:
+                    _frozen_set = set(_frozen_participant_pids)
+                    _s_tls = scenario.get("trustlines")
+                    if isinstance(_s_tls, list):
+                        for _tl in _s_tls:
+                            if not isinstance(_tl, dict):
+                                continue
+                            _frm = str(_tl.get("from") or "").strip()
+                            _to = str(_tl.get("to") or "").strip()
+                            _eq = str(_tl.get("equivalent") or "").strip()
+                            _st = str(_tl.get("status") or "").strip().lower()
+                            if (_frm in _frozen_set or _to in _frozen_set) and _st == "active":
+                                _frozen_edges_for_sse.append({
+                                    "from_pid": _frm,
+                                    "to_pid": _to,
+                                    "equivalent_code": _eq.upper(),
+                                })
+
+                # ---- cache invalidation after successful commit -----------
+                self._invalidate_caches_after_inject(
+                    run=run,
+                    scenario=scenario,
+                    affected_equivalents=_affected_equivalents,
+                    new_participants=_new_participants_for_cache,
+                    new_participants_scenario=_new_participants_for_scenario,
+                    new_trustlines_scenario=_new_trustlines_for_scenario,
+                    frozen_pids=_frozen_participant_pids,
+                )
+
+                # ---- SSE topology.changed (per affected equivalent) -------
+                self._broadcast_topology_changed(
+                    run_id=run_id,
+                    run=run,
+                    affected_equivalents=_affected_equivalents,
+                    new_participants_scenario=_new_participants_for_scenario,
+                    new_trustlines_scenario=_new_trustlines_for_scenario,
+                    frozen_pids=_frozen_participant_pids,
+                    frozen_edges=_frozen_edges_for_sse,
+                )
 
                 self._artifacts.enqueue_event_artifact(
                     run_id,
@@ -562,6 +1001,253 @@ class RealRunner:
             # Unknown / unsupported event types are ignored, but we still mark them fired once due.
             run._real_fired_scenario_event_indexes.add(idx)
 
+    def _invalidate_caches_after_inject(
+        self,
+        *,
+        run: RunRecord,
+        scenario: dict[str, Any],
+        affected_equivalents: set[str],
+        new_participants: list[tuple[uuid.UUID, str]],
+        new_participants_scenario: list[dict[str, Any]],
+        new_trustlines_scenario: list[dict[str, Any]],
+        frozen_pids: list[str],
+    ) -> None:
+        """Invalidate in-memory caches after a successful inject commit.
+
+        Uses Variant A (mutate shared dicts in-place) so that the running tick
+        picks up the topology changes immediately.
+
+        Best-effort: failures here are logged but do not crash the tick.
+        """
+        try:
+            # 1. PaymentRouter graph cache — evict affected equivalents.
+            for eq in affected_equivalents:
+                PaymentRouter._graph_cache.pop(eq, None)
+
+            # 2. run._real_viz_by_eq — evict so VizPatchHelper is recreated.
+            for eq in affected_equivalents:
+                run._real_viz_by_eq.pop(eq, None)
+
+            # 3. run._real_participants — append new participants.
+            if new_participants and run._real_participants is not None:
+                for p_tuple in new_participants:
+                    run._real_participants.append(p_tuple)
+
+            # 4. scenario["participants"] — append new participant dicts.
+            if new_participants_scenario:
+                s_participants = scenario.get("participants")
+                if isinstance(s_participants, list):
+                    for p_dict in new_participants_scenario:
+                        s_participants.append(p_dict)
+
+            # 5. scenario["trustlines"] — append new trustline dicts.
+            if new_trustlines_scenario:
+                s_trustlines = scenario.get("trustlines")
+                if isinstance(s_trustlines, list):
+                    for tl_dict in new_trustlines_scenario:
+                        s_trustlines.append(tl_dict)
+
+            # 6. run._edges_by_equivalent — add edges for new trustlines.
+            if new_trustlines_scenario and run._edges_by_equivalent is not None:
+                for tl_dict in new_trustlines_scenario:
+                    eq = str(tl_dict.get("equivalent") or "").strip()
+                    src = str(tl_dict.get("from") or "").strip()
+                    dst = str(tl_dict.get("to") or "").strip()
+                    if eq and src and dst:
+                        run._edges_by_equivalent.setdefault(eq, []).append(
+                            (src, dst)
+                        )
+
+            # 7. Frozen participants — update scenario dicts in-place.
+            if frozen_pids:
+                frozen_set = set(frozen_pids)
+
+                # Update scenario["participants"][i]["status"].
+                s_participants = scenario.get("participants")
+                if isinstance(s_participants, list):
+                    for p_dict in s_participants:
+                        if isinstance(p_dict, dict):
+                            pid = str(p_dict.get("id") or "").strip()
+                            if pid in frozen_set:
+                                p_dict["status"] = "suspended"
+
+                # Update scenario["trustlines"][i]["status"] for incident edges.
+                s_trustlines = scenario.get("trustlines")
+                if isinstance(s_trustlines, list):
+                    for tl_dict in s_trustlines:
+                        if isinstance(tl_dict, dict):
+                            frm = str(tl_dict.get("from") or "").strip()
+                            to = str(tl_dict.get("to") or "").strip()
+                            if frm in frozen_set or to in frozen_set:
+                                tl_dict["status"] = "frozen"
+
+                # Remove frozen edges from run._edges_by_equivalent.
+                if run._edges_by_equivalent is not None:
+                    for eq, edges in run._edges_by_equivalent.items():
+                        run._edges_by_equivalent[eq] = [
+                            (s, d)
+                            for s, d in edges
+                            if s not in frozen_set and d not in frozen_set
+                        ]
+
+        except Exception:
+            self._logger.warning(
+                "simulator.real.inject.cache_invalidation_error",
+                exc_info=True,
+            )
+
+    def _broadcast_topology_changed(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        affected_equivalents: set[str],
+        new_participants_scenario: list[dict[str, Any]],
+        new_trustlines_scenario: list[dict[str, Any]],
+        frozen_pids: list[str],
+        frozen_edges: list[dict[str, str]],
+    ) -> None:
+        """Broadcast SSE topology.changed events per affected equivalent.
+
+        Only emits if there are actual topology changes. Best-effort: errors
+        are logged but do not crash the tick.
+        """
+        try:
+            if not affected_equivalents:
+                return
+
+            # Build node refs for added nodes.
+            added_nodes = [
+                TopologyChangedNodeRef(
+                    pid=str(p.get("id") or ""),
+                    name=str(p.get("name") or "") or None,
+                    type=str(p.get("type") or "") or None,
+                )
+                for p in new_participants_scenario
+                if str(p.get("id") or "").strip()
+            ]
+
+            # Build removed nodes list.
+            removed_nodes = [pid for pid in frozen_pids if pid.strip()]
+
+            # Build edge refs for added edges, grouped by equivalent.
+            added_edges_by_eq: dict[str, list[TopologyChangedEdgeRef]] = {}
+            for tl in new_trustlines_scenario:
+                eq = str(tl.get("equivalent") or "").strip().upper()
+                if not eq:
+                    continue
+                ref = TopologyChangedEdgeRef(
+                    from_pid=str(tl.get("from") or ""),
+                    to_pid=str(tl.get("to") or ""),
+                    equivalent_code=eq,
+                    limit=str(tl.get("limit") or "") or None,
+                )
+                added_edges_by_eq.setdefault(eq, []).append(ref)
+
+            # Build edge refs for removed edges (frozen), grouped by equivalent.
+            removed_edges_by_eq: dict[str, list[TopologyChangedEdgeRef]] = {}
+            for fe in frozen_edges:
+                eq = str(fe.get("equivalent_code") or "").strip().upper()
+                if not eq:
+                    continue
+                ref = TopologyChangedEdgeRef(
+                    from_pid=str(fe.get("from_pid") or ""),
+                    to_pid=str(fe.get("to_pid") or ""),
+                    equivalent_code=eq,
+                )
+                removed_edges_by_eq.setdefault(eq, []).append(ref)
+
+            # Emit one topology.changed event per affected equivalent.
+            for eq in affected_equivalents:
+                eq_upper = eq.strip().upper()
+                payload = TopologyChangedPayload(
+                    added_nodes=added_nodes,
+                    removed_nodes=removed_nodes,
+                    added_edges=added_edges_by_eq.get(eq_upper, []),
+                    removed_edges=removed_edges_by_eq.get(eq_upper, []),
+                )
+
+                # Skip empty payloads.
+                if (
+                    not payload.added_nodes
+                    and not payload.removed_nodes
+                    and not payload.added_edges
+                    and not payload.removed_edges
+                ):
+                    continue
+
+                evt = SimulatorTopologyChangedEvent(
+                    event_id=self._sse.next_event_id(run),
+                    ts=self._utc_now(),
+                    type="topology.changed",
+                    equivalent=eq_upper,
+                    payload=payload,
+                ).model_dump(mode="json")
+
+                self._sse.broadcast(run_id, evt)
+                self._logger.info(
+                    "simulator.real.inject.topology_changed eq=%s added_nodes=%d removed_nodes=%d added_edges=%d removed_edges=%d",
+                    eq_upper,
+                    len(payload.added_nodes),
+                    len(payload.removed_nodes),
+                    len(payload.added_edges),
+                    len(payload.removed_edges),
+                )
+
+        except Exception:
+            self._logger.warning(
+                "simulator.real.inject.topology_changed_broadcast_error",
+                exc_info=True,
+            )
+
+    def _broadcast_trust_drift_changed(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        reason: str,
+        equivalents: list[str] | set[str],
+    ) -> None:
+        """Broadcast SSE topology.changed for trust-drift limit changes.
+
+        Emits one event per equivalent so the frontend calls refreshSnapshot()
+        and picks up updated limits.  Best-effort: errors are logged but never
+        crash the tick.
+
+        ``reason`` is added as an extra field on the event (the schema uses
+        ``extra="allow"``); possible values: ``trust_drift_growth``,
+        ``trust_drift_decay``.
+        """
+        try:
+            for eq in equivalents:
+                eq_upper = str(eq).strip().upper()
+                if not eq_upper:
+                    continue
+
+                payload = TopologyChangedPayload()  # empty — frontend refreshes anyway
+
+                evt = SimulatorTopologyChangedEvent(
+                    event_id=self._sse.next_event_id(run),
+                    ts=self._utc_now(),
+                    type="topology.changed",
+                    equivalent=eq_upper,
+                    payload=payload,
+                    reason=reason,
+                ).model_dump(mode="json")
+
+                self._sse.broadcast(run_id, evt)
+                self._logger.info(
+                    "simulator.real.trust_drift.topology_changed eq=%s reason=%s",
+                    eq_upper,
+                    reason,
+                )
+        except Exception:
+            self._logger.warning(
+                "simulator.real.trust_drift.topology_changed_broadcast_error reason=%s",
+                reason,
+                exc_info=True,
+            )
+
     def _should_warn_this_tick(self, run: RunRecord, *, key: str) -> bool:
         with self._lock:
             tick = int(run.tick_index)
@@ -573,6 +1259,286 @@ class RealRunner:
                 return False
             run._real_warned_keys.add(key)
             return True
+
+    # -----------------------------------------------------------------
+    # Trust Drift: init / growth / decay
+    # -----------------------------------------------------------------
+
+    def _init_trust_drift(self, run: RunRecord, scenario: dict[str, Any]) -> None:
+        """Initialize trust drift config and edge clearing history from scenario.
+
+        Called once per run, when ``_trust_drift_config`` is still ``None``.
+        """
+        run._trust_drift_config = TrustDriftConfig.from_scenario(scenario)
+
+        if run._edge_clearing_history:
+            return  # already populated (e.g. by inject adding edges)
+
+        trustlines = scenario.get("trustlines") or []
+        for tl in trustlines:
+            eq = str(tl.get("equivalent") or "").strip().upper()
+            creditor_pid = str(tl.get("from") or "").strip()
+            debtor_pid = str(tl.get("to") or "").strip()
+            if not eq or not creditor_pid or not debtor_pid:
+                continue
+
+            try:
+                limit = float(tl.get("limit", 0))
+            except (ValueError, TypeError):
+                continue
+            if limit <= 0:
+                continue
+
+            key = f"{creditor_pid}:{debtor_pid}:{eq}"
+            run._edge_clearing_history[key] = EdgeClearingHistory(
+                original_limit=limit
+            )
+
+        if run._trust_drift_config.enabled:
+            self._logger.info(
+                "simulator.real.trust_drift.init run_id=%s edges=%d "
+                "growth_rate=%s decay_rate=%s max_growth=%s "
+                "min_limit_ratio=%s overload_threshold=%s",
+                run.run_id,
+                len(run._edge_clearing_history),
+                run._trust_drift_config.growth_rate,
+                run._trust_drift_config.decay_rate,
+                run._trust_drift_config.max_growth,
+                run._trust_drift_config.min_limit_ratio,
+                run._trust_drift_config.overload_threshold,
+            )
+
+    async def _apply_trust_growth(
+        self,
+        run: RunRecord,
+        clearing_session,
+        touched_edges: set[tuple[str, str]],
+        eq_code: str,
+        tick_index: int,
+        cleared_amount_per_edge: dict[tuple[str, str], float],
+    ) -> int:
+        """Apply trust growth to edges that participated in clearing.
+
+        Uses the *clearing_session* (isolated per-equivalent session used by
+        ``tick_real_mode_clearing``).  Commits internally on success.
+
+        Returns count of updated edges.
+        """
+        cfg = run._trust_drift_config
+        if not cfg or not cfg.enabled:
+            return 0
+
+        if not touched_edges:
+            return 0
+
+        pid_to_uuid: dict[str, uuid.UUID] = {
+            pid: uid for uid, pid in (run._real_participants or [])
+        }
+
+        eq_upper = eq_code.strip().upper()
+        try:
+            eq_id = (
+                await clearing_session.execute(
+                    select(Equivalent.id).where(Equivalent.code == eq_upper)
+                )
+            ).scalar_one_or_none()
+        except Exception:
+            return 0
+        if not eq_id:
+            return 0
+
+        updated = 0
+        for creditor_pid, debtor_pid in touched_edges:
+            key = f"{creditor_pid}:{debtor_pid}:{eq_upper}"
+            hist = run._edge_clearing_history.get(key)
+            if not hist:
+                continue
+
+            # Update history
+            hist.clearing_count += 1
+            hist.last_clearing_tick = tick_index
+            hist.cleared_volume += cleared_amount_per_edge.get(
+                (creditor_pid, debtor_pid), 0.0
+            )
+
+            creditor_uuid = pid_to_uuid.get(creditor_pid)
+            debtor_uuid = pid_to_uuid.get(debtor_pid)
+            if not creditor_uuid or not debtor_uuid:
+                continue
+
+            # Get current limit from DB
+            tl_limit_row = (
+                await clearing_session.execute(
+                    select(TrustLine.limit).where(
+                        TrustLine.from_participant_id == creditor_uuid,
+                        TrustLine.to_participant_id == debtor_uuid,
+                        TrustLine.equivalent_id == eq_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if tl_limit_row is None:
+                continue
+
+            current_limit = float(tl_limit_row)
+            new_limit = min(
+                current_limit * (1 + cfg.growth_rate),
+                hist.original_limit * cfg.max_growth,
+            )
+            new_limit = round(new_limit, 2)
+
+            if new_limit != current_limit:
+                await clearing_session.execute(
+                    update(TrustLine)
+                    .where(
+                        TrustLine.from_participant_id == creditor_uuid,
+                        TrustLine.to_participant_id == debtor_uuid,
+                        TrustLine.equivalent_id == eq_id,
+                    )
+                    .values(limit=Decimal(str(new_limit)))
+                )
+                # Update scenario trustlines in-memory
+                scenario = self._get_scenario_raw(run.scenario_id)
+                s_tls = scenario.get("trustlines") or []
+                for s_tl in s_tls:
+                    if (
+                        str(s_tl.get("from") or "").strip() == creditor_pid
+                        and str(s_tl.get("to") or "").strip() == debtor_pid
+                        and str(s_tl.get("equivalent") or "").strip().upper()
+                        == eq_upper
+                    ):
+                        s_tl["limit"] = new_limit
+                        break
+                self._logger.info(
+                    "simulator.real.trust_drift.growth key=%s old=%.2f new=%.2f",
+                    key,
+                    current_limit,
+                    new_limit,
+                )
+                updated += 1
+
+        if updated:
+            await clearing_session.commit()
+        return updated
+
+    async def _apply_trust_decay(
+        self,
+        run: RunRecord,
+        session,
+        tick_index: int,
+        debt_snapshot: dict[tuple[str, str, str], Decimal],
+        scenario: dict[str, Any],
+    ) -> int:
+        """Apply trust decay to overloaded edges that didn't get cleared.
+
+        Uses the main tick session.  Does NOT commit — the caller's final
+        ``session.commit()`` flushes decay writes together with metrics.
+
+        Returns count of decayed edges.
+        """
+        cfg = run._trust_drift_config
+        if not cfg or not cfg.enabled:
+            return 0
+
+        pid_to_uuid: dict[str, uuid.UUID] = {
+            pid: uid for uid, pid in (run._real_participants or [])
+        }
+
+        eq_id_cache: dict[str, uuid.UUID] = {}
+        updated = 0
+        trustlines = scenario.get("trustlines") or []
+
+        for tl in trustlines:
+            eq_code = str(tl.get("equivalent") or "").strip().upper()
+            creditor_pid = str(tl.get("from") or "").strip()
+            debtor_pid = str(tl.get("to") or "").strip()
+            status = str(tl.get("status") or "active").strip().lower()
+
+            if not eq_code or not creditor_pid or not debtor_pid:
+                continue
+            if status != "active":
+                continue
+
+            key = f"{creditor_pid}:{debtor_pid}:{eq_code}"
+            hist = run._edge_clearing_history.get(key)
+            if not hist:
+                continue
+
+            # Skip if just cleared this tick
+            if hist.last_clearing_tick == tick_index:
+                continue
+
+            # Get current limit from scenario (in-memory, kept in sync by growth)
+            try:
+                current_limit = float(tl.get("limit", 0))
+            except (ValueError, TypeError):
+                continue
+            if current_limit <= 0:
+                continue
+
+            # Debt for this edge: debt_snapshot key is (debtor_pid, creditor_pid, eq_code)
+            debt_amount = float(
+                debt_snapshot.get(
+                    (debtor_pid, creditor_pid, eq_code), Decimal("0")
+                )
+            )
+
+            ratio = debt_amount / current_limit if current_limit > 0 else 0
+            if ratio < cfg.overload_threshold:
+                continue
+
+            # Calculate new limit
+            new_limit = max(
+                current_limit * (1 - cfg.decay_rate),
+                hist.original_limit * cfg.min_limit_ratio,
+            )
+            new_limit = round(new_limit, 2)
+
+            if new_limit == current_limit:
+                continue
+
+            # Resolve UUIDs
+            creditor_uuid = pid_to_uuid.get(creditor_pid)
+            debtor_uuid = pid_to_uuid.get(debtor_pid)
+            if not creditor_uuid or not debtor_uuid:
+                continue
+
+            if eq_code not in eq_id_cache:
+                eq_row = (
+                    await session.execute(
+                        select(Equivalent.id).where(Equivalent.code == eq_code)
+                    )
+                ).scalar_one_or_none()
+                if eq_row is None:
+                    continue
+                eq_id_cache[eq_code] = eq_row
+
+            eq_id = eq_id_cache.get(eq_code)
+            if not eq_id:
+                continue
+
+            await session.execute(
+                update(TrustLine)
+                .where(
+                    TrustLine.from_participant_id == creditor_uuid,
+                    TrustLine.to_participant_id == debtor_uuid,
+                    TrustLine.equivalent_id == eq_id,
+                )
+                .values(limit=Decimal(str(new_limit)))
+            )
+
+            # Update scenario trustlines in-memory
+            tl["limit"] = new_limit
+
+            self._logger.info(
+                "simulator.real.trust_drift.decay key=%s old=%.2f new=%.2f ratio=%.2f",
+                key,
+                current_limit,
+                new_limit,
+                ratio,
+            )
+            updated += 1
+
+        return updated
 
     async def flush_pending_storage(self, run_id: str) -> None:
         """Best-effort flush of the last computed tick metrics/bottlenecks.
@@ -686,13 +1652,34 @@ class RealRunner:
                 if len(participants) < 2 or not equivalents:
                     return
 
+                # Initialize trust drift (once per run)
+                if run._trust_drift_config is None:
+                    self._init_trust_drift(run, scenario)
+
                 # Apply due scenario timeline events (note/stress/inject). Best-effort.
                 # IMPORTANT: inject modifies DB state and must happen before payments.
                 await self._apply_due_scenario_events(
                     session, run_id=run_id, run=run, scenario=scenario
                 )
 
-                planned = self._plan_real_payments(run, scenario)
+                # ── Phase 1.4: capacity-aware payment amounts ─────────
+                # Load current debt snapshot *after* events (which may mutate DB)
+                # so that capacity reflects the latest state.  Best-effort:
+                # if the query fails we fall back to static limits.
+                debt_snapshot: dict[tuple[str, str, str], Decimal] = {}
+                try:
+                    debt_snapshot = await self._load_debt_snapshot_by_pid(
+                        session, participants, equivalents
+                    )
+                except Exception:
+                    self._logger.debug(
+                        "capacity_aware: debt snapshot load failed, "
+                        "falling back to static limits"
+                    )
+
+                planned = self._plan_real_payments(
+                    run, scenario, debt_snapshot=debt_snapshot
+                )
                 with self._lock:
                     run.ops_sec = float(len(planned))
                     run.queue_depth = len(planned)
@@ -1566,6 +2553,38 @@ class RealRunner:
                         int((time.monotonic() - clearing_t0) * 1000.0),
                     )
 
+                # ── Trust Drift: decay overloaded edges ─────────────
+                try:
+                    decay_count = await self._apply_trust_decay(
+                        run=run,
+                        session=session,
+                        tick_index=int(run.tick_index or 0),
+                        debt_snapshot=debt_snapshot,
+                        scenario=scenario,
+                    )
+                    if decay_count:
+                        await session.commit()
+                        # Notify frontend about changed limits
+                        try:
+                            self._broadcast_trust_drift_changed(
+                                run_id=run_id,
+                                run=run,
+                                reason="trust_drift_decay",
+                                equivalents=equivalents,
+                            )
+                        except Exception:
+                            self._logger.warning(
+                                "simulator.real.trust_drift.decay_broadcast_error",
+                                exc_info=True,
+                            )
+                except Exception:
+                    self._logger.warning(
+                        "simulator.real.trust_drift.decay_failed run_id=%s tick=%s",
+                        str(run.run_id),
+                        int(run.tick_index or 0),
+                        exc_info=True,
+                    )
+
                 # Real total debt snapshot (sum of all debts for the equivalent).
                 # Throttled: aggregate SUM can become hot on large Debt tables.
                 total_debt_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
@@ -1632,6 +2651,25 @@ class RealRunner:
                     )
                     per_eq_metric_values[str(eq)]["clearing_volume"] = float(
                         clearing_volume_by_eq.get(str(eq), 0.0) or 0.0
+                    )
+
+                # --- Network topology metrics (Phase 3) ---
+                # active_participants: count scenario participants with status='active'.
+                # Computed once from in-memory scenario (lightweight, no DB).
+                _scenario_parts = scenario.get("participants") or []
+                _active_participants_count = float(sum(
+                    1 for _p in _scenario_parts
+                    if isinstance(_p, dict)
+                    and str(_p.get("status") or "active").strip().lower() == "active"
+                ))
+                # active_trustlines per equivalent: count from run._edges_by_equivalent cache.
+                # After inject ops, this cache already reflects frozen/removed edges.
+                with self._lock:
+                    _edges_snapshot = dict(run._edges_by_equivalent or {})
+                for eq in equivalents:
+                    per_eq_metric_values[str(eq)]["active_participants"] = _active_participants_count
+                    per_eq_metric_values[str(eq)]["active_trustlines"] = float(
+                        len(_edges_snapshot.get(str(eq), []))
                     )
 
                 # Cache the last computed payload to allow best-effort flush on stop/error.
@@ -1961,6 +2999,8 @@ class RealRunner:
                     touched_nodes: set[str] = set()
                     # Edge direction in graph is creditor -> debtor.
                     touched_edges: set[tuple[str, str]] = set()
+                    # Trust drift: track cleared amount per edge for growth
+                    cleared_amount_per_edge: dict[tuple[str, str], float] = {}
                     clearing_started = time.monotonic()
                     progress_last_log = 0.0
                     while True:
@@ -2100,6 +3140,12 @@ class RealRunner:
                                             touched_edges.add(
                                                 (creditor_pid, debtor_pid)
                                             )
+                                            # Accumulate per-edge clearing amount for trust growth
+                                            edge_key = (creditor_pid, debtor_pid)
+                                            cleared_amount_per_edge[edge_key] = (
+                                                cleared_amount_per_edge.get(edge_key, 0.0)
+                                                + float(clear_amount)
+                                            )
                                 except Exception:
                                     if self._should_warn_this_tick(
                                         run, key=f"clearing_touched_parse_failed:{eq}"
@@ -2122,6 +3168,40 @@ class RealRunner:
                     # NOTE: ClearingService.execute_clearing already commits on success
                     # No need for additional commit here
                     cleared_amount_by_eq[str(eq)] = float(cleared_amount_dec)
+
+                    # ── Trust Drift: growth for cleared edges ─────────
+                    if touched_edges:
+                        try:
+                            growth_count = await self._apply_trust_growth(
+                                run=run,
+                                clearing_session=clearing_session,
+                                touched_edges=touched_edges,
+                                eq_code=str(eq),
+                                tick_index=int(run.tick_index or 0),
+                                cleared_amount_per_edge=cleared_amount_per_edge,
+                            )
+                            # Notify frontend about changed limits
+                            if growth_count > 0:
+                                try:
+                                    self._broadcast_trust_drift_changed(
+                                        run_id=run_id,
+                                        run=run,
+                                        reason="trust_drift_growth",
+                                        equivalents=[str(eq)],
+                                    )
+                                except Exception:
+                                    self._logger.warning(
+                                        "simulator.real.trust_drift.growth_broadcast_error",
+                                        exc_info=True,
+                                    )
+                        except Exception:
+                            self._logger.warning(
+                                "simulator.real.trust_drift.growth_failed run_id=%s tick=%s eq=%s",
+                                str(run.run_id),
+                                int(run.tick_index or 0),
+                                str(eq),
+                                exc_info=True,
+                            )
 
                     # Best-effort: compute patches for touched nodes/edges.
                     node_patch_list: list[dict[str, Any]] | None = None
@@ -2430,8 +3510,8 @@ class RealRunner:
                 continue
 
             # TrustLine direction is creditor->debtor. Payment from debtor->creditor.
-            # TODO: Consider pre-filtering by DB-derived available capacity (taking current "used" into account)
-            # to reduce rejected payment attempts under high load.
+            # NOTE: capacity-aware filtering is applied in _plan_real_payments()
+            # via the debt_snapshot parameter (Phase 1.4).
             out.append(
                 {
                     "equivalent": eq,
@@ -2445,7 +3525,11 @@ class RealRunner:
         return out
 
     def _plan_real_payments(
-        self, run: RunRecord, scenario: dict[str, Any]
+        self,
+        run: RunRecord,
+        scenario: dict[str, Any],
+        *,
+        debt_snapshot: dict[tuple[str, str, str], Decimal] | None = None,
     ) -> list[_RealPaymentAction]:
         """Deterministic planner for Real Mode payment actions.
 
@@ -2453,10 +3537,35 @@ class RealRunner:
         - planning for a given (seed, tick_index, scenario) is deterministic.
         - changing intensity only changes *how many* actions we take from the same
           per-tick ordering (prefix-stable), so it doesn't affect later ticks.
+
+        Parameters
+        ----------
+        debt_snapshot : dict | None
+            Mapping ``(debtor_pid, creditor_pid, eq_code_UPPER) → Decimal``
+            with current debt amounts.  When provided, the planner reduces
+            trustline limits by the already-used debt to avoid generating
+            payments that exceed available capacity (Phase 1.4).
         """
 
         intensity = max(0.0, min(1.0, float(run.intensity_percent) / 100.0))
-        target_actions = int(self._actions_per_tick_max * intensity)
+
+        # ── Warm-up ramp (Phase 1.1) ──────────────────────────────────
+        # If the scenario defines settings.warmup, linearly ramp intensity
+        # from  floor  up to full value over the first *warmup_ticks* ticks.
+        # Formula:  ramp_factor = floor + (1 - floor) * (tick_index / warmup_ticks)
+        # After warmup_ticks the factor is ≥ 1.0, so intensity stays unchanged.
+        warmup_cfg = (scenario.get("settings") or {}).get("warmup") or {}
+        warmup_ticks = int(warmup_cfg.get("ticks", 0) or 0)
+        if warmup_ticks > 0 and int(run.tick_index) < warmup_ticks:
+            warmup_floor = float(warmup_cfg.get("floor", 0.1) or 0.1)
+            warmup_floor = max(0.0, min(1.0, warmup_floor))
+            ramp_factor = warmup_floor + (1.0 - warmup_floor) * (
+                int(run.tick_index) / warmup_ticks
+            )
+            intensity = intensity * ramp_factor
+        # ── /Warm-up ──────────────────────────────────────────────────
+
+        target_actions = max(1, int(self._actions_per_tick_max * intensity)) if intensity > 0 else 0
         if target_actions <= 0:
             return []
 
@@ -2465,6 +3574,7 @@ class RealRunner:
             return []
 
         profiles_props_by_id: dict[str, dict[str, Any]] = {}
+        profiles_full_by_id: dict[str, dict[str, Any]] = {}
         for bp in scenario.get("behaviorProfiles") or []:
             if not isinstance(bp, dict):
                 continue
@@ -2473,6 +3583,7 @@ class RealRunner:
                 continue
             props = bp.get("props")
             profiles_props_by_id[bp_id] = props if isinstance(props, dict) else {}
+            profiles_full_by_id[bp_id] = bp
 
         participant_profile_id_by_pid: dict[str, str] = {}
         participant_group_by_pid: dict[str, str] = {}
@@ -2488,6 +3599,24 @@ class RealRunner:
             group_id = str(p.get("groupId") or "").strip()
             if group_id:
                 participant_group_by_pid[pid] = group_id
+
+        # ── Phase 4: profile_by_pid lookup for flow/periodicity/reciprocity ──
+        profile_by_pid: dict[str, dict[str, Any]] = {}
+        for _pid, _prof_id in participant_profile_id_by_pid.items():
+            if _prof_id in profiles_full_by_id:
+                profile_by_pid[_pid] = profiles_full_by_id[_prof_id]
+        # ── /Phase 4 profile_by_pid ──────────────────────────────────────────
+
+        # ── Phase 4: flow config (read once) ─────────────────────────────────
+        _flow_cfg: dict[str, Any] = (scenario.get("settings") or {}).get("flow") or {}
+        _flow_enabled: bool = bool(_flow_cfg.get("enabled", False))
+        _flow_default_affinity: float = float(_flow_cfg.get("default_affinity", 0.7))
+        _flow_reciprocity_bonus: float = 0.0
+        try:
+            _flow_reciprocity_bonus = float(_flow_cfg.get("reciprocity_bonus", 0.0))
+        except Exception:
+            _flow_reciprocity_bonus = 0.0
+        # ── /Phase 4 flow config ─────────────────────────────────────────────
 
         tick_seed = (int(run.seed) * 1_000_003 + int(run.tick_index)) & 0xFFFFFFFF
         tick_rng = random.Random(tick_seed)
@@ -2563,6 +3692,18 @@ class RealRunner:
                 # Deterministic neighbor order.
                 edges.sort(key=lambda x: x[0])
 
+        # ── Phase 1.4: pre-aggregate debt snapshot for O(1) lookups ───
+        _ZERO = Decimal("0")
+        _debt_out_agg: dict[tuple[str, str], Decimal] = {}   # (debtor_pid, eq_upper) → total
+        _debt_in_agg: dict[tuple[str, str], Decimal] = {}    # (creditor_pid, eq_upper) → total
+        if debt_snapshot:
+            for (debtor_pid, creditor_pid, eq_code), amt in debt_snapshot.items():
+                k_out = (debtor_pid, eq_code)
+                _debt_out_agg[k_out] = _debt_out_agg.get(k_out, _ZERO) + amt
+                k_in = (creditor_pid, eq_code)
+                _debt_in_agg[k_in] = _debt_in_agg.get(k_in, _ZERO) + amt
+        # ── /Phase 1.4 pre-aggregate ──────────────────────────────────
+
         all_group_ids = sorted({g for g in participant_group_by_pid.values() if g})
 
         def _pick_group(rng: random.Random, sender_props: dict[str, Any]) -> str | None:
@@ -2627,6 +3768,40 @@ class RealRunner:
                 reachable = sorted({p for p in direct if p and p != sender})
             if not reachable:
                 return None
+
+            # ── Flow Directionality (Phase 4.1) ──────────────────────
+            if _flow_enabled:
+                sender_group = participant_group_by_pid.get(sender)
+                if sender_group:
+                    sender_profile = profile_by_pid.get(sender, {})
+                    sender_profile_props = sender_profile.get("props") if isinstance(sender_profile.get("props"), dict) else {}
+                    flow_chains = sender_profile_props.get("flow_chains", [])
+                    if isinstance(flow_chains, list) and flow_chains:
+                        affinity = _flow_default_affinity
+                        try:
+                            _fa = sender_profile_props.get("flow_affinity")
+                            if _fa is not None:
+                                affinity = float(_fa)
+                        except Exception:
+                            pass
+                        if rng.random() < affinity:
+                            target_groups_flow = [
+                                chain[1]
+                                for chain in flow_chains
+                                if isinstance(chain, (list, tuple))
+                                and len(chain) >= 2
+                                and chain[0] == sender_group
+                            ]
+                            if target_groups_flow:
+                                target_group_flow = rng.choice(target_groups_flow)
+                                in_target = [
+                                    pid
+                                    for pid in reachable
+                                    if participant_group_by_pid.get(pid) == target_group_flow
+                                ]
+                                if in_target:
+                                    return rng.choice(in_target)
+            # ── /Flow Directionality ─────────────────────────────────
 
             target_group = _pick_group(rng, sender_props)
             if target_group:
@@ -2702,6 +3877,59 @@ class RealRunner:
             if direct_cap is not None and direct_cap > 0:
                 limit = min(limit, direct_cap)
 
+            # ── Phase 1.4: capacity-aware amounts ─────────────────────
+            # Reduce the static limit by already-used debt so generated
+            # amounts fit into the remaining trustline capacity.
+            if debt_snapshot:
+                eq_upper = eq.strip().upper()
+                static_limit = limit  # keep for debug logging
+
+                # 1) Sender total outgoing debt → cap max_outgoing_limit
+                out_limit_raw = max_outgoing_limit.get((sender_pid, eq), c["limit"])
+                out_used = _debt_out_agg.get((sender_pid, eq_upper), _ZERO)
+                available_out = max(_ZERO, out_limit_raw - out_used)
+                limit = min(limit, available_out)
+
+                # 2) Receiver total incoming debt → cap max_incoming_limit
+                recv_limit_raw = max_incoming_limit.get((receiver_pid, eq))
+                if recv_limit_raw is not None and recv_limit_raw > 0:
+                    in_used = _debt_in_agg.get((receiver_pid, eq_upper), _ZERO)
+                    available_in = max(_ZERO, recv_limit_raw - in_used)
+                    limit = min(limit, available_in)
+
+                # 3) Direct edge debt → cap direct_edge_limit
+                if direct_cap is not None and direct_cap > 0:
+                    edge_used = debt_snapshot.get(
+                        (sender_pid, receiver_pid, eq_upper), _ZERO
+                    )
+                    available_direct = max(_ZERO, direct_cap - edge_used)
+                    limit = min(limit, available_direct)
+
+                if limit < static_limit and static_limit > 0:
+                    ratio = float(limit) / float(static_limit)
+                    if ratio < 0.5:
+                        self._logger.debug(
+                            "capacity_aware: edge %s→%s eq=%s "
+                            "static_limit=%s available=%s (%.0f%%)",
+                            sender_pid,
+                            receiver_pid,
+                            eq,
+                            static_limit,
+                            limit,
+                            ratio * 100,
+                        )
+            # ── /Phase 1.4 ────────────────────────────────────────────
+
+            # ── Reciprocity Bonus (Phase 4.2) ─────────────────────────
+            if _flow_reciprocity_bonus > 0 and debt_snapshot:
+                _eq_upper_recip = eq.strip().upper()
+                _reverse_debt = debt_snapshot.get(
+                    (receiver_pid, sender_pid, _eq_upper_recip), _ZERO
+                )
+                if _reverse_debt > 0:
+                    limit = limit * Decimal(str(1.0 + _flow_reciprocity_bonus))
+            # ── /Reciprocity Bonus ────────────────────────────────────
+
             amount_model = None
             raw_amount_model = sender_props.get("amount_model")
             if isinstance(raw_amount_model, dict):
@@ -2715,6 +3943,42 @@ class RealRunner:
             if amount is None:
                 i += 1
                 continue
+
+            # ── Periodicity (Phase 4.3) ───────────────────────────────
+            _sender_profile_period = profile_by_pid.get(sender_pid, {})
+            _sender_props_period = _sender_profile_period.get("props") if isinstance(_sender_profile_period.get("props"), dict) else {}
+            _periodicity_factor = 1.0
+            try:
+                _pf_raw = _sender_props_period.get("periodicity_factor")
+                if _pf_raw is not None:
+                    _periodicity_factor = float(_pf_raw)
+            except Exception:
+                _periodicity_factor = 1.0
+            if _periodicity_factor != 1.0:
+                try:
+                    _amount_val = float(amount)
+                except Exception:
+                    _amount_val = 0.0
+                if _amount_val > 0:
+                    _p50_period = 50.0
+                    if amount_model and isinstance(amount_model, dict):
+                        try:
+                            _p50_raw = amount_model.get("p50")
+                            if _p50_raw is not None:
+                                _p50_period = float(_p50_raw)
+                        except Exception:
+                            pass
+                    if _p50_period > 0:
+                        _period_accept = 1.0 / (
+                            1.0
+                            + math.log(max(_amount_val / _p50_period, 0.1))
+                            * _periodicity_factor
+                        )
+                        _period_accept = max(0.0, min(1.0, _period_accept))
+                        if action_rng.random() > _period_accept:
+                            i += 1
+                            continue
+            # ── /Periodicity ──────────────────────────────────────────
 
             planned.append(
                 _RealPaymentAction(
@@ -2868,6 +4132,86 @@ class RealRunner:
                 continue
             out.append((rec.id, rec.pid))
         return out
+
+    async def _load_debt_snapshot_by_pid(
+        self,
+        session,
+        participants: list[tuple[uuid.UUID, str]],
+        equivalents: list[str],
+    ) -> dict[tuple[str, str, str], Decimal]:
+        """Load current debt amounts keyed by (debtor_pid, creditor_pid, eq_code).
+
+        Used by ``_plan_real_payments`` to compute capacity-aware payment amounts.
+        The Debt table stores one row per (debtor, creditor, equivalent) triple
+        (UNIQUE constraint), so no SUM aggregation is strictly needed – but we
+        use it defensively.
+
+        Returns
+        -------
+        dict[(str, str, str), Decimal]
+            Mapping from ``(debtor_pid, creditor_pid, eq_code_UPPER)`` to the
+            current debt amount on that edge.  Keys use **upper-cased**
+            equivalent codes to match the DB ``equivalents.code`` column.
+        """
+        if not participants or not equivalents:
+            return {}
+
+        uuid_to_pid: dict[uuid.UUID, str] = {
+            uid: pid for (uid, pid) in participants
+        }
+        participant_uuids = list(uuid_to_pid.keys())
+
+        eq_codes_upper = [
+            str(x).strip().upper() for x in equivalents if str(x).strip()
+        ]
+        if not eq_codes_upper:
+            return {}
+
+        # Equivalent UUID → code mapping (one lightweight query).
+        eq_rows = (
+            await session.execute(
+                select(Equivalent.id, Equivalent.code).where(
+                    Equivalent.code.in_(eq_codes_upper)
+                )
+            )
+        ).all()
+        eq_uuid_to_code: dict[uuid.UUID, str] = {
+            row.id: row.code for row in eq_rows
+        }
+        if not eq_uuid_to_code:
+            return {}
+
+        eq_uuids = list(eq_uuid_to_code.keys())
+
+        # Single aggregate query for all relevant debts.
+        debt_rows = (
+            await session.execute(
+                select(
+                    Debt.debtor_id,
+                    Debt.creditor_id,
+                    Debt.equivalent_id,
+                    func.sum(Debt.amount).label("total"),
+                )
+                .where(
+                    Debt.debtor_id.in_(participant_uuids),
+                    Debt.creditor_id.in_(participant_uuids),
+                    Debt.equivalent_id.in_(eq_uuids),
+                )
+                .group_by(
+                    Debt.debtor_id, Debt.creditor_id, Debt.equivalent_id
+                )
+            )
+        ).all()
+
+        snapshot: dict[tuple[str, str, str], Decimal] = {}
+        for row in debt_rows:
+            debtor_pid = uuid_to_pid.get(row.debtor_id)
+            creditor_pid = uuid_to_pid.get(row.creditor_id)
+            eq_code = eq_uuid_to_code.get(row.equivalent_id)
+            if debtor_pid and creditor_pid and eq_code:
+                key = (debtor_pid, creditor_pid, eq_code)
+                snapshot[key] = Decimal(str(row.total or 0))
+        return snapshot
 
     async def _seed_scenario_into_db(self, session, scenario: dict[str, Any]) -> None:
         # Equivalents
