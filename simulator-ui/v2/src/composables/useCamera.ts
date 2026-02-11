@@ -182,6 +182,13 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     panState.active = false
     panState.pointerId = -1
 
+    const canvas = deps.canvasEl.value
+    try {
+      canvas?.releasePointerCapture(ev.pointerId)
+    } catch {
+      // ignore
+    }
+
     // Returns true if it was a click (no pan).
     return !panState.moved
   }

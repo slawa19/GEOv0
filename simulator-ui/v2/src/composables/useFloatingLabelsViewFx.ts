@@ -72,27 +72,68 @@ export function useFloatingLabelsViewFx<N extends LayoutNodeLike>(
       const padPx = 12
       const falloffPx = 36
 
+      // Build a cheap screen-space grid index for nodes.
+      // This keeps the exact same distance math, but avoids scanning all nodes
+      // for each label.
+      type NodeScreen = { x: number; y: number; rPx: number }
+      const nodeScreen: NodeScreen[] = []
+      let maxNodeRPx = 6
+      for (const n of nodes) {
+        const sz = deps.sizeForNode(n)
+        const rPx = Math.max(6, Math.max(sz.w, sz.h) / 2)
+        const np = deps.worldToScreen(n.__x, n.__y)
+        nodeScreen.push({ x: np.x, y: np.y, rPx })
+        if (rPx > maxNodeRPx) maxNodeRPx = rPx
+      }
+
+      const maxSearchRadiusPx = maxNodeRPx + padPx + falloffPx
+      const cellSizePx = 96
+      const rangeCells = Math.max(1, Math.ceil(maxSearchRadiusPx / cellSizePx))
+
+      const cellKey = (cx: number, cy: number) => `${cx},${cy}`
+      const grid = new Map<string, number[]>()
+      for (let i = 0; i < nodeScreen.length; i++) {
+        const ns = nodeScreen[i]
+        const cx = Math.floor(ns.x / cellSizePx)
+        const cy = Math.floor(ns.y / cellSizePx)
+        const k = cellKey(cx, cy)
+        const arr = grid.get(k)
+        if (arr) arr.push(i)
+        else grid.set(k, [i])
+      }
+
       const next = new Map<number, number>()
       for (const fl of base) {
         const lp = deps.worldToScreen(fl.x, fl.y)
         let best = 0
 
-        for (const n of nodes) {
-          const sz = deps.sizeForNode(n)
-          const rPx = Math.max(6, Math.max(sz.w, sz.h) / 2)
-          const np = deps.worldToScreen(n.__x, n.__y)
+        const lcX = Math.floor(lp.x / cellSizePx)
+        const lcY = Math.floor(lp.y / cellSizePx)
 
-          const dx = lp.x - np.x
-          const dy = lp.y - np.y
+        for (let dyCell = -rangeCells; dyCell <= rangeCells; dyCell++) {
+          for (let dxCell = -rangeCells; dxCell <= rangeCells; dxCell++) {
+            const idxs = grid.get(cellKey(lcX + dxCell, lcY + dyCell))
+            if (!idxs) continue
 
-          // Fast reject.
-          if (Math.abs(dx) > rPx + padPx + falloffPx) continue
-          if (Math.abs(dy) > rPx + padPx + falloffPx) continue
+            for (const idx of idxs) {
+              const ns = nodeScreen[idx]
 
-          const boundary = rPx + padPx
-          const d = Math.hypot(dx, dy)
-          const t = clamp01(1 - (d - boundary) / falloffPx)
-          if (t > best) best = t
+              const dx = lp.x - ns.x
+              const dy = lp.y - ns.y
+
+              // Fast reject.
+              if (Math.abs(dx) > ns.rPx + padPx + falloffPx) continue
+              if (Math.abs(dy) > ns.rPx + padPx + falloffPx) continue
+
+              const boundary = ns.rPx + padPx
+              const d = Math.hypot(dx, dy)
+              const t = clamp01(1 - (d - boundary) / falloffPx)
+              if (t > best) best = t
+              if (best >= 0.98) break
+            }
+
+            if (best >= 0.98) break
+          }
           if (best >= 0.98) break
         }
 

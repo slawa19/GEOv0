@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -97,7 +97,7 @@ async def sync_artifacts(run: RunRecord) -> None:
             os.getenv("SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "524288") or "524288"
         )
 
-        items: list[SimulatorRunArtifact] = []
+        items: list[dict[str, object]] = []
         for p in sorted(base.iterdir()):
             if not p.is_file():
                 continue
@@ -115,23 +115,95 @@ async def sync_artifacts(run: RunRecord) -> None:
                     getattr(p, "name", ""),
                 )
             items.append(
-                SimulatorRunArtifact(
-                    run_id=run.run_id,
-                    name=p.name,
-                    content_type=artifact_content_type(p.name),
-                    size_bytes=size,
-                    sha256=sha,
-                    storage_url=url,
-                )
+                {
+                    "run_id": str(run.run_id),
+                    "name": str(p.name),
+                    "content_type": artifact_content_type(p.name),
+                    "size_bytes": size,
+                    "sha256": sha,
+                    "storage_url": url,
+                }
             )
 
         async with db.AsyncSessionLocal() as session:
-            await session.execute(
-                delete(SimulatorRunArtifact).where(
-                    SimulatorRunArtifact.run_id == run.run_id
+            # Diff-based sync: delete missing + upsert changed/new.
+            existing_rows = (
+                await session.execute(
+                    select(
+                        SimulatorRunArtifact.name,
+                        SimulatorRunArtifact.content_type,
+                        SimulatorRunArtifact.size_bytes,
+                        SimulatorRunArtifact.sha256,
+                        SimulatorRunArtifact.storage_url,
+                    ).where(SimulatorRunArtifact.run_id == run.run_id)
                 )
-            )
-            session.add_all(items)
+            ).all()
+
+            existing: dict[str, tuple[object, object, object, object]] = {
+                str(name): (content_type, size_bytes, sha256, storage_url)
+                for (name, content_type, size_bytes, sha256, storage_url) in existing_rows
+            }
+
+            names_now: set[str] = set()
+            rows_to_upsert: list[dict[str, object]] = []
+            for row in items:
+                name = str(row.get("name") or "")
+                names_now.add(name)
+                prev = existing.get(name)
+                cur = (
+                    row.get("content_type"),
+                    row.get("size_bytes"),
+                    row.get("sha256"),
+                    row.get("storage_url"),
+                )
+                if prev == cur:
+                    continue
+                rows_to_upsert.append(row)
+
+            names_to_delete = [n for n in existing.keys() if n not in names_now]
+            if names_to_delete:
+                await session.execute(
+                    delete(SimulatorRunArtifact).where(
+                        SimulatorRunArtifact.run_id == run.run_id,
+                        SimulatorRunArtifact.name.in_(names_to_delete),
+                    )
+                )
+
+            if rows_to_upsert:
+                bind = None
+                try:
+                    bind = session.get_bind()
+                except Exception:
+                    bind = getattr(session, "bind", None)
+
+                dialect_name = None
+                try:
+                    dialect_name = bind.dialect.name if bind is not None else None
+                except Exception:
+                    dialect_name = None
+
+                if dialect_name == "sqlite":
+                    insert_fn = sqlite_insert
+                elif dialect_name in {"postgresql", "postgres"}:
+                    insert_fn = pg_insert
+                else:
+                    raise RuntimeError(
+                        f"Unsupported SQL dialect for simulator_run_artifacts upsert: {dialect_name!r}"
+                    )
+
+                table = SimulatorRunArtifact.__table__
+                stmt = insert_fn(table)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[table.c.run_id, table.c.name],
+                    set_={
+                        table.c.content_type: stmt.excluded.content_type,
+                        table.c.size_bytes: stmt.excluded.size_bytes,
+                        table.c.sha256: stmt.excluded.sha256,
+                        table.c.storage_url: stmt.excluded.storage_url,
+                    },
+                )
+                await session.execute(stmt, rows_to_upsert)
+
             await session.commit()
     except Exception:
         logger.exception(

@@ -55,9 +55,14 @@ class ArtifactsManager:
             artifacts_dir.mkdir(parents=True, exist_ok=True)
             run.artifacts_dir = artifacts_dir
 
-            (artifacts_dir / "last_tick.json").write_text(
+            def _atomic_write_text(path: Path, text: str) -> None:
+                tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+                tmp.write_text(text, encoding="utf-8")
+                tmp.replace(path)
+
+            _atomic_write_text(
+                artifacts_dir / "last_tick.json",
                 json.dumps({"tick_index": 0, "sim_time_ms": 0}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
             (artifacts_dir / "status.json").write_text(
                 json.dumps(
@@ -353,10 +358,13 @@ class ArtifactsManager:
         if base is None:
             return
         try:
-            (base / "last_tick.json").write_text(
+            path = base / "last_tick.json"
+            tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+            tmp.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            tmp.replace(path)
         except Exception:
             self._logger.exception("simulator.artifacts.last_tick_write_failed run_id=%s", getattr(run, "run_id", ""))
             return
