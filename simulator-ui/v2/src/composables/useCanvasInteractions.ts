@@ -32,7 +32,33 @@ export function useCanvasInteractions(opts: {
   edgeHover: EdgeHoverLike
   getPanActive: () => boolean
 }) {
+  // Tracks whether a pan or drag-to-pin interaction just completed.
+  // Used to suppress the subsequent browser `click` event that fires even after
+  // small pointer movements (3-10px). Without this guard, a short pan/drag would
+  // clear the user's node selection via onCanvasClick.
+  let suppressNextClick = false
+  let suppressClickTimer: ReturnType<typeof setTimeout> | null = null
+
+  function markSuppressClick() {
+    suppressNextClick = true
+    if (suppressClickTimer !== null) clearTimeout(suppressClickTimer)
+    // Safety: clear the flag after a short window in case click never fires.
+    suppressClickTimer = setTimeout(() => {
+      suppressNextClick = false
+      suppressClickTimer = null
+    }, 300)
+  }
+
   function onCanvasClick(ev: MouseEvent) {
+    if (suppressNextClick) {
+      suppressNextClick = false
+      if (suppressClickTimer !== null) {
+        clearTimeout(suppressClickTimer)
+        suppressClickTimer = null
+      }
+      return
+    }
+
     const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
     if (!hit) {
       opts.setSelectedNodeId(null)
@@ -75,10 +101,21 @@ export function useCanvasInteractions(opts: {
   }
 
   function onCanvasPointerUp(ev: PointerEvent) {
-    if (opts.dragToPin.onPointerUp(ev)) return
+    if (opts.dragToPin.onPointerUp(ev)) {
+      // Drag-to-pin consumed this pointer-up. The browser may still fire a `click`
+      // event for the same gesture. Suppress it so the drag doesn't accidentally
+      // deselect the node the user just pinned.
+      markSuppressClick()
+      return
+    }
 
     const wasClick = opts.cameraSystem.onPointerUp(ev)
-    if (!wasClick) return
+    if (!wasClick) {
+      // Camera detected a pan (moved ≥ 3px). The browser may still fire `click`
+      // for small movements (3-10px). Suppress it to prevent unintended deselection.
+      markSuppressClick()
+      return
+    }
 
     // Click on empty background: clear selection.
     opts.setSelectedNodeId(null)

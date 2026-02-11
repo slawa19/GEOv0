@@ -365,8 +365,10 @@ function toggleDemoUi() {
       :run-clearing-once="fxDebug.runClearingOnce"
     />
 
-    <!-- Loading / error overlay (fail-fast, but non-intrusive) -->
-    <div v-if="state.loading" class="overlay">Loading…</div>
+    <!-- Loading / error overlay (fail-fast, but non-intrusive).
+         Hide the overlay during incremental updates (when we already have a snapshot)
+         to avoid a visible "Loading…" flash on preview → run transitions. -->
+    <div v-if="state.loading && !state.snapshot" class="overlay">Loading…</div>
     <div v-else-if="state.error" class="overlay overlay-error">
       <div class="overlay-title">Error</div>
       <div class="overlay-text mono">{{ state.error }}</div>

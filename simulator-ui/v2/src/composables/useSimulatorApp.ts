@@ -1225,6 +1225,10 @@ export function useSimulatorApp() {
     setupResizeListener: () => layoutCoordinator.setupResizeListener(),
     teardownResizeListener: () => layoutCoordinator.teardownResizeListener(),
     stopRenderLoop,
+    // In real mode the initial snapshot load is handled by useSimulatorRealMode's
+    // immediate watcher (refreshScenarios → refreshSnapshot). Skipping the duplicate
+    // loadScene() in setup() eliminates a redundant "Loading…" flash on page open.
+    skipInitialLoad: () => isRealMode.value,
   })
 
   const clearingPlansById = new Map<string, ClearingPlanEvent>()

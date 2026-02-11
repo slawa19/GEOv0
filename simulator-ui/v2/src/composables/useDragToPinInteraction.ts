@@ -115,7 +115,11 @@ export function useDragToPinInteraction(opts: {
       if (id) showDragPreviewForNode(id)
       scheduleDragPreview()
 
-      reheatPhysics(0.25)
+      // Do NOT reheat physics during drag.
+      // Any nonzero alpha causes d3-force to run ~N ticks moving unpinned nodes,
+      // producing a visible "graph jump" that accumulates while the user drags.
+      // The dragged node is already pinned via pinNodeLive(); connected edges
+      // stretch/compress naturally via canvas rendering without physics.
 
       // Hide the node from canvas and lock in the baseline frame.
       renderOnce()
@@ -136,7 +140,8 @@ export function useDragToPinInteraction(opts: {
       // ALWAYS pin the node after drag (like v1) so user can see its edges
       commitPinnedPos(id, ln.__x, ln.__y)
       pinNodeLive(id, ln.__x, ln.__y)
-      reheatPhysics(0.18)
+      // No physics reheat on drop — the drag interaction is purely positional.
+      // See comment in onPointerMove for rationale.
     }
 
     hideDragPreview()

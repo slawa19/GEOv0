@@ -228,6 +228,13 @@ export function useSimulatorRealMode(opts: {
   // Block watchers from calling refreshSnapshot during startRun to prevent double load.
   let startRunInProgress = false
 
+  // Block the scenario-change watcher from calling refreshSnapshot during the initial
+  // boot sequence (immediate watcher). refreshScenarios() may update selectedScenarioId,
+  // which triggers the scenario watcher — but the immediate watcher is about to call
+  // refreshSnapshot() itself, so the scenario watcher's call is redundant and causes
+  // a visible "Loading…" flash.
+  let initialBootInProgress = false
+
   function cancelPendingRefreshSnapshotDebounce() {
     if (refreshSnapshotDebounceTimer !== null) {
       clearTimeout(refreshSnapshotDebounceTimer)
@@ -1029,35 +1036,40 @@ export function useSimulatorRealMode(opts: {
         stopSse()
         return
       }
+      initialBootInProgress = true
       void (async () => {
-        await refreshScenarios()
+        try {
+          await refreshScenarios()
 
-        ensureScenarioSelectionValid()
+          ensureScenarioSelectionValid()
 
-        if (real.runId && real.accessToken) {
-          await refreshRunStatus()
-          if (real.runId) {
-            await refreshSnapshot()
+          if (real.runId && real.accessToken) {
+            await refreshRunStatus()
             if (real.runId) {
-              await runSseLoop()
+              await refreshSnapshot()
+              if (real.runId) {
+                await runSseLoop()
+              }
             }
+            return
           }
-          return
-        }
 
-        // No active run on mount: show scenario preview immediately.
-        if (real.accessToken && real.selectedScenarioId && !real.runId) {
-          await refreshSnapshot()
-        }
+          // No active run on mount: show scenario preview immediately.
+          if (real.accessToken && real.selectedScenarioId && !real.runId) {
+            await refreshSnapshot()
+          }
 
-        const shouldAutoStart =
-          import.meta.env.DEV &&
-          isLocalhost &&
-          real.accessToken &&
-          real.selectedScenarioId &&
-          !real.runId &&
-          new URLSearchParams(window.location.search).get('autostart') === '1'
-        if (shouldAutoStart) await startRun()
+          const shouldAutoStart =
+            import.meta.env.DEV &&
+            isLocalhost &&
+            real.accessToken &&
+            real.selectedScenarioId &&
+            !real.runId &&
+            new URLSearchParams(window.location.search).get('autostart') === '1'
+          if (shouldAutoStart) await startRun()
+        } finally {
+          initialBootInProgress = false
+        }
       })()
     },
     { immediate: true },
@@ -1073,6 +1085,10 @@ export function useSimulatorRealMode(opts: {
 
       // Block watcher from calling refreshSnapshot during startRun (it handles its own refresh).
       if (startRunInProgress) return
+
+      // Block watcher during initial boot: the immediate watcher already calls
+      // refreshSnapshot() after refreshScenarios() — this watcher would duplicate it.
+      if (initialBootInProgress) return
 
       const st = String(real.runStatus?.state ?? '').toLowerCase()
       const isActive =

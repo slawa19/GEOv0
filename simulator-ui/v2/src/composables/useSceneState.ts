@@ -40,11 +40,15 @@ type UseSceneStateDeps = {
   // Optional hook: when a new snapshot is loaded with the same node IDs as the current snapshot,
   // we may skip full relayout/camera resets. In that case, the app may still need to sync
   // visual/metrics fields into the layout node/link objects used for rendering.
-  onIncrementalSnapshotLoaded?: (snapshot: GraphSnapshot) => void
+  onIncrementalSnapshotLoaded?: (snapshot: import('../types').GraphSnapshot) => void
 
   setupResizeListener: () => void
   teardownResizeListener: () => void
   stopRenderLoop: () => void
+
+  // When true, setup() skips the initial loadScene() call.
+  // Useful when another subsystem (e.g. real-mode boot) is responsible for the first load.
+  skipInitialLoad?: () => boolean
 }
 
 type UseSceneStateReturn = {
@@ -170,7 +174,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       // ignore
     }
 
-    loadScene()
+    // In real mode, the initial snapshot load is handled by useSimulatorRealMode's immediate watcher.
+    // Calling loadScene() here would create a duplicate/racing load, causing a visible "Loading…" flash.
+    if (!deps.skipInitialLoad?.()) {
+      loadScene()
+    }
     deps.setupResizeListener()
   }
 
