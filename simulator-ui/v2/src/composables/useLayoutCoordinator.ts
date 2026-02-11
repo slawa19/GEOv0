@@ -167,7 +167,11 @@ export function useLayoutCoordinator<
     const snap = deps.snapshot.value
     if (!snap) return
 
-    const snapKey = `${deps.getSourcePath()}|${snap.generated_at}|${snap.nodes.length}|${snap.links.length}`
+    // IMPORTANT: do not key layout on `generated_at`.
+    // Real-mode streams and patch-only events often bump `generated_at` even when topology
+    // (node/link composition) is unchanged. Recomputing layout in that case recreates physics
+    // and causes a visible "graph jump".
+    const snapKey = `${deps.getSourcePath()}|${snap.nodes.length}|${snap.links.length}`
     const key = `${snapKey}|${deps.layoutMode.value}|${layout.w}x${layout.h}`
     if (key === lastLayoutKey) return
     lastLayoutKey = key
@@ -424,7 +428,8 @@ export function useLayoutCoordinator<
   watch(
     () => {
       const s = deps.snapshot.value
-      return [s?.generated_at ?? '', s?.nodes?.length ?? 0, s?.links?.length ?? 0] as const
+      // Relayout should be driven by topology (node/link composition), not timestamps.
+      return [s?.nodes?.length ?? 0, s?.links?.length ?? 0] as const
     },
     () => {
       if (!deps.snapshot.value) return

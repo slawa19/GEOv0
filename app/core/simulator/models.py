@@ -14,6 +14,28 @@ from app.schemas.simulator import RunMode, RunState, ScenarioSummary
 
 
 @dataclass(frozen=True)
+class InjectResult:
+    affected_equivalents: set[str] = field(default_factory=set)
+    new_participants: list[tuple[uuid.UUID, str]] = field(default_factory=list)  # (id, pid)
+    new_participants_scenario: list[dict[str, Any]] = field(default_factory=list)
+    new_trustlines_scenario: list[dict[str, Any]] = field(default_factory=list)
+    frozen_participant_pids: list[str] = field(default_factory=list)
+    frozen_edges: list[dict[str, str]] = field(default_factory=list)  # {from_pid,to_pid,equivalent_code}
+    inject_debt_equivalents: set[str] = field(default_factory=set)
+    inject_debt_edges_by_eq: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
+    applied: int = 0
+    skipped: int = 0
+    total_applied: Decimal = Decimal("0")
+
+
+@dataclass(frozen=True)
+class TrustDriftResult:
+    updated_count: int
+    touched_equivalents: set[str] = field(default_factory=set)
+    touched_edges_by_eq: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ScenarioRecord:
     scenario_id: str
     name: Optional[str]

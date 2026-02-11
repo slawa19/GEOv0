@@ -212,6 +212,68 @@ describe('useSceneState', () => {
     expect(clearScheduledTimeouts.mock.calls[2]?.[0]).toEqual({ keepCritical: true })
   })
 
+  it('incremental update does not relayout when only links change', async () => {
+    const eq = ref('UAH')
+    const scene = ref<'A' | 'B' | 'C'>('A')
+    const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
+    const effectiveEq = computed(() => eq.value)
+
+    const state = reactive({
+      loading: false,
+      error: '',
+      sourcePath: '',
+      snapshot: null as GraphSnapshot | null,
+      selectedNodeId: null as string | null,
+    })
+
+    const snapshot1 = makeSnapshot() // nodes [A,B], links [A->B]
+    const snapshot2: GraphSnapshot = {
+      ...snapshot1,
+      generated_at: '2026-01-25T00:00:01Z',
+      // Same node IDs, but link composition differs (preview → run can do this).
+      links: [
+        { source: 'A', target: 'B' },
+        { source: 'B', target: 'A' },
+      ],
+    }
+
+    const loadSnapshot = vi.fn()
+    loadSnapshot.mockResolvedValueOnce({ snapshot: snapshot1, sourcePath: 'snap1.json' })
+    loadSnapshot.mockResolvedValueOnce({ snapshot: snapshot2, sourcePath: 'snap2.json' })
+
+    const resizeAndLayout = vi.fn()
+    const onIncrementalSnapshotLoaded = vi.fn()
+
+    const s = useSceneState({
+      eq,
+      scene,
+      layoutMode,
+      allowEqDeepLink: () => true,
+      isEqAllowed: () => true,
+      effectiveEq,
+      state,
+      loadSnapshot,
+      clearScheduledTimeouts: vi.fn(),
+      resetCamera: vi.fn(),
+      resetLayoutKeyCache: vi.fn(),
+      resetOverlays: vi.fn(),
+      resizeAndLayout,
+      ensureRenderLoop: vi.fn(),
+      onIncrementalSnapshotLoaded,
+      setupResizeListener: vi.fn(),
+      teardownResizeListener: vi.fn(),
+      stopRenderLoop: vi.fn(),
+    })
+
+    await s.loadScene()
+    expect(resizeAndLayout).toHaveBeenCalledTimes(1)
+
+    await s.loadScene()
+    expect(onIncrementalSnapshotLoaded).toHaveBeenCalledTimes(1)
+    // Critical: no second relayout when only links changed.
+    expect(resizeAndLayout).toHaveBeenCalledTimes(1)
+  })
+
   it('setup applies allow-listed eq and focuses existing node from URL', async () => {
     const eq = ref('UAH')
     const scene = ref<'A' | 'B' | 'C'>('A')

@@ -1,0 +1,35 @@
+{
+  "id": "trust-drift-decay-regression",
+  "name": "Trust Drift Decay Regression (minimal)",
+  "description": "Minimal deterministic scenario that guarantees trust_drift_decay triggers. Used by regression test to verify topology.changed events carry non-empty edge_patch.",
+  "equivalents": ["UAH"],
+  "participants": [
+    { "id": "alice", "name": "Alice", "type": "person", "status": "active" },
+    { "id": "bob", "name": "Bob", "type": "person", "status": "active" },
+    { "id": "carol", "name": "Carol", "type": "person", "status": "active" }
+  ],
+  "trustlines": [
+    { "from": "alice", "to": "bob", "equivalent": "UAH", "limit": 100, "status": "active" },
+    { "from": "bob", "to": "carol", "equivalent": "UAH", "limit": 100, "status": "active" },
+    { "from": "carol", "to": "alice", "equivalent": "UAH", "limit": 100, "status": "active" }
+  ],
+  "settings": {
+    "trust_drift": {
+      "enabled": true,
+      "growth_rate": 0.02,
+      "decay_rate": 0.05,
+      "max_growth": 2.0,
+      "min_limit_ratio": 0.3,
+      "overload_threshold": 0.5
+    }
+  },
+  "behavior_profiles": [
+    {
+      "id": "default",
+      "tx_rate": 1.0,
+      "amount_model": { "min": 60, "max": 90, "p50": 70, "p90": 85 }
+    }
+  ],
+  "amount_model": { "min": 60, "max": 90, "p50": 70, "p90": 85 },
+  "events": []
+}

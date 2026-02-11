@@ -4,6 +4,7 @@ import os
 import secrets
 import time
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Optional
 
@@ -52,6 +53,50 @@ def safe_int_env(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)) or str(default))
     except Exception:
         return int(default)
+
+
+def safe_decimal_env(name: str, default: Decimal) -> Decimal:
+    """Parse Decimal env var with a defensive fallback.
+
+    Behavior matches the historical RealRunner helpers:
+    - missing / empty value -> default
+    - non-positive / NaN -> default
+    - any parsing error -> default
+    - quantize to 0.01 with ROUND_DOWN
+    """
+
+    try:
+        raw = os.getenv(name, "")
+        if not str(raw).strip():
+            return default
+        v = Decimal(str(raw))
+        if v.is_nan() or v <= 0:
+            return default
+        return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    except (InvalidOperation, Exception):
+        return default
+
+
+def safe_optional_decimal_env(name: str) -> Decimal | None:
+    """Parse optional Decimal env var.
+
+    Behavior matches the historical RealRunner helpers:
+    - missing / empty value -> None
+    - non-positive / NaN -> None
+    - any parsing error -> None
+    - quantize to 0.01 with ROUND_DOWN
+    """
+
+    try:
+        raw = os.getenv(name, "")
+        if not str(raw).strip():
+            return None
+        v = Decimal(str(raw))
+        if v.is_nan() or v <= 0:
+            return None
+        return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    except (InvalidOperation, Exception):
+        return None
 
 
 def new_run_id() -> str:

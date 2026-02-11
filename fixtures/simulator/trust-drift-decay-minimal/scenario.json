@@ -1,0 +1,37 @@
+{
+  "schema_version": "scenario/1",
+  "scenario_id": "trust-drift-decay-minimal",
+  "name": "Trust drift decay (minimal)",
+  "description": "2-node minimal scenario to deterministically trigger trust_drift decay and emit topology.changed edge_patch (no empty refresh events).",
+  "seed": 1,
+  "equivalents": ["UAH"],
+  "participants": [
+    { "id": "alice", "name": "Alice", "type": "person", "status": "active" },
+    { "id": "bob", "name": "Bob", "type": "person", "status": "active", "behaviorProfileId": "bob_profile" }
+  ],
+  "trustlines": [
+    { "from": "alice", "to": "bob", "equivalent": "UAH", "limit": 10 }
+  ],
+  "behaviorProfiles": [
+    {
+      "id": "bob_profile",
+      "props": {
+        "tx_rate": 1.0,
+        "amount_model": {
+          "UAH": { "min": 9, "max": 9, "p50": 9 }
+        }
+      }
+    }
+  ],
+  "settings": {
+    "warmup": { "ticks": 0, "floor": 0.0 },
+    "trust_drift": {
+      "enabled": true,
+      "growth_rate": 0.05,
+      "decay_rate": 0.02,
+      "max_growth": 2.0,
+      "min_limit_ratio": 0.3,
+      "overload_threshold": 0.8
+    }
+  }
+}

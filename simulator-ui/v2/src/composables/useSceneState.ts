@@ -93,11 +93,10 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       const isIncrementalUpdate =
         hasLoadedOnce && deps.state.snapshot !== null && snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
 
-      // Structural change = different node count or different link count (needs layout recalc).
-      const isStructuralChange =
-        !isIncrementalUpdate ||
-        deps.state.snapshot?.nodes.length !== snapshot.nodes.length ||
-        deps.state.snapshot?.links.length !== snapshot.links.length
+      // Only treat *node composition* changes as structural.
+      // Link count can differ between preview → run (or between run snapshots) while we still
+      // want to keep camera + node positions stable to avoid a visible "graph jump".
+      const isStructuralChange = !isIncrementalUpdate || deps.state.snapshot?.nodes.length !== snapshot.nodes.length
 
       if (!isIncrementalUpdate) {
         // Full reload: clear everything (including critical timers) because we're changing scene context.

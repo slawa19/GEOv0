@@ -406,6 +406,46 @@ describe('useLayoutCoordinator', () => {
     vi.useRealTimers()
   })
 
+  it('generated_at changes do not invalidate layout cache', async () => {
+    vi.useFakeTimers()
+
+    const snapshotRef = ref({
+      generated_at: 't1',
+      nodes: [{ id: 'A' }],
+      links: [],
+    })
+
+    const computeLayout = vi.fn()
+
+    const coordinator = useLayoutCoordinator({
+      canvasEl: ref(null),
+      fxCanvasEl: ref(null),
+      hostEl: ref(null),
+      snapshot: computed(() => snapshotRef.value),
+      layoutMode: ref<'admin-force'>('admin-force'),
+      dprClamp: computed(() => 1),
+      isTestMode: computed(() => false),
+      getSourcePath: () => 'src',
+      computeLayout,
+      clampCameraPan: vi.fn(),
+    })
+
+    coordinator.layout.w = 800
+    coordinator.layout.h = 600
+
+    coordinator.requestRelayoutDebounced(0)
+    vi.runAllTimers()
+    expect(computeLayout).toHaveBeenCalledTimes(1)
+
+    // Only timestamp changes: should not cause another computeLayout.
+    snapshotRef.value = { ...snapshotRef.value, generated_at: 't2' }
+    coordinator.requestRelayoutDebounced(0)
+    vi.runAllTimers()
+    expect(computeLayout).toHaveBeenCalledTimes(1)
+
+    vi.useRealTimers()
+  })
+
   it('requestResizeAndLayout coalesces to one scheduled run', () => {
     vi.useFakeTimers()
 
