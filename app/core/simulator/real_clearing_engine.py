@@ -15,13 +15,9 @@ from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
-from app.core.simulator.sse_broadcast import SseBroadcast
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.participant import Participant
-from app.schemas.simulator import (
-    SimulatorClearingDoneEvent,
-    SimulatorClearingPlanEvent,
-)
 
 
 class RealClearingEngine:
@@ -71,6 +67,8 @@ class RealClearingEngine:
             ..., Awaitable[list[dict[str, Any]]]
         ],
         broadcast_topology_edge_patch: Callable[..., None],
+        async_session_local: Any | None = None,
+        clearing_service_cls: Any | None = None,
     ) -> dict[str, float]:
         """Execute clearing for all equivalents using an isolated session.
 
@@ -84,10 +82,15 @@ class RealClearingEngine:
         max_fx_edges = int(self._clearing_max_fx_edges_limit)
         cleared_amount_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
 
+        emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
+
+        session_local = async_session_local or db_session.AsyncSessionLocal
+        service_cls = clearing_service_cls or ClearingService
+
         for eq in equivalents:
             try:
-                async with db_session.AsyncSessionLocal() as clearing_session:
-                    service = ClearingService(clearing_session)
+                async with session_local() as clearing_session:
+                    service = service_cls(clearing_session)
 
                     eq_t0 = time.monotonic()
                     self._logger.warning(
@@ -189,19 +192,16 @@ class RealClearingEngine:
                             }
                         )
 
-                    plan_evt = SimulatorClearingPlanEvent(
-                        event_id=self._sse.next_event_id(run),
-                        ts=self._utc_now(),
-                        type="clearing.plan",
-                        equivalent=eq,
-                        plan_id=plan_id,
-                        steps=plan_steps,
-                    ).model_dump(mode="json", by_alias=True)
-
                     with self._lock:
                         run.last_event_type = "clearing.plan"
                         run.current_phase = "clearing"
-                    self._sse.broadcast(run_id, plan_evt)
+                    emitter.emit_clearing_plan(
+                        run_id=run_id,
+                        run=run,
+                        equivalent=eq,
+                        plan_id=plan_id,
+                        steps=plan_steps,
+                    )
 
                     cleared_cycles = 0
                     cleared_amount_dec = Decimal("0")
@@ -363,7 +363,7 @@ class RealClearingEngine:
 
                     if touched_edges:
                         try:
-                            growth_count = await apply_trust_growth(
+                            growth_res = await apply_trust_growth(
                                 run=run,
                                 clearing_session=clearing_session,
                                 touched_edges=touched_edges,
@@ -371,7 +371,7 @@ class RealClearingEngine:
                                 tick_index=int(run.tick_index or 0),
                                 cleared_amount_per_edge=cleared_amount_per_edge,
                             )
-                            if growth_count > 0:
+                            if int(getattr(growth_res, "updated_count", 0) or 0) > 0:
                                 try:
                                     edge_patch = await build_edge_patch_for_equivalent(
                                         session=clearing_session,
@@ -523,21 +523,19 @@ class RealClearingEngine:
                         int(_patch_ms),
                     )
 
-                    done_evt = SimulatorClearingDoneEvent(
-                        event_id=self._sse.next_event_id(run),
-                        ts=self._utc_now(),
-                        type="clearing.done",
+                    with self._lock:
+                        run.last_event_type = "clearing.done"
+                        run.current_phase = None
+                    emitter.emit_clearing_done(
+                        run_id=run_id,
+                        run=run,
                         equivalent=eq,
                         plan_id=plan_id,
                         cleared_cycles=cleared_cycles,
                         cleared_amount=cleared_amount_str,
                         node_patch=node_patch_list,
                         edge_patch=edge_patch_list,
-                    ).model_dump(mode="json", by_alias=True)
-                    with self._lock:
-                        run.last_event_type = "clearing.done"
-                        run.current_phase = None
-                    self._sse.broadcast(run_id, done_evt)
+                    )
 
                     self._logger.warning(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",

@@ -388,6 +388,8 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
         type: 'clearing.done',
         equivalent: asString(evt.equivalent, `events[${idx}].equivalent (${sourcePath})`),
         plan_id: asString(evt.plan_id, `events[${idx}].plan_id (${sourcePath})`),
+        cleared_cycles: asOptionalNumber(evt.cleared_cycles),
+        cleared_amount: asOptionalString(evt.cleared_amount),
         node_patch: asNodePatchArray((evt as any).node_patch, `clearing.done.node_patch (${sourcePath})`),
         edge_patch: asEdgePatchArray((evt as any).edge_patch, `clearing.done.edge_patch (${sourcePath})`),
       }

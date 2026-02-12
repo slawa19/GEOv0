@@ -13,11 +13,10 @@ from app.config import settings
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.rejection_codes import map_rejection_code
-from app.core.simulator.sse_broadcast import SseBroadcast
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.db.models.participant import Participant
-from app.schemas.simulator import SimulatorTxFailedEvent, SimulatorTxUpdatedEvent
 from app.utils.exceptions import GeoException, TimeoutException
 
 
@@ -70,6 +69,8 @@ class RealPaymentsExecutor:
         rejected = 0
         errors = 0
         timeouts = 0
+
+        emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
 
         sem = asyncio.Semaphore(max(1, int(max_in_flight)))
         action_db_lock = asyncio.Lock()
@@ -316,21 +317,18 @@ class RealPaymentsExecutor:
                         }
                         run.last_event_type = "tx.failed"
 
-                    failed_evt = SimulatorTxFailedEvent(
-                        event_id=self._sse.next_event_id(run),
-                        ts=self._utc_now(),
-                        type="tx.failed",
+                    emitter.emit_tx_failed(
+                        run_id=run_id,
+                        run=run,
                         equivalent=eq,
-                        from_=sender_pid,
-                        to=receiver_pid,
-                        error={
-                            "code": err_code,
-                            "message": str((err_details or {}).get("message") or err_code),
-                            "at": self._utc_now(),
-                            "details": err_details,
-                        },
-                    ).model_dump(mode="json", by_alias=True)
-                    self._sse.broadcast(run_id, failed_evt)
+                        from_pid=sender_pid,
+                        to_pid=receiver_pid,
+                        error_code=str(err_code),
+                        error_message=str(
+                            (err_details or {}).get("message") or err_code
+                        ),
+                        error_details=err_details,
+                    )
                 else:
                     for a, b in edges_pairs:
                         _edge_inc(eq, a, b, "attempts")
@@ -343,28 +341,24 @@ class RealPaymentsExecutor:
                         if float(avg_route_len) > 0:
                             _route_add(eq, float(avg_route_len))
 
-                        evt_dict = SimulatorTxUpdatedEvent(
-                            event_id=self._sse.next_event_id(run),
-                            ts=self._utc_now(),
-                            type="tx.updated",
+                        emitter.emit_tx_updated(
+                            run_id=run_id,
+                            run=run,
                             equivalent=eq,
-                            from_=sender_pid,
-                            to=receiver_pid,
+                            from_pid=sender_pid,
+                            to_pid=receiver_pid,
                             amount=amount,
                             amount_flyout=True,
                             ttl_ms=1200,
                             edges=[{"from": a, "to": b} for a, b in edges_pairs],
                             node_badges=None,
-                        ).model_dump(mode="json", by_alias=True)
-                        if edge_patch:
-                            evt_dict["edge_patch"] = edge_patch
-                        if node_patch:
-                            evt_dict["node_patch"] = node_patch
+                            edge_patch=edge_patch,
+                            node_patch=node_patch,
+                        )
                         with self._lock:
                             run.last_event_type = "tx.updated"
                             run.attempts_total += 1
                             run.committed_total += 1
-                        self._sse.broadcast(run_id, evt_dict)
                     else:
                         rejected += 1
                         _inc(eq, "rejected")
@@ -388,21 +382,16 @@ class RealPaymentsExecutor:
                             run.attempts_total += 1
                             run.rejected_total += 1
 
-                        failed_evt = SimulatorTxFailedEvent(
-                            event_id=self._sse.next_event_id(run),
-                            ts=self._utc_now(),
-                            type="tx.failed",
+                        emitter.emit_tx_failed(
+                            run_id=run_id,
+                            run=run,
                             equivalent=eq,
-                            from_=sender_pid,
-                            to=receiver_pid,
-                            error={
-                                "code": rejection_code,
-                                "message": rejection_code,
-                                "at": self._utc_now(),
-                                "details": err_details,
-                            },
-                        ).model_dump(mode="json", by_alias=True)
-                        self._sse.broadcast(run_id, failed_evt)
+                            from_pid=sender_pid,
+                            to_pid=receiver_pid,
+                            error_code=str(rejection_code),
+                            error_message=str(rejection_code),
+                            error_details=err_details,
+                        )
 
                 with self._lock:
                     run.queue_depth = max(0, run.queue_depth - 1)

@@ -96,6 +96,31 @@ describe('useOverlayState', () => {
     expect(overlay.floatingLabels[0]!.text).toBe('t2')
   })
 
+  it("pushFloatingLabel restarts throttled 'amt:' labels (new id) to avoid mid-flight updates", () => {
+    let now = 0
+
+    const overlay = useOverlayState({
+      getLayoutNodeById: () => ({ __x: 0, __y: 0 }),
+      sizeForNode: () => ({ w: 40, h: 40 }),
+      getCameraZoom: () => 1,
+      setFlash: () => undefined,
+      resetFxState: () => undefined,
+      nowMs: () => now,
+    })
+
+    overlay.pushFloatingLabel({ nodeId: 'A', text: '+1 EQ', color: '#fff', throttleKey: 'amt:+:A', throttleMs: 100 })
+    expect(overlay.floatingLabels).toHaveLength(1)
+    const id1 = overlay.floatingLabels[0]!.id
+
+    now = 50
+    overlay.pushFloatingLabel({ nodeId: 'A', text: '+2 EQ', color: '#fff', throttleKey: 'amt:+:A', throttleMs: 100 })
+    expect(overlay.floatingLabels).toHaveLength(1)
+    const id2 = overlay.floatingLabels[0]!.id
+
+    expect(id2).not.toBe(id1)
+    expect(overlay.floatingLabels[0]!.text).toBe('+2 EQ')
+  })
+
   it('pushFloatingLabel enforces maxFloatingLabels', () => {
     let now = 0
 

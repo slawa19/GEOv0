@@ -58,6 +58,8 @@ async def test_simulator_fixtures_mode_emits_clearing_plan_and_done_with_same_pl
                 if payload.get("type") == "clearing.done":
                     seen_done = True
                     assert payload.get("plan_id") == plan_id
+                    cleared_amount = str(payload.get("cleared_amount") or "").strip()
+                    assert cleared_amount and cleared_amount != "0" and cleared_amount != "0.00"
 
                 if seen_plan and seen_done:
                     return

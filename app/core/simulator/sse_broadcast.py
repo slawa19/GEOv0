@@ -8,6 +8,14 @@ from typing import Any, Callable, Optional
 
 from app.core.simulator.models import RunRecord, _Subscription
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
+from app.schemas.simulator import (
+    SimulatorClearingDoneEvent,
+    SimulatorClearingPlanEvent,
+    SimulatorTopologyChangedEvent,
+    SimulatorTxFailedEvent,
+    SimulatorTxUpdatedEvent,
+    TopologyChangedPayload,
+)
 from app.utils.exceptions import TooManyRequestsException
 
 
@@ -306,3 +314,275 @@ class SseBroadcast:
         if oldest_seq is None:
             return False
         return after_seq < oldest_seq
+
+
+class SseEventEmitter:
+    """Domain-level SSE event construction.
+
+    SseBroadcast is a transport (queues + replay). This emitter centralizes
+    strict alias serialization policy: always `model_dump(mode="json", by_alias=True)`.
+    """
+
+    def __init__(
+        self,
+        *,
+        sse: SseBroadcast,
+        utc_now,
+        logger: logging.Logger,
+    ) -> None:
+        self._sse = sse
+        self._utc_now = utc_now
+        self._logger = logger
+
+    def emit_topology_edge_patch(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        equivalent: str,
+        edge_patch: list[dict[str, Any]],
+        reason: str,
+    ) -> None:
+        """Emit topology.changed with an edge_patch payload (no full refresh needed)."""
+
+        try:
+            eq_upper = str(equivalent or "").strip().upper()
+            if not eq_upper or not edge_patch:
+                return
+
+            payload = TopologyChangedPayload(edge_patch=edge_patch)
+            evt = SimulatorTopologyChangedEvent(
+                event_id=self._sse.next_event_id(run),
+                ts=self._utc_now(),
+                type="topology.changed",
+                equivalent=eq_upper,
+                payload=payload,
+                reason=reason,
+            ).model_dump(mode="json", by_alias=True)
+
+            self._sse.broadcast(run_id, evt)
+        except Exception:
+            self._logger.warning(
+                "simulator.real.topology_edge_patch_broadcast_error eq=%s reason=%s",
+                str(equivalent),
+                str(reason),
+                exc_info=True,
+            )
+
+    def emit_topology_changed(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        equivalent: str,
+        payload: TopologyChangedPayload,
+        reason: str | None = None,
+    ) -> None:
+        """Emit a topology.changed event with an explicit payload.
+
+        Caller is responsible for deciding whether an empty payload should be skipped.
+        """
+
+        try:
+            eq_upper = str(equivalent or "").strip().upper()
+            if not eq_upper:
+                return
+
+            evt_kwargs: dict[str, Any] = {
+                "event_id": self._sse.next_event_id(run),
+                "ts": self._utc_now(),
+                "type": "topology.changed",
+                "equivalent": eq_upper,
+                "payload": payload,
+            }
+            if reason is not None:
+                evt_kwargs["reason"] = reason
+
+            evt = SimulatorTopologyChangedEvent(**evt_kwargs).model_dump(
+                mode="json",
+                by_alias=True,
+            )
+            self._sse.broadcast(run_id, evt)
+        except Exception:
+            self._logger.warning(
+                "simulator.sse.topology_changed_emit_error eq=%s reason=%s",
+                str(equivalent),
+                str(reason),
+                exc_info=True,
+            )
+
+    def emit_tx_failed(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        equivalent: str,
+        from_pid: str,
+        to_pid: str,
+        error_code: str,
+        error_message: str,
+        error_details: dict[str, Any] | None = None,
+        event_id: str | None = None,
+    ) -> None:
+        try:
+            eq_upper = str(equivalent or "").strip().upper()
+            if not eq_upper:
+                return
+
+            failed_evt = SimulatorTxFailedEvent(
+                event_id=str(event_id) if event_id is not None else self._sse.next_event_id(run),
+                ts=self._utc_now(),
+                type="tx.failed",
+                equivalent=eq_upper,
+                from_=str(from_pid),
+                to=str(to_pid),
+                error={
+                    "code": str(error_code),
+                    "message": str(error_message),
+                    "at": self._utc_now(),
+                    "details": error_details,
+                },
+            ).model_dump(mode="json", by_alias=True)
+            self._sse.broadcast(run_id, failed_evt)
+        except Exception:
+            self._logger.warning(
+                "simulator.sse.tx_failed_emit_error eq=%s",
+                str(equivalent),
+                exc_info=True,
+            )
+
+    def emit_tx_updated(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        equivalent: str,
+        from_pid: str | None,
+        to_pid: str | None,
+        amount: str | None,
+        amount_flyout: bool,
+        ttl_ms: int,
+        edges: list[dict[str, Any]],
+        node_badges: list[dict[str, Any]] | None = None,
+        intensity_key: str | None = None,
+        edge_patch: list[dict[str, Any]] | None = None,
+        node_patch: list[dict[str, Any]] | None = None,
+        event_id: str | None = None,
+    ) -> None:
+        try:
+            eq_upper = str(equivalent or "").strip().upper()
+            if not eq_upper:
+                return
+
+            evt_kwargs: dict[str, Any] = {
+                "event_id": str(event_id) if event_id is not None else self._sse.next_event_id(run),
+                "ts": self._utc_now(),
+                "type": "tx.updated",
+                "equivalent": eq_upper,
+                "amount_flyout": bool(amount_flyout),
+                "ttl_ms": int(ttl_ms),
+                "edges": edges,
+                "node_badges": node_badges,
+            }
+            if from_pid is not None:
+                evt_kwargs["from_"] = str(from_pid)
+            if to_pid is not None:
+                evt_kwargs["to"] = str(to_pid)
+            if amount is not None:
+                evt_kwargs["amount"] = str(amount)
+            if intensity_key is not None:
+                evt_kwargs["intensity_key"] = str(intensity_key)
+
+            evt = SimulatorTxUpdatedEvent(**evt_kwargs).model_dump(
+                mode="json", by_alias=True
+            )
+
+            # These patches are intentionally added post-schema (runtime extension).
+            if edge_patch:
+                evt["edge_patch"] = edge_patch
+            if node_patch:
+                evt["node_patch"] = node_patch
+
+            self._sse.broadcast(run_id, evt)
+        except Exception:
+            self._logger.warning(
+                "simulator.sse.tx_updated_emit_error eq=%s",
+                str(equivalent),
+                exc_info=True,
+            )
+
+    def emit_clearing_plan(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        equivalent: str,
+        plan_id: str,
+        steps: list[dict[str, Any]],
+        event_id: str | None = None,
+    ) -> None:
+        try:
+            eq_upper = str(equivalent or "").strip().upper()
+            if not eq_upper:
+                return
+
+            plan_evt = SimulatorClearingPlanEvent(
+                event_id=str(event_id) if event_id is not None else self._sse.next_event_id(run),
+                ts=self._utc_now(),
+                type="clearing.plan",
+                equivalent=eq_upper,
+                plan_id=str(plan_id),
+                steps=steps,
+            ).model_dump(mode="json", by_alias=True)
+            self._sse.broadcast(run_id, plan_evt)
+        except Exception:
+            self._logger.warning(
+                "simulator.sse.clearing_plan_emit_error eq=%s",
+                str(equivalent),
+                exc_info=True,
+            )
+
+    def emit_clearing_done(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        equivalent: str,
+        plan_id: str,
+        cleared_cycles: int | None = None,
+        cleared_amount: str | None = None,
+        node_patch: list[dict[str, Any]] | None = None,
+        edge_patch: list[dict[str, Any]] | None = None,
+        event_id: str | None = None,
+    ) -> None:
+        try:
+            eq_upper = str(equivalent or "").strip().upper()
+            if not eq_upper:
+                return
+
+            done_kwargs: dict[str, Any] = {
+                "event_id": str(event_id) if event_id is not None else self._sse.next_event_id(run),
+                "ts": self._utc_now(),
+                "type": "clearing.done",
+                "equivalent": eq_upper,
+                "plan_id": str(plan_id),
+            }
+            if cleared_cycles is not None:
+                done_kwargs["cleared_cycles"] = int(cleared_cycles)
+            if cleared_amount is not None:
+                done_kwargs["cleared_amount"] = str(cleared_amount)
+            if node_patch is not None:
+                done_kwargs["node_patch"] = node_patch
+            if edge_patch is not None:
+                done_kwargs["edge_patch"] = edge_patch
+
+            done_evt = SimulatorClearingDoneEvent(**done_kwargs).model_dump(
+                mode="json", by_alias=True
+            )
+            self._sse.broadcast(run_id, done_evt)
+        except Exception:
+            self._logger.warning(
+                "simulator.sse.clearing_done_emit_error eq=%s",
+                str(equivalent),
+                exc_info=True,
+            )

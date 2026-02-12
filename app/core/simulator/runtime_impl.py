@@ -50,7 +50,7 @@ from app.core.simulator.runtime_utils import (
 from app.core.simulator.scenario_registry import ScenarioRegistry
 from app.core.simulator.snapshot_builder import SnapshotBuilder, scenario_to_snapshot
 import app.core.simulator.storage as simulator_storage
-from app.core.simulator.sse_broadcast import SseBroadcast
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.utils.exceptions import NotFoundException
 from app.utils.exceptions import ConflictException
 
@@ -486,25 +486,26 @@ class _SimulatorRuntimeBase:
         ttl = max(50, min(ttl, 30_000))
         ik = str(intensity_key or "").strip() or "mid"
 
-        evt = SimulatorTxUpdatedEvent(
-            event_id=self._sse.next_event_id(run),
-            ts=_utc_now(),
-            type="tx.updated",
+        emitter = SseEventEmitter(sse=self._sse, utc_now=_utc_now, logger=logger)
+        event_id = self._sse.next_event_id(run)
+        emitter.emit_tx_updated(
+            run_id=run_id,
+            run=run,
             equivalent=eq,
-            from_=src,
-            to=dst,
+            from_pid=src,
+            to_pid=dst,
             amount=amt,
             amount_flyout=True,
             ttl_ms=ttl,
             intensity_key=ik,
             edges=[{"from": src, "to": dst}],
             node_badges=None,
-        ).model_dump(mode="json", by_alias=True)
+            event_id=event_id,
+        )
 
         with self._lock:
             run.last_event_type = "tx.updated"
-        self._sse.broadcast(run_id, evt)
-        return str(evt.get("event_id") or "")
+        return str(event_id)
 
     def emit_debug_clearing_once(
         self,
@@ -607,33 +608,35 @@ class _SimulatorRuntimeBase:
                 picked = [(a, b)]
 
         plan_id = f"plan_dbg_{secrets.token_hex(6)}"
-        plan_evt = SimulatorClearingPlanEvent(
-            event_id=self._sse.next_event_id(run),
-            ts=_utc_now(),
-            type="clearing.plan",
-            equivalent=eq,
-            plan_id=plan_id,
-            steps=[
-                {
-                    "at_ms": 0,
-                    "intensity_key": "high",
-                    "highlight_edges": [{"from": a, "to": b} for a, b in picked],
-                },
-                {
-                    "at_ms": 400,
-                    "intensity_key": "mid",
-                    "particles_edges": [{"from": a, "to": b} for a, b in picked],
-                },
-                {
-                    "at_ms": 900,
-                    "flash": {"kind": "clearing"},
-                },
-            ],
-        ).model_dump(mode="json", by_alias=True)
+        emitter = SseEventEmitter(sse=self._sse, utc_now=_utc_now, logger=logger)
+        plan_event_id = self._sse.next_event_id(run)
+        plan_steps = [
+            {
+                "at_ms": 0,
+                "intensity_key": "high",
+                "highlight_edges": [{"from": a, "to": b} for a, b in picked],
+            },
+            {
+                "at_ms": 400,
+                "intensity_key": "mid",
+                "particles_edges": [{"from": a, "to": b} for a, b in picked],
+            },
+            {
+                "at_ms": 900,
+                "flash": {"kind": "clearing"},
+            },
+        ]
 
         with self._lock:
             run.last_event_type = "clearing.plan"
-        self._sse.broadcast(run_id, plan_evt)
+        emitter.emit_clearing_plan(
+            run_id=run_id,
+            run=run,
+            equivalent=eq,
+            plan_id=plan_id,
+            steps=plan_steps,
+            event_id=plan_event_id,
+        )
 
         done_event_id = self._sse.next_event_id(run)
         done_amt = str(cleared_amount or "").strip() or "10.00"
@@ -641,20 +644,19 @@ class _SimulatorRuntimeBase:
         async def _emit_done_later() -> None:
             try:
                 await asyncio.sleep(1.1)
-                done_evt = SimulatorClearingDoneEvent(
-                    event_id=done_event_id,
-                    ts=_utc_now(),
-                    type="clearing.done",
+                with self._lock:
+                    run.last_event_type = "clearing.done"
+                emitter.emit_clearing_done(
+                    run_id=run_id,
+                    run=run,
                     equivalent=eq,
                     plan_id=plan_id,
                     cleared_cycles=1,
                     cleared_amount=done_amt,
                     node_patch=None,
                     edge_patch=None,
-                ).model_dump(mode="json", by_alias=True)
-                with self._lock:
-                    run.last_event_type = "clearing.done"
-                self._sse.broadcast(run_id, done_evt)
+                    event_id=done_event_id,
+                )
             except Exception:
                 logger.exception(
                     "simulator.debug_clearing_done_emit_failed run_id=%s", run_id
@@ -664,22 +666,21 @@ class _SimulatorRuntimeBase:
             asyncio.get_running_loop().create_task(_emit_done_later())
         except RuntimeError:
             # No running loop (should not happen under FastAPI); fall back to immediate emit.
-            done_evt = SimulatorClearingDoneEvent(
-                event_id=done_event_id,
-                ts=_utc_now(),
-                type="clearing.done",
+            with self._lock:
+                run.last_event_type = "clearing.done"
+            emitter.emit_clearing_done(
+                run_id=run_id,
+                run=run,
                 equivalent=eq,
                 plan_id=plan_id,
                 cleared_cycles=1,
                 cleared_amount=done_amt,
                 node_patch=None,
                 edge_patch=None,
-            ).model_dump(mode="json", by_alias=True)
-            with self._lock:
-                run.last_event_type = "clearing.done"
-            self._sse.broadcast(run_id, done_evt)
+                event_id=done_event_id,
+            )
 
-        return plan_id, str(plan_evt.get("event_id") or ""), str(done_event_id), eq
+        return plan_id, str(plan_event_id), str(done_event_id), eq
 
     async def pause(self, run_id: str) -> RunStatus:
         return await self._run_lifecycle.pause(run_id)

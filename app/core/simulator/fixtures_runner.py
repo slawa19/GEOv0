@@ -1,14 +1,10 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Optional
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.sse_broadcast import SseBroadcast
-from app.schemas.simulator import (
-    SimulatorClearingDoneEvent,
-    SimulatorClearingPlanEvent,
-    SimulatorTxUpdatedEvent,
-)
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 
 
 class FixturesRunner:
@@ -24,11 +20,14 @@ class FixturesRunner:
         self._get_run = get_run
         self._sse = sse
         self._utc_now = utc_now
+        self._logger = logging.getLogger(__name__)
 
     def tick_fixtures_events(self, run_id: str) -> None:
         run = self._get_run(run_id)
         if run._rng is None or run._edges_by_equivalent is None:
             return
+
+        emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
 
         # Clearing lifecycle
         if run._clearing_pending_done_at_ms is not None and run.sim_time_ms >= run._clearing_pending_done_at_ms:
@@ -37,16 +36,18 @@ class FixturesRunner:
                 plan_id = run._clearing_pending_plan_id_by_eq.get(eq)
                 if not plan_id:
                     continue
-                evt = SimulatorClearingDoneEvent(
-                    event_id=self._sse.next_event_id(run),
-                    ts=self._utc_now(),
-                    type="clearing.done",
-                    equivalent=eq,
-                    plan_id=plan_id,
-                ).model_dump(mode="json", by_alias=True)
                 run.last_event_type = "clearing.done"
                 run.current_phase = None
-                self._sse.broadcast(run_id, evt)
+                emitter.emit_clearing_done(
+                    run_id=run_id,
+                    run=run,
+                    equivalent=eq,
+                    plan_id=plan_id,
+                    cleared_cycles=1,
+                    # Fixtures-mode clearing is a visualization aid; provide a
+                    # deterministic non-zero total so UI can show the flyout label.
+                    cleared_amount="10.00",
+                )
 
             run._clearing_pending_done_at_ms = None
             run._clearing_pending_plan_id_by_eq.clear()
@@ -60,11 +61,19 @@ class FixturesRunner:
                 if plan is None:
                     continue
                 plan_id = str(plan.get("plan_id") or "").strip()
+                steps = list((plan.get("steps") or []))
                 if plan_id:
                     run._clearing_pending_plan_id_by_eq[eq] = plan_id
                 run.last_event_type = "clearing.plan"
                 run.current_phase = "clearing"
-                self._sse.broadcast(run_id, plan)
+                emitter.emit_clearing_plan(
+                    run_id=run_id,
+                    run=run,
+                    equivalent=eq,
+                    plan_id=plan_id,
+                    steps=steps,
+                    event_id=str(plan.get("event_id") or "") or None,
+                )
 
             run._clearing_pending_done_at_ms = run.sim_time_ms + 2_000
             return
@@ -88,7 +97,20 @@ class FixturesRunner:
         if evt is None:
             return
         run.last_event_type = "tx.updated"
-        self._sse.broadcast(run_id, evt)
+        emitter.emit_tx_updated(
+            run_id=run_id,
+            run=run,
+            equivalent=eq,
+            from_pid=str(evt.get("from") or "") or None,
+            to_pid=str(evt.get("to") or "") or None,
+            amount=str(evt.get("amount") or "") or None,
+            amount_flyout=bool(evt.get("amount_flyout")),
+            ttl_ms=int(evt.get("ttl_ms") or 1200),
+            intensity_key=str(evt.get("intensity_key") or "") or None,
+            edges=list(evt.get("edges") or []),
+            node_badges=(list(evt.get("node_badges") or []) or None),
+            event_id=str(evt.get("event_id") or "") or None,
+        )
 
     def maybe_make_tx_updated(self, *, run_id: str, equivalent: str) -> Optional[dict[str, Any]]:
         run = self._get_run(run_id)
@@ -99,27 +121,26 @@ class FixturesRunner:
             return None
 
         (src, dst) = run._rng.choice(edges)
-        evt = SimulatorTxUpdatedEvent(
-            event_id=self._sse.next_event_id(run),
-            ts=self._utc_now(),
-            type="tx.updated",
-            equivalent=equivalent,
-            amount_flyout=False,
-            ttl_ms=1200,
-            intensity_key="mid" if run.intensity_percent < 70 else "hi",
-            edges=[
+        return {
+            "event_id": self._sse.next_event_id(run),
+            "ts": self._utc_now().isoformat(),
+            "type": "tx.updated",
+            "equivalent": equivalent,
+            "amount_flyout": False,
+            "ttl_ms": 1200,
+            "intensity_key": "mid" if run.intensity_percent < 70 else "hi",
+            "edges": [
                 {
                     "from": src,
                     "to": dst,
                     "style": {"viz_width_key": "highlight", "viz_alpha_key": "hi"},
                 }
             ],
-            node_badges=[
+            "node_badges": [
                 {"id": src, "viz_badge_key": "tx"},
                 {"id": dst, "viz_badge_key": "tx"},
             ],
-        ).model_dump(mode="json", by_alias=True)
-        return evt
+        }
 
     def make_clearing_plan(self, *, run_id: str, equivalent: str) -> Optional[dict[str, Any]]:
         run = self._get_run(run_id)
@@ -132,16 +153,23 @@ class FixturesRunner:
         (e1_from, e1_to) = run._rng.choice(edges)
         (e2_from, e2_to) = run._rng.choice(edges)
         plan_id = f"clr_{run.run_id}_{run._event_seq + 1:06d}"
-        evt = SimulatorClearingPlanEvent(
-            event_id=self._sse.next_event_id(run),
-            ts=self._utc_now(),
-            type="clearing.plan",
-            equivalent=equivalent,
-            plan_id=plan_id,
-            steps=[
-                {"at_ms": 0, "highlight_edges": [{"from": e1_from, "to": e1_to}], "intensity_key": "hi"},
-                {"at_ms": 180, "particles_edges": [{"from": e2_from, "to": e2_to}], "intensity_key": "mid"},
+        return {
+            "event_id": self._sse.next_event_id(run),
+            "ts": self._utc_now().isoformat(),
+            "type": "clearing.plan",
+            "equivalent": equivalent,
+            "plan_id": plan_id,
+            "steps": [
+                {
+                    "at_ms": 0,
+                    "highlight_edges": [{"from": e1_from, "to": e1_to}],
+                    "intensity_key": "hi",
+                },
+                {
+                    "at_ms": 180,
+                    "particles_edges": [{"from": e2_from, "to": e2_to}],
+                    "intensity_key": "mid",
+                },
                 {"at_ms": 420, "flash": {"kind": "clearing"}},
             ],
-        ).model_dump(mode="json", by_alias=True)
-        return evt
+        }

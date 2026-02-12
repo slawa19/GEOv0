@@ -351,12 +351,12 @@ class TestApplyTrustGrowth:
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
         cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 200.0}
 
-        updated = await runner._apply_trust_growth(
+        res = await runner._apply_trust_growth(
             run, session, touched_edges, "UAH", tick_index=5,
             cleared_amount_per_edge=cleared_amounts,
         )
 
-        assert updated == 1
+        assert res.updated_count == 1
         # new_limit = min(1000 * 1.05, 1000 * 2.0) = 1050.0
         expected_limit = round(current_limit * 1.05, 2)
         # Check scenario in-memory update
@@ -385,12 +385,12 @@ class TestApplyTrustGrowth:
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
         cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 100.0}
 
-        updated = await runner._apply_trust_growth(
+        res = await runner._apply_trust_growth(
             run, session, touched_edges, "UAH", tick_index=5,
             cleared_amount_per_edge=cleared_amounts,
         )
 
-        assert updated == 1
+        assert res.updated_count == 1
         # new_limit = min(1490 * 1.05, 1000 * 1.5) = min(1564.5, 1500) = 1500.0
         cap = run._edge_clearing_history["alice:bob:UAH"].original_limit * Decimal("1.5")
         s_tls = scenario["trustlines"]
@@ -448,12 +448,12 @@ class TestApplyTrustGrowth:
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
         cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 200.0}
 
-        updated = await runner._apply_trust_growth(
+        res = await runner._apply_trust_growth(
             run, session, touched_edges, "UAH", tick_index=5,
             cleared_amount_per_edge=cleared_amounts,
         )
 
-        assert updated == 0
+        assert res.updated_count == 0
         # Session should not have been used for execute
         session.execute.assert_not_called()
 
@@ -485,12 +485,12 @@ class TestApplyTrustDecay:
 
         session = _make_decay_session()
 
-        updated = await runner._apply_trust_decay(
+        res = await runner._apply_trust_decay(
             run, session, tick_index=10, debt_snapshot=debt_snapshot,
             scenario=scenario,
         )
 
-        assert updated == 1
+        assert res.updated_count == 1
         # new_limit = max(1000 * (1 - 0.02), 1000 * 0.3) = max(980, 300) = 980.0
         expected = round(1000.0 * (1 - 0.02), 2)
         ab_tl = next(
@@ -539,12 +539,12 @@ class TestApplyTrustDecay:
 
         session = _make_decay_session()
 
-        updated = await runner._apply_trust_decay(
+        res = await runner._apply_trust_decay(
             run, session, tick_index=10, debt_snapshot=debt_snapshot,
             scenario=scenario,
         )
 
-        assert updated == 1
+        assert res.updated_count == 1
         # new_limit = max(350 * (1 - 0.5), 1000 * 0.3) = max(175, 300) = 300.0
         ab_tl = scenario["trustlines"][0]
         assert ab_tl["limit"] == 300.0
@@ -569,12 +569,12 @@ class TestApplyTrustDecay:
 
         session = _make_decay_session()
 
-        updated = await runner._apply_trust_decay(
+        res = await runner._apply_trust_decay(
             run, session, tick_index=10, debt_snapshot=debt_snapshot,
             scenario=scenario,
         )
 
-        assert updated == 0
+        assert res.updated_count == 0
         # Limit should remain unchanged
         ab_tl = next(
             t for t in scenario["trustlines"]
@@ -607,12 +607,12 @@ class TestApplyTrustDecay:
         session = _make_decay_session()
 
         # Call with tick_index = 10 (same as last_clearing_tick)
-        updated = await runner._apply_trust_decay(
+        res = await runner._apply_trust_decay(
             run, session, tick_index=10, debt_snapshot=debt_snapshot,
             scenario=scenario,
         )
 
-        assert updated == 0
+        assert res.updated_count == 0
         ab_tl = next(
             t for t in scenario["trustlines"]
             if t["from"] == "alice" and t["to"] == "bob"

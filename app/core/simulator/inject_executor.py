@@ -8,16 +8,17 @@ from typing import Any, Awaitable, Callable
 
 from sqlalchemy import or_, select
 
-from app.core.payments.router import PaymentRouter
+from app.core.simulator.cache_invalidator import (
+    invalidate_caches_after_inject as _invalidate_caches_after_inject,
+)
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import InjectResult, RunRecord
-from app.core.simulator.sse_broadcast import SseBroadcast
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.simulator import (
-    SimulatorTopologyChangedEvent,
     TopologyChangedEdgeRef,
     TopologyChangedNodeRef,
     TopologyChangedPayload,
@@ -43,80 +44,16 @@ def invalidate_caches_after_inject(
     Best-effort: failures here are logged but do not crash the tick.
     """
 
-    try:
-        # 1. PaymentRouter graph cache — evict affected equivalents.
-        for eq in affected_equivalents:
-            PaymentRouter._graph_cache.pop(eq, None)
-
-        # 2. run._real_viz_by_eq — evict so VizPatchHelper is recreated.
-        for eq in affected_equivalents:
-            run._real_viz_by_eq.pop(eq, None)
-
-        # 3. run._real_participants — append new participants.
-        if new_participants and run._real_participants is not None:
-            for p_tuple in new_participants:
-                run._real_participants.append(p_tuple)
-
-        # 4. scenario["participants"] — append new participant dicts.
-        if new_participants_scenario:
-            s_participants = scenario.get("participants")
-            if isinstance(s_participants, list):
-                for p_dict in new_participants_scenario:
-                    s_participants.append(p_dict)
-
-        # 5. scenario["trustlines"] — append new trustline dicts.
-        if new_trustlines_scenario:
-            s_trustlines = scenario.get("trustlines")
-            if isinstance(s_trustlines, list):
-                for tl_dict in new_trustlines_scenario:
-                    s_trustlines.append(tl_dict)
-
-        # 6. run._edges_by_equivalent — add edges for new trustlines.
-        if new_trustlines_scenario and run._edges_by_equivalent is not None:
-            for tl_dict in new_trustlines_scenario:
-                eq = str(tl_dict.get("equivalent") or "").strip()
-                src = str(tl_dict.get("from") or "").strip()
-                dst = str(tl_dict.get("to") or "").strip()
-                if eq and src and dst:
-                    run._edges_by_equivalent.setdefault(eq, []).append((src, dst))
-
-        # 7. Frozen participants — update scenario dicts in-place.
-        if frozen_pids:
-            frozen_set = set(frozen_pids)
-
-            # Update scenario["participants"][i]["status"].
-            s_participants = scenario.get("participants")
-            if isinstance(s_participants, list):
-                for p_dict in s_participants:
-                    if isinstance(p_dict, dict):
-                        pid = str(p_dict.get("id") or "").strip()
-                        if pid in frozen_set:
-                            p_dict["status"] = "suspended"
-
-            # Update scenario["trustlines"][i]["status"] for incident edges.
-            s_trustlines = scenario.get("trustlines")
-            if isinstance(s_trustlines, list):
-                for tl_dict in s_trustlines:
-                    if isinstance(tl_dict, dict):
-                        frm = str(tl_dict.get("from") or "").strip()
-                        to = str(tl_dict.get("to") or "").strip()
-                        if frm in frozen_set or to in frozen_set:
-                            prev = str(tl_dict.get("status") or "active").strip().lower()
-                            if prev == "active":
-                                tl_dict["status"] = "frozen"
-
-            # Remove frozen edges from run._edges_by_equivalent.
-            if run._edges_by_equivalent is not None:
-                for eq, edges in run._edges_by_equivalent.items():
-                    run._edges_by_equivalent[eq] = [
-                        (s, d) for s, d in edges if s not in frozen_set and d not in frozen_set
-                    ]
-
-    except Exception:
-        logger.warning(
-            "simulator.real.inject.cache_invalidation_error",
-            exc_info=True,
-        )
+    _invalidate_caches_after_inject(
+        logger=logger,
+        run=run,
+        scenario=scenario,
+        affected_equivalents=affected_equivalents,
+        new_participants=new_participants,
+        new_participants_scenario=new_participants_scenario,
+        new_trustlines_scenario=new_trustlines_scenario,
+        frozen_pids=frozen_pids,
+    )
 
 
 def broadcast_topology_changed(
@@ -137,6 +74,8 @@ def broadcast_topology_changed(
     try:
         if not affected_equivalents:
             return
+
+        emitter = SseEventEmitter(sse=sse, utc_now=utc_now, logger=logger)
 
         added_nodes = [
             TopologyChangedNodeRef(
@@ -196,15 +135,12 @@ def broadcast_topology_changed(
             ):
                 continue
 
-            evt = SimulatorTopologyChangedEvent(
-                event_id=sse.next_event_id(run),
-                ts=utc_now(),
-                type="topology.changed",
+            emitter.emit_topology_changed(
+                run_id=run_id,
+                run=run,
                 equivalent=eq_upper,
                 payload=payload,
-            ).model_dump(mode="json", by_alias=True)
-
-            sse.broadcast(run_id, evt)
+            )
             logger.info(
                 "simulator.real.inject.topology_changed eq=%s added_nodes=%d removed_nodes=%d added_edges=%d removed_edges=%d",
                 eq_upper,

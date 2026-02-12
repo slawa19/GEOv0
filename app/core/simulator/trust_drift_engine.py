@@ -8,11 +8,16 @@ from typing import Any, Callable
 from sqlalchemy import select, update
 
 from app.core.payments.router import PaymentRouter
-from app.core.simulator.models import EdgeClearingHistory, RunRecord, TrustDriftConfig, TrustDriftResult
-from app.core.simulator.sse_broadcast import SseBroadcast
+from app.core.simulator.models import (
+    EdgeClearingHistory,
+    RunRecord,
+    TrustDriftConfig,
+    TrustDriftResult,
+)
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.db.models.equivalent import Equivalent
 from app.db.models.trustline import TrustLine
-from app.schemas.simulator import SimulatorTopologyChangedEvent, TopologyChangedPayload
+from app.schemas.simulator import TopologyChangedPayload
 
 
 def broadcast_trust_drift_changed(
@@ -39,6 +44,8 @@ def broadcast_trust_drift_changed(
     """
 
     try:
+        emitter = SseEventEmitter(sse=sse, utc_now=utc_now, logger=logger)
+
         for eq in equivalents:
             eq_upper = str(eq).strip().upper()
             if not eq_upper:
@@ -56,16 +63,13 @@ def broadcast_trust_drift_changed(
                 continue
 
             payload = TopologyChangedPayload(edge_patch=edge_patch)
-            evt = SimulatorTopologyChangedEvent(
-                event_id=sse.next_event_id(run),
-                ts=utc_now(),
-                type="topology.changed",
+            emitter.emit_topology_changed(
+                run_id=run_id,
+                run=run,
                 equivalent=eq_upper,
                 payload=payload,
                 reason=reason,
-            ).model_dump(mode="json", by_alias=True)
-
-            sse.broadcast(run_id, evt)
+            )
             logger.info(
                 "simulator.real.trust_drift.topology_changed eq=%s reason=%s edges=%d",
                 eq_upper,
@@ -143,21 +147,21 @@ class TrustDriftEngine:
         eq_code: str,
         tick_index: int,
         cleared_amount_per_edge: dict[tuple[str, str], float],
-    ) -> int:
+    ) -> TrustDriftResult:
         """Apply trust growth to edges that participated in clearing.
 
         Uses the *clearing_session* (isolated per-equivalent session used by
         ``tick_real_mode_clearing``). Commits internally on success.
 
-        Returns count of updated edges.
+        Returns structured information about updated edges.
         """
 
         cfg = run._trust_drift_config
         if not cfg or not cfg.enabled:
-            return 0
+            return TrustDriftResult(updated_count=0)
 
         if not touched_edges:
-            return 0
+            return TrustDriftResult(updated_count=0)
 
         pid_to_uuid: dict[str, uuid.UUID] = {
             pid: uid for uid, pid in (run._real_participants or [])
@@ -171,11 +175,12 @@ class TrustDriftEngine:
                 )
             ).scalar_one_or_none()
         except Exception:
-            return 0
+            return TrustDriftResult(updated_count=0)
         if not eq_id:
-            return 0
+            return TrustDriftResult(updated_count=0)
 
         updated = 0
+        updated_edges: set[tuple[str, str]] = set()
         for creditor_pid, debtor_pid in touched_edges:
             key = f"{creditor_pid}:{debtor_pid}:{eq_upper}"
             hist = run._edge_clearing_history.get(key)
@@ -265,12 +270,20 @@ class TrustDriftEngine:
                     new_limit,
                 )
                 updated += 1
+                updated_edges.add((creditor_pid, debtor_pid))
 
         if updated:
             # Trust drift changes limits and must invalidate routing cache.
             PaymentRouter._graph_cache.pop(eq_upper, None)
             await clearing_session.commit()
-        return updated
+
+        touched_eqs = {eq_upper} if updated_edges else set()
+        touched_edges_by_eq = {eq_upper: updated_edges} if updated_edges else {}
+        return TrustDriftResult(
+            updated_count=int(updated),
+            touched_equivalents=touched_eqs,
+            touched_edges_by_eq=touched_edges_by_eq,
+        )
 
     async def apply_trust_decay(
         self,

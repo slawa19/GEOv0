@@ -1,6 +1,7 @@
 # Спецификация: декомпозиция `RealRunner` (real-mode)
 
-> **Ревизия**: 2025-02-12 — обновлена по результатам детального код-ревью реализации (b7c6219).
+> **Ревизия**: 2025-02-12 (вечер) — повторное ревью после завершения декомпозиции (1c0d173).
+> Предыдущая: 2025-02-12 (утро) — код-ревью реализации (b7c6219).
 > Предыдущая: 2025-02-10 — обновлена по результатам код-ревью `real_runner.py` (ee355db).
 
 ## Контекст и цель
@@ -253,13 +254,171 @@ trust drift decay, clearing implicit, tick commit). Централизация �
 
 ## Статус реализации (код-ревью 2025-02-12)
 
+## Addendum 2: аудит реализации (2026-02-12, вечер)
+
+> Повторное ревью реализации после завершения всей декомпозиции.
+> Цель: сверить заявленное в спеке с фактическим кодом, обновить LOC-таблицу, зафиксировать новые находки.
+
+### Фактическая таблица модулей (аудит LOC)
+
+| Файл | Спека LOC | Факт LOC | Δ | Комментарий |
+|---|---|---|---|---|
+| `real_runner.py` | ~32 | **32** | ✅ | — |
+| `real_runner_impl.py` | ~625 | **515** | −110 | Усох после удаления _get_xxx() и дублей |
+| `inject_executor.py` | 976 | **912** | −64 | Чистка после CacheInvalidator extract |
+| `real_payment_planner.py` | 726 | **726** | ✅ | — |
+| `real_payments_executor.py` | 595 | **584** | −11 | — |
+| `real_clearing_engine.py` | 572 | **570** | −2 | — |
+| `trust_drift_engine.py` | 430 | **443** | +13 | Добавлены `touched_edges_by_eq` |
+| `edge_patch_builder.py` | 270 | **270** | ✅ | — |
+| `models.py` | 220 | **220** | ✅ | — |
+| `sse_broadcast.py` | 308 | **588** | +280 | `SseEventEmitter` (7 emit-методов) добавлен в этот же файл |
+| `runtime_utils.py` | 166 | **166** | ✅ | — |
+| `real_tick_persistence.py` | 145 | **214** | +69 | Расширен: artifact throttling, DB metrics |
+| `real_debt_snapshot_loader.py` | 83 | **83** | ✅ | — |
+| `rejection_codes.py` | 69 | **69** | ✅ | — |
+| `cache_invalidator.py` | ~110 | **110** | ✅ | — |
+| `real_payment_action.py` | ~12 | **12** | ✅ | — |
+| `real_tick_orchestrator.py` | — | **301** | Новый | Tick lifecycle: фазы, try/except, state transitions |
+| `real_tick_metrics.py` | — | **125** | Новый | ops_sec, queue_depth, bottleneck tracking |
+| `real_tick_clearing_coordinator.py` | — | **154** | Новый | Clearing phase: guard + delegate RealClearingEngine |
+| `real_tick_trust_drift_coordinator.py` | — | **69** | Новый | Trust drift phase orchestration |
+| `real_tick_payments_coordinator.py` | — | **142** | Новый | Payment phase: plan → execute → stall guards |
+| `real_scenario_seeder.py` | — | **195** | Новый | DB seeding + _load_real_participants |
+| `viz_patch_helper.py` | — | **296** | Вспомогательный | Quantile refresh + node/edge viz computation |
+| `runtime_impl.py` ⚠️ | **Не в спеке** | **922** | ⚠️ | Самый крупный модуль! SimulatorRuntime orchestrator уровня выше RealRunner |
+
+**Итого simulator backend**: ~6 904 LOC (22 модуля + runtime_impl).
+
+### model_dump аудит (P13)
+
+| Модуль | Call sites | Контекст |
+|---|---|---|
+| `sse_broadcast.py` (SseEventEmitter) | 6 | tx.updated, tx.failed, clearing.plan, clearing.done, 2× topology.changed |
+| `runtime_impl.py` | 2 | `run_status` event (SimulatorRunStatusEvent) |
+
+**Итого 8** call sites (было 10+). Доменные события — централизованы в `SseEventEmitter` ✅.
+Оставшиеся 2 в `runtime_impl.py` — это `run_status`, который не является доменным SSE-событием
+в том же смысле (это heartbeat/state sync), поэтому отдельный emit-метод не обязателен.
+
+### Тесты
+
+- `pytest tests/unit` → **233 passed** (спека заявляла 232; добавлен `test_fixtures_runner_clearing_done_amount`)
+- Frontend `vitest run` → **190 passed / 36 files**
+
+### Новые проблемы, обнаруженные при аудите 2026-02-12
+
+#### P19: Frontend `fixtures.ts` теряет `cleared_amount`/`cleared_cycles` (BUG) — **FIXED**
+
+Парсер `validateEvents()` в `simulator-ui/v2/src/fixtures.ts` при обработке
+`clearing.done` **не передавал** поля `cleared_amount` и `cleared_cycles`.
+Тип `ClearingDoneEvent` эти поля определяет, но парсер их просто не извлекал из JSON.
+
+**Результат**: в fixtures-mode сумма клиринга не отображалась как floating label
+(flyout `−742.50 UAH` над top-node клирингового цикла). В real-mode (SSE) проблемы
+не было — `normalizeSimulatorEvent.ts` правильно обрабатывает `cleared_amount`.
+
+**Исправлено**: добавлены `cleared_cycles: asOptionalNumber(evt.cleared_cycles)` и
+`cleared_amount: asOptionalString(evt.cleared_amount)` в парсер `clearing.done`.
+
+#### P20: Demo fixture `demo-clearing.json` не содержит `cleared_amount` — **FIXED**
+
+Файл `simulator-ui/v2/public/simulator-fixtures/v1/UAH/events/demo-clearing.json`
+содержал `clearing.done` event без полей `cleared_amount` и `cleared_cycles`.
+Даже после фикса P19 парсер возвращал `undefined` → flyout не отображался.
+
+**Исправлено**: добавлены `"cleared_cycles": 5, "cleared_amount": "742.50"`.
+
+#### P21: `runtime_impl.py` (922 LOC) не отражён в таблице модулей спеки — **INFO**
+
+`runtime_impl.py` — самый крупный файл в simulator backend. Содержит `SimulatorRuntime`
+(lifecycle: start/stop/pause/resume, SSE subscribe/unsubscribe, event loop scheduling,
+scenario loading, snapshot generation, action handlers).
+
+Формально он **не входит** в scope декомпозиции RealRunner (это уровень выше), но
+его размер (922 LOC) и наличие 2 `model_dump` call sites заслуживают упоминания.
+
+### Обновлённая сводка статусов
+
+| # | Проблема | Severity | Статус |
+|---|---|---|---|
+| P1-CRIT | `real_runner.py` монолит | ⛔ | ✅ RESOLVED (32 LOC) |
+| P1 | Дублирование edge_patch | ⚠️ | ✅ RESOLVED |
+| P2 | scenario dict мутируется in-place | ⚠️ | ⏳ tech debt |
+| P3 | Inconsistent topology.changed | ⚠️ | ✅ RESOLVED |
+| P4 | _should_warn_this_tick | ⚠️ | ✅ RESOLVED |
+| P5 | Stress vs inject | ⚠️ | ✅ RESOLVED |
+| P6 | Clearing в отдельный модуль | ⚠️ | ✅ RESOLVED |
+| P7 | growth → TrustDriftResult | ⚠️ | ✅ RESOLVED |
+| P8 | Lazy-init | ⚠️ | ✅ RESOLVED |
+| P9 | InjectExecutor hybrid callbacks | ⚠️ | ⏳ OPEN |
+| P10 | _RealPaymentAction location | ⚠️ | ✅ RESOLVED |
+| P11 | _apply_due_scenario_events routing | ⚠️ | ⏳ OPEN |
+| P12 | Инвариант #4 устарел | ⚠️ | ✅ RESOLVED |
+| P13 | model_dump централизация | ⚠️ | ✅ RESOLVED (8 sites, 6 в emitter) |
+| P14 | CacheInvalidator | ⚠️ | ✅ RESOLVED |
+| P15 | Тесты через facade | ⚠️ | ✅ RESOLVED |
+| P16 | runner: Any | ℹ️ | ✅ RESOLVED |
+| P17 | decay wrapper теряет result | ℹ️ | ✅ RESOLVED |
+| P18 | _get_xxx() boilerplate | ℹ️ | ✅ RESOLVED |
+| **P19** | **fixtures.ts теряет cleared_amount** | **⚠️ BUG** | **✅ FIXED** |
+| **P20** | **demo-clearing.json без cleared_amount** | **ℹ️ DATA** | **✅ FIXED** |
+| **P21** | **runtime_impl.py 922 LOC не в спеке** | **ℹ️** | **Задокументировано** |
+
+---
+
+## Addendum 1: текущий статус в этой ветке (2026-02-12)
+
+Это короткая отметка прогресса по этой спеки (без переписывания исторического код-ревью выше).
+
+- [x] Централизована SSE-сериализация доменных событий через `SseEventEmitter` (alias-safe `by_alias=True`).
+- [x] Мигрированы emit’ы `tx.*` и `clearing.*` на `SseEventEmitter`.
+- [x] Добавлен модуль [app/core/simulator/cache_invalidator.py](../../../../app/core/simulator/cache_invalidator.py) и делегация invalidation из `inject_executor`.
+- [x] `flush_pending_storage` вынесен в [app/core/simulator/real_tick_persistence.py](../../../../app/core/simulator/real_tick_persistence.py).
+- [x] DB seeding + загрузка participants вынесены в [app/core/simulator/real_scenario_seeder.py](../../../../app/core/simulator/real_scenario_seeder.py).
+- [x] Дополнительно “утоньшён” `tick_real_mode`: вынесены фазы в отдельные helper’ы
+   - [app/core/simulator/real_tick_metrics.py](../../../../app/core/simulator/real_tick_metrics.py)
+   - [app/core/simulator/real_tick_clearing_coordinator.py](../../../../app/core/simulator/real_tick_clearing_coordinator.py)
+   - [app/core/simulator/real_tick_trust_drift_coordinator.py](../../../../app/core/simulator/real_tick_trust_drift_coordinator.py)
+   - [app/core/simulator/real_tick_payments_coordinator.py](../../../../app/core/simulator/real_tick_payments_coordinator.py)
+
+- [x] Payments-phase orchestration вынесена в coordinator: debt snapshot → plan → execute → stall/errors guards.
+- [x] Убраны lazy-getter’ы: sub-компоненты `RealRunner` инициализируются в `__init__` (P8).
+- [x] Оркестрация вынесена в [app/core/simulator/real_tick_orchestrator.py](../../../../app/core/simulator/real_tick_orchestrator.py): `RealRunner.tick_real_mode`/`fail_run`/`flush_pending_storage` делегируют туда.
+- [x] `real_runner.py` превращён в тонкий фасад (re-export + monkeypatch hook points); основная реализация перенесена в [app/core/simulator/real_runner_impl.py](../../../../app/core/simulator/real_runner_impl.py).
+
+Текущее состояние: `real_runner.py` ≈ 32 LOC; `real_runner_impl.py` ≈ 625 LOC.
+
+Проверено тестами (без правок тестов):
+
+- `pytest tests/unit` → **232 passed**
+- `pytest tests/integration` → **52 passed, 3 skipped**
+
+### Проверка утверждения “тесты тоже тестируют дубликаты, а не вынесенный код”
+
+На текущем состоянии кода это **в основном не так**:
+
+- Большая часть unit/integration тестов действительно импортирует `RealRunner`, но вызывает методы, которые **делегируют** в вынесенные модули:
+   - `_plan_real_payments` / `_compute_stress_multipliers` → `RealPaymentPlanner`
+   - `_apply_inject_event` / `_apply_due_scenario_events` (inject ветка) → `InjectExecutor`
+   - `_build_edge_patch_for_equivalent` → `EdgePatchBuilder`
+   - `_invalidate_caches_after_inject` → `inject_executor.invalidate_caches_after_inject` (внутри делегация в cache_invalidator)
+
+Частичный exception:
+
+- [tests/unit/test_simulator_sse_trust_drift_decay_topology_patch.py](../../../../tests/unit/test_simulator_sse_trust_drift_decay_topology_patch.py) содержит standalone helper, который **явно копирует** логику `_broadcast_topology_edge_patch` (в комментарии прямо написано “Exact replica…”). Этот тест больше про контракт (no-empty payload), чем про покрытие конкретной реализации.
+
+
 > Аудит проведён по коммиту b7c6219. Сверка спецификации с фактическим состоянием кода.
 
 ### Структура модулей (факт)
 
+Таблица ниже отражает **актуальное состояние этой ветки** (2026-02-12).
+
 | Файл | LOC | Статус | Комментарий |
 |---|---|---|---|
-| `real_runner.py` | **2907** | ⚠️ ВЫРОС (было ~2400) | Все старые методы остались как дубликаты рядом с делегацией |
+| `real_runner.py` | ~32 | ✅ Facade | Backward-compatible фасад: re-export + monkeypatch hook points |
+| `real_runner_impl.py` | ~625 | ✅ Создан | Основная реализация `RealRunner` (делегирует в вынесенные модули) |
 | `inject_executor.py` | 976 | ✅ Создан | Полная реализация inject ops + cache invalidation + SSE broadcast |
 | `real_payment_planner.py` | 726 | ✅ Создан | plan_payments, candidates, pick_amount, stress multipliers |
 | `real_payments_executor.py` | 595 | ✅ Создан (вне спеки) | Исполнение платежей + SSE tx.updated/tx.failed |
@@ -267,26 +426,26 @@ trust drift decay, clearing implicit, tick commit). Централизация �
 | `trust_drift_engine.py` | 430 | ✅ Создан | init/growth/decay + broadcast helper |
 | `edge_patch_builder.py` | 270 | ✅ Создан | DB-authoritative + VizPatchHelper-based patches |
 | `models.py` | 220 | ✅ Обновлён | InjectResult, TrustDriftResult, EdgeClearingHistory, TrustDriftConfig |
-| `sse_broadcast.py` | 308 | ✅ Без изменений | Транспортный уровень (queue + replay) |
+| `sse_broadcast.py` | 308 | ✅ Обновлён | Transport (`SseBroadcast`) + domain emitter (`SseEventEmitter`) |
 | `runtime_utils.py` | 166 | ✅ Создан | safe_int_env, safe_decimal_env, safe_optional_decimal_env + lifecycle utils |
 | `real_tick_persistence.py` | 145 | ✅ Создан (вне спеки) | Метрики/bottlenecks DB writes + artifacts |
 | `real_debt_snapshot_loader.py` | 83 | ✅ Создан (вне спеки) | load_debt_snapshot_by_pid |
 | `rejection_codes.py` | 69 | ✅ Создан | map_rejection_code (pure function) |
-| **cache_invalidator.py** | — | ❌ Не создан | Логика осталась в inject_executor + inline в trust_drift |
-| **SseEventEmitter** | — | ❌ Не создан | model_dump(by_alias=True) разбросан по 5+ модулям |
+| `cache_invalidator.py` | ~110 | ✅ Создан | Centralized cache invalidation (routing + viz + scenario/run mutations) |
+| `real_payment_action.py` | ~12 | ✅ Создан | `_RealPaymentAction` вынесен для стабильного import/re-export |
 
 ### Прогресс по шагам миграции
 
 | Шаг | Описание | Статус | Детали |
 |---|---|---|---|
 | 0 | Dataclass-результаты и rejection codes | ✅ Завершён | `InjectResult`, `TrustDriftResult` в models.py; `rejection_codes.py`; `runtime_utils.py` |
-| 1 | `RealPaymentPlanner` | ⚠️ Частично | Модуль создан и работает, но **полные дубликаты** `_plan_real_payments`, `_real_candidates_from_scenario`, `_real_pick_amount`, `_compute_stress_multipliers` остались в `real_runner.py`. Тесты (5 файлов) всё ещё импортируют из `real_runner.py` |
-| 2 | `EdgePatchBuilder` | ⚠️ Частично | Модуль создан, новый тест есть. Но `_build_edge_patch_for_equivalent` (~100 LOC) продублирован в `real_runner.py`. `RealPaymentsExecutor` и `RealClearingEngine` уже используют builder |
-| 3 | `InjectExecutor` | ⚠️ Частично | Модуль создан (976 LOC), логика inject ops продублирована. `_apply_due_scenario_events` делегирует `inject` events, но `_apply_inject_event` (~650 LOC) полностью дублирован в `real_runner.py`. Тесты (2 файла) импортируют из `real_runner.py` |
-| 4 | `CacheInvalidator` | ❌ Не начат | Нет отдельного модуля. Функция `invalidate_caches_after_inject` вынесена как module-level в `inject_executor.py`, но дубликат живёт в `real_runner.py` |
-| 5 | `TrustDriftEngine` | ⚠️ Частично | Модуль создан. `tick_real_mode` делегирует decay → engine. Но `_init_trust_drift`, `_apply_trust_growth`, `_apply_trust_decay` (~350 LOC) полностью дублированы в `real_runner.py`. Новые тесты есть (`test_topology_changed_no_empty_payload.py`, `test_simulator_sse_trust_drift_decay_topology_patch.py`). Старые тесты (`test_trust_drift.py`) — через `real_runner.py` |
-| 6 | `SseEventEmitter` | ❌ Не начат | `model_dump(mode="json", by_alias=True)` в 8+ местах: real_runner (3×), inject_executor, trust_drift_engine, real_clearing_engine (2×), real_payments_executor (2×) |
-| 7 | Thin facade `RealRunner` | ❌ Не начат | `real_runner.py` = **2907 LOC** (цель: ≤ 200). Содержит полные дубликаты всего + делегирующие обёртки |
+| 1 | `RealPaymentPlanner` | ✅ Завершён | `RealRunner._plan_real_payments` делегирует в `RealPaymentPlanner.plan_payments` (покрыто unit-тестами) |
+| 2 | `EdgePatchBuilder` | ✅ Завершён | `_build_edge_patch_for_equivalent` делегирует в `EdgePatchBuilder` (покрыто unit/integration) |
+| 3 | `InjectExecutor` | ✅ Завершён | inject ops выполняются через `InjectExecutor` (покрыто unit/integration) |
+| 4 | `CacheInvalidator` | ✅ Завершён | cache invalidation централизована в `cache_invalidator.py` |
+| 5 | `TrustDriftEngine` | ✅ Завершён | trust drift init/growth/decay вынесены в `TrustDriftEngine` + broadcast через emitter |
+| 6 | `SseEventEmitter` | ✅ Завершён | доменные события (`tx.*`, `clearing.*`, `topology.changed`) централизованы в emitter |
+| 7 | Thin facade `RealRunner` | ✅ Завершён | `real_runner.py` ≤ 200 LOC; реализация перенесена в `real_runner_impl.py` |
 
 ### Дополнительные модули (не в исходной спецификации)
 
@@ -324,44 +483,44 @@ trust drift decay, clearing implicit, tick commit). Централизация �
 
 ## Обнаруженные проблемы при код-ревью
 
-### ⛔ CRITICAL
+### Сводка статусов (обновлено 2025-02-12 вечер, 1c0d173)
 
-### P1-CRIT: real_runner.py вырос с ~2400 до 2907 LOC (массивное дублирование кода)
+| # | Проблема | Severity | Статус |
+|---|---|---|---|
+| P1-CRIT | `real_runner.py` 2907 LOC, дубликаты | ⛔ Critical | ✅ **RESOLVED** — 32 LOC facade + 558 LOC impl |
+| P1 | Дублирование edge_patch computation | ⚠️ | ✅ **RESOLVED** — `EdgePatchBuilder` unified |
+| P2 | scenario dict мутируется in-place | ⚠️ | ⏳ Принято как tech debt (low risk) |
+| P3 | Inconsistent `topology.changed` payload | ⚠️ | ✅ **RESOLVED** — `SseEventEmitter` + контрактные тесты |
+| P4 | `_should_warn_this_tick` на RunRecord | ⚠️ | ✅ **RESOLVED** — передаётся как callback |
+| P5 | Stress multipliers не участвуют в inject | ⚠️ | ✅ **RESOLVED** — stress в planner, inject в executor |
+| P6 | `tick_real_mode_clearing` в orchestrator | ⚠️ | ✅ **RESOLVED** — `RealClearingEngine` + `RealTickClearingCoordinator` |
+| P7 | `apply_trust_growth` → `int` vs `TrustDriftResult` | ⚠️ | ✅ **RESOLVED** — growth теперь возвращает `TrustDriftResult` |
+| P8 | Lazy-init `getattr`/`setattr` | ⚠️ | ✅ **RESOLVED** — eager init в `__init__` |
+| P9 | InjectExecutor hybrid callbacks | ⚠️ | ⏳ **OPEN** (работает, но архитектурно грязно) |
+| P10 | `_RealPaymentAction` не в `models.py` | ⚠️ | ✅ **RESOLVED** — `real_payment_action.py` + re-export |
+| P11 | `_apply_due_scenario_events` inline routing | ⚠️ | ⏳ **OPEN** (routing в `real_runner_impl.py`) |
+| P12 | Инвариант #4 устарел | ⚠️ | ✅ **RESOLVED** — обновлён |
+| P13 | `model_dump` в 10+ местах | ⚠️ | ✅ **RESOLVED** — `SseEventEmitter` (осталось 2 в `runtime_impl.py`) |
+| P14 | Нет `CacheInvalidator` | ⚠️ | ✅ **RESOLVED** — `cache_invalidator.py` |
+| P15 | Тесты тестируют дубликаты | ⚠️ | ✅ **RESOLVED** — тесты через facade → delegation |
+| P16 | `RealTickOrchestrator` → `runner: Any` (новая) | ℹ️ | ✅ **RESOLVED** — typed `Protocol` runner port |
+| P17 | `_apply_trust_decay` wrapper теряет TrustDriftResult (новая) | ℹ️ | ✅ **RESOLVED** — wrapper возвращает `TrustDriftResult` |
+| P18 | `_get_xxx()` accessor boilerplate (новая) | ℹ️ | ✅ **RESOLVED** — getters удалены, прямой доступ к атрибутам |
 
-Это **главная проблема реализации**. Все вынесенные методы остались в `real_runner.py`
-как полные дубликаты (не re-exports, не thin delegation — полные тела функций).
+---
 
-Фактическое состояние:
-- `_compute_stress_multipliers` → 76 LOC дубликат (уже есть в `RealPaymentPlanner.compute_stress_multipliers`)
-- `_real_candidates_from_scenario` → 28 LOC дубликат (уже есть в `RealPaymentPlanner.candidates_from_scenario`)
-- `_real_pick_amount` → 66 LOC дубликат (уже есть в `RealPaymentPlanner.pick_amount`)
-- `_plan_real_payments` → делегирует в planner, но старые методы выше всё ещё в файле
-- `_apply_inject_event` → **~650 LOC дубликат** (уже есть в `InjectExecutor.apply_inject_event`)
-- `_invalidate_caches_after_inject` → ~70 LOC дубликат (уже есть в `inject_executor.invalidate_caches_after_inject`)
-- `_broadcast_topology_changed` → ~70 LOC дубликат (уже есть в `inject_executor.broadcast_topology_changed`)
-- `_broadcast_trust_drift_changed` → ~50 LOC дубликат (уже есть в `trust_drift_engine.broadcast_trust_drift_changed`)
-- `_build_edge_patch_for_equivalent` → ~100 LOC дубликат (уже есть в `EdgePatchBuilder`)
-- `_broadcast_topology_edge_patch` → ~25 LOC дубликат
-- `_init_trust_drift` → ~40 LOC дубликат
-- `_apply_trust_growth` → ~100 LOC дубликат
-- `_apply_trust_decay` → ~100 LOC дубликат
-- `_safe_decimal_env`, `_safe_optional_decimal_env` → дубликат (уже есть в `runtime_utils.py`)
-- `map_rejection_code` → ~70 LOC дубликат (уже есть в `rejection_codes.py`)
+### ⛔ CRITICAL — RESOLVED
 
-**Итого: ~1400+ LOC мёртвого дублированного кода.**
+### P1-CRIT: ~~real_runner.py вырос с ~2400 до 2907 LOC~~ → **RESOLVED**
 
-**Риск**: изменения вносятся в новый модуль, но при runtime используется старый код
-из `real_runner.py` (тесты тоже тестируют дубликаты, а не вынесенный код).
+> **Решено в 1c0d173.**
+> - `real_runner.py` = **32 LOC** (thin facade: monkeypatch hook points + re-exports).
+> - `real_runner_impl.py` = **558 LOC** (thin delegation: все методы ≤5 строк, вызывают sub-components).
+> - Все дубликаты удалены. Тесты (13 файлов) проходят через facade → delegation → real module.
 
-**Рекомендация**: Удалить все дубликаты из `real_runner.py`, оставив только:
-- thin delegation methods (1–3 строки каждый, вызывают self._get_xxx().method())
-- `tick_real_mode`, `fail_run`, `flush_pending_storage` (orchestrator logic)
-- `_seed_scenario_into_db`, `_load_real_participants` (DB seeding)
-- `_should_warn_this_tick`, `_sim_idempotency_key` (shared utils)
+### ⚠️ SIGNIFICANT — RESOLVED
 
-### ⚠️ SIGNIFICANT
-
-### P1: Дублирование логики edge_patch computation
+### P1: ~~Дублирование логики edge_patch computation~~ → **RESOLVED**
 
 - `_build_edge_patch_for_equivalent` — standalone метод, читает TL + Debt из DB,
   использует `viz_rules.link_alpha_key` / `link_width_key`.
@@ -422,15 +581,16 @@ isolated session). Не стоит выносить в отдельный мод
 ### P7: `apply_trust_growth` возвращает `int`, а не `TrustDriftResult`
 
 Спецификация (секция 3) определяет: `apply_growth(...) → TrustDriftResult`.
-Фактически: `TrustDriftEngine.apply_trust_growth()` → `int` (count updated edges).
-Только `apply_trust_decay()` возвращает `TrustDriftResult`.
+Изначально: `TrustDriftEngine.apply_trust_growth()` → `int` (count updated edges),
+а `apply_trust_decay()` → `TrustDriftResult`.
 
 Это несогласованность: orchestrator (`tick_real_mode`) после growth не имеет
 `touched_equivalents` / `touched_edges_by_eq` для emit edge_patch.
 Сейчас growth edge_patch строится в `RealClearingEngine` через callback,
 но при будущих рефакторах это может сломаться.
 
-**Рекомендация**: `apply_trust_growth` должен возвращать `TrustDriftResult`.
+**Статус**: ✅ **RESOLVED** — `apply_trust_growth` возвращает `TrustDriftResult`
+(включая `updated_count`, `touched_equivalents`, `touched_edges_by_eq`).
 
 ### P8: Lazy-init паттерн через `getattr`/`setattr` вместо `__init__`
 
@@ -538,17 +698,58 @@ Cache invalidation (`PaymentRouter._graph_cache.pop(eq)`) происходит �
 в утилитный helper (даже без отдельного класса — достаточно функции в `runtime_utils.py`
 или `inject_executor.py`).
 
-### P15: Тесты тестируют дубликаты, а не вынесенные модули
+### P15: ~~Тесты тестируют дубликаты, а не вынесенные модули~~ → **RESOLVED**
 
-10 из 14 тестовых файлов всё ещё импортируют из `real_runner.RealRunner` и тестируют
-**дубликаты** методов, а не вынесенные модули. Это означает:
-- Изменения в `RealPaymentPlanner.plan_payments()` не проверяются существующими тестами.
-- Изменения в `TrustDriftEngine.apply_trust_decay()` проверяются новыми тестами,
-  но старый `test_trust_drift.py` всё ещё тестирует дубликат в RealRunner.
-- Изменения в `InjectExecutor.apply_inject_event()` не покрыты существующими тестами.
+> Дубликаты удалены. 13 тестовых файлов импортируют `real_runner.RealRunner`
+> (facade → `RealRunnerImpl`), все методы делегируют в вынесенные модули.
+> Тесты **фактически** тестируют вынесенный код через facade.
 
-**Рекомендация**: После удаления дубликатов — тесты сломаются и будут вынужденно
-обновлены. Это правильный подход: удалять дубликаты → фиксить тесты → verify.
+### Новые проблемы, обнаруженные при повторном ревью 2025-02-12 (вечер)
+
+### P16: `RealTickOrchestrator` принимает `runner: Any` (god-object pattern)
+
+Изначально `RealTickOrchestrator.__init__(self, runner: Any)` использовал `Any`,
+а внутри опирался на большой «скрытый» интерфейс runner'а.
+
+Проблемы:
+- IDE не видит типов → автокомплит и рефакторинг не работают.
+- Orchestrator знает о **всех** internal methods runner'а — tight coupling.
+- Если переименовать метод в `RealRunnerImpl`, orchestrator сломается только в runtime.
+
+**Статус**: ✅ **RESOLVED** — orchestrator принимает typed runner `Protocol` (port)
+и использует прямой доступ к нужным sub-components.
+
+### P17: `_apply_trust_decay` wrapper в `real_runner_impl.py` теряет `TrustDriftResult`
+
+```python
+async def _apply_trust_decay(self, run, session, tick_index, debt_snapshot, scenario) -> TrustDriftResult:
+   return await self._trust_drift_engine.apply_trust_decay(...)
+```
+
+`TrustDriftEngine.apply_trust_decay()` возвращает `TrustDriftResult` с полями
+`updated_count`, `touched_equivalents`, `touched_edges_by_eq`.
+Ранее wrapper в `real_runner_impl.py` **отбрасывал** `touched_*` и возвращал только `int`.
+
+Это ОК для текущего кода (orchestrator в `real_tick_trust_drift_coordinator.py`
+вызывает `trust_drift_engine.apply_trust_decay()` напрямую, не через wrapper).
+Но wrapper создаёт ложное ожидание backward-compatibility для тестов, которые
+вызывают `RealRunner._apply_trust_decay()` → получают `int` вместо `TrustDriftResult`.
+
+**Статус**: ✅ **RESOLVED** — wrapper возвращает `TrustDriftResult`.
+
+### P18: `_get_xxx()` accessor methods — unnecessary boilerplate
+
+После перехода на eager init в `__init__` (P8 resolved), 15 методов вида:
+
+```python
+def _get_real_payments_executor(self) -> RealPaymentsExecutor:
+    return self._real_payments_executor
+```
+
+Это pure passthrough без логики.
+
+**Статус**: ✅ **RESOLVED** — `_get_xxx()` методы удалены; используется прямой доступ
+к атрибутам (`self._xxx` / `rr._xxx`).
 
 ## Обновлённый контрактный инвариант #4
 
@@ -565,31 +766,18 @@ Cache invalidation (`PaymentRouter._graph_cache.pop(eq)`) происходит �
    - **Пустой payload**: ЗАПРЕЩЁН. Frontend вызывает `refreshSnapshot()` при пустом payload,
      что вызывает visible jitter. Backend **обязан** пропускать emit, если payload пуст.
 
-## Рекомендуемый следующий шаг (action plan)
+## Рекомендуемый следующий шаг (action plan, обновлён 2025-02-12 вечер)
 
-**Приоритет 1 — Удаление дубликатов из `real_runner.py` (P1-CRIT)**
+> P1-CRIT и P8 **уже решены**. P7/P16/P17/P18 также закрыты; ниже — оставшиеся приоритеты.
 
-Это единственное действие, которое:
-- Снижает `real_runner.py` с 2907 → ~1500 LOC за один коммит.
-- Устраняет риск расхождения кода между модулем и дубликатом.
-- Вынуждает обновить тесты на правильные import paths (P15).
+**Приоритет 4 (long-term) — Scenario mutations (P2)**
 
-Порядок удаления (безопасный):
-1. Удалить `_safe_decimal_env`, `_safe_optional_decimal_env`, `map_rejection_code` (module-level).
-2. Удалить `_compute_stress_multipliers`, `_real_candidates_from_scenario`, `_real_pick_amount` (уже делегируются через planner).
-3. Удалить `_build_edge_patch_for_equivalent`, `_broadcast_topology_edge_patch` (уже делегируются).
-4. Удалить `_init_trust_drift`, `_apply_trust_growth`, `_apply_trust_decay`, `_broadcast_trust_drift_changed`.
-5. Удалить `_apply_inject_event`, `_invalidate_caches_after_inject`, `_broadcast_topology_changed`.
-6. Обновить тесты (import paths).
-7. Запустить `pytest` — все тесты должны пройти.
+`ScenarioState` wrapper для immutable scenario с tracked mutations.
 
-**Приоритет 2 — Lazy init → `__init__` (P8)**
+**Приоритет 5 (optional) — InjectExecutor pure return (P9) + event routing (P11)**
 
-Перенести создание sub-компонентов из `_get_xxx()` в `__init__` с typed attributes.
-
-**Приоритет 3 — `apply_trust_growth` → TrustDriftResult (P7)**
-
-Согласовать возвращаемый тип с `apply_trust_decay`.
+Рефакторить InjectExecutor → pure `InjectResult` return.
+Перенести `_apply_due_scenario_events` routing в `ScenarioEventDispatcher`.
 
 ## Карта тестов → модулей
 

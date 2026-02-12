@@ -228,11 +228,28 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       for (let i = floatingLabels.length - 1; i >= 0; i--) {
         const fl = floatingLabels[i]!
         if (fl.throttleKey !== key) continue
+        fl.nodeId = opts.nodeId
         fl.text = opts.text
         fl.color = opts.color
         fl.offsetXPx = opts.offsetXPx ?? 0
         fl.offsetYPx = opts.offsetYPx ?? 0
+        fl.cssClass = opts.cssClass
         fl.expiresAtMs = Math.max(fl.expiresAtMs, nowMs + ttlMs)
+
+        // If we are updating a label in-place, its world-space anchor might have been
+        // frozen previously; reset it so the label re-anchors to the current node position.
+        fl._frozenX = undefined
+        fl._frozenY = undefined
+
+        // Tx amount labels should never “teleport” mid-flight: if a throttled amount label
+        // is updated while its CSS animation is already in progress, it can look like the
+        // new amount originated from a different node. For amount labels, restart by
+        // changing the keyed id so Vue remounts and the animation begins at the correct anchor.
+        if (key.startsWith('amt:')) {
+          const id = opts.id ?? nextFloatingLabelId++
+          if (opts.id != null) nextFloatingLabelId = Math.max(nextFloatingLabelId, opts.id + 1)
+          fl.id = id
+        }
         return
       }
       // Throttle hit, but the previous label was already pruned/evicted.
