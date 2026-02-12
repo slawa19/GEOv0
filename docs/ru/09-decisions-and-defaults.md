@@ -159,6 +159,12 @@
 - `SIMULATOR_ACTIONS_PER_TICK_MAX=20`
 - `SIMULATOR_CLEARING_EVERY_N_TICKS=25` (для real mode)
 
+Клиринг (policy):
+- Фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`) остаётся дефолтом для backward compatibility и регрессии.
+- Проектное направление для real mode: **адаптивная политика клиринга** (feedback-control) вместо одного «магического N».
+	- мотивация: разные комьюнити/сценарии требуют разной периодичности; клиринг имеет стоимость и должен подстраиваться по сигналам сети.
+	- каноничное описание: `docs/ru/simulator/backend/adaptive-clearing-policy.md`.
+
 Расширение real mode (behavior model):
 - Спецификация: [simulator/backend/behavior-model-spec.md](simulator/backend/behavior-model-spec.md)
 - Новый env (backward‑compatible): `SIMULATOR_REAL_AMOUNT_CAP=3.00`

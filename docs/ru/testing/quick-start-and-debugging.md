@@ -207,6 +207,7 @@ Invoke-WebRequest -Uri "http://127.0.0.1:18000/api/v1/admin/..." -Headers $heade
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
+| `SIMULATOR_CLEARING_POLICY` | `static` | Политика клиринга: `static` (каждые N тиков) или `adaptive` (динамически по сигналам сети) |
 | `SIMULATOR_CLEARING_EVERY_N_TICKS` | `25` | Частота клиринга |
 | `SIMULATOR_REAL_AMOUNT_CAP` | — | Лимит суммы транзакции |
 | `SIMULATOR_REAL_ENABLE_INJECT` | — | Включить inject-режим |

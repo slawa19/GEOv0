@@ -206,6 +206,11 @@ Real Mode guardrails:
 - `SIMULATOR_REAL_MAX_ERRORS_TOTAL` (по умолчанию 200)
 - `SIMULATOR_CLEARING_MAX_DEPTH` (по умолчанию 6)
 
+Clearing policy:
+- `SIMULATOR_CLEARING_POLICY=static|adaptive` (по умолчанию `static`)
+  - `static` использует `SIMULATOR_CLEARING_EVERY_N_TICKS`
+  - `adaptive` динамически подстраивает периодичность (см. `adaptive-clearing-policy.md`)
+
 Real Mode: тюнинг дисковой нагрузки (артефакты) для dev/UI:
 - `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS` — как часто обновлять `last_tick.json` (по умолчанию `500`).
   - `<=0` отключает запись `last_tick.json` на каждом тике.

@@ -44,6 +44,13 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     startPanX: 0,
     startPanY: 0,
     moved: false,
+
+    // Per-gesture locks: if everything is already visible, dragging the background
+    // should not move the graph.
+    lockPanX: false,
+    lockPanY: false,
+    lockedPanX: 0,
+    lockedPanY: 0,
   })
 
   const wheelState = reactive({
@@ -79,11 +86,12 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     return { minX, minY, maxX, maxY }
   }
 
-  function clampCameraPan() {
-    if (deps.isTestMode()) return
+  function getCameraClampInfo() {
     const bounds = getWorldBounds()
-    if (!bounds) return
+    if (!bounds) return null
 
+    // NOTE: `padPx` is used only for clamping when content is larger than the viewport.
+    // When content fits the viewport, we lock panning and keep it centered.
     const padPx = 80
     const z = clamp(camera.zoom, 0.2, 10)
 
@@ -95,22 +103,70 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     const layoutW = deps.getLayoutW()
     const layoutH = deps.getLayoutH()
 
-    // If the content is smaller than the viewport, center it (still respecting pad).
-    if (contentW <= layoutW - padPx * 2) {
-      camera.panX = (layoutW - contentW) / 2 - bounds.minX * z
-    } else {
-      const minPanX = (layoutW - padPx) - bounds.maxX * z
-      const maxPanX = padPx - bounds.minX * z
-      camera.panX = clamp(camera.panX, minPanX, maxPanX)
-    }
+    const screenMinX = bounds.minX * z + camera.panX
+    const screenMaxX = bounds.maxX * z + camera.panX
+    const screenMinY = bounds.minY * z + camera.panY
+    const screenMaxY = bounds.maxY * z + camera.panY
 
-    if (contentH <= layoutH - padPx * 2) {
-      camera.panY = (layoutH - contentH) / 2 - bounds.minY * z
-    } else {
-      const minPanY = (layoutH - padPx) - bounds.maxY * z
-      const maxPanY = padPx - bounds.minY * z
-      camera.panY = clamp(camera.panY, minPanY, maxPanY)
+    // True when the entire world bounds are currently visible in the viewport.
+    // This is different from `fitX/fitY` (which is size-only) and is used to decide
+    // whether background dragging should be allowed at all.
+    const epsPx = 0.5
+    const fullyVisibleX = screenMinX >= -epsPx && screenMaxX <= layoutW + epsPx
+    const fullyVisibleY = screenMinY >= -epsPx && screenMaxY <= layoutH + epsPx
+
+    // If the content fully fits the viewport, lock panning on that axis.
+    // This prevents the “jump” effect when users try to drag a fully visible graph.
+    const fitX = contentW <= layoutW
+    const fitY = contentH <= layoutH
+
+    const centeredPanX = (layoutW - contentW) / 2 - bounds.minX * z
+    const centeredPanY = (layoutH - contentH) / 2 - bounds.minY * z
+
+    const minPanX = (layoutW - padPx) - bounds.maxX * z
+    const maxPanX = padPx - bounds.minX * z
+    const minPanY = (layoutH - padPx) - bounds.maxY * z
+    const maxPanY = padPx - bounds.minY * z
+
+    return {
+      bounds,
+      padPx,
+      z,
+      worldW,
+      worldH,
+      contentW,
+      contentH,
+      layoutW,
+      layoutH,
+
+      screenMinX,
+      screenMaxX,
+      screenMinY,
+      screenMaxY,
+      fullyVisibleX,
+      fullyVisibleY,
+
+      fitX,
+      fitY,
+      centeredPanX,
+      centeredPanY,
+      minPanX,
+      maxPanX,
+      minPanY,
+      maxPanY,
     }
+  }
+
+  function clampCameraPan() {
+    if (deps.isTestMode()) return
+    const info = getCameraClampInfo()
+    if (!info) return
+
+    if (info.fitX) camera.panX = info.centeredPanX
+    else camera.panX = clamp(camera.panX, info.minPanX, info.maxPanX)
+
+    if (info.fitY) camera.panY = info.centeredPanY
+    else camera.panY = clamp(camera.panY, info.minPanY, info.maxPanY)
   }
 
   function worldToScreen(x: number, y: number) {
@@ -147,6 +203,19 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     const canvas = deps.canvasEl.value
     if (!canvas) return
 
+    // Defensive reset: if we ever miss a pointerup (e.g. due to browser quirks),
+    // we must not keep a stale active pan session alive.
+    panState.active = false
+    panState.pointerId = -1
+    panState.moved = false
+    panState.lockPanX = false
+    panState.lockPanY = false
+
+    // If the graph fits the viewport, do not start a pan gesture at all.
+    // This ensures background dragging does not move the scene when nothing is off-screen.
+    const info = getCameraClampInfo()
+    if (info?.fullyVisibleX && info?.fullyVisibleY) return
+
     panState.active = true
     panState.pointerId = ev.pointerId
     panState.startClientX = ev.clientX
@@ -154,6 +223,13 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     panState.startPanX = camera.panX
     panState.startPanY = camera.panY
     panState.moved = false
+
+    // Decide whether background dragging should be able to pan.
+    // Lock axis if content fits that axis.
+    panState.lockPanX = !!info?.fullyVisibleX
+    panState.lockPanY = !!info?.fullyVisibleY
+    panState.lockedPanX = camera.panX
+    panState.lockedPanY = camera.panY
 
     try {
       canvas.setPointerCapture(ev.pointerId)
@@ -168,16 +244,48 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
 
     const dx = ev.clientX - panState.startClientX
     const dy = ev.clientY - panState.startClientY
-    if (!panState.moved && dx * dx + dy * dy >= 9) panState.moved = true
+    if (!panState.moved && dx * dx + dy * dy >= 9) {
+      // Transition into "pan" mode.
+      // Important: don't apply the full delta from pointerdown on the same frame,
+      // otherwise the first pan update can "jump" (and trigger clamp/centering).
+      // Start panning from the current pointer position instead.
+      panState.moved = true
+      panState.startClientX = ev.clientX
+      panState.startClientY = ev.clientY
+      panState.startPanX = camera.panX
+      panState.startPanY = camera.panY
+      return
+    }
 
-    camera.panX = panState.startPanX + dx
-    camera.panY = panState.startPanY + dy
-    clampCameraPan()
+    // Don't update camera pan until movement exceeds the drag threshold (3 px).
+    // This prevents micro-jitter on click/dblclick from triggering clampCameraPan()
+    // which can snap/center the graph when content fits the viewport (fitX/fitY).
+    if (!panState.moved) return
+
+    const info = getCameraClampInfo()
+
+    // Lock background panning when the graph is already fully visible.
+    // Keep the last "locked" pan values stable for the whole gesture.
+    const desiredPanX = panState.lockPanX ? panState.lockedPanX : panState.startPanX + dx
+    const desiredPanY = panState.lockPanY ? panState.lockedPanY : panState.startPanY + dy
+
+    if (!info) {
+      camera.panX = desiredPanX
+      camera.panY = desiredPanY
+      return
+    }
+
+    // IMPORTANT: when content fits, min/max pan bounds can be inverted; never clamp in that case.
+    // Keep pan locked (stable) instead.
+    camera.panX = info.fitX || panState.lockPanX ? panState.lockedPanX : clamp(desiredPanX, info.minPanX, info.maxPanX)
+    camera.panY = info.fitY || panState.lockPanY ? panState.lockedPanY : clamp(desiredPanY, info.minPanY, info.maxPanY)
   }
 
   function onPointerUp(ev: PointerEvent) {
     if (!panState.active) return false
     if (ev.pointerId !== panState.pointerId) return false
+
+    const wasClick = !panState.moved
 
     panState.active = false
     panState.pointerId = -1
@@ -190,7 +298,7 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     }
 
     // Returns true if it was a click (no pan).
-    return !panState.moved
+    return wasClick
   }
 
   function onWheel(ev: WheelEvent) {

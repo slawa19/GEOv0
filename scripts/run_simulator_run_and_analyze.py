@@ -134,6 +134,17 @@ def _tick_from_status(st: dict[str, Any]) -> tuple[int | None, str]:
     return None, "missing"
 
 
+def _status_from_summary(summary: dict[str, Any]) -> dict[str, Any] | None:
+    st = summary.get("status")
+    return st if isinstance(st, dict) else None
+
+
+def _fmt_rate(n: int | None, d: int | None) -> str:
+    if not isinstance(n, int) or not isinstance(d, int) or d <= 0:
+        return "n/a"
+    return f"{(n / d) * 100:.1f}%"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--origin", default="http://127.0.0.1:18000", help="Backend origin (no /api/v1)")
@@ -253,6 +264,28 @@ def main() -> int:
         _download(origin=args.origin, url_path=it["url"], headers={"X-Admin-Token": args.admin_token}, out_path=out_dir / name)
 
     print(f"downloaded_dir={out_dir}")
+
+    summary_path = out_dir / "summary.json"
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            st = _status_from_summary(summary) or {}
+            attempts = st.get("attempts_total")
+            committed = st.get("committed_total")
+            rejected = st.get("rejected_total")
+            timeouts = st.get("timeouts_total")
+            errors = st.get("errors_total")
+            sim_time_ms = st.get("sim_time_ms")
+            ops_sec = st.get("ops_sec")
+
+            print(
+                "run.counters="
+                f"attempts={attempts} committed={committed} rejected={rejected} "
+                f"timeouts={timeouts} errors={errors} committed_rate={_fmt_rate(committed, attempts)}"
+            )
+            print(f"run.sim_time_ms={sim_time_ms} run.ops_sec={ops_sec}")
+        except Exception:
+            print("run.counters=unavailable (failed to parse summary.json)")
 
     db = sqlite3.connect("file:geov0.db?mode=ro", uri=True)
     window = _load_run_window(db, run_id)

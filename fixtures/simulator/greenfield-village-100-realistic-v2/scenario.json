@@ -4697,10 +4697,10 @@
     "trust_drift": {
       "enabled": true,
       "growth_rate": 0.05,
-      "decay_rate": 0.02,
+      "decay_rate": 0.005,
       "max_growth": 2.0,
-      "min_limit_ratio": 0.3,
-      "overload_threshold": 0.8
+      "min_limit_ratio": 0.5,
+      "overload_threshold": 0.95
     },
     "flow": {
       "enabled": true,

@@ -2058,381 +2058,408 @@ class RealRunner:
 
         try:
             async with db_session.AsyncSessionLocal() as session:
-                if not run._real_seeded:
-                    await self._seed_scenario_into_db(session, scenario)
-                    await session.commit()
-                    run._real_seeded = True
-
-                if run._real_participants is None or run._real_equivalents is None:
-                    run._real_participants = await self._load_real_participants(
-                        session, scenario
-                    )
-                    run._real_equivalents = [
-                        str(x)
-                        for x in (scenario.get("equivalents") or [])
-                        if str(x).strip()
-                    ]
-
-                participants = run._real_participants or []
-                equivalents = run._real_equivalents or []
-                if len(participants) < 2 or not equivalents:
-                    return
-
-                # Initialize trust drift (once per run)
-                if run._trust_drift_config is None:
-                    self._get_trust_drift_engine().init_trust_drift(run, scenario)
-
-                # Apply due scenario timeline events (note/stress/inject). Best-effort.
-                # IMPORTANT: inject modifies DB state and must happen before payments.
-                await self._apply_due_scenario_events(
-                    session, run_id=run_id, run=run, scenario=scenario
-                )
-
-                # ── Phase 1.4: capacity-aware payment amounts ─────────
-                # Load current debt snapshot *after* events (which may mutate DB)
-                # so that capacity reflects the latest state.  Best-effort:
-                # if the query fails we fall back to static limits.
-                debt_snapshot: dict[tuple[str, str, str], Decimal] = {}
                 try:
-                    debt_snapshot = await self._load_debt_snapshot_by_pid(
-                        session, participants, equivalents
+                    if not run._real_seeded:
+                        await self._seed_scenario_into_db(session, scenario)
+                        await session.commit()
+                        run._real_seeded = True
+
+                    if run._real_participants is None or run._real_equivalents is None:
+                        run._real_participants = await self._load_real_participants(
+                            session, scenario
+                        )
+                        run._real_equivalents = [
+                            str(x)
+                            for x in (scenario.get("equivalents") or [])
+                            if str(x).strip()
+                        ]
+
+                    participants = run._real_participants or []
+                    equivalents = run._real_equivalents or []
+                    if len(participants) < 2 or not equivalents:
+                        return
+
+                    # Initialize trust drift (once per run)
+                    if run._trust_drift_config is None:
+                        self._get_trust_drift_engine().init_trust_drift(run, scenario)
+
+                    # Apply due scenario timeline events (note/stress/inject). Best-effort.
+                    # IMPORTANT: inject modifies DB state and must happen before payments.
+                    await self._apply_due_scenario_events(
+                        session, run_id=run_id, run=run, scenario=scenario
                     )
-                except Exception:
-                    self._logger.debug(
-                        "capacity_aware: debt snapshot load failed, "
-                        "falling back to static limits"
+
+                    # ── Phase 1.4: capacity-aware payment amounts ─────────
+                    # Load current debt snapshot *after* events (which may mutate DB)
+                    # so that capacity reflects the latest state.  Best-effort:
+                    # if the query fails we fall back to static limits.
+                    debt_snapshot: dict[tuple[str, str, str], Decimal] = {}
+                    try:
+                        debt_snapshot = await self._load_debt_snapshot_by_pid(
+                            session, participants, equivalents
+                        )
+                    except Exception:
+                        self._logger.debug(
+                            "capacity_aware: debt snapshot load failed, "
+                            "falling back to static limits"
+                        )
+
+                    planned = self._plan_real_payments(
+                        run, scenario, debt_snapshot=debt_snapshot
+                    )
+                    with self._lock:
+                        run.ops_sec = float(len(planned))
+                        run.queue_depth = len(planned)
+                        run._real_in_flight = 0
+                        run.current_phase = "payments" if planned else None
+                    sender_id_by_pid = {
+                        pid: participant_id for (participant_id, pid) in participants
+                    }
+
+                    max_timeouts_per_tick = int(self._real_max_timeouts_per_tick_limit)
+                    max_errors_total = int(self._real_max_errors_total_limit)
+                    per_eq_metric_values: dict[str, dict[str, float]] = {
+                        str(eq): {} for eq in equivalents
+                    }
+
+                    payments_res = await self._get_real_payments_executor().execute_planned_payments(
+                        session=session,
+                        run_id=run_id,
+                        run=run,
+                        planned=planned,
+                        equivalents=equivalents,
+                        sender_id_by_pid=sender_id_by_pid,
+                        max_in_flight=int(run._real_max_in_flight),
+                        max_timeouts_per_tick=max_timeouts_per_tick,
+                        fail_run=lambda _run_id, code, message: self.fail_run(
+                            _run_id, code=code, message=message
+                        ),
                     )
 
-                planned = self._plan_real_payments(
-                    run, scenario, debt_snapshot=debt_snapshot
-                )
-                with self._lock:
-                    run.ops_sec = float(len(planned))
-                    run.queue_depth = len(planned)
-                    run._real_in_flight = 0
-                    run.current_phase = "payments" if planned else None
-                sender_id_by_pid = {
-                    pid: participant_id for (participant_id, pid) in participants
-                }
+                    committed = int(payments_res.committed)
+                    rejected = int(payments_res.rejected)
+                    errors = int(payments_res.errors)
+                    timeouts = int(payments_res.timeouts)
+                    stall_ticks = int(payments_res.stall_ticks)
 
-                max_timeouts_per_tick = int(self._real_max_timeouts_per_tick_limit)
-                max_errors_total = int(self._real_max_errors_total_limit)
-                per_eq_metric_values: dict[str, dict[str, float]] = {
-                    str(eq): {} for eq in equivalents
-                }
+                    per_eq = dict(payments_res.per_eq)
+                    per_eq_route = dict(payments_res.per_eq_route)
+                    per_eq_edge_stats = dict(payments_res.per_eq_edge_stats)
 
-                payments_res = await self._get_real_payments_executor().execute_planned_payments(
-                    session=session,
-                    run_id=run_id,
-                    run=run,
-                    planned=planned,
-                    equivalents=equivalents,
-                    sender_id_by_pid=sender_id_by_pid,
-                    max_in_flight=int(run._real_max_in_flight),
-                    max_timeouts_per_tick=max_timeouts_per_tick,
-                    fail_run=lambda _run_id, code, message: self.fail_run(
-                        _run_id, code=code, message=message
-                    ),
-                )
+                    # Log stall warning (throttled: every 5 consecutive stall ticks).
+                    if stall_ticks > 0 and stall_ticks % 5 == 0:
+                        self._logger.warning(
+                            "simulator.real.all_rejected_stall run_id=%s tick=%s "
+                            "consec_stall_ticks=%d planned=%d rejected=%d",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            stall_ticks,
+                            len(planned),
+                            rejected,
+                        )
 
-                committed = int(payments_res.committed)
-                rejected = int(payments_res.rejected)
-                errors = int(payments_res.errors)
-                timeouts = int(payments_res.timeouts)
-                stall_ticks = int(payments_res.stall_ticks)
-
-                per_eq = dict(payments_res.per_eq)
-                per_eq_route = dict(payments_res.per_eq_route)
-                per_eq_edge_stats = dict(payments_res.per_eq_edge_stats)
-
-                # Log stall warning (throttled: every 5 consecutive stall ticks).
-                if stall_ticks > 0 and stall_ticks % 5 == 0:
-                    self._logger.warning(
-                        "simulator.real.all_rejected_stall run_id=%s tick=%s "
-                        "consec_stall_ticks=%d planned=%d rejected=%d",
-                        str(run.run_id),
-                        int(run.tick_index),
-                        stall_ticks,
-                        len(planned),
-                        rejected,
-                    )
+                        if max_errors_total > 0 and run.errors_total >= max_errors_total:
+                            # Mark error; heartbeat task will be cancelled in _fail_run.
+                            pass
 
                     if max_errors_total > 0 and run.errors_total >= max_errors_total:
-                        # Mark error; heartbeat task will be cancelled in _fail_run.
-                        pass
+                        await self.fail_run(
+                            run_id,
+                            code="REAL_MODE_TOO_MANY_ERRORS",
+                            message=f"Too many total errors: {run.errors_total}",
+                        )
+                        return
 
-                if max_errors_total > 0 and run.errors_total >= max_errors_total:
-                    await self.fail_run(
-                        run_id,
-                        code="REAL_MODE_TOO_MANY_ERRORS",
-                        message=f"Too many total errors: {run.errors_total}",
-                    )
-                    return
+                    # Best-effort clearing (optional MVP): once in a while, attempt clearing per equivalent.
+                    clearing_volume_by_eq: dict[str, float] = {
+                        str(eq): 0.0 for eq in equivalents
+                    }
+                    if (
+                        self._clearing_every_n_ticks > 0
+                        and run.tick_index % self._clearing_every_n_ticks == 0
+                        and bool(getattr(settings, "CLEARING_ENABLED", True))
+                    ):
+                        # Commit payments BEFORE clearing to release the DB write lock.
+                        # Clearing uses an isolated session (separate connection) that needs
+                        # write access. On SQLite (single-writer) the clearing session would
+                        # deadlock if the parent session still holds an uncommitted transaction.
+                        try:
+                            commit_t0 = time.monotonic()
+                            await session.commit()
+                            commit_ms = (time.monotonic() - commit_t0) * 1000.0
+                            if commit_ms > 500.0:
+                                self._logger.warning(
+                                    "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
+                                    str(run.run_id),
+                                    int(run.tick_index),
+                                    int(commit_ms),
+                                    int((time.monotonic() - tick_t0) * 1000.0),
+                                )
+                        except Exception:
+                            await session.rollback()
+                            raise
 
-                # Best-effort clearing (optional MVP): once in a while, attempt clearing per equivalent.
-                clearing_volume_by_eq: dict[str, float] = {
-                    str(eq): 0.0 for eq in equivalents
-                }
-                if (
-                    self._clearing_every_n_ticks > 0
-                    and run.tick_index % self._clearing_every_n_ticks == 0
-                    and bool(getattr(settings, "CLEARING_ENABLED", True))
-                ):
-                    # Commit payments BEFORE clearing to release the DB write lock.
-                    # Clearing uses an isolated session (separate connection) that needs
-                    # write access. On SQLite (single-writer) the clearing session would
-                    # deadlock if the parent session still holds an uncommitted transaction.
-                    try:
-                        commit_t0 = time.monotonic()
-                        await session.commit()
-                        commit_ms = (time.monotonic() - commit_t0) * 1000.0
-                        if commit_ms > 500.0:
+                        self._logger.warning(
+                            "simulator.real.tick_clearing_enter run_id=%s tick=%s eqs=%s planned=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            ",".join([str(x) for x in (equivalents or [])]),
+                            int(len(planned or [])),
+                        )
+                        clearing_t0 = time.monotonic()
+                        # Hard timeout: clearing must not block the heartbeat loop indefinitely.
+                        # Note: asyncio.wait_for() relies on cancellation being delivered. Some
+                        # DB awaits (or driver edge cases) may delay cancellation, so we run
+                        # clearing in a separate task and time out without waiting for teardown.
+                        clearing_hard_timeout_sec = max(
+                            2.0,
+                            float(self._real_clearing_time_budget_ms) / 1000.0 * 4.0,
+                        )
+                        env_timeout_cap = float(
+                            _safe_int_env("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 8)
+                        )
+                        if env_timeout_cap > 0:
+                            clearing_hard_timeout_sec = min(
+                                clearing_hard_timeout_sec, env_timeout_cap
+                            )
+                        clearing_hard_timeout_sec = max(
+                            0.1, float(clearing_hard_timeout_sec)
+                        )
+
+                        clearing_task: asyncio.Task[dict[str, float]] | None = None
+                        with self._lock:
+                            existing = run._real_clearing_task
+                            if existing is not None and existing.done():
+                                run._real_clearing_task = None
+                                existing = None
+                            clearing_task = existing
+
+                        if clearing_task is None:
+                            clearing_task = asyncio.create_task(
+                                self.tick_real_mode_clearing(
+                                    session, run_id, run, equivalents
+                                )
+                            )
+                            with self._lock:
+                                run._real_clearing_task = clearing_task
+                        else:
                             self._logger.warning(
-                                "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
+                                "simulator.real.tick_clearing_already_running run_id=%s tick=%s",
                                 str(run.run_id),
                                 int(run.tick_index),
-                                int(commit_ms),
-                                int((time.monotonic() - tick_t0) * 1000.0),
                             )
-                    except Exception:
-                        await session.rollback()
-                        raise
-
-                    self._logger.warning(
-                        "simulator.real.tick_clearing_enter run_id=%s tick=%s eqs=%s planned=%s",
-                        str(run.run_id),
-                        int(run.tick_index),
-                        ",".join([str(x) for x in (equivalents or [])]),
-                        int(len(planned or [])),
-                    )
-                    clearing_t0 = time.monotonic()
-                    # Hard timeout: clearing must not block the heartbeat loop indefinitely.
-                    # Note: asyncio.wait_for() relies on cancellation being delivered. Some
-                    # DB awaits (or driver edge cases) may delay cancellation, so we run
-                    # clearing in a separate task and time out without waiting for teardown.
-                    clearing_hard_timeout_sec = max(
-                        2.0,
-                        float(self._real_clearing_time_budget_ms) / 1000.0 * 4.0,
-                    )
-                    env_timeout_cap = float(
-                        _safe_int_env("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 8)
-                    )
-                    if env_timeout_cap > 0:
-                        clearing_hard_timeout_sec = min(
-                            clearing_hard_timeout_sec, env_timeout_cap
-                        )
-                    clearing_hard_timeout_sec = max(0.1, float(clearing_hard_timeout_sec))
-
-                    clearing_task: asyncio.Task[dict[str, float]] | None = None
-                    with self._lock:
-                        existing = run._real_clearing_task
-                        if existing is not None and existing.done():
-                            run._real_clearing_task = None
-                            existing = None
-                        clearing_task = existing
-
-                    if clearing_task is None:
-                        clearing_task = asyncio.create_task(
-                            self.tick_real_mode_clearing(
-                                session, run_id, run, equivalents
-                            )
-                        )
-                        with self._lock:
-                            run._real_clearing_task = clearing_task
-                    else:
-                        self._logger.warning(
-                            "simulator.real.tick_clearing_already_running run_id=%s tick=%s",
-                            str(run.run_id),
-                            int(run.tick_index),
-                        )
-                    try:
-                        clearing_volume_by_eq = await asyncio.wait_for(
-                            asyncio.shield(clearing_task),
-                            timeout=clearing_hard_timeout_sec,
-                        )
-                        with self._lock:
-                            if run._real_clearing_task is clearing_task:
-                                run._real_clearing_task = None
-                    except asyncio.TimeoutError:
-                        self._logger.warning(
-                            "simulator.real.tick_clearing_hard_timeout run_id=%s tick=%s timeout_sec=%s",
-                            str(run.run_id),
-                            int(run.tick_index),
-                            clearing_hard_timeout_sec,
-                        )
-                        # Clearing timed out — proceed with the rest of the tick.
-                        # Best-effort: request cancellation, but do not await it here.
-                        # We keep the task reference to avoid overlapping clearing runs.
                         try:
-                            clearing_task.cancel()
+                            clearing_volume_by_eq = await asyncio.wait_for(
+                                asyncio.shield(clearing_task),
+                                timeout=clearing_hard_timeout_sec,
+                            )
+                            with self._lock:
+                                if run._real_clearing_task is clearing_task:
+                                    run._real_clearing_task = None
+                        except asyncio.TimeoutError:
+                            self._logger.warning(
+                                "simulator.real.tick_clearing_hard_timeout run_id=%s tick=%s timeout_sec=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                clearing_hard_timeout_sec,
+                            )
+                            # Clearing timed out — proceed with the rest of the tick.
+                            # Best-effort: request cancellation, but do not await it here.
+                            # We keep the task reference to avoid overlapping clearing runs.
+                            try:
+                                clearing_task.cancel()
+                            except Exception:
+                                pass
+                            with self._lock:
+                                run.current_phase = None
                         except Exception:
-                            pass
-                        with self._lock:
-                            run.current_phase = None
-                    except Exception:
-                        # Clearing is best-effort; do not fail the whole tick.
-                        with self._lock:
-                            if run._real_clearing_task is clearing_task:
-                                run._real_clearing_task = None
+                            # Clearing is best-effort; do not fail the whole tick.
+                            with self._lock:
+                                if run._real_clearing_task is clearing_task:
+                                    run._real_clearing_task = None
+                            self._logger.warning(
+                                "simulator.real.tick_clearing_failed run_id=%s tick=%s",
+                                str(run.run_id),
+                                int(run.tick_index),
+                                exc_info=True,
+                            )
                         self._logger.warning(
-                            "simulator.real.tick_clearing_failed run_id=%s tick=%s",
+                            "simulator.real.tick_clearing_done run_id=%s tick=%s elapsed_ms=%s",
                             str(run.run_id),
                             int(run.tick_index),
+                            int((time.monotonic() - clearing_t0) * 1000.0),
+                        )
+
+                    # ── Trust Drift: decay overloaded edges ─────────────
+                    try:
+                        decay_res = await self._get_trust_drift_engine().apply_trust_decay(
+                            run=run,
+                            session=session,
+                            tick_index=int(run.tick_index or 0),
+                            debt_snapshot=debt_snapshot,
+                            scenario=scenario,
+                        )
+                        if decay_res.updated_count:
+                            await session.commit()
+                            # Notify frontend about changed limits via edge_patch (no full refresh).
+                            try:
+                                for eq in sorted(decay_res.touched_equivalents or set()):
+                                    eq_upper = str(eq or "").strip().upper()
+                                    if not eq_upper:
+                                        continue
+                                    only_edges = (decay_res.touched_edges_by_eq or {}).get(eq_upper)
+                                    edge_patch = await self._build_edge_patch_for_equivalent(
+                                        session=session,
+                                        run=run,
+                                        equivalent_code=eq_upper,
+                                        only_edges=only_edges,
+                                        include_width_keys=True,
+                                    )
+                                    self._broadcast_topology_edge_patch(
+                                        run_id=run_id,
+                                        run=run,
+                                        equivalent=eq_upper,
+                                        edge_patch=edge_patch,
+                                        reason="trust_drift_decay",
+                                    )
+                            except Exception:
+                                self._logger.warning(
+                                    "simulator.real.trust_drift.decay_edge_patch_broadcast_error",
+                                    exc_info=True,
+                                )
+                    except Exception:
+                        self._logger.warning(
+                            "simulator.real.trust_drift.decay_failed run_id=%s tick=%s",
+                            str(run.run_id),
+                            int(run.tick_index or 0),
                             exc_info=True,
                         )
-                    self._logger.warning(
-                        "simulator.real.tick_clearing_done run_id=%s tick=%s elapsed_ms=%s",
-                        str(run.run_id),
-                        int(run.tick_index),
-                        int((time.monotonic() - clearing_t0) * 1000.0),
+
+                    # Real total debt snapshot (sum of all debts for the equivalent).
+                    # Throttled: aggregate SUM can become hot on large Debt tables.
+                    total_debt_by_eq: dict[str, float] = {
+                        str(eq): 0.0 for eq in equivalents
+                    }
+
+                    metrics_every_n = int(self._real_db_metrics_every_n_ticks)
+                    should_refresh_total_debt = metrics_every_n <= 1 or (
+                        int(run.tick_index) % int(metrics_every_n) == 0
                     )
 
-                # ── Trust Drift: decay overloaded edges ─────────────
-                try:
-                    decay_res = await self._get_trust_drift_engine().apply_trust_decay(
-                        run=run,
-                        session=session,
-                        tick_index=int(run.tick_index or 0),
-                        debt_snapshot=debt_snapshot,
-                        scenario=scenario,
-                    )
-                    if decay_res.updated_count:
-                        await session.commit()
-                        # Notify frontend about changed limits via edge_patch (no full refresh).
-                        try:
-                            for eq in sorted(decay_res.touched_equivalents or set()):
-                                eq_upper = str(eq or "").strip().upper()
-                                if not eq_upper:
-                                    continue
-                                only_edges = (decay_res.touched_edges_by_eq or {}).get(eq_upper)
-                                edge_patch = await self._build_edge_patch_for_equivalent(
-                                    session=session,
-                                    run=run,
-                                    equivalent_code=eq_upper,
-                                    only_edges=only_edges,
-                                    include_width_keys=True,
-                                )
-                                self._broadcast_topology_edge_patch(
-                                    run_id=run_id,
-                                    run=run,
-                                    equivalent=eq_upper,
-                                    edge_patch=edge_patch,
-                                    reason="trust_drift_decay",
-                                )
-                        except Exception:
-                            self._logger.warning(
-                                "simulator.real.trust_drift.decay_edge_patch_broadcast_error",
-                                exc_info=True,
-                            )
-                except Exception:
-                    self._logger.warning(
-                        "simulator.real.trust_drift.decay_failed run_id=%s tick=%s",
-                        str(run.run_id),
-                        int(run.tick_index or 0),
-                        exc_info=True,
-                    )
-
-                # Real total debt snapshot (sum of all debts for the equivalent).
-                # Throttled: aggregate SUM can become hot on large Debt tables.
-                total_debt_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
-
-                metrics_every_n = int(self._real_db_metrics_every_n_ticks)
-                should_refresh_total_debt = metrics_every_n <= 1 or (
-                    int(run.tick_index) % int(metrics_every_n) == 0
-                )
-
-                if not should_refresh_total_debt:
-                    with self._lock:
-                        cached = dict(run._real_total_debt_by_eq or {})
-                    for eq in equivalents:
-                        total_debt_by_eq[str(eq)] = float(cached.get(str(eq), 0.0) or 0.0)
-
-                if should_refresh_total_debt:
-                    try:
-                        eq_rows = (
-                            await session.execute(
-                                select(Equivalent.id, Equivalent.code).where(
-                                    Equivalent.code.in_(list(equivalents))
-                                )
-                            )
-                        ).all()
-                        eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
-                        for eq_code, eq_id in eq_id_by_code.items():
-                            total = (
-                                await session.execute(
-                                    select(func.coalesce(func.sum(Debt.amount), 0)).where(
-                                        Debt.equivalent_id == eq_id
-                                    )
-                                )
-                            ).scalar_one()
-                            total_debt_by_eq[str(eq_code)] = float(total)
-
-                        with self._lock:
-                            run._real_total_debt_by_eq = dict(total_debt_by_eq)
-                            run._real_total_debt_tick = int(run.tick_index)
-                    except Exception:
-                        if self._should_warn_this_tick(run, key="total_debt_snapshot_failed"):
-                            self._logger.debug(
-                                "simulator.real.total_debt_snapshot_failed run_id=%s tick=%s",
-                                str(run.run_id),
-                                int(run.tick_index),
-                                exc_info=True,
-                            )
-
-                        # Fallback to the last cached values if available.
+                    if not should_refresh_total_debt:
                         with self._lock:
                             cached = dict(run._real_total_debt_by_eq or {})
                         for eq in equivalents:
-                            total_debt_by_eq[str(eq)] = float(cached.get(str(eq), 0.0) or 0.0)
+                            total_debt_by_eq[str(eq)] = float(
+                                cached.get(str(eq), 0.0) or 0.0
+                            )
 
-                # Avg route length for this tick (successful payments).
-                for eq in equivalents:
-                    r = per_eq_route.get(str(eq), {})
-                    n = float(r.get("route_len_n", 0.0) or 0.0)
-                    s = float(r.get("route_len_sum", 0.0) or 0.0)
-                    per_eq_metric_values[str(eq)]["avg_route_length"] = (
-                        float(s / n) if n > 0 else 0.0
-                    )
-                    per_eq_metric_values[str(eq)]["total_debt"] = float(
-                        total_debt_by_eq.get(str(eq), 0.0) or 0.0
-                    )
-                    per_eq_metric_values[str(eq)]["clearing_volume"] = float(
-                        clearing_volume_by_eq.get(str(eq), 0.0) or 0.0
-                    )
+                    if should_refresh_total_debt:
+                        try:
+                            eq_rows = (
+                                await session.execute(
+                                    select(Equivalent.id, Equivalent.code).where(
+                                        Equivalent.code.in_(list(equivalents))
+                                    )
+                                )
+                            ).all()
+                            eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
+                            for eq_code, eq_id in eq_id_by_code.items():
+                                total = (
+                                    await session.execute(
+                                        select(
+                                            func.coalesce(func.sum(Debt.amount), 0)
+                                        ).where(Debt.equivalent_id == eq_id)
+                                    )
+                                ).scalar_one()
+                                total_debt_by_eq[str(eq_code)] = float(total)
 
-                # --- Network topology metrics (Phase 3) ---
-                # active_participants: count scenario participants with status='active'.
-                # Computed once from in-memory scenario (lightweight, no DB).
-                _scenario_parts = scenario.get("participants") or []
-                _active_participants_count = float(sum(
-                    1 for _p in _scenario_parts
-                    if isinstance(_p, dict)
-                    and str(_p.get("status") or "active").strip().lower() == "active"
-                ))
-                # active_trustlines per equivalent: count from run._edges_by_equivalent cache.
-                # After inject ops, this cache already reflects frozen/removed edges.
-                with self._lock:
-                    _edges_snapshot = dict(run._edges_by_equivalent or {})
-                for eq in equivalents:
-                    per_eq_metric_values[str(eq)]["active_participants"] = _active_participants_count
-                    per_eq_metric_values[str(eq)]["active_trustlines"] = float(
-                        len(_edges_snapshot.get(str(eq), []))
-                    )
+                            with self._lock:
+                                run._real_total_debt_by_eq = dict(total_debt_by_eq)
+                                run._real_total_debt_tick = int(run.tick_index)
+                        except Exception:
+                            if self._should_warn_this_tick(run, key="total_debt_snapshot_failed"):
+                                self._logger.debug(
+                                    "simulator.real.total_debt_snapshot_failed run_id=%s tick=%s",
+                                    str(run.run_id),
+                                    int(run.tick_index),
+                                    exc_info=True,
+                                )
 
-                await self._get_real_tick_persistence().persist_tick_tail(
-                    session=session,
-                    run=run,
-                    equivalents=equivalents,
-                    tick_t0=tick_t0,
-                    planned_len=len(planned),
-                    committed=committed,
-                    rejected=rejected,
-                    errors=errors,
-                    timeouts=timeouts,
-                    per_eq=per_eq,
-                    per_eq_metric_values=per_eq_metric_values,
-                    per_eq_edge_stats=per_eq_edge_stats,
-                )
+                            # Fallback to the last cached values if available.
+                            with self._lock:
+                                cached = dict(run._real_total_debt_by_eq or {})
+                            for eq in equivalents:
+                                total_debt_by_eq[str(eq)] = float(
+                                    cached.get(str(eq), 0.0) or 0.0
+                                )
+
+                    # Avg route length for this tick (successful payments).
+                    for eq in equivalents:
+                        r = per_eq_route.get(str(eq), {})
+                        n = float(r.get("route_len_n", 0.0) or 0.0)
+                        s = float(r.get("route_len_sum", 0.0) or 0.0)
+                        per_eq_metric_values[str(eq)]["avg_route_length"] = (
+                            float(s / n) if n > 0 else 0.0
+                        )
+                        per_eq_metric_values[str(eq)]["total_debt"] = float(
+                            total_debt_by_eq.get(str(eq), 0.0) or 0.0
+                        )
+                        per_eq_metric_values[str(eq)]["clearing_volume"] = float(
+                            clearing_volume_by_eq.get(str(eq), 0.0) or 0.0
+                        )
+
+                    # --- Network topology metrics (Phase 3) ---
+                    # active_participants: count scenario participants with status='active'.
+                    # Computed once from in-memory scenario (lightweight, no DB).
+                    _scenario_parts = scenario.get("participants") or []
+                    _active_participants_count = float(
+                        sum(
+                            1
+                            for _p in _scenario_parts
+                            if isinstance(_p, dict)
+                            and str(_p.get("status") or "active")
+                            .strip()
+                            .lower()
+                            == "active"
+                        )
+                    )
+                    # active_trustlines per equivalent: count from run._edges_by_equivalent cache.
+                    # After inject ops, this cache already reflects frozen/removed edges.
+                    with self._lock:
+                        _edges_snapshot = dict(run._edges_by_equivalent or {})
+                    for eq in equivalents:
+                        per_eq_metric_values[str(eq)][
+                            "active_participants"
+                        ] = _active_participants_count
+                        per_eq_metric_values[str(eq)]["active_trustlines"] = float(
+                            len(_edges_snapshot.get(str(eq), []))
+                        )
+
+                    await self._get_real_tick_persistence().persist_tick_tail(
+                        session=session,
+                        run=run,
+                        equivalents=equivalents,
+                        tick_t0=tick_t0,
+                        planned_len=len(planned),
+                        committed=committed,
+                        rejected=rejected,
+                        errors=errors,
+                        timeouts=timeouts,
+                        per_eq=per_eq,
+                        per_eq_metric_values=per_eq_metric_values,
+                        per_eq_edge_stats=per_eq_edge_stats,
+                    )
+                except Exception:
+                    # CRITICAL: always rollback on tick failure.
+                    # Otherwise the underlying pooled connection can be returned
+                    # in an invalid transaction state, and subsequent ticks may
+                    # fail with "Can't reconnect until invalid transaction is rolled back".
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                    raise
         except Exception as e:
             self._logger.warning(
                 "simulator.real.tick_failed run_id=%s tick=%s",

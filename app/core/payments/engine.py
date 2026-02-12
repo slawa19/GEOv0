@@ -138,14 +138,19 @@ class PaymentEngine:
             except DBAPIError as exc:
                 attempt += 1
 
-                # Always rollback on DBAPIError to reset the session/transaction state.
+                # Only rollback when we are actually going to retry.
+                # For non-retryable DBAPIError (or on non-Postgres backends), rolling back
+                # inside a surrounding transaction context manager can close that context
+                # and cause follow-up errors like:
+                # "Can't operate on closed transaction inside context manager".
+                is_retryable = self._is_retryable_db_error(exc)
+                if attempt >= self._retry_attempts or not is_retryable:
+                    raise
+
                 try:
                     await self.session.rollback()
                 except Exception:
                     pass
-
-                if attempt >= self._retry_attempts or not self._is_retryable_db_error(exc):
-                    raise
 
                 base = max(0.0, self._retry_base_delay_s)
                 cap = max(base, self._retry_max_delay_s)
