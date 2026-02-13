@@ -1,4 +1,4 @@
-import type { ClearingDoneEvent, ClearingPlanEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { RunStatusEvent, SimulatorEvent, TopologyChangedEvent, TopologyChangedEdgeRef, TopologyChangedNodeRef, TxFailedEvent } from './simulatorTypes'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -231,44 +231,6 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     return evt
   }
 
-  if (type === 'clearing.plan') {
-    const equivalent = asString(raw.equivalent)
-    const plan_id = asString(raw.plan_id)
-    const stepsRaw = asArray(raw.steps)
-    if (!equivalent || !plan_id || !stepsRaw) return null
-
-    const steps: ClearingPlanEvent['steps'] = []
-    for (const s of stepsRaw) {
-      if (!isRecord(s)) continue
-      const at_ms = asNumber(s.at_ms)
-      if (at_ms == null) continue
-      const step: ClearingPlanEvent['steps'][number] = { at_ms }
-
-      const intensity_key = asString(s.intensity_key)
-      if (intensity_key) step.intensity_key = intensity_key
-
-      const mapEdges = (arr: unknown[] | null | undefined) => {
-        const out: Array<{ from: string; to: string }> = []
-        for (const e of arr ?? []) {
-          if (!isRecord(e)) continue
-          const from = asString(e.from)
-          const to = asString(e.to)
-          if (!from || !to) continue
-          out.push({ from, to })
-        }
-        return out
-      }
-
-      if (asArray(s.highlight_edges)) step.highlight_edges = mapEdges(asArray(s.highlight_edges))
-      if (asArray(s.particles_edges)) step.particles_edges = mapEdges(asArray(s.particles_edges))
-
-      steps.push(step)
-    }
-
-    const evt: ClearingPlanEvent = { event_id, ts, type: 'clearing.plan', equivalent, plan_id, steps }
-    return evt as SimulatorEvent
-  }
-
   if (type === 'clearing.done') {
     const equivalent = asString(raw.equivalent)
     const plan_id = asString(raw.plan_id)
@@ -276,6 +238,19 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
 
     const cleared_cycles = asNumber(raw.cleared_cycles) ?? undefined
     const cleared_amount = asString(raw.cleared_amount) ?? undefined
+
+    const cycle_edges_raw = asArray((raw as any).cycle_edges)
+    const cycle_edges = cycle_edges_raw
+      ? cycle_edges_raw
+          .map((e) => {
+            if (!isRecord(e)) return null
+            const from = asString(e.from)
+            const to = asString(e.to)
+            if (!from || !to) return null
+            return { from, to }
+          })
+          .filter(Boolean)
+      : undefined
 
     const evt: ClearingDoneEvent = {
       event_id,
@@ -285,6 +260,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
       plan_id,
       cleared_cycles,
       cleared_amount,
+      cycle_edges: (cycle_edges as any) ?? undefined,
       node_patch: normalizeNodePatchArray(raw.node_patch),
       edge_patch: normalizeEdgePatchArray(raw.edge_patch),
     }

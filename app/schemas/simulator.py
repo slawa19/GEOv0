@@ -190,45 +190,22 @@ class SimulatorTxFailedEvent(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
-class SimulatorClearingPlanStep(BaseModel):
-    at_ms: int
-
-    intensity_key: Optional[str] = None
-    highlight_edges: Optional[List[SimulatorEventEdgeRef]] = None
-    particles_edges: Optional[List[SimulatorEventEdgeRef]] = None
-    flash: Optional[Dict[str, Any]] = None
-
-    # Ensure nested SimulatorEventEdgeRef objects serialize with alias 'from'
-    model_config = ConfigDict(extra="allow", serialize_by_alias=True)
-
-
-class SimulatorClearingPlanEvent(BaseModel):
-    event_id: str
-    ts: datetime
-    type: Literal["clearing.plan"]
-    equivalent: str
-
-    plan_id: str
-    steps: List[SimulatorClearingPlanStep]
-
-    # Ensure nested steps serialize with alias 'from' for edge refs
-    model_config = ConfigDict(extra="allow", serialize_by_alias=True)
-
-
 class SimulatorClearingDoneEvent(BaseModel):
     event_id: str
     ts: datetime
     type: Literal["clearing.done"]
     equivalent: str
 
-    # Links clearing.done back to the previously emitted clearing.plan.
-    # UI uses this to drive the clearing animation lifecycle.
+    # Identifier for the clearing batch (unique per emission).
     plan_id: str
 
     # Optional: stats useful for UI/analytics.
     cleared_cycles: Optional[int] = None
     # Total cleared volume in major units (string), e.g. "120.00".
     cleared_amount: Optional[str] = None
+
+    # Authoritative edges that were actually touched by clearing.
+    cycle_edges: Optional[List[SimulatorEventEdgeRef]] = None
 
     # Optional patches to update the graph without a full snapshot refresh.
     # Shape matches NodePatch/EdgePatch used by the Simulator UI.
@@ -333,7 +310,6 @@ class SimulatorRunStatusEvent(BaseModel):
 SimulatorEvent = Union[
     SimulatorTxUpdatedEvent,
     SimulatorTxFailedEvent,
-    SimulatorClearingPlanEvent,
     SimulatorClearingDoneEvent,
     SimulatorTopologyChangedEvent,
     SimulatorRunStatusEvent,

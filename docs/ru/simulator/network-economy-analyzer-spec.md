@@ -43,7 +43,7 @@ Analyzer в MVP не требует новых контрактов backend.
 События, которые уже идут в UI:
 - `run_status` (включая `last_error`, counters)
 - `tx.updated`, `tx.failed`
-- `clearing.plan`, `clearing.done`
+- `clearing.done`
 
 Практически полезные агрегаты на стороне UI:
 - `runStats` (attempts/committed/rejected/errors/timeouts + распределение по error.code).
@@ -159,7 +159,7 @@ type Insight = {
 ### 6.2 Перегрузка клиринга / “clearing pressure”
 **Сигналы:**
 - рост `total_debt` при слабом росте `clearing_volume`
-- частые `clearing.plan` без стабилизации `success_rate`
+- частые `clearing.done` без стабилизации `success_rate`
 
 **Экономический смысл:**
 - «Долги накапливаются быстрее, чем сеть успевает их “сжигать” клирингом».

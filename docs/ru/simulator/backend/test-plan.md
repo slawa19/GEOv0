@@ -152,7 +152,7 @@ tests/performance/simulator/
 2) `POST /api/v1/simulator/runs` → получить `run_id`.
 3) Подключиться к `GET /api/v1/simulator/runs/{run_id}/events?equivalent=UAH`.
 4) В течение 2 секунд получить минимум 1 событие `type=run_status` со `state=running`.
-5) В течение 30 секунд получить минимум 1 доменное событие из набора (в зависимости от MVP runner): `tx.updated` или `clearing.plan`.
+5) В течение 30 секунд получить минимум 1 доменное событие из набора (в зависимости от MVP runner): `tx.updated` или `clearing.done`.
 
 Критерии успеха:
 - stream не падает, события парсятся как JSON (в строке `data:`)

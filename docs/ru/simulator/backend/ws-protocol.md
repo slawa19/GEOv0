@@ -127,7 +127,6 @@ MVP правило: `run_status` — единственный обязатель
 ## 4) Доменные сообщения
 - `tx.updated`
 - `tx.failed`
-- `clearing.plan`
 - `clearing.done`
 
 См. `docs/ru/simulator/frontend/docs/api.md` — там source of truth для полей `viz_*`.
@@ -166,7 +165,6 @@ MVP правило: `run_status` — единственный обязатель
 | `run_status` | SSE | статус прогона + heartbeat |
 | `tx.updated` | SSE | визуальные подсветки транзакций |
 | `tx.failed` | SSE | отказ/ошибка платежа (нормализованный код в `error.code`) |
-| `clearing.plan` | SSE | план шагов клиринга |
-| `clearing.done` | SSE | завершение клиринга |
+| `clearing.done` | SSE | завершение клиринга + `cycle_edges` для FX |
 
 Команды (REST): `pause`, `resume`, `stop`, `restart` (опц.), `intensity`.

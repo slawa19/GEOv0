@@ -3649,56 +3649,9 @@ components:
           additionalProperties: true
       additionalProperties: true
 
-    SimulatorClearingPlanStep:
-      type: object
-      required: [at_ms]
-      properties:
-        at_ms:
-          type: integer
-        intensity_key:
-          type: string
-          nullable: true
-        highlight_edges:
-          type: array
-          nullable: true
-          items:
-            $ref: '#/components/schemas/SimulatorEventEdgeRef'
-        particles_edges:
-          type: array
-          nullable: true
-          items:
-            $ref: '#/components/schemas/SimulatorEventEdgeRef'
-        flash:
-          type: object
-          nullable: true
-          additionalProperties: true
-      additionalProperties: true
-
-    SimulatorClearingPlanEvent:
-      type: object
-      required: [event_id, ts, type, equivalent, plan_id, steps]
-      properties:
-        event_id:
-          type: string
-        ts:
-          type: string
-          format: date-time
-        type:
-          type: string
-          enum: [clearing.plan]
-        equivalent:
-          $ref: '#/components/schemas/EquivalentCode'
-        plan_id:
-          type: string
-        steps:
-          type: array
-          items:
-            $ref: '#/components/schemas/SimulatorClearingPlanStep'
-      additionalProperties: true
-
     SimulatorClearingDoneEvent:
       type: object
-      required: [event_id, ts, type, equivalent]
+      required: [event_id, ts, type, equivalent, plan_id]
       properties:
         event_id:
           type: string
@@ -3712,13 +3665,17 @@ components:
           $ref: '#/components/schemas/EquivalentCode'
         plan_id:
           type: string
-          nullable: true
         cleared_cycles:
           type: integer
           nullable: true
         cleared_amount:
           type: string
           nullable: true
+        cycle_edges:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimulatorEventEdgeRef'
         node_patch:
           type: array
           nullable: true
@@ -3735,7 +3692,6 @@ components:
       oneOf:
         - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
         - $ref: '#/components/schemas/SimulatorTxFailedEvent'
-        - $ref: '#/components/schemas/SimulatorClearingPlanEvent'
         - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
         - $ref: '#/components/schemas/SimulatorRunStatusEvent'
 

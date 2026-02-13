@@ -71,7 +71,6 @@
 | Event `type` | In `SimulatorEvent` (OpenAPI) | Required fields (OpenAPI) | Mentioned in protocol | Mentioned in frontend doc |
 |---|---|---|---|---|
 | `tx.updated` | ✅ | `event_id, ts, type, equivalent` | ✅ | ✅ |
-| `clearing.plan` | ✅ | `event_id, ts, type, equivalent, plan_id, steps` | ✅ | ✅ |
 | `clearing.done` | ✅ | `event_id, ts, type, equivalent` | ✅ | ✅ |
 | `run_status` | ✅ | `event_id, ts, type, run_id, scenario_id, state` | ✅ (heartbeat) | ✅ (heartbeat) |
 

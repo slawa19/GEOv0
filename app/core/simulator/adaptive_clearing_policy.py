@@ -20,6 +20,23 @@ ZERO_VOLUME_EPS: float = 1e-9
 
 
 # ---------------------------------------------------------------------------
+# Reason codes (human-readable, stable strings for logs/tests)
+# ---------------------------------------------------------------------------
+
+REASON_WARMUP_RUN = "WARMUP_FALLBACK_RUN"
+REASON_WARMUP_SKIP = "WARMUP_FALLBACK_SKIP"
+REASON_WARMUP_DISABLED = "WARMUP_DISABLED"
+
+REASON_RATE_HIGH_ENTER = "RATE_HIGH_ENTER"
+REASON_RATE_LOW_EXIT = "RATE_LOW_EXIT"
+REASON_RUN_ACTIVE = "RUN_ACTIVE"
+
+REASON_SKIP_NOT_ACTIVE = "SKIP_NOT_ACTIVE"
+REASON_SKIP_MIN_INTERVAL = "SKIP_MIN_INTERVAL"
+REASON_SKIP_BACKOFF = "SKIP_BACKOFF"
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
@@ -163,7 +180,15 @@ class AdaptiveClearingState:
 
     def record_tick_signals(self, eq: str, signals: TickSignals) -> None:
         s = self._get(eq)
-        s.window.append((signals.attempted_payments, signals.rejected_no_capacity))
+        # Be defensive against missing/None values.
+        attempted = int(getattr(signals, "attempted_payments", 0) or 0)
+        rejected = int(getattr(signals, "rejected_no_capacity", 0) or 0)
+        if attempted < 0:
+            attempted = 0
+        if rejected < 0:
+            rejected = 0
+
+        s.window.append((attempted, rejected))
         while len(s.window) > self._config.window_ticks:
             s.window.popleft()
 
@@ -177,11 +202,16 @@ class AdaptiveClearingState:
 
         if volume < ZERO_VOLUME_EPS:
             s.consecutive_zero_yield += 1
-            # Exponential backoff: double interval, cap at max
-            s.backoff_interval = min(
-                max(s.backoff_interval * 2, self._config.min_interval_ticks),
-                self._config.backoff_max_interval_ticks,
-            )
+            # Exponential backoff (deterministic):
+            # interval = min(max_interval, min_interval * 2**max(0, streak-1))
+            # so the first zero-yield does not become more conservative than
+            # the base min-interval (cooldown).
+            min_interval = max(1, int(self._config.min_interval_ticks))
+            max_interval = max(min_interval, int(self._config.backoff_max_interval_ticks))
+
+            exp = max(0, int(s.consecutive_zero_yield) - 1)
+            interval = min(max_interval, int(min_interval * (2**exp)))
+            s.backoff_interval = max(min_interval, int(interval))
         else:
             s.consecutive_zero_yield = 0
             s.backoff_interval = 0
@@ -228,61 +258,95 @@ class AdaptiveClearingPolicy:
         s = state.get_per_eq_state(eq)
         no_capacity_rate = state.get_no_capacity_rate(eq)
 
-        # -- Cooldown / backoff check --
-        if s.last_clearing_tick >= 0:
-            ticks_since = tick_index - s.last_clearing_tick
+        window_fill = state.get_window_fill(eq)
 
-            # Respect min interval (cooldown)
-            if ticks_since < cfg.min_interval_ticks:
+        # -- Cold-start / warmup fallback --
+        # While the window is underfilled, we do NOT run the adaptive hysteresis logic.
+        # Instead, we either:
+        # - run on a static cadence (when warmup_fallback_cadence > 0), or
+        # - skip clearing entirely until the window fills (when warmup_fallback_cadence == 0).
+        if window_fill < cfg.window_ticks:
+            if cfg.warmup_fallback_cadence <= 0:
                 return ClearingDecision(
                     should_run=False,
-                    reason="cooldown",
+                    reason=REASON_WARMUP_DISABLED,
                 )
 
-            # Respect backoff (zero-yield exponential)
-            if s.backoff_interval > 0 and ticks_since < s.backoff_interval:
+            if tick_index % cfg.warmup_fallback_cadence != 0:
                 return ClearingDecision(
                     should_run=False,
-                    reason="backoff",
+                    reason=REASON_WARMUP_SKIP,
                 )
 
-        # -- Cold-start fallback: use static cadence while window is underfilled --
-        if (
-            cfg.warmup_fallback_cadence > 0
-            and state.get_window_fill(eq) < cfg.window_ticks
-        ):
-            # Not enough data yet — fall back to periodic cadence
-            if tick_index % cfg.warmup_fallback_cadence == 0:
-                # During warmup fallback we MUST use the minimal budget (no scaling
-                # by no_capacity_rate) to match the spec.
-                return self._make_min_budget_decision("warmup_fallback")
+            # Even in warmup fallback, respect min interval / backoff to prevent
+            # hammering clearing.
+            blocked = self._check_interval_limits(s, tick_index)
+            if blocked is not None:
+                return blocked
+
+            # During warmup fallback we MUST use the minimal budget (no scaling
+            # by no_capacity_rate) to match the spec.
+            return self._make_min_budget_decision(REASON_WARMUP_RUN)
+
+        # -- Hysteresis logic (determines active/inactive state) --
+        was_active = bool(s.active)
+        if no_capacity_rate >= cfg.no_capacity_high:
+            s.active = True
+        # Deactivate only when we drop strictly below LOW.
+        # (At exactly LOW we keep the previous state to avoid boundary churn
+        # and to allow the "pressure=0" budget case while active.)
+        elif no_capacity_rate < cfg.no_capacity_low:
+            s.active = False
+
+        # If we just exited active state, we skip for this tick.
+        if was_active and not s.active:
             return ClearingDecision(
                 should_run=False,
-                reason="warmup_fallback_skip",
+                reason=REASON_RATE_LOW_EXIT,
             )
 
-        # -- Hysteresis logic --
-        if s.active:
-            # Already in active mode — stay active until no_capacity drops below LOW
-            if no_capacity_rate < cfg.no_capacity_low:
-                s.active = False
-                return ClearingDecision(
-                    should_run=False,
-                    reason="hysteresis_deactivate",
-                )
-            # Still above low — run clearing
-            return self._make_run_decision(no_capacity_rate, "active")
-        else:
-            # Inactive — activate only when no_capacity rises above HIGH
-            if no_capacity_rate >= cfg.no_capacity_high:
-                s.active = True
-                return self._make_run_decision(no_capacity_rate, "activate")
-
-            # Not enough pressure — skip
+        if not s.active:
             return ClearingDecision(
                 should_run=False,
-                reason="below_threshold",
+                reason=REASON_SKIP_NOT_ACTIVE,
             )
+
+        # -- Cooldown / backoff check (limits frequency even when active) --
+        blocked = self._check_interval_limits(s, tick_index)
+        if blocked is not None:
+            return blocked
+
+        # Choose a reason depending on whether we just entered active state.
+        reason = REASON_RATE_HIGH_ENTER if (not was_active and s.active) else REASON_RUN_ACTIVE
+        return self._make_run_decision(no_capacity_rate, reason)
+
+    def _check_interval_limits(
+        self,
+        s: _PerEqState,
+        tick_index: int,
+    ) -> ClearingDecision | None:
+        """Return a negative decision when min-interval/backoff blocks clearing."""
+
+        cfg = self._config
+
+        if s.last_clearing_tick < 0:
+            return None
+
+        ticks_since = tick_index - s.last_clearing_tick
+
+        if ticks_since < cfg.min_interval_ticks:
+            return ClearingDecision(
+                should_run=False,
+                reason=REASON_SKIP_MIN_INTERVAL,
+            )
+
+        if s.backoff_interval > 0 and ticks_since < s.backoff_interval:
+            return ClearingDecision(
+                should_run=False,
+                reason=REASON_SKIP_BACKOFF,
+            )
+
+        return None
 
     def _make_run_decision(
         self, no_capacity_rate: float, reason: str

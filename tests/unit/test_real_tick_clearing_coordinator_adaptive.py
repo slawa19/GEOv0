@@ -245,3 +245,66 @@ async def test_adaptive_tick_budget_caps_multi_equivalent_clearing(monkeypatch) 
 
     assert calls == ["USD"]
 
+
+@pytest.mark.asyncio
+async def test_adaptive_max_eq_per_tick_caps_multi_equivalent_clearing() -> None:
+    cfg = AdaptiveClearingPolicyConfig(
+        window_ticks=1,
+        min_interval_ticks=1,
+        no_capacity_low=0.30,
+        no_capacity_high=0.60,
+    )
+    coordinator = RealTickClearingCoordinator(
+        lock=threading.Lock(),
+        logger=logging.getLogger(__name__),
+        clearing_every_n_ticks=0,
+        real_clearing_time_budget_ms=250,
+        clearing_policy="adaptive",
+        adaptive_config=cfg,
+    )
+
+    session = _AsyncSession()
+    run = _make_run(tick_index=0)
+    equivalents = ["USD", "EUR"]
+
+    calls: list[str] = []
+
+    async def run_clearing_for_eq(eq: str, *, time_budget_ms_override=None, max_depth_override=None):
+        calls.append(eq)
+        return {eq: 10.0}
+
+    async def run_clearing():
+        raise AssertionError("static run_clearing() must not be used in adaptive branch")
+
+    payments_result = _PaymentsResult(
+        per_eq={
+            "USD": {"committed": 0, "rejected": 10, "errors": 0, "timeouts": 0},
+            "EUR": {"committed": 0, "rejected": 10, "errors": 0, "timeouts": 0},
+        },
+        rejection_codes_by_eq={
+            "USD": {"ROUTING_NO_CAPACITY": 10},
+            "EUR": {"ROUTING_NO_CAPACITY": 10},
+        },
+    )
+
+    env = {
+        "SIMULATOR_CLEARING_ADAPTIVE_TICK_BUDGET_MS": 0,
+        "SIMULATOR_CLEARING_ADAPTIVE_MAX_EQ_PER_TICK": 1,
+    }
+
+    await coordinator.maybe_run_clearing(
+        session=session,
+        run_id=str(run.run_id),
+        run=run,
+        equivalents=equivalents,
+        planned_len=0,
+        tick_t0=0.0,
+        clearing_enabled=True,
+        safe_int_env=lambda k, d: int(env.get(k, d)),
+        run_clearing=run_clearing,
+        run_clearing_for_eq=run_clearing_for_eq,
+        payments_result=payments_result,
+    )
+
+    assert calls == ["USD"]
+

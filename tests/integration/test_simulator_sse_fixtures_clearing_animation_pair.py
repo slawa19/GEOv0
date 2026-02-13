@@ -6,7 +6,7 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_simulator_fixtures_mode_emits_clearing_plan_and_done_with_same_plan_id(
+async def test_simulator_fixtures_mode_emits_clearing_done_with_plan_id(
     client: AsyncClient,
     auth_headers,
     monkeypatch,
@@ -32,41 +32,40 @@ async def test_simulator_fixtures_mode_emits_clearing_plan_and_done_with_same_pl
     url = f"/api/v1/simulator/runs/{run_id}/events"
 
     plan_id: str | None = None
-    seen_plan = False
     seen_done = False
 
     async with client.stream(
         "GET",
         url,
         headers={**auth_headers, "Last-Event-ID": f"evt_{run_id}_000000"},
-        params={"equivalent": "UAH", "stop_after_types": "clearing.plan,clearing.done"},
+        params={"equivalent": "UAH", "stop_after_types": "clearing.done"},
     ) as r:
         assert r.status_code == 200
 
         async def _read_until() -> None:
-            nonlocal plan_id, seen_plan, seen_done
+            nonlocal plan_id, seen_done
             async for line in r.aiter_lines():
                 if not line.startswith("data: "):
                     continue
                 payload = json.loads(line.removeprefix("data: "))
 
                 if payload.get("type") == "clearing.plan":
-                    seen_plan = True
-                    plan_id = payload.get("plan_id")
-                    assert isinstance(plan_id, str) and plan_id
+                    raise AssertionError("Fixtures mode must not emit clearing.plan")
 
                 if payload.get("type") == "clearing.done":
                     seen_done = True
-                    assert payload.get("plan_id") == plan_id
+                    plan_id = payload.get("plan_id")
+                    assert isinstance(plan_id, str) and plan_id
                     cleared_amount = str(payload.get("cleared_amount") or "").strip()
                     assert cleared_amount and cleared_amount != "0" and cleared_amount != "0.00"
+                    cycle_edges = payload.get("cycle_edges")
+                    assert isinstance(cycle_edges, list) and cycle_edges
 
-                if seen_plan and seen_done:
+                if seen_done:
                     return
 
         await asyncio.wait_for(_read_until(), timeout=8.0)
 
-    assert seen_plan
     assert seen_done
 
     # Cleanup: stop run to avoid background heartbeats affecting other tests.

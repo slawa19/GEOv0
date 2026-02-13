@@ -65,9 +65,10 @@
    - Эффект/рендер должен быть идентичен тому, что UI делает при получении `tx.updated` из обычного раннера.
 
 2) **Run Clearing (full cycle)**
-   - Триггерит пару событий: `clearing.plan` → `clearing.done` (один цикл).
-   - FX соответствует real-mode.
-   - Clearing Viz v2 применяется поверх этого.
+  - Триггерит одно событие: `clearing.done` (один цикл, без `clearing.plan`).
+  - `clearing.done` содержит `cycle_edges` (authoritative) и `cleared_amount`.
+  - FX соответствует real-mode.
+  - Clearing Viz v2 применяется поверх этого.
 
 ### 4.3. Детерминизм (рекомендуется)
 
@@ -161,7 +162,7 @@ Response (JSON):
 
 ### 5.3. POST /api/v1/simulator/runs/{run_id}/actions/clearing-once
 
-**Назначение:** сгенерировать clearing план и завершение для одного цикла.
+**Назначение:** сгенерировать `clearing.done` для одного цикла (без `clearing.plan`).
 
 Request (JSON):
 
@@ -174,26 +175,15 @@ Response (JSON):
 
 - `ok: true`
 - `plan_id: string`
-- `plan_event_id: string`
 - `done_event_id: string`
 
 Дополнительно (рекомендуется):
 
 - `client_action_id?: string` (если был передан)
 
-**Семантика `clearing.plan`:**
-
-- `steps[]` должны соответствовать real контракту:
-  - step0 (at_ms=0): **только** `highlight_edges`
-  - step1 (at_ms≈400): **только** `particles_edges`
-  - step2 (at_ms≈900): `flash: { kind: "clearing" }`
-- Запрещено в одном step одновременно отдавать `highlight_edges` и `particles_edges`.
-
-Важная цель этого правила: чтобы визуализация не превращалась в «месиво» при наложении pulse+particles на одном и том же шаге.
-
 **Семантика `clearing.done`:**
 
-- Содержит `plan_id` и `cleared_amount`.
+- Содержит `plan_id`, `cleared_amount`, `cycle_edges`.
 - `node_patch/edge_patch` опциональны (phase-2).
 
 ### 5.4. Где живёт логика генерации
@@ -253,17 +243,16 @@ UI должен:
 
 Требование: во время проигрывания clearing цикла подсвечиваются **все узлы**, участвующие в цикле.
 
-Реализация (frontend-only, без изменения backend схемы):
+Реализация (frontend-only):
 
-- При получении `clearing.plan`:
-  - вычислить `cycleNodeIds` как объединение всех `from/to` из `highlight_edges` и `particles_edges` (по всем steps).
-  - установить overlay state `activeClearingNodeIds = cycleNodeIds` на время плана.
+- При получении `clearing.done`:
+  - вычислить `cycleNodeIds` как объединение всех `from/to` из `cycle_edges`.
+  - подсветить рёбра из `cycle_edges` и узлы из `cycleNodeIds` на короткое TTL.
 
 Тайминг (рекомендация):
 
-- старт: сразу при `clearing.plan`
-- стоп: при `clearing.done` с тем же `plan_id`
-- safety stop: через `max(1500ms, lastStep.at_ms + 1200ms)` если `clearing.done` не пришёл (best-effort)
+- старт: при `clearing.done`
+- стоп: через 900–1500ms (best-effort)
 - Для визуала:
   - либо новый “node glow” overlay (предпочтительно, т.к. это подсветка «во времени», а не одноразовый burst),
   - либо серия `spawnNodeBursts` с низкой амплитудой и повтором.
@@ -282,12 +271,6 @@ UI должен:
 - Размер/вес: заметно крупнее tx-лейблов.
 
 Ограничение: если `cleared_amount` отсутствует — лейбл не показывать (или показывать “Cleared” без суммы — отдельное решение).
-
-### 7.3. Связка plan_id → done
-
-UI должен хранить сопоставление `plan_id -> cycleNodeIds` (вычисленное на `clearing.plan`) до прихода `clearing.done`, чтобы правильно позиционировать лейбл.
-
-Также хранить (опционально) `plan_id -> centroid` (координаты в world-space), чтобы big-label позиционировался стабильно даже если layout слегка «дышит».
 
 ## 8. Acceptance criteria
 

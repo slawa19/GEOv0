@@ -36,6 +36,7 @@ class FixturesRunner:
                 plan_id = run._clearing_pending_plan_id_by_eq.get(eq)
                 if not plan_id:
                     continue
+                cycle_edges = run._clearing_pending_cycle_edges_by_eq.get(eq)
                 run.last_event_type = "clearing.done"
                 run.current_phase = None
                 emitter.emit_clearing_done(
@@ -47,33 +48,31 @@ class FixturesRunner:
                     # Fixtures-mode clearing is a visualization aid; provide a
                     # deterministic non-zero total so UI can show the flyout label.
                     cleared_amount="10.00",
+                    cycle_edges=cycle_edges,
                 )
 
             run._clearing_pending_done_at_ms = None
             run._clearing_pending_plan_id_by_eq.clear()
+            run._clearing_pending_cycle_edges_by_eq.clear()
             run._next_clearing_at_ms = run.sim_time_ms + 45_000
             return
 
         if run._clearing_pending_done_at_ms is None and run.sim_time_ms >= run._next_clearing_at_ms:
-            # Emit clearing.plan for all equivalents.
+            # Schedule clearing.done for all equivalents (emit only on completion).
             for eq in list(run._edges_by_equivalent.keys()):
-                plan = self.make_clearing_plan(run_id=run_id, equivalent=eq)
-                if plan is None:
+                edges = (run._edges_by_equivalent or {}).get(eq) or []
+                if not edges:
                     continue
-                plan_id = str(plan.get("plan_id") or "").strip()
-                steps = list((plan.get("steps") or []))
-                if plan_id:
-                    run._clearing_pending_plan_id_by_eq[eq] = plan_id
-                run.last_event_type = "clearing.plan"
+
+                (e1_from, e1_to) = run._rng.choice(edges)
+                (e2_from, e2_to) = run._rng.choice(edges)
+                plan_id = f"clr_{run.run_id}_{run._event_seq + 1:06d}"
+                run._clearing_pending_plan_id_by_eq[eq] = plan_id
+                run._clearing_pending_cycle_edges_by_eq[eq] = [
+                    {"from": str(e1_from), "to": str(e1_to)},
+                    {"from": str(e2_from), "to": str(e2_to)},
+                ]
                 run.current_phase = "clearing"
-                emitter.emit_clearing_plan(
-                    run_id=run_id,
-                    run=run,
-                    equivalent=eq,
-                    plan_id=plan_id,
-                    steps=steps,
-                    event_id=str(plan.get("event_id") or "") or None,
-                )
 
             run._clearing_pending_done_at_ms = run.sim_time_ms + 2_000
             return
@@ -142,34 +141,4 @@ class FixturesRunner:
             ],
         }
 
-    def make_clearing_plan(self, *, run_id: str, equivalent: str) -> Optional[dict[str, Any]]:
-        run = self._get_run(run_id)
-        if run._rng is None or run._edges_by_equivalent is None:
-            return None
-        edges = (run._edges_by_equivalent or {}).get(equivalent) or []
-        if not edges:
-            return None
 
-        (e1_from, e1_to) = run._rng.choice(edges)
-        (e2_from, e2_to) = run._rng.choice(edges)
-        plan_id = f"clr_{run.run_id}_{run._event_seq + 1:06d}"
-        return {
-            "event_id": self._sse.next_event_id(run),
-            "ts": self._utc_now().isoformat(),
-            "type": "clearing.plan",
-            "equivalent": equivalent,
-            "plan_id": plan_id,
-            "steps": [
-                {
-                    "at_ms": 0,
-                    "highlight_edges": [{"from": e1_from, "to": e1_to}],
-                    "intensity_key": "hi",
-                },
-                {
-                    "at_ms": 180,
-                    "particles_edges": [{"from": e2_from, "to": e2_to}],
-                    "intensity_key": "mid",
-                },
-                {"at_ms": 420, "flash": {"kind": "clearing"}},
-            ],
-        }

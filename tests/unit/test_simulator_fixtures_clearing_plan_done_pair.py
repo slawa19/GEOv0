@@ -6,7 +6,7 @@ from app.core.simulator.runtime import runtime
 
 
 @pytest.mark.asyncio
-async def test_fixtures_mode_emits_clearing_plan_and_done_with_matching_plan_id() -> None:
+async def test_fixtures_mode_emits_clearing_done_with_plan_id() -> None:
     run_id = await runtime.create_run(
         scenario_id="greenfield-village-100-realistic-v2",
         mode="fixtures",
@@ -19,15 +19,14 @@ async def test_fixtures_mode_emits_clearing_plan_and_done_with_matching_plan_id(
     run._next_clearing_at_ms = 0
     run._clearing_pending_done_at_ms = None
     run._clearing_pending_plan_id_by_eq.clear()
+    run._clearing_pending_cycle_edges_by_eq.clear()
 
     sub = await runtime.subscribe(run_id, equivalent="UAH")
     try:
-        plan_id: str | None = None
-        seen_plan = False
         seen_done = False
 
         async def _read_until() -> None:
-            nonlocal plan_id, seen_plan, seen_done
+            nonlocal seen_done
             deadline = asyncio.get_running_loop().time() + 6.0
             while asyncio.get_running_loop().time() < deadline:
                 try:
@@ -35,19 +34,22 @@ async def test_fixtures_mode_emits_clearing_plan_and_done_with_matching_plan_id(
                 except asyncio.TimeoutError:
                     continue
 
-                if evt.get("type") == "clearing.plan" and evt.get("equivalent") == "UAH":
-                    seen_plan = True
-                    plan_id = evt.get("plan_id")
-                    assert isinstance(plan_id, str) and plan_id
+                if evt.get("type") == "clearing.plan":
+                    raise AssertionError("Fixtures mode must not emit clearing.plan")
 
                 if evt.get("type") == "clearing.done" and evt.get("equivalent") == "UAH":
                     seen_done = True
-                    assert evt.get("plan_id") == plan_id
+                    plan_id = evt.get("plan_id")
+                    assert isinstance(plan_id, str) and plan_id
+                    cleared_amount = str(evt.get("cleared_amount") or "").strip()
+                    assert cleared_amount and cleared_amount != "0" and cleared_amount != "0.00"
+                    cycle_edges = evt.get("cycle_edges")
+                    assert isinstance(cycle_edges, list) and cycle_edges
 
-                if seen_plan and seen_done:
+                if seen_done:
                     return
 
-            raise AssertionError("Did not receive both clearing.plan and clearing.done within timeout")
+            raise AssertionError("Did not receive clearing.done within timeout")
 
         await _read_until()
     finally:

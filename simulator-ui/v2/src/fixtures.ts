@@ -358,29 +358,6 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
       }
     }
 
-    if (type === 'clearing.plan') {
-      if (!Array.isArray(evt.steps)) throw new Error(`clearing.plan.steps must be array (${sourcePath})`)
-      return {
-        event_id: asString(evt.event_id, `events[${idx}].event_id (${sourcePath})`),
-        ts: asString(evt.ts, `events[${idx}].ts (${sourcePath})`),
-        type: 'clearing.plan',
-        equivalent: asString(evt.equivalent, `events[${idx}].equivalent (${sourcePath})`),
-        plan_id: asString(evt.plan_id, `events[${idx}].plan_id (${sourcePath})`),
-        steps: (evt.steps as any).map((s: any, sidx: number) => {
-          if (!isRecord(s)) throw new Error(`clearing.plan.steps[${sidx}] must be object (${sourcePath})`)
-          const atMs = asFiniteNumber(s.at_ms, `clearing.plan.steps[${sidx}].at_ms (${sourcePath})`)
-          const highlight = s.highlight_edges === undefined ? undefined : asEdgeArray(s.highlight_edges, `clearing.plan.steps[${sidx}].highlight_edges (${sourcePath})`)
-          const particles = s.particles_edges === undefined ? undefined : asEdgeArray(s.particles_edges, `clearing.plan.steps[${sidx}].particles_edges (${sourcePath})`)
-          return {
-            at_ms: atMs,
-            intensity_key: asOptionalString(s.intensity_key),
-            highlight_edges: highlight,
-            particles_edges: particles,
-          }
-        }),
-      }
-    }
-
     if (type === 'clearing.done') {
       return {
         event_id: asString(evt.event_id, `events[${idx}].event_id (${sourcePath})`),
@@ -390,6 +367,7 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
         plan_id: asString(evt.plan_id, `events[${idx}].plan_id (${sourcePath})`),
         cleared_cycles: asOptionalNumber(evt.cleared_cycles),
         cleared_amount: asOptionalString(evt.cleared_amount),
+        cycle_edges: evt.cycle_edges === undefined ? undefined : asEdgeArray((evt as any).cycle_edges, `clearing.done.cycle_edges (${sourcePath})`),
         node_patch: asNodePatchArray((evt as any).node_patch, `clearing.done.node_patch (${sourcePath})`),
         edge_patch: asEdgePatchArray((evt as any).edge_patch, `clearing.done.edge_patch (${sourcePath})`),
       }

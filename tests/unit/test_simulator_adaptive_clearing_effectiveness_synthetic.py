@@ -118,7 +118,7 @@ class TestReactionTime:
         decisions = _run_ticks(policy, state, eq, recovery, start_tick=6)
 
         # Should have deactivated at some point
-        deactivations = [d for d in decisions if d.reason == "hysteresis_deactivate"]
+        deactivations = [d for d in decisions if d.reason == "RATE_LOW_EXIT"]
         assert len(deactivations) >= 1, "Policy never deactivated during recovery"
 
 
@@ -343,7 +343,8 @@ class TestWarmupBehaviour:
         assert d.should_run is False
 
     def test_partial_window_activates_on_extreme_signal(self):
-        """With only 3/10 window ticks filled, 90% rejection should activate."""
+        """With only 3/10 window ticks filled and fallback disabled,
+        policy MUST NOT activate (warmup gate)."""
         cfg = _cfg(window_ticks=10, no_capacity_high=0.50)
         state = AdaptiveClearingState(cfg)
         policy = AdaptiveClearingPolicy(cfg)
@@ -352,7 +353,8 @@ class TestWarmupBehaviour:
         # 3 ticks of 90% rejection (well above HIGH)
         _run_ticks(policy, state, eq, [(10, 9)] * 3, start_tick=0)
         d = policy.evaluate(eq, state, tick_index=3)
-        assert d.should_run is True
+        assert d.should_run is False
+        assert d.reason == "WARMUP_DISABLED"
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +416,7 @@ class TestWarmupFallbackEffectiveness:
         state.record_tick_signals(eq, TickSignals(attempted_payments=10, rejected_no_capacity=1))
         d5 = policy.evaluate(eq, state, tick_index=5)
         assert d5.should_run is True
-        assert d5.reason == "warmup_fallback"
+        assert d5.reason == "WARMUP_FALLBACK_RUN"
 
     def test_cold_start_without_fallback_no_clearing(self):
         """Without fallback cadence, cold start with low signal does not clear."""
@@ -426,3 +428,4 @@ class TestWarmupFallbackEffectiveness:
         decisions = _run_ticks(policy, state, eq, [(10, 1)] * 3, start_tick=0)
         d5 = policy.evaluate(eq, state, tick_index=5)
         assert d5.should_run is False
+        assert d5.reason == "WARMUP_DISABLED"

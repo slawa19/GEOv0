@@ -29,7 +29,7 @@
 В API/UI есть `mode`:
 
 1) **Fixtures mode**
-- Это «демо-режим», который генерирует **визуальные события** (подсветки `tx.updated`, `clearing.plan/done`) без реального прохождения по платежному стеку.
+- Это «демо-режим», который генерирует **визуальные события** (подсветки `tx.updated`, `clearing.done`) без реального прохождения по платежному стеку.
 - Нужен, чтобы быстро проверить UI/визуализацию и топологию графа.
 
 2) **Real mode**
@@ -466,7 +466,7 @@ sequenceDiagram
   end
   alt clearing tick
     RR->>DB: plan+apply clearing
-    RR->>SSE: clearing.plan / clearing.done
+    RR->>SSE: clearing.done
   end
   RR->>SSE: run_status (heartbeat)
 ```

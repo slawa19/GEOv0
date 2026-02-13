@@ -129,6 +129,10 @@ class RealRunnerImpl:
             self._clearing_policy = "static"
         self._adaptive_clearing_config: AdaptiveClearingPolicyConfig | None = None
         if self._clearing_policy == "adaptive":
+            warmup_fallback_cadence = _safe_int_env(
+                "SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE",
+                int(self._clearing_every_n_ticks),
+            )
             self._adaptive_clearing_config = AdaptiveClearingPolicyConfig(
                 window_ticks=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS", 30),
                 no_capacity_high=_safe_float_env("SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_HIGH", 0.60),
@@ -143,7 +147,7 @@ class RealRunnerImpl:
                 queue_depth_threshold=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD", 0),
                 global_max_depth_ceiling=int(self._clearing_max_depth_limit),
                 global_time_budget_ms_ceiling=int(self._real_clearing_time_budget_ms),
-                warmup_fallback_cadence=int(self._clearing_every_n_ticks),
+                warmup_fallback_cadence=int(warmup_fallback_cadence),
             )
 
         # Sub-components: eager init (RealRunner is created once on startup).

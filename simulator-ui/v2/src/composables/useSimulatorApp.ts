@@ -2,7 +2,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode, sizeForNode } from '../render/nodePainter'
-import type { ClearingDoneEvent, ClearingPlanEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
 import type { SceneId } from '../scenes'
 import { VIZ_MAPPING } from '../vizMapping'
@@ -847,8 +847,6 @@ export function useSimulatorApp() {
 
   const REAL_CLEARING_FX = getFxConfig('real')
 
-  const clearingPlanFxStarted = new Set<string>()
-
   function pushFloatingLabelWhenReady(
     opts: Parameters<typeof pushFloatingLabel>[0],
     retryLeft = 6,
@@ -912,123 +910,30 @@ export function useSimulatorApp() {
     return out
   }
 
-  function runRealClearingPlanFx(plan: ClearingPlanEvent) {
-    const planId = String(plan?.plan_id ?? '')
-    if (!planId) return
-    if (clearingPlanFxStarted.has(planId)) return
-    clearingPlanFxStarted.add(planId)
-
-    const clearingColor = VIZ_MAPPING.fx.clearing_debt
-
-    // Collect all edges from plan for highlighting (even without steps).
-    const allPlanEdges: Array<{ from: string; to: string }> = []
-    for (const step of plan.steps ?? []) {
-      for (const e of step.highlight_edges ?? []) allPlanEdges.push({ from: e.from, to: e.to })
-      for (const e of step.particles_edges ?? []) allPlanEdges.push({ from: e.from, to: e.to })
-    }
-
-    // Fallback: if plan has cycle_edges directly (some backends), use those.
-    const cycleEdges = (plan as any).cycle_edges as Array<{ from: string; to: string }> | undefined
-    if (cycleEdges && cycleEdges.length > 0) {
-      for (const e of cycleEdges) allPlanEdges.push({ from: e.from, to: e.to })
-    }
-
-    const maxAt = Math.max(
-      0,
-      ...((plan.steps ?? [])
-        .map((s) => Number(s.at_ms ?? 0))
-        .filter((v) => Number.isFinite(v))),
-    )
-    const planFxTtlMs = Math.max(1500, Math.min(30_000, maxAt + 2500))
-
-    // Highlight all nodes in the cycle during the plan phase.
-    if (allPlanEdges.length > 0) {
-      const nodeIds = nodesFromEdges(allPlanEdges)
-      for (const id of nodeIds) addActiveNode(id, planFxTtlMs)
-    }
-
-    // Highlight all clearing edges with soft pulsing glow (geometry-only, no sparks/particles).
-    if (allPlanEdges.length > 0) {
-      const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      for (const e of allPlanEdges) addActiveEdge(keyEdge(e.from, e.to), REAL_CLEARING_FX.highlightPulseMs + 3000)
-
-      spawnEdgePulses(fxState, {
-        edges: allPlanEdges,
-        nowMs,
-        durationMs: REAL_CLEARING_FX.highlightPulseMs,
-        color: clearingColor,
-        thickness: REAL_CLEARING_FX.highlightThickness,
-        seedPrefix: `real-clearing:plan:${planId}:${plan.equivalent}`,
-        countPerEdge: 1,
-        keyEdge,
-        seedFn: fnv1a,
-        isTestMode: isTestMode.value && isWebDriver,
-      })
-    }
-
-    // Process steps: only spawn additional edge pulses per step (no sparks, no node bursts).
-    for (const step of plan.steps ?? []) {
-      const atMs = Math.max(0, Number(step.at_ms ?? 0))
-      scheduleTimeout(() => {
-        const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-
-        const stepEdges = (step.particles_edges ?? []).map((e) => ({ from: e.from, to: e.to }))
-        if (stepEdges.length > 0) {
-          // Reinforce the edge glow for this step's edges.
-          spawnEdgePulses(fxState, {
-            edges: stepEdges,
-            nowMs,
-            durationMs: REAL_CLEARING_FX.highlightPulseMs * 0.6,
-            color: clearingColor,
-            thickness: REAL_CLEARING_FX.highlightThickness * 1.1,
-            seedPrefix: `real-clearing:step:${planId}:${step.at_ms}`,
-            countPerEdge: 1,
-            keyEdge,
-            seedFn: fnv1a,
-            isTestMode: isTestMode.value && isWebDriver,
-          })
-        }
-      }, atMs)
-    }
-
-    scheduleTimeout(() => {
-      clearingPlanFxStarted.delete(planId)
-    }, planFxTtlMs)
-  }
-
-  function runRealClearingDoneFx(plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent) {
+  function runRealClearingDoneFx(done: ClearingDoneEvent) {
     const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const clearingColor = VIZ_MAPPING.fx.clearing_debt
 
     // Single subtle flash at clearing completion (warm orange tint, once per event).
     state.flash = 0.55
 
-    // Collect all edges from plan (for edge highlighting).
-    const planEdges: Array<{ from: string; to: string }> = []
-    if (plan?.steps) {
-      for (const s of plan.steps) {
-        for (const e of s.highlight_edges ?? []) planEdges.push({ from: e.from, to: e.to })
-        for (const e of s.particles_edges ?? []) planEdges.push({ from: e.from, to: e.to })
-      }
-    }
-
-    // Fallback: use cycle_edges from plan or done if steps are empty.
-    const cycleEdges = (plan as any)?.cycle_edges ?? (done as any)?.cycle_edges
-    if (planEdges.length === 0 && Array.isArray(cycleEdges)) {
-      for (const e of cycleEdges) planEdges.push({ from: e.from, to: e.to })
+    const edges: Array<{ from: string; to: string }> = []
+    const doneCycleEdges = (done as any)?.cycle_edges
+    if (Array.isArray(doneCycleEdges) && doneCycleEdges.length > 0) {
+      for (const e of doneCycleEdges) edges.push({ from: e.from, to: e.to })
     }
 
     // Fallback: derive edges from done.node_patch if still empty (edge between consecutive nodes).
-    if (planEdges.length === 0 && done.node_patch && done.node_patch.length >= 2) {
+    if (edges.length === 0 && done.node_patch && done.node_patch.length >= 2) {
       const patchIds = done.node_patch.map((p) => p.id).filter(Boolean)
       for (let i = 0; i < patchIds.length; i++) {
         const from = patchIds[i]!
         const to = patchIds[(i + 1) % patchIds.length]!
-        if (from && to) planEdges.push({ from, to })
+        if (from && to) edges.push({ from, to })
       }
     }
 
-    const nodeIds = nodesFromEdges(planEdges)
+    const nodeIds = nodesFromEdges(edges)
 
     // Keep cycle nodes visible during completion.
     if (nodeIds.length > 0) {
@@ -1036,9 +941,9 @@ export function useSimulatorApp() {
     }
 
     // Highlight edges with pulsing glow (geometry-only, no sparks/bursts).
-    if (planEdges.length > 0) {
+    if (edges.length > 0) {
       spawnEdgePulses(fxState, {
-        edges: planEdges,
+        edges,
         nowMs,
         durationMs: 4200,
         color: clearingColor,
@@ -1050,7 +955,7 @@ export function useSimulatorApp() {
         isTestMode: isTestMode.value && isWebDriver,
       })
 
-      for (const e of planEdges) addActiveEdge(keyEdge(e.from, e.to), 5200)
+      for (const e of edges) addActiveEdge(keyEdge(e.from, e.to), 5200)
     }
 
     // Show total cleared amount as a premium floating label at the TOP of the clearing figure.
@@ -1231,15 +1136,12 @@ export function useSimulatorApp() {
     skipInitialLoad: () => isRealMode.value,
   })
 
-  const clearingPlansById = new Map<string, ClearingPlanEvent>()
-
   function cleanupRealRunFxAndTimers() {
     // Keep critical timers (e.g. “arrival” labels) so quick stop/restart/cleanup doesn't silently drop them.
     // Each critical timer must self-guard (runId / sseSeq / abort signal) before emitting UI.
     clearScheduledTimeouts({ keepCritical: true })
     resetOverlays()
     clearHoveredEdge()
-    clearingPlanFxStarted.clear()
 
     // Reset token-bucket between runs so a newly started run can always show TX FX immediately.
     txFxTokens = REAL_TX_FX.burst
@@ -1265,9 +1167,7 @@ export function useSimulatorApp() {
     pushTxAmountLabel,
     runRealTxFx,
     clampRealTxTtlMs,
-    runRealClearingPlanFx,
     runRealClearingDoneFx,
-    clearingPlansById,
     scheduleTimeout,
     wakeUp,
     onAnySseEvent: markDemoActivity,

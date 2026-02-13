@@ -28,7 +28,8 @@ from app.core.simulator.adaptive_clearing_policy import (
 
 def _default_config(**overrides) -> AdaptiveClearingPolicyConfig:
     defaults = dict(
-        window_ticks=10,
+        # Use minimal window by default to avoid warmup gating unrelated tests.
+        window_ticks=1,
         no_capacity_high=0.60,
         no_capacity_low=0.30,
         min_interval_ticks=3,
@@ -75,7 +76,7 @@ class TestActivation:
 
         decision = policy.evaluate(eq, state, tick_index=5)
         assert decision.should_run is True
-        assert decision.reason == "activate"
+        assert decision.reason == "RATE_HIGH_ENTER"
         assert decision.time_budget_ms is not None
         assert decision.max_depth is not None
 
@@ -90,7 +91,7 @@ class TestActivation:
 
         decision = policy.evaluate(eq, state, tick_index=5)
         assert decision.should_run is False
-        assert decision.reason == "below_threshold"
+        assert decision.reason == "SKIP_NOT_ACTIVE"
 
     def test_activates_respecting_cooldown(self):
         cfg = _default_config(min_interval_ticks=5)
@@ -112,7 +113,7 @@ class TestActivation:
         _feed_ticks(state, eq, [(10, 8)] * 2)
         d2 = policy.evaluate(eq, state, tick_index=12)
         assert d2.should_run is False
-        assert d2.reason == "cooldown"
+        assert d2.reason == "SKIP_MIN_INTERVAL"
 
         # Tick 15 — cooldown expired
         _feed_ticks(state, eq, [(10, 8)] * 3)
@@ -141,7 +142,7 @@ class TestHysteresis:
         _feed_ticks(state, eq, [(10, 4)] * 10)  # overwrite window
         d2 = policy.evaluate(eq, state, tick_index=15)
         assert d2.should_run is True
-        assert d2.reason == "active"
+        assert d2.reason == "RUN_ACTIVE"
 
     def test_deactivates_below_low(self):
         cfg = _default_config()
@@ -159,7 +160,7 @@ class TestHysteresis:
         _feed_ticks(state, eq, [(10, 2)] * 10)
         d2 = policy.evaluate(eq, state, tick_index=20)
         assert d2.should_run is False
-        assert d2.reason == "hysteresis_deactivate"
+        assert d2.reason == "RATE_LOW_EXIT"
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +192,8 @@ class TestBackoff:
         _feed_ticks(state, eq, [(10, 8)] * (backoff - 1))
         d2 = policy.evaluate(eq, state, tick_index=backoff - 1)
         assert d2.should_run is False
-        # Could be cooldown or backoff depending on which fires first — both are correct
-        assert d2.reason in ("cooldown", "backoff")
+        # Could be min-interval or backoff depending on which fires first — both are correct
+        assert d2.reason in ("SKIP_MIN_INTERVAL", "SKIP_BACKOFF")
 
         # After backoff expires — should be allowed again
         _feed_ticks(state, eq, [(10, 8)])
@@ -226,6 +227,32 @@ class TestBackoff:
 
         s = state.get_per_eq_state(eq)
         assert s.backoff_interval <= cfg.backoff_max_interval_ticks
+
+    def test_backoff_formula_exact_intervals_with_cap(self):
+        cfg = _default_config(min_interval_ticks=3, backoff_max_interval_ticks=20)
+        state = AdaptiveClearingState(cfg)
+        eq = "USD"
+
+        # streak -> expected interval
+        expected = [3, 6, 12, 20, 20]
+        for i, want in enumerate(expected, start=1):
+            state.update_clearing_result(eq, volume=0.0, cost_ms=50.0, tick=i * 10)
+            s = state.get_per_eq_state(eq)
+            assert s.consecutive_zero_yield == i
+            assert s.backoff_interval == want
+
+
+class TestMissingData:
+    def test_record_tick_signals_treats_none_and_negative_as_zero(self):
+        cfg = _default_config(window_ticks=3)
+        state = AdaptiveClearingState(cfg)
+        eq = "USD"
+
+        state.record_tick_signals(eq, TickSignals(attempted_payments=None, rejected_no_capacity=None))  # type: ignore[arg-type]
+        state.record_tick_signals(eq, TickSignals(attempted_payments=-10, rejected_no_capacity=-5))
+
+        s = state.get_per_eq_state(eq)
+        assert list(s.window) == [(0, 0), (0, 0)]
 
 
 # ---------------------------------------------------------------------------
@@ -342,10 +369,10 @@ class TestColdStart:
         policy = AdaptiveClearingPolicy(cfg)
         eq = "USD"
 
-        # No ticks fed → no_capacity_rate = 0 → below threshold
+        # No ticks fed → warmup_fallback_cadence=0 → warmup disabled until window fills
         d = policy.evaluate(eq, state, tick_index=0)
         assert d.should_run is False
-        assert d.reason == "below_threshold"
+        assert d.reason == "WARMUP_DISABLED"
 
     def test_zero_attempted_payments(self):
         cfg = _default_config()
@@ -416,7 +443,7 @@ class TestWarmupFallback:
         # tick=5 — should fire (5 % 5 == 0)
         d5 = policy.evaluate(eq, state, tick_index=5)
         assert d5.should_run is True
-        assert d5.reason == "warmup_fallback"
+        assert d5.reason == "WARMUP_FALLBACK_RUN"
         assert d5.time_budget_ms == cfg.time_budget_ms_min
         assert d5.max_depth == cfg.max_depth_min
 
@@ -431,10 +458,12 @@ class TestWarmupFallback:
         # tick=3 — not on cadence
         d3 = policy.evaluate(eq, state, tick_index=3)
         assert d3.should_run is False
-        assert d3.reason == "warmup_fallback_skip"
+        assert d3.reason == "WARMUP_FALLBACK_SKIP"
 
     def test_warmup_fallback_respects_cooldown(self):
-        cfg = _default_config(window_ticks=10, warmup_fallback_cadence=5, min_interval_ticks=3)
+        # Use cadence=1 so the fallback would attempt to run every tick,
+        # and we can assert that min_interval (cooldown) still blocks it.
+        cfg = _default_config(window_ticks=10, warmup_fallback_cadence=1, min_interval_ticks=3)
         state = AdaptiveClearingState(cfg)
         policy = AdaptiveClearingPolicy(cfg)
         eq = "USD"
@@ -447,7 +476,7 @@ class TestWarmupFallback:
         # tick=1 — in cooldown (min_interval=3)
         d1 = policy.evaluate(eq, state, tick_index=1)
         assert d1.should_run is False
-        assert d1.reason == "cooldown"
+        assert d1.reason == "SKIP_MIN_INTERVAL"
 
     def test_warmup_disabled_when_cadence_zero(self):
         cfg = _default_config(window_ticks=10, warmup_fallback_cadence=0)
@@ -458,7 +487,7 @@ class TestWarmupFallback:
         # Empty window, tick on typical cadence
         d = policy.evaluate(eq, state, tick_index=0)
         assert d.should_run is False
-        assert d.reason == "below_threshold"
+        assert d.reason == "WARMUP_DISABLED"
 
     def test_warmup_fallback_transitions_to_adaptive(self):
         """After window fills up, fallback stops and adaptive logic takes over."""
@@ -474,7 +503,7 @@ class TestWarmupFallback:
         # 20% rate < 50% HIGH → below_threshold (not warmup_fallback)
         d = policy.evaluate(eq, state, tick_index=10)
         assert d.should_run is False
-        assert d.reason == "below_threshold"
+        assert d.reason == "SKIP_NOT_ACTIVE"
 
 
 # ---------------------------------------------------------------------------

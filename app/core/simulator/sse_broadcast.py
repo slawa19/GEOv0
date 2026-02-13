@@ -10,7 +10,6 @@ from app.core.simulator.models import RunRecord, _Subscription
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.schemas.simulator import (
     SimulatorClearingDoneEvent,
-    SimulatorClearingPlanEvent,
     SimulatorTopologyChangedEvent,
     SimulatorTxFailedEvent,
     SimulatorTxUpdatedEvent,
@@ -511,37 +510,6 @@ class SseEventEmitter:
                 exc_info=True,
             )
 
-    def emit_clearing_plan(
-        self,
-        *,
-        run_id: str,
-        run: RunRecord,
-        equivalent: str,
-        plan_id: str,
-        steps: list[dict[str, Any]],
-        event_id: str | None = None,
-    ) -> None:
-        try:
-            eq_upper = str(equivalent or "").strip().upper()
-            if not eq_upper:
-                return
-
-            plan_evt = SimulatorClearingPlanEvent(
-                event_id=str(event_id) if event_id is not None else self._sse.next_event_id(run),
-                ts=self._utc_now(),
-                type="clearing.plan",
-                equivalent=eq_upper,
-                plan_id=str(plan_id),
-                steps=steps,
-            ).model_dump(mode="json", by_alias=True)
-            self._sse.broadcast(run_id, plan_evt)
-        except Exception:
-            self._logger.warning(
-                "simulator.sse.clearing_plan_emit_error eq=%s",
-                str(equivalent),
-                exc_info=True,
-            )
-
     def emit_clearing_done(
         self,
         *,
@@ -551,6 +519,7 @@ class SseEventEmitter:
         plan_id: str,
         cleared_cycles: int | None = None,
         cleared_amount: str | None = None,
+        cycle_edges: list[dict[str, Any]] | None = None,
         node_patch: list[dict[str, Any]] | None = None,
         edge_patch: list[dict[str, Any]] | None = None,
         event_id: str | None = None,
@@ -571,6 +540,8 @@ class SseEventEmitter:
                 done_kwargs["cleared_cycles"] = int(cleared_cycles)
             if cleared_amount is not None:
                 done_kwargs["cleared_amount"] = str(cleared_amount)
+            if cycle_edges is not None:
+                done_kwargs["cycle_edges"] = cycle_edges
             if node_patch is not None:
                 done_kwargs["node_patch"] = node_patch
             if edge_patch is not None:

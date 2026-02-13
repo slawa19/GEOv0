@@ -427,12 +427,12 @@ async def test_adaptive_coordinator_respects_cooldown(
     # Decision at tick 1: should be in cooldown (min_interval=3)
     d1 = policy.evaluate("UAH", state, tick_index=1)
     assert d1.should_run is False
-    assert d1.reason == "cooldown"
+    assert d1.reason == "SKIP_MIN_INTERVAL"
 
     # Decision at tick 2: still cooldown
     d2 = policy.evaluate("UAH", state, tick_index=2)
     assert d2.should_run is False
-    assert d2.reason == "cooldown"
+    assert d2.reason == "SKIP_MIN_INTERVAL"
 
     # Decision at tick 3: cooldown passed, should run again
     state.record_tick_signals("UAH", TickSignals(attempted_payments=10, rejected_no_capacity=5))

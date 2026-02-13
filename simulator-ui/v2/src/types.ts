@@ -83,20 +83,6 @@ export type TxUpdatedEvent = {
   edge_patch?: EdgePatch[]
 }
 
-export type ClearingPlanEvent = {
-  event_id: string
-  ts: string
-  type: 'clearing.plan'
-  equivalent: string
-  plan_id: string
-  steps: Array<{
-    at_ms: number
-    intensity_key?: string
-    highlight_edges?: Array<{ from: string; to: string }>
-    particles_edges?: Array<{ from: string; to: string }>
-  }>
-}
-
 export type ClearingDoneEvent = {
   event_id: string
   ts: string
@@ -105,8 +91,10 @@ export type ClearingDoneEvent = {
   plan_id: string
   cleared_cycles?: number
   cleared_amount?: string
+  // Authoritative edges that were actually touched by clearing.
+  cycle_edges?: Array<{ from: string; to: string }>
   node_patch?: NodePatch[]
   edge_patch?: EdgePatch[]
 }
 
-export type DemoEvent = TxUpdatedEvent | ClearingPlanEvent | ClearingDoneEvent
+export type DemoEvent = TxUpdatedEvent | ClearingDoneEvent

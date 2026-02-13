@@ -129,12 +129,17 @@ async def _seed_network(session: AsyncSession) -> tuple[str, list[str]]:
 
 
 class _DummySse:
-    def __init__(self):
+    def __init__(self, *, get_tick):
         self.events: list[dict] = []
+        self._get_tick = get_tick
     def next_event_id(self, run):
         run._event_seq += 1
         return f"e{run._event_seq}"
     def broadcast(self, run_id, payload):
+        # Attach the current tick at broadcast time so warmup filtering can be
+        # done by tick/time, not by "first N clearing events".
+        if isinstance(payload, dict):
+            payload = {**payload, "_tick": int(self._get_tick() or 0)}
         self.events.append(payload)
 
 
@@ -187,7 +192,7 @@ async def _run_benchmark(
         run._real_participants = [(p.id, p.pid) for p in rows]
         run._real_equivalents = [eq_code]
 
-    sse = _DummySse()
+    sse = _DummySse(get_tick=lambda: int(run.tick_index or 0))
     runner = RealRunner(
         lock=threading.RLock(),
         get_run=lambda _: run,
@@ -206,6 +211,30 @@ async def _run_benchmark(
     )
     runner._real_clearing_time_budget_ms = 2000
 
+    clearing_override_calls: list[tuple[int | None, int | None]] = []
+    _orig_tick_real_mode_clearing = runner.tick_real_mode_clearing
+
+    async def _spy_tick_real_mode_clearing(
+        session,
+        run_id: str,
+        run: RunRecord,
+        equivalents: list[str],
+        *,
+        time_budget_ms_override: int | None = None,
+        max_depth_override: int | None = None,
+    ) -> dict[str, float]:
+        clearing_override_calls.append((time_budget_ms_override, max_depth_override))
+        return await _orig_tick_real_mode_clearing(
+            session,
+            run_id=run_id,
+            run=run,
+            equivalents=equivalents,
+            time_budget_ms_override=time_budget_ms_override,
+            max_depth_override=max_depth_override,
+        )
+
+    runner.tick_real_mode_clearing = _spy_tick_real_mode_clearing  # type: ignore[assignment]
+
     metrics = {
         "policy": policy,
         "committed": 0,
@@ -217,6 +246,7 @@ async def _run_benchmark(
         "errors_total": 0,
         "clearing_count": 0,
         "clearing_after_warmup": 0,
+        "clearing_override_calls": clearing_override_calls,
     }
 
     # Track current tick for event attribution
@@ -233,29 +263,17 @@ async def _run_benchmark(
         except Exception:
             metrics["errors_total"] += 1
 
-    # Collect events with warmup filtering
-    # SSE events don't carry tick numbers directly, so we count all events
-    # and track which events arrived. For per-tick reporting we use the
-    # sse.events list which accumulates in order.
-    #
-    # We approximate warmup by counting events: first _WARMUP_TICKS * avg_events_per_tick
-    # are excluded. For more precise filtering we count by clearing.done events.
-    warmup_clearings_seen = 0
-    in_warmup = True
-
     for evt in sse.events:
         if not isinstance(evt, dict):
             continue
 
         evt_type = evt.get("type", "")
+        tick = int(evt.get("_tick", 0) or 0)
+        in_warmup = tick < int(_WARMUP_TICKS)
 
         if evt_type == "clearing.done":
             metrics["clearing_count"] += 1
-            if warmup_clearings_seen < 2:
-                # First 2 clearing events approximate warmup phase
-                warmup_clearings_seen += 1
-            else:
-                in_warmup = False
+            if not in_warmup:
                 metrics["clearing_after_warmup"] += 1
 
         elif evt_type == "tx.updated":
@@ -382,9 +400,20 @@ async def test_adaptive_does_not_degrade_vs_static(ab_db, monkeypatch):
         )
 
     # 3. Budget guardrail: verify adaptive clearing time budget and depth
-    #    are within configured limits (checked via config, which clamps)
+    #    are within configured limits (checked by intercepting per-call overrides)
     assert _MAX_CLEARING_TIME_BUDGET_MS >= 50, "Sanity: budget max is reasonable"
     assert _MAX_CLEARING_DEPTH >= 3, "Sanity: depth max is reasonable"
+
+    overrides = adaptive_metrics.get("clearing_override_calls") or []
+    seen_budgets = [b for (b, _) in overrides if b is not None]
+    seen_depths = [d for (_, d) in overrides if d is not None]
+
+    # We expect at least one adaptive per-eq clearing call during the benchmark.
+    assert seen_budgets, "Adaptive benchmark did not record any time_budget_ms_override"
+    assert seen_depths, "Adaptive benchmark did not record any max_depth_override"
+
+    assert all(1 <= int(b) <= int(_MAX_CLEARING_TIME_BUDGET_MS) for b in seen_budgets)
+    assert all(1 <= int(d) <= int(_MAX_CLEARING_DEPTH) for d in seen_depths)
 
     # 4. Log report for human inspection
     print("\n=== A/B Benchmark Report ===")

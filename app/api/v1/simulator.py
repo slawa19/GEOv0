@@ -82,7 +82,6 @@ class ClearingOnceRequestBody(BaseModel):
 class ClearingOnceResponseBody(BaseModel):
     ok: bool = True
     plan_id: str
-    plan_event_id: str
     done_event_id: str
     client_action_id: Optional[str] = None
 
@@ -185,7 +184,7 @@ async def _run_events_stream(
             # Under pytest we intentionally terminate the stream after emitting a bounded
             # "first frame" so integration tests don't hang on infinite SSE.
             #
-            # Some tests need specific event types (e.g. clearing.plan + clearing.done);
+            # Some tests need specific event types (e.g. clearing.done);
             # in that case we keep streaming until we observe all requested types or
             # hit a short deadline.
             if stop_after_types and stop_after_types.issubset(seen_types):
@@ -589,7 +588,7 @@ async def action_clearing_once(
     _actor=Depends(deps.require_participant_or_admin),
 ):
     _require_actions_enabled()
-    plan_id, plan_event_id, done_event_id, _eq = runtime.emit_debug_clearing_once(
+    plan_id, done_event_id, _eq = runtime.emit_debug_clearing_once(
         run_id=run_id,
         equivalent=body.equivalent,
         cycle_edges=body.cycle_edges,
@@ -598,7 +597,6 @@ async def action_clearing_once(
     )
     return ClearingOnceResponseBody(
         plan_id=plan_id,
-        plan_event_id=plan_event_id,
         done_event_id=done_event_id,
         client_action_id=body.client_action_id,
     )

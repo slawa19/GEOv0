@@ -65,7 +65,7 @@
 - `type: string` — строковый дискриминатор
 
 Важно про `equivalent`:
-- для доменных событий `tx.updated|clearing.plan|clearing.done` в OpenAPI `equivalent` является **обязательным**
+- для доменных событий `tx.updated|clearing.done` в OpenAPI `equivalent` является **обязательным**
 - для `run_status` `equivalent` не требуется
 
 #### 2.2.2 Каталог событий (MVP: полный контракт)
@@ -92,21 +92,17 @@ MVP-контракт событий **точно равен** union `SimulatorEv
   - дополнительные детали допускаются как `additionalProperties`
 - Поля `from`/`to` допускаются как nullable.
 
-3) `clearing.plan`
-- Назначение: план анимации клиринга в виде шагов.
-- Обязательные поля (OpenAPI):
-  - `event_id`, `ts`, `type="clearing.plan"`, `equivalent`, `plan_id`, `steps[]`
-
-4) `clearing.done`
+3) `clearing.done`
 - Назначение: завершение клиринга + (опционально) статистика и патчи для обновления графа без локальных расчётов.
 - Обязательные поля (OpenAPI):
   - `event_id`, `ts`, `type="clearing.done"`, `equivalent`
  - Опциональные поля (OpenAPI, can be omitted):
   - `plan_id`
   - `cleared_cycles`, `cleared_amount` (amount в major units, строка)
+  - `cycle_edges[]` — список затронутых рёбер (edge refs `{from,to}`) для FX-подсветки
   - `node_patch[]`, `edge_patch[]`
 
-5) `run_status`
+4) `run_status`
 - Назначение: мониторинг/восстановление состояния; обязательное событие для UI вкладки Run.
 - Эмитится:
   - при смене состояния (`start/pause/resume/stop/error`)
@@ -212,25 +208,7 @@ MVP-контракт событий **точно равен** union `SimulatorEv
 }
 ```
 
-### A.3 `clearing.plan`
-```json
-{
-  "event_id": "evt_0200",
-  "ts": "2026-01-28T12:00:05.000Z",
-  "type": "clearing.plan",
-  "equivalent": "UAH",
-  "plan_id": "plan_001",
-  "steps": [
-    {
-      "at_ms": 0,
-      "highlight_edges": [{ "from": "p1", "to": "h1" }],
-      "particles_edges": [{ "from": "h1", "to": "p2" }]
-    }
-  ]
-}
-```
-
-### A.4 `clearing.done`
+### A.3 `clearing.done`
 ```json
 {
   "event_id": "evt_0250",
@@ -240,12 +218,13 @@ MVP-контракт событий **точно равен** union `SimulatorEv
   "plan_id": "plan_001",
   "cleared_cycles": 2,
   "cleared_amount": "10.00",
+  "cycle_edges": [{ "from": "p1", "to": "h1" }, { "from": "h1", "to": "p2" }],
   "node_patch": [{ "id": "p1", "net_balance": "-12.50", "net_balance_atoms": "1250", "net_sign": -1 }],
   "edge_patch": [{ "source": "p1", "target": "h1", "used": "1.00", "available": "9.00" }]
 }
 ```
 
-### A.5 `tx.failed`
+### A.4 `tx.failed`
 ```json
 {
   "event_id": "evt_0150",

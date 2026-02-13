@@ -153,12 +153,12 @@ $result.Content | ConvertFrom-Json | Select-Object -First 3
 **Проверить сериализацию событий:**
 ```powershell
 .\.venv\Scripts\python.exe -c "
-from app.schemas.simulator import SimulatorClearingPlanEvent
+from app.schemas.simulator import SimulatorClearingDoneEvent
 import json
-evt = SimulatorClearingPlanEvent(
-    event_id='1', ts='2025-01-01T00:00:00Z', type='clearing.plan',
-    equivalent='UAH', plan_id='p1',
-    steps=[{'at_ms': 0, 'highlight_edges': [{'from': 'A', 'to': 'B'}]}]
+evt = SimulatorClearingDoneEvent(
+  event_id='1', ts='2025-01-01T00:00:00Z', type='clearing.done',
+  equivalent='UAH', plan_id='p1', cleared_cycles=1, cleared_amount='10.00',
+  cycle_edges=[{'from': 'A', 'to': 'B'}],
 )
 print(json.dumps(evt.model_dump(mode='json', by_alias=True), indent=2))
 "

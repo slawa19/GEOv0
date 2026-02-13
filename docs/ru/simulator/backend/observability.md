@@ -122,7 +122,7 @@ HTTP метрики собираются middleware в `app/main.py`.
 
 - `geo_simulator_sse_clients` (Gauge)
 - `geo_simulator_sse_events_sent_total{type}` (Counter)
-  - type: ограниченное enum (например `run_status|tx.updated|tx.failed|clearing.plan|clearing.done|keepalive`)
+  - type: ограниченное enum (например `run_status|tx.updated|tx.failed|clearing.done|keepalive`)
 - `geo_simulator_sse_bytes_sent_total` (Counter)
 - `geo_simulator_sse_disconnects_total{reason}` (Counter)
   - reason: `client|timeout|server_error`

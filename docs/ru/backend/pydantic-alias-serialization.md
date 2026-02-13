@@ -9,7 +9,7 @@
 
 ## Краткое описание проблемы
 
-Визуализация клиринга в Simulator UI не работала, несмотря на наличие кода для FX-эффектов. События `clearing.plan` и `clearing.done` отправлялись с backend, но фронтенд не мог распарсить edge-референсы.
+Визуализация клиринга в Simulator UI не работала, несмотря на наличие кода для FX-эффектов. Событие `clearing.done` отправлялось с backend, но фронтенд не мог распарсить edge-референсы.
 
 **Причина:** Pydantic v2 сериализовал поле `from_` как `"from_"` вместо alias `"from"`, потому что `model_dump(mode="json")` по умолчанию НЕ использует alias.
 
@@ -30,17 +30,17 @@ class SimulatorEventEdgeRef(BaseModel):
 ### Неправильная сериализация (было)
 
 ```python
-# app/core/simulator/real_runner.py
-plan_evt = SimulatorClearingPlanEvent(...).model_dump(mode="json")
-# Результат: {"highlight_edges": [{"from_": "A", "to": "B"}]}
+# app/core/simulator/sse_broadcast.py (и любой код, который сериализует event-модели)
+done_evt = SimulatorClearingDoneEvent(...).model_dump(mode="json")
+# Результат: {"cycle_edges": [{"from_": "A", "to": "B"}]}
 #                                   ^^^^^^ НЕПРАВИЛЬНО
 ```
 
 ### Правильная сериализация (стало)
 
 ```python
-plan_evt = SimulatorClearingPlanEvent(...).model_dump(mode="json", by_alias=True)
-# Результат: {"highlight_edges": [{"from": "A", "to": "B"}]}
+done_evt = SimulatorClearingDoneEvent(...).model_dump(mode="json", by_alias=True)
+# Результат: {"cycle_edges": [{"from": "A", "to": "B"}]}
 #                                   ^^^^ ПРАВИЛЬНО
 ```
 
@@ -96,8 +96,8 @@ print(edge.model_dump_json())                 # {"from":"A","to":"B"}     ✅
 ### 1. Добавить `by_alias=True` во все вызовы `model_dump()`
 
 Файлы:
-- `app/core/simulator/real_runner.py` — clearing.plan, clearing.done
-- `app/core/simulator/fixtures_runner.py` — tx.updated, clearing.plan, clearing.done
+- `app/core/simulator/sse_broadcast.py` — tx.updated, clearing.done
+- `app/core/simulator/fixtures_runner.py` — tx.updated, clearing.done
 
 ```python
 # Было:
@@ -148,16 +148,18 @@ class SimulatorEventEdgeRef(BaseModel):
 
 ```powershell
 .\.venv\Scripts\python.exe -c "
-from app.schemas.simulator import SimulatorClearingPlanEvent
+from app.schemas.simulator import SimulatorClearingDoneEvent
 import json
 
-evt = SimulatorClearingPlanEvent(
+evt = SimulatorClearingDoneEvent(
     event_id='1',
     ts='2025-01-01T00:00:00Z',
-    type='clearing.plan',
+  type='clearing.done',
     equivalent='UAH',
     plan_id='p1',
-    steps=[{'at_ms': 0, 'highlight_edges': [{'from': 'A', 'to': 'B'}]}]
+  cleared_cycles=1,
+  cleared_amount='10.00',
+  cycle_edges=[{'from': 'A', 'to': 'B'}]
 )
 
 result = evt.model_dump(mode='json', by_alias=True)
@@ -168,7 +170,7 @@ print(json.dumps(result, indent=2))
 Ожидаемый результат:
 ```json
 {
-  "highlight_edges": [
+  "cycle_edges": [
     {
       "from": "A",
       "to": "B"

@@ -116,6 +116,41 @@ class RealTickClearingCoordinator:
         if state is None or policy is None or cfg is None:
             return clearing_volume_by_eq
 
+        def _clamp_int(v: int, lo: int, hi: int) -> int:
+            return max(lo, min(hi, v))
+
+        def _resolve_effective_int(
+            raw: int | None,
+            *,
+            cfg_min: int,
+            cfg_max: int,
+            hard_ceiling: int,
+        ) -> int:
+            """Resolve None/invalid inputs and clamp deterministically.
+
+            Spec rule:
+            - None -> MIN
+            - clamp(raw, MIN, min(MAX, CEILING))
+
+            Additional safety:
+            - enforce >= 1 so we never propagate 0/negative budgets.
+            """
+
+            lo = max(1, int(cfg_min))
+            hi = min(int(cfg_max), int(hard_ceiling))
+            if hi < lo:
+                hi = lo
+
+            if raw is None:
+                raw_i = lo
+            else:
+                try:
+                    raw_i = int(raw)
+                except Exception:
+                    raw_i = lo
+
+            return _clamp_int(raw_i, lo, hi)
+
         tick_index = int(run.tick_index)
 
         # Feed tick signals every tick so the rolling window advances with time
@@ -150,7 +185,7 @@ class RealTickClearingCoordinator:
             in_flight = int(getattr(run, "_real_in_flight", 0) or 0)
             if in_flight > cfg.inflight_threshold:
                 self._logger.warning(
-                    "simulator.real.adaptive_clearing_guardrail_inflight run_id=%s tick=%s in_flight=%s threshold=%s",
+                    "simulator.real.adaptive_clearing_guardrail_inflight reason=CLEARING_SKIPPED_GUARDRAIL run_id=%s tick=%s in_flight=%s threshold=%s",
                     str(run.run_id), tick_index, in_flight, cfg.inflight_threshold,
                 )
                 return clearing_volume_by_eq
@@ -158,7 +193,7 @@ class RealTickClearingCoordinator:
             queue_depth = int(getattr(run, "queue_depth", 0) or 0)
             if queue_depth > cfg.queue_depth_threshold:
                 self._logger.warning(
-                    "simulator.real.adaptive_clearing_guardrail_queue_depth run_id=%s tick=%s queue_depth=%s threshold=%s",
+                    "simulator.real.adaptive_clearing_guardrail_queue_depth reason=CLEARING_SKIPPED_GUARDRAIL run_id=%s tick=%s queue_depth=%s threshold=%s",
                     str(run.run_id), tick_index, queue_depth, cfg.queue_depth_threshold,
                 )
                 return clearing_volume_by_eq
@@ -170,6 +205,20 @@ class RealTickClearingCoordinator:
             no_cap_rate = state.get_no_capacity_rate(eq)
             per_eq_state = state.get_per_eq_state(eq)
             cooldown_remaining = max(0, (per_eq_state.last_clearing_tick + cfg.min_interval_ticks) - tick_index) if per_eq_state.last_clearing_tick >= 0 else 0
+
+            if decision.reason == "SKIP_BACKOFF" and per_eq_state.last_clearing_tick >= 0:
+                next_allowed_tick = per_eq_state.last_clearing_tick + int(
+                    max(0, per_eq_state.backoff_interval)
+                )
+                backoff_remaining = max(0, int(next_allowed_tick) - int(tick_index))
+                self._logger.debug(
+                    "simulator.real.adaptive_clearing_backoff_skip run_id=%s tick=%s eq=%s backoff_remaining=%s next_allowed_tick=%s",
+                    str(run.run_id),
+                    int(tick_index),
+                    str(eq),
+                    int(backoff_remaining),
+                    int(next_allowed_tick),
+                )
 
             self._logger.debug(
                 "simulator.real.adaptive_clearing_decision run_id=%s tick=%s eq=%s should_run=%s reason=%s no_capacity_rate=%.3f cooldown_remaining=%s budget_ms=%s depth=%s",
@@ -223,7 +272,7 @@ class RealTickClearingCoordinator:
         for i, (eq, budget_ms, max_depth) in enumerate(eqs_to_clear):
             if max_eq_per_tick > 0 and i >= max_eq_per_tick:
                 self._logger.warning(
-                    "simulator.real.adaptive_clearing_tick_cap_max_eq run_id=%s tick=%s max_eq=%s requested=%s",
+                    "simulator.real.adaptive_clearing_tick_cap_max_eq reason=CLEARING_SKIPPED_MAX_EQ_PER_TICK run_id=%s tick=%s max_eq=%s requested=%s",
                     str(run.run_id), tick_index, max_eq_per_tick, len(eqs_to_clear),
                 )
                 break
@@ -232,20 +281,36 @@ class RealTickClearingCoordinator:
                 elapsed_ms = (time.monotonic() - tick_clearing_t0) * 1000.0
                 if elapsed_ms >= float(tick_budget_ms):
                     self._logger.warning(
-                        "simulator.real.adaptive_clearing_tick_cap_budget_exhausted run_id=%s tick=%s budget_ms=%s elapsed_ms=%s",
+                        "simulator.real.adaptive_clearing_tick_cap_budget_exhausted reason=CLEARING_SKIPPED_TICK_BUDGET run_id=%s tick=%s budget_ms=%s elapsed_ms=%s",
                         str(run.run_id), tick_index, tick_budget_ms, int(elapsed_ms),
                     )
                     break
 
             eq_t0 = time.monotonic()
-            hard_timeout_sec = max(2.0, float(budget_ms or 250) / 1000.0 * 4.0)
+            effective_budget_ms = _resolve_effective_int(
+                budget_ms,
+                cfg_min=int(cfg.time_budget_ms_min),
+                cfg_max=int(cfg.time_budget_ms_max),
+                hard_ceiling=min(
+                    int(cfg.global_time_budget_ms_ceiling),
+                    int(self._real_clearing_time_budget_ms),
+                ),
+            )
+            effective_max_depth = _resolve_effective_int(
+                max_depth,
+                cfg_min=int(cfg.max_depth_min),
+                cfg_max=int(cfg.max_depth_max),
+                hard_ceiling=int(cfg.global_max_depth_ceiling),
+            )
+
+            hard_timeout_sec = max(2.0, float(effective_budget_ms) / 1000.0 * 4.0)
             hard_timeout_sec = min(hard_timeout_sec, 8.0)
             try:
                 result = await asyncio.wait_for(
                     run_clearing_for_eq(
                         eq,
-                        time_budget_ms_override=budget_ms,
-                        max_depth_override=max_depth,
+                        time_budget_ms_override=effective_budget_ms,
+                        max_depth_override=effective_max_depth,
                     ),
                     timeout=hard_timeout_sec,
                 )

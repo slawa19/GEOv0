@@ -23,7 +23,7 @@ import { connectSse } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 
-import type { ClearingDoneEvent, ClearingPlanEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { resolveTxDirection } from '../utils/txDirection'
 
@@ -87,10 +87,7 @@ export function useSimulatorRealMode(opts: {
   // Managed timers (must be cleaned up via cleanupRealRunFxAndTimers -> clearScheduledTimeouts)
   scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
   runRealTxFx: (tx: TxUpdatedEvent) => void
-  runRealClearingPlanFx: (plan: ClearingPlanEvent) => void
-  runRealClearingDoneFx: (plan: ClearingPlanEvent | undefined, done: ClearingDoneEvent) => void
-
-  clearingPlansById: Map<string, ClearingPlanEvent>
+  runRealClearingDoneFx: (done: ClearingDoneEvent) => void
 
   // Optional: wake up render loop after snapshot/patch/FX updates.
   wakeUp?: () => void
@@ -128,9 +125,7 @@ export function useSimulatorRealMode(opts: {
     clampRealTxTtlMs,
     scheduleTimeout,
     runRealTxFx,
-    runRealClearingPlanFx,
     runRealClearingDoneFx,
-    clearingPlansById,
     wakeUp,
     onAnySseEvent,
   } = opts
@@ -262,7 +257,6 @@ export function useSimulatorRealMode(opts: {
     real.runStatus = null
     real.lastEventId = null
     real.artifacts = []
-    clearingPlansById.clear()
     cleanupRealRunFxAndTimers()
     resetRunStats()
     stopSse()
@@ -561,7 +555,6 @@ export function useSimulatorRealMode(opts: {
                 const ttlMs = clampRealTxTtlMs(tx.ttl_ms)
 
                 const runIdAtEvent = runId
-                const sseSeqAtEvent = mySeq
 
                 diag.tx_receiver_scheduled += 1
                 scheduleTimeout(
@@ -569,10 +562,6 @@ export function useSimulatorRealMode(opts: {
                     // IMPORTANT: do NOT guard on ctrl.signal.aborted.
                     // AbortSignal is tied to the fetch/SSE-loop lifecycle; on reconnect we abort
                     // the old connection, but UI timers for still-valid events should still fire.
-                    if (sseSeq !== sseSeqAtEvent) {
-                      diag.tx_receiver_guard_dropped += 1
-                      return
-                    }
                     if (real.runId !== runIdAtEvent) {
                       diag.tx_receiver_guard_dropped += 1
                       return
@@ -605,28 +594,15 @@ export function useSimulatorRealMode(opts: {
               return
             }
 
-            if (evt.type === 'clearing.plan') {
-              const plan = evt as ClearingPlanEvent
-              const planId = String(plan.plan_id ?? '')
-              if (planId) {
-                clearingPlansById.set(planId, plan)
-                runRealClearingPlanFx(plan)
-                wakeUp?.()
-              }
-              return
-            }
 
             if (evt.type === 'clearing.done') {
               const done = evt as ClearingDoneEvent
-              const planId = String(done.plan_id ?? '')
-              const plan = planId ? clearingPlansById.get(planId) : undefined
 
               if (done.node_patch) realPatchApplier.applyNodePatches(done.node_patch)
               if (done.edge_patch) realPatchApplier.applyEdgePatches(done.edge_patch)
 
-              runRealClearingDoneFx(plan, done)
+              runRealClearingDoneFx(done)
               wakeUp?.()
-              if (planId) clearingPlansById.delete(planId)
               return
             }
 
@@ -887,7 +863,6 @@ export function useSimulatorRealMode(opts: {
     startRunInProgress = true
     try {
       stopSse()
-      clearingPlansById.clear()
       cleanupRealRunFxAndTimers()
       resetRunStats()
 
@@ -960,7 +935,6 @@ export function useSimulatorRealMode(opts: {
     try {
       teardownRefreshSnapshot()
       stopSse()
-      clearingPlansById.clear()
       cleanupRealRunFxAndTimers()
       real.runStatus = await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, {
         source: 'ui',

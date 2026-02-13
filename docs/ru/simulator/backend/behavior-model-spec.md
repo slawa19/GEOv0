@@ -413,5 +413,5 @@ Runtime gate (реализация):
 
 Артефакты проверки:
 - В `events.ndjson` видны разнообразные суммы (не только 1–3).
-- Регулярно встречаются `clearing.plan` и `clearing.done`.
+- Регулярно встречается `clearing.done`.
 - В `tx.updated` заметен микс групп (не только retail→anchor).

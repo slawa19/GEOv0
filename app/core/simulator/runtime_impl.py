@@ -20,7 +20,6 @@ from app.schemas.simulator import (
     SimulatorGraphSnapshot,
     SimulatorRunStatusEvent,
     SimulatorTxUpdatedEvent,
-    SimulatorClearingPlanEvent,
     SimulatorClearingDoneEvent,
 )
 from app.core.simulator.artifacts import ArtifactsManager
@@ -515,8 +514,8 @@ class _SimulatorRuntimeBase:
         cycle_edges: list[dict[str, str]] | None,
         cleared_amount: str | None,
         seed: str | int | None,
-    ) -> tuple[str, str, str, str]:
-        """Emits (plan_id, plan_event_id, done_event_id, equivalent)."""
+    ) -> tuple[str, str, str]:
+        """Emits (plan_id, done_event_id, equivalent)."""
         run = self._ensure_run_accepts_actions(run_id)
 
         eq = str(equivalent or "").strip().upper()
@@ -609,34 +608,6 @@ class _SimulatorRuntimeBase:
 
         plan_id = f"plan_dbg_{secrets.token_hex(6)}"
         emitter = SseEventEmitter(sse=self._sse, utc_now=_utc_now, logger=logger)
-        plan_event_id = self._sse.next_event_id(run)
-        plan_steps = [
-            {
-                "at_ms": 0,
-                "intensity_key": "high",
-                "highlight_edges": [{"from": a, "to": b} for a, b in picked],
-            },
-            {
-                "at_ms": 400,
-                "intensity_key": "mid",
-                "particles_edges": [{"from": a, "to": b} for a, b in picked],
-            },
-            {
-                "at_ms": 900,
-                "flash": {"kind": "clearing"},
-            },
-        ]
-
-        with self._lock:
-            run.last_event_type = "clearing.plan"
-        emitter.emit_clearing_plan(
-            run_id=run_id,
-            run=run,
-            equivalent=eq,
-            plan_id=plan_id,
-            steps=plan_steps,
-            event_id=plan_event_id,
-        )
 
         done_event_id = self._sse.next_event_id(run)
         done_amt = str(cleared_amount or "").strip() or "10.00"
@@ -653,6 +624,7 @@ class _SimulatorRuntimeBase:
                     plan_id=plan_id,
                     cleared_cycles=1,
                     cleared_amount=done_amt,
+                    cycle_edges=[{"from": a, "to": b} for a, b in picked] if picked else None,
                     node_patch=None,
                     edge_patch=None,
                     event_id=done_event_id,
@@ -675,12 +647,13 @@ class _SimulatorRuntimeBase:
                 plan_id=plan_id,
                 cleared_cycles=1,
                 cleared_amount=done_amt,
+                cycle_edges=[{"from": a, "to": b} for a, b in picked] if picked else None,
                 node_patch=None,
                 edge_patch=None,
                 event_id=done_event_id,
             )
 
-        return plan_id, str(plan_event_id), str(done_event_id), eq
+        return plan_id, str(done_event_id), eq
 
     async def pause(self, run_id: str) -> RunStatus:
         return await self._run_lifecycle.pause(run_id)

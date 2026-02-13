@@ -1,4 +1,4 @@
-import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingPlanEvent, ClearingDoneEvent } from '../types'
+import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingDoneEvent } from '../types'
 
 export type SimulatorMode = 'fixtures' | 'real'
 
@@ -56,7 +56,6 @@ export type ClearingOnceRequest = {
 export type ClearingOnceResponse = {
   ok: true
   plan_id: string
-  plan_event_id: string
   done_event_id: string
   client_action_id?: string | null
 }
@@ -156,7 +155,6 @@ export type TopologyChangedEvent = {
 export type SimulatorEvent =
   | RunStatusEvent
   | (TxUpdatedEvent & { type: 'tx.updated' })
-  | (ClearingPlanEvent & { type: 'clearing.plan' })
   | (ClearingDoneEvent & { type: 'clearing.done' })
   | TxFailedEvent
   | TopologyChangedEvent

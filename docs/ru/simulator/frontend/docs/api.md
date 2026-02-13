@@ -271,32 +271,16 @@ export type GraphLink = {
 }
 ```
 
-### 4.4 `clearing.plan` (сценарий клиринга)
+### 4.4 `clearing.done`
+Назначение:
+- UI запускает FX‑подсветку рёбер/узлов, участвовавших в клиринге.
+- UI показывает одну крупную сумму `cleared_amount` (если она есть).
 
-Примечание по визуалу:
-- `steps` — это сценарные «подсказки» для FX overlay.
-- Конкретная презентация (например, beam-искра золотого цвета + локальные вспышки узлов) — задача UI.
-- В demo-fast-mock v2 клиринг реализован как последовательность `particles_edges` + node glows; full-screen `flash` не является обязательным элементом.
-
-```json
-{
-  "event_id": "evt_0001",
-  "ts": "2026-01-22T12:00:00Z",
-  "type": "clearing.plan",
-  "equivalent": "UAH",
-  "plan_id": "clr_2026_01_22_0001",
-  "steps": [
-    { "at_ms": 0,   "highlight_edges": [{"from":"user_2","to":"user_5"}], "intensity_key": "hi" },
-    { "at_ms": 180, "particles_edges": [{"from":"user_5","to":"user_9"}], "intensity_key": "mid" },
-    { "at_ms": 420, "flash": {"kind":"clearing"} }
-  ]
-}
-```
-
-### 4.5 `clearing.done`
-- Снять эффекты, затем либо:
+Рекомендуемое поведение:
+- Подсветить `cycle_edges` (gold spark) и узлы `from/to` из этих рёбер на короткое TTL.
+- Затем либо:
   - запросить новый snapshot, либо
-  - получить патчи.
+  - применить патчи (`node_patch/edge_patch`).
 
 Рекомендуемый контракт (backend-first):
 ```json
@@ -308,6 +292,7 @@ export type GraphLink = {
   "plan_id": "clr_2026_01_22_0001",
   "cleared_cycles": 2,
   "cleared_amount": "10.00",
+  "cycle_edges": [{"from":"user_2","to":"user_5"},{"from":"user_5","to":"user_9"}],
   "node_patch": [{ "id": "user_1", "net_balance": "-12.50", "net_balance_atoms": "1250", "net_sign": -1 }],
   "edge_patch": [{ "source": "user_1", "target": "user_2", "used": "1.00", "available": "9.00" }]
 }
@@ -330,7 +315,7 @@ backend может одновременно обновить и `viz_color_key`,
 
 ## 6) Минимальные правила производительности для клиента
 
-- В `Overview` не рисовать постоянные частицы: частицы только по `tx.*` и шагам `clearing.plan`.
+- В `Overview` не рисовать постоянные частицы: частицы только по `tx.*` и `clearing.done`.
 - Если одновременно слишком много событий: оставить top-N по `intensity_key`.
 - Подписи — только выбранный узел + соседи (глобальные подписи — отдельная настройка).
 

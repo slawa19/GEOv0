@@ -68,7 +68,7 @@ $$ sim\_time\_ms = tick\_index \cdot tick\_ms\_base $$
      - вычислить «бюджет действий» на тик из `intensity_percent`
      - выбрать действия (по поведению участников + события сценария)
      - выполнить действия (вызовы PaymentEngine / GEO API)
-     - эмитить доменные события (`tx.updated`, `clearing.plan`, `clearing.done`) best-effort
+   - эмитить доменные события (`tx.updated`, `clearing.done`) best-effort
      - обновить метрики/агрегаты (для `ops_sec` и т.п.)
      - увеличить `tick_index`
 
@@ -183,7 +183,7 @@ MVP включает:
 
 2) `clearing_attempt` (опционально для раннего MVP)
    - инициировать клиринг по политике (фиксированный cadence или адаптивный feedback-control)
-   - эмитить `clearing.plan` → потом `clearing.done`
+   - эмитить `clearing.done` (включая `cycle_edges` для FX)
 
 Примечание (текущая реализация):
 - **Real mode:** базовая «частота клиринга» по умолчанию `CLEARING_EVERY_N_TICKS = 25`, но переопределяется через `SIMULATOR_CLEARING_EVERY_N_TICKS`.
@@ -284,7 +284,7 @@ MVP политика ошибок:
 
 ### 8.2 Что best-effort
 - `tx.updated` — короткоживущие подсветки.
-- `clearing.plan`/`clearing.done` — если clearing включён.
+- `clearing.done` — если clearing включён (включая `cycle_edges` для FX).
 
 ### 8.3 Поля `ops_sec` и `queue_depth`
 MVP определение:

@@ -96,7 +96,7 @@
 | Событие | Эффект |
 |---------|--------|
 | `tx.updated` | Cyan spark по edges |
-| `clearing.plan` + `clearing.done` | Gold spark по cycle |
+| `clearing.done` | Gold spark по cycle |
 | `tx.failed` | Red label на target node |
 
 ---

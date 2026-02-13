@@ -108,7 +108,7 @@ Policy получает на каждый тик (per eq):
 
 Важно:
 - сохранить isolated-session клиринга (как сейчас);
-- не менять контракты SSE событий (`clearing.plan` / `clearing.done`);
+- контракт SSE событий: используется только `clearing.done` (без `clearing.plan`);
 - при ошибках клиринга не “травить” payment tick session.
 
 ### 4.5 Управление бюджетом клиринга ✅

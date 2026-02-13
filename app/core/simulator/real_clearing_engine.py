@@ -5,6 +5,7 @@ import logging
 import secrets
 import time
 import uuid
+import hashlib
 from decimal import Decimal, ROUND_DOWN
 from typing import Any, Awaitable, Callable
 
@@ -87,13 +88,22 @@ class RealClearingEngine:
         """
 
         max_depth = min(
-            int(max_depth_override) if max_depth_override is not None else int(self._clearing_max_depth_limit),
+            int(max_depth_override)
+            if max_depth_override is not None
+            else int(self._clearing_max_depth_limit),
             int(self._clearing_max_depth_limit),
         )
         effective_time_budget_ms = min(
-            int(time_budget_ms_override) if time_budget_ms_override is not None else int(self._real_clearing_time_budget_ms),
+            int(time_budget_ms_override)
+            if time_budget_ms_override is not None
+            else int(self._real_clearing_time_budget_ms),
             int(self._real_clearing_time_budget_ms),
         )
+
+        # Safety: never allow non-positive budgets/depth.
+        # If time_budget_ms <= 0, the loop would skip the budget check entirely.
+        max_depth = max(1, int(max_depth))
+        effective_time_budget_ms = max(1, int(effective_time_budget_ms))
         max_fx_edges = int(self._clearing_max_fx_edges_limit)
         cleared_amount_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
 
@@ -144,79 +154,27 @@ class RealClearingEngine:
                     if not cycles:
                         continue
 
+                    def _prioritize_cycle_for_tick(cycles_in: list[Any]) -> list[Any]:
+                        if len(cycles_in) <= 1:
+                            return cycles_in
+                        seed = f"{run.run_id}:{run.tick_index}:{eq}".encode("utf-8")
+                        digest = hashlib.sha256(seed).digest()
+                        idx = int.from_bytes(digest[:4], byteorder="big", signed=False) % len(
+                            cycles_in
+                        )
+                        if idx <= 0:
+                            return cycles_in
+                        # Put the chosen cycle first (so visualization and execution are aligned).
+                        chosen = cycles_in[idx]
+                        return [chosen, *cycles_in[:idx], *cycles_in[idx + 1 :]]
+
+                    # IMPORTANT: keep visualization aligned with what we attempt to clear first.
+                    cycles = _prioritize_cycle_for_tick(list(cycles))
+
                     plan_id = f"plan_{secrets.token_hex(6)}"
 
-                    cycle_edges: list[dict[str, str]] = []
-                    try:
-                        for edge in cycles[0]:
-                            debtor_pid = (
-                                str(edge.get("debtor") or "")
-                                if isinstance(edge, dict)
-                                else str(getattr(edge, "debtor", ""))
-                            )
-                            creditor_pid = (
-                                str(edge.get("creditor") or "")
-                                if isinstance(edge, dict)
-                                else str(getattr(edge, "creditor", ""))
-                            )
-                            if debtor_pid and creditor_pid:
-                                cycle_edges.append({"from": debtor_pid, "to": creditor_pid})
-                    except Exception:
-                        if self._should_warn_this_tick(
-                            run, f"clearing_cycle_edges_parse_failed:{eq}"
-                        ):
-                            self._logger.debug(
-                                "simulator.real.clearing_cycle_edges_parse_failed run_id=%s tick=%s eq=%s",
-                                str(run.run_id),
-                                int(run.tick_index),
-                                str(eq),
-                                exc_info=True,
-                            )
-                        cycle_edges = []
-
-                    if max_fx_edges > 0 and len(cycle_edges) > max_fx_edges:
-                        cycle_edges = cycle_edges[:max_fx_edges]
-
-                    plan_steps: list[dict[str, Any]] = []
-                    if cycle_edges:
-                        plan_steps.append(
-                            {
-                                "at_ms": 0,
-                                "highlight_edges": cycle_edges,
-                                "intensity_key": "hi",
-                            }
-                        )
-                        plan_steps.append(
-                            {
-                                "at_ms": 400,
-                                "particles_edges": cycle_edges,
-                                "intensity_key": "mid",
-                            }
-                        )
-                        plan_steps.append({"at_ms": 900, "flash": {"kind": "clearing"}})
-                    else:
-                        plan_steps.append(
-                            {
-                                "at_ms": 0,
-                                "intensity_key": "mid",
-                                "flash": {
-                                    "kind": "info",
-                                    "title": "Clearing",
-                                    "detail": "Auto clearing",
-                                },
-                            }
-                        )
-
                     with self._lock:
-                        run.last_event_type = "clearing.plan"
                         run.current_phase = "clearing"
-                    emitter.emit_clearing_plan(
-                        run_id=run_id,
-                        run=run,
-                        equivalent=eq,
-                        plan_id=plan_id,
-                        steps=plan_steps,
-                    )
 
                     cleared_cycles = 0
                     cleared_amount_dec = Decimal("0")
@@ -244,22 +202,21 @@ class RealClearingEngine:
                         if cleared_cycles and (cleared_cycles % 5 == 0):
                             await asyncio.sleep(0)
 
-                        budget_ms = int(effective_time_budget_ms or 0)
-                        if budget_ms > 0:
-                            elapsed_ms = (time.monotonic() - clearing_started) * 1000.0
-                            if elapsed_ms >= float(budget_ms):
-                                if self._should_warn_this_tick(
-                                    run, f"clearing_time_budget_exceeded:{eq}"
-                                ):
-                                    self._logger.warning(
-                                        "simulator.real.clearing_time_budget_exceeded run_id=%s tick=%s eq=%s budget_ms=%s elapsed_ms=%s",
-                                        str(run.run_id),
-                                        int(run.tick_index),
-                                        str(eq),
-                                        int(budget_ms),
-                                        int(elapsed_ms),
-                                    )
-                                break
+                        budget_ms = int(effective_time_budget_ms)
+                        elapsed_ms = (time.monotonic() - clearing_started) * 1000.0
+                        if elapsed_ms >= float(budget_ms):
+                            if self._should_warn_this_tick(
+                                run, f"clearing_time_budget_exceeded:{eq}"
+                            ):
+                                self._logger.warning(
+                                    "simulator.real.clearing_time_budget_exceeded run_id=%s tick=%s eq=%s budget_ms=%s elapsed_ms=%s",
+                                    str(run.run_id),
+                                    int(run.tick_index),
+                                    str(eq),
+                                    int(budget_ms),
+                                    int(elapsed_ms),
+                                )
+                            break
 
                         self._logger.debug(
                             "simulator.real.clearing_find_cycles_loop_start run_id=%s tick=%s eq=%s cleared_cycles=%s",
@@ -281,6 +238,9 @@ class RealClearingEngine:
                             )
                         if not cycles:
                             break
+
+                        # Keep execution order aligned with visualization policy.
+                        cycles = _prioritize_cycle_for_tick(list(cycles))
 
                         executed = False
                         for cycle in cycles:
@@ -541,6 +501,14 @@ class RealClearingEngine:
                     with self._lock:
                         run.last_event_type = "clearing.done"
                         run.current_phase = None
+
+                    # Provide authoritative edges for visualization: what was actually touched by clearing.
+                    done_cycle_edges: list[dict[str, str]] | None = None
+                    if touched_edges:
+                        pairs = sorted(touched_edges)
+                        if max_fx_edges > 0 and len(pairs) > max_fx_edges:
+                            pairs = pairs[:max_fx_edges]
+                        done_cycle_edges = [{"from": a, "to": b} for (a, b) in pairs]
                     emitter.emit_clearing_done(
                         run_id=run_id,
                         run=run,
@@ -548,6 +516,7 @@ class RealClearingEngine:
                         plan_id=plan_id,
                         cleared_cycles=cleared_cycles,
                         cleared_amount=cleared_amount_str,
+                        cycle_edges=done_cycle_edges,
                         node_patch=node_patch_list,
                         edge_patch=edge_patch_list,
                     )
