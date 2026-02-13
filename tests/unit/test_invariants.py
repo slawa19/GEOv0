@@ -116,7 +116,14 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
 
     abort_called = {"called": False}
 
-    async def _abort_noop(_tx_id: str, reason: str = "Aborted", *, commit: bool = True):
+    async def _abort_noop(
+        _tx_id: str,
+        reason: str = "Aborted",
+        *,
+        commit: bool = True,
+        error_code: str | None = None,
+        details: dict | None = None,
+    ):
         abort_called["called"] = True
         return True
 

@@ -117,6 +117,16 @@ MVP-контракт событий **точно равен** union `SimulatorEv
 - ошибки отдельных платежей выражаются через `tx.failed`
 - фатальная ошибка прогона выражается через `run_status.state="error"` + `last_error`
 
+5) `audit.drift`
+- Назначение: сигнал о нарушении целостности данных (Lost Update / Data Corruption), обнаруженном Post-Tick Audit.
+- Обязательные поля:
+  - `event_id`, `ts`, `type="audit.drift"`, `equivalent`
+  - `severity`: "warning" | "critical"
+  - `total_drift`: строка (сумма модулей расхождений)
+- Опциональные поля:
+  - `drifts[]`: список деталей по участникам (`participant_id`, `expected_delta`, `actual_delta`, `drift`)
+  - `source`: "post_tick_audit" | "delta_check"
+
 #### 2.2.3 Системные события
 - `run_status` — обязательное для MVP событие статуса:
   - эмитить при смене состояния (`start/pause/resume/stop/error`)
@@ -239,5 +249,22 @@ MVP-контракт событий **точно равен** union `SimulatorEv
     "at": "2026-01-28T12:00:03.000Z",
     "details": {"status_code": 409}
   }
+}
+```
+
+### A.5 `audit.drift`
+```json
+{
+  "event_id": "evt_audit_drift_001",
+  "ts": "2026-02-13T10:00:00.000Z",
+  "type": "audit.drift",
+  "source": "post_tick_audit",
+  "severity": "critical",
+  "equivalent": "UAH",
+  "total_drift": "30.00",
+  "drifts": [
+    {"participant_id": "p1", "drift": "30.00"},
+    {"participant_id": "p2", "drift": "-30.00"}
+  ]
 }
 ```

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -665,7 +666,7 @@ async def test_adaptive_coordinator_processes_equivalents_in_sorted_order(
         planned_len=0,
         tick_t0=0.0,
         clearing_enabled=True,
-        safe_int_env=lambda k, d: int(monkeypatch.getenv(k, str(d))),
+        safe_int_env=lambda k, d: int(os.getenv(k, str(d))),
         run_clearing=lambda: None,
         run_clearing_for_eq=spy_clearing,
         payments_result=_FakePaymentsResult(),

@@ -107,7 +107,7 @@ class RealTickOrchestrator:
         )
 
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=grace_sec)
+            await asyncio.wait_for(task, timeout=grace_sec)
         except asyncio.TimeoutError:
             rr._logger.warning(
                 "simulator.real.pending_clearing_grace_timeout run_id=%s tick=%s grace_sec=%s",
@@ -191,6 +191,16 @@ class RealTickOrchestrator:
         if clearing_task is not None:
             try:
                 clearing_task.cancel()
+            except Exception:
+                pass
+            # Best-effort: await cancellation so we don't leave a background task
+            # running after transitioning the run into error.
+            try:
+                await asyncio.wait_for(clearing_task, timeout=1.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                pass
             except Exception:
                 pass
 

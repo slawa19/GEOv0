@@ -592,6 +592,7 @@ async def test_super_smoke_part2_real_logic_deterministic(
             import hashlib
             import threading
 
+            from sqlalchemy import select
             from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
             from app.core.payments.service import PaymentService
@@ -601,6 +602,7 @@ async def test_super_smoke_part2_real_logic_deterministic(
             from app.db.models.debt import Debt
             from app.db.models.equivalent import Equivalent
             from app.db.models.participant import Participant
+            from app.db.models.transaction import Transaction
             from app.db.models.trustline import TrustLine
 
             def _pubkey(seed: str) -> str:
@@ -643,7 +645,37 @@ async def test_super_smoke_part2_real_logic_deterministic(
             )
             await db_session.commit()
 
-            # Nested payment (regression guard for transaction context misuse).
+            id_to_pid = {a.id: a.pid, b.id: b.pid, c.id: c.pid}
+
+            async def _net_positions() -> dict[str, Decimal]:
+                rows = (
+                    await db_session.execute(
+                        select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(Debt.equivalent_id == eq.id)
+                    )
+                ).all()
+                incoming: dict[str, Decimal] = {}
+                outgoing: dict[str, Decimal] = {}
+                for debtor_id, creditor_id, amount in rows:
+                    amt = Decimal(str(amount or 0))
+                    if amt == 0:
+                        continue
+
+                    debtor_pid = id_to_pid.get(debtor_id)
+                    creditor_pid = id_to_pid.get(creditor_id)
+                    if debtor_pid is not None:
+                        outgoing[debtor_pid] = outgoing.get(debtor_pid, Decimal("0")) + amt
+                    if creditor_pid is not None:
+                        incoming[creditor_pid] = incoming.get(creditor_pid, Decimal("0")) + amt
+
+                pids = set(incoming.keys()) | set(outgoing.keys())
+                out: dict[str, Decimal] = {}
+                for pid in pids:
+                    out[pid] = incoming.get(pid, Decimal("0")) - outgoing.get(pid, Decimal("0"))
+                return out
+
+            net_before = await _net_positions()
+
+            # Nested payments (regression guard for transaction context misuse).
             svc = PaymentService(db_session)
             async with db_session.begin_nested():
                 await svc.create_payment_internal(
@@ -651,10 +683,67 @@ async def test_super_smoke_part2_real_logic_deterministic(
                     to_pid=b.pid,
                     equivalent="UAH",
                     amount="1.00",
-                    idempotency_key="super-smoke-nested-payment",
+                    idempotency_key="super-smoke-p1",
+                    commit=False,
+                )
+                await svc.create_payment_internal(
+                    b.id,
+                    to_pid=c.pid,
+                    equivalent="UAH",
+                    amount="2.00",
+                    idempotency_key="super-smoke-p2",
+                    commit=False,
+                )
+                await svc.create_payment_internal(
+                    c.id,
+                    to_pid=a.pid,
+                    equivalent="UAH",
+                    amount="3.00",
+                    idempotency_key="super-smoke-p3",
                     commit=False,
                 )
             await db_session.commit()
+
+            # T7: per-participant balance consistency.
+            # Clearing should preserve per-participant net positions; only payments should shift net.
+            net_after_payments = await _net_positions()
+
+            expected_delta: dict[str, Decimal] = {}
+            tx_ids = ["super-smoke-p1", "super-smoke-p2", "super-smoke-p3"]
+            txs = (
+                await db_session.execute(
+                    select(Transaction).where(
+                        Transaction.type == "PAYMENT",
+                        Transaction.state == "COMMITTED",
+                        Transaction.tx_id.in_(tx_ids),
+                    )
+                )
+            ).scalars().all()
+            if len(txs) != len(tx_ids):
+                raise _SuperSimFailure(f"Expected {len(tx_ids)} COMMITTED PAYMENT txs, got {len(txs)}")
+
+            for tx in txs:
+                payload = tx.payload or {}
+                from_pid = str(payload.get("from") or "").strip()
+                to_pid = str(payload.get("to") or "").strip()
+                amt = Decimal(str(payload.get("amount") or "0"))
+                if not from_pid or not to_pid or amt == 0:
+                    raise _SuperSimFailure(f"Unexpected PAYMENT payload for per-participant audit: {payload}")
+
+                expected_delta[from_pid] = expected_delta.get(from_pid, Decimal("0")) - amt
+                expected_delta[to_pid] = expected_delta.get(to_pid, Decimal("0")) + amt
+
+            tol = Decimal("0.00000001")
+            for pid in {a.pid, b.pid, c.pid}:
+                before = net_before.get(pid, Decimal("0"))
+                after_pay = net_after_payments.get(pid, Decimal("0"))
+                actual = after_pay - before
+                exp = expected_delta.get(pid, Decimal("0"))
+                if abs(actual - exp) > tol:
+                    raise _SuperSimFailure(
+                        f"Per-participant net drift after payments for pid={pid}: actual_delta={actual} expected_delta={exp} "
+                        f"net_before={before} net_after_payments={after_pay}"
+                    )
 
             class _CaptureSse:
                 def __init__(self) -> None:
@@ -714,6 +803,18 @@ async def test_super_smoke_part2_real_logic_deterministic(
                 broadcast_topology_edge_patch=_no_topology_patch,
                 async_session_local=async_session_local,
             )
+
+            net_after = await _net_positions()
+            for pid in {a.pid, b.pid, c.pid}:
+                after = net_after.get(pid, Decimal("0"))
+                after_pay = net_after_payments.get(pid, Decimal("0"))
+                if abs(after - after_pay) > tol:
+                    raise _SuperSimFailure(
+                        f"Clearing must preserve net positions for pid={pid}: net_after_payments={after_pay} net_after_clearing={after}"
+                    )
+
+            if abs(sum(net_after.values(), Decimal("0"))) > tol:
+                raise _SuperSimFailure(f"Net positions must remain zero-sum: net_after={net_after}")
 
             dump.add_extra({"phase": "part2.all_sse_events", "events": sse.events})
 

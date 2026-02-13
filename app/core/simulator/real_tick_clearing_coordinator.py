@@ -450,7 +450,7 @@ class RealTickClearingCoordinator:
 
         try:
             clearing_volume_by_eq = await asyncio.wait_for(
-                asyncio.shield(clearing_task),
+                clearing_task,
                 timeout=clearing_hard_timeout_sec,
             )
             with self._lock:
@@ -463,13 +463,20 @@ class RealTickClearingCoordinator:
                 tick_index,
                 clearing_hard_timeout_sec,
             )
-            # IMPORTANT:
-            # Do NOT cancel the background task here.
-            # It may be running under asyncio.shield() and cancellation can be
-            # unreliable / lead to confusing partial execution semantics.
-            # The next tick is responsible for awaiting (bounded grace) and then
-            # cancelling if still stuck.
+            # Managed timeout: cancel best-effort so we don't leak background clearing.
+            try:
+                clearing_task.cancel()
+            except Exception:
+                pass
+            try:
+                await clearing_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
             with self._lock:
+                if run._real_clearing_task is clearing_task:
+                    run._real_clearing_task = None
                 run.current_phase = None
         except Exception:
             with self._lock:

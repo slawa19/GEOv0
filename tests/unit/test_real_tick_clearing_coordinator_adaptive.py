@@ -243,7 +243,7 @@ async def test_adaptive_tick_budget_caps_multi_equivalent_clearing(monkeypatch) 
         payments_result=payments_result,
     )
 
-    assert calls == ["USD"]
+    assert calls == [sorted(equivalents)[0]]
 
 
 @pytest.mark.asyncio
@@ -306,5 +306,5 @@ async def test_adaptive_max_eq_per_tick_caps_multi_equivalent_clearing() -> None
         payments_result=payments_result,
     )
 
-    assert calls == ["USD"]
+    assert calls == [sorted(equivalents)[0]]
 

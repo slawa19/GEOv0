@@ -536,6 +536,7 @@ class PaymentService:
                                 tx_id_str,
                                 reason=str(getattr(e, "message", None) or str(e)),
                                 error_code=getattr(e, "code", ErrorCode.E010),
+                                details=getattr(e, "details", None),
                                 commit=True,
                             )
                         else:
@@ -544,6 +545,7 @@ class PaymentService:
                                     tx_id_str,
                                     reason=str(getattr(e, "message", None) or str(e)),
                                     error_code=getattr(e, "code", ErrorCode.E010),
+                                    details=getattr(e, "details", None),
                                     commit=False,
                                 )
                             except Exception:

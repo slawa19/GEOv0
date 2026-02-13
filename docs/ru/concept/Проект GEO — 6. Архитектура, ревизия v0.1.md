@@ -263,7 +263,8 @@ Hub:
 - `debtor` (PID_X) — должник;
 - `creditor` (PID_Y) — кредитор;
 - `equivalent` (E);
-- `amount` > 0 — текущая сумма долга.
+- `amount` > 0 — текущая сумма долга;
+- `version` (int) — для optimistic concurrency control (каждое изменение инкрементирует версию).
 
 Интерпретация:
 

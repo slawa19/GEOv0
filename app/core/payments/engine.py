@@ -785,6 +785,8 @@ class PaymentEngine:
                 await self.abort(
                     tx_id,
                     reason=f"Invariant violation: {exc.code}",
+                    error_code=getattr(exc, "code", None),
+                    details=getattr(exc, "details", None),
                     commit=commit,
                 )
                 raise

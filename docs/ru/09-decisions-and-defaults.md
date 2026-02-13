@@ -196,6 +196,20 @@ Real mode: артефакты (dev perf)
 - Демо-кнопки (Single TX / Run Clearing) реализуются как backend actions, которые эмитят те же `tx.updated` / `clearing.*`.
 - Спецификация: [simulator/backend/backend-driven-demo-mode-spec.md](simulator/backend/backend-driven-demo-mode-spec.md)
 
+### 1.12. Защита конкурентных платежей и клиринга (Concurrency Control)
+
+Для предотвращения Lost Update при одновременной работе фонового клиринга и пользовательских платежей принята стратегия **Defence in Depth**:
+
+| Уровень | Механизм | Реализация |
+|---|---|---|
+| **L1: Prevention** | Optimistic Locking | Поле `Debt.version` (Integer). При UPDATE проверяется `WHERE version = OLD`. При конфликте (`StaleDataError`) — автоматический retry (до 3 раз) с перечитыванием состояния. |
+| **L2: Detection** | Post-Tick Audit | В real-mode симулятора после каждого тика сверяется изменение балансов в БД с суммой committed транзакций. При расхождении эмиттится SSE событие `audit.drift` и запись в `IntegrityAuditLog`. |
+| **L3: Invariant** | In-transaction Check | Внутри транзакции платежа (`PaymentEngine.commit`) проверяется дельта балансов до и после операций. При несовпадении (из-за триггеров или side-effects) транзакция откатывается (`IntegrityViolation`). |
+
+Управление фоновыми задачами клиринга:
+- `asyncio.shield` запрещён для длинных операций в `RealTickOrchestrator`.
+- Задачи клиринга, не уложившиеся в time budget, отменяются (`task.cancel()`) и ожидаются, чтобы гарантировать освобождение ресурсов БД до начала следующей фазы платежей.
+
 ---
 
 ## 2. Дефолты и лимиты

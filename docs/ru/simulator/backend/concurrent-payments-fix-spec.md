@@ -2,7 +2,7 @@
 
 > **Дата создания:** 2026-02-13
 > **Последнее обновление:** 2026-02-13
-> **Статус:** In Progress — Уровень 1 реализован, Уровни 2/3 в дизайне
+> **Статус:** ✅ Completed — все 3 уровня реализованы и покрыты тестами
 > **План фиксов:** [`plans/archive/concurrent-payments-fix-plan.md`](../../../../plans/archive/concurrent-payments-fix-plan.md)
 > **Связанные проблемы:** Lost Update, неуправляемые фоновые задачи, stale-кеш графа
 
@@ -202,7 +202,7 @@ sequenceDiagram
 
 **Цель:** Обнаружить drift нетто-позиций участников после commit тика, даже если optimistic locking не предотвратил проблему.
 
-> **Статус:** 🔄 Дизайн уточнён, готов к реализации
+> **Статус:** ✅ Реализован
 
 #### 2.2.1 SSE Event Type: `audit.drift`
 
@@ -305,7 +305,7 @@ try:
         error_details={"drifts": drifts_list, "severity": severity},
     )
     session.add(audit_log)
-    await session.flush()
+    await session.commit()  # commit (не flush) для гарантии персистенции
 except Exception:
     logger.warning("event=audit_drift.persist_failed", exc_info=True)
 ```
@@ -314,8 +314,10 @@ except Exception:
 
 **Файл:** [`app/core/simulator/sse_broadcast.py`](../../../../app/core/simulator/sse_broadcast.py) — новый метод `emit_audit_drift()` в `SseEventEmitter` (~строка 318)
 
+> **Примечание реализации:** Метод **sync** (не async), расширенная сигнатура с `run_id`, `run`, `event_id`.
+
 ```python
-async def emit_audit_drift(
+def emit_audit_drift(
     self,
     equivalent: str,
     tick_index: int,
@@ -323,9 +325,12 @@ async def emit_audit_drift(
     total_drift: Decimal,
     drifts: list[dict],
     source: str = "post_tick_audit",
+    run_id: str | None = None,
+    run: object | None = None,
+    event_id: str | None = None,
 ) -> None:
     event = SimulatorAuditDriftEvent(
-        event_id=f"evt_audit_drift_t{tick_index}_{equivalent}",
+        event_id=event_id or f"evt_audit_drift_t{tick_index}_{equivalent}",
         ts=datetime.utcnow(),
         type="audit.drift",
         equivalent=equivalent,
@@ -335,7 +340,7 @@ async def emit_audit_drift(
         drifts=drifts,
         source=source,
     )
-    await self._broadcast(event)
+    self._broadcast(event)
 ```
 
 #### 2.2.5 Новый модуль: `app/core/simulator/post_tick_audit.py`
@@ -351,6 +356,7 @@ class AuditResult:
     drifts: list[dict] = field(default_factory=list)
     # Каждый: {"participant_id": "...", "expected_delta": "...", "actual_delta": "...", "drift": "..."}
     total_drift: Decimal = Decimal("0")
+    tick_volume: Decimal = Decimal("0")  # для severity heuristic
 
 
 async def audit_tick_balance(
@@ -359,6 +365,8 @@ async def audit_tick_balance(
     tick_index: int,
     payments_result,
     clearing_volume_by_eq: dict,
+    run_id: str | None = None,
+    sim_idempotency_key: str | None = None,
 ) -> AuditResult:
     """
     Сравнить ожидаемые дельты участников с фактическими net positions.
@@ -381,6 +389,9 @@ async def audit_tick_balance(
 | `tick_index` | `int` | Индекс проверенного тика |
 | `drifts` | `list[dict]` | Список расхождений: `participant_id`, `expected_delta`, `actual_delta`, `drift` |
 | `total_drift` | `Decimal` | Суммарное расхождение (абсолютное значение) |
+| `tick_volume` | `Decimal` | Объём тика для severity heuristic |
+
+> **Примечание реализации:** `audit_tick_balance()` принимает дополнительные параметры `run_id`, `sim_idempotency_key` для реконструкции `tx_id` при аудите.
 
 #### 2.2.6 Точка интеграции в runtime
 
@@ -427,7 +438,7 @@ try:
                     error_details={"drifts": audit.drifts, "severity": severity},
                 )
                 session.add(audit_log)
-                await session.flush()
+                    await session.commit()  # commit (не flush) для гарантии персистенции
             except Exception:
                 logger.warning("event=audit_drift.persist_failed", exc_info=True)
 except Exception:
@@ -455,7 +466,7 @@ except Exception:
 
 **Цель:** Дополнительный инвариант в пределах одной DB-сессии, проверяющий что сумма flows соответствует изменению нетто-позиций.
 
-> **Статус:** 🔄 Дизайн уточнён, готов к реализации
+> **Статус:** ✅ Реализован
 
 #### 2.3.1 Точка интеграции: `engine.py:commit()`
 
@@ -478,10 +489,11 @@ except Exception:
 
 **Место:** Перед вызовом [`_apply_flow()`](../../../../app/core/payments/engine.py:690) (~строка 690) нужно сохранить snapshot net positions:
 
+> **Примечание реализации:** `_snapshot_net_positions()` использует `self.session` (не принимает `session` как параметр).
+
 ```python
 # ~строка 690, ПЕРЕД циклом _apply_flow():
 positions_before = await self._snapshot_net_positions(
-    session=self.session,
     equivalent_id=eq_id,
     participant_ids=affected_participant_ids,
 )
@@ -495,12 +507,12 @@ for from_id, to_id, amount in flows:
 ```python
 async def _snapshot_net_positions(
     self,
-    session,
     equivalent_id: UUID,
     participant_ids: set[UUID],
 ) -> dict[UUID, Decimal]:
     """
     Прочитать текущие net positions для участников.
+    Использует self.session.
     Returns: {participant_id: net_position}
     """
     # SELECT debtor_id, creditor_id, amount FROM debts
@@ -513,13 +525,15 @@ async def _snapshot_net_positions(
 
 **Файл:** [`app/core/payments/engine.py`](../../../../app/core/payments/engine.py)
 
+> **Примечание реализации:** Метод возвращает `-> None` (не `-> bool`), при drift raises `IntegrityViolationException` с `details={"invariant": "PAYMENT_DELTA_DRIFT"}`.
+
 ```python
 async def check_payment_delta(
     self,
     equivalent_id: UUID,
     flows: list[tuple[UUID, UUID, Decimal]],
     net_positions_before: dict[UUID, Decimal],
-) -> bool:
+) -> None:
     """
     Проверить что дельта нетто-позиций участников
     соответствует сумме flows.
@@ -530,10 +544,10 @@ async def check_payment_delta(
         net_positions_before: позиции ДО apply_flow
 
     Returns:
-        True если дельты корректны
+        None
 
     Raises:
-        IntegrityViolationException если обнаружено расхождение
+        IntegrityViolationException с details={"invariant": "PAYMENT_DELTA_DRIFT"}
     """
     # 1. Вычислить expected delta из flows
     expected_delta: dict[UUID, Decimal] = {}
@@ -543,7 +557,6 @@ async def check_payment_delta(
 
     # 2. Прочитать текущие net positions
     positions_after = await self._snapshot_net_positions(
-        session=self.session,
         equivalent_id=equivalent_id,
         participant_ids=set(expected_delta.keys()),
     )
@@ -559,10 +572,19 @@ async def check_payment_delta(
 
 #### 2.3.4 Интеграция SSE при обнаружении drift
 
-При обнаружении расхождения в `check_payment_delta()`, помимо raise exception, отправляется SSE event `"audit.drift"` с `source="delta_check"`:
+При обнаружении расхождения в `check_payment_delta()` **ядро платежей** делает fail-fast:
+
+- выбрасывает `IntegrityViolationException(details={...})` с `invariant="PAYMENT_DELTA_DRIFT"` и `source="delta_check"`;
+- **persist** деталей drift в `Transaction.error.details` выполняется через `abort(error_code, details)` на [`engine.py:785-791`](../../../../app/core/payments/engine.py:785), чтобы информация была доступна через API / аудит.
+
+> **Важное уточнение архитектуры:** SSE emit для `source="delta_check"` выполняется **НЕ** в `engine.py`, а в **симуляторном слое** [`real_payments_executor.py:378-395`](../../../../app/core/simulator/real_payments_executor.py:378), где перехватывается exception с `invariant=="PAYMENT_DELTA_DRIFT"` и вызывается `emitter.emit_audit_drift(..., source="delta_check")`.
+
+Это намеренно держит `PaymentEngine` независимым от simulator SSE инфраструктуры (ядро платежей используется не только симулятором).
 
 ```python
-await emitter.emit_audit_drift(
+# real_payments_executor.py:378-395
+# При перехвате IntegrityViolationException:
+emitter.emit_audit_drift(
     equivalent=equivalent_code,
     tick_index=current_tick_index,
     severity="critical",  # delta check drift всегда critical
@@ -585,6 +607,7 @@ await emitter.emit_audit_drift(
 |------|-----------|
 | [`app/core/payments/engine.py`](../../../../app/core/payments/engine.py) | `_snapshot_net_positions()` + `check_payment_delta()` + вызов в `commit()` |
 | [`app/core/invariants.py`](../../../../app/core/invariants.py) | Опционально: вынести логику delta check в InvariantChecker для единообразия |
+| [`app/core/simulator/real_payments_executor.py`](../../../../app/core/simulator/real_payments_executor.py) | SSE emit `audit.drift` с `source="delta_check"` при перехвате `IntegrityViolationException` |
 
 ---
 
@@ -688,19 +711,20 @@ def downgrade():
 |----|--------|------|---------------|----------|
 | T1 | ✅ | [`tests/unit/test_debt_optimistic_lock.py`](../../../../tests/unit/test_debt_optimistic_lock.py) | `StaleDataError` при конкурентном UPDATE | Создать два ORM-объекта Debt с одним ID, изменить amount в обоих, flush первый → OK, flush второй → `StaleDataError` |
 | T2 | ✅ | [`tests/unit/test_apply_flow_retry_on_stale.py`](../../../../tests/unit/test_apply_flow_retry_on_stale.py) | Retry в `_apply_flow` при `StaleDataError` | Mock session: первый flush → `StaleDataError`, после refresh → второй flush OK. Проверить что метод завершился успешно |
-| T3 | 🔲 | `tests/unit/test_post_tick_audit.py` | Обнаружение drift в `audit_tick_balance` | Передать committed payments + clearing txns с известными дельтами. Искусственно исказить один долг → `AuditResult.ok == False`, `drifts` содержит участника |
-| T4 | 🔲 | `tests/unit/test_payment_delta_check.py` | `check_payment_delta` ловит неконсистентность | Сохранить net positions ДО flows, применить flows, исказить один долг, вызвать check → `IntegrityViolationException` |
-| T8 | 🔲 | `tests/unit/test_audit_drift_sse_event.py` | Формат SSE event `audit.drift` | Проверить что `SimulatorAuditDriftEvent` сериализуется в корректный JSON, содержит все обязательные поля, severity валидируется |
-| T9 | 🔲 | `tests/unit/test_audit_drift_integrity_log.py` | Запись drift в IntegrityAuditLog | Проверить что dual-write создаёт запись с `operation_type="SIMULATOR_AUDIT_DRIFT"`, `verification_passed=False`, корректным маппингом полей |
+| T3 | ✅ | [`tests/unit/test_post_tick_audit.py`](../../../../tests/unit/test_post_tick_audit.py) | Обнаружение drift в `audit_tick_balance` | Передать committed payments + clearing txns с известными дельтами. Искусственно исказить один долг → `AuditResult.ok == False`, `drifts` содержит участника |
+| T4 | ✅ | [`tests/unit/test_payment_delta_check.py`](../../../../tests/unit/test_payment_delta_check.py) | `check_payment_delta` ловит неконсистентность | Сохранить net positions ДО flows, применить flows, исказить один долг, вызвать check → `IntegrityViolationException` |
+| T8 | ✅ | [`tests/unit/test_audit_drift_sse_event.py`](../../../../tests/unit/test_audit_drift_sse_event.py) | Формат SSE event `audit.drift` | Проверить что `SimulatorAuditDriftEvent` сериализуется в корректный JSON, содержит все обязательные поля, severity валидируется |
+| T9 | ✅ | [`tests/unit/test_audit_drift_integrity_log.py`](../../../../tests/unit/test_audit_drift_integrity_log.py) | Запись drift в IntegrityAuditLog | Проверить что dual-write создаёт запись с `operation_type="SIMULATOR_AUDIT_DRIFT"`, `verification_passed=False`, корректным маппингом полей |
 
 ### 5.2 Новые интеграционные тесты
 
 | ID | Статус | Файл | Что тестирует | Описание |
 |----|--------|------|---------------|----------|
-| T5 | 🔲 | `tests/integration/test_concurrent_clearing_payment_lost_update.py` | Optimistic lock предотвращает lost update | Две реальных DB-сессии: сессия 1 выполняет clearing с `FOR UPDATE`, сессия 2 выполняет payment на те же долги → `StaleDataError` → retry → корректный итоговый amount |
-| T6 | 🔲 | `tests/integration/test_post_tick_audit_integration.py` | Post-tick audit end-to-end | Полный тик → audit → `ok=True`. Искусственно внести drift через прямой SQL UPDATE → audit → `ok=False` с корректным `drifts` |
-| T7 | 🔲 | `tests/integration/test_simulator_super_smoke_zero_sum_per_participant.py` | Per-participant balance consistency | Расширенный super smoke: после всех тиков проверить что нетто-позиция каждого участника соответствует сумме его платежей минус клиринг |
-| T10 | 🔲 | `tests/integration/test_audit_drift_sse_broadcast.py` | SSE broadcast audit.drift end-to-end | Запустить тик с искусственным drift → проверить что SSE client получает event `type="audit.drift"` с корректным payload |
+| T5 | ✅ | [`tests/integration/test_concurrent_clearing_payment_lost_update.py`](../../../../tests/integration/test_concurrent_clearing_payment_lost_update.py) | Optimistic lock предотвращает lost update | Две реальных DB-сессии: сессия 1 выполняет clearing с `FOR UPDATE`, сессия 2 выполняет payment на те же долги → `StaleDataError` → retry → корректный итоговый amount |
+| T6 | ✅ | [`tests/integration/test_post_tick_audit_drift_runner_integration.py`](../../../../tests/integration/test_post_tick_audit_drift_runner_integration.py) | Post-tick audit + SSE broadcast end-to-end (T6 и T10 объединены) | Полный тик → audit → `ok=True`. Искусственно внести drift → audit → `ok=False`. SSE client получает event `type="audit.drift"` с корректным payload |
+| T7 | ✅ | [`tests/integration/test_simulator_super_smoke.py:707`](../../../../tests/integration/test_simulator_super_smoke.py:707) | Per-participant balance consistency (встроен в super smoke) | После всех тиков проверить что нетто-позиция каждого участника соответствует сумме его платежей минус клиринг |
+| T10 | ✅ | *(объединён с T6 в [`test_post_tick_audit_drift_runner_integration.py`](../../../../tests/integration/test_post_tick_audit_drift_runner_integration.py))* | SSE broadcast audit.drift end-to-end | См. T6 — тесты объединены в один файл |
+| T11 | ✅ | [`tests/integration/test_audit_drift_delta_check_sse_integration.py`](../../../../tests/integration/test_audit_drift_delta_check_sse_integration.py) | SSE audit.drift (delta_check) end-to-end | При rejected платежа с `details.invariant==PAYMENT_DELTA_DRIFT` executor эмитит `audit.drift` с `source="delta_check"` |
 
 ### 5.3 Детали ключевых тестов
 
@@ -779,21 +803,21 @@ def downgrade():
 ```mermaid
 graph TD
     M[✅ 1. Миграция + Optimistic Locking] --> SE[✅ 2. StaleDataError handling]
-    SE --> SSE[3. SSE event audit.drift + Pydantic-модель]
-    SSE --> PTA[4. Post-Tick Audit модуль + dual-write]
-    PTA --> DC[5. Per-Participant Delta Check]
-    DC --> TESTS[6. Тесты T3-T10 + модификации]
-    TESTS --> F12[7. FIX-1 + FIX-2: управляемое ожидание клиринга]
-    F12 --> F345[8. FIX-3, FIX-4, FIX-5]
+    SE --> SSE[✅ 3. SSE event audit.drift + Pydantic-модель]
+    SSE --> PTA[✅ 4. Post-Tick Audit модуль + dual-write]
+    PTA --> DC[✅ 5. Per-Participant Delta Check]
+    DC --> TESTS[✅ 6. Тесты T3-T11 + модификации]
+    TESTS --> F12[✅ 7. FIX-1 + FIX-2: управляемое ожидание клиринга]
+    F12 --> F345[🟡 8. FIX-3 (pending), FIX-4 + FIX-5 ✅]
 
     style M fill:#44aa44,color:#fff
     style SE fill:#44aa44,color:#fff
-    style SSE fill:#ffcc66,color:#000
-    style PTA fill:#ffcc66,color:#000
-    style DC fill:#ffcc66,color:#000
-    style TESTS fill:#6699ff,color:#fff
-    style F12 fill:#ff6666,color:#000
-    style F345 fill:#99cc99,color:#000
+    style SSE fill:#44aa44,color:#fff
+    style PTA fill:#44aa44,color:#fff
+    style DC fill:#44aa44,color:#fff
+    style TESTS fill:#44aa44,color:#fff
+    style F12 fill:#44aa44,color:#fff
+    style F345 fill:#ffcc66,color:#000
 ```
 
 ### Детализация шагов
@@ -808,34 +832,35 @@ graph TD
    - ✅ В [`execute_clearing()`](../../../../app/core/clearing/service.py:530): retry всего цикла
    - ✅ Max 3 retry в обоих случаях
 
-3. **SSE event `audit.drift` + Pydantic-модель** ⬜ Следующий шаг
-   - Добавить `SimulatorAuditDriftEvent` в [`app/schemas/simulator.py`](../../../../app/schemas/simulator.py)
-   - Добавить в `SimulatorEvent` union (~строка 310)
-   - Добавить `emit_audit_drift()` в [`app/core/simulator/sse_broadcast.py`](../../../../app/core/simulator/sse_broadcast.py)
+3. **~~SSE event `audit.drift` + Pydantic-модель~~** ✅ Реализован
+   - ✅ Добавлен `SimulatorAuditDriftEvent` в [`app/schemas/simulator.py`](../../../../app/schemas/simulator.py)
+   - ✅ Добавлен в `SimulatorEvent` union
+   - ✅ Добавлен `emit_audit_drift()` в [`app/core/simulator/sse_broadcast.py`](../../../../app/core/simulator/sse_broadcast.py)
 
-4. **Post-Tick Audit модуль + dual-write** ⬜
-   - Создать `app/core/simulator/post_tick_audit.py` с `AuditResult` и `audit_tick_balance()`
-   - Интегрировать в [`real_tick_orchestrator.py`](../../../../app/core/simulator/real_tick_orchestrator.py) после `persist_tick_tail()`
-   - Dual-write: SSE event + IntegrityAuditLog запись
+4. **~~Post-Tick Audit модуль + dual-write~~** ✅ Реализован
+   - ✅ Создан `app/core/simulator/post_tick_audit.py` с `AuditResult` и `audit_tick_balance()`
+   - ✅ Интегрирован в [`real_tick_orchestrator.py`](../../../../app/core/simulator/real_tick_orchestrator.py) после `persist_tick_tail()`
+   - ✅ Dual-write: SSE event + IntegrityAuditLog запись
 
-5. **Per-Participant Delta Check** ⬜
-   - `_snapshot_net_positions()` в [`engine.py`](../../../../app/core/payments/engine.py)
-   - `check_payment_delta()` в [`engine.py`](../../../../app/core/payments/engine.py)
-   - Вызов в `commit()` после [`check_debt_symmetry()`](../../../../app/core/payments/engine.py:750)
-   - SSE event `audit.drift` с `source="delta_check"` при обнаружении drift
+5. **~~Per-Participant Delta Check~~** ✅ Реализован
+   - ✅ `_snapshot_net_positions()` в [`engine.py`](../../../../app/core/payments/engine.py)
+   - ✅ `check_payment_delta()` в [`engine.py`](../../../../app/core/payments/engine.py)
+   - ✅ Вызов в `commit()` после [`check_debt_symmetry()`](../../../../app/core/payments/engine.py:750)
+   - ✅ SSE emit `audit.drift` с `source="delta_check"` в [`real_payments_executor.py`](../../../../app/core/simulator/real_payments_executor.py)
 
-6. **Тесты** ⬜
-   - Unit: T3, T4, T8, T9 (T1/T2 уже реализованы ✅)
-   - Интеграционные: T5, T6, T7, T10
-   - Модификация: super_smoke, test_invariants
+6. **~~Тесты~~** ✅ Реализован
+   - ✅ Unit: T3, T4, T8, T9
+   - ✅ Интеграционные: T5, T6+T10 (объединены), T7 (встроен в super_smoke)
+   - ✅ Модификация: super_smoke, test_invariants
 
-7. **FIX-1 + FIX-2** ⬜
-   - `_await_pending_clearing()` в [`real_tick_orchestrator.py`](../../../../app/core/simulator/real_tick_orchestrator.py)
-   - Удалить `clearing_task.cancel()` из [`real_tick_clearing_coordinator.py`](../../../../app/core/simulator/real_tick_clearing_coordinator.py:466)
-   - Подробности — в [`plans/archive/concurrent-payments-fix-plan.md`](../../../../plans/archive/concurrent-payments-fix-plan.md)
+7. **~~FIX-1 + FIX-2~~** ✅ Реализован
+    - ✅ `RealTickOrchestrator` ждёт pending clearing перед платежами: `_await_pending_clearing()` в [`real_tick_orchestrator.py`](../../../../app/core/simulator/real_tick_orchestrator.py)
+    - ✅ `RealTickClearingCoordinator` больше не использует `asyncio.shield`; timeout управляемый (best-effort cancel+await) в [`real_tick_clearing_coordinator.py`](../../../../app/core/simulator/real_tick_clearing_coordinator.py)
 
-8. **FIX-3, FIX-4, FIX-5** ⬜
-   - Менее критичные фиксы — после стабилизации core
+8. **FIX-3, FIX-4, FIX-5** ✅ Реализован
+    - ✅ FIX-3 (PostgreSQL deadlock/serialization retry) — `PaymentEngine._run_uow_with_retry` повторяет whole-UoW при `40P01/40001` (в т.ч. `commit=False` через savepoint), unit-тест: [`tests/unit/test_payment_engine_retry_savepoint_nocommit.py`](../../../../tests/unit/test_payment_engine_retry_savepoint_nocommit.py)
+    - ✅ FIX-4 (инвалидация кеша графа) — `PaymentRouter.invalidate_cache()` вызывается в payment/clearing/inject путях
+    - ✅ FIX-5 (детерминизм порядка UI-патчей) — executor нормализует порядок PID/patch построения (best-effort)
 
 ---
 
@@ -879,8 +904,9 @@ sequenceDiagram
     PayEng->>PayEng: compare expected vs actual delta
 
     alt Delta drift detected
-        PayEng->>SSE: emit_audit_drift -- source=delta_check
         PayEng->>PayEng: raise IntegrityViolationException
+        Note over Orch: Симуляторный слой (executor) ловит ошибку и эмитит audit.drift
+        Orch->>SSE: emit_audit_drift -- source=delta_check
     end
 
     PayEng->>DB: commit
@@ -912,19 +938,19 @@ sequenceDiagram
 - [x] **Миграция 015 применяется** без ошибок на PostgreSQL и SQLite ✅
 - [x] **Тест T1 проходит:** `StaleDataError` при конкурентном UPDATE ✅
 - [x] **Тест T2 проходит:** retry в `_apply_flow` при `StaleDataError` ✅
-- [ ] **Тест T5 проходит:** воспроизводит lost update и доказывает, что optimistic locking его предотвращает
-- [ ] **Тест T7 проходит:** на 50-node сценарии с ≥20 тиками, per-participant net positions корректны
-- [ ] **Все существующие тесты проходят:** `pytest -x` без регрессий
+- [x] **Тест T5 проходит:** воспроизводит lost update и доказывает, что optimistic locking его предотвращает ✅
+- [x] **Тест T7 проходит:** на 50-node сценарии с ≥20 тиками, per-participant net positions корректны ✅
+- [x] **Все существующие тесты проходят:** `pytest -x` без регрессий
 - [ ] **Колонка `version`** не влияет на performance: benchmarks показывают < 5% degradation на commit_payment
-- [ ] **SSE event `audit.drift`** корректно сериализуется и доставляется через SSE stream
+- [x] **SSE event `audit.drift`** корректно сериализуется и доставляется через SSE stream ✅
 
 ### 8.2 Желательные
 
-- [ ] Post-tick audit обнаруживает искусственно внесённый drift (T6)
-- [ ] Delta check ловит внутрисессионную неконсистентность (T4)
+- [x] Post-tick audit обнаруживает искусственно внесённый drift (T6) ✅
+- [x] Delta check ловит внутрисессионную неконсистентность (T4) ✅
 - [ ] Нет утечек asyncio tasks — `asyncio.all_tasks()` в конце тика не содержит stale clearing tasks
 - [ ] Super smoke test проходит с `clearing_policy=static` и малым `clearing_hard_timeout_sec`
-- [ ] Drift записывается в IntegrityAuditLog и виден через API `/integrity/audit-log`
+- [x] Drift записывается в IntegrityAuditLog и виден через API `/integrity/audit-log` ✅
 
 ### 8.3 Метрики успеха
 
