@@ -18,6 +18,9 @@ class RealRunner(_RealRunnerImpl):
         run_id: str,
         run: RunRecord,
         equivalents: list[str],
+        *,
+        time_budget_ms_override: int | None = None,
+        max_depth_override: int | None = None,
     ) -> dict[str, float]:
         # Preserve monkeypatch hook points:
         # - tests patch real_runner.db_session.AsyncSessionLocal
@@ -29,4 +32,6 @@ class RealRunner(_RealRunnerImpl):
             equivalents=equivalents,
             async_session_local=db_session.AsyncSessionLocal,
             clearing_service_cls=ClearingService,
+            time_budget_ms_override=time_budget_ms_override,
+            max_depth_override=max_depth_override,
         )

@@ -169,8 +169,6 @@
     "type": "clearing.done",
     "equivalent": "UAH",
     "plan_id": "clearing-demo-UAH",
-    "cleared_cycles": 5,
-    "cleared_amount": "742.50",
     "node_patch": [
       {
         "id": "PID_U0001_9e3779b1",

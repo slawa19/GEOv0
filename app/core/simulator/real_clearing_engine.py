@@ -69,6 +69,8 @@ class RealClearingEngine:
         broadcast_topology_edge_patch: Callable[..., None],
         async_session_local: Any | None = None,
         clearing_service_cls: Any | None = None,
+        time_budget_ms_override: int | None = None,
+        max_depth_override: int | None = None,
     ) -> dict[str, float]:
         """Execute clearing for all equivalents using an isolated session.
 
@@ -76,9 +78,22 @@ class RealClearingEngine:
         tick_real_mode session with commit/rollback side effects. PostgreSQL marks
         a transaction as "aborted" after any error, and subsequent queries fail
         with InFailedSQLTransactionError.
+
+        Optional overrides (for adaptive clearing policy):
+        - time_budget_ms_override: if set, used instead of self._real_clearing_time_budget_ms
+          (clamped to the constructor ceiling as guardrail).
+        - max_depth_override: if set, used instead of self._clearing_max_depth_limit
+          (clamped to the constructor ceiling as guardrail).
         """
 
-        max_depth = int(self._clearing_max_depth_limit)
+        max_depth = min(
+            int(max_depth_override) if max_depth_override is not None else int(self._clearing_max_depth_limit),
+            int(self._clearing_max_depth_limit),
+        )
+        effective_time_budget_ms = min(
+            int(time_budget_ms_override) if time_budget_ms_override is not None else int(self._real_clearing_time_budget_ms),
+            int(self._real_clearing_time_budget_ms),
+        )
         max_fx_edges = int(self._clearing_max_fx_edges_limit)
         cleared_amount_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
 
@@ -229,7 +244,7 @@ class RealClearingEngine:
                         if cleared_cycles and (cleared_cycles % 5 == 0):
                             await asyncio.sleep(0)
 
-                        budget_ms = int(self._real_clearing_time_budget_ms or 0)
+                        budget_ms = int(effective_time_budget_ms or 0)
                         if budget_ms > 0:
                             elapsed_ms = (time.monotonic() - clearing_started) * 1000.0
                             if elapsed_ms >= float(budget_ms):

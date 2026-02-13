@@ -211,6 +211,19 @@ Clearing policy:
   - `static` использует `SIMULATOR_CLEARING_EVERY_N_TICKS`
   - `adaptive` динамически подстраивает периодичность (см. `adaptive-clearing-policy.md`)
 
+Adaptive clearing knobs (используются только при `SIMULATOR_CLEARING_POLICY=adaptive`):
+- `SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS` (default: 30) — длина rolling window (в тиках) для расчёта `no_capacity_rate`.
+- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_HIGH` (default: 0.60) — порог `no_capacity_rate` для включения клиринга.
+- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_LOW` (default: 0.30) — порог для выключения (hysteresis).
+- `SIMULATOR_CLEARING_ADAPTIVE_MIN_INTERVAL_TICKS` (default: 5) — минимальный cooldown между запусками клиринга для одного equivalent.
+- `SIMULATOR_CLEARING_ADAPTIVE_BACKOFF_MAX_INTERVAL_TICKS` (default: 60) — потолок exponential backoff при zero yield.
+- `SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN` (default: 3) / `MAX` (default: 6) — диапазон `max_depth` per-eq.
+- `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN` (default: 50) / `MAX` (default: 250) — диапазон `time_budget_ms` per-eq.
+- `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD` (default: 0, disabled) — если in-flight > threshold, клиринг откладывается.
+- `SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD` (default: 0, disabled) — если queue_depth > threshold, клиринг откладывается.
+
+Cold-start: на первых `WINDOW_TICKS` тиках данные неполные. Если `warmup_fallback_cadence > 0` (по умолчанию = `CLEARING_EVERY_N_TICKS`), clearing запускается периодически с минимальным бюджетом. После заполнения окна policy переключается на полную адаптивную логику.
+
 Real Mode: тюнинг дисковой нагрузки (артефакты) для dev/UI:
 - `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS` — как часто обновлять `last_tick.json` (по умолчанию `500`).
   - `<=0` отключает запись `last_tick.json` на каждом тике.

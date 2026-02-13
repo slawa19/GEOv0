@@ -2,6 +2,12 @@
 
 Дата: 2026-02-12
 
+> **Статус: реализовано (2026-02-13).**
+> Модуль: `app/core/simulator/adaptive_clearing_policy.py`.
+> Интеграция: `RealTickClearingCoordinator` (adaptive branch).
+> Спецификация (с деталями реализации): `adaptive-clearing-policy-spec.md`.
+> Тесты: `tests/unit/test_simulator_adaptive_clearing_policy.py` (17), `tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py` (12), `tests/integration/test_simulator_adaptive_clearing_integration.py` (3), `tests/integration/test_simulator_adaptive_clearing_effectiveness_ab.py` (1).
+
 ## 0) Зачем это нужно
 
 Фиксированная периодичность клиринга (например «каждые N тиков») удобна для MVP и демо, но **не является универсальной**:

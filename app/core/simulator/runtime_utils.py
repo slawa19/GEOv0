@@ -55,6 +55,29 @@ def safe_int_env(name: str, default: int) -> int:
         return int(default)
 
 
+def safe_float_env(name: str, default: float) -> float:
+    """Parse float env var with a defensive fallback.
+
+    - missing / empty value -> default
+    - any parsing error -> default
+    """
+
+    try:
+        raw = os.getenv(name, "")
+        if not str(raw).strip():
+            return float(default)
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def safe_str_env(name: str, default: str) -> str:
+    """Read string env var with a defensive fallback."""
+
+    raw = os.getenv(name, "")
+    return str(raw).strip() if str(raw).strip() else str(default)
+
+
 def safe_decimal_env(name: str, default: Decimal) -> Decimal:
     """Parse Decimal env var with a defensive fallback.
 

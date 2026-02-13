@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from sqlalchemy import select
@@ -30,6 +30,9 @@ class RealPaymentsResult:
     per_eq: dict[str, dict[str, int]]
     per_eq_route: dict[str, dict[str, float]]
     per_eq_edge_stats: dict[str, dict[tuple[str, str], dict[str, int]]]
+    # Per-eq rejection codes breakdown.
+    # Contract: always a dict (never None) for downstream consumers (adaptive policy).
+    rejection_codes_by_eq: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 class RealPaymentsExecutor:
@@ -85,6 +88,13 @@ class RealPaymentsExecutor:
         per_eq_edge_stats: dict[str, dict[tuple[str, str], dict[str, int]]] = {
             str(eq): {} for eq in equivalents
         }
+        rejection_codes_by_eq: dict[str, dict[str, int]] = {
+            str(eq): {} for eq in equivalents
+        }
+
+        def _rejection_code_inc(eq: str, code: str) -> None:
+            m = rejection_codes_by_eq.setdefault(str(eq), {})
+            m[code] = int(m.get(code, 0)) + 1
 
         def _edge_inc(eq: str, src: str, dst: str, key: str, n: int = 1) -> None:
             m = per_eq_edge_stats.setdefault(str(eq), {})
@@ -377,6 +387,8 @@ class RealPaymentsExecutor:
                                 )
                             rejection_code = "PAYMENT_REJECTED"
 
+                        _rejection_code_inc(eq, rejection_code)
+
                         with self._lock:
                             run.last_event_type = "tx.failed"
                             run.attempts_total += 1
@@ -581,4 +593,5 @@ class RealPaymentsExecutor:
             per_eq=per_eq,
             per_eq_route=per_eq_route,
             per_eq_edge_stats=per_eq_edge_stats,
+            rejection_codes_by_eq=rejection_codes_by_eq,
         )

@@ -6,6 +6,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Callable
 
+from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import (
@@ -28,8 +29,10 @@ from app.core.simulator.real_tick_trust_drift_coordinator import (
     RealTickTrustDriftCoordinator,
 )
 from app.core.simulator.runtime_utils import (
+    safe_float_env as _safe_float_env,
     safe_int_env as _safe_int_env,
     safe_optional_decimal_env as _safe_optional_decimal_env,
+    safe_str_env as _safe_str_env,
 )
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
@@ -120,6 +123,29 @@ class RealRunnerImpl:
             "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250
         )
 
+        # Adaptive clearing policy knobs (§5 of adaptive-clearing-policy-spec).
+        self._clearing_policy = _safe_str_env("SIMULATOR_CLEARING_POLICY", "static")
+        if self._clearing_policy not in ("static", "adaptive"):
+            self._clearing_policy = "static"
+        self._adaptive_clearing_config: AdaptiveClearingPolicyConfig | None = None
+        if self._clearing_policy == "adaptive":
+            self._adaptive_clearing_config = AdaptiveClearingPolicyConfig(
+                window_ticks=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS", 30),
+                no_capacity_high=_safe_float_env("SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_HIGH", 0.60),
+                no_capacity_low=_safe_float_env("SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_LOW", 0.30),
+                min_interval_ticks=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_MIN_INTERVAL_TICKS", 5),
+                backoff_max_interval_ticks=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_BACKOFF_MAX_INTERVAL_TICKS", 60),
+                time_budget_ms_min=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN", 50),
+                time_budget_ms_max=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MAX", 250),
+                max_depth_min=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN", 3),
+                max_depth_max=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MAX", 6),
+                inflight_threshold=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD", 0),
+                queue_depth_threshold=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD", 0),
+                global_max_depth_ceiling=int(self._clearing_max_depth_limit),
+                global_time_budget_ms_ceiling=int(self._real_clearing_time_budget_ms),
+                warmup_fallback_cadence=int(self._clearing_every_n_ticks),
+            )
+
         # Sub-components: eager init (RealRunner is created once on startup).
         self._edge_patch_builder: EdgePatchBuilder = EdgePatchBuilder(logger=self._logger)
         self._real_debt_snapshot_loader: RealDebtSnapshotLoader = RealDebtSnapshotLoader()
@@ -202,6 +228,8 @@ class RealRunnerImpl:
                 logger=self._logger,
                 clearing_every_n_ticks=int(self._clearing_every_n_ticks),
                 real_clearing_time_budget_ms=int(self._real_clearing_time_budget_ms),
+                clearing_policy=self._clearing_policy,  # type: ignore[arg-type]
+                adaptive_config=self._adaptive_clearing_config,
             )
         )
         self._real_tick_trust_drift_coordinator: RealTickTrustDriftCoordinator = (
@@ -448,6 +476,8 @@ class RealRunnerImpl:
         *,
         async_session_local: Any | None = None,
         clearing_service_cls: Any | None = None,
+        time_budget_ms_override: int | None = None,
+        max_depth_override: int | None = None,
     ) -> dict[str, float]:
         return await self._real_clearing_engine.tick_real_mode_clearing(
             session,
@@ -459,6 +489,8 @@ class RealRunnerImpl:
             broadcast_topology_edge_patch=self._broadcast_topology_edge_patch,
             async_session_local=async_session_local,
             clearing_service_cls=clearing_service_cls,
+            time_budget_ms_override=time_budget_ms_override,
+            max_depth_override=max_depth_override,
         )
 
     def _plan_real_payments(

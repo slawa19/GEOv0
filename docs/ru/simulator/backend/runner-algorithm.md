@@ -189,11 +189,22 @@ MVP включает:
 - **Real mode:** базовая «частота клиринга» по умолчанию `CLEARING_EVERY_N_TICKS = 25`, но переопределяется через `SIMULATOR_CLEARING_EVERY_N_TICKS`.
 - **Fixtures mode:** клиринг/подсветки носят демонстрационный характер и управляются таймингами внутри fixtures-runner (не “каждые N тиков”).
 
-Политика клиринга (проектное направление):
-- фиксированный cadence удобен для демо/регрессии, но не универсален для разных комьюнити;
-- для real mode рекомендуется поддерживать **адаптивную политику** (запускать клиринг чаще/реже по сигналам `ROUTING_NO_CAPACITY`, тренду `total_debt` и yield клиринга).
+Политика клиринга (`SIMULATOR_CLEARING_POLICY`):
+- `static` (default) — фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`), один вызов `tick_real_mode_clearing()` по всем equivalents.
+- `adaptive` — динамическая периодичность на основе feedback-control. Координатор (`RealTickClearingCoordinator`) вызывает `AdaptiveClearingPolicy.evaluate()` **per-equivalent** на каждом тике:
+  - сигналы: rolling-window `no_capacity_rate`, `clearing_volume`, `clearing_cost_ms`, `in_flight`, `queue_depth`.
+  - решения: `should_run`, `time_budget_ms`, `max_depth` (per-eq).
+  - hysteresis (HIGH/LOW пороги), cooldown (`min_interval_ticks`), exponential backoff при нулевом yield.
+  - budget scaling: давление `no_capacity_rate` линейно масштабирует depth и time_budget в пределах `[MIN, min(MAX, global_ceiling)]`.
+  - per-eq clearing loop заменяет единый `run_clearing()`, с per-call overrides в `tick_real_mode_clearing()`.
+
+Env knobs для adaptive (подробнее — `real-mode-runbook.md`):
+- `SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS`, `NO_CAPACITY_HIGH`, `NO_CAPACITY_LOW`, `MIN_INTERVAL_TICKS`, `BACKOFF_MAX_INTERVAL_TICKS`
+- `SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN/MAX`, `TIME_BUDGET_MS_MIN/MAX`
+- `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD`, `QUEUE_DEPTH_THRESHOLD`
 
 См. каноничное описание: `adaptive-clearing-policy.md`.
+Спецификация реализации: `adaptive-clearing-policy-spec.md`.
 
 Важно:
 - строгий контракт payload’ов событий — в `api/openapi.yaml` и `simulator-domain-model.md`.

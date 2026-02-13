@@ -61,6 +61,8 @@ Source of truth:
 - `tests/unit/test_simulator_tx_failed_event_schema.py`
 - `tests/unit/test_simulator_rejection_codes.py`
 - `tests/unit/test_simulator_fixtures_clearing_plan_done_pair.py`
+- `tests/unit/test_simulator_adaptive_clearing_policy.py` — unit tests for AdaptiveClearingPolicy (activation, hysteresis, backoff, guardrails, budget scaling, cold start, per-eq independence)
+- `tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py` — deterministic effectiveness tests (reaction time, no jitter, backoff growth, budget clamping, warmup behaviour, budget scaling)
 
 ### 3.2 Contract (контракты схем/типов)
 Цель: ловить дрейф контрактов без запуска сервисов.
@@ -90,6 +92,8 @@ Source of truth:
 - `tests/integration/test_simulator_sse_fixtures_clearing_animation_pair.py`
 - `tests/integration/test_simulator_artifacts_events_ndjson.py`
 - `tests/integration/test_simulator_real_snapshot_db_enrichment.py`
+- `tests/integration/test_simulator_adaptive_clearing_integration.py` — spy-based integration tests for adaptive clearing coordinator (adaptive activation, static unchanged, cooldown)
+- `tests/integration/test_simulator_adaptive_clearing_effectiveness_ab.py` — A/B benchmark: static vs adaptive, non-flaky invariants (errors, committed_rate, no_capacity_rate). Marked `@pytest.mark.slow`.
 
 Примечание по SSE тестам:
 - для MVP достаточно проверить, что stream отдаёт:

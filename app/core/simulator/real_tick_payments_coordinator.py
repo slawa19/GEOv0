@@ -27,6 +27,10 @@ class RealTickPaymentsPhaseResult:
 
     stall_ticks: int
 
+    # Rejection codes breakdown per equivalent (for adaptive clearing policy).
+    # Contract: always a dict (never None).
+    rejection_codes_by_eq: dict[str, dict[str, int]]
+
 
 class RealTickPaymentsCoordinator:
     def __init__(self, *, lock, logger: logging.Logger) -> None:
@@ -137,6 +141,7 @@ class RealTickPaymentsCoordinator:
             per_eq_route=dict(payments_res.per_eq_route),
             per_eq_edge_stats=dict(payments_res.per_eq_edge_stats),
             stall_ticks=stall_ticks,
+            rejection_codes_by_eq=dict(getattr(payments_res, "rejection_codes_by_eq", {}) or {}),
         )
 
         return res, should_stop

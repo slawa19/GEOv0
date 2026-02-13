@@ -4,16 +4,22 @@
 
 Документ-основание (каноника): `adaptive-clearing-policy.md`.
 
-## 1) Цель
+> **Статус реализации (2026-02-13):**
+> Все шаги из §9.10 выполнены. 262 unit + 56 integration тестов проходят (0 regressions).
+> Smoke-тестирование на 3 сценариях завершено — policy работает по спеке.
+> A/B benchmark (static vs adaptive) реализован и проходит.
+> Документация обновлена (§9.11).
+
+## 1) Цель ✅
 
 Добавить в Real Mode симулятора **адаптивную политику клиринга** (feedback-control), чтобы:
 
 - клиринг запускался чаще при признаках деградации ликвидности (например рост `ROUTING_NO_CAPACITY`),
-- клиринг редел/останавливался при нулевой пользе (clearing_volume ≈ 0),
+- клиринг редел/останавливался при нулевой пользе (clearing_volume < `ZERO_VOLUME_EPS`),
 - стоимость клиринга оставалась ограниченной (time budget, depth),
 - поведение было объяснимым и устойчивым (hysteresis/cooldown).
 
-## 2) Scope
+## 2) Scope ✅
 
 Включено:
 - новый компонент policy, не привязанный к конкретному сценарию;
@@ -26,14 +32,14 @@
 - “ML/оптимизатор” или подбор параметров offline;
 - обязательное расширение OpenAPI метрик (можно как отдельный этап).
 
-## 3) Backward compatibility
+## 3) Backward compatibility ✅
 
 - По умолчанию система работает как сейчас (фиксированный cadence).
 - Адаптивный режим включается отдельным env knob.
 
-## 4) Дизайн (компоненты)
+## 4) Дизайн (компоненты) ✅
 
-### 4.1 Новый модуль
+### 4.1 Новый модуль ✅
 
 Файл: `app/core/simulator/adaptive_clearing_policy.py`
 
@@ -55,23 +61,27 @@
 - policy принимает сигналы и принимает решение **per-equivalent**.
 - интеграция в `RealRunner` должна вызывать policy в цикле по `equivalents`.
 
-### 4.2 Сигналы (минимум)
+### 4.2 Сигналы (минимум) ✅
 
 Policy получает на каждый тик (per eq):
 - `attempted_payments_tick` (сколько попыток платежей в тике)
 - `rejected_no_capacity_tick` (сколько отказов с кодом `ROUTING_NO_CAPACITY` в тике)
-- `total_debt` (уже считается в runner; используем тренд/дельту, не абсолют)
+- `total_debt` (уже считается в runner; **MVP: передаётся в `TickSignals`, но не используется в решениях — зарезервирован для этапа 2**)
 - `last_clearing_volume` (объём клиринга на последнем запуске клиринга для этого eq)
-- `last_clearing_cost_ms` (стоимость последнего клиринга по времени для этого eq)
+- `last_clearing_cost_ms` (стоимость последнего клиринга по времени для этого eq; **MVP: хранится в state, но не участвует в критерии решений — зарезервирован для этапа 2**)
 - `in_flight`, `queue_depth` (guardrail)
 
 Определения (для объяснимости):
 - `no_capacity_rate_window = sum(rejected_no_capacity_tick) / max(1, sum(attempted_payments_tick))` за окно `WINDOW_TICKS`.
-- `clearing_yield_last = last_clearing_volume / max(1, last_clearing_cost_ms)`.
+- `clearing_yield_last = last_clearing_volume / max(1, last_clearing_cost_ms)` — **MVP: определение зафиксировано, но yield не используется в решениях (только `volume ≈ 0` → backoff); подключение yield как критерия — этап 2.**
+
+**MVP решения принимаются по двум факторам:**
+1. `no_capacity_rate_window` (hysteresis HIGH/LOW) → активация/деактивация клиринга.
+2. `clearing_volume ≈ 0` (ниже `ZERO_VOLUME_EPS = 1e-9`) → backoff с экспоненциальным ростом интервала.
 
 Примечание: `total_debt` и `clearing_volume` уже пишутся как time-series в БД — policy может работать без БД, но эти метрики полезны для отладки.
 
-### 4.3 Источник `ROUTING_NO_CAPACITY`
+### 4.3 Источник `ROUTING_NO_CAPACITY` ✅ (Вариант A)
 
 Варианты (выбрать один, остальные отложить):
 
@@ -86,7 +96,7 @@ Policy получает на каждый тик (per eq):
 
 Плюсы: без дополнительного IO, без парсинга `events.ndjson`, без скрытой мутации `run` из executor.
 
-### 4.4 Интеграция в RealRunner
+### 4.4 Интеграция в RealRunner ✅
 
 Изменить место, где сейчас решается “пора ли клирить”.
 
@@ -101,7 +111,7 @@ Policy получает на каждый тик (per eq):
 - не менять контракты SSE событий (`clearing.plan` / `clearing.done`);
 - при ошибках клиринга не “травить” payment tick session.
 
-### 4.5 Управление бюджетом клиринга
+### 4.5 Управление бюджетом клиринга ✅
 
 Минимально:
 - `time_budget_ms`: прокидывать в `RealClearingEngine`.
@@ -117,7 +127,7 @@ Policy получает на каждый тик (per eq):
 - `effective_time_budget_ms = clamp(policy_time_budget_ms, ADAPTIVE_TIME_BUDGET_MS_MIN, min(ADAPTIVE_TIME_BUDGET_MS_MAX, SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS))`
 - `effective_max_depth = clamp(policy_max_depth, ADAPTIVE_MAX_DEPTH_MIN, min(ADAPTIVE_MAX_DEPTH_MAX, SIMULATOR_CLEARING_MAX_DEPTH))`
 
-## 5) Конфиг (env knobs)
+## 5) Конфиг (env knobs) ✅
 
 Новые:
 - `SIMULATOR_CLEARING_POLICY` = `static|adaptive` (default: `static`)
@@ -143,11 +153,29 @@ Budgets:
 - `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN=50`
 - `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MAX=250`
 
+Hard-timeout (adaptive branch):
+- Per-eq clearing вызов оборачивается в `asyncio.wait_for` с hard timeout = `max(2s, budget_ms * 4 / 1000)`, capped at 8s.
+- При timeout clearing для данного eq считается zero-yield (→ backoff).
+
+Дополнительно (cap на тик, чтобы избежать `N * timeout` при нескольких equivalents):
+- Координатор может ограничивать общий clearing loop в рамках одного тика:
+  - `SIMULATOR_CLEARING_ADAPTIVE_TICK_BUDGET_MS` (default: 0; 0 = disabled) — wall-clock бюджет на обработку всех eq в этом тике.
+  - `SIMULATOR_CLEARING_ADAPTIVE_MAX_EQ_PER_TICK` (default: 0; 0 = disabled) — максимум eq, которые можно клирить за один тик.
+  - При достижении любого лимита дальнейшие eq в этом тике пропускаются.
+
+Валидация конфигурации:
+- `__post_init__` проверяет: `0 <= low < high <= 1`, `window_ticks >= 1`, `min_interval_ticks >= 1`, `budget_min <= budget_max`. При нарушении — лог warning (не exception).
+
+Cold-start (warmup fallback):
+- Новый knob `warmup_fallback_cadence` (default: `clearing_every_n_ticks` от static, 0 = disabled).
+- Пока `len(window) < window_ticks`, policy использует static cadence (`tick_index % warmup_fallback_cadence == 0`) с минимальным бюджетом.
+- После заполнения окна — переключается на полную адаптивную логику.
+
 Стратегия усреднения сигналов: rolling window (объяснимость)
 - используем rolling window длиной `WINDOW_TICKS` (без EWMA).
 - отдельный `alpha` не нужен.
 
-## 6) Наблюдаемость и отладка
+## 6) Наблюдаемость и отладка ✅ (минимум)
 
 Минимально требуемое:
 - лог на tick decision: `reason`, `no_capacity_rate`, `cooldown_remaining`, `budget`.
@@ -157,9 +185,9 @@ Budgets:
 
 Примечание: `clearing_cost_ms` полезен даже без сохранения как метрика — он нужен policy для yield.
 
-## 7) Тестирование
+## 7) Тестирование ✅
 
-### 7.1 Unit tests (policy)
+### 7.1 Unit tests (policy) ✅
 
 Новые тесты:
 - `tests/unit/test_simulator_adaptive_clearing_policy.py`
@@ -167,20 +195,21 @@ Budgets:
 Покрыть сценарии:
 1) `no_capacity_rate` растёт выше `high` → policy включает clearing, уважая cooldown.
 2) `no_capacity_rate` падает ниже `low` → policy выключает clearing (hysteresis).
-3) `clearing_volume`≈0 несколько раз подряд → backoff растёт.
-4) `in_flight`/`queue_depth` выше порога → policy откладывает клиринг (guardrail).
+3) `clearing_volume` < `ZERO_VOLUME_EPS` несколько раз подряд → backoff растёт.
+4) `in_flight`/`queue_depth` выше порога → **координатор** откладывает клиринг (guardrail; тестируется на уровне coordinator, не policy).
+5) Cold-start: warmup fallback выставляет periodic cadence пока окно не заполнено.
 
-### 7.2 Integration tests (runner)
+### 7.2 Integration tests (runner) ✅
 
 Новые/расширенные тесты (примерные направления):
 - симулировать тик-цикл с подменой `RealClearingEngine` (spy) и проверить, что он вызывается при нужных сигналах;
 - проверить, что `static` режим не меняет поведение.
 
-### 7.3 Regression: SSE contracts
+### 7.3 Regression: SSE contracts ✅
 
 Проверить существующие интеграционные тесты SSE (`tx.updated`, `clearing.*`) — адаптивность не должна ломать payload.
 
-### 7.4 Scenario smoke
+### 7.4 Scenario smoke ✅
 
 Опционально (не как строгий unit):
 - прогон greenfield realistic-v2 в двух режимах (static vs adaptive) и сравнение по одинаковому `sim_time_ms`:
@@ -189,7 +218,7 @@ Budgets:
   - clearing_volume,
   - средняя стоимость клиринга (если есть).
 
-### 7.5 Оценка эффективности (автоматизируемые тесты)
+### 7.5 Оценка эффективности (автоматизируемые тесты) ✅
 
 Цель этого раздела — не просто проверить «policy не ломает систему», а **измеримо оценить**, даёт ли adaptive режим пользу относительно baseline `static`.
 
@@ -291,16 +320,210 @@ Budgets:
    - проверяет не-флак инварианты (budgets/errors).
 3) Результаты A/B (report) можно воспроизвести локально одной командой.
 
-## 8) Acceptance criteria
+## 8) Acceptance criteria ✅
 
-1) `SIMULATOR_CLEARING_POLICY=static` — поведение полностью как сейчас.
-2) `SIMULATOR_CLEARING_POLICY=adaptive`:
+1) ✅ `SIMULATOR_CLEARING_POLICY=static` — поведение полностью как сейчас.
+2) ✅ `SIMULATOR_CLEARING_POLICY=adaptive`:
    - при искусственно повышенной доле `ROUTING_NO_CAPACITY` клиринг становится чаще (не нарушая cooldown);
    - при нулевом `clearing_volume` политика уходит в backoff (редеет);
    - клиринг не превышает заданные budgets и не ломает payment loop.
-3) Unit tests policy покрывают основные переходы состояний.
+3) ✅ Unit tests policy покрывают основные переходы состояний.
 
-4) Добавлена методика и автотесты/бенчмарки, позволяющие измерять эффективность (A/B static vs adaptive) на clean DB, с исключением warmup.
+4) ✅ Добавлена методика и автотесты/бенчмарки, позволяющие измерять эффективность (A/B static vs adaptive) на clean DB, с исключением warmup.
 
 Дополнительно (risk note):
 - При существенном учащении клиринга может усилиться `trust_growth` (TrustDriftEngine). Это не блокирует внедрение policy, но требует регрессии/наблюдения: лимиты не должны “разбухать” от одной лишь частоты клиринга.
+## 9) Implementation addendum (решения по интеграции) ✅
+
+Дата: 2026-02-13
+
+Результат сверки спеки с реальным кодом. Фиксирует решения по integration points, не описанным в основной части.
+
+### 9.1 Точка вставки — `RealTickClearingCoordinator`, а не `RealRunner`
+
+Основная спека в §4.4 абстрактно описывает «изменить место, где решается "пора ли клирить"». В реальном коде это:
+
+- `RealTickClearingCoordinator.maybe_run_clearing()` — файл `app/core/simulator/real_tick_clearing_coordinator.py`
+- Именно здесь live-check `tick_index % N != 0`
+
+Решение:
+- **Не создавать** параллельный coordinator.
+- Расширить `RealTickClearingCoordinator`:
+  - конструктор принимает `clearing_policy: Literal["static", "adaptive"]` и опциональный `AdaptiveClearingPolicyConfig`.
+  - при `policy == "static"` — текущая логика без изменений.
+  - при `policy == "adaptive"` — `maybe_run_clearing()` делегирует решение в `AdaptiveClearingPolicy.evaluate()` per-eq (см. §9.3).
+- `AdaptiveClearingState` хранится **на координаторе** (не на `RunRecord`), т.к. он уже является stateful per-run объектом.
+
+### 9.2 Прокидывание `time_budget_ms` и `max_depth` per-call
+
+Сейчас `RealClearingEngine.tick_real_mode_clearing()` использует `self._clearing_max_depth_limit` и `self._real_clearing_time_budget_ms`, зафиксированные в конструкторе. Per-eq адаптивные budgets требуют per-call override.
+
+Решение:
+- Добавить в сигнатуру `tick_real_mode_clearing()` optional kwargs:
+  ```python
+  async def tick_real_mode_clearing(
+      self,
+      ...,
+      time_budget_ms_override: int | None = None,
+      max_depth_override: int | None = None,
+  ) -> dict[str, float]:
+  ```
+- Внутри метода: `effective_budget = time_budget_ms_override or self._real_clearing_time_budget_ms`.
+- Конструкторные значения остаются **hard ceiling** (guardrails из §4.5 спеки).
+- Это минимальный рефактор — не ломает существующие call sites (`None` → прежнее поведение).
+
+### 9.3 Per-eq решения: разбиение clearing loop
+
+Сейчас `maybe_run_clearing()` вызывает один `run_clearing()` на все equivalents разом. Policy из §4.1 требует per-eq решений (разные `should_run`, разные budgets).
+
+Решение:
+- В `adaptive` ветке координатора: **не** вызывать единый `run_clearing()`.
+- Вместо этого — цикл по equivalents:
+  ```python
+  for eq in equivalents:
+      decision = policy.evaluate(eq, signals[eq])
+      if not decision.should_run:
+          continue
+      volume = await run_clearing_for_eq(
+          eq,
+          time_budget_ms_override=decision.time_budget_ms,
+          max_depth_override=decision.max_depth,
+      )
+      clearing_volume_by_eq[eq] = volume
+  ```
+- Для этого нужна **per-eq версия** `tick_real_mode_clearing()`. Текущий метод уже содержит `for eq in equivalents:` loop внутри — его нужно разделить:
+  - вынести inner loop body в `_clear_single_equivalent(eq, ..., time_budget_ms, max_depth)` (private)
+  - оставить `tick_real_mode_clearing()` как обёртку (не ломает `static` mode)
+- `run_clearing_for_eq` лямбда передаётся в coordinator из orchestrator (как сейчас передаётся `run_clearing`).
+
+Следствие: в `static` mode по-прежнему один вызов `tick_real_mode_clearing()` с полным списком equivalents.
+
+### 9.4 Источник и хранение `last_clearing_volume` / `last_clearing_cost_ms`
+
+Спека перечисляет их как сигналы (§4.2), но не описывает, кто записывает.
+
+Решение:
+- `AdaptiveClearingState` хранит per-eq:
+  ```python
+  @dataclass
+  class PerEqClearingHistory:
+      last_clearing_volume: float = 0.0
+      last_clearing_cost_ms: float = 0.0
+      last_clearing_tick: int = -1
+  ```
+- **Координатор** записывает после каждого clearing вызова:
+  ```python
+  cost_ms = (time.monotonic() - t0) * 1000.0
+  state.update_clearing_result(eq, volume=volume, cost_ms=cost_ms, tick=tick_index)
+  ```
+- Данные не персистятся в БД — они transient (per-run in-memory). При restart run они обнуляются — policy начинает в «cold start» (первые `WINDOW_TICKS` тиков без данных → fallback к static cadence через `warmup_fallback_cadence`; при `warmup_fallback_cadence=0` policy не клирит пока не соберёт сигналы).
+
+### 9.5 `in_flight` и `queue_depth` — глобальные, а не per-eq
+
+В текущем коде:
+- `run.queue_depth` — скаляр (общий)
+- `len(run._real_in_flight)` — один общий counter
+
+Per-eq in_flight breakdown нетривиален и не нужен для MVP guardrail (цель: «не запускать clearing, если система перегружена»).
+
+Решение:
+- Policy принимает **глобальные** `in_flight` и `queue_depth`.
+- Guardrail проверяется **один раз перед eq-loop** (не per-eq):
+  ```python
+  if in_flight > threshold or queue_depth > threshold:
+      return {eq: 0.0 for eq in equivalents}  # skip all clearing this tick
+  ```
+- Per-eq breakdown отложен (этап 2, если понадобится).
+
+### 9.6 `attempted_payments_tick` per-eq — вычисляется как сумма
+
+`RealPaymentsResult.per_eq[eq]` содержит `committed`, `rejected`, `errors`, `timeouts`, но не `attempted`.
+
+Решение:
+- Policy вычисляет `attempted = committed + rejected + errors + timeouts` из `per_eq[eq]`.
+- Отдельное поле `attempted` в `RealPaymentsResult` **не добавляем** — избыточно.
+
+### 9.7 Lifecycle `AdaptiveClearingState`
+
+Решение:
+- Создаётся в `RealTickClearingCoordinator.__init__()` при `policy == "adaptive"`. При `static` — `None`.
+- Живёт as long as coordinator (= as long as runner = as long as run).
+- При stop/restart run — coordinator пересоздаётся → state обнуляется.
+- Per-eq entries создаются lazily при первом `evaluate(eq, ...)`.
+
+### 9.8 Rejection codes → signals pipeline
+
+Спека §4.3 выбирает Вариант A. Конкретная реализация:
+
+1. **`RealPaymentsExecutor._emit_if_ready()`**: после `map_rejection_code(err_details)` на [строке 369](app/core/simulator/real_payments_executor.py#L369) — инкрементировать in-memory counter:
+   ```python
+   self._rejection_codes_by_eq[eq][rejection_code] += 1
+   ```
+   Где `_rejection_codes_by_eq: dict[str, dict[str, int]]` — `defaultdict(lambda: defaultdict(int))`, обнуляется в `execute()` начале каждого tick batch.
+
+2. **`RealPaymentsResult`**: добавить поле `rejection_codes_by_eq: dict[str, dict[str, int]]`.
+
+3. **Coordinator**: извлекает `rejected_no_capacity_tick` per-eq:
+   ```python
+   rejected_no_capacity = result.rejection_codes_by_eq.get(eq, {}).get("ROUTING_NO_CAPACITY", 0)
+   ```
+
+### 9.9 Передача signals из payments phase в clearing coordinator
+
+Сейчас `tick_real_mode()` в orchestrator вызывает payments → clearing последовательно, но payments result явно не передаётся в clearing coordinator.
+
+Решение:
+- `maybe_run_clearing()` получает дополнительный kwarg:
+  ```python
+  payments_result: RealPaymentsResult | None = None,
+  ```
+- В `static` mode — игнорируется.
+- В `adaptive` mode — coordinator извлекает signals и передаёт в `policy.evaluate()`.
+- Orchestrator передаёт `payments_phase` result в `maybe_run_clearing()`.
+
+### 9.10 Порядок реализации (рекомендуемый)
+
+| Шаг | Что | Файлы | Статус |
+|-----|-----|-------|--------|
+| 1 | `AdaptiveClearingPolicy` + `Config` + `State` + `Decision` (чистая логика) | `app/core/simulator/adaptive_clearing_policy.py` | ✅ |
+| 2 | Unit tests policy (§7.1) | `tests/unit/test_simulator_adaptive_clearing_policy.py` | ✅ (17 тестов) |
+| 3 | `rejection_codes_by_eq` в `RealPaymentsExecutor` + `RealPaymentsResult` | `app/core/simulator/real_payments_executor.py` | ✅ |
+| 4 | `_clear_single_equivalent()` extract в `RealClearingEngine` + per-call overrides | `app/core/simulator/real_clearing_engine.py` | ✅ |
+| 5 | Интеграция в `RealTickClearingCoordinator` (adaptive branch) | `app/core/simulator/real_tick_clearing_coordinator.py` | ✅ |
+| 6 | Env knobs в `RealRunnerImpl.__init__()` + передача в coordinator | `app/core/simulator/real_runner_impl.py` | ✅ |
+| 7 | Orchestrator: прокидывание `payments_result` → coordinator | `app/core/simulator/real_tick_orchestrator.py` | ✅ |
+| 8 | Integration tests + A/B benchmark | `tests/integration/test_simulator_adaptive_clearing_*.py` | ✅ |
+| 9 | Regression: SSE contract tests (прогон существующих) | — | ✅ (52 теста) |
+| 10 | Обновление документации (§9.11) | см. ниже | ✅ |
+
+### 9.11 Обновление документации после реализации ✅
+
+После завершения реализации необходимо обновить следующие документы:
+
+#### Обязательные (blocking merge)
+
+| Документ | Что обновить |
+|----------|-------------|
+| `docs/ru/simulator/backend/runner-algorithm.md` | §«clearing_attempt»: добавить описание `adaptive` policy ветки, env knob `SIMULATOR_CLEARING_POLICY`, per-eq loop; обновить ссылки на новые env knobs (§5 спеки) |
+| `docs/ru/simulator/backend/real-mode-runbook.md` | Секция env vars: добавить все новые `SIMULATOR_CLEARING_ADAPTIVE_*` knobs с описанием и дефолтами; описать cold-start поведение (fallback к static cadence на warmup) |
+| `docs/ru/simulator/backend/adaptive-clearing-policy.md` | Каноника. Обновить статус: «реализовано». Добавить ссылку на спеку (`adaptive-clearing-policy-spec.md`). При расхождениях между каноникой и фактической реализацией — привести в соответствие |
+| `docs/ru/09-decisions-and-defaults.md` | §1.10 (Simulator defaults): добавить `SIMULATOR_CLEARING_POLICY=static` (default), перечислить новые env knobs с дефолтами |
+| `docs/ru/simulator/backend/test-plan.md` | Добавить новые тестовые файлы: `test_simulator_adaptive_clearing_policy.py`, `test_simulator_adaptive_clearing_effectiveness_synthetic.py`, `test_simulator_adaptive_clearing_effectiveness_ab.py` |
+| `.github/copilot-instructions.md` | Если добавляются новые env knobs, влияющие на dev workflow — упомянуть в Quick Start / Guardrails |
+
+#### Желательные (после merge, этап 2)
+
+| Документ | Что обновить |
+|----------|-------------|
+| `docs/ru/simulator/backend/observability.md` | Добавить описание новых log-строк policy (`reason`, `no_capacity_rate`, `cooldown_remaining`, `budget`); если расширяется `MetricSeriesKey` — задокументировать новые ключи |
+| `docs/ru/simulator/backend/simulator-domain-model.md` | Если расширяется `MetricSeriesKey` (`no_capacity_rate`, `clearing_cost_ms`) — обновить перечень метрик в §Metric time-series |
+| `docs/ru/simulator/backend/real-runner-decomposition-spec.md` | Описать расширение `RealTickClearingCoordinator` (adaptive state, per-eq loop), новый модуль `adaptive_clearing_policy.py` |
+| `api/openapi.yaml` | Если новые `MetricSeriesKey` попадают в API — обновить enum `MetricSeriesKey` |
+| `docs/ru/simulator/README.md` | Уже есть ссылка на `adaptive-clearing-policy.md`. Добавить ссылку на спеку, если нужно |
+
+#### Правило верификации
+
+Перед merge PR с реализацией:
+1. Запустить `grep -r "CLEARING_EVERY_N_TICKS\|CLEARING_POLICY\|CLEARING_ADAPTIVE" docs/` — убедиться, что все упоминания clearing cadence согласованы с новой реальностью.
+2. Убедиться, что `adaptive-clearing-policy.md` (каноника) не противоречит фактическому поведению.
+3. Env knobs, перечисленные в `real-mode-runbook.md`, должны совпадать с теми, что реально читаются в коде.

@@ -161,9 +161,21 @@
 
 Клиринг (policy):
 - Фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`) остаётся дефолтом для backward compatibility и регрессии.
-- Проектное направление для real mode: **адаптивная политика клиринга** (feedback-control) вместо одного «магического N».
-	- мотивация: разные комьюнити/сценарии требуют разной периодичности; клиринг имеет стоимость и должен подстраиваться по сигналам сети.
+- `SIMULATOR_CLEARING_POLICY=static` (default): фиксированный cadence.
+- `SIMULATOR_CLEARING_POLICY=adaptive`: feedback-control, per-eq решения на основе rolling-window `no_capacity_rate`, hysteresis, cooldown, backoff.
 	- каноничное описание: `docs/ru/simulator/backend/adaptive-clearing-policy.md`.
+	- спецификация реализации: `docs/ru/simulator/backend/adaptive-clearing-policy-spec.md`.
+
+Дефолты adaptive knobs:
+- `SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS=30`
+- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_HIGH=0.60`
+- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_LOW=0.30`
+- `SIMULATOR_CLEARING_ADAPTIVE_MIN_INTERVAL_TICKS=5`
+- `SIMULATOR_CLEARING_ADAPTIVE_BACKOFF_MAX_INTERVAL_TICKS=60`
+- `SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN=3`, `MAX=6`
+- `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN=50`, `MAX=250`
+- `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD=0` (disabled)
+- `SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD=0` (disabled)
 
 Расширение real mode (behavior model):
 - Спецификация: [simulator/backend/behavior-model-spec.md](simulator/backend/behavior-model-spec.md)

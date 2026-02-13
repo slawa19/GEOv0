@@ -46,7 +46,7 @@ class _RealRunnerPort(Protocol):
     _real_max_consec_tick_failures_limit: int
 
     async def fail_run(self, run_id: str, *, code: str, message: str) -> None: ...
-    async def tick_real_mode_clearing(self, session, run_id: str, run: RunRecord, equivalents: list[str]) -> dict[str, float]: ...
+    async def tick_real_mode_clearing(self, session, run_id: str, run: RunRecord, equivalents: list[str], *, time_budget_ms_override: int | None = None, max_depth_override: int | None = None) -> dict[str, float]: ...
 
     async def _seed_scenario_into_db(self, session, scenario: dict) -> None: ...
     async def _load_real_participants(self, session, scenario: dict) -> list[tuple]: ...
@@ -207,6 +207,12 @@ class RealTickOrchestrator:
                         run_clearing=lambda: rr.tick_real_mode_clearing(
                             session, run_id, run, equivalents
                         ),
+                        run_clearing_for_eq=lambda eq, *, time_budget_ms_override=None, max_depth_override=None: rr.tick_real_mode_clearing(
+                            session, run_id, run, [eq],
+                            time_budget_ms_override=time_budget_ms_override,
+                            max_depth_override=max_depth_override,
+                        ),
+                        payments_result=payments_phase,
                     )
 
                     # ── Trust Drift: decay overloaded edges ─────────────
@@ -291,6 +297,9 @@ class RealTickOrchestrator:
         run_id: str,
         run: RunRecord,
         equivalents: list[str],
+        *,
+        time_budget_ms_override: int | None = None,
+        max_depth_override: int | None = None,
     ) -> dict[str, float]:
         rr = self._runner
         return await rr.tick_real_mode_clearing(
@@ -298,4 +307,6 @@ class RealTickOrchestrator:
             run_id=run_id,
             run=run,
             equivalents=equivalents,
+            time_budget_ms_override=time_budget_ms_override,
+            max_depth_override=max_depth_override,
         )
