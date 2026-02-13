@@ -111,6 +111,11 @@ Policy получает на каждый тик (per eq):
 - контракт SSE событий: используется только `clearing.done` (без `clearing.plan`);
 - при ошибках клиринга не “травить” payment tick session.
 
+> Примечание по фактической точке интеграции: в коде решение «пора ли клирить»
+> реализовано в clearing coordinator (`RealTickClearingCoordinator.maybe_run_clearing()`),
+> а `RealRunner`/orchestrator выступают как orchestrator (читают env, собирают сигналы,
+> прокидывают конфиг/коллбеки). См. addendum §9.1.
+
 ### 4.5 Управление бюджетом клиринга ✅
 
 Минимально:
@@ -138,6 +143,7 @@ Adaptive:
 - `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_LOW` (default: 0.30)
 - `SIMULATOR_CLEARING_ADAPTIVE_MIN_INTERVAL_TICKS` (default: 5)
 - `SIMULATOR_CLEARING_ADAPTIVE_BACKOFF_MAX_INTERVAL_TICKS` (default: 60)
+- `SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE` (default: `SIMULATOR_CLEARING_EVERY_N_TICKS`; 0 = disabled) — cadence (ticks) для warmup fallback.
 
 Guardrails (adaptive):
 - `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD` (default: 0; 0 = disabled)
@@ -167,7 +173,7 @@ Hard-timeout (adaptive branch):
 - `__post_init__` проверяет: `0 <= low < high <= 1`, `window_ticks >= 1`, `min_interval_ticks >= 1`, `budget_min <= budget_max`. При нарушении — лог warning (не exception).
 
 Cold-start (warmup fallback):
-- Новый knob `warmup_fallback_cadence` (default: `clearing_every_n_ticks` от static, 0 = disabled).
+- Env knob: `SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE` (default: `SIMULATOR_CLEARING_EVERY_N_TICKS`, `0 = disabled`).
 - Пока `len(window) < window_ticks`, policy использует static cadence (`tick_index % warmup_fallback_cadence == 0`) с минимальным бюджетом.
 - После заполнения окна — переключается на полную адаптивную логику.
 
@@ -455,7 +461,7 @@ Per-eq in_flight breakdown нетривиален и не нужен для MVP 
 
 Спека §4.3 выбирает Вариант A. Конкретная реализация:
 
-1. **`RealPaymentsExecutor._emit_if_ready()`**: после `map_rejection_code(err_details)` на [строке 369](app/core/simulator/real_payments_executor.py#L369) — инкрементировать in-memory counter:
+1. **`RealPaymentsExecutor._emit_if_ready()`**: после вызова `map_rejection_code(err_details)` — инкрементировать in-memory counter:
    ```python
    self._rejection_codes_by_eq[eq][rejection_code] += 1
    ```
@@ -506,7 +512,7 @@ Per-eq in_flight breakdown нетривиален и не нужен для MVP 
 |----------|-------------|
 | `docs/ru/simulator/backend/runner-algorithm.md` | §«clearing_attempt»: добавить описание `adaptive` policy ветки, env knob `SIMULATOR_CLEARING_POLICY`, per-eq loop; обновить ссылки на новые env knobs (§5 спеки) |
 | `docs/ru/simulator/backend/real-mode-runbook.md` | Секция env vars: добавить все новые `SIMULATOR_CLEARING_ADAPTIVE_*` knobs с описанием и дефолтами; описать cold-start поведение (fallback к static cadence на warmup) |
-| `docs/ru/simulator/backend/adaptive-clearing-policy.md` | Каноника. Обновить статус: «реализовано». Добавить ссылку на спеку (`adaptive-clearing-policy-spec.md`). При расхождениях между каноникой и фактической реализацией — привести в соответствие |
+| `docs/ru/simulator/backend/adaptive-clearing-policy.md` | Каноника. Обновить статус: «реализовано». Добавить ссылку на спеку (`docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`). При расхождениях между каноникой и фактической реализацией — привести в соответствие |
 | `docs/ru/09-decisions-and-defaults.md` | §1.10 (Simulator defaults): добавить `SIMULATOR_CLEARING_POLICY=static` (default), перечислить новые env knobs с дефолтами |
 | `docs/ru/simulator/backend/test-plan.md` | Добавить новые тестовые файлы: `test_simulator_adaptive_clearing_policy.py`, `test_simulator_adaptive_clearing_effectiveness_synthetic.py`, `test_simulator_adaptive_clearing_effectiveness_ab.py` |
 | `.github/copilot-instructions.md` | Если добавляются новые env knobs, влияющие на dev workflow — упомянуть в Quick Start / Guardrails |

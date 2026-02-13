@@ -418,10 +418,6 @@ class RealPaymentsExecutor:
                     tuple[str, tuple[str, ...]],
                     dict[str, Participant],
                 ] = {}
-                per_tick_node_patch_by_eq_and_pids: dict[
-                    tuple[str, tuple[str, ...]],
-                    list[dict[str, Any]] | None,
-                ] = {}
                 per_tick_quantiles_refreshed_by_eq: set[str] = set()
 
                 emitted_since_yield = 0
@@ -494,17 +490,16 @@ class RealPaymentsExecutor:
                                     per_tick_pid_to_participant_by_eq_and_pids[pids_key] = pid_to_participant
 
                                 try:
-                                    if pids_key in per_tick_node_patch_by_eq_and_pids:
-                                        node_patch_list = per_tick_node_patch_by_eq_and_pids[pids_key]
-                                    else:
-                                        node_patch_list = await helper.compute_node_patches(
-                                            patch_session,
-                                            pid_to_participant=pid_to_participant,
-                                            pids=pids,
-                                        )
-                                        if node_patch_list == []:
-                                            node_patch_list = None
-                                        per_tick_node_patch_by_eq_and_pids[pids_key] = node_patch_list
+                                    # Do NOT cache node patches within a tick: net balances can
+                                    # change multiple times per tick, and caching would make UI
+                                    # updates appear delayed/stale.
+                                    node_patch_list = await helper.compute_node_patches(
+                                        patch_session,
+                                        pid_to_participant=pid_to_participant,
+                                        pids=pids,
+                                    )
+                                    if node_patch_list == []:
+                                        node_patch_list = None
                                 except Exception:
                                     if self._should_warn_this_tick(run, key=f"node_patch_failed:{eq}"):
                                         self._logger.warning(

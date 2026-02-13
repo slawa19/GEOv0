@@ -164,7 +164,7 @@
 - `SIMULATOR_CLEARING_POLICY=static` (default): фиксированный cadence.
 - `SIMULATOR_CLEARING_POLICY=adaptive`: feedback-control, per-eq решения на основе rolling-window `no_capacity_rate`, hysteresis, cooldown, backoff.
 	- каноничное описание: `docs/ru/simulator/backend/adaptive-clearing-policy.md`.
-	- спецификация реализации: `docs/ru/simulator/backend/adaptive-clearing-policy-spec.md`.
+	- спецификация реализации: `docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`.
 
 Дефолты adaptive knobs:
 - `SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS=30`

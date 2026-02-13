@@ -221,8 +221,9 @@ Adaptive clearing knobs (используются только при `SIMULATOR
 - `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN` (default: 50) / `MAX` (default: 250) — диапазон `time_budget_ms` per-eq.
 - `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD` (default: 0, disabled) — если in-flight > threshold, клиринг откладывается.
 - `SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD` (default: 0, disabled) — если queue_depth > threshold, клиринг откладывается.
+- `SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE` (default: `SIMULATOR_CLEARING_EVERY_N_TICKS`, disabled при `<=0`) — cadence (ticks) для warmup fallback.
 
-Cold-start: на первых `WINDOW_TICKS` тиках данные неполные. Если `warmup_fallback_cadence > 0` (по умолчанию = `CLEARING_EVERY_N_TICKS`), clearing запускается периодически с минимальным бюджетом. После заполнения окна policy переключается на полную адаптивную логику.
+Cold-start: на первых `WINDOW_TICKS` тиках данные неполные. Если `SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE > 0` (по умолчанию = `SIMULATOR_CLEARING_EVERY_N_TICKS`), clearing запускается периодически с минимальным бюджетом. После заполнения окна policy переключается на полную адаптивную логику.
 
 Real Mode: тюнинг дисковой нагрузки (артефакты) для dev/UI:
 - `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS` — как часто обновлять `last_tick.json` (по умолчанию `500`).

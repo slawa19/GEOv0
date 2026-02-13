@@ -403,10 +403,16 @@ class PaymentService:
                     if commit:
                         await self.session.commit()
                     else:
-                        await self.session.flush()
+                        # When running under an outer transaction context manager (e.g. simulator
+                        # real-mode tick using session.begin_nested()), avoid calling
+                        # session.rollback()/commit() here. Use an inner SAVEPOINT instead so an
+                        # IntegrityError doesn't poison/close the outer context.
+                        async with self.session.begin_nested():
+                            await self.session.flush()
                 except IntegrityError:
                     # tx_id is globally unique; handle race by re-loading and applying idempotency rules.
-                    await self.session.rollback()
+                    if commit:
+                        await self.session.rollback()
                     existing_tx = (
                         await self.session.execute(
                             select(Transaction).where(Transaction.tx_id == tx_id_str)
@@ -467,11 +473,23 @@ class PaymentService:
                     except Exception:
                         pass
                     # Abort is idempotent and also cleans up any partial locks.
-                    await self.engine.abort(
-                        tx_id_str,
-                        reason=f"Prepare failed: {str(e)}",
-                        error_code=ErrorCode.E010,
-                    )
+                    if commit:
+                        await self.engine.abort(
+                            tx_id_str,
+                            reason=f"Prepare failed: {str(e)}",
+                            error_code=ErrorCode.E010,
+                            commit=True,
+                        )
+                    else:
+                        try:
+                            await self.engine.abort(
+                                tx_id_str,
+                                reason=f"Prepare failed: {str(e)}",
+                                error_code=ErrorCode.E010,
+                                commit=False,
+                            )
+                        except Exception:
+                            pass
                     raise BadRequestException(f"Payment preparation failed: {str(e)}")
 
                 # 5. Engine Commit
@@ -497,8 +515,75 @@ class PaymentService:
                         ).inc()
                     except Exception:
                         pass
+
+                    # If the engine raised a user-level GeoException (4xx), preserve it so
+                    # simulator real-mode can classify it as REJECTED instead of INTERNAL_ERROR.
+                    if isinstance(e, GeoException) and 400 <= int(getattr(e, "status_code", 500) or 500) < 500:
+                        if commit:
+                            try:
+                                await self.session.rollback()
+                            except Exception:
+                                pass
+
+                        if commit:
+                            await self.engine.abort(
+                                tx_id_str,
+                                reason=str(getattr(e, "message", None) or str(e)),
+                                error_code=getattr(e, "code", ErrorCode.E010),
+                                commit=True,
+                            )
+                        else:
+                            try:
+                                await self.engine.abort(
+                                    tx_id_str,
+                                    reason=str(getattr(e, "message", None) or str(e)),
+                                    error_code=getattr(e, "code", ErrorCode.E010),
+                                    commit=False,
+                                )
+                            except Exception:
+                                pass
+                        raise
+
                     # Under uncertainty (e.g. DB/network errors), commit may have succeeded even if
                     # the caller sees an exception. Read-before-abort to avoid COMMITTED -> ABORTED.
+                    if commit:
+                        try:
+                            await self.session.rollback()
+                        except Exception:
+                            pass
+
+                        tx_latest = (
+                            await self.session.execute(
+                                select(Transaction).where(Transaction.tx_id == tx_id_str)
+                            )
+                        ).scalar_one_or_none()
+                        if tx_latest is not None and tx_latest.state == "COMMITTED":
+                            return self._tx_to_payment_result(tx_latest)
+
+                    # Abort is idempotent; if commit failed before applying changes, this releases locks.
+                    if commit:
+                        await self.engine.abort(
+                            tx_id_str,
+                            reason=f"Commit failed: {str(e)}",
+                            error_code=ErrorCode.E010,
+                            commit=True,
+                        )
+                    else:
+                        try:
+                            await self.engine.abort(
+                                tx_id_str,
+                                reason=f"Commit failed: {str(e)}",
+                                error_code=ErrorCode.E010,
+                                commit=False,
+                            )
+                        except Exception:
+                            pass
+                    raise GeoException(f"Payment commit failed: {str(e)}")
+        except asyncio.TimeoutError:
+            if tx_persisted:
+                # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
+                # COMMITTED -> ABORTED.
+                if commit:
                     try:
                         await self.session.rollback()
                     except Exception:
@@ -512,39 +597,28 @@ class PaymentService:
                     if tx_latest is not None and tx_latest.state == "COMMITTED":
                         return self._tx_to_payment_result(tx_latest)
 
-                    # Abort is idempotent; if commit failed before applying changes, this releases locks.
-                    await self.engine.abort(
-                        tx_id_str,
-                        reason=f"Commit failed: {str(e)}",
-                        error_code=ErrorCode.E010,
-                    )
-                    raise GeoException(f"Payment commit failed: {str(e)}")
-        except asyncio.TimeoutError:
-            if tx_persisted:
-                # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
-                # COMMITTED -> ABORTED.
-                try:
-                    await self.session.rollback()
-                except Exception:
-                    pass
-
-                tx_latest = (
-                    await self.session.execute(
-                        select(Transaction).where(Transaction.tx_id == tx_id_str)
-                    )
-                ).scalar_one_or_none()
-                if tx_latest is not None and tx_latest.state == "COMMITTED":
-                    return self._tx_to_payment_result(tx_latest)
-
                 # Ensure abort isn't cancelled due to the timeout cancellation context.
-                await asyncio.shield(
-                    self.engine.abort(
-                        tx_id_str,
-                        reason="Payment timeout",
-                        commit=commit,
-                        error_code=ErrorCode.E007,
+                if commit:
+                    await asyncio.shield(
+                        self.engine.abort(
+                            tx_id_str,
+                            reason="Payment timeout",
+                            commit=True,
+                            error_code=ErrorCode.E007,
+                        )
                     )
-                )
+                else:
+                    try:
+                        await asyncio.shield(
+                            self.engine.abort(
+                                tx_id_str,
+                                reason="Payment timeout",
+                                commit=False,
+                                error_code=ErrorCode.E007,
+                            )
+                        )
+                    except Exception:
+                        pass
             raise TimeoutException("Payment timed out")
 
         # Fetch server timestamps (created_at/updated_at) explicitly.

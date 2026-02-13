@@ -108,7 +108,12 @@ class RealTickClearingCoordinator:
         run_clearing_for_eq: Callable[..., Awaitable[dict[str, float]]] | None,
         payments_result: Any | None,
     ) -> dict[str, float]:
-        clearing_volume_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+        # IMPORTANT: process equivalents in a deterministic order.
+        # This matters when tick-level caps (tick budget / max-eq-per-tick) are enabled:
+        # we must ensure "which eq makes it into the first K" does not depend on input order.
+        eqs_sorted: list[str] = sorted(str(eq) for eq in (equivalents or []))
+
+        clearing_volume_by_eq: dict[str, float] = {str(eq): 0.0 for eq in eqs_sorted}
         state = self._adaptive_state
         policy = self._adaptive_policy
         cfg = self._adaptive_config
@@ -161,7 +166,7 @@ class RealTickClearingCoordinator:
             if payments_result is not None
             else {}
         )
-        for eq in equivalents:
+        for eq in eqs_sorted:
             eq_stats = per_eq.get(eq, {})
             attempted = (
                 int(eq_stats.get("committed", 0))
@@ -200,7 +205,7 @@ class RealTickClearingCoordinator:
 
         # Evaluate policy per-eq
         eqs_to_clear: list[tuple[str, int | None, int | None]] = []
-        for eq in equivalents:
+        for eq in eqs_sorted:
             decision = policy.evaluate(eq, state, tick_index)
             no_cap_rate = state.get_no_capacity_rate(eq)
             per_eq_state = state.get_per_eq_state(eq)
@@ -332,6 +337,17 @@ class RealTickClearingCoordinator:
                 )
                 # Record as zero-yield so backoff kicks in
                 state.update_clearing_result(eq, volume=0.0, cost_ms=cost_ms, tick=tick_index)
+            except asyncio.CancelledError:
+                # Cancellation is typically a control-plane signal (shutdown / stopping the run).
+                # We still record a zero-yield result so the adaptive policy does not thrash
+                # if the run resumes later in the same process.
+                cost_ms = (time.monotonic() - eq_t0) * 1000.0
+                self._logger.warning(
+                    "simulator.real.adaptive_clearing_eq_cancelled run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                    str(run.run_id), tick_index, eq, int(cost_ms),
+                )
+                state.update_clearing_result(eq, volume=0.0, cost_ms=cost_ms, tick=tick_index)
+                raise
             except Exception:
                 cost_ms = (time.monotonic() - eq_t0) * 1000.0
                 self._logger.warning(

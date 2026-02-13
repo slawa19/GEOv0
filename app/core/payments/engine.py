@@ -693,7 +693,7 @@ class PaymentEngine:
                 )
             ).scalar_one_or_none()
             if expired_lock:
-                await self.abort(tx_id, reason="Prepare locks expired before commit")
+                await self.abort(tx_id, reason="Prepare locks expired before commit", commit=commit)
                 raise ConflictException(f"Transaction {tx_id} expired before commit")
 
             # 2. Process each lock (segment)

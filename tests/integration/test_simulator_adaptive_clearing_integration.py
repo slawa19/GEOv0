@@ -594,3 +594,82 @@ async def test_guardrail_queue_depth_blocks_clearing(
 
     assert len(clearing_calls) == 0, f"Clearing should be blocked by queue_depth guardrail, but got: {clearing_calls}"
     assert result["UAH"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_adaptive_coordinator_processes_equivalents_in_sorted_order(
+    adaptive_session_factory,
+    monkeypatch,
+) -> None:
+    """Coordinator MUST iterate equivalents in deterministic order (sorted).
+
+    This becomes observable when tick-level caps are enabled; "first K" equivalents
+    must be stable and not depend on scenario list ordering.
+    """
+    from app.core.simulator.real_tick_clearing_coordinator import RealTickClearingCoordinator
+    from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
+
+    # Caps: only allow clearing for 1 equivalent per tick.
+    monkeypatch.setenv("SIMULATOR_CLEARING_ADAPTIVE_MAX_EQ_PER_TICK", "1")
+
+    cfg = AdaptiveClearingPolicyConfig(
+        window_ticks=1,
+        no_capacity_high=0.0,
+        no_capacity_low=0.0,
+        min_interval_ticks=1,
+        warmup_fallback_cadence=1,
+    )
+
+    coordinator = RealTickClearingCoordinator(
+        lock=threading.RLock(),
+        logger=logging.getLogger("test_sorted_eq"),
+        clearing_every_n_ticks=25,
+        real_clearing_time_budget_ms=250,
+        clearing_policy="adaptive",
+        adaptive_config=cfg,
+    )
+
+    # RunRecord with no guardrail pressure.
+    run = RunRecord(run_id="sorted-eq-test", scenario_id="s1", mode="real", state="running")
+    run.tick_index = 10
+    run.sim_time_ms = 10000
+    run._real_in_flight = 0
+    run.queue_depth = 0
+
+    class _MockSession:
+        async def commit(self):
+            return None
+        async def rollback(self):
+            return None
+
+    # Capture actual clearing calls.
+    clearing_calls: list[str] = []
+
+    async def spy_clearing(eq, *, time_budget_ms_override=None, max_depth_override=None):
+        clearing_calls.append(str(eq))
+        return {str(eq): 1.0}
+
+    # Provide 2 equivalents in reverse order. Sorted order should pick "AAA" first.
+    equivalents = ["ZZZ", "AAA"]
+
+    # Minimal fake payments result; values don't matter for warmup fallback.
+    class _FakePaymentsResult:
+        per_eq = {"AAA": {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}, "ZZZ": {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}}
+        rejection_codes_by_eq = {"AAA": {"ROUTING_NO_CAPACITY": 0}, "ZZZ": {"ROUTING_NO_CAPACITY": 0}}
+
+    await coordinator.maybe_run_clearing(
+        session=_MockSession(),
+        run_id="sorted-eq-test",
+        run=run,
+        equivalents=equivalents,
+        planned_len=0,
+        tick_t0=0.0,
+        clearing_enabled=True,
+        safe_int_env=lambda k, d: int(monkeypatch.getenv(k, str(d))),
+        run_clearing=lambda: None,
+        run_clearing_for_eq=spy_clearing,
+        payments_result=_FakePaymentsResult(),
+    )
+
+    assert clearing_calls, "Expected at least one per-eq clearing call"
+    assert clearing_calls[0] == "AAA", f"Expected sorted order to pick 'AAA' first, got: {clearing_calls}"

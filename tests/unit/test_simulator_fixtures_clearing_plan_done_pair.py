@@ -3,10 +3,20 @@ import asyncio
 import pytest
 
 from app.core.simulator.runtime import runtime
+import app.core.simulator.storage as simulator_storage
 
 
 @pytest.mark.asyncio
-async def test_fixtures_mode_emits_clearing_done_with_plan_id() -> None:
+async def test_fixtures_mode_emits_clearing_done_with_plan_id(monkeypatch) -> None:
+    # Fixtures-mode test must not depend on simulator DB persistence.
+    # Under SQLite, background persistence can transiently hit "database is locked"
+    # and delay the heartbeat loop enough to make this test flaky.
+    async def _anoop(*a, **kw):
+        return None
+
+    monkeypatch.setattr(simulator_storage, "upsert_run", _anoop)
+    monkeypatch.setattr(simulator_storage, "sync_artifacts", _anoop)
+
     run_id = await runtime.create_run(
         scenario_id="greenfield-village-100-realistic-v2",
         mode="fixtures",

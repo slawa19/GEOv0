@@ -22,7 +22,15 @@ def _parse_dt(s: str) -> datetime:
     return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
 
 
-def _http_json(*, base_url: str, method: str, path: str, headers: dict[str, str], body: Any | None = None) -> Any:
+def _http_json(
+    *,
+    base_url: str,
+    method: str,
+    path: str,
+    headers: dict[str, str],
+    body: Any | None = None,
+    timeout_sec: int = 30,
+) -> Any:
     url = base_url.rstrip("/") + "/" + path.lstrip("/")
     data = None
     if body is not None:
@@ -33,7 +41,7 @@ def _http_json(*, base_url: str, method: str, path: str, headers: dict[str, str]
         req.add_header(k, v)
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=max(1, int(timeout_sec))) as resp:
             raw = resp.read()
             return json.loads(raw.decode("utf-8")) if raw else None
     except urllib.error.HTTPError as e:
@@ -49,13 +57,20 @@ def _try_parse_error_detail(detail: str) -> dict[str, Any] | None:
         return None
 
 
-def _download(*, origin: str, url_path: str, headers: dict[str, str], out_path: Path) -> None:
+def _download(
+    *,
+    origin: str,
+    url_path: str,
+    headers: dict[str, str],
+    out_path: Path,
+    timeout_sec: int = 30,
+) -> None:
     url = origin.rstrip("/") + "/" + url_path.lstrip("/")
     req = urllib.request.Request(url, method="GET")
     for k, v in headers.items():
         req.add_header(k, v)
 
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=max(1, int(timeout_sec))) as resp:
         out_path.write_bytes(resp.read())
 
 
@@ -158,6 +173,7 @@ def main() -> int:
     ap.add_argument("--min-amount", type=float, default=50.0)
     ap.add_argument("--max-amount", type=float, default=1500.0)
     ap.add_argument("--out-dir", default=str(Path(".local-run") / "analysis"))
+    ap.add_argument("--timeout-sec", type=int, default=30, help="HTTP client timeout (seconds)")
     args = ap.parse_args()
 
     headers = {
@@ -165,7 +181,13 @@ def main() -> int:
         "Content-Type": "application/json",
     }
 
-    scenarios = _http_json(base_url=args.base_url, method="GET", path="/simulator/scenarios", headers=headers)
+    scenarios = _http_json(
+        base_url=args.base_url,
+        method="GET",
+        path="/simulator/scenarios",
+        headers=headers,
+        timeout_sec=args.timeout_sec,
+    )
     scenario_ids = {item.get("scenario_id") for item in scenarios.get("items", [])}
     if args.scenario_id not in scenario_ids:
         raise SystemExit(f"Scenario not found: {args.scenario_id}")
@@ -183,6 +205,7 @@ def main() -> int:
                 "mode": args.mode,
                 "intensity_percent": int(args.intensity),
             },
+            timeout_sec=args.timeout_sec,
         )
     except RuntimeError as e:
         msg = str(e)
@@ -194,7 +217,11 @@ def main() -> int:
                 active_run_id = None
                 try:
                     active = _http_json(
-                        base_url=args.base_url, method="GET", path="/simulator/runs/active", headers=headers
+                        base_url=args.base_url,
+                        method="GET",
+                        path="/simulator/runs/active",
+                        headers=headers,
+                        timeout_sec=args.timeout_sec,
                     )
                     active_run_id = active.get("run_id") if isinstance(active, dict) else None
                 except Exception:
@@ -216,7 +243,13 @@ def main() -> int:
 
     end_at = time.time() + max(1, int(args.run_seconds))
     while time.time() < end_at:
-        st = _http_json(base_url=args.base_url, method="GET", path=f"/simulator/runs/{run_id}", headers=headers)
+        st = _http_json(
+            base_url=args.base_url,
+            method="GET",
+            path=f"/simulator/runs/{run_id}",
+            headers=headers,
+            timeout_sec=args.timeout_sec,
+        )
         tick, tick_src = _tick_from_status(st)
         tick_s = str(tick) if tick is not None else "None"
         if tick_src == "derived":
@@ -232,12 +265,19 @@ def main() -> int:
         method="POST",
         path=f"/simulator/runs/{run_id}/stop?source=cli&reason=run_seconds_elapsed",
         headers=headers,
+        timeout_sec=max(args.timeout_sec, 60),
     )
 
     deadline = time.time() + 30
     last = None
     while time.time() < deadline:
-        st = _http_json(base_url=args.base_url, method="GET", path=f"/simulator/runs/{run_id}", headers=headers)
+        st = _http_json(
+            base_url=args.base_url,
+            method="GET",
+            path=f"/simulator/runs/{run_id}",
+            headers=headers,
+            timeout_sec=args.timeout_sec,
+        )
         last = st
         if st.get("state") in ("stopped", "error"):
             break
@@ -249,7 +289,13 @@ def main() -> int:
         tick_s = tick_s + "~"
     print(f"final_state={last.get('state')} sim_time_ms={last.get('sim_time_ms')} tick={tick_s}")
 
-    idx = _http_json(base_url=args.base_url, method="GET", path=f"/simulator/runs/{run_id}/artifacts", headers=headers)
+    idx = _http_json(
+        base_url=args.base_url,
+        method="GET",
+        path=f"/simulator/runs/{run_id}/artifacts",
+        headers=headers,
+        timeout_sec=args.timeout_sec,
+    )
     items = {it["name"]: it for it in idx.get("items", [])}
     print("artifacts=", ",".join(sorted(items.keys())))
 
@@ -261,7 +307,13 @@ def main() -> int:
         it = items.get(name)
         if not it:
             continue
-        _download(origin=args.origin, url_path=it["url"], headers={"X-Admin-Token": args.admin_token}, out_path=out_dir / name)
+        _download(
+            origin=args.origin,
+            url_path=it["url"],
+            headers={"X-Admin-Token": args.admin_token},
+            out_path=out_dir / name,
+            timeout_sec=args.timeout_sec,
+        )
 
     print(f"downloaded_dir={out_dir}")
 

@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import threading
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -249,11 +248,7 @@ async def _run_benchmark(
         "clearing_override_calls": clearing_override_calls,
     }
 
-    # Track current tick for event attribution
-    current_tick = 0
-
     for tick in range(_TOTAL_TICKS):
-        current_tick = tick
         run.tick_index = tick
         run.sim_time_ms = tick * 1000
         try:

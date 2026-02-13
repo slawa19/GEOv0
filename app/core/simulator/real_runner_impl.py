@@ -123,7 +123,7 @@ class RealRunnerImpl:
             "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250
         )
 
-        # Adaptive clearing policy knobs (§5 of adaptive-clearing-policy-spec).
+        # Adaptive clearing policy knobs (§5 of docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md).
         self._clearing_policy = _safe_str_env("SIMULATOR_CLEARING_POLICY", "static")
         if self._clearing_policy not in ("static", "adaptive"):
             self._clearing_policy = "static"

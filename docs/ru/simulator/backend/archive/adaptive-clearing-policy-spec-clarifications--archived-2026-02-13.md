@@ -2,7 +2,7 @@
 
 Дата: 2026-02-13
 
-Этот документ уточняет двусмысленные места в [`docs/ru/simulator/backend/adaptive-clearing-policy-spec.md`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:1) и вводит **нормативные** формулировки (MUST/SHOULD) для реализации и тестов.
+Этот документ уточняет двусмысленные места в [`docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:1) и вводит **нормативные** формулировки (MUST/SHOULD) для реализации и тестов.
 
 ## 0) Термины и обозначения
 
@@ -13,24 +13,24 @@
 - `rejected_no_capacity_tick(eq)` — число отказов за тик для `eq` с кодом `ROUTING_NO_CAPACITY`.
 - `no_capacity_rate_window(eq)` — агрегированный за окно показатель:
   - `sum(rejected_no_capacity_tick) / max(1, sum(attempted_tick))`.
-  - Формула закреплена в спека-документе: [`no_capacity_rate_window`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:75).
-- `ZERO_VOLUME_EPS` — порог нулевого объёма, закреплён: [`ZERO_VOLUME_EPS = 1e-9`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:80).
+  - Формула закреплена в спека-документе: [`no_capacity_rate_window`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:75).
+- `ZERO_VOLUME_EPS` — порог нулевого объёма, закреплён: [`ZERO_VOLUME_EPS = 1e-9`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:80).
 
 ## 1) Нормативная семантика budgets (None и clamp)
 
 ### 1.1 Decision budgets: None MUST трактоваться детерминированно
 
-В `ClearingDecision` поля `time_budget_ms` и `max_depth` допускают `None` ([`ClearingDecision`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:49)).
+В `ClearingDecision` поля `time_budget_ms` и `max_depth` допускают `None` ([`ClearingDecision`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:49)).
 
 **Уточнение (MUST):**
 - Если `decision.time_budget_ms is None`, то для этого вызова используется `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN`.
 - Если `decision.max_depth is None`, то для этого вызова используется `SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN`.
 
-**Мотивация:** минимизация стоимости клиринга по умолчанию соответствует целям спеки (ограничение стоимости, объяснимость) и warmup-ветке, где явно сказано «с минимальным бюджетом» ([`warmup fallback`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:171)).
+**Мотивация:** минимизация стоимости клиринга по умолчанию соответствует целям спеки (ограничение стоимости, объяснимость) и warmup-ветке, где явно сказано «с минимальным бюджетом» ([`warmup fallback`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:171)).
 
 ### 1.2 Clamp MUST применяться всегда, до вызова clearing engine
 
-Clamp-правило закреплено в спека-документе: [`clamp budgets`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:127).
+Clamp-правило закреплено в спека-документе: [`clamp budgets`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:127).
 
 **Уточнение (MUST):**
 - `effective_time_budget_ms` вычисляется по clamp-правилу даже если исходный budget получен из `None` (см. 1.1).
@@ -40,7 +40,7 @@ Clamp-правило закреплено в спека-документе: [`cl
 
 ### 2.1 Hysteresis определяет состояние «клиринг активен»
 
-Спека фиксирует hysteresis HIGH/LOW как фактор решения ([`MVP фактор 1`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:79)).
+Спека фиксирует hysteresis HIGH/LOW как фактор решения ([`MVP фактор 1`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:79)).
 
 **Уточнение (MUST):**
 - Policy хранит per-eq состояние `is_clearing_active`.
@@ -51,7 +51,7 @@ Clamp-правило закреплено в спека-документе: [`cl
 
 ### 2.2 Cooldown в MVP эквивалентен min_interval_ticks
 
-Спека в тексте использует термин cooldown ([`goal: hysteresis/cooldown`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:20)), а в env knobs явно задан `MIN_INTERVAL_TICKS` ([`min_interval_ticks`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:139)).
+Спека в тексте использует термин cooldown ([`goal: hysteresis/cooldown`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:20)), а в env knobs явно задан `MIN_INTERVAL_TICKS` ([`min_interval_ticks`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:139)).
 
 **Уточнение (MUST):**
 - В MVP отдельного параметра cooldown не вводится.
@@ -61,7 +61,7 @@ Clamp-правило закреплено в спека-документе: [`cl
 
 ### 2.3 Backoff MUST ограничивать частоту даже при активном hysteresis
 
-Спека фиксирует backoff при «нулевом объёме» как второй фактор ([`MVP фактор 2`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:80)).
+Спека фиксирует backoff при «нулевом объёме» как второй фактор ([`MVP фактор 2`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:80)).
 
 **Уточнение (MUST):**
 - Если `is_clearing_active=True`, это означает «в принципе разрешено пытаться клирить», но фактический запуск клиринга дополнительно ограничивается `next_allowed_tick(eq)`, вычисляемым из min interval и backoff.
@@ -70,7 +70,7 @@ Clamp-правило закреплено в спека-документе: [`cl
 
 ### 3.1 Backoff MUST быть экспоненциальным и детерминированным
 
-Спека требует «экспоненциальный рост интервала» ([`backoff`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:80)) и задаёт верхнюю границу интервала ([`BACKOFF_MAX_INTERVAL_TICKS`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:140)).
+Спека требует «экспоненциальный рост интервала» ([`backoff`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:80)) и задаёт верхнюю границу интервала ([`BACKOFF_MAX_INTERVAL_TICKS`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:140)).
 
 **Уточнение (MUST):**
 - Policy хранит per-eq счётчик `zero_volume_streak`.
@@ -87,16 +87,32 @@ Clamp-правило закреплено в спека-документе: [`cl
 
 ## 4) Timeout MUST трактоваться как zero-volume для backoff
 
-Спека требует hard-timeout per-eq ([`hard-timeout`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:156)) и говорит, что timeout считается zero-yield и ведёт к backoff ([`timeout -> backoff`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:158)), при этом yield не используется в решениях MVP ([`yield не используется`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:76)).
+Спека требует hard-timeout per-eq ([`hard-timeout`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:156)) и говорит, что timeout считается zero-yield и ведёт к backoff ([`timeout -> backoff`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:158)), при этом yield не используется в решениях MVP ([`yield не используется`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:76)).
 
 **Уточнение (MUST):**
 - Если per-eq clearing завершился по timeout, то для целей MVP backoff это MUST трактоваться как:
   - `last_clearing_volume = 0.0` (то есть «нулевой объём»);
   - `last_clearing_cost_ms = hard_timeout_ms` (или фактическое elapsed; но значение MUST быть > 0).
 
+### 4.1 Любые ошибки/исключения клиринга MUST трактоваться как zero-volume
+
+Спека должна фиксировать детерминированное и безопасное поведение не только для timeout,
+но и для других failure-сценариев (DB errors, lock conflicts, unexpected exceptions,
+cancellation/stop).
+
+**Уточнение (MUST):**
+- Если per-eq clearing завершился с ошибкой/исключением (включая cancellation), то для целей
+  MVP backoff это MUST трактоваться как:
+  - `last_clearing_volume = 0.0`;
+  - `last_clearing_cost_ms = elapsed_ms` (значение MUST быть > 0);
+  - `last_clearing_tick = tick_index`.
+
+**Мотивация:** предотвращение thrashing (повторных попыток клиринга каждый тик под нагрузкой)
+и сохранение детерминизма для тестов/регрессий.
+
 ## 5) Warmup fallback: точное поведение
 
-Спека описывает warmup fallback ([`cold-start`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:169)).
+Спека описывает warmup fallback ([`cold-start`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:169)).
 
 **Уточнение (MUST):**
 - Пока rolling window не заполнено (`len(window) < WINDOW_TICKS`), policy НЕ применяет hysteresis и backoff.
@@ -111,7 +127,7 @@ Clamp-правило закреплено в спека-документе: [`cl
 
 ## 6) Missing data MUST деградировать безопасно
 
-Спека требует устойчивость к missing данным ([`устойчивость к missing`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:57)), но не фиксирует конкретное поведение.
+Спека требует устойчивость к missing данным ([`устойчивость к missing`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:57)), но не фиксирует конкретное поведение.
 
 **Уточнение (MUST):**
 - Missing/None значения сигналов трактуются как 0 (attempted, rejected_no_capacity, in_flight, queue_depth, last_clearing_*).
@@ -120,18 +136,25 @@ Clamp-правило закреплено в спека-документе: [`cl
 
 ## 7) Guardrails и логирование причин
 
-Guardrails находятся на координаторе, а не policy ([`guardrail scope`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:199)) и могут пропустить клиринг целиком на тик ([`skip all`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:431)). Спека также требует минимальный лог на tick decision ([`наблюдаемость`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:180)).
+Guardrails находятся на координаторе, а не policy ([`guardrail scope`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:199)) и могут пропустить клиринг целиком на тик ([`skip all`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:431)). Спека также требует минимальный лог на tick decision ([`наблюдаемость`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:180)).
 
 **Уточнение (MUST):**
 - Если guardrail сработал до per-eq evaluate, координатор MUST записать лог-строку с `reason=CLEARING_SKIPPED_GUARDRAIL` и значениями `in_flight`/`queue_depth`.
 - При guardrail skip-all policy.evaluate MAY не вызываться.
 
+### 7.1 Семантика “0 = disabled” для guardrail thresholds
+
+**Уточнение (MUST):**
+- Если `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD <= 0`, то inflight guardrail MUST считаться отключенным и MUST NOT приводить к skip.
+- Если `SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD <= 0`, то queue-depth guardrail MUST считаться отключенным и MUST NOT приводить к skip.
+
 ## 8) Canonical reason codes (для объяснимости и тестов)
 
-Спека требует `reason: str` ([`ClearingDecision.reason`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:51)).
+Спека требует `reason: str` ([`ClearingDecision.reason`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:51)).
 
 **Уточнение (SHOULD):** reason должен быть одним из фиксированного набора (строковые константы):
 - `WARMUP_FALLBACK_RUN` / `WARMUP_FALLBACK_SKIP`
+- `WARMUP_DISABLED`
 - `RATE_HIGH_ENTER` / `RATE_LOW_EXIT` / `RATE_HOLD`
 - `SKIP_NOT_ACTIVE`
 - `SKIP_MIN_INTERVAL`
@@ -158,9 +181,13 @@ Guardrails находятся на координаторе, а не policy ([`g
 - Guardrail skip-all → reason/log.
 - Tick budget/max eq per tick → остальные eq пропускаются детерминированно.
 
+**Уточнение (MUST, детерминизм):**
+- При использовании tick-level caps (`SIMULATOR_CLEARING_ADAPTIVE_TICK_BUDGET_MS` / `SIMULATOR_CLEARING_ADAPTIVE_MAX_EQ_PER_TICK`) координатор MUST обходить equivalents в детерминированном порядке.
+- Рекомендуемый и закреплённый порядок: `sorted(equivalents)` (лексикографически по коду).
+
 ---
 
 ## 10) Что НЕ меняется (явные non-goals)
 
-- Не вводятся новые критерии решения по `clearing_yield_last` или `total_debt` (этап 2). См. [`yield не используется`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:76) и [`total_debt MVP: не используется`](docs/ru/simulator/backend/adaptive-clearing-policy-spec.md:69).
+- Не вводятся новые критерии решения по `clearing_yield_last` или `total_debt` (этап 2). См. [`yield не используется`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:76) и [`total_debt MVP: не используется`](docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md:69).
 - Контракт SSE для клиринга: используется только `clearing.done` (с `cycle_edges` и `cleared_amount`), без `clearing.plan`.

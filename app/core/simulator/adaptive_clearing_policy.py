@@ -3,7 +3,7 @@
 Pure logic, no DB/IO. Determines per-equivalent whether clearing should run
 based on rolling-window signals (no_capacity_rate, clearing yield, backoff).
 
-See: docs/ru/simulator/backend/adaptive-clearing-policy-spec.md
+See: docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md
 """
 
 from __future__ import annotations

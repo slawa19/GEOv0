@@ -917,33 +917,25 @@ export function useSimulatorApp() {
     // Single subtle flash at clearing completion (warm orange tint, once per event).
     state.flash = 0.55
 
-    const edges: Array<{ from: string; to: string }> = []
+    const edgesAll: Array<{ from: string; to: string }> = []
     const doneCycleEdges = (done as any)?.cycle_edges
     if (Array.isArray(doneCycleEdges) && doneCycleEdges.length > 0) {
-      for (const e of doneCycleEdges) edges.push({ from: e.from, to: e.to })
+      for (const e of doneCycleEdges) edgesAll.push({ from: e.from, to: e.to })
     }
 
-    // Fallback: derive edges from done.node_patch if still empty (edge between consecutive nodes).
-    if (edges.length === 0 && done.node_patch && done.node_patch.length >= 2) {
-      const patchIds = done.node_patch.map((p) => p.id).filter(Boolean)
-      for (let i = 0; i < patchIds.length; i++) {
-        const from = patchIds[i]!
-        const to = patchIds[(i + 1) % patchIds.length]!
-        if (from && to) edges.push({ from, to })
-      }
-    }
-
-    const nodeIds = nodesFromEdges(edges)
+    const nodeIds = nodesFromEdges(edgesAll)
 
     // Keep cycle nodes visible during completion.
     if (nodeIds.length > 0) {
       for (const id of nodeIds) addActiveNode(id, 5200)
     }
 
-    // Highlight edges with pulsing glow (geometry-only, no sparks/bursts).
-    if (edges.length > 0) {
+    // Highlight all touched edges (authoritative from clearing.done.cycle_edges).
+    // Keep the expensive pulse spawning bounded to avoid O(N) particle cost on large clearings.
+    const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
+    if (edgesFx.length > 0) {
       spawnEdgePulses(fxState, {
-        edges,
+        edges: edgesFx,
         nowMs,
         durationMs: 4200,
         color: clearingColor,
@@ -954,8 +946,10 @@ export function useSimulatorApp() {
         seedFn: fnv1a,
         isTestMode: isTestMode.value && isWebDriver,
       })
+    }
 
-      for (const e of edges) addActiveEdge(keyEdge(e.from, e.to), 5200)
+    if (edgesAll.length > 0) {
+      for (const e of edgesAll) addActiveEdge(keyEdge(e.from, e.to), 5200)
     }
 
     // Show total cleared amount as a premium floating label at the TOP of the clearing figure.

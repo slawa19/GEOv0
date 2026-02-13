@@ -506,9 +506,33 @@ class RealClearingEngine:
                     done_cycle_edges: list[dict[str, str]] | None = None
                     if touched_edges:
                         pairs = sorted(touched_edges)
-                        if max_fx_edges > 0 and len(pairs) > max_fx_edges:
-                            pairs = pairs[:max_fx_edges]
-                        done_cycle_edges = [{"from": a, "to": b} for (a, b) in pairs]
+
+                        # `touched_edges` is tracked as (creditor_pid, debtor_pid) because that's the
+                        # trustline direction used by snapshot links (source->target) and edge patches.
+                        # However, some call-sites / older data may treat edges as (debtor->creditor).
+                        # To keep UI highlighting stable, prefer edges that exist in the scenario-topology
+                        # cache for this run/equivalent, and fall back gracefully if the cache is missing.
+                        with self._lock:
+                            topo_edges = set(
+                                ((run._edges_by_equivalent or {}).get(str(eq)) or [])
+                            )
+
+                        out_edges: list[dict[str, str]] = []
+                        limit_n = max(1, int(max_fx_edges))
+                        if topo_edges:
+                            for a, b in pairs:
+                                if (a, b) in topo_edges:
+                                    out_edges.append({"from": a, "to": b})
+                                elif (b, a) in topo_edges:
+                                    out_edges.append({"from": b, "to": a})
+                                if len(out_edges) >= limit_n:
+                                    break
+                        else:
+                            for a, b in pairs[:limit_n]:
+                                out_edges.append({"from": a, "to": b})
+
+                        if out_edges:
+                            done_cycle_edges = out_edges
                     emitter.emit_clearing_done(
                         run_id=run_id,
                         run=run,

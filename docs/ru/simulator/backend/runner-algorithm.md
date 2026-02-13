@@ -204,7 +204,7 @@ Env knobs для adaptive (подробнее — `real-mode-runbook.md`):
 - `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD`, `QUEUE_DEPTH_THRESHOLD`
 
 См. каноничное описание: `adaptive-clearing-policy.md`.
-Спецификация реализации: `adaptive-clearing-policy-spec.md`.
+Спецификация реализации: `docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`.
 
 Важно:
 - строгий контракт payload’ов событий — в `api/openapi.yaml` и `simulator-domain-model.md`.
