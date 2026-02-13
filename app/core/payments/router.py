@@ -36,6 +36,13 @@ class PaymentRouter:
         ],
     ] = {}
 
+    @classmethod
+    def invalidate_cache(cls, equivalent_code: str | None = None) -> None:
+        if equivalent_code:
+            cls._graph_cache.pop(str(equivalent_code), None)
+        else:
+            cls._graph_cache.clear()
+
     def __init__(self, session: AsyncSession):
         self.session = session
         # Graph structure: { from_pid: { to_pid: capacity } }

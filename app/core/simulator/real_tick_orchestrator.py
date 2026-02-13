@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
@@ -7,8 +8,10 @@ from typing import TYPE_CHECKING, Protocol
 import app.db.session as db_session
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
+from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.models import RunRecord
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
+from app.db.models.audit_log import IntegrityAuditLog
 
 
 if TYPE_CHECKING:
@@ -39,6 +42,7 @@ class _RealRunnerPort(Protocol):
     _real_tick_trust_drift_coordinator: "RealTickTrustDriftCoordinator"
     _real_tick_payments_coordinator: "RealTickPaymentsCoordinator"
     _real_payments_executor: "RealPaymentsExecutor"
+    _sse_emitter: "object"
     _trust_drift_engine: "TrustDriftEngine"
 
     _real_max_timeouts_per_tick_limit: int
@@ -62,6 +66,77 @@ class RealTickOrchestrator:
     def __init__(self, runner: _RealRunnerPort) -> None:
         self._runner = runner
 
+    async def _await_pending_clearing(self, run_id: str, *, run: RunRecord) -> None:
+        rr = self._runner
+
+        with rr._lock:
+            task = run._real_clearing_task
+            if task is not None and task.done():
+                run._real_clearing_task = None
+                task = None
+
+        if task is None:
+            return
+
+        # If the run is no longer active, do not wait: cancel best-effort.
+        if getattr(run, "state", None) in ("stopped", "stopping", "error"):
+            try:
+                task.cancel()
+            except Exception:
+                pass
+            with rr._lock:
+                if run._real_clearing_task is task:
+                    run._real_clearing_task = None
+            return
+
+        # Bounded grace: if clearing is still running from the previous tick,
+        # wait a bit so payments don't race it and cause lost updates.
+        try:
+            hard_timeout = rr._real_tick_clearing_coordinator.compute_static_clearing_hard_timeout_sec(
+                safe_int_env=_safe_int_env
+            )
+        except Exception:
+            hard_timeout = 2.0
+        grace_sec = max(0.1, float(hard_timeout) * 0.5)
+
+        rr._logger.warning(
+            "simulator.real.pending_clearing_await_enter run_id=%s tick=%s grace_sec=%s",
+            str(run_id),
+            int(getattr(run, "tick_index", 0) or 0),
+            grace_sec,
+        )
+
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=grace_sec)
+        except asyncio.TimeoutError:
+            rr._logger.warning(
+                "simulator.real.pending_clearing_grace_timeout run_id=%s tick=%s grace_sec=%s",
+                str(run_id),
+                int(getattr(run, "tick_index", 0) or 0),
+                grace_sec,
+            )
+            try:
+                task.cancel()
+            except Exception:
+                pass
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        except Exception:
+            rr._logger.warning(
+                "simulator.real.pending_clearing_await_failed run_id=%s tick=%s",
+                str(run_id),
+                int(getattr(run, "tick_index", 0) or 0),
+                exc_info=True,
+            )
+        finally:
+            with rr._lock:
+                if run._real_clearing_task is task:
+                    run._real_clearing_task = None
+
     async def flush_pending_storage(self, run_id: str) -> None:
         rr = self._runner
         run = rr._get_run(run_id)
@@ -74,6 +149,7 @@ class RealTickOrchestrator:
         rr = self._runner
         run = rr._get_run(run_id)
         task = None
+        clearing_task = None
         with rr._lock:
             if run.state in ("stopped", "stopping", "error"):
                 return
@@ -94,6 +170,8 @@ class RealTickOrchestrator:
                 "at": rr._utc_now().isoformat(),
             }
             task = run._heartbeat_task
+            clearing_task = run._real_clearing_task
+            run._real_clearing_task = None
 
         rr._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)
@@ -110,6 +188,12 @@ class RealTickOrchestrator:
         if task is not None:
             task.cancel()
 
+        if clearing_task is not None:
+            try:
+                clearing_task.cancel()
+            except Exception:
+                pass
+
     async def tick_real_mode(self, run_id: str) -> None:
         rr = self._runner
 
@@ -125,6 +209,10 @@ class RealTickOrchestrator:
             int(run.tick_index or 0),
             int(run.sim_time_ms or 0),
         )
+
+        # CRITICAL: prevent payments from racing an unfinished background clearing
+        # from the previous tick (lost updates under Postgres).
+        await self._await_pending_clearing(run_id, run=run)
 
         try:
             async with db_session.AsyncSessionLocal() as session:
@@ -253,6 +341,113 @@ class RealTickOrchestrator:
                         per_eq_metric_values=per_eq_metric_values,
                         per_eq_edge_stats=per_eq_edge_stats,
                     )
+
+                    # ── Post-tick audit (best-effort): detect participant drift ──
+                    try:
+                        emitter = getattr(rr, "_sse_emitter", None)
+                        sim_idem = getattr(rr._real_payments_executor, "_sim_idempotency_key", None)
+
+                        for eq_code in equivalents:
+                            audit = await audit_tick_balance(
+                                session=session,
+                                equivalent_code=str(eq_code),
+                                tick_index=int(run.tick_index or 0),
+                                payments_result=payments_phase,
+                                clearing_volume_by_eq=clearing_volume_by_eq,
+                                run_id=str(run_id),
+                                sim_idempotency_key=sim_idem,
+                            )
+                            if audit.ok:
+                                continue
+
+                            # Severity heuristic: warning if drift < 1% of tick volume.
+                            severity = "critical"
+                            if audit.tick_volume > 0:
+                                try:
+                                    ratio = audit.total_drift / audit.tick_volume
+                                    if ratio < Decimal("0.01"):
+                                        severity = "warning"
+                                except Exception:
+                                    severity = "critical"
+
+                            rr._logger.warning(
+                                "event=post_tick_audit.drift run_id=%s tick=%s eq=%s total_drift=%s severity=%s",
+                                str(run_id),
+                                int(run.tick_index or 0),
+                                str(eq_code),
+                                str(audit.total_drift),
+                                str(severity),
+                            )
+
+                            # 1) SSE event (best-effort).
+                            try:
+                                if emitter is not None:
+                                    emitter.emit_audit_drift(
+                                        run_id=str(run_id),
+                                        run=run,
+                                        equivalent=str(eq_code),
+                                        tick_index=int(run.tick_index or 0),
+                                        severity=str(severity),
+                                        total_drift=str(audit.total_drift),
+                                        drifts=list(audit.drifts or []),
+                                        source="post_tick_audit",
+                                    )
+                            except Exception:
+                                rr._logger.warning(
+                                    "event=post_tick_audit.emit_failed run_id=%s tick=%s eq=%s",
+                                    str(run_id),
+                                    int(run.tick_index or 0),
+                                    str(eq_code),
+                                    exc_info=True,
+                                )
+
+                            # 2) IntegrityAuditLog (best-effort).
+                            try:
+                                session.add(
+                                    IntegrityAuditLog(
+                                        operation_type="SIMULATOR_AUDIT_DRIFT",
+                                        tx_id=None,
+                                        equivalent_code=str(eq_code).strip().upper(),
+                                        state_checksum_before="",
+                                        state_checksum_after="",
+                                        affected_participants={
+                                            "drifts": list(audit.drifts or []),
+                                            "tick_index": int(run.tick_index or 0),
+                                            "source": "post_tick_audit",
+                                        },
+                                        invariants_checked={
+                                            "post_tick_balance": {
+                                                "passed": False,
+                                                "total_drift": str(audit.total_drift),
+                                            }
+                                        },
+                                        verification_passed=False,
+                                        error_details={
+                                            "drifts": list(audit.drifts or []),
+                                            "severity": str(severity),
+                                        },
+                                    )
+                                )
+                                await session.commit()
+                            except Exception:
+                                try:
+                                    await session.rollback()
+                                except Exception:
+                                    pass
+                                rr._logger.warning(
+                                    "event=post_tick_audit.persist_failed run_id=%s tick=%s eq=%s",
+                                    str(run_id),
+                                    int(run.tick_index or 0),
+                                    str(eq_code),
+                                    exc_info=True,
+                                )
+                    except Exception:
+                        rr._logger.warning(
+                            "event=post_tick_audit.failed run_id=%s tick=%s",
+                            str(run_id),
+                            int(run.tick_index or 0),
+                            exc_info=True,
+                        )
                 except Exception:
                     # CRITICAL: always rollback on tick failure.
                     # Otherwise the underlying pooled connection can be returned

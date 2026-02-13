@@ -278,9 +278,54 @@ def _validate_tx_failed(evt: dict[str, Any]) -> None:
         raise _SuperSimFailure(f"Unexpected INTERNAL_ERROR in tx.failed: {evt}")
 
 
+def _validate_node_patch_shape(patch_list: list[Any], *, context: str = "node_patch") -> None:
+    """Validate that node_patch list has correct structure.
+
+    Checks the first element for required fields:
+    id (str), net_balance_atoms (str, magnitude-only), net_sign ∈ {-1,0,1},
+    net_balance (str), viz_color_key (str), viz_size (dict with w,h).
+    """
+    if not isinstance(patch_list, list) or not patch_list:
+        raise _SuperSimFailure(f"{context}: expected non-empty list, got {type(patch_list).__name__}")
+
+    np0 = _ensure_dict(patch_list[0])
+    if not isinstance(np0.get("id"), str) or not np0.get("id"):
+        raise _SuperSimFailure(f"{context}[0] missing id: {np0}")
+    if not isinstance(np0.get("net_balance_atoms"), str):
+        raise _SuperSimFailure(f"{context}[0] missing net_balance_atoms: {np0}")
+    if str(np0.get("net_balance_atoms")).startswith("-"):
+        raise _SuperSimFailure(f"{context}[0] net_balance_atoms must be magnitude-only: {np0}")
+    if np0.get("net_sign") not in (-1, 0, 1):
+        raise _SuperSimFailure(f"{context}[0] missing/invalid net_sign: {np0}")
+    if not isinstance(np0.get("net_balance"), str) or not str(np0.get("net_balance") or "").strip():
+        raise _SuperSimFailure(f"{context}[0] missing net_balance: {np0}")
+    if not isinstance(np0.get("viz_color_key"), str) or not np0.get("viz_color_key"):
+        raise _SuperSimFailure(f"{context}[0] missing viz_color_key: {np0}")
+    vs = np0.get("viz_size")
+    if not isinstance(vs, dict) or not ("w" in vs and "h" in vs):
+        raise _SuperSimFailure(f"{context}[0] missing viz_size: {np0}")
+
+
+def _validate_edge_patch_shape(patch_list: list[Any], *, context: str = "edge_patch") -> None:
+    """Validate that edge_patch list has correct structure.
+
+    Checks the first element for required fields:
+    source (str), target (str), viz_alpha_key (str), viz_width_key (str).
+    """
+    if not isinstance(patch_list, list) or not patch_list:
+        raise _SuperSimFailure(f"{context}: expected non-empty list, got {type(patch_list).__name__}")
+
+    ep0 = _ensure_dict(patch_list[0])
+    for k in ("source", "target", "viz_alpha_key", "viz_width_key"):
+        if not isinstance(ep0.get(k), str) or not str(ep0.get(k) or "").strip():
+            raise _SuperSimFailure(f"{context}[0] missing {k}: {ep0}")
+
+
 def _validate_edge_refs_are_in_snapshot(
-    edges: list[Any], *, snapshot_edge_keys: set[str], context: str
+    edges: list[Any], *, snapshot_edge_keys: set[str] | None, context: str
 ) -> None:
+    if snapshot_edge_keys is None:
+        return
     for e in edges:
         ed = _ensure_dict(e)
         a = ed.get("from")
@@ -294,7 +339,7 @@ def _validate_edge_refs_are_in_snapshot(
             )
 
 
-def _validate_tx_updated(evt: dict[str, Any], *, snapshot_edge_keys: set[str], require_patches: bool) -> None:
+def _validate_tx_updated(evt: dict[str, Any], *, snapshot_edge_keys: set[str] | None, require_patches: bool) -> None:
     edges = evt.get("edges")
     if edges is None:
         raise _SuperSimFailure(f"tx.updated missing edges: {evt}")
@@ -319,17 +364,8 @@ def _validate_tx_updated(evt: dict[str, Any], *, snapshot_edge_keys: set[str], r
             raise _SuperSimFailure(f"tx.updated missing node_patch in real-mode: {evt}")
         if not isinstance(edge_patch, list) or not edge_patch:
             raise _SuperSimFailure(f"tx.updated missing edge_patch in real-mode: {evt}")
-
-        # Minimal contract checks (mirrors existing real SSE smoke).
-        np0 = _ensure_dict(node_patch[0])
-        if not isinstance(np0.get("id"), str):
-            raise _SuperSimFailure(f"tx.updated node_patch[0] missing id: {evt}")
-        if not isinstance(np0.get("net_balance_atoms"), str):
-            raise _SuperSimFailure(f"tx.updated node_patch[0] missing net_balance_atoms: {evt}")
-        if str(np0.get("net_balance_atoms")).startswith("-"):
-            raise _SuperSimFailure(f"tx.updated net_balance_atoms must be magnitude-only: {evt}")
-        if np0.get("net_sign") not in (-1, 0, 1):
-            raise _SuperSimFailure(f"tx.updated node_patch[0] missing/invalid net_sign: {evt}")
+        _validate_node_patch_shape(node_patch, context="tx.updated.node_patch")
+        _validate_edge_patch_shape(edge_patch, context="tx.updated.edge_patch")
 
 
 def _validate_clearing_done(evt: dict[str, Any], *, snapshot_edge_keys: set[str]) -> None:
@@ -708,28 +744,8 @@ async def test_super_smoke_part2_real_logic_deterministic(
                 raise _SuperSimFailure(f"clearing.done missing node_patch: {done0}")
             if not isinstance(edge_patch, list) or not edge_patch:
                 raise _SuperSimFailure(f"clearing.done missing edge_patch: {done0}")
-
-            np0 = _ensure_dict(node_patch[0])
-            if not isinstance(np0.get("id"), str) or not np0.get("id"):
-                raise _SuperSimFailure(f"clearing.done node_patch[0] missing id: {done0}")
-            if not isinstance(np0.get("net_balance_atoms"), str):
-                raise _SuperSimFailure(f"clearing.done node_patch[0] missing net_balance_atoms: {done0}")
-            if str(np0.get("net_balance_atoms")).startswith("-"):
-                raise _SuperSimFailure(f"clearing.done net_balance_atoms must be magnitude-only: {done0}")
-            if np0.get("net_sign") not in (-1, 0, 1):
-                raise _SuperSimFailure(f"clearing.done node_patch[0] invalid net_sign: {done0}")
-            if not isinstance(np0.get("net_balance"), str) or not str(np0.get("net_balance") or "").strip():
-                raise _SuperSimFailure(f"clearing.done node_patch[0] missing net_balance: {done0}")
-            if not isinstance(np0.get("viz_color_key"), str) or not np0.get("viz_color_key"):
-                raise _SuperSimFailure(f"clearing.done node_patch[0] missing viz_color_key: {done0}")
-            vs = np0.get("viz_size")
-            if not isinstance(vs, dict) or not ("w" in vs and "h" in vs):
-                raise _SuperSimFailure(f"clearing.done node_patch[0] missing viz_size: {done0}")
-
-            ep0 = _ensure_dict(edge_patch[0])
-            for k in ("source", "target", "viz_alpha_key", "viz_width_key"):
-                if not isinstance(ep0.get(k), str) or not str(ep0.get(k) or "").strip():
-                    raise _SuperSimFailure(f"clearing.done edge_patch[0] missing {k}: {done0}")
+            _validate_node_patch_shape(node_patch, context="clearing.done.node_patch")
+            _validate_edge_patch_shape(edge_patch, context="clearing.done.edge_patch")
 
             _print_summary(
                 f"Part2 OK: cleared_amount={cleared_amount} cleared_cycles={cleared_cycles} cycle_edges={len(cycle_edges)} node_patch={len(node_patch)} edge_patch={len(edge_patch)}"
@@ -812,6 +828,10 @@ async def test_super_smoke_part3_real_mode_http_startup(
                     _validate_run_status(evt, run_id=cap.run_id, scenario_id=scenario_id)
                 elif t == "tx.updated":
                     seen_tx += 1
+                    # No snapshot loaded in Part 3 (for speed), so snapshot_edge_keys=None
+                    # skips edge-in-snapshot membership check but still validates edge shape
+                    # and patch structure.
+                    _validate_tx_updated(evt, snapshot_edge_keys=None, require_patches=True)
                 elif t == "tx.failed":
                     seen_tx += 1
                     _validate_tx_failed(evt)

@@ -93,6 +93,26 @@ class RealTickClearingCoordinator:
             run_clearing=run_clearing,
         )
 
+    def compute_static_clearing_hard_timeout_sec(
+        self,
+        *,
+        safe_int_env: Callable[[str, int], int],
+    ) -> float:
+        """Compute the hard timeout used by the static clearing branch.
+
+        Exposed so the orchestrator can apply a bounded "grace" wait for
+        a pending background clearing task before starting the next tick.
+        """
+        clearing_hard_timeout_sec = max(
+            2.0,
+            float(self._real_clearing_time_budget_ms) / 1000.0 * 4.0,
+        )
+        env_timeout_cap = float(safe_int_env("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 8))
+        if env_timeout_cap > 0:
+            clearing_hard_timeout_sec = min(clearing_hard_timeout_sec, env_timeout_cap)
+        clearing_hard_timeout_sec = max(0.1, float(clearing_hard_timeout_sec))
+        return float(clearing_hard_timeout_sec)
+
     # ── Adaptive mode ────────────────────────────────────────────
 
     async def _maybe_run_adaptive(
@@ -405,14 +425,9 @@ class RealTickClearingCoordinator:
 
         clearing_t0 = time.monotonic()
 
-        clearing_hard_timeout_sec = max(
-            2.0,
-            float(self._real_clearing_time_budget_ms) / 1000.0 * 4.0,
+        clearing_hard_timeout_sec = self.compute_static_clearing_hard_timeout_sec(
+            safe_int_env=safe_int_env
         )
-        env_timeout_cap = float(safe_int_env("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 8))
-        if env_timeout_cap > 0:
-            clearing_hard_timeout_sec = min(clearing_hard_timeout_sec, env_timeout_cap)
-        clearing_hard_timeout_sec = max(0.1, float(clearing_hard_timeout_sec))
 
         clearing_task: asyncio.Task[dict[str, float]] | None = None
         with self._lock:
@@ -448,10 +463,12 @@ class RealTickClearingCoordinator:
                 tick_index,
                 clearing_hard_timeout_sec,
             )
-            try:
-                clearing_task.cancel()
-            except Exception:
-                pass
+            # IMPORTANT:
+            # Do NOT cancel the background task here.
+            # It may be running under asyncio.shield() and cancellation can be
+            # unreliable / lead to confusing partial execution semantics.
+            # The next tick is responsible for awaiting (bounded grace) and then
+            # cancelling if still stuck.
             with self._lock:
                 run.current_phase = None
         except Exception:

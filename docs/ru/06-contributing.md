@@ -524,8 +524,10 @@ class TestRoutingService:
 # Убедиться, что все проверки проходят
 ruff check .
 
-# (опционально)
-# mypy app/
+# 1. Запустить Super Smoke (обязательно!)
+pytest tests/integration/test_simulator_super_smoke.py -vv
+
+# 2. Запустить все тесты
 pytest
 
 # Commit с понятным сообщением

@@ -14,6 +14,7 @@
 - Реестр конфигурации (runtime vs restart): [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1)
 - OpenAPI (должен быть согласован с каноном): [`api/openapi.yaml`](api/openapi.yaml:1)
 - **Quick Start & Debugging:** [`docs/ru/testing/quick-start-and-debugging.md`](testing/quick-start-and-debugging.md) — практическое руководство для новых участников
+- **Справочник Super Smoke:** [`docs/ru/testing/super-smoke.md`](testing/super-smoke.md) — главный интеграционный тест симулятора
 
 ---
 

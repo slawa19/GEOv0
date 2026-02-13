@@ -337,6 +337,34 @@ python -m pytest -q tests/contract/test_openapi_contract.py
 # Simulator SSE smoke (fixtures-mode)
 python -m pytest -q tests/integration/test_simulator_sse_smoke.py
 
+# Simulator "super smoke" (fixtures HTTP + deterministic real-logic + real-mode HTTP startup)
+# Writes postmortem dumps to test-results/super-simulator/ on failure.
+python -m pytest -q tests/integration/test_simulator_super_smoke.py
+
+# Always write dumps (useful for scheduled diagnostics)
+$env:GEO_TEST_DUMP_SUPER_SIM = "1"; python -m pytest -q tests/integration/test_simulator_super_smoke.py
+
+What this "super smoke" checks (high-signal, fast):
+
+- Fixtures-mode HTTP run + SSE contract: `run_status`, `tx.updated|tx.failed`, `clearing.done`.
+- Visual contract: emitted edge refs must exist in the current snapshot topology.
+- Deterministic real-logic smoke (no HTTP): nested transaction payment + real clearing tick + patch shapes.
+- Real-mode HTTP startup: a real run emits `run_status` and at least one `tx.*` event.
+
+When to run it:
+
+- Before/after changes in simulator runtime (runner/orchestrator/tick loop), SSE schemas, graph snapshot APIs.
+- After changes in payments, clearing, trust-limit enforcement, or Pydantic event serialization.
+- After changes in UI normalization code that depends on event payload shape (even if backend code was not touched).
+- As a quick local regression check while debugging simulator UI issues.
+
+When to update it:
+
+- Whenever you intentionally change fields/shape in: `run_status`, `tx.updated`, `tx.failed`, `clearing.done`.
+- When the scenario used by the test changes/renames (currently realistic-v2) or its fixtures/topology assumptions change.
+- When patch payload keys change (`node_patch`, `edge_patch`, `viz_*`, `net_balance*`).
+- If the test becomes flaky due to expected timing changes: adjust only stop conditions/timeouts first; avoid weakening validations.
+
 # Simulator realistic-v2 smoke (real-mode) + artifacts/DB analysis
 # (requires backend running; recommended cap for realistic amounts: SIMULATOR_REAL_AMOUNT_CAP=500)
 python scripts/run_simulator_run_and_analyze.py --scenario-id greenfield-village-100-realistic-v2 --mode real --equivalent UAH --intensity 80 --run-seconds 20
@@ -414,7 +442,13 @@ If you are an AI assistant operating in this repo, follow these rules:
 4) For simulator Real Mode contract changes, run at least:
    - `python -m pytest -q tests/contract/test_openapi_contract.py`
    - `python -m pytest -q tests/integration/test_simulator_sse_smoke.py`
+  - `python -m pytest -q tests/integration/test_simulator_super_smoke.py`
 5) Do not paste multi-line Python into PowerShell as if it were a script; run Python via `python ...` (or via the configured interpreter/tools).
+
+When to run the simulator super smoke:
+- After changes in `app/core/simulator/*`, `app/schemas/simulator.py`, `app/core/simulator/sse_broadcast.py`.
+- After changes in real-mode payments/clearing (`app/core/payments/*`, clearing engines) that can affect `tx.*`, `clearing.*`, `run_status`, or patches.
+- Before merging any PR that touches simulator SSE contracts or UI-facing payload formats.
 
 ---
 

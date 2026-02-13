@@ -375,6 +375,27 @@ class RealPaymentsExecutor:
                         for a, b in edges_pairs:
                             _edge_inc(eq, a, b, "rejected")
 
+                        # Level 3 (delta check): emit a system-level audit drift event.
+                        try:
+                            details = (err_details or {}).get("details")
+                            if (
+                                isinstance(details, dict)
+                                and str(details.get("invariant") or "")
+                                == "PAYMENT_DELTA_DRIFT"
+                            ):
+                                emitter.emit_audit_drift(
+                                    run_id=run_id,
+                                    run=run,
+                                    equivalent=eq,
+                                    tick_index=int(run.tick_index or 0),
+                                    severity="critical",
+                                    total_drift=str(details.get("total_drift") or "0"),
+                                    drifts=list(details.get("drifts") or []),
+                                    source="delta_check",
+                                )
+                        except Exception:
+                            pass
+
                         try:
                             rejection_code = map_rejection_code(err_details)
                         except Exception:

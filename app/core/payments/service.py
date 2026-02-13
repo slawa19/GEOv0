@@ -456,6 +456,9 @@ class PaymentService:
                             ),
                             timeout=prepare_timeout_s,
                         )
+
+                    # Routing graph may incorporate debts/locks; invalidate any TTL cache.
+                    PaymentRouter.invalidate_cache(str(request.equivalent))
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:
@@ -499,6 +502,9 @@ class PaymentService:
                         self.engine.commit(tx_id_str, commit=commit),
                         timeout=commit_timeout_s,
                     )
+
+                    # Debts/locks changed — never serve stale routing graphs.
+                    PaymentRouter.invalidate_cache(str(request.equivalent))
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:

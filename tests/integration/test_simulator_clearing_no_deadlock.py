@@ -291,3 +291,6 @@ async def test_clearing_does_not_deadlock_on_sqlite(
     assert int(done.get("cleared_cycles", 0)) >= 1, (
         f"Expected cleared_cycles >= 1, got {done}"
     )
+
+    # Ensure we didn't leave a pending background clearing task behind.
+    assert run._real_clearing_task is None

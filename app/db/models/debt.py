@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Numeric, UniqueConstraint, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
@@ -14,6 +14,9 @@ class Debt(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __mapper_args__ = {"version_id_col": version}
 
     debtor = relationship("Participant", foreign_keys=[debtor_id])
     creditor = relationship("Participant", foreign_keys=[creditor_id])

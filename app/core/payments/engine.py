@@ -7,9 +7,10 @@ from decimal import Decimal
 from typing import Any, List, Tuple, Awaitable, Callable, TypeVar
 from uuid import UUID
 
-from sqlalchemy import select, and_, delete, update, func, text
+from sqlalchemy import select, and_, delete, update, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.debt import Debt
@@ -120,7 +121,11 @@ class PaymentEngine:
         )
 
     async def _run_uow_with_retry(
-        self, *, op: str, fn: Callable[[], Awaitable[_T]]
+        self,
+        *,
+        op: str,
+        fn: Callable[[], Awaitable[_T]],
+        use_savepoint: bool = False,
     ) -> _T:
         """Retry wrapper for SERIALIZABLE/deadlock errors.
 
@@ -134,6 +139,9 @@ class PaymentEngine:
         attempt = 0
         while True:
             try:
+                if use_savepoint:
+                    async with self.session.begin_nested():
+                        return await fn()
                 return await fn()
             except DBAPIError as exc:
                 attempt += 1
@@ -147,10 +155,11 @@ class PaymentEngine:
                 if attempt >= self._retry_attempts or not is_retryable:
                     raise
 
-                try:
-                    await self.session.rollback()
-                except Exception:
-                    pass
+                if not use_savepoint:
+                    try:
+                        await self.session.rollback()
+                    except Exception:
+                        pass
 
                 base = max(0.0, self._retry_base_delay_s)
                 cap = max(base, self._retry_max_delay_s)
@@ -379,7 +388,7 @@ class PaymentEngine:
             return True
 
         if not commit:
-            return await _uow()
+            return await self._run_uow_with_retry(op="prepare_nocommit", fn=_uow, use_savepoint=True)
         return await self._run_uow_with_retry(op="prepare", fn=_uow)
 
     async def prepare_routes(
@@ -613,7 +622,7 @@ class PaymentEngine:
             return True
 
         if not commit:
-            return await _uow()
+            return await self._run_uow_with_retry(op="prepare_routes_nocommit", fn=_uow, use_savepoint=True)
         return await self._run_uow_with_retry(op="prepare_routes", fn=_uow)
 
     async def commit(self, tx_id: str, *, commit: bool = True):
@@ -697,15 +706,46 @@ class PaymentEngine:
                 raise ConflictException(f"Transaction {tx_id} expired before commit")
 
             # 2. Process each lock (segment)
-            affected_pairs_by_equivalent: dict[UUID, set[tuple[UUID, UUID]]] = {}
-            for lock in locks:
-                flows = lock.effects.get("flows", [])
-                for flow in flows:
-                    from_id = UUID(flow["from"])
-                    to_id = UUID(flow["to"])
-                    amount = Decimal(flow["amount"])
-                    equivalent_id = UUID(flow["equivalent"])
+            flows_by_equivalent: dict[UUID, list[tuple[UUID, UUID, Decimal]]] = {}
+            affected_pids_by_equivalent: dict[UUID, set[UUID]] = {}
+            flows_parsed_by_lock: list[list[tuple[UUID, UUID, Decimal, UUID]]] = []
 
+            for lock in locks:
+                parsed: list[tuple[UUID, UUID, Decimal, UUID]] = []
+                raw_effects = lock.effects or {}
+                raw_flows = raw_effects.get("flows", []) if isinstance(raw_effects, dict) else []
+                if isinstance(raw_flows, list):
+                    for flow in raw_flows:
+                        if not isinstance(flow, dict):
+                            continue
+                        try:
+                            from_id = UUID(flow["from"])
+                            to_id = UUID(flow["to"])
+                            amount = Decimal(flow["amount"])
+                            equivalent_id = UUID(flow["equivalent"])
+                        except Exception:
+                            continue
+
+                        parsed.append((from_id, to_id, amount, equivalent_id))
+                        flows_by_equivalent.setdefault(equivalent_id, []).append(
+                            (from_id, to_id, amount)
+                        )
+                        affected = affected_pids_by_equivalent.setdefault(equivalent_id, set())
+                        affected.add(from_id)
+                        affected.add(to_id)
+
+                flows_parsed_by_lock.append(parsed)
+
+            net_positions_before_by_equivalent: dict[UUID, dict[UUID, Decimal]] = {}
+            for eq_id, pids in affected_pids_by_equivalent.items():
+                net_positions_before_by_equivalent[eq_id] = await self._snapshot_net_positions(
+                    equivalent_id=eq_id,
+                    participant_ids=pids,
+                )
+
+            affected_pairs_by_equivalent: dict[UUID, set[tuple[UUID, UUID]]] = {}
+            for parsed in flows_parsed_by_lock:
+                for from_id, to_id, amount, equivalent_id in parsed:
                     pairs = affected_pairs_by_equivalent.setdefault(equivalent_id, set())
                     pairs.add((from_id, to_id))
                     pairs.add((to_id, from_id))
@@ -727,6 +767,11 @@ class PaymentEngine:
                     await checker.check_zero_sum(equivalent_id=eq_id)
                     await checker.check_debt_symmetry(
                         equivalent_id=eq_id, participant_pairs=list(pairs)
+                    )
+                    await self.check_payment_delta(
+                        equivalent_id=eq_id,
+                        flows=flows_by_equivalent.get(eq_id, []),
+                        net_positions_before=net_positions_before_by_equivalent.get(eq_id, {}),
                     )
             except IntegrityViolationException as exc:
                 # IMPORTANT:
@@ -833,7 +878,7 @@ class PaymentEngine:
             return True
 
         if not commit:
-            return await _uow()
+            return await self._run_uow_with_retry(op="commit_nocommit", fn=_uow, use_savepoint=True)
         return await self._run_uow_with_retry(op="commit", fn=_uow)
 
     async def _apply_flow(
@@ -845,66 +890,211 @@ class PaymentEngine:
           1. If receiver owes sender: reduce that debt.
           2. If remaining amount > 0: increase sender's debt to receiver.
         """
-        remaining_amount = amount
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with self.session.begin_nested():
+                    remaining_amount = amount
 
-        # 1. Check if Receiver owes Sender (Debt: debtor=to, creditor=from)
-        debt_r_s = await self._get_debt(to_id, from_id, equivalent_id)
+                    # 1. Check if Receiver owes Sender (Debt: debtor=to, creditor=from)
+                    debt_r_s = await self._get_debt(to_id, from_id, equivalent_id)
 
-        if debt_r_s and debt_r_s.amount > 0:
-            reduction = min(remaining_amount, debt_r_s.amount)
-            debt_r_s.amount -= reduction
-            remaining_amount -= reduction
+                    if debt_r_s and debt_r_s.amount > 0:
+                        reduction = min(remaining_amount, debt_r_s.amount)
+                        debt_r_s.amount -= reduction
+                        remaining_amount -= reduction
 
-            if debt_r_s.amount == 0:
-                await self.session.delete(debt_r_s)
-            else:
-                self.session.add(debt_r_s)
+                        if debt_r_s.amount == 0:
+                            await self.session.delete(debt_r_s)
+                        else:
+                            self.session.add(debt_r_s)
 
-        if remaining_amount > 0:
-            # 2. Increase Sender's debt to Receiver (Debt: debtor=from, creditor=to)
-            debt_s_r = await self._get_debt(from_id, to_id, equivalent_id)
-            if not debt_s_r:
-                # Create new debt record
-                debt_s_r = Debt(
-                    debtor_id=from_id,
-                    creditor_id=to_id,
-                    equivalent_id=equivalent_id,
-                    amount=Decimal("0"),
+                    if remaining_amount > 0:
+                        # 2. Increase Sender's debt to Receiver (Debt: debtor=from, creditor=to)
+                        debt_s_r = await self._get_debt(from_id, to_id, equivalent_id)
+                        if not debt_s_r:
+                            # Create new debt record
+                            debt_s_r = Debt(
+                                debtor_id=from_id,
+                                creditor_id=to_id,
+                                equivalent_id=equivalent_id,
+                                amount=Decimal("0"),
+                            )
+
+                        debt_s_r.amount += remaining_amount
+                        self.session.add(debt_s_r)
+
+                    # NOTE: app sessions may run with autoflush=False. Ensure the DB view is
+                    # consistent before the symmetry-netting queries below.
+                    await self.session.flush()
+
+                    # Enforce debt symmetry by netting mutual debts, if any.
+                    debt_forward = await self._get_debt(from_id, to_id, equivalent_id)
+                    debt_reverse = await self._get_debt(to_id, from_id, equivalent_id)
+                    if (
+                        debt_forward
+                        and debt_reverse
+                        and debt_forward.amount > 0
+                        and debt_reverse.amount > 0
+                    ):
+                        net = min(debt_forward.amount, debt_reverse.amount)
+                        debt_forward.amount -= net
+                        debt_reverse.amount -= net
+
+                        if debt_forward.amount == 0:
+                            await self.session.delete(debt_forward)
+                        else:
+                            self.session.add(debt_forward)
+
+                        if debt_reverse.amount == 0:
+                            await self.session.delete(debt_reverse)
+                        else:
+                            self.session.add(debt_reverse)
+
+                        # Flush netting effects immediately so later flows / invariant checks
+                        # don't observe a transient mutual-debt state.
+                        await self.session.flush()
+
+                return
+            except StaleDataError:
+                if attempt >= max_retries - 1:
+                    raise
+                logger.warning(
+                    "event=apply_flow.stale_data retry=%s/%s from=%s to=%s",
+                    attempt + 1,
+                    max_retries,
+                    str(from_id),
+                    str(to_id),
                 )
+                try:
+                    self.session.expire_all()
+                except Exception:
+                    pass
 
-            debt_s_r.amount += remaining_amount
-            self.session.add(debt_s_r)
+    async def _snapshot_net_positions(
+        self,
+        *,
+        equivalent_id: UUID,
+        participant_ids: set[UUID],
+    ) -> dict[UUID, Decimal]:
+        """Read net positions for participants (credits - debts) in an equivalent."""
+        if not participant_ids:
+            return {}
 
-        # NOTE: app sessions may run with autoflush=False. Ensure the DB view is
-        # consistent before the symmetry-netting queries below.
-        await self.session.flush()
+        credits_rows = (
+            await self.session.execute(
+                select(Debt.creditor_id, func.sum(Debt.amount).label("total"))
+                .where(
+                    Debt.equivalent_id == equivalent_id,
+                    Debt.creditor_id.in_(participant_ids),
+                )
+                .group_by(Debt.creditor_id)
+            )
+        ).all()
+        debts_rows = (
+            await self.session.execute(
+                select(Debt.debtor_id, func.sum(Debt.amount).label("total"))
+                .where(
+                    Debt.equivalent_id == equivalent_id,
+                    Debt.debtor_id.in_(participant_ids),
+                )
+                .group_by(Debt.debtor_id)
+            )
+        ).all()
 
-        # Enforce debt symmetry by netting mutual debts, if any.
-        debt_forward = await self._get_debt(from_id, to_id, equivalent_id)
-        debt_reverse = await self._get_debt(to_id, from_id, equivalent_id)
-        if (
-            debt_forward
-            and debt_reverse
-            and debt_forward.amount > 0
-            and debt_reverse.amount > 0
-        ):
-            net = min(debt_forward.amount, debt_reverse.amount)
-            debt_forward.amount -= net
-            debt_reverse.amount -= net
+        credits = {pid: (total or Decimal("0")) for pid, total in credits_rows}
+        debts = {pid: (total or Decimal("0")) for pid, total in debts_rows}
 
-            if debt_forward.amount == 0:
-                await self.session.delete(debt_forward)
-            else:
-                self.session.add(debt_forward)
+        out: dict[UUID, Decimal] = {}
+        for pid in participant_ids:
+            out[pid] = Decimal(str(credits.get(pid, Decimal("0")))) - Decimal(
+                str(debts.get(pid, Decimal("0")))
+            )
+        return out
 
-            if debt_reverse.amount == 0:
-                await self.session.delete(debt_reverse)
-            else:
-                self.session.add(debt_reverse)
+    async def check_payment_delta(
+        self,
+        *,
+        equivalent_id: UUID,
+        flows: list[tuple[UUID, UUID, Decimal]],
+        net_positions_before: dict[UUID, Decimal],
+    ) -> None:
+        """Verify per-participant net position deltas match applied flows."""
+        if not flows:
+            return
 
-            # Flush netting effects immediately so later flows / invariant checks
-            # don't observe a transient mutual-debt state.
-            await self.session.flush()
+        expected_delta: dict[UUID, Decimal] = {}
+        for from_id, to_id, amount in flows:
+            expected_delta[from_id] = expected_delta.get(from_id, Decimal("0")) - Decimal(
+                str(amount)
+            )
+            expected_delta[to_id] = expected_delta.get(to_id, Decimal("0")) + Decimal(
+                str(amount)
+            )
+
+        positions_after = await self._snapshot_net_positions(
+            equivalent_id=equivalent_id,
+            participant_ids=set(expected_delta.keys()),
+        )
+
+        tolerance = Decimal("0.00000001")
+        drifts_raw: list[tuple[UUID, Decimal, Decimal, Decimal]] = []
+
+        for pid, expected in expected_delta.items():
+            before = net_positions_before.get(pid, Decimal("0"))
+            after = positions_after.get(pid, Decimal("0"))
+            actual = after - before
+            drift = actual - expected
+            if abs(drift) > tolerance:
+                drifts_raw.append((pid, expected, actual, drift))
+
+        if not drifts_raw:
+            return
+
+        # Best-effort enrichment: participant pids + equivalent code for downstream SSE.
+        pid_rows = (
+            await self.session.execute(
+                select(Participant.id, Participant.pid).where(
+                    Participant.id.in_([pid for pid, *_ in drifts_raw])
+                )
+            )
+        ).all()
+        uuid_to_pid = {row.id: str(row.pid) for row in pid_rows}
+        eq_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == equivalent_id)
+            )
+        ).scalar_one_or_none()
+        eq_code_str = str(eq_code or equivalent_id)
+
+        drifts_list: list[dict[str, Any]] = []
+        for pid, expected, actual, drift in drifts_raw:
+            participant_pid = uuid_to_pid.get(pid)
+            drifts_list.append(
+                {
+                    "participant_id": str(participant_pid or pid),
+                    "participant_uuid": str(pid),
+                    "expected_delta": str(expected),
+                    "actual_delta": str(actual),
+                    "drift": str(drift),
+                }
+            )
+
+        total_drift = sum(abs(d) for *_pid, _e, _a, d in drifts_raw) / Decimal("2")
+
+        from app.utils.exceptions import IntegrityViolationException
+
+        raise IntegrityViolationException(
+            "Per-participant delta check failed",
+            details={
+                "invariant": "PAYMENT_DELTA_DRIFT",
+                "source": "delta_check",
+                "equivalent": eq_code_str,
+                "equivalent_id": str(equivalent_id),
+                "total_drift": str(total_drift),
+                "drifts": drifts_list,
+            },
+        )
 
     async def _get_debt(
         self, debtor_id: UUID, creditor_id: UUID, equivalent_id: UUID
@@ -1027,5 +1217,5 @@ class PaymentEngine:
             return True
 
         if not commit:
-            return await _uow()
+            return await self._run_uow_with_retry(op="abort_nocommit", fn=_uow, use_savepoint=True)
         return await self._run_uow_with_retry(op="abort", fn=_uow)

@@ -15,6 +15,7 @@ from app.db.models.trustline import TrustLine
 from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.exceptions import GeoException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
+from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 
@@ -783,6 +784,14 @@ class ClearingService:
             new_tx.state = "COMMITTED"
             self.session.add(new_tx)
             await self.session.commit()
+
+            # Debts changed: invalidate any TTL routing graph cache.
+            try:
+                eq_code = str(equivalent.code if equivalent else "")
+                if eq_code:
+                    PaymentRouter.invalidate_cache(eq_code)
+            except Exception:
+                pass
 
             logger.info("event=clearing.committed tx_id=%s", tx_id_str)
             try:
