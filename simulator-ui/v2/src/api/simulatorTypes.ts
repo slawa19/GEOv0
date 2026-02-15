@@ -4,6 +4,8 @@ export type SimulatorMode = 'fixtures' | 'real'
 
 export type ScenarioSummary = {
   scenario_id: string
+  /** Human-friendly name (preferred over legacy `label`). */
+  name?: string
   label?: string
   mode?: string
   created_at?: string
@@ -58,6 +60,138 @@ export type ClearingOnceResponse = {
   plan_id: string
   done_event_id: string
   client_action_id?: string | null
+}
+
+// ============================
+// Interact Mode (Actions API)
+// ============================
+
+/**
+ * Backend error shape for all `/simulator/runs/{run_id}/actions/*` endpoints.
+ * Note: returned as a top-level JSON object (not wrapped).
+ */
+export type SimulatorActionError = {
+  code: string
+  message: string
+  details?: Record<string, unknown> | null
+}
+
+export type SimulatorActionTrustlineCreateRequest = {
+  from_pid: string
+  to_pid: string
+  equivalent: string
+  limit: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionTrustlineCreateResponse = {
+  ok: true
+  trustline_id: string
+  from_pid: string
+  to_pid: string
+  equivalent: string
+  limit: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionTrustlineUpdateRequest = {
+  from_pid: string
+  to_pid: string
+  equivalent: string
+  new_limit: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionTrustlineUpdateResponse = {
+  ok: true
+  trustline_id: string
+  old_limit: string
+  new_limit: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionTrustlineCloseRequest = {
+  from_pid: string
+  to_pid: string
+  equivalent: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionTrustlineCloseResponse = {
+  ok: true
+  trustline_id: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionPaymentRealRequest = {
+  from_pid: string
+  to_pid: string
+  equivalent: string
+  amount: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionPaymentRealResponse = {
+  ok: true
+  payment_id: string
+  from_pid: string
+  to_pid: string
+  equivalent: string
+  amount: string
+  status: string
+  client_action_id?: string | null
+}
+
+export type SimulatorActionEdgeRef = {
+  from: string
+  to: string
+}
+
+export type SimulatorActionClearingCycle = {
+  cleared_amount: string
+  edges: SimulatorActionEdgeRef[]
+}
+
+export type SimulatorActionClearingRealRequest = {
+  equivalent: string
+  max_depth?: number
+  client_action_id?: string | null
+}
+
+export type SimulatorActionClearingRealResponse = {
+  ok: true
+  equivalent: string
+  cleared_cycles: number
+  total_cleared_amount: string
+  cycles: SimulatorActionClearingCycle[]
+  client_action_id?: string | null
+}
+
+export type ParticipantInfo = {
+  pid: string
+  name: string
+  type: string
+  status: string
+}
+
+export type SimulatorActionParticipantsListResponse = {
+  items: ParticipantInfo[]
+}
+
+export type TrustlineInfo = {
+  from_pid: string
+  from_name: string
+  to_pid: string
+  to_name: string
+  equivalent: string
+  limit: string
+  used: string
+  available: string
+  status: string
+}
+
+export type SimulatorActionTrustlinesListResponse = {
+  items: TrustlineInfo[]
 }
 
 export type RunState = 'created' | 'running' | 'paused' | 'stopped' | 'error'

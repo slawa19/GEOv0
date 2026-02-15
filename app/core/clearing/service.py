@@ -529,12 +529,18 @@ class ClearingService:
         return final_cycles
 
     async def execute_clearing(self, cycle: List[Dict]) -> bool:
-        """
-        Execute clearing for a specific cycle.
-        cycle: list of dicts {'debt_id': ..., 'amount': ...} or similar from find_cycles
+        """Backward-compatible API: execute clearing and return success flag."""
+        return (await self.execute_clearing_with_amount(cycle)) is not None
+
+    async def execute_clearing_with_amount(self, cycle: List[Dict]) -> Decimal | None:
+        """Execute clearing for a specific cycle and return the *actual* cleared amount.
+
+        Returns:
+        - Decimal amount on success (the min debt amount among the locked cycle edges at execution time)
+        - None on failure / skipped.
         """
         if not cycle:
-            return False
+            return None
 
         logger.info("event=clearing.execute cycle_len=%s", len(cycle))
         try:
@@ -558,7 +564,7 @@ class ClearingService:
                     "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.bad_request",
                     exc_info=True,
                 )
-            return False
+            return None
 
         debts = (
             (
@@ -571,13 +577,13 @@ class ClearingService:
         )
 
         if len(debts) != len(debt_ids):
-            return False
+            return None
 
         # 1. Determine clearing amount (min amount in cycle)
         clear_amount = min([d.amount for d in debts])
 
         if clear_amount <= 0:
-            return False
+            return None
 
         logger.info(
             "event=clearing.execute_ready cycle_len=%s amount=%s",
@@ -601,7 +607,7 @@ class ClearingService:
                             "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.skip_locked",
                             exc_info=True,
                         )
-                    return False
+                    return None
 
         # FIX-017: enforce auto_clearing policy on every edge in the cycle.
         if not await self._cycle_respects_auto_clearing(debts):
@@ -615,7 +621,7 @@ class ClearingService:
                     "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.skip_policy",
                     exc_info=True,
                 )
-            return False
+            return None
 
         # FIX-011: capture net positions BEFORE clearing (clearing neutrality invariant).
         checker = InvariantChecker(self.session)
@@ -798,7 +804,7 @@ class ClearingService:
                 CLEARING_EVENTS_TOTAL.labels(event="execute", result="success").inc()
             except Exception:
                 pass
-            return True
+            return clear_amount
 
         except Exception as e:
             logger.error("event=clearing.failed error=%s", str(e))
@@ -808,7 +814,7 @@ class ClearingService:
                 pass
             await self.session.rollback()
             # Log failed tx?
-            return False
+            return None
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
         """

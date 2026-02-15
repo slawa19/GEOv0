@@ -5,16 +5,32 @@ import json
 import secrets
 import os
 import logging
+import uuid
+from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic.config import ConfigDict
 
 from fastapi import APIRouter, Depends, Query, Request
-from starlette.responses import FileResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
+
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import aliased
 
 from app.api import deps
+from app.config import settings
 from app.core.simulator.runtime import runtime
+from app.core.clearing.service import ClearingService
+from app.core.payments.router import PaymentRouter
+from app.core.payments.service import PaymentService
+from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.sse_broadcast import SseEventEmitter
+from app.core.simulator.viz_patch_helper import VizPatchHelper
+from app.db.models.debt import Debt
+from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 from app.schemas.simulator import (
     ActiveRunResponse,
     ArtifactIndex,
@@ -31,14 +47,170 @@ from app.schemas.simulator import (
     SimulatorGraphSnapshot,
     SimulatorRunStatusEvent,
     SimulatorTxUpdatedEvent,
+
+    # SSE payloads
+    TopologyChangedEdgeRef,
+    TopologyChangedPayload,
+
+    # Interact Mode action endpoints
+    SimulatorActionError,
+    SimulatorActionTrustlineCreateRequest,
+    SimulatorActionTrustlineCreateResponse,
+    SimulatorActionTrustlineUpdateRequest,
+    SimulatorActionTrustlineUpdateResponse,
+    SimulatorActionTrustlineCloseRequest,
+    SimulatorActionTrustlineCloseResponse,
+    SimulatorActionPaymentRealRequest,
+    SimulatorActionPaymentRealResponse,
+    SimulatorActionClearingRealRequest,
+    SimulatorActionClearingRealResponse,
+    SimulatorActionClearingCycle,
+    SimulatorActionEdgeRef,
+    SimulatorActionParticipantsListResponse,
+    SimulatorActionParticipantItem,
+    SimulatorActionTrustlinesListResponse,
+    SimulatorActionTrustlineListItem,
 )
-from app.utils.exceptions import GoneException, NotFoundException
-from app.utils.exceptions import ForbiddenException
+from app.utils.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    GeoException,
+    GoneException,
+    NotFoundException,
+    RoutingException,
+    TimeoutException,
+)
+from app.utils.validation import parse_amount_decimal
 
 router = APIRouter(prefix="/simulator")
 
 # Uvicorn typically configures this logger at INFO level.
 logger = logging.getLogger("uvicorn.error")
+
+
+def _build_clearing_done_cycle_edges_payload(
+    executed_cycles: list[SimulatorActionClearingCycle],
+) -> list[dict[str, str]] | None:
+    """Builds a stable `cycle_edges` payload for clearing.done SSE.
+
+    Requirements:
+    - include edges from *all* cleared cycles (not just the first one)
+    - allow deduplication
+    - keep payload ordering stable for UI consumption
+    """
+
+    seen: set[tuple[str, str]] = set()
+    out: list[dict[str, str]] = []
+
+    for cycle in (executed_cycles or []):
+        for e in (getattr(cycle, "edges", None) or []):
+            from_pid = str(getattr(e, "from_", "") or "").strip()
+            to_pid = str(getattr(e, "to", "") or "").strip()
+            if not from_pid or not to_pid or from_pid == to_pid:
+                continue
+
+            key = (from_pid, to_pid)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"from": from_pid, "to": to_pid})
+
+    if not out:
+        return None
+
+    # Stable ordering for UI (regardless of cycle discovery/execution order).
+    out.sort(key=lambda d: (d.get("from") or "", d.get("to") or ""))
+    return out
+
+
+async def _compute_viz_patches_best_effort(
+    *,
+    session,
+    run,
+    equivalent_code: str,
+    edges_pairs: list[tuple[str, str]],
+) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
+    """Compute (edge_patch, node_patch) for a set of touched edges.
+
+    Best-effort helper used by interact-mode action endpoints to update UI without
+    requiring full snapshot refresh.
+    """
+
+    eq_upper = str(equivalent_code or "").strip().upper()
+    if not eq_upper or not edges_pairs:
+        return None, None
+
+    try:
+        # 1) Get or create per-run per-equivalent VizPatchHelper.
+        helper: VizPatchHelper | None = None
+        try:
+            with runtime._lock:  # type: ignore[attr-defined]
+                viz_by_eq = getattr(run, "_real_viz_by_eq", None)
+                if isinstance(viz_by_eq, dict):
+                    helper = viz_by_eq.get(eq_upper)
+        except Exception:
+            helper = None
+
+        if helper is None:
+            helper = await VizPatchHelper.create(
+                session,
+                equivalent_code=eq_upper,
+                refresh_every_ticks=int(getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10),
+            )
+            try:
+                with runtime._lock:  # type: ignore[attr-defined]
+                    viz_by_eq = getattr(run, "_real_viz_by_eq", None)
+                    if isinstance(viz_by_eq, dict):
+                        viz_by_eq[eq_upper] = helper
+            except Exception:
+                pass
+
+        # 2) Best-effort refresh quantiles (affects viz_width_key/viz_size).
+        try:
+            participant_ids: list[uuid.UUID] = []
+            real_parts = getattr(run, "_real_participants", None)
+            if real_parts:
+                participant_ids = [pid for (pid, _p) in real_parts]
+            await helper.maybe_refresh_quantiles(
+                session,
+                tick_index=int(getattr(run, "tick_index", 0) or 0),
+                participant_ids=participant_ids,
+            )
+        except Exception:
+            # Quantiles are optional; continue with default keys.
+            pass
+
+        # 3) Load Participant rows for touched pids.
+        pids = sorted({pid for ab in edges_pairs for pid in ab if str(pid).strip()})
+        if not pids:
+            return None, None
+
+        res = await session.execute(select(Participant).where(Participant.pid.in_(pids)))
+        pid_to_participant = {p.pid: p for p in res.scalars().all()}
+
+        # 4) Node patch (net balances + viz_*).
+        node_patch = await helper.compute_node_patches(
+            session,
+            pid_to_participant=pid_to_participant,
+            pids=pids,
+        )
+        if node_patch == []:
+            node_patch = None
+
+        # 5) Edge patch (used/available + viz_*).
+        edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_pairs(
+            session=session,
+            helper=helper,
+            edges_pairs=edges_pairs,
+            pid_to_participant=pid_to_participant,
+        )
+        if edge_patch == []:
+            edge_patch = None
+
+        return edge_patch, node_patch
+    except Exception:
+        return None, None
 
 
 def _actions_enabled() -> bool:
@@ -48,6 +220,283 @@ def _actions_enabled() -> bool:
 def _require_actions_enabled() -> None:
     if not _actions_enabled():
         raise ForbiddenException("Simulator actions are disabled (set SIMULATOR_ACTIONS_ENABLE=1)")
+
+
+def _action_error(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    details: Optional[dict[str, Any]] = None,
+) -> JSONResponse:
+    payload = SimulatorActionError(code=code, message=message, details=details).model_dump(mode="json")
+    return JSONResponse(status_code=int(status_code), content=payload)
+
+
+def _require_actions_enabled_or_error() -> Optional[JSONResponse]:
+    if not _actions_enabled():
+        return _action_error(
+            status_code=403,
+            code="ACTIONS_DISABLED",
+            message="Simulator actions are disabled",
+            details={"env": "SIMULATOR_ACTIONS_ENABLE"},
+        )
+    return None
+
+
+def _require_run_accepts_actions_or_error(run_id: str) -> Optional[JSONResponse]:
+    try:
+        st = runtime.get_run_status(run_id)
+    except NotFoundException:
+        # Not in spec table; keep stable error anyway.
+        return _action_error(
+            status_code=404,
+            code="RUN_NOT_FOUND",
+            message="Run not found",
+            details={"run_id": str(run_id)},
+        )
+
+    if st.state in ("stopped", "error"):
+        return _action_error(
+            status_code=409,
+            code="RUN_TERMINAL",
+            message="Run is in terminal state",
+            details={"run_id": str(run_id), "state": str(st.state)},
+        )
+    return None
+
+
+async def _resolve_participant_or_error(
+    *, session, pid: str, field: str
+) -> tuple[Optional[Participant], Optional[JSONResponse]]:
+    pid_s = str(pid or "").strip()
+    if not pid_s:
+        return None, _action_error(
+            status_code=404,
+            code="PARTICIPANT_NOT_FOUND",
+            message="Participant not found",
+            details={"field": field, "pid": pid_s},
+        )
+    row = (
+        await session.execute(select(Participant).where(Participant.pid == pid_s))
+    ).scalar_one_or_none()
+    if row is None:
+        return None, _action_error(
+            status_code=404,
+            code="PARTICIPANT_NOT_FOUND",
+            message="Participant not found",
+            details={"field": field, "pid": pid_s},
+        )
+    return row, None
+
+
+async def _resolve_equivalent_or_error(
+    *, session, code: str
+) -> tuple[Optional[Equivalent], Optional[JSONResponse]]:
+    eq_code = str(code or "").strip().upper()
+    if not eq_code:
+        return None, _action_error(
+            status_code=404,
+            code="EQUIVALENT_NOT_FOUND",
+            message="Equivalent not found",
+            details={"equivalent": eq_code},
+        )
+    eq = (
+        await session.execute(select(Equivalent).where(Equivalent.code == eq_code))
+    ).scalar_one_or_none()
+    if eq is None:
+        return None, _action_error(
+            status_code=404,
+            code="EQUIVALENT_NOT_FOUND",
+            message="Equivalent not found",
+            details={"equivalent": eq_code},
+        )
+    return eq, None
+
+
+async def _trustline_used_amount(
+    session, *, from_id: uuid.UUID, to_id: uuid.UUID, equivalent_id: uuid.UUID
+) -> Decimal:
+    used = (
+        await session.execute(
+            select(func.coalesce(func.sum(Debt.amount), 0)).where(
+                and_(
+                    Debt.debtor_id == to_id,
+                    Debt.creditor_id == from_id,
+                    Debt.equivalent_id == equivalent_id,
+                )
+            )
+        )
+    ).scalar_one()
+    try:
+        return Decimal(str(used or 0))
+    except Exception:
+        return Decimal("0")
+
+
+async def _trustline_reverse_used_amount(
+    session, *, from_id: uuid.UUID, to_id: uuid.UUID, equivalent_id: uuid.UUID
+) -> Decimal:
+    reverse_used = (
+        await session.execute(
+            select(func.coalesce(func.sum(Debt.amount), 0)).where(
+                and_(
+                    Debt.debtor_id == from_id,
+                    Debt.creditor_id == to_id,
+                    Debt.equivalent_id == equivalent_id,
+                )
+            )
+        )
+    ).scalar_one()
+    try:
+        return Decimal(str(reverse_used or 0))
+    except Exception:
+        return Decimal("0")
+
+
+def _fmt_decimal_for_api(v: Decimal) -> str:
+    # Preserve plain decimal string without scientific notation.
+    return format(v, "f")
+
+
+def _norm_pid(v: object) -> str:
+    return str(v or "").strip()
+
+
+def _guard_no_self_loop_or_error(*, from_pid: object, to_pid: object) -> Optional[JSONResponse]:
+    """Guard against self-loop trustlines.
+
+    Spec: for trustline-create/update/close, reject from_pid == to_pid.
+    """
+
+    fp = _norm_pid(from_pid)
+    tp = _norm_pid(to_pid)
+    if fp and tp and fp == tp:
+        return _action_error(
+            status_code=400,
+            code="INVALID_REQUEST",
+            message="Invalid request",
+            details={
+                "from_pid": fp,
+                "to_pid": tp,
+                "reason": "self_loop_trustline",
+            },
+        )
+    return None
+
+
+def _mutate_runtime_trustline_topology_best_effort(
+    *,
+    run_id: str,
+    op: str,
+    equivalent: str,
+    from_pid: str,
+    to_pid: str,
+    limit: str | None = None,
+) -> None:
+    """Best-effort sync of in-memory runtime snapshot/cache with interact trustline actions.
+
+    This is needed so:
+    - list endpoints can be snapshot-scoped and still reflect create/close immediately;
+    - runtime edge cache (run._edges_by_equivalent) stays consistent with topology changes.
+
+    Never raises.
+    """
+
+    try:
+        run = runtime.get_run(run_id)
+
+        lock = getattr(runtime, "_lock", None)
+        if lock is None:
+            # Fallback: mutate without lock (still best-effort).
+            lock_ctx = None
+        else:
+            lock_ctx = lock
+
+        def _apply() -> None:
+            eq = str(equivalent or "").strip().upper()
+            fp = _norm_pid(from_pid)
+            tp = _norm_pid(to_pid)
+            if not (eq and fp and tp):
+                return
+
+            # Invalidate per-equivalent viz cache so subsequent node/edge patches are consistent.
+            try:
+                getattr(run, "_real_viz_by_eq", {}).pop(eq, None)
+            except Exception:
+                pass
+
+            # Update scenario snapshot.
+            scenario = getattr(run, "_scenario_raw", None)
+            if isinstance(scenario, dict):
+                tls = scenario.get("trustlines")
+                if isinstance(tls, list):
+                    if op == "create":
+                        tls.append(
+                            {
+                                "equivalent": eq,
+                                "from": fp,
+                                "to": tp,
+                                "limit": str(limit or "0"),
+                                "status": "active",
+                            }
+                        )
+                    elif op == "update":
+                        # Update the first matching trustline; if not found (legacy drift), append.
+                        found = False
+                        for tl in tls:
+                            if not isinstance(tl, dict):
+                                continue
+                            if (
+                                str(tl.get("equivalent") or "").strip().upper() == eq
+                                and _norm_pid(tl.get("from")) == fp
+                                and _norm_pid(tl.get("to")) == tp
+                            ):
+                                tl["limit"] = str(limit or "0")
+                                found = True
+                                break
+                        if not found:
+                            tls.append(
+                                {
+                                    "equivalent": eq,
+                                    "from": fp,
+                                    "to": tp,
+                                    "limit": str(limit or "0"),
+                                    "status": "active",
+                                }
+                            )
+                    elif op == "close":
+                        # Remove trustline(s) from scenario topology so snapshot no longer includes them.
+                        scenario["trustlines"] = [
+                            tl
+                            for tl in tls
+                            if not (
+                                isinstance(tl, dict)
+                                and str(tl.get("equivalent") or "").strip().upper() == eq
+                                and _norm_pid(tl.get("from")) == fp
+                                and _norm_pid(tl.get("to")) == tp
+                            )
+                        ]
+
+            # Update runtime edge cache.
+            edges_by_eq = getattr(run, "_edges_by_equivalent", None)
+            if isinstance(edges_by_eq, dict):
+                if op == "create":
+                    lst = list(edges_by_eq.get(eq) or [])
+                    if (fp, tp) not in lst:
+                        lst.append((fp, tp))
+                    edges_by_eq[eq] = lst
+                elif op == "close":
+                    lst = list(edges_by_eq.get(eq) or [])
+                    edges_by_eq[eq] = [(a, b) for (a, b) in lst if not (a == fp and b == tp)]
+
+        if lock_ctx is None:
+            _apply()
+        else:
+            with lock_ctx:
+                _apply()
+    except Exception:
+        return
 
 
 class TxOnceRequestBody(BaseModel):
@@ -84,6 +533,899 @@ class ClearingOnceResponseBody(BaseModel):
     plan_id: str
     done_event_id: str
     client_action_id: Optional[str] = None
+
+
+# ----------------------------------
+# Interact Mode action endpoints (MVP)
+# ----------------------------------
+
+
+@router.post(
+    "/runs/{run_id}/actions/trustline-create",
+    response_model=SimulatorActionTrustlineCreateResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def action_trustline_create(
+    run_id: str,
+    req: SimulatorActionTrustlineCreateRequest,
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
+        return err
+
+    if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
+        return err
+
+    # Validate and normalize amounts early.
+    try:
+        limit_dec = parse_amount_decimal(req.limit, require_positive=False)
+        if limit_dec < 0:
+            raise BadRequestException("Invalid limit")
+    except BadRequestException:
+        return _action_error(
+            status_code=400,
+            code="INVALID_AMOUNT",
+            message="Invalid limit",
+            details={"limit": req.limit},
+        )
+
+    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    if err is not None:
+        return err
+    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    if err is not None:
+        return err
+    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
+    if err is not None:
+        return err
+
+    assert from_p is not None and to_p is not None and eq is not None
+
+    # If there is already debt, ensure the new limit is not below it.
+    try:
+        used_now = await _trustline_used_amount(
+            db,
+            from_id=from_p.id,
+            to_id=to_p.id,
+            equivalent_id=eq.id,
+        )
+    except Exception:
+        # Do NOT fall back to 0: it can create an inconsistent trustline (limit < existing debt).
+        logger.error(
+            "Failed to read used amount for trustline-create: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
+            run_id,
+            eq.code,
+            from_p.pid,
+            to_p.pid,
+            exc_info=True,
+        )
+        return _action_error(
+            status_code=503,
+            code="TRUSTLINE_USED_UNAVAILABLE",
+            message="Temporary error while reading current used amount",
+            details={
+                "equivalent": eq.code,
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+            },
+        )
+    if limit_dec < used_now:
+        return _action_error(
+            status_code=409,
+            code="USED_EXCEEDS_NEW_LIMIT",
+            message="Limit is below current used amount",
+            details={
+                "equivalent": eq.code,
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+                "used": _fmt_decimal_for_api(used_now),
+                "limit": _fmt_decimal_for_api(limit_dec),
+            },
+        )
+
+    existing = (
+        await db.execute(
+            select(TrustLine.id).where(
+                and_(
+                    TrustLine.from_participant_id == from_p.id,
+                    TrustLine.to_participant_id == to_p.id,
+                    TrustLine.equivalent_id == eq.id,
+                    TrustLine.status != "closed",
+                )
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return _action_error(
+            status_code=409,
+            code="TRUSTLINE_EXISTS",
+            message="Active trustline already exists",
+            details={
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+                "equivalent": eq.code,
+            },
+        )
+
+    tl = TrustLine(
+        from_participant_id=from_p.id,
+        to_participant_id=to_p.id,
+        equivalent_id=eq.id,
+        limit=limit_dec,
+        status="active",
+    )
+    db.add(tl)
+    await db.commit()
+    await db.refresh(tl)
+
+    # Keep runtime snapshot/cache consistent with action.
+    _mutate_runtime_trustline_topology_best_effort(
+        run_id=run_id,
+        op="create",
+        equivalent=eq.code,
+        from_pid=from_p.pid,
+        to_pid=to_p.pid,
+        limit=req.limit,
+    )
+
+    # Trustline topology affects routing graph.
+    try:
+        PaymentRouter.invalidate_cache(eq.code)
+    except Exception:
+        pass
+
+    # Best-effort SSE emission.
+    try:
+        run = runtime.get_run(run_id)
+        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+
+        edge_patch: list[dict[str, Any]] | None = None
+        try:
+            edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
+                session=db,
+                run=run,
+                equivalent_code=eq.code,
+                only_edges={(from_p.pid, to_p.pid)},
+                include_width_keys=True,
+            )
+        except Exception:
+            edge_patch = None
+
+        payload = TopologyChangedPayload(
+            added_edges=[
+                TopologyChangedEdgeRef(
+                    from_pid=from_p.pid,
+                    to_pid=to_p.pid,
+                    equivalent_code=eq.code,
+                    limit=_fmt_decimal_for_api(limit_dec),
+                )
+            ],
+            node_patch=None,
+            edge_patch=(edge_patch or None),
+        )
+        emitter.emit_topology_changed(
+            run_id=run_id,
+            run=run,
+            equivalent=eq.code,
+            payload=payload,
+            reason="interact.trustline_create",
+        )
+    except Exception:
+        # TODO(interact): consider emitting node_patch/edge_patch via VizPatchHelper for immediate UI updates.
+        logger.warning(
+            "Best-effort SSE emission failed: interact.trustline_create run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+    return SimulatorActionTrustlineCreateResponse(
+        trustline_id=str(tl.id),
+        from_pid=from_p.pid,
+        to_pid=to_p.pid,
+        equivalent=eq.code,
+        limit=_fmt_decimal_for_api(limit_dec),
+        client_action_id=req.client_action_id,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/actions/trustline-update",
+    response_model=SimulatorActionTrustlineUpdateResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def action_trustline_update(
+    run_id: str,
+    req: SimulatorActionTrustlineUpdateRequest,
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
+        return err
+
+    if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
+        return err
+
+    try:
+        new_limit_dec = parse_amount_decimal(req.new_limit, require_positive=False)
+        if new_limit_dec < 0:
+            raise BadRequestException("Invalid new_limit")
+    except BadRequestException:
+        return _action_error(
+            status_code=400,
+            code="INVALID_AMOUNT",
+            message="Invalid new_limit",
+            details={"new_limit": req.new_limit},
+        )
+
+    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    if err is not None:
+        return err
+    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    if err is not None:
+        return err
+    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
+    if err is not None:
+        return err
+
+    assert from_p is not None and to_p is not None and eq is not None
+
+    tl = (
+        await db.execute(
+            select(TrustLine).where(
+                and_(
+                    TrustLine.from_participant_id == from_p.id,
+                    TrustLine.to_participant_id == to_p.id,
+                    TrustLine.equivalent_id == eq.id,
+                    TrustLine.status != "closed",
+                )
+            )
+        )
+    ).scalar_one_or_none()
+    if tl is None:
+        return _action_error(
+            status_code=404,
+            code="TRUSTLINE_NOT_FOUND",
+            message="Trustline not found",
+            details={"from_pid": from_p.pid, "to_pid": to_p.pid, "equivalent": eq.code},
+        )
+
+    old_limit_dec = Decimal(str(getattr(tl, "limit", 0) or 0))
+    used = await _trustline_used_amount(
+        db,
+        from_id=tl.from_participant_id,
+        to_id=tl.to_participant_id,
+        equivalent_id=eq.id,
+    )
+    if new_limit_dec < used:
+        return _action_error(
+            status_code=409,
+            code="USED_EXCEEDS_NEW_LIMIT",
+            message="Cannot reduce trustline limit below used amount",
+            details={
+                "equivalent": eq.code,
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+                "used": _fmt_decimal_for_api(used),
+                "new_limit": _fmt_decimal_for_api(new_limit_dec),
+            },
+        )
+
+    tl.limit = new_limit_dec
+    await db.commit()
+    await db.refresh(tl)
+
+    # Keep runtime snapshot consistent with action (limit change).
+    _mutate_runtime_trustline_topology_best_effort(
+        run_id=run_id,
+        op="update",
+        equivalent=eq.code,
+        from_pid=from_p.pid,
+        to_pid=to_p.pid,
+        limit=req.new_limit,
+    )
+
+    try:
+        PaymentRouter.invalidate_cache(eq.code)
+    except Exception:
+        pass
+
+    try:
+        run = runtime.get_run(run_id)
+        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+        edge_patch: list[dict[str, Any]] | None = None
+        try:
+            edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
+                session=db,
+                run=run,
+                equivalent_code=eq.code,
+                only_edges={(from_p.pid, to_p.pid)},
+                include_width_keys=True,
+            )
+        except Exception:
+            edge_patch = None
+
+        if edge_patch:
+            payload = TopologyChangedPayload(node_patch=None, edge_patch=edge_patch)
+            emitter.emit_topology_changed(
+                run_id=run_id,
+                run=run,
+                equivalent=eq.code,
+                payload=payload,
+                reason="interact.trustline_update",
+            )
+    except Exception:
+        # TODO(interact): best-effort patches for trustline update.
+        logger.warning(
+            "Best-effort SSE emission failed: interact.trustline_update run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+    return SimulatorActionTrustlineUpdateResponse(
+        trustline_id=str(tl.id),
+        old_limit=_fmt_decimal_for_api(old_limit_dec),
+        new_limit=_fmt_decimal_for_api(new_limit_dec),
+        client_action_id=req.client_action_id,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/actions/trustline-close",
+    response_model=SimulatorActionTrustlineCloseResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def action_trustline_close(
+    run_id: str,
+    req: SimulatorActionTrustlineCloseRequest,
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
+        return err
+
+    if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
+        return err
+
+    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    if err is not None:
+        return err
+    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    if err is not None:
+        return err
+    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
+    if err is not None:
+        return err
+
+    assert from_p is not None and to_p is not None and eq is not None
+
+    tl = (
+        await db.execute(
+            select(TrustLine).where(
+                and_(
+                    TrustLine.from_participant_id == from_p.id,
+                    TrustLine.to_participant_id == to_p.id,
+                    TrustLine.equivalent_id == eq.id,
+                    TrustLine.status != "closed",
+                )
+            )
+        )
+    ).scalar_one_or_none()
+    if tl is None:
+        return _action_error(
+            status_code=404,
+            code="TRUSTLINE_NOT_FOUND",
+            message="Trustline not found",
+            details={"from_pid": from_p.pid, "to_pid": to_p.pid, "equivalent": eq.code},
+        )
+
+    used = await _trustline_used_amount(
+        db,
+        from_id=tl.from_participant_id,
+        to_id=tl.to_participant_id,
+        equivalent_id=eq.id,
+    )
+    reverse_used = await _trustline_reverse_used_amount(
+        db,
+        from_id=tl.from_participant_id,
+        to_id=tl.to_participant_id,
+        equivalent_id=eq.id,
+    )
+    if used > 0 or reverse_used > 0:
+        return _action_error(
+            status_code=409,
+            code="TRUSTLINE_HAS_DEBT",
+            message="Cannot close trustline with non-zero debt",
+            details={
+                "equivalent": eq.code,
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+                "used": _fmt_decimal_for_api(used),
+                "reverse_used": _fmt_decimal_for_api(reverse_used),
+            },
+        )
+
+    tl.status = "closed"
+    await db.commit()
+    await db.refresh(tl)
+
+    # Keep runtime snapshot/cache consistent with action.
+    _mutate_runtime_trustline_topology_best_effort(
+        run_id=run_id,
+        op="close",
+        equivalent=eq.code,
+        from_pid=from_p.pid,
+        to_pid=to_p.pid,
+    )
+
+    try:
+        PaymentRouter.invalidate_cache(eq.code)
+    except Exception:
+        pass
+
+    try:
+        run = runtime.get_run(run_id)
+        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+
+        # For close, frontend needs an explicit removal semantic.
+        payload = TopologyChangedPayload(
+            removed_edges=[
+                TopologyChangedEdgeRef(
+                    from_pid=from_p.pid,
+                    to_pid=to_p.pid,
+                    equivalent_code=eq.code,
+                )
+            ],
+            node_patch=None,
+            edge_patch=None,
+        )
+        emitter.emit_topology_changed(
+            run_id=run_id,
+            run=run,
+            equivalent=eq.code,
+            payload=payload,
+            reason="interact.trustline_close",
+        )
+    except Exception:
+        # TODO(interact): best-effort patches for trustline close.
+        logger.warning(
+            "Best-effort SSE emission failed: interact.trustline_close run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+    return SimulatorActionTrustlineCloseResponse(
+        trustline_id=str(tl.id),
+        client_action_id=req.client_action_id,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/actions/payment-real",
+    response_model=SimulatorActionPaymentRealResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def action_payment_real(
+    run_id: str,
+    req: SimulatorActionPaymentRealRequest,
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
+        return err
+
+    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    if err is not None:
+        return err
+    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    if err is not None:
+        return err
+    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
+    if err is not None:
+        return err
+    assert from_p is not None and to_p is not None and eq is not None
+
+    # Amount validation per spec.
+    try:
+        _ = parse_amount_decimal(req.amount, require_positive=True)
+    except BadRequestException as exc:
+        return _action_error(
+            status_code=400,
+            code="INVALID_AMOUNT",
+            message=str(getattr(exc, "message", None) or "Invalid amount"),
+            details={"amount": req.amount},
+        )
+
+    # Best-effort pre-check to distinguish NO_ROUTE vs INSUFFICIENT_CAPACITY.
+    # Use cached trustline-only topology via PaymentRouter (ignores remaining capacity), so
+    # fully-saturated edges don't get misclassified as NO_ROUTE.
+    any_path_exists: Optional[bool] = None
+    try:
+        router = PaymentRouter(db)
+        await router.build_topology(eq.code)
+        any_path_exists = router.has_topology_path(
+            str(from_p.pid),
+            str(to_p.pid),
+            max_hops=int(getattr(settings, "ROUTING_MAX_HOPS", 6) or 6),
+        )
+    except Exception:
+        any_path_exists = None
+
+    try:
+        service = PaymentService(db)
+        res = await service.create_payment_internal(
+            from_p.id,
+            to_pid=to_p.pid,
+            equivalent=eq.code,
+            amount=req.amount,
+            idempotency_key=None,
+            commit=True,
+        )
+    except RoutingException as exc:
+        if any_path_exists is False:
+            return _action_error(
+                status_code=409,
+                code="NO_ROUTE",
+                message=str(getattr(exc, "message", None) or "No route"),
+                details={
+                    "equivalent": eq.code,
+                    "from_pid": from_p.pid,
+                    "to_pid": to_p.pid,
+                    "requested": req.amount,
+                },
+            )
+        return _action_error(
+            status_code=409,
+            code="INSUFFICIENT_CAPACITY",
+            message=str(getattr(exc, "message", None) or "Insufficient capacity"),
+            details={
+                "equivalent": eq.code,
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+                "requested": req.amount,
+            },
+        )
+    except TimeoutException as exc:
+        return _action_error(
+            status_code=503,
+            code="ENGINE_TIMEOUT",
+            message=str(getattr(exc, "message", None) or "Engine timeout"),
+            details={"equivalent": eq.code, "from_pid": from_p.pid, "to_pid": to_p.pid},
+        )
+    except GeoException as exc:
+        # Best-effort mapping for unexpected business errors.
+        return _action_error(
+            status_code=int(getattr(exc, "status_code", 409) or 409),
+            code="PAYMENT_REJECTED",
+            message=str(getattr(exc, "message", None) or str(exc)),
+            details=getattr(exc, "details", None) or {},
+        )
+
+    # Success: emit best-effort tx.updated SSE.
+    try:
+        run = runtime.get_run(run_id)
+        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+
+        edges: list[dict[str, Any]] = []
+        try:
+            routes = res.routes or []
+            if routes:
+                path = routes[0].path
+                edges = [{"from": str(a), "to": str(b)} for a, b in zip(path, path[1:])]
+        except Exception:
+            edges = []
+        if not edges:
+            edges = [{"from": from_p.pid, "to": to_p.pid}]
+
+        edges_pairs: list[tuple[str, str]] = []
+        for e in edges:
+            a = str(e.get("from") or "").strip()
+            b = str(e.get("to") or "").strip()
+            if a and b:
+                edges_pairs.append((a, b))
+
+        edge_patch, node_patch = await _compute_viz_patches_best_effort(
+            session=db,
+            run=run,
+            equivalent_code=eq.code,
+            edges_pairs=edges_pairs,
+        )
+
+        emitter.emit_tx_updated(
+            run_id=run_id,
+            run=run,
+            equivalent=eq.code,
+            from_pid=from_p.pid,
+            to_pid=to_p.pid,
+            amount=req.amount,
+            amount_flyout=True,
+            ttl_ms=1200,
+            edges=edges,
+            node_badges=None,
+            edge_patch=edge_patch,
+            node_patch=node_patch,
+        )
+    except Exception:
+        # TODO(interact): use VizPatchHelper + EdgePatchBuilder.build_edge_patch_for_pairs for immediate UI updates.
+        logger.warning(
+            "Best-effort SSE emission failed: interact.payment_real run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+    return SimulatorActionPaymentRealResponse(
+        payment_id=str(res.tx_id),
+        from_pid=from_p.pid,
+        to_pid=to_p.pid,
+        equivalent=eq.code,
+        amount=str(req.amount),
+        status=str(res.status),
+        client_action_id=req.client_action_id,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/actions/clearing-real",
+    response_model=SimulatorActionClearingRealResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def action_clearing_real(
+    run_id: str,
+    req: SimulatorActionClearingRealRequest,
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
+        return err
+
+    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
+    if err is not None:
+        return err
+    assert eq is not None
+
+    service = ClearingService(db)
+
+    executed: list[SimulatorActionClearingCycle] = []
+    total = Decimal("0")
+    cleared_count = 0
+
+    # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
+    for _ in range(0, 100):
+        cycles = await service.find_cycles(eq.code, max_depth=int(req.max_depth))
+        if not cycles:
+            break
+
+        executed_this_round = False
+        for cycle in cycles:
+            clear_amt = await service.execute_clearing_with_amount(cycle)
+            if clear_amt is None:
+                continue
+
+            edges: list[SimulatorActionEdgeRef] = []
+            for e in (cycle or []):
+                debtor = str(e.get("debtor") or "").strip()
+                creditor = str(e.get("creditor") or "").strip()
+                if debtor and creditor and debtor != creditor:
+                    edges.append(SimulatorActionEdgeRef(from_=debtor, to=creditor))
+
+            executed.append(
+                SimulatorActionClearingCycle(
+                    cleared_amount=_fmt_decimal_for_api(clear_amt),
+                    edges=edges,
+                )
+            )
+            total += clear_amt
+            cleared_count += 1
+            executed_this_round = True
+            break
+
+        if not executed_this_round:
+            break
+
+    # Best-effort SSE emission (clearing.done).
+    try:
+        if cleared_count > 0:
+            run = runtime.get_run(run_id)
+            emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+
+            cycle_edges_payload = _build_clearing_done_cycle_edges_payload(executed)
+
+            edges_pairs: list[tuple[str, str]] = []
+            for e in (cycle_edges_payload or []):
+                a = str(e.get("from") or "").strip()
+                b = str(e.get("to") or "").strip()
+                if a and b:
+                    edges_pairs.append((a, b))
+
+            edge_patch, node_patch = await _compute_viz_patches_best_effort(
+                session=db,
+                run=run,
+                equivalent_code=eq.code,
+                edges_pairs=edges_pairs,
+            )
+
+            emitter.emit_clearing_done(
+                run_id=run_id,
+                run=run,
+                equivalent=eq.code,
+                plan_id=f"plan_interact_{secrets.token_hex(6)}",
+                cleared_cycles=int(cleared_count),
+                cleared_amount=_fmt_decimal_for_api(total),
+                cycle_edges=cycle_edges_payload,
+                node_patch=node_patch,
+                edge_patch=edge_patch,
+            )
+    except Exception:
+        # TODO(interact): compute node_patch/edge_patch via VizPatchHelper for clearing.done.
+        logger.warning(
+            "Best-effort SSE emission failed: interact.clearing_real run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+    return SimulatorActionClearingRealResponse(
+        equivalent=eq.code,
+        cleared_cycles=int(cleared_count),
+        total_cleared_amount=_fmt_decimal_for_api(total),
+        cycles=executed,
+        client_action_id=req.client_action_id,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/actions/participants-list",
+    response_model=SimulatorActionParticipantsListResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def action_participants_list(
+    run_id: str,
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
+        return err
+
+    # Run/snapshot-scoped: build from current run snapshot (not global Participant table).
+    try:
+        snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent="", session=db)
+    except NotFoundException:
+        return _action_error(
+            status_code=404,
+            code="RUN_NOT_FOUND",
+            message="Run not found",
+            details={"run_id": str(run_id)},
+        )
+
+    items: list[SimulatorActionParticipantItem] = []
+    for n in (getattr(snap, "nodes", None) or []):
+        pid = _norm_pid(getattr(n, "id", ""))
+        if not pid:
+            continue
+        name = str(getattr(n, "name", None) or pid)
+        t = str(getattr(n, "type", None) or "person")
+        st = str(getattr(n, "status", None) or "active")
+        items.append(
+            SimulatorActionParticipantItem(
+                pid=pid,
+                name=name,
+                type=t,
+                status=st,
+            )
+        )
+
+    items.sort(key=lambda x: x.pid)
+    return SimulatorActionParticipantsListResponse(items=items)
+
+
+@router.get(
+    "/runs/{run_id}/actions/trustlines-list",
+    response_model=SimulatorActionTrustlinesListResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def action_trustlines_list(
+    run_id: str,
+    equivalent: Optional[str] = Query(None),
+    participant_pid: Optional[str] = Query(None),
+    _actor=Depends(deps.require_participant_or_admin),
+    db=Depends(deps.get_db),
+):
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
+        return err
+
+    eq, err = await _resolve_equivalent_or_error(session=db, code=str(equivalent or ""))
+    if err is not None:
+        return err
+    assert eq is not None
+
+    participant_id: uuid.UUID | None = None
+    if participant_pid is not None:
+        p, p_err = await _resolve_participant_or_error(session=db, pid=participant_pid, field="participant_pid")
+        if p_err is not None:
+            return p_err
+        assert p is not None
+        participant_id = p.id
+
+    # Run/snapshot-scoped: build from current run snapshot (not global TrustLine table).
+    try:
+        snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent=eq.code, session=db)
+    except NotFoundException:
+        return _action_error(
+            status_code=404,
+            code="RUN_NOT_FOUND",
+            message="Run not found",
+            details={"run_id": str(run_id)},
+        )
+
+    pid_to_name: dict[str, str] = {}
+    for n in (getattr(snap, "nodes", None) or []):
+        pid = _norm_pid(getattr(n, "id", ""))
+        if not pid:
+            continue
+        pid_to_name[pid] = str(getattr(n, "name", None) or pid)
+
+    def _fmt_num_or_str(v: object) -> str:
+        if v is None:
+            return "0"
+        if isinstance(v, Decimal):
+            return _fmt_decimal_for_api(v)
+        if isinstance(v, (int, float)):
+            # Avoid scientific notation for most typical values.
+            try:
+                return format(Decimal(str(v)), "f")
+            except Exception:
+                return str(v)
+        return str(v)
+
+    items: list[SimulatorActionTrustlineListItem] = []
+    for link in (getattr(snap, "links", None) or []):
+        from_pid = _norm_pid(getattr(link, "source", ""))
+        to_pid = _norm_pid(getattr(link, "target", ""))
+        if not from_pid or not to_pid:
+            continue
+
+        if participant_pid is not None:
+            if from_pid != participant_pid and to_pid != participant_pid:
+                continue
+
+        status = str(getattr(link, "status", None) or "active").strip().lower()
+        # Do not surface non-active edges (closed/frozen/etc.).
+        if status != "active":
+            continue
+
+        limit_s = _fmt_num_or_str(getattr(link, "trust_limit", None))
+        used_s = _fmt_num_or_str(getattr(link, "used", None))
+        avail_s = _fmt_num_or_str(getattr(link, "available", None))
+
+        items.append(
+            SimulatorActionTrustlineListItem(
+                from_pid=from_pid,
+                from_name=pid_to_name.get(from_pid, from_pid),
+                to_pid=to_pid,
+                to_name=pid_to_name.get(to_pid, to_pid),
+                equivalent=eq.code,
+                limit=limit_s,
+                used=used_s,
+                available=avail_s,
+                status=status,
+            )
+        )
+
+    items.sort(key=lambda x: (x.from_pid, x.to_pid, x.equivalent))
+    return SimulatorActionTrustlinesListResponse(items=items)
 
 
 def _utc_now() -> datetime:

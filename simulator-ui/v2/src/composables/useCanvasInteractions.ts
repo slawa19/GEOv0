@@ -21,12 +21,21 @@ export type EdgeHoverLike = {
   onPointerMove: (ev: PointerEvent, ctx: { panActive: boolean }) => void
 }
 
+export type EdgePickLike = {
+  pickEdgeAt: (clientX: number, clientY: number) => { key: string; fromId: string; toId: string } | null
+}
+
 export function useCanvasInteractions(opts: {
   isTestMode: () => boolean
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
+  pickEdgeAt?: (clientX: number, clientY: number) => { key: string; fromId: string; toId: string } | null
   setSelectedNodeId: (id: string | null) => void
   setNodeCardOpen: (open: boolean) => void
   clearHoveredEdge: () => void
+
+  /** Optional hook: return true when edge click was handled (prevents default clear-selection). */
+  onEdgeClick?: (edge: { key: string; fromId: string; toId: string }, ptr: { clientX: number; clientY: number }) => boolean
+
   dragToPin: DragToPinLike
   cameraSystem: CameraSystemLike
   edgeHover: EdgeHoverLike
@@ -60,13 +69,22 @@ export function useCanvasInteractions(opts: {
     }
 
     const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
-    if (!hit) {
-      opts.setSelectedNodeId(null)
+    if (hit) {
+      opts.setSelectedNodeId(hit.id)
+      // Single click only selects; keep the card closed.
       opts.setNodeCardOpen(false)
       return
     }
-    opts.setSelectedNodeId(hit.id)
-    // Single click only selects; keep the card closed.
+
+    if (opts.pickEdgeAt && opts.onEdgeClick) {
+      const edgeHit = opts.pickEdgeAt(ev.clientX, ev.clientY)
+      if (edgeHit) {
+        const handled = opts.onEdgeClick(edgeHit, { clientX: ev.clientX, clientY: ev.clientY })
+        if (handled) return
+      }
+    }
+
+    opts.setSelectedNodeId(null)
     opts.setNodeCardOpen(false)
   }
 

@@ -7,9 +7,12 @@ export function useAppCanvasInteractionsWiring(opts: {
   wakeUp?: () => void
 
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
+  pickEdgeAt?: (clientX: number, clientY: number) => { key: string; fromId: string; toId: string } | null
   selectNode: (id: string | null) => void
   setNodeCardOpen: (open: boolean) => void
   clearHoveredEdge: () => void
+
+  onEdgeClick?: (edge: { key: string; fromId: string; toId: string }, ptr: { clientX: number; clientY: number }) => boolean
 
   dragToPin: DragToPinLike
   cameraSystem: CameraSystemLike
@@ -19,9 +22,11 @@ export function useAppCanvasInteractionsWiring(opts: {
   const canvasInteractions = useCanvasInteractions({
     isTestMode: opts.isTestMode,
     pickNodeAt: opts.pickNodeAt,
+    pickEdgeAt: opts.pickEdgeAt,
     setSelectedNodeId: opts.selectNode,
     setNodeCardOpen: opts.setNodeCardOpen,
     clearHoveredEdge: opts.clearHoveredEdge,
+    onEdgeClick: opts.onEdgeClick,
     dragToPin: opts.dragToPin,
     cameraSystem: opts.cameraSystem,
     edgeHover: opts.edgeHover,

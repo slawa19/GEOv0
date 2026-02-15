@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 from pydantic.config import ConfigDict
 
 
@@ -521,6 +521,180 @@ class BottlenecksResponse(BaseModel):
     run_id: str
     equivalent: str
     items: List[BottleneckItem]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# =====================================
+# Interact Mode (Simulator Actions) MVP
+# =====================================
+
+
+class SimulatorActionError(BaseModel):
+    """Interact Mode error shape.
+
+    IMPORTANT: this is intentionally NOT wrapped into {"error": ...}.
+    """
+
+    code: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlineCreateRequest(BaseModel):
+    from_pid: str
+    to_pid: str
+    equivalent: str
+    limit: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlineCreateResponse(BaseModel):
+    ok: bool = True
+    trustline_id: str
+    from_pid: str
+    to_pid: str
+    equivalent: str
+    limit: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlineUpdateRequest(BaseModel):
+    from_pid: str
+    to_pid: str
+    equivalent: str
+    new_limit: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlineUpdateResponse(BaseModel):
+    ok: bool = True
+    trustline_id: str
+    old_limit: str
+    new_limit: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlineCloseRequest(BaseModel):
+    from_pid: str
+    to_pid: str
+    equivalent: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlineCloseResponse(BaseModel):
+    ok: bool = True
+    trustline_id: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionPaymentRealRequest(BaseModel):
+    from_pid: str
+    to_pid: str
+    equivalent: str
+    amount: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionPaymentRealResponse(BaseModel):
+    ok: bool = True
+    payment_id: str
+    from_pid: str
+    to_pid: str
+    equivalent: str
+    amount: str
+    status: str
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionEdgeRef(BaseModel):
+    from_: str = Field(alias="from")
+    to: str
+
+    # Response payloads must use key `from` (not `from_`) regardless of model_dump(by_alias=...).
+    # FastAPI response serialization may or may not request `by_alias=True`, so make this explicit.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @model_serializer(mode="plain")
+    def _serialize(self) -> Dict[str, str]:
+        return {"from": self.from_, "to": self.to}
+
+
+class SimulatorActionClearingCycle(BaseModel):
+    cleared_amount: str
+    edges: List[SimulatorActionEdgeRef]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionClearingRealRequest(BaseModel):
+    equivalent: str
+    max_depth: int = Field(default=6, ge=1, le=12)
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionClearingRealResponse(BaseModel):
+    ok: bool = True
+    equivalent: str
+    cleared_cycles: int = Field(ge=0)
+    total_cleared_amount: str
+    cycles: List[SimulatorActionClearingCycle]
+    client_action_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionParticipantItem(BaseModel):
+    pid: str
+    name: str
+    type: str
+    status: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionParticipantsListResponse(BaseModel):
+    items: List[SimulatorActionParticipantItem]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlineListItem(BaseModel):
+    from_pid: str
+    from_name: str
+    to_pid: str
+    to_name: str
+    equivalent: str
+    limit: str
+    used: str
+    available: str
+    status: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionTrustlinesListResponse(BaseModel):
+    items: List[SimulatorActionTrustlineListItem]
 
     model_config = ConfigDict(extra="forbid")
 

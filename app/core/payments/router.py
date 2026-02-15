@@ -1,6 +1,7 @@
 import logging
 import heapq
 import time
+from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Set, Tuple, Iterable
@@ -36,12 +37,18 @@ class PaymentRouter:
         ],
     ] = {}
 
+    # Lightweight, trustline-only topology cache used to distinguish NO_ROUTE vs INSUFFICIENT_CAPACITY.
+    # Keyed by equivalent_code; invalidated via invalidate_cache() on trustline CRUD.
+    _topology_cache: Dict[str, Dict[str, Set[str]]] = {}
+
     @classmethod
     def invalidate_cache(cls, equivalent_code: str | None = None) -> None:
         if equivalent_code:
             cls._graph_cache.pop(str(equivalent_code), None)
+            cls._topology_cache.pop(str(equivalent_code), None)
         else:
             cls._graph_cache.clear()
+            cls._topology_cache.clear()
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -53,6 +60,94 @@ class PaymentRouter:
         self.edge_blocked_participants: Dict[str, Dict[str, Set[str]]] = {}
         self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
         self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
+
+        # Trustline-only adjacency list: { debtor_pid: set(creditor_pid) }
+        # Payment flow is debtor -> creditor.
+        self.topology_adj: Dict[str, Set[str]] = {}
+
+    async def build_topology(self, equivalent_code: str) -> None:
+        """Build (or load from cache) trustline-only adjacency.
+
+        This intentionally ignores remaining capacity/debts/locks so fully-saturated edges are still
+        considered "connected" for NO_ROUTE vs INSUFFICIENT_CAPACITY distinction.
+        """
+        validate_equivalent_code(equivalent_code)
+
+        cached = self._topology_cache.get(equivalent_code)
+        if cached is not None:
+            # Copy to isolate instance mutation.
+            self.topology_adj = {u: set(vs) for u, vs in cached.items()}
+            return
+
+        # Join TrustLine -> Equivalent(code) + Participant (creditor/debtor) to avoid N+1 and avoid
+        # a second lookup for participant UUID->PID mapping.
+        from sqlalchemy.orm import aliased
+        from app.db.models.participant import Participant
+
+        Creditor = aliased(Participant)
+        Debtor = aliased(Participant)
+
+        stmt = (
+            select(Debtor.pid, Creditor.pid)
+            .select_from(TrustLine)
+            .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+            .join(Creditor, Creditor.id == TrustLine.from_participant_id)
+            .join(Debtor, Debtor.id == TrustLine.to_participant_id)
+            .where(
+                and_(
+                    Equivalent.code == equivalent_code,
+                    TrustLine.status == "active",
+                )
+            )
+        )
+
+        rows = (await self.session.execute(stmt)).all()
+        adj: Dict[str, Set[str]] = {}
+        for debtor_pid, creditor_pid in rows:
+            d = str(debtor_pid or "").strip()
+            c = str(creditor_pid or "").strip()
+            if not d or not c:
+                continue
+            adj.setdefault(d, set()).add(c)
+
+        self.topology_adj = {u: set(vs) for u, vs in adj.items()}
+        # Store a copy in cache.
+        self._topology_cache[equivalent_code] = {u: set(vs) for u, vs in adj.items()}
+
+    def has_topology_path(self, from_pid: str, to_pid: str, *, max_hops: int = 6) -> bool:
+        """Return True if a trustline-topology path exists (ignoring capacity).
+
+        max_hops is aligned with routing constraint semantics: a topology-only path longer than
+        max_hops should still be treated as NO_ROUTE for payment routing.
+        """
+        src = str(from_pid or "").strip()
+        dst = str(to_pid or "").strip()
+        if not src or not dst:
+            return False
+        if src == dst:
+            return True
+
+        max_hops = int(max_hops or 0)
+        if max_hops <= 0:
+            return False
+
+        # BFS with hop limit.
+        q: deque[tuple[str, int]] = deque([(src, 0)])
+        seen: Set[str] = {src}
+
+        while q:
+            cur, hops = q.popleft()
+            if hops >= max_hops:
+                continue
+            for nxt in self.topology_adj.get(cur, set()):
+                if nxt == dst:
+                    return True
+                if nxt in seen:
+                    continue
+                seen.add(nxt)
+                q.append((nxt, hops + 1))
+
+        return False
 
     async def build_graph(self, equivalent_code: str):
         """Loads all trustlines and debts for the given equivalent and builds the capacity graph."""

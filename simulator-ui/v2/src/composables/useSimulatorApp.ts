@@ -40,6 +40,10 @@ import { getFxConfig, intensityScale } from '../config/fxConfig'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
 
+import { useInteractActions } from './useInteractActions'
+import { useInteractMode } from './useInteractMode'
+import { useSystemBalance } from './useSystemBalance'
+
 export function useSimulatorApp() {
   const eq = ref('UAH')
   const scene = ref<SceneId>('A')
@@ -100,6 +104,15 @@ export function useSimulatorApp() {
     try {
       const ui = String(new URLSearchParams(window.location.search).get('ui') ?? '').toLowerCase()
       return ui === 'demo'
+    } catch {
+      return false
+    }
+  })
+
+  const isInteractUi = computed(() => {
+    try {
+      const ui = String(new URLSearchParams(window.location.search).get('ui') ?? '').toLowerCase()
+      return ui === 'interact'
     } catch {
       return false
     }
@@ -388,6 +401,22 @@ export function useSimulatorApp() {
 
   const snapshotRef = computed(() => state.snapshot)
 
+  // Interact Mode core (state machine + actions + balance).
+  // NOTE: this is intentionally lightweight wiring; UI panels/picking integration is done in later phases.
+  const interactHttpConfig = computed(() => ({ apiBase: real.apiBase, accessToken: real.accessToken }))
+  const interactRunId = computed(() => String(real.runId ?? ''))
+  const interactActions = useInteractActions({ httpConfig: interactHttpConfig, runId: interactRunId })
+  const interactMode = useInteractMode({
+    actions: interactActions,
+    equivalent: effectiveEq,
+    snapshot: snapshotRef,
+    // Keep node selection highlight in sync with picking-driven flows.
+    onNodeClick: (id) => {
+      selectNode(id)
+    },
+  })
+  const systemBalance = useSystemBalance(snapshotRef).balance
+
   // `fxAndRender` is initialized later (it needs layout + camera), but layout/resize
   // code may want to wake the render loop. IMPORTANT: this must be a stable wrapper.
   // Some wirings capture the function reference at init-time; reassigning a `let wakeUp = ...`
@@ -617,6 +646,7 @@ export function useSimulatorApp() {
   const fxState = fxAndRender.fxState
   const hoveredEdge = fxAndRender.hoveredEdge
   const clearHoveredEdge = fxAndRender.clearHoveredEdge
+  const edgeDetailAnchor = ref<{ x: number; y: number } | null>(null)
   const activeEdges = fxAndRender.activeEdges
   const addActiveEdge = fxAndRender.addActiveEdge
   const pruneActiveEdges = fxAndRender.pruneActiveEdges
@@ -1021,7 +1051,30 @@ export function useSimulatorApp() {
   })
 
   const pickNodeAt = pickingAndHover.pickNodeAt
+  const pickEdgeAt = pickingAndHover.pickEdgeAt
   const edgeHover = pickingAndHover.edgeHover
+
+  const isInteractPickingPhase = computed(() => {
+    if (!isInteractUi.value) return false
+    const p = String(interactMode.phase.value ?? '')
+    return (
+      p === 'picking-payment-from' ||
+      p === 'picking-payment-to' ||
+      p === 'picking-trustline-from' ||
+      p === 'picking-trustline-to'
+    )
+  })
+
+  function selectNodeFromCanvas(id: string | null) {
+    // In Interact UI picking phases: treat node click as a flow input.
+    if (id && isInteractPickingPhase.value) {
+      interactMode.selectNode(id)
+      return
+    }
+
+    // Default: regular selection for NodeCard/hover.
+    selectNode(id)
+  }
 
   const dragToPinWiring = useAppDragToPinWiring({
     dragPreviewEl,
@@ -1047,9 +1100,30 @@ export function useSimulatorApp() {
     isTestMode: () => isTestMode.value,
     wakeUp,
     pickNodeAt,
-    selectNode,
+    pickEdgeAt,
+    selectNode: selectNodeFromCanvas,
     setNodeCardOpen,
     clearHoveredEdge,
+    onEdgeClick: (edge, ptr) => {
+      if (!isInteractUi.value) return false
+      if (apiMode.value !== 'real') return false
+
+      // In Interact UI: edge click opens trustline editing (and selects one endpoint for context).
+      try {
+        const host = hostEl.value
+        const rect = host?.getBoundingClientRect()
+        if (rect) {
+          edgeDetailAnchor.value = { x: ptr.clientX - rect.left, y: ptr.clientY - rect.top }
+        } else {
+          edgeDetailAnchor.value = { x: ptr.clientX, y: ptr.clientY }
+        }
+      } catch {
+        edgeDetailAnchor.value = null
+      }
+      interactMode.selectEdge(edge.key)
+      selectNode(edge.fromId)
+      return true
+    },
     dragToPin,
     cameraSystem,
     edgeHover,
@@ -1166,6 +1240,30 @@ export function useSimulatorApp() {
     wakeUp,
     onAnySseEvent: markDemoActivity,
   })
+
+  // Interact UI contract: intensity must be forced to 0%.
+  // Do this early (affects next started run) and also best-effort apply to an active run.
+  if (isInteractUi.value && apiMode.value === 'real') {
+    real.intensityPercent = 0
+  }
+
+  let interactIntensityAppliedForRunId: string | null = null
+  watch(
+    () => [isInteractUi.value, isRealMode.value, real.runId] as const,
+    ([isInteract, isReal, runId]) => {
+      if (!isInteract || !isReal) return
+
+      // Ensure local state (and persisted pref) is always 0.
+      if (real.intensityPercent !== 0) real.intensityPercent = 0
+
+      // If a run is active, also enforce backend intensity (idempotent).
+      if (runId && runId !== interactIntensityAppliedForRunId) {
+        interactIntensityAppliedForRunId = runId
+        void realMode.applyIntensity()
+      }
+    },
+    { immediate: true, flush: 'post' },
+  )
 
   const fxDebugBusy = ref(false)
 
@@ -1364,6 +1462,7 @@ export function useSimulatorApp() {
     // flags
     isDemoFixtures,
     isDemoUi,
+    isInteractUi,
     isTestMode,
     isWebDriver,
     isE2eScreenshots,
@@ -1407,6 +1506,16 @@ export function useSimulatorApp() {
 
     effectiveEq,
 
+    // derived interact UI helpers
+    isInteractPickingPhase,
+
+    // interact mode
+    interact: {
+      actions: interactActions,
+      mode: interactMode,
+      systemBalance,
+    },
+
     // env
     gpuAccelLikely,
 
@@ -1441,6 +1550,7 @@ export function useSimulatorApp() {
     isNodeCardOpen,
     hoveredEdge,
     clearHoveredEdge,
+    edgeDetailAnchor,
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
     selectedNode: viewWiring.selectedNode,
     nodeCardStyle: viewWiring.nodeCardStyle,

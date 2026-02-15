@@ -229,7 +229,21 @@ async def geo_exception_handler(request: Request, exc: GeoException):
 async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ):
-    # Unify FastAPI/Pydantic validation errors into GEO error envelope.
+    path = str(getattr(request.url, "path", "") or "")
+
+    # Simulator Interact Mode action endpoints use a different error envelope.
+    # Keep schema validation errors stable and aligned with simulator-ui expectations.
+    if path.startswith("/api/v1/simulator/runs/") and "/actions/" in path:
+        from app.schemas.simulator import SimulatorActionError
+
+        payload = SimulatorActionError(
+            code="INVALID_REQUEST",
+            message="Invalid request",
+            details={"errors": exc.errors()},
+        ).model_dump(mode="json")
+        return JSONResponse(status_code=400, content=payload)
+
+    # Default: unify FastAPI/Pydantic validation errors into GEO error envelope.
     # Spec: E009 (Invalid input).
     return JSONResponse(
         status_code=422,

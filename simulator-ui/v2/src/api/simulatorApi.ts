@@ -6,6 +6,18 @@ import type {
   ClearingOnceRequest,
   ClearingOnceResponse,
   MetricsResponse,
+  SimulatorActionClearingRealRequest,
+  SimulatorActionClearingRealResponse,
+  SimulatorActionParticipantsListResponse,
+  SimulatorActionPaymentRealRequest,
+  SimulatorActionPaymentRealResponse,
+  SimulatorActionTrustlineCloseRequest,
+  SimulatorActionTrustlineCloseResponse,
+  SimulatorActionTrustlineCreateRequest,
+  SimulatorActionTrustlineCreateResponse,
+  SimulatorActionTrustlineUpdateRequest,
+  SimulatorActionTrustlineUpdateResponse,
+  SimulatorActionTrustlinesListResponse,
   RunCreateRequest,
   RunCreateResponse,
   RunStatus,
@@ -148,4 +160,80 @@ export function actionClearingOnce(
     method: 'POST',
     body: JSON.stringify(req),
   })
+}
+
+// ============================
+// Interact Mode (Actions API)
+// ============================
+
+export function actionTrustlineCreate(
+  cfg: HttpConfig,
+  runId: string,
+  req: SimulatorActionTrustlineCreateRequest,
+): Promise<SimulatorActionTrustlineCreateResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-create`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function actionTrustlineUpdate(
+  cfg: HttpConfig,
+  runId: string,
+  req: SimulatorActionTrustlineUpdateRequest,
+): Promise<SimulatorActionTrustlineUpdateResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-update`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function actionTrustlineClose(
+  cfg: HttpConfig,
+  runId: string,
+  req: SimulatorActionTrustlineCloseRequest,
+): Promise<SimulatorActionTrustlineCloseResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-close`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function actionPaymentReal(
+  cfg: HttpConfig,
+  runId: string,
+  req: SimulatorActionPaymentRealRequest,
+): Promise<SimulatorActionPaymentRealResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/payment-real`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function actionClearingReal(
+  cfg: HttpConfig,
+  runId: string,
+  req: SimulatorActionClearingRealRequest,
+): Promise<SimulatorActionClearingRealResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-real`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function getParticipantsList(cfg: HttpConfig, runId: string): Promise<SimulatorActionParticipantsListResponse> {
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/participants-list`)
+}
+
+export function getTrustlinesList(
+  cfg: HttpConfig,
+  runId: string,
+  equivalent: string,
+  participantPid?: string,
+): Promise<SimulatorActionTrustlinesListResponse> {
+  const q = new URLSearchParams({
+    equivalent,
+    ...(participantPid ? { participant_pid: participantPid } : {}),
+  }).toString()
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustlines-list?${q}`)
 }

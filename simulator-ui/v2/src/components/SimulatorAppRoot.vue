@@ -4,11 +4,23 @@ import FixturesHudTop from './FixturesHudTop.vue'
 import RealHudBottom from './RealHudBottom.vue'
 import RealHudTop from './RealHudTop.vue'
 import DemoHudBottom from './DemoHudBottom.vue'
+import InteractHudTop from './InteractHudTop.vue'
+import InteractHudBottom from './InteractHudBottom.vue'
+import ActionBar from './ActionBar.vue'
+import SystemBalanceBar from './SystemBalanceBar.vue'
+import ManualPaymentPanel from './ManualPaymentPanel.vue'
+import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
+import EdgeDetailPopup from './EdgeDetailPopup.vue'
+import ClearingPanel from './ClearingPanel.vue'
 import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
 import FxDebugPanel from './FxDebugPanel.vue'
+
+import { computed, isRef, onMounted, onUnmounted } from 'vue'
+
+import type { GraphLink } from '../types'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
 
@@ -20,6 +32,7 @@ const {
   // flags
   isDemoFixtures,
   isDemoUi,
+  isInteractUi,
   isTestMode,
   isWebDriver,
   isE2eScreenshots,
@@ -37,6 +50,11 @@ const {
   labelsLod,
 
   effectiveEq,
+
+  interact,
+
+  // derived interact UI helpers
+  isInteractPickingPhase,
 
   // env
   gpuAccelLikely,
@@ -61,6 +79,7 @@ const {
   // selection + overlays
   isNodeCardOpen,
   hoveredEdge,
+  edgeDetailAnchor,
   clearHoveredEdge,
   edgeTooltipStyle,
   selectedNode,
@@ -90,6 +109,86 @@ const {
   getNodeById,
   resetView,
 } = app
+
+const interactPhase = computed(() => {
+  // Real app: `phase` is a Ref. Unit tests may mock it as a plain string.
+  const p = interact.mode.phase
+  return String(isRef(p) ? p.value : p)
+})
+
+const isInteractActivePhase = computed(() => {
+  if (!isInteractUi.value) return false
+  return String(interactPhase.value ?? '').toLowerCase() !== 'idle'
+})
+
+function isFormLikeTarget(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null
+  const tag = String((el as any)?.tagName ?? '').toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select'
+}
+
+function onGlobalKeydown(ev: KeyboardEvent) {
+  const k = String(ev.key ?? '')
+  const isEsc = k === 'Escape' || k === 'Esc' || (ev as any).keyCode === 27
+  if (!isEsc) return
+
+  // Interact-only: allow ESC to cancel the active flow.
+  if (!isInteractActivePhase.value) return
+
+  // Minimal guard: keep default ESC behavior for form controls.
+  if (!isFormLikeTarget(ev.target)) {
+    ev.preventDefault()
+  }
+
+  // Give overlays/panels a chance to consume ESC (e.g. disarm a destructive confirmation).
+  // Convention: listeners call preventDefault() on the custom event to stop the global cancel.
+  try {
+    const escEvt = new CustomEvent('geo:interact-esc', { cancelable: true })
+    const notCanceled = window.dispatchEvent(escEvt)
+    if (!notCanceled) return
+  } catch {
+    // ignore
+  }
+
+  interact.mode.cancel()
+}
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  window.addEventListener('keydown', onGlobalKeydown)
+})
+
+onUnmounted(() => {
+  if (typeof window === 'undefined') return
+  window.removeEventListener('keydown', onGlobalKeydown)
+})
+
+const interactRunTerminal = computed(() => {
+  const st = String(real.runStatus?.state ?? '').toLowerCase()
+  return st === 'stopped' || st === 'error'
+})
+
+const interactEquivalents = computed(() => {
+  // Minimal: prefer snapshot-provided equivalent when present, otherwise fall back to the known set.
+  // InteractHudTop must not hardcode options.
+  const s = new Set<string>()
+  const snapEq = String(state.snapshot?.equivalent ?? '').trim().toUpperCase()
+  if (snapEq) s.add(snapEq)
+  for (const e of ['UAH', 'HOUR', 'EUR']) s.add(e)
+  return Array.from(s)
+})
+
+const interactSelectedLink = computed<GraphLink | null>(() => {
+  const snap = state.snapshot
+  if (!snap) return null
+  const from = interact.mode.state.fromPid
+  const to = interact.mode.state.toPid
+  if (!from || !to) return null
+  for (const l of snap.links ?? []) {
+    if (l.source === from && l.target === to) return l
+  }
+  return null
+})
 
 function formatDemoActionError(e: any): string {
   const msg = String(e?.message ?? e)
@@ -189,6 +288,67 @@ function toggleDemoUi() {
   if (isDemoUi.value) void exitDemoUi()
   else enterDemoUi()
 }
+
+function enterInteractUi() {
+  forceDbEnrichedPreviewOnNextLoad()
+  setQueryAndReload((sp) => {
+    sp.set('mode', 'real')
+    sp.set('ui', 'interact')
+    sp.delete('debug')
+  })
+}
+
+function exitInteractUi() {
+  forceDbEnrichedPreviewOnNextLoad()
+  setQueryAndReload((sp) => {
+    sp.set('mode', 'real')
+    sp.delete('ui')
+    sp.delete('debug')
+  })
+}
+
+function toggleInteractUi() {
+  if (isInteractUi.value) exitInteractUi()
+  else enterInteractUi()
+}
+
+// Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
+
+async function resetInteractScenario() {
+  // Interact UX: show errors (don't silently swallow failures).
+  real.lastError = ''
+  try {
+    await realActions.stop()
+  } catch (e: any) {
+    real.lastError = formatDemoActionError(e)
+  }
+
+  try {
+    await realActions.startRun({ mode: 'real', intensityPercent: 0 })
+  } catch (e: any) {
+    real.lastError = formatDemoActionError(e)
+  }
+}
+
+function onEdgeDetailChangeLimit() {
+  // Minimal wiring: focus the limit editor in TrustlineManagementPanel.
+  // NOTE: IDs are stable in the current UI.
+  try {
+    setTimeout(() => {
+      const el = document.getElementById('tl-new-limit') as HTMLInputElement | null
+      el?.focus()
+      el?.select?.()
+    }, 0)
+  } catch {
+    // ignore
+  }
+}
+
+function onEdgeDetailCloseLine() {
+  // Delegate to mode action (will transition to idle on success).
+  if (interactPhase.value !== 'editing-trustline') return
+  void interact.mode.confirmTrustlineClose()
+}
 </script>
 
 <template>
@@ -206,6 +366,7 @@ function toggleDemoUi() {
     <canvas
       ref="canvasEl"
       class="canvas"
+      :style="{ cursor: isInteractPickingPhase ? 'crosshair' : 'default' }"
       @click="onCanvasClick"
       @dblclick.prevent="onCanvasDblClick"
       @pointerdown="onCanvasPointerDown"
@@ -226,10 +387,14 @@ function toggleDemoUi() {
     />
 
     <div v-if="!isTestMode && !isWebDriver" class="demo-ui" :data-enabled="isDemoUi ? '1' : '0'">
-      <div class="demo-ui__title">Demo UI</div>
+      <div class="demo-ui__title">UI</div>
       <div class="demo-ui__row">
         <button class="demo-ui__btn" type="button" @click="toggleDemoUi">
           {{ isDemoUi ? 'Exit' : 'Enter' }}
+        </button>
+
+        <button class="demo-ui__btn" type="button" @click="toggleInteractUi">
+          {{ isInteractUi ? 'Exit Interact' : 'Enter Interact' }}
         </button>
 
         <div v-if="apiMode === 'real' && isDemoUi" class="demo-ui__chip">
@@ -263,8 +428,108 @@ function toggleDemoUi() {
       </div>
     </div>
 
+    <InteractHudTop
+      v-if="apiMode === 'real' && isInteractUi"
+      v-model:eq="eq"
+      v-model:layoutMode="layoutMode"
+      :equivalents="interactEquivalents"
+      :loading-scenarios="real.loadingScenarios"
+      :scenarios="real.scenarios"
+      :selected-scenario-id="real.selectedScenarioId"
+      :run-id="real.runId"
+      :run-status="real.runStatus"
+      :sse-state="real.sseState"
+      :last-error="real.lastError"
+      :refresh-scenarios="realActions.refreshScenarios"
+      :start-run="realActions.startRun"
+      :pause="realActions.pause"
+      :resume="realActions.resume"
+      :stop="realActions.stop"
+      :reset-scenario="resetInteractScenario"
+      @update:selected-scenario-id="realActions.setSelectedScenarioId"
+    />
+
+    <SystemBalanceBar
+      v-if="apiMode === 'real' && isInteractUi"
+      :balance="interact.systemBalance"
+      :equivalent="effectiveEq"
+    />
+
+    <ActionBar
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :busy="interact.mode.busy"
+      :actions-disabled="interact.actions.actionsDisabled"
+      :run-terminal="interactRunTerminal"
+      :start-payment-flow="interact.mode.startPaymentFlow"
+      :start-trustline-flow="interact.mode.startTrustlineFlow"
+      :start-clearing-flow="interact.mode.startClearingFlow"
+    />
+
+    <ManualPaymentPanel
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :unit="effectiveEq"
+      :available-capacity="interact.mode.availableCapacity"
+      :participants="interact.mode.participants"
+      :busy="interact.mode.busy"
+      :can-send-payment="interact.mode.canSendPayment"
+      :confirm-payment="interact.mode.confirmPayment"
+      :set-from-pid="interact.mode.setPaymentFromPid"
+      :set-to-pid="interact.mode.setPaymentToPid"
+      :cancel="interact.mode.cancel"
+    />
+
+    <TrustlineManagementPanel
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :unit="effectiveEq"
+      :used="interactSelectedLink?.used ?? null"
+      :current-limit="interactSelectedLink?.trust_limit ?? null"
+      :available="interactSelectedLink?.available ?? null"
+      :participants="interact.mode.participants"
+      :trustlines="interact.mode.trustlines"
+      :busy="interact.mode.busy"
+      :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
+      :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
+      :confirm-trustline-close="interact.mode.confirmTrustlineClose"
+      :set-from-pid="interact.mode.setTrustlineFromPid"
+      :set-to-pid="interact.mode.setTrustlineToPid"
+      :select-trustline="interact.mode.selectTrustline"
+      :cancel="interact.mode.cancel"
+    />
+
+    <ClearingPanel
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :busy="interact.mode.busy"
+      :equivalent="effectiveEq"
+      :total-debt="interact.systemBalance.totalUsed"
+      :confirm-clearing="interact.mode.confirmClearing"
+      :cancel="interact.mode.cancel"
+    />
+
+    <EdgeDetailPopup
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :anchor="edgeDetailAnchor"
+      :unit="effectiveEq"
+      :used="interactSelectedLink?.used ?? null"
+      :limit="interactSelectedLink?.trust_limit ?? null"
+      :available="interactSelectedLink?.available ?? null"
+      :status="(interactSelectedLink?.status as any) ?? null"
+      :busy="interact.mode.busy"
+      :close="interact.mode.cancel"
+      @change-limit="onEdgeDetailChangeLimit"
+      @close-line="onEdgeDetailCloseLine"
+    />
+
     <RealHudTop
-      v-if="apiMode === 'real' && !isDemoUi"
+      v-else-if="apiMode === 'real' && !isDemoUi"
       v-model:eq="eq"
       v-model:layoutMode="layoutMode"
       :loading-scenarios="real.loadingScenarios"
@@ -316,8 +581,20 @@ function toggleDemoUi() {
     />
 
 
+    <InteractHudBottom
+      v-if="apiMode === 'real' && isInteractUi"
+      v-model:quality="quality"
+      v-model:labelsLod="labelsLod"
+      :show-reset-view="showResetView"
+      :run-id="real.runId"
+      :run-status="real.runStatus"
+      :sse-state="real.sseState"
+      :refresh-snapshot="realActions.refreshSnapshot"
+      :reset-view="resetView"
+    />
+
     <RealHudBottom
-      v-if="apiMode === 'real' && !isDemoUi"
+      v-else-if="apiMode === 'real' && !isDemoUi"
       v-model:quality="quality"
       v-model:labelsLod="labelsLod"
       :show-reset-view="showResetView"

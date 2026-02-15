@@ -124,10 +124,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,
-      runRealClearingPlanFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
-
-      clearingPlansById: new Map(),
       wakeUp: () => undefined,
     })
 
@@ -189,10 +186,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       scheduleTimeout: () => undefined,
       runRealTxFx: () => undefined,
-      runRealClearingPlanFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
-
-      clearingPlansById: new Map(),
       wakeUp: () => undefined,
     })
 
@@ -263,9 +257,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
       runRealTxFx: vi.fn(),
-      runRealClearingPlanFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
-      clearingPlansById: new Map(),
       wakeUp: () => undefined,
     })
 
@@ -326,9 +318,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
       runRealTxFx: vi.fn(),
-      runRealClearingPlanFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
-      clearingPlansById: new Map(),
       wakeUp: () => undefined,
     })
 
@@ -393,9 +383,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
       runRealTxFx: vi.fn(),
-      runRealClearingPlanFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
-      clearingPlansById: new Map(),
       wakeUp: () => undefined,
     })
 
@@ -456,10 +444,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       scheduleTimeout,
       runRealTxFx,
-      runRealClearingPlanFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
-
-      clearingPlansById: new Map(),
       wakeUp: () => undefined,
     })
 
@@ -540,10 +525,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       scheduleTimeout,
       runRealTxFx,
-      runRealClearingPlanFx: () => undefined,
       runRealClearingDoneFx: () => undefined,
-
-      clearingPlansById: new Map(),
       wakeUp: () => undefined,
     })
 

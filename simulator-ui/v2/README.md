@@ -116,6 +116,31 @@ Notes:
 	- graph snapshot renders
 	- `tx.updated` / clearing events animate when present
 
+---
+
+## Interact Mode (Real Mode UI)
+
+Interact Mode is a **Real Mode** UI variant that enables a small set of *manual actions* against a running simulator run.
+
+### 1) Enable backend action endpoints
+
+Backend action endpoints are feature-flagged.
+
+- Set `SIMULATOR_ACTIONS_ENABLE=1` **before starting the backend**.
+- When the flag is off, calling any `/api/v1/simulator/runs/{run_id}/actions/*` endpoint returns HTTP **403** with JSON error code `ACTIONS_DISABLED`.
+
+### 2) Run UI and open Interact Mode
+
+Start the UI in real mode (see section above) and open:
+
+- `http://localhost:5176/?mode=real&ui=interact`
+
+### 3) Example scenario fixture
+
+Example scenario JSON (fixtures):
+
+- `fixtures/simulator/clearing-demo-10/scenario.json`
+
 ### Troubleshooting: "balances / colors / sizes don't change"
 
 - Verify SSE payload contains patches:
@@ -130,5 +155,4 @@ From `simulator-ui/v2`:
 
 - Run screenshot assertions: `npm run test:e2e`
 - Update snapshots (only for intentional visual changes): `npm run test:e2e:update`
-
 
