@@ -70,22 +70,22 @@ const isRunActive = computed(() => {
 </script>
 
 <template>
-  <div class="hud-top">
-    <div class="hud-top-grid">
-      <div class="hud-controls" aria-label="Interact controls">
-        <div class="hudbar">
-          <span class="hud-badge" data-tone="warn" title="Interact Mode (intensity forced to 0%)">INTERACT MODE</span>
+  <div class="ds-ov-top">
+    <div class="ds-ov-top-grid">
+      <div class="ds-ov-controls" aria-label="Interact controls">
+        <div class="ds-panel ds-ov-bar">
+          <span class="ds-badge ds-badge--warn" title="Interact Mode (intensity forced to 0%)">INTERACT MODE</span>
 
-          <div class="hud-chip">
-            <span class="hud-label">EQ</span>
-            <select v-model="eq" class="hud-select" aria-label="Equivalent">
+          <div class="ds-row" style="gap: 6px">
+            <span class="ds-label">EQ</span>
+            <select v-model="eq" class="ds-select" aria-label="Equivalent">
               <option v-for="e in props.equivalents" :key="e" :value="e">{{ e }}</option>
             </select>
           </div>
 
-          <div class="hud-chip">
-            <span class="hud-label">Layout</span>
-            <select v-model="layoutMode" class="hud-select" aria-label="Layout">
+          <div class="ds-row" style="gap: 6px">
+            <span class="ds-label">Layout</span>
+            <select v-model="layoutMode" class="ds-select" aria-label="Layout">
               <option value="admin-force">Organic cloud</option>
               <option value="community-clusters">Clusters</option>
               <option value="balance-split">Balance</option>
@@ -94,10 +94,10 @@ const isRunActive = computed(() => {
             </select>
           </div>
 
-          <div class="hud-chip">
-            <span class="hud-label">Scenario</span>
+          <div class="ds-row" style="gap: 6px">
+            <span class="ds-label">Scenario</span>
             <select
-              class="hud-select"
+              class="ds-select"
               :value="selectedScenarioId"
               aria-label="Scenario"
               @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
@@ -107,16 +107,16 @@ const isRunActive = computed(() => {
                 {{ s.name ? `${s.name} (${s.scenario_id})` : s.scenario_id }}
               </option>
             </select>
-            <button class="btn btn-xxs" type="button" :disabled="loadingScenarios" @click="props.refreshScenarios">↻</button>
-            <button class="btn btn-xs" type="button" :disabled="isRunActive || !selectedScenarioId" @click="props.startRun">
+            <button class="ds-btn ds-btn--icon" type="button" :disabled="loadingScenarios" @click="props.refreshScenarios">↻</button>
+            <button class="ds-btn ds-btn--primary" type="button" :disabled="isRunActive || !selectedScenarioId" @click="props.startRun">
               {{ runId && !isRunActive ? 'New run' : 'Start' }}
             </button>
-            <button class="btn btn-xs" type="button" :disabled="!runId || !canPause" @click="props.pause">Pause</button>
-            <button class="btn btn-xs" type="button" :disabled="!runId || !canResume" @click="props.resume">Resume</button>
-            <button class="btn btn-xs btn-ghost" type="button" :disabled="!runId || !canStop" @click="props.stop">Stop</button>
+            <button class="ds-btn" type="button" :disabled="!runId || !canPause" @click="props.pause">Pause</button>
+            <button class="ds-btn" type="button" :disabled="!runId || !canResume" @click="props.resume">Resume</button>
+            <button class="ds-btn ds-btn--ghost" type="button" :disabled="!runId || !canStop" @click="props.stop">Stop</button>
             <button
               v-if="props.resetScenario"
-              class="btn btn-xs"
+              class="ds-btn"
               type="button"
               :disabled="!selectedScenarioId"
               @click="props.resetScenario"
@@ -127,18 +127,18 @@ const isRunActive = computed(() => {
         </div>
       </div>
 
-      <div class="hud-status" aria-label="Interact run status">
-        <div class="hudbar" style="justify-content: flex-end">
-          <span class="hud-badge" :data-tone="sseTone">SSE {{ sseState }}</span>
-          <span class="hud-badge" :data-tone="runTone">Run {{ runStatus?.state ?? (runId ? '…' : '—') }}</span>
-          <span class="hud-chip subtle" title="Interact mode forces intensity=0%">Intensity 0%</span>
+      <div class="ds-ov-status" aria-label="Interact run status">
+        <div class="ds-panel ds-ov-bar" style="justify-content: flex-end">
+          <span :class="['ds-badge', `ds-badge--${sseTone}`]">SSE {{ sseState }}</span>
+          <span :class="['ds-badge', `ds-badge--${runTone}`]">Run {{ runStatus?.state ?? (runId ? '…' : '—') }}</span>
+          <span class="ds-label ds-muted" title="Interact mode forces intensity=0%">Intensity 0%</span>
         </div>
       </div>
 
-      <div v-if="lastError" class="hud-alert" data-tone="err" aria-label="Error">
-        <span class="hud-label">Error</span>
-        <div class="hud-alert__msg">
-          <span class="mono">{{ String(lastError).slice(0, 160) }}</span>
+      <div v-if="lastError" class="ds-panel ds-ov-bar ds-ov-full" aria-label="Error" style="gap: 10px">
+        <span class="ds-badge ds-badge--err">Error</span>
+        <div class="ds-label ds-mono" style="max-width: 56ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+          {{ String(lastError).slice(0, 160) }}
         </div>
       </div>
     </div>

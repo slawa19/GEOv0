@@ -130,7 +130,7 @@ onUnmounted(() => {
   <div v-if="enabled" class="perf" role="region" aria-label="Performance diagnostics">
     <div class="row">
       <div class="title">Perf probe</div>
-      <button class="btn" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
+      <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
     </div>
 
     <div
@@ -178,19 +178,6 @@ onUnmounted(() => {
   color: rgba(226, 232, 240, 0.92);
 }
 
-.btn {
-  font-size: 12px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  background: rgba(15, 23, 42, 0.65);
-  color: rgba(226, 232, 240, 0.92);
-  cursor: pointer;
-}
-
-.btn:hover {
-  background: rgba(15, 23, 42, 0.8);
-}
 
 .pre {
   margin: 0;

@@ -197,201 +197,147 @@ function onTrustlinePick(key: string) {
 </script>
 
 <template>
-  <div
-    v-if="open"
-    class="panel"
-    data-testid="trustline-panel"
-    aria-label="Trustline management panel"
-  >
-    <div class="panel__title">{{ title }}</div>
-
-    <div v-if="participantsSorted.length" class="panel__row">
-      <label class="hud-label" for="tl-from">From</label>
-      <select
-        id="tl-from"
-        class="panel__input"
-        :value="state.fromPid ?? ''"
-        :disabled="busy"
-        aria-label="Trustline from participant"
-        @change="props.setFromPid?.(($event.target as HTMLSelectElement).value || null)"
-      >
-        <option value="">—</option>
-        <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
-      </select>
+  <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" data-testid="trustline-panel" aria-label="Trustline management panel">
+    <div class="ds-panel__header">
+      <div class="ds-h2">{{ title }}</div>
     </div>
 
-    <div v-if="participantsSorted.length" class="panel__row">
-      <label class="hud-label" for="tl-to">To</label>
-      <select
-        id="tl-to"
-        class="panel__input"
-        :value="state.toPid ?? ''"
-        :disabled="busy || !state.fromPid"
-        aria-label="Trustline to participant"
-        @change="props.setToPid?.(($event.target as HTMLSelectElement).value || null)"
-      >
-        <option value="">—</option>
-        <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
-      </select>
-    </div>
-
-    <div v-if="trustlinesSorted.length" class="panel__row">
-      <label class="hud-label" for="tl-pick">Existing</label>
-      <select
-        id="tl-pick"
-        class="panel__input"
-        :disabled="busy"
-        aria-label="Pick existing trustline"
-        @change="onTrustlinePick(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="">—</option>
-        <option v-for="tl in trustlinesSorted" :key="encodeTlKey(tl)" :value="encodeTlKey(tl)">
-          {{ (tl.from_name || tl.from_pid) + ' → ' + (tl.to_name || tl.to_pid) }}
-        </option>
-      </select>
-    </div>
-
-    <div v-if="isPickFrom" class="hud-label" style="margin-top: 6px">Pick From node (canvas) or choose from dropdown.</div>
-    <div v-if="isPickTo" class="hud-label" style="margin-top: 6px">Pick To node (canvas) or choose from dropdown.</div>
-
-    <div v-if="isEdit" class="panel__grid">
-      <div class="hud-label">Used</div>
-      <div class="hud-value mono">{{ effectiveUsed ?? '—' }} {{ unit }}</div>
-      <div class="hud-label">Limit</div>
-      <div class="hud-value mono">{{ effectiveLimit ?? '—' }} {{ unit }}</div>
-      <div class="hud-label">Available</div>
-      <div class="hud-value mono">{{ effectiveAvailable ?? '—' }} {{ unit }}</div>
-    </div>
-
-    <div v-if="isCreate" class="panel__row">
-      <label class="hud-label" for="tl-limit">Limit</label>
-      <input
-        id="tl-limit"
-        v-model="limit"
-        class="panel__input mono"
-        inputmode="decimal"
-        placeholder="0.00"
-        :aria-invalid="createValid ? 'false' : 'true'"
-      />
-      <span class="hud-label">{{ unit }}</span>
-    </div>
-
-    <div v-if="isCreate && !createValid && limit.trim()" class="hud-label" style="margin-top: 6px">
-      Limit must be greater than 0.
-    </div>
-
-    <div v-if="isEdit" class="panel__row">
-      <label class="hud-label" for="tl-new-limit">New limit</label>
-      <input
-        id="tl-new-limit"
-        v-model="newLimit"
-        class="panel__input mono"
-        inputmode="decimal"
-        placeholder="0.00"
-        :aria-invalid="updateValid ? 'false' : 'true'"
-      />
-      <span class="hud-label">{{ unit }}</span>
-    </div>
-
-    <div v-if="state.error" class="panel__error mono" data-testid="trustline-error">{{ state.error }}</div>
-
-    <div class="panel__actions">
-      <button v-if="isCreate" class="btn btn-xs" type="button" :disabled="busy || !createValid" @click="onCreate">Create</button>
-
-      <template v-else>
-        <button class="btn btn-xs" type="button" :disabled="busy || !updateValid" @click="onUpdate">Update</button>
-
-        <button
-          class="btn btn-xs"
-          type="button"
+    <div class="ds-panel__body ds-stack">
+      <div v-if="participantsSorted.length" class="ds-controls__row">
+        <label class="ds-label" for="tl-from">From</label>
+        <select
+          id="tl-from"
+          class="ds-select"
+          :value="state.fromPid ?? ''"
           :disabled="busy"
-          data-testid="trustline-close-btn"
-          @click="onClose"
+          aria-label="Trustline from participant"
+          @change="props.setFromPid?.(($event.target as HTMLSelectElement).value || null)"
         >
-          {{ closeArmed ? 'Confirm close' : 'Close TL' }}
+          <option value="">—</option>
+          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
+        </select>
+      </div>
+
+      <div v-if="participantsSorted.length" class="ds-controls__row">
+        <label class="ds-label" for="tl-to">To</label>
+        <select
+          id="tl-to"
+          class="ds-select"
+          :value="state.toPid ?? ''"
+          :disabled="busy || !state.fromPid"
+          aria-label="Trustline to participant"
+          @change="props.setToPid?.(($event.target as HTMLSelectElement).value || null)"
+        >
+          <option value="">—</option>
+          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
+        </select>
+      </div>
+
+      <div v-if="trustlinesSorted.length" class="ds-controls__row">
+        <label class="ds-label" for="tl-pick">Existing</label>
+        <select
+          id="tl-pick"
+          class="ds-select"
+          :disabled="busy"
+          aria-label="Pick existing trustline"
+          @change="onTrustlinePick(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">—</option>
+          <option v-for="tl in trustlinesSorted" :key="encodeTlKey(tl)" :value="encodeTlKey(tl)">
+            {{ (tl.from_name || tl.from_pid) + ' → ' + (tl.to_name || tl.to_pid) }}
+          </option>
+        </select>
+      </div>
+
+      <div v-if="isPickFrom" class="ds-label ds-muted" style="margin-top: 6px">Pick From node (canvas) or choose from dropdown.</div>
+      <div v-if="isPickTo" class="ds-label ds-muted" style="margin-top: 6px">Pick To node (canvas) or choose from dropdown.</div>
+
+      <div v-if="isEdit" class="ds-controls" style="padding: 0">
+        <div class="ds-controls__row">
+          <div class="ds-label">Used</div>
+          <div class="ds-value ds-mono">{{ effectiveUsed ?? '—' }} {{ unit }}</div>
+        </div>
+        <div class="ds-controls__row">
+          <div class="ds-label">Limit</div>
+          <div class="ds-value ds-mono">{{ effectiveLimit ?? '—' }} {{ unit }}</div>
+        </div>
+        <div class="ds-controls__row">
+          <div class="ds-label">Available</div>
+          <div class="ds-value ds-mono">{{ effectiveAvailable ?? '—' }} {{ unit }}</div>
+        </div>
+      </div>
+
+      <div v-if="isCreate" class="ds-controls__row">
+        <label class="ds-label" for="tl-limit">Limit</label>
+        <div class="ds-row" style="flex-wrap: nowrap">
+          <input
+            id="tl-limit"
+            v-model="limit"
+            class="ds-input ds-mono"
+            style="flex: 1"
+            inputmode="decimal"
+            placeholder="0.00"
+            :aria-invalid="createValid ? 'false' : 'true'"
+          />
+          <span class="ds-label ds-muted">{{ unit }}</span>
+        </div>
+      </div>
+
+      <div v-if="isCreate && !createValid && limit.trim()" class="ds-label ds-muted" style="margin-top: 6px">
+        Limit must be greater than 0.
+      </div>
+
+      <div v-if="isEdit" class="ds-controls__row">
+        <label class="ds-label" for="tl-new-limit">New limit</label>
+        <div class="ds-row" style="flex-wrap: nowrap">
+          <input
+            id="tl-new-limit"
+            v-model="newLimit"
+            class="ds-input ds-mono"
+            style="flex: 1"
+            inputmode="decimal"
+            placeholder="0.00"
+            :aria-invalid="updateValid ? 'false' : 'true'"
+          />
+          <span class="ds-label ds-muted">{{ unit }}</span>
+        </div>
+      </div>
+
+      <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
+
+      <div class="ds-row" style="justify-content: flex-end">
+        <button v-if="isCreate" class="ds-btn ds-btn--primary" type="button" :disabled="busy || !createValid" @click="onCreate">
+          Create
         </button>
 
-        <button
-          v-if="closeArmed"
-          class="btn btn-xs btn-ghost"
-          type="button"
-          :disabled="busy"
-          data-testid="trustline-close-cancel"
-          @click="disarmClose"
-        >
-          Cancel close
-        </button>
-      </template>
+        <template v-else>
+          <button class="ds-btn ds-btn--primary" type="button" :disabled="busy || !updateValid" @click="onUpdate">Update</button>
 
-      <button class="btn btn-xs btn-ghost" type="button" :disabled="busy" @click="cancel">Cancel</button>
+          <button
+            class="ds-btn"
+            type="button"
+            :disabled="busy"
+            data-testid="trustline-close-btn"
+            @click="onClose"
+          >
+            {{ closeArmed ? 'Confirm close' : 'Close TL' }}
+          </button>
+
+          <button
+            v-if="closeArmed"
+            class="ds-btn ds-btn--ghost"
+            type="button"
+            :disabled="busy"
+            data-testid="trustline-close-cancel"
+            @click="disarmClose"
+          >
+            Cancel close
+          </button>
+        </template>
+
+        <button class="ds-btn ds-btn--ghost" type="button" :disabled="busy" @click="cancel">Cancel</button>
+      </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.panel {
-  position: absolute;
-  right: 12px;
-  top: 110px;
-  z-index: 42;
-  min-width: 360px;
-  max-width: min(560px, calc(100vw - 24px));
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  backdrop-filter: blur(10px);
-  pointer-events: auto;
-}
-
-.panel__title {
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.panel__grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 10px;
-  margin: 8px 0;
-}
-
-.panel__row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin: 6px 0;
-}
-
-.panel__input {
-  flex: 1;
-  background: rgba(2, 6, 23, 0.15);
-  color: rgba(226, 232, 240, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 10px;
-  padding: 7px 10px;
-  font-size: 12px;
-}
-
-.panel__error {
-  margin-top: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  background: rgba(127, 29, 29, 0.14);
-  color: rgba(254, 202, 202, 0.9);
-}
-
-.panel__actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 10px;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-}
-</style>
 

@@ -26,19 +26,95 @@ class ClearingService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    def _dialect_name(self) -> str | None:
+        try:
+            return self.session.get_bind().dialect.name
+        except Exception:
+            return None
+
+    def _is_sqlite(self) -> bool:
+        return self._dialect_name() == "sqlite"
+
+    def _bind_uuid(self, uid: uuid.UUID) -> object:
+        """Return UUID in a format supported by the current DBAPI for raw SQL binds."""
+        if self._is_sqlite():
+            # SQLAlchemy stores UUIDs in SQLite as CHAR(32) hex (no dashes).
+            return uid.hex
+        return uid
+
+    def _bind_decimal(self, val: Decimal) -> object:
+        """Return Decimal in a format supported by the current DBAPI for raw SQL binds."""
+        if self._is_sqlite():
+            return float(val)
+        return val
+
+    def _sql_auto_clearing_ok(self, alias: str) -> str:
+        """Dialect-aware SQL predicate: trustline policy permits auto-clearing.
+
+        Must match `_policy_flag(..., default=True)` semantics as closely as possible:
+        - NULL policy -> allow
+        - missing key -> allow
+        - explicit false-ish -> reject
+        """
+        dialect = self._dialect_name()
+        if dialect == "sqlite":
+            # json_extract returns 0/1 for JSON booleans; can also surface strings.
+            return (
+                "("
+                f"{alias}.policy IS NULL OR "
+                f"json_extract({alias}.policy, '$.auto_clearing') IS NULL OR "
+                f"json_extract({alias}.policy, '$.auto_clearing') NOT IN (0, 'false', '0', 'no', 'off')"
+                ")"
+            )
+
+        # Postgres (json/jsonb): policy->>'auto_clearing' yields text.
+        return (
+            "("
+            f"{alias}.policy IS NULL OR "
+            f"({alias}.policy->>'auto_clearing') IS NULL OR "
+            f"lower({alias}.policy->>'auto_clearing') NOT IN ('false', '0', 'no', 'off')"
+            ")"
+        )
+
+    @staticmethod
+    def _deduplicate_cycles(cycles: List[List[Dict]]) -> List[List[Dict]]:
+        """Stable dedupe by unordered set of debt ids.
+
+        SQL cycle queries can emit the same logical cycle multiple times (different rotation).
+        Keep first occurrence to preserve ordering heuristics (e.g. clear_amount DESC).
+        """
+        if not cycles:
+            return []
+
+        seen: set[tuple[str, ...]] = set()
+        out: List[List[Dict]] = []
+        for cycle in cycles:
+            try:
+                key = tuple(sorted(str(e.get("debt_id", "")) for e in cycle))
+            except Exception:
+                key = tuple()
+            if not key:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(cycle)
+        return out
+
     async def find_triangles_sql(self, equivalent_id: uuid.UUID) -> List[List[Dict]]:
         """Find 3-node debt cycles using a SQL JOIN."""
 
-        dialect = None
-        try:
-            dialect = self.session.get_bind().dialect.name
-        except Exception:
-            dialect = None
+        dialect = self._dialect_name()
 
         least_expr = "LEAST(d1.amount, d2.amount, d3.amount)"
         if dialect == "sqlite":
             # SQLite supports scalar min(x, y, z) as a LEAST replacement.
             least_expr = "min(d1.amount, d2.amount, d3.amount)"
+
+        # NOTE: When executing raw SQL (text()), sqlite3 DBAPI does not accept uuid.UUID/Decimal
+        # as bound parameters. Normalize binds for SQLite only.
+        equivalent_id_param = self._bind_uuid(equivalent_id)
+        min_amount_param = self._bind_decimal(Decimal("0.01"))
 
         query = text(
             f"""
@@ -59,6 +135,21 @@ class ClearingService:
             JOIN debts d3 ON d2.creditor_id = d3.debtor_id
                          AND d3.creditor_id = d1.debtor_id
                          AND d2.equivalent_id = d3.equivalent_id
+                        JOIN trust_lines t1 ON t1.from_participant_id = d1.creditor_id
+                                                            AND t1.to_participant_id = d1.debtor_id
+                                                            AND t1.equivalent_id = d1.equivalent_id
+                                                            AND t1.status = 'active'
+                                                            AND {self._sql_auto_clearing_ok('t1')}
+                        JOIN trust_lines t2 ON t2.from_participant_id = d2.creditor_id
+                                                            AND t2.to_participant_id = d2.debtor_id
+                                                            AND t2.equivalent_id = d2.equivalent_id
+                                                            AND t2.status = 'active'
+                                                            AND {self._sql_auto_clearing_ok('t2')}
+                        JOIN trust_lines t3 ON t3.from_participant_id = d3.creditor_id
+                                                            AND t3.to_participant_id = d3.debtor_id
+                                                            AND t3.equivalent_id = d3.equivalent_id
+                                                            AND t3.status = 'active'
+                                                            AND {self._sql_auto_clearing_ok('t3')}
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0
               AND {least_expr} > :min_amount
@@ -70,8 +161,8 @@ class ClearingService:
         result = await self.session.execute(
             query,
             {
-                "equivalent_id": equivalent_id,
-                "min_amount": Decimal("0.01"),
+                "equivalent_id": equivalent_id_param,
+                "min_amount": min_amount_param,
             },
         )
 
@@ -105,15 +196,14 @@ class ClearingService:
     async def find_quadrangles_sql(self, equivalent_id: uuid.UUID) -> List[List[Dict]]:
         """Find 4-node debt cycles using a SQL JOIN."""
 
-        dialect = None
-        try:
-            dialect = self.session.get_bind().dialect.name
-        except Exception:
-            dialect = None
+        dialect = self._dialect_name()
 
         least_expr = "LEAST(d1.amount, d2.amount, d3.amount, d4.amount)"
         if dialect == "sqlite":
             least_expr = "min(d1.amount, d2.amount, d3.amount, d4.amount)"
+
+        equivalent_id_param = self._bind_uuid(equivalent_id)
+        min_amount_param = self._bind_decimal(Decimal("0.01"))
 
         query = text(
             f"""
@@ -128,10 +218,31 @@ class ClearingService:
             JOIN debts d3 ON d2.creditor_id = d3.debtor_id AND d2.equivalent_id = d3.equivalent_id
             JOIN debts d4 ON d3.creditor_id = d4.debtor_id AND d4.creditor_id = d1.debtor_id
                          AND d3.equivalent_id = d4.equivalent_id
+                        JOIN trust_lines t1 ON t1.from_participant_id = d1.creditor_id
+                                                            AND t1.to_participant_id = d1.debtor_id
+                                                            AND t1.equivalent_id = d1.equivalent_id
+                                                            AND t1.status = 'active'
+                                                            AND {self._sql_auto_clearing_ok('t1')}
+                        JOIN trust_lines t2 ON t2.from_participant_id = d2.creditor_id
+                                                            AND t2.to_participant_id = d2.debtor_id
+                                                            AND t2.equivalent_id = d2.equivalent_id
+                                                            AND t2.status = 'active'
+                                                            AND {self._sql_auto_clearing_ok('t2')}
+                        JOIN trust_lines t3 ON t3.from_participant_id = d3.creditor_id
+                                                            AND t3.to_participant_id = d3.debtor_id
+                                                            AND t3.equivalent_id = d3.equivalent_id
+                                                            AND t3.status = 'active'
+                                                            AND {self._sql_auto_clearing_ok('t3')}
+                        JOIN trust_lines t4 ON t4.from_participant_id = d4.creditor_id
+                                                            AND t4.to_participant_id = d4.debtor_id
+                                                            AND t4.equivalent_id = d4.equivalent_id
+                                                            AND t4.status = 'active'
+                                                            AND {self._sql_auto_clearing_ok('t4')}
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0 AND d4.amount > 0
               AND d1.debtor_id != d2.creditor_id
               AND d1.debtor_id != d3.creditor_id
+              AND d1.creditor_id != d3.creditor_id
               AND {least_expr} > :min_amount
             ORDER BY clear_amount DESC
             LIMIT 50
@@ -141,8 +252,8 @@ class ClearingService:
         result = await self.session.execute(
             query,
             {
-                "equivalent_id": equivalent_id,
-                "min_amount": Decimal("0.01"),
+                "equivalent_id": equivalent_id_param,
+                "min_amount": min_amount_param,
             },
         )
 
@@ -221,11 +332,103 @@ class ClearingService:
             tl = tl_by_pair.get((from_id, to_id))
             if tl is None:
                 return False
-            policy = tl.policy or {}
-            if not bool(policy.get("auto_clearing", True)):
+            if not self._policy_flag(tl.policy, "auto_clearing", default=True):
                 return False
 
         return True
+
+    @staticmethod
+    def _policy_flag(policy: dict | None, key: str, *, default: bool) -> bool:
+        """Parse a boolean flag from a policy JSON blob.
+
+        SQLite JSON handling can surface values as strings in some flows.
+        We treat common falsy string forms as False.
+        """
+        if policy is None:
+            return default
+
+        value = policy.get(key, default)
+        if value is None:
+            return default
+
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, (int, float)):
+            return bool(value)
+
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in {"false", "0", "no", "off"}:
+                return False
+            if v in {"true", "1", "yes", "on"}:
+                return True
+            return default
+
+        return bool(value)
+
+    async def _filter_cycles_by_auto_clearing_policy_sql(
+        self, cycles: List[List[Dict]], *, equivalent_id: uuid.UUID
+    ) -> List[List[Dict]]:
+        """Filter SQL-produced candidate cycles by auto-clearing consent.
+
+        Important: SQL cycle detectors don't apply policy constraints. If we return
+        cycles that will be skipped at execution time, the clearing loop may stop
+        early and never try alternative depths (e.g., quadrangles).
+        """
+
+        if not cycles:
+            return []
+
+        debt_ids: set[uuid.UUID] = set()
+        for cycle in cycles:
+            for edge in cycle:
+                try:
+                    debt_ids.add(uuid.UUID(str(edge.get("debt_id"))))
+                except Exception:
+                    continue
+
+        if not debt_ids:
+            return []
+
+        debts = (
+            (
+                await self.session.execute(
+                    select(Debt).where(Debt.id.in_(list(debt_ids)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        debts_by_id: dict[uuid.UUID, Debt] = {d.id: d for d in debts}
+
+        # Use the same policy evaluation path as execution time.
+        # This is intentionally less optimized than the bulk trustline fetch, but
+        # keeps behavior consistent and avoids subtle SQLite/JSON edge cases.
+        filtered: List[List[Dict]] = []
+        for cycle in cycles:
+            cycle_debts: List[Debt] = []
+            ok = True
+            for edge in cycle:
+                try:
+                    debt_id = uuid.UUID(str(edge.get("debt_id")))
+                except Exception:
+                    ok = False
+                    break
+                debt = debts_by_id.get(debt_id)
+                if debt is None:
+                    ok = False
+                    break
+                cycle_debts.append(debt)
+
+            if not ok or not cycle_debts:
+                continue
+            if cycle_debts[0].equivalent_id != equivalent_id:
+                continue
+            if await self._cycle_respects_auto_clearing(cycle_debts):
+                filtered.append(cycle)
+
+        return filtered
 
     async def _locked_pairs_for_equivalent(
         self, equivalent_id: uuid.UUID
@@ -303,8 +506,56 @@ class ClearingService:
             cycles: List[List[Dict]] = []
             try:
                 cycles = await self.find_triangles_sql(equivalent.id)
+                if cycles and locked_pairs:
+                    filtered: List[List[Dict]] = []
+                    for cycle in cycles:
+                        skip = False
+                        for edge in cycle:
+                            try:
+                                debtor_id = uuid.UUID(str(edge.get("debtor")))
+                                creditor_id = uuid.UUID(str(edge.get("creditor")))
+                            except Exception:
+                                continue
+                            if frozenset({debtor_id, creditor_id}) in locked_pairs:
+                                skip = True
+                                break
+                        if not skip:
+                            filtered.append(cycle)
+                    cycles = filtered
+
+                cycles = self._deduplicate_cycles(cycles)
+
+                if cycles:
+                    cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
+                        cycles, equivalent_id=equivalent.id
+                    )
+
+                # If triangles exist but are all filtered out (policy/locks), try quadrangles.
                 if max_depth >= 4 and not cycles:
                     cycles = await self.find_quadrangles_sql(equivalent.id)
+                    if cycles and locked_pairs:
+                        filtered = []
+                        for cycle in cycles:
+                            skip = False
+                            for edge in cycle:
+                                try:
+                                    debtor_id = uuid.UUID(str(edge.get("debtor")))
+                                    creditor_id = uuid.UUID(str(edge.get("creditor")))
+                                except Exception:
+                                    continue
+                                if frozenset({debtor_id, creditor_id}) in locked_pairs:
+                                    skip = True
+                                    break
+                            if not skip:
+                                filtered.append(cycle)
+                        cycles = filtered
+
+                    cycles = self._deduplicate_cycles(cycles)
+
+                    if cycles:
+                        cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
+                            cycles, equivalent_id=equivalent.id
+                        )
             except Exception:
                 logger.warning(
                     "event=clearing.find_cycles_sql_failed equivalent=%s",
@@ -312,23 +563,6 @@ class ClearingService:
                     exc_info=True,
                 )
                 cycles = []
-
-            if cycles and locked_pairs:
-                filtered: List[List[Dict]] = []
-                for cycle in cycles:
-                    skip = False
-                    for edge in cycle:
-                        try:
-                            debtor_id = uuid.UUID(str(edge.get("debtor")))
-                            creditor_id = uuid.UUID(str(edge.get("creditor")))
-                        except Exception:
-                            continue
-                        if frozenset({debtor_id, creditor_id}) in locked_pairs:
-                            skip = True
-                            break
-                    if not skip:
-                        filtered.append(cycle)
-                cycles = filtered
 
             if cycles:
                 # Replace UUIDs with PIDs for consistency with existing output.
@@ -482,7 +716,7 @@ class ClearingService:
         # Heuristic: Start from nodes with Debts.
         for start_node in nodes:
             # Limit search
-            if len(cycles) > 10:
+            if len(cycles) > 50:
                 break
 
             dfs(start_node, start_node, [], {start_node})
@@ -514,6 +748,9 @@ class ClearingService:
                     )
                 final_cycles.append(cycle_data)
 
+        # Prefer shorter cycles first for auto_clear().
+        final_cycles.sort(key=len)
+
         logger.info(
             "event=clearing.find_cycles_done equivalent=%s cycles=%s",
             equivalent_code,
@@ -525,6 +762,10 @@ class ClearingService:
             logger.debug(
                 "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=find_cycles.success",
                 exc_info=True,
+            )
+        if final_cycles:
+            final_cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
+                final_cycles, equivalent_id=equivalent.id
             )
         return final_cycles
 

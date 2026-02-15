@@ -33,9 +33,9 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
 
 <template>
   <div class="action-bar" aria-label="Interact actions">
-    <div class="action-bar__inner">
+    <div class="ds-panel ds-ov-bar">
       <button
-        class="btn btn-xs"
+        class="ds-btn ds-btn--secondary"
         type="button"
         :disabled="isDisabled"
         :data-active="activeKey === 'payment' ? '1' : '0'"
@@ -47,7 +47,7 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
       </button>
 
       <button
-        class="btn btn-xs"
+        class="ds-btn ds-btn--secondary"
         type="button"
         :disabled="isDisabled"
         :data-active="activeKey === 'trustline' ? '1' : '0'"
@@ -59,7 +59,7 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
       </button>
 
       <button
-        class="btn btn-xs"
+        class="ds-btn ds-btn--secondary"
         type="button"
         :disabled="isDisabled"
         :data-active="activeKey === 'clearing' ? '1' : '0'"
@@ -74,19 +74,9 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
 </template>
 
 <style scoped>
-.action-bar__inner {
-  display: inline-flex;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  backdrop-filter: blur(10px);
-}
-
-.btn[data-active='1'] {
-  border-color: rgba(56, 189, 248, 0.45);
-  background: rgba(56, 189, 248, 0.12);
+.ds-btn[data-active='1'] {
+  border-color: var(--ds-accent);
+  background: var(--ds-accent-surface);
 }
 </style>
 

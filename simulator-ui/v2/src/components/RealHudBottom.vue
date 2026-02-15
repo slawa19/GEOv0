@@ -33,48 +33,57 @@ function sseTone() {
 </script>
 
 <template>
-  <div class="hud-bottom">
-    <div class="btn-group" aria-label="View controls">
-      <button class="btn btn-xs btn-ghost" type="button" :disabled="!runId" @click="refreshSnapshot">Refresh</button>
-      <button v-if="showResetView" class="btn btn-xs btn-ghost" type="button" @click="resetView">Reset view</button>
+  <div class="ds-ov-bottom ds-panel ds-ov-bar">
+    <div class="ds-ov-btn-group" aria-label="View controls">
+      <button class="ds-btn ds-btn--ghost" style="height: 28px; padding: 0 10px" type="button" :disabled="!runId" @click="refreshSnapshot">Refresh</button>
+      <button v-if="showResetView" class="ds-btn ds-btn--ghost" style="height: 28px; padding: 0 10px" type="button" @click="resetView">Reset view</button>
     </div>
 
-    <details class="hud-chip subtle" aria-label="Artifacts">
-      <summary class="hud-label" style="cursor: pointer">
-        <span class="hud-badge" data-tone="info">Artifacts</span>
-        <span class="hud-value" style="opacity: 0.8">{{ artifacts.length || 0 }}</span>
+    <details class="ds-panel ds-ov-metric ds-ov-details" style="opacity: 0.92" aria-label="Artifacts">
+      <summary class="ds-row" style="gap: 8px; cursor: pointer">
+        <span class="ds-badge ds-badge--info">Artifacts</span>
+        <span class="ds-value" style="opacity: 0.85">{{ artifacts.length || 0 }}</span>
       </summary>
-      <div class="hudbar" style="margin-top: 8px">
-        <button class="btn btn-xxs" type="button" :disabled="!runId || artifactsLoading" @click="refreshArtifacts">
-          {{ artifactsLoading ? 'Loading…' : 'Refresh' }}
-        </button>
-        <div v-if="!artifacts.length" class="hud-label" style="opacity: 0.85">No artifacts</div>
-        <div v-else class="hudbar">
-          <button v-for="a in artifacts" :key="a.name" class="btn btn-xxs" type="button" @click="downloadArtifact(a.name)">
+      <div class="ds-stack" style="margin-top: 8px; gap: 8px">
+        <div class="ds-row" style="gap: 6px">
+          <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" :disabled="!runId || artifactsLoading" @click="refreshArtifacts">
+            {{ artifactsLoading ? 'Loading…' : 'Refresh' }}
+          </button>
+          <div v-if="!artifacts.length" class="ds-label" style="opacity: 0.85">No artifacts</div>
+        </div>
+        <div v-if="artifacts.length" class="ds-row" style="gap: 6px">
+          <button
+            v-for="a in artifacts"
+            :key="a.name"
+            class="ds-btn ds-btn--secondary"
+            style="height: 28px; padding: 0 10px"
+            type="button"
+            @click="downloadArtifact(a.name)"
+          >
             {{ a.name }}
           </button>
         </div>
       </div>
     </details>
 
-    <div class="hud-chip subtle" aria-label="Quality">
-      <span class="hud-label">Quality</span>
-      <select v-model="quality" class="hud-select" aria-label="Quality">
+    <div class="ds-row" aria-label="Quality" style="gap: 6px">
+      <span class="ds-label">Quality</span>
+      <select v-model="quality" class="ds-select" aria-label="Quality">
         <option value="low">Low</option>
         <option value="med">Med</option>
         <option value="high">High</option>
       </select>
     </div>
 
-    <div class="hud-chip subtle" aria-label="Labels">
-      <span class="hud-label">Labels</span>
-      <select v-model="labelsLod" class="hud-select" aria-label="Labels">
+    <div class="ds-row" aria-label="Labels" style="gap: 6px">
+      <span class="ds-label">Labels</span>
+      <select v-model="labelsLod" class="ds-select" aria-label="Labels">
         <option value="off">Off</option>
         <option value="selection">Selection</option>
         <option value="neighbors">Neighbors</option>
       </select>
     </div>
 
-    <span class="hud-badge" :data-tone="sseTone()" aria-label="Connection">SSE {{ sseState }}</span>
+    <span :class="['ds-badge', `ds-badge--${sseTone()}`]" aria-label="Connection">SSE {{ sseState }}</span>
   </div>
 </template>

@@ -8,6 +8,7 @@ from app.config import settings
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 
 
 @pytest.mark.asyncio
@@ -29,6 +30,36 @@ async def test_admin_clearing_cycles_returns_equivalents_and_cycles(client, db_s
     await db_session.flush()
 
     # Create a 3-edge debt cycle for UAH: alice -> carol -> bob -> alice
+    # NOTE: cycle discovery filters by auto-clearing consent; provide controlling
+    # trustlines so the cycle is executable.
+    db_session.add_all(
+        [
+            # Controlling trustline for debt(alice->carol) is TL(carol->alice)
+            TrustLine(
+                from_participant_id=carol.id,
+                to_participant_id=alice.id,
+                equivalent_id=uah.id,
+                limit=Decimal('100.00'),
+                status='active',
+            ),
+            # Controlling trustline for debt(carol->bob) is TL(bob->carol)
+            TrustLine(
+                from_participant_id=bob.id,
+                to_participant_id=carol.id,
+                equivalent_id=uah.id,
+                limit=Decimal('100.00'),
+                status='active',
+            ),
+            # Controlling trustline for debt(bob->alice) is TL(alice->bob)
+            TrustLine(
+                from_participant_id=alice.id,
+                to_participant_id=bob.id,
+                equivalent_id=uah.id,
+                limit=Decimal('100.00'),
+                status='active',
+            ),
+        ]
+    )
     db_session.add_all(
         [
             Debt(debtor_id=alice.id, creditor_id=carol.id, equivalent_id=uah.id, amount=Decimal('10.00')),

@@ -27,15 +27,15 @@ const scene = defineModel<SceneId>('scene', { required: true })
 
 <template>
   <!-- Minimal top HUD (controls + small status) -->
-  <div class="hud-top">
-    <div class="hud-row">
-      <div class="pill">
-        <span class="label">EQ</span>
+  <div class="ds-ov-top">
+    <div class="ds-ov-row">
+      <div class="ds-panel ds-ov-metric">
+        <span class="ds-label">EQ</span>
         <template v-if="isDemoFixtures">
-          <span class="value">UAH</span>
+          <span class="ds-value ds-mono">UAH</span>
         </template>
         <template v-else>
-          <select v-model="eq" class="select" aria-label="Equivalent">
+          <select v-model="eq" class="ds-select" aria-label="Equivalent">
             <option value="UAH">UAH</option>
             <option value="HOUR">HOUR</option>
             <option value="EUR">EUR</option>
@@ -43,9 +43,9 @@ const scene = defineModel<SceneId>('scene', { required: true })
         </template>
       </div>
 
-      <div class="field">
-        <span class="label">Layout</span>
-        <select v-model="layoutMode" class="select" aria-label="Layout">
+      <div class="ds-panel ds-ov-metric">
+        <span class="ds-label">Layout</span>
+        <select v-model="layoutMode" class="ds-select" aria-label="Layout">
           <option value="admin-force">Organic cloud (links)</option>
           <option value="community-clusters">Community clusters</option>
           <option value="balance-split">Constellations: balance</option>
@@ -54,23 +54,24 @@ const scene = defineModel<SceneId>('scene', { required: true })
         </select>
       </div>
 
-      <div class="pill">
-        <span class="label">Scene</span>
-        <select v-model="scene" class="select" aria-label="Scene">
+      <div class="ds-panel ds-ov-metric">
+        <span class="ds-label">Scene</span>
+        <select v-model="scene" class="ds-select" aria-label="Scene">
           <option v-for="id in SCENE_IDS" :key="id" :value="id">{{ SCENES[id].label }}</option>
         </select>
       </div>
 
-      <div v-if="nodesCount != null && linksCount != null" class="pill subtle" aria-label="Stats">
-        <span class="mono">Nodes {{ nodesCount }} | Links {{ linksCount }}</span>
+      <div v-if="nodesCount != null && linksCount != null" class="ds-panel ds-ov-metric" style="opacity: 0.9" aria-label="Stats">
+        <span class="ds-value ds-mono">Nodes {{ nodesCount }} | Links {{ linksCount }}</span>
       </div>
 
       <div
         v-if="isDev && !isWebDriver && (sourcePath || eventsPath || effectiveEq || generatedAt)"
-        class="pill subtle"
+        class="ds-panel ds-ov-metric"
+        style="opacity: 0.9"
         aria-label="Diagnostics"
       >
-        <span class="mono">
+        <span class="ds-value ds-mono">
           <template v-if="effectiveEq">EQ* {{ effectiveEq }}</template>
           <template v-if="generatedAt"> | {{ generatedAt }}</template>
           <template v-if="sourcePath"> | {{ sourcePath }}</template>
@@ -78,8 +79,8 @@ const scene = defineModel<SceneId>('scene', { required: true })
         </span>
       </div>
 
-      <div v-if="isTestMode && !isWebDriver" class="pill subtle" aria-label="Mode">
-        <span class="mono">TEST MODE</span>
+      <div v-if="isTestMode && !isWebDriver" class="ds-panel ds-ov-metric" style="opacity: 0.9" aria-label="Mode">
+        <span class="ds-value ds-mono">TEST MODE</span>
       </div>
     </div>
   </div>

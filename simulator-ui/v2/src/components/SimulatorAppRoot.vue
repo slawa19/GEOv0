@@ -20,6 +20,22 @@ import FxDebugPanel from './FxDebugPanel.vue'
 
 import { computed, isRef, onMounted, onUnmounted } from 'vue'
 
+import type { InteractPhase } from '../composables/useInteractMode'
+
+type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
+
+const uiTheme = computed<UiThemeId>(() => {
+  try {
+    const v = String(new URLSearchParams(window.location.search).get('theme') ?? '').trim().toLowerCase()
+    if (v === 'shadcn') return 'shadcn'
+    if (v === 'saas') return 'saas'
+    if (v === 'library') return 'library'
+    return 'hud'
+  } catch {
+    return 'hud'
+  }
+})
+
 import type { GraphLink } from '../types'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
@@ -110,10 +126,10 @@ const {
   resetView,
 } = app
 
-const interactPhase = computed(() => {
+const interactPhase = computed<InteractPhase>(() => {
   // Real app: `phase` is a Ref. Unit tests may mock it as a plain string.
-  const p = interact.mode.phase
-  return String(isRef(p) ? p.value : p)
+  const p = interact.mode.phase as any
+  return (isRef(p) ? p.value : p) as InteractPhase
 })
 
 const isInteractActivePhase = computed(() => {
@@ -355,6 +371,9 @@ function onEdgeDetailCloseLine() {
   <div
     ref="hostEl"
     class="root"
+    :data-theme="uiTheme"
+    data-density="comfortable"
+    data-motion="full"
     :data-ready="!state.loading && !state.error && state.snapshot ? '1' : '0'"
     :data-scene="scene"
     :data-layout="layoutMode"
@@ -386,47 +405,58 @@ function onEdgeDetailCloseLine() {
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
     />
 
-    <div v-if="!isTestMode && !isWebDriver" class="demo-ui" :data-enabled="isDemoUi ? '1' : '0'">
-      <div class="demo-ui__title">UI</div>
-      <div class="demo-ui__row">
-        <button class="demo-ui__btn" type="button" @click="toggleDemoUi">
-          {{ isDemoUi ? 'Exit' : 'Enter' }}
-        </button>
-
-        <button class="demo-ui__btn" type="button" @click="toggleInteractUi">
-          {{ isInteractUi ? 'Exit Interact' : 'Enter Interact' }}
-        </button>
-
-        <div v-if="apiMode === 'real' && isDemoUi" class="demo-ui__chip">
-          <span class="demo-ui__label">EQ</span>
-          <select v-model="eq" class="demo-ui__select" aria-label="Equivalent">
-            <option value="UAH">UAH</option>
-            <option value="HOUR">HOUR</option>
-            <option value="EUR">EUR</option>
-          </select>
-        </div>
-
-        <div v-if="apiMode === 'real' && isDemoUi" class="demo-ui__chip">
-          <span class="demo-ui__label">Layout</span>
-          <select v-model="layoutMode" class="demo-ui__select" aria-label="Layout">
-            <option value="admin-force">Organic cloud</option>
-            <option value="community-clusters">Clusters</option>
-            <option value="balance-split">Balance</option>
-            <option value="type-split">Type</option>
-            <option value="status-split">Status</option>
-          </select>
-        </div>
-
-        <div v-if="apiMode === 'real' && isDemoUi" class="demo-ui__chip" aria-label="SSE status">
-          <span class="demo-ui__label">SSE</span>
-          <span class="demo-ui__value">{{ real.sseState }}</span>
-        </div>
+    <div
+      v-if="!isTestMode && !isWebDriver"
+      class="ds-ov-demo ds-panel"
+      :data-enabled="isDemoUi ? '1' : '0'"
+      aria-label="UI demo controls"
+    >
+      <div class="ds-panel__header" style="padding: 10px 10px 8px">
+        <div class="ds-kicker">UI</div>
       </div>
 
-      <div v-if="apiMode === 'real' && isDemoUi && real.lastError" class="demo-ui__error mono">
-        {{ real.lastError }}
+      <div class="ds-panel__body" style="padding: 10px">
+        <div class="ds-row">
+          <button class="ds-btn ds-btn--secondary" type="button" @click="toggleDemoUi">
+            {{ isDemoUi ? 'Exit' : 'Enter' }}
+          </button>
+
+          <button class="ds-btn ds-btn--secondary" type="button" @click="toggleInteractUi">
+            {{ isInteractUi ? 'Exit Interact' : 'Enter Interact' }}
+          </button>
+
+          <div v-if="apiMode === 'real' && isDemoUi" class="ds-row" style="gap: 6px">
+            <span class="ds-label">EQ</span>
+            <select v-model="eq" class="ds-select" aria-label="Equivalent">
+              <option value="UAH">UAH</option>
+              <option value="HOUR">HOUR</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </div>
+
+          <div v-if="apiMode === 'real' && isDemoUi" class="ds-row" style="gap: 6px">
+            <span class="ds-label">Layout</span>
+            <select v-model="layoutMode" class="ds-select" aria-label="Layout">
+              <option value="admin-force">Organic cloud</option>
+              <option value="community-clusters">Clusters</option>
+              <option value="balance-split">Balance</option>
+              <option value="type-split">Type</option>
+              <option value="status-split">Status</option>
+            </select>
+          </div>
+
+          <div v-if="apiMode === 'real' && isDemoUi" class="ds-row" style="gap: 6px" aria-label="SSE status">
+            <span class="ds-label">SSE</span>
+            <span class="ds-value ds-mono">{{ real.sseState }}</span>
+          </div>
+        </div>
+
+        <div v-if="apiMode === 'real' && isDemoUi && real.lastError" class="ds-alert ds-alert--err ds-mono" style="margin-top: 8px">
+          {{ real.lastError }}
+        </div>
       </div>
     </div>
+
 
     <InteractHudTop
       v-if="apiMode === 'real' && isInteractUi"
@@ -458,8 +488,8 @@ function onEdgeDetailCloseLine() {
     <ActionBar
       v-if="apiMode === 'real' && isInteractUi"
       :phase="interactPhase"
-      :busy="interact.mode.busy"
-      :actions-disabled="interact.actions.actionsDisabled"
+      :busy="interact.mode.busy.value"
+      :actions-disabled="interact.actions.actionsDisabled.value"
       :run-terminal="interactRunTerminal"
       :start-payment-flow="interact.mode.startPaymentFlow"
       :start-trustline-flow="interact.mode.startTrustlineFlow"
@@ -471,10 +501,10 @@ function onEdgeDetailCloseLine() {
       :phase="interactPhase"
       :state="interact.mode.state"
       :unit="effectiveEq"
-      :available-capacity="interact.mode.availableCapacity"
-      :participants="interact.mode.participants"
-      :busy="interact.mode.busy"
-      :can-send-payment="interact.mode.canSendPayment"
+      :available-capacity="interact.mode.availableCapacity.value"
+      :participants="interact.mode.participants.value"
+      :busy="interact.mode.busy.value"
+      :can-send-payment="interact.mode.canSendPayment.value"
       :confirm-payment="interact.mode.confirmPayment"
       :set-from-pid="interact.mode.setPaymentFromPid"
       :set-to-pid="interact.mode.setPaymentToPid"
@@ -489,9 +519,9 @@ function onEdgeDetailCloseLine() {
       :used="interactSelectedLink?.used ?? null"
       :current-limit="interactSelectedLink?.trust_limit ?? null"
       :available="interactSelectedLink?.available ?? null"
-      :participants="interact.mode.participants"
-      :trustlines="interact.mode.trustlines"
-      :busy="interact.mode.busy"
+      :participants="interact.mode.participants.value"
+      :trustlines="interact.mode.trustlines.value"
+      :busy="interact.mode.busy.value"
       :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
       :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
       :confirm-trustline-close="interact.mode.confirmTrustlineClose"
@@ -505,9 +535,9 @@ function onEdgeDetailCloseLine() {
       v-if="apiMode === 'real' && isInteractUi"
       :phase="interactPhase"
       :state="interact.mode.state"
-      :busy="interact.mode.busy"
+      :busy="interact.mode.busy.value"
       :equivalent="effectiveEq"
-      :total-debt="interact.systemBalance.totalUsed"
+      :total-debt="interact.systemBalance.value.totalUsed"
       :confirm-clearing="interact.mode.confirmClearing"
       :cancel="interact.mode.cancel"
     />
@@ -522,7 +552,7 @@ function onEdgeDetailCloseLine() {
       :limit="interactSelectedLink?.trust_limit ?? null"
       :available="interactSelectedLink?.available ?? null"
       :status="(interactSelectedLink?.status as any) ?? null"
-      :busy="interact.mode.busy"
+      :busy="interact.mode.busy.value"
       :close="interact.mode.cancel"
       @change-limit="onEdgeDetailChangeLimit"
       @close-line="onEdgeDetailCloseLine"
@@ -622,9 +652,9 @@ function onEdgeDetailCloseLine() {
     />
 
     <!-- E2E screenshot tests: minimal offline controls only (match stored snapshots) -->
-    <div v-else-if="isE2eScreenshots" class="hud-bottom">
-      <button class="btn" type="button" @click="e2e.runTxOnce">Single Tx</button>
-      <button class="btn" type="button" @click="e2e.runClearingOnce">Run Clearing</button>
+    <div v-else-if="isE2eScreenshots" class="ds-ov-bottom ds-panel ds-ov-bar">
+      <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runTxOnce">Single Tx</button>
+      <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runClearingOnce">Run Clearing</button>
     </div>
 
     <FixturesHudBottom
@@ -645,10 +675,16 @@ function onEdgeDetailCloseLine() {
     <!-- Loading / error overlay (fail-fast, but non-intrusive).
          Hide the overlay during incremental updates (when we already have a snapshot)
          to avoid a visible "Loading…" flash on preview → run transitions. -->
-    <div v-if="state.loading && !state.snapshot" class="overlay">Loading…</div>
-    <div v-else-if="state.error" class="overlay overlay-error">
-      <div class="overlay-title">Error</div>
-      <div class="overlay-text mono">{{ state.error }}</div>
+    <div v-if="state.loading && !state.snapshot" class="ds-ov-inset">
+      <div class="ds-ov-message">
+        <div class="ds-ov-message__title">Loading…</div>
+      </div>
+    </div>
+    <div v-else-if="state.error" class="ds-ov-inset">
+      <div class="ds-ov-message">
+        <div class="ds-ov-message__title">Error</div>
+        <div class="ds-ov-message__text">{{ state.error }}</div>
+      </div>
     </div>
 
     <LabelsOverlayLayers
@@ -662,72 +698,4 @@ function onEdgeDetailCloseLine() {
 </template>
 
 <style scoped>
-.demo-ui {
-  position: absolute;
-  left: 12px;
-  top: 12px;
-  z-index: 41;
-  padding: 10px 10px 8px;
-  border-radius: 10px;
-  background: rgba(10, 12, 16, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(8px);
-  color: rgba(255, 255, 255, 0.92);
-  user-select: none;
-}
-
-.demo-ui__title {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.8;
-  margin-bottom: 6px;
-}
-
-.demo-ui__row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.demo-ui__btn {
-  appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
-  color: inherit;
-  border-radius: 9px;
-  padding: 8px 10px;
-  font-weight: 700;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.demo-ui__chip {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 9px;
-  padding: 6px 8px;
-}
-
-.demo-ui__label {
-  font-size: 11px;
-  opacity: 0.75;
-}
-
-.demo-ui__select {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.2);
-  color: inherit;
-  border-radius: 8px;
-  padding: 4px 6px;
-  font-weight: 600;
-}
-
-.demo-ui__value {
-  font-weight: 600;
-}
 </style>

@@ -120,20 +120,23 @@ onUnmounted(() => {
     <div class="popup__subtitle mono">{{ title }}</div>
 
     <div class="popup__grid">
-      <div class="hud-label">Used</div>
-      <div class="hud-value mono">{{ used ?? '—' }} {{ unit }}</div>
-      <div class="hud-label">Limit</div>
-      <div class="hud-value mono">{{ limit ?? '—' }} {{ unit }}</div>
-      <div class="hud-label">Available</div>
-      <div class="hud-value mono">{{ available ?? '—' }} {{ unit }}</div>
-      <div class="hud-label">Status</div>
-      <div class="hud-value mono">{{ status ?? '—' }}</div>
+      <div class="ds-label">Used</div>
+      <div class="ds-value ds-mono">{{ used ?? '—' }} {{ unit }}</div>
+      <div class="ds-label">Limit</div>
+      <div class="ds-value ds-mono">{{ limit ?? '—' }} {{ unit }}</div>
+      <div class="ds-label">Available</div>
+      <div class="ds-value ds-mono">{{ available ?? '—' }} {{ unit }}</div>
+      <div class="ds-label">Status</div>
+      <div class="ds-value ds-mono">{{ status ?? '—' }}</div>
     </div>
 
     <div class="popup__actions">
-      <button class="btn btn-xxs" type="button" :disabled="!!busy" @click="emit('changeLimit')">Change limit</button>
+      <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" :disabled="!!busy" @click="emit('changeLimit')">
+        Change limit
+      </button>
       <button
-        class="btn btn-xxs"
+        class="ds-btn ds-btn--danger"
+        style="height: 28px; padding: 0 10px"
         type="button"
         :disabled="!!busy"
         data-testid="edge-close-line-btn"
@@ -144,7 +147,8 @@ onUnmounted(() => {
 
       <button
         v-if="closeArmed"
-        class="btn btn-xxs btn-ghost"
+        class="ds-btn ds-btn--ghost"
+        style="height: 28px; padding: 0 10px"
         type="button"
         :disabled="!!busy"
         data-testid="edge-close-line-cancel"
@@ -152,7 +156,7 @@ onUnmounted(() => {
       >
         Cancel
       </button>
-      <button class="btn btn-xxs btn-ghost" type="button" @click="close">Close</button>
+      <button class="ds-btn ds-btn--ghost" style="height: 28px; padding: 0 10px" type="button" @click="close">Close</button>
     </div>
   </div>
 </template>

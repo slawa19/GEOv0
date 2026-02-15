@@ -91,9 +91,13 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     const cardH = 146
     const gap = 18
 
+    // Nodes have a sizeable glow/halo (bloom + rim). `getNodeScreenSize()` returns the
+    // core geometry size, so we add a halo pad to keep the card visually separated.
+    const haloPad = 20
+
     const { w: nw, h: nh } = deps.getNodeScreenSize(selectedNode.value)
-    const nodeW = Math.max(10, nw) + 18
-    const nodeH = Math.max(10, nh) + 18
+    const nodeW = Math.max(10, nw) + haloPad * 2
+    const nodeH = Math.max(10, nh) + haloPad * 2
 
     const nodeRect = {
       x: p.x - nodeW / 2,
@@ -102,18 +106,30 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
       h: nodeH,
     }
 
+    // Require a minimum gap from the node on any side.
+    // We approximate this by expanding the node rect and ensuring the card does not intersect it.
+    const nodeRectWithGap = {
+      x: nodeRect.x - gap,
+      y: nodeRect.y - gap,
+      w: nodeRect.w + gap * 2,
+      h: nodeRect.h + gap * 2,
+    }
+
     const clampCard = (x: number, y: number) => ({
       x: clamp(x, pad, rect.width - pad - cardW),
       y: clamp(y, pad, rect.height - pad - cardH),
     })
 
-    const intersects = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
-      !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y)
+    const intersects = (
+      a: { x: number; y: number; w: number; h: number },
+      b: { x: number; y: number; w: number; h: number },
+    ) => !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y)
 
     // Count edges in each direction
     const edgeCounts = countEdgeDirections(selectedNode.value.id, p)
 
-    // Create candidates with their direction names and edge counts
+    // Create candidates with their direction names and edge counts.
+    // NOTE: `pos` is the desired position; it may be clamped later.
     const candidates: Array<{
       pos: { x: number; y: number }
       direction: 'right' | 'left' | 'bottom' | 'top'
@@ -144,19 +160,41 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     // Sort candidates by edge count (prefer positions with fewer edges)
     candidates.sort((a, b) => a.edgeCount - b.edgeCount)
 
-    // Try candidates in order of preference (least edges first)
-    for (const c of candidates) {
+    const evalCandidate = (c: (typeof candidates)[number]) => {
       const t = clampCard(c.pos.x, c.pos.y)
       const cardRect = { x: t.x, y: t.y, w: cardW, h: cardH }
-      if (!intersects(cardRect, nodeRect)) {
-        return { left: `${t.x}px`, top: `${t.y}px` }
-      }
+
+      const primaryAxisClamped =
+        c.direction === 'left' || c.direction === 'right' ? t.x !== c.pos.x : t.y !== c.pos.y
+
+      const violatesMinGap = intersects(cardRect, nodeRectWithGap)
+
+      return { c, t, cardRect, primaryAxisClamped, violatesMinGap }
     }
 
-    // Fallback: use the position with least edges, even if it intersects with node
-    const best = candidates[0]!
-    const t = clampCard(best.pos.x, best.pos.y)
-    return { left: `${t.x}px`, top: `${t.y}px` }
+    const evaluated = candidates.map(evalCandidate)
+
+    const pickFirst = (pred: (e: (typeof evaluated)[number]) => boolean) => {
+      const hit = evaluated.find(pred)
+      if (!hit) return null
+      return { left: `${hit.t.x}px`, top: `${hit.t.y}px` }
+    }
+
+    // Pass 1 (ideal): keep the intended gap AND do not clamp on the primary axis.
+    const p1 = pickFirst((e) => !e.primaryAxisClamped && !e.violatesMinGap)
+    if (p1) return p1
+
+    // Pass 2: keep the intended gap (even if we must clamp). This avoids the "stuck to node" look.
+    const p2 = pickFirst((e) => !e.violatesMinGap)
+    if (p2) return p2
+
+    // Pass 3: do not clamp on the primary axis (even if we cannot keep the full min gap).
+    const p3 = pickFirst((e) => !e.primaryAxisClamped)
+    if (p3) return p3
+
+    // Fallback: use the best edge-count candidate (legacy behavior).
+    const best = evaluated[0]!
+    return { left: `${best.t.x}px`, top: `${best.t.y}px` }
   }
 
   return { selectedNode, nodeCardStyle }

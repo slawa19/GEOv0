@@ -26,31 +26,31 @@ function sseTone() {
 </script>
 
 <template>
-  <div class="hud-bottom">
-    <div class="btn-group" aria-label="View controls">
-      <button class="btn btn-xs btn-ghost" type="button" :disabled="!runId" @click="refreshSnapshot">Refresh</button>
-      <button v-if="showResetView" class="btn btn-xs btn-ghost" type="button" @click="resetView">Reset view</button>
+  <div class="ds-ov-bottom ds-panel ds-ov-bar">
+    <div class="ds-ov-btn-group" aria-label="View controls">
+      <button class="ds-btn ds-btn--ghost" type="button" :disabled="!runId" @click="refreshSnapshot">Refresh</button>
+      <button v-if="showResetView" class="ds-btn ds-btn--ghost" type="button" @click="resetView">Reset view</button>
     </div>
 
-    <div class="hud-chip subtle" aria-label="Quality">
-      <span class="hud-label">Quality</span>
-      <select v-model="quality" class="hud-select" aria-label="Quality">
+    <div class="ds-row" aria-label="Quality" style="gap: 6px">
+      <span class="ds-label">Quality</span>
+      <select v-model="quality" class="ds-select" aria-label="Quality">
         <option value="low">Low</option>
         <option value="med">Med</option>
         <option value="high">High</option>
       </select>
     </div>
 
-    <div class="hud-chip subtle" aria-label="Labels">
-      <span class="hud-label">Labels</span>
-      <select v-model="labelsLod" class="hud-select" aria-label="Labels">
+    <div class="ds-row" aria-label="Labels" style="gap: 6px">
+      <span class="ds-label">Labels</span>
+      <select v-model="labelsLod" class="ds-select" aria-label="Labels">
         <option value="off">Off</option>
         <option value="selection">Selection</option>
         <option value="neighbors">Neighbors</option>
       </select>
     </div>
 
-    <span class="hud-badge" :data-tone="sseTone()" aria-label="Connection">SSE {{ sseState }}</span>
+    <span :class="['ds-badge', `ds-badge--${sseTone()}`]" aria-label="Connection">SSE {{ sseState }}</span>
   </div>
 </template>
 

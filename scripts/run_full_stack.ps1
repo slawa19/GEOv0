@@ -46,10 +46,38 @@ param(
     [string]$FixturesCommunity = 'greenfield-village-100',
     
     [switch]$ShowWindows,
-    [switch]$NoInstall
+    [switch]$NoInstall,
+
+    # Optional backend env overrides, e.g.:
+    #   -BackendEnv 'SIMULATOR_CLEARING_POLICY=adaptive','SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS=250'
+    [string[]]$BackendEnv = @()
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Set-EnvOverrides {
+    param([string[]]$Pairs)
+    if (-not $Pairs -or $Pairs.Count -eq 0) { return }
+
+    foreach ($pair in $Pairs) {
+        $p = [string]$pair
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+
+        $idx = $p.IndexOf('=')
+        if ($idx -lt 1) {
+            throw "Invalid -BackendEnv entry: '$p' (expected KEY=VALUE)"
+        }
+
+        $key = $p.Substring(0, $idx).Trim()
+        $val = $p.Substring($idx + 1)
+        if ([string]::IsNullOrWhiteSpace($key)) {
+            throw "Invalid -BackendEnv entry: '$p' (empty key)"
+        }
+
+        Set-Item -Path ("Env:$key") -Value $val
+        Write-Host "     Env override: $key=$val" -ForegroundColor Gray
+    }
+}
 
 # --- Configuration & Paths ---
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -359,6 +387,9 @@ switch ($Action) {
 }
 
 # --- START action ---
+
+# Apply env overrides early so child processes inherit them.
+Set-EnvOverrides -Pairs $BackendEnv
 
 Write-Host "[1/8] Cleaning up old processes..." -ForegroundColor Yellow
 Stop-AllServices

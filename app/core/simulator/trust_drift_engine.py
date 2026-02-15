@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from typing import Any, Callable
 
 from sqlalchemy import select, update
@@ -360,9 +360,19 @@ class TrustDriftEngine:
                 )
             except Exception:
                 continue
+
+            # Guardrail: trust drift must never shrink limit below already-used debt,
+            # otherwise we can create a TRUST_LIMIT_VIOLATION without any new payment.
+            try:
+                debt_floor = Decimal(str(debt_amount)).quantize(
+                    Decimal("0.01"), rounding=ROUND_UP
+                )
+            except Exception:
+                debt_floor = Decimal("0")
             new_limit = max(
                 (current_limit * decay_mult),
                 (original_limit * min_ratio),
+                debt_floor,
             ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
             if new_limit == current_limit:

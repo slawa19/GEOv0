@@ -12,33 +12,31 @@ const labelsLod = defineModel<string>('labelsLod', { required: true })
 </script>
 
 <template>
-  <div class="hud-bottom">
+  <div class="ds-ov-bottom ds-panel ds-ov-bar">
     <template v-if="showResetView">
-      <button class="btn btn-ghost" type="button" @click="resetView">Reset view</button>
-      <div class="hud-divider" />
+      <button class="ds-btn ds-btn--ghost" type="button" @click="resetView">Reset view</button>
+      <div class="ds-ov-divider" />
     </template>
 
-    <div class="pill subtle">
-      <span class="label">Quality</span>
-      <select v-model="quality" class="select select-compact" aria-label="Quality">
+    <div class="ds-row" style="gap: 6px">
+      <span class="ds-label">Quality</span>
+      <select v-model="quality" class="ds-select" aria-label="Quality">
         <option value="low">Low</option>
         <option value="med">Med</option>
         <option value="high">High</option>
       </select>
     </div>
 
-    <div class="pill subtle">
-      <span class="label">Labels</span>
-      <select v-model="labelsLod" class="select select-compact" aria-label="Labels">
+    <div class="ds-row" style="gap: 6px">
+      <span class="ds-label">Labels</span>
+      <select v-model="labelsLod" class="ds-select" aria-label="Labels">
         <option value="off">Off</option>
         <option value="selection">Selection</option>
         <option value="neighbors">Neighbors</option>
       </select>
     </div>
 
-    <div class="pill subtle" aria-label="Note">
-      <span class="mono">FX: use real mode (Demo UI / debug)</span>
-    </div>
+    <div class="ds-label ds-mono ds-muted" aria-label="Note">FX: use real mode (Demo UI / debug)</div>
   </div>
 </template>
 

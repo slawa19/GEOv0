@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
+from sqlalchemy.engine.url import make_url
 
 from app.api.router import api_router
 from app.config import settings
@@ -23,11 +24,58 @@ from app.utils.exceptions import GeoException
 logger = logging.getLogger(__name__)
 
 
+async def _sqlite_ensure_debts_version_column() -> None:
+    """Lightweight SQLite-only schema fix for dev DB files.
+
+    Alembic migrations are primarily designed for Postgres in this repo.
+    When running locally with the default SQLite DATABASE_URL, older DB files
+    may be missing newly added columns (e.g. debts.version).
+    """
+
+    try:
+        dialect = make_url(settings.DATABASE_URL).get_backend_name()
+    except Exception:
+        return
+
+    if dialect != "sqlite":
+        return
+
+    try:
+        async with engine.begin() as conn:
+            table_exists = await conn.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='debts'")
+            )
+            if table_exists.scalar() is None:
+                return
+
+            cols = await conn.execute(text("PRAGMA table_info(debts)"))
+            col_names = {row[1] for row in cols.fetchall()}
+            if "version" in col_names:
+                return
+
+            logger.warning(
+                "SQLite DB is missing debts.version; applying compatibility ALTER TABLE"
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE debts ADD COLUMN version INTEGER NOT NULL DEFAULT 0"
+                )
+            )
+    except Exception as exc:
+        # Fail fast with a clearer message than the later SQLAlchemy error.
+        raise RuntimeError(
+            "SQLite DB schema appears outdated and auto-fix failed. "
+            "Delete ./geov0.db (or point DATABASE_URL to a fresh file) and restart."
+        ) from exc
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.redis = None
     app.state._bg_stop_event = asyncio.Event()
     app.state._bg_tasks = []
+
+    await _sqlite_ensure_debts_version_column()
 
     if settings.REDIS_ENABLED:
         import redis.asyncio as redis

@@ -25,5 +25,7 @@ class Debt(Base):
     __table_args__ = (
         UniqueConstraint('debtor_id', 'creditor_id', 'equivalent_id', name='uq_debts_debtor_creditor_equivalent'),
         CheckConstraint('amount > 0', name='chk_debt_amount_positive'),
+        CheckConstraint('debtor_id != creditor_id', name='chk_debt_no_self_loop'),
         Index('ix_debts_debtor_creditor', 'debtor_id', 'creditor_id'),
+        Index('ix_debts_equivalent_debtor', 'equivalent_id', 'debtor_id'),
     )

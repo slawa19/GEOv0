@@ -1,0 +1,255 @@
+/*
+  Design System Tokens
+
+  Правило: компоненты используют только SEMANTIC tokens (например --ds-surface-1),
+  а темы меняют их значения.
+*/
+
+:root {
+  /* shared scales */
+  --ds-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ds-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+  /* HUD geometry */
+  --ds-cut: 12px; /* corner cut size for HUD clip-path */
+
+  --ds-radius-sm: 10px;
+  --ds-radius-md: 12px;
+  --ds-radius-lg: 14px;
+
+  --ds-space-1: 6px;
+  --ds-space-2: 10px;
+  --ds-space-3: 14px;
+  --ds-space-4: 18px;
+
+  /* motion */
+  --ds-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ds-dur-fast: 120ms;
+  --ds-dur: 180ms;
+  --ds-dur-slow: 260ms;
+
+  /* semantic defaults (will be overwritten by theme blocks below) */
+  --ds-page-bg: #0f172a;
+  --ds-text-1: rgba(226, 232, 240, 0.92);
+  --ds-text-2: rgba(226, 232, 240, 0.70);
+  --ds-text-3: rgba(226, 232, 240, 0.55);
+  --ds-border: rgba(148, 163, 184, 0.18);
+  --ds-border-subtle: rgba(148, 163, 184, 0.12);
+
+  --ds-surface-0: rgba(15, 23, 42, 0.35);
+  --ds-surface-1: rgba(15, 23, 42, 0.68);
+  --ds-surface-2: rgba(15, 23, 42, 0.82);
+
+  --ds-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+  --ds-shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.25);
+  --ds-inner-highlight: inset 0 1px 0 rgba(255,255,255,0.06);
+
+  --ds-accent: #38bdf8;
+  --ds-accent-2: #a78bfa;
+  --ds-ring: rgba(56, 189, 248, 0.45);
+  /* Focus rings: split for controls vs buttons (shadcn differs) */
+  --ds-focus-ring-control: 0 0 0 3px var(--ds-ring);
+  --ds-focus-ring-btn: 0 0 0 3px var(--ds-ring);
+  /* Back-compat alias */
+  --ds-focus-ring: var(--ds-focus-ring-btn);
+  --ds-accent-surface: rgba(56, 189, 248, 0.12);
+
+  /* Hover/interactive surface used by multiple primitives (buttons, progress track, etc.) */
+  --ds-surface-hover: rgba(255,255,255,0.08);
+
+  /* Bright highlight used for small glints (switch knob, HUD progress head) */
+  --ds-glint: rgba(255,255,255,0.92);
+
+  /* Stronger border used for secondary controls (e.g. shadcn secondary button) */
+  --ds-border-strong: rgba(255,255,255,0.14);
+
+  --ds-ok: #34d399;
+  --ds-warn: #facc15;
+  --ds-err: #fb7185;
+  --ds-info: #38bdf8;
+
+  --ds-blur: blur(10px);
+  --ds-gridline: rgba(56, 189, 248, 0.06);
+
+  /* HUD FX */
+  --ds-glow: 0 0 12px rgba(56, 189, 248, 0.22);
+  --ds-glow-strong: 0 0 20px rgba(56, 189, 248, 0.32);
+  --ds-scanline: rgba(56, 189, 248, 0.035);
+}
+
+/* Density */
+[data-density='compact'] {
+  --ds-space-1: 4px;
+  --ds-space-2: 8px;
+  --ds-space-3: 12px;
+  --ds-space-4: 16px;
+}
+
+/* Motion */
+[data-motion='reduced'] {
+  --ds-dur-fast: 0ms;
+  --ds-dur: 0ms;
+  --ds-dur-slow: 0ms;
+}
+
+/* THEME: SaaS (subtle, premium) */
+[data-theme='saas'] {
+  --ds-page-bg: #0b1220;
+
+  --ds-surface-0: rgba(9, 9, 11, 0.25);
+  --ds-surface-1: rgba(9, 9, 11, 0.62);
+  --ds-surface-2: rgba(9, 9, 11, 0.78);
+
+  --ds-border: rgba(161, 161, 170, 0.18);
+  --ds-border-subtle: rgba(161, 161, 170, 0.12);
+
+  --ds-text-1: rgba(250, 250, 250, 0.95);
+  --ds-text-2: rgba(250, 250, 250, 0.72);
+  --ds-text-3: rgba(250, 250, 250, 0.52);
+
+  --ds-accent: #0ea5e9;
+  --ds-accent-2: #22c55e;
+  --ds-ring: rgba(14, 165, 233, 0.42);
+  --ds-focus-ring-control: 0 0 0 3px var(--ds-ring);
+  --ds-focus-ring-btn: 0 0 0 3px var(--ds-ring);
+  --ds-focus-ring: var(--ds-focus-ring-btn);
+  --ds-accent-surface: rgba(14, 165, 233, 0.12);
+  --ds-surface-hover: rgba(255,255,255,0.06);
+  --ds-glint: rgba(255,255,255,0.92);
+  --ds-border-strong: rgba(255,255,255,0.16);
+
+  --ds-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  --ds-shadow-soft: 0 12px 40px rgba(0, 0, 0, 0.35);
+  --ds-gridline: rgba(250, 250, 250, 0.04);
+}
+
+/* THEME: Library (Naive-like) */
+[data-theme='library'] {
+  --ds-page-bg: #0f1115;
+
+  --ds-surface-0: rgba(16, 16, 20, 0.35);
+  --ds-surface-1: rgba(24, 24, 28, 0.92);
+  --ds-surface-2: rgba(32, 32, 40, 0.92);
+
+  --ds-border: rgba(99, 226, 183, 0.18);
+  --ds-border-subtle: rgba(99, 226, 183, 0.12);
+
+  --ds-text-1: rgba(255, 255, 255, 0.92);
+  --ds-text-2: rgba(255, 255, 255, 0.70);
+  --ds-text-3: rgba(255, 255, 255, 0.52);
+
+  --ds-accent: #63e2b7;
+  --ds-accent-2: #70c0e8;
+  --ds-ring: rgba(99, 226, 183, 0.30);
+  --ds-focus-ring-control: 0 0 0 3px var(--ds-ring);
+  --ds-focus-ring-btn: 0 0 0 3px var(--ds-ring);
+  --ds-focus-ring: var(--ds-focus-ring-btn);
+  --ds-accent-surface: rgba(99, 226, 183, 0.12);
+  --ds-surface-hover: rgba(255,255,255,0.06);
+  --ds-glint: rgba(255,255,255,0.92);
+  --ds-border-strong: rgba(255,255,255,0.16);
+
+  --ds-radius-sm: 8px;
+  --ds-radius-md: 10px;
+  --ds-radius-lg: 12px;
+
+  --ds-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  --ds-shadow-soft: 0 10px 28px rgba(0, 0, 0, 0.30);
+  --ds-gridline: rgba(99, 226, 183, 0.05);
+}
+
+/* THEME: shadcn/ui (dark) */
+[data-theme='shadcn'] {
+  /* Match shadcn column from plans/ui-style-comparison.html, but as semantic tokens */
+  --ds-page-bg: #0c0c0e;
+
+  --ds-surface-0: rgba(12, 12, 14, 0.35);
+  --ds-surface-1: #18181b; /* card */
+  --ds-surface-2: #09090b; /* card inner */
+
+  --ds-border: #27272a;
+  --ds-border-subtle: #27272a;
+  --ds-border-strong: #3f3f46;
+
+  --ds-text-1: rgba(250, 250, 250, 0.96);
+  --ds-text-2: rgba(212, 212, 216, 0.92);
+  --ds-text-3: rgba(113, 113, 122, 0.95);
+
+  --ds-accent: #0ea5e9;
+  --ds-accent-2: #38bdf8;
+  --ds-ring: rgba(14, 165, 233, 0.40);
+  --ds-focus-ring-control: 0 0 0 2px var(--ds-ring);
+  --ds-focus-ring-btn: 0 0 0 2px var(--ds-page-bg), 0 0 0 4px var(--ds-ring);
+  --ds-focus-ring: var(--ds-focus-ring-btn);
+  --ds-accent-surface: rgba(14, 165, 233, 0.10);
+
+  --ds-surface-hover: #27272a;
+  --ds-glint: rgba(255,255,255,0.92);
+
+  /* Match reference badges/alerts colors */
+  --ds-ok: #34d399;
+  --ds-warn: #facc15;
+  --ds-err: #f87171;
+  --ds-info: #38bdf8;
+
+  --ds-radius-sm: 6px;
+  --ds-radius-md: 6px;
+  --ds-radius-lg: 8px;
+
+  --ds-shadow: 0 4px 24px rgba(0, 0, 0, 0.30);
+  --ds-shadow-soft: 0 2px 16px rgba(0, 0, 0, 0.22);
+
+  /* shadcn has no glass blur by default */
+  --ds-blur: none;
+
+  --ds-gridline: rgba(255, 255, 255, 0.03);
+}
+
+/* THEME: HUD (sci-fi) */
+[data-theme='hud'] {
+  /* Match Sci-fi/HUD from plans/ui-style-comparison.html, but as semantic tokens */
+  --ds-page-bg: #060b14;
+
+  --ds-surface-0: rgba(6, 11, 20, 0.35);
+  --ds-surface-1: #0a1020; /* reference --h-bg-card */
+  --ds-surface-2: #0a1020;
+
+  /* Base border in reference is deep blue; glow is handled via accent/ring/glow tokens. */
+  --ds-border: #0d3a6e; /* reference --h-border */
+  --ds-border-subtle: #0d3a6e;
+
+  --ds-text-1: rgba(200, 224, 255, 0.92);
+  --ds-text-2: rgba(200, 224, 255, 0.70);
+  --ds-text-3: rgba(90, 126, 168, 0.98);
+
+  --ds-accent: #00e5ff;
+  --ds-accent-2: #00b4ff;
+  --ds-ring: rgba(0, 229, 255, 0.20);
+  --ds-focus-ring-control: 0 0 12px rgba(0,229,255,0.20), inset 0 0 12px rgba(0,229,255,0.05);
+  --ds-focus-ring-btn: 0 0 0 3px var(--ds-ring);
+  --ds-focus-ring: var(--ds-focus-ring-btn);
+  --ds-accent-surface: rgba(0, 229, 255, 0.15);
+  --ds-surface-hover: #0f1a30;
+  --ds-glint: rgba(255,255,255,0.92);
+  /* matches reference --h-border-glow */
+  --ds-border-strong: #1a5fb4;
+
+  --ds-ok: #00ff88;
+  --ds-warn: #ffaa00;
+  --ds-err: #ff3d5a;
+  --ds-info: #00b4ff;
+
+  /* Reference uses glow, not drop shadow */
+  --ds-shadow: none;
+  --ds-shadow-soft: none;
+  --ds-gridline: rgba(0, 229, 255, 0.06);
+
+  --ds-glow: 0 0 12px rgba(0, 229, 255, 0.30);
+  --ds-glow-strong: 0 0 20px rgba(0, 229, 255, 0.40);
+  --ds-scanline: rgba(0, 229, 255, 0.020);
+
+  /* HUD typography */
+  --ds-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ds-font-mono: Consolas, 'Fira Code', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, 'Liberation Mono', 'Courier New', monospace;
+}
+

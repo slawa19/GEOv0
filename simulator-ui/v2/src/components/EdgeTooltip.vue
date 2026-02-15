@@ -18,8 +18,10 @@ defineProps<Props>()
 </script>
 
 <template>
-  <div v-if="edge.key" class="edge-tooltip" :style="style" aria-label="Edge tooltip">
-    <div class="edge-tooltip-title">{{ getNodeName(edge.fromId) ?? edge.fromId }} → {{ getNodeName(edge.toId) ?? edge.toId }}</div>
-    <div class="edge-tooltip-amount mono">{{ edge.amountText }}</div>
+  <div v-if="edge.key" class="ds-ov-tooltip" :style="style" aria-label="Edge tooltip">
+    <div class="ds-ov-tooltip__title">
+      {{ getNodeName(edge.fromId) ?? edge.fromId }} → {{ getNodeName(edge.toId) ?? edge.toId }}
+    </div>
+    <div class="ds-ov-tooltip__amount">{{ edge.amountText }}</div>
   </div>
 </template>

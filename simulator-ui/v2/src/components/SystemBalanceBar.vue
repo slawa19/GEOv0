@@ -29,36 +29,36 @@ function fmt(n: number): string {
 <template>
   <div class="system-balance-bar" aria-label="System balance">
     <div class="system-balance-bar__inner">
-      <div v-if="b.isClean" class="hud-chip" style="gap: 10px">
-        <span class="hud-badge" data-tone="ok">Clean</span>
-        <span class="hud-label">System is clean — no debts</span>
+      <div v-if="b.isClean" class="ds-panel ds-ov-metric">
+        <span class="ds-badge ds-badge--ok">Clean</span>
+        <span class="ds-label">System is clean — no debts</span>
       </div>
 
-      <div class="hud-chip">
-        <span class="hud-label">Total Debt</span>
-        <span class="hud-value">{{ fmt(b.totalUsed) }} {{ equivalent }}</span>
+      <div class="ds-panel ds-ov-metric">
+        <span class="ds-label">Total Debt</span>
+        <span class="ds-value ds-mono">{{ fmt(b.totalUsed) }} {{ equivalent }}</span>
       </div>
 
-      <div class="hud-chip">
-        <span class="hud-label">Available Capacity</span>
-        <span class="hud-value">{{ fmt(b.totalAvailable) }} {{ equivalent }}</span>
+      <div class="ds-panel ds-ov-metric">
+        <span class="ds-label">Available Capacity</span>
+        <span class="ds-value ds-mono">{{ fmt(b.totalAvailable) }} {{ equivalent }}</span>
       </div>
 
-      <div class="hud-chip">
-        <span class="hud-label">Trustlines</span>
-        <span class="hud-value">{{ fmt(b.activeTrustlines) }}</span>
+      <div class="ds-panel ds-ov-metric">
+        <span class="ds-label">Trustlines</span>
+        <span class="ds-value ds-mono">{{ fmt(b.activeTrustlines) }}</span>
       </div>
 
-      <div class="hud-chip">
-        <span class="hud-label">Participants</span>
-        <span class="hud-value">{{ fmt(b.activeParticipants) }}</span>
+      <div class="ds-panel ds-ov-metric">
+        <span class="ds-label">Participants</span>
+        <span class="ds-value ds-mono">{{ fmt(b.activeParticipants) }}</span>
       </div>
 
-      <div class="hud-chip" style="gap: 10px">
-        <span class="hud-label">Utilization</span>
-        <span class="hud-value">{{ utilPct }}%</span>
-        <div class="util">
-          <div class="util__bar" :style="{ width: utilPct + '%' }" />
+      <div class="ds-panel ds-ov-metric" style="gap: 10px">
+        <span class="ds-label">Utilization</span>
+        <span class="ds-value ds-mono">{{ utilPct }}%</span>
+        <div class="ds-progress__track" style="width: 110px; height: 6px">
+          <div class="ds-progress__bar" :style="{ width: utilPct + '%' }" />
         </div>
       </div>
     </div>
@@ -75,17 +75,7 @@ function fmt(n: number): string {
   pointer-events: auto;
 }
 
-.util {
-  width: 110px;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.16);
-  overflow: hidden;
-}
-
-.util__bar {
-  height: 100%;
-  background: rgba(56, 189, 248, 0.7);
+.ds-progress__bar {
   transition:
     width 280ms ease,
     background-color 280ms ease,

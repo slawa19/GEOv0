@@ -143,24 +143,24 @@ function short(s: string, n: number) {
 </script>
 
 <template>
-  <div class="hud-top">
-    <div class="hud-top-grid">
-      <div class="hud-controls" aria-label="Controls">
-        <div class="hudbar">
-          <span class="hud-badge" :data-tone="modeBadgeTone" :title="modeTitle">{{ modeBadgeText }}</span>
+  <div class="ds-ov-top">
+    <div class="ds-ov-top-grid">
+      <div class="ds-ov-controls" aria-label="Controls">
+        <div class="ds-panel ds-ov-bar">
+          <span :class="['ds-badge', `ds-badge--${modeBadgeTone}`]" :title="modeTitle">{{ modeBadgeText }}</span>
 
-          <div class="hud-chip">
-            <span class="hud-label">EQ</span>
-            <select v-model="eq" class="hud-select" aria-label="Equivalent">
+          <div class="ds-panel ds-ov-metric">
+            <span class="ds-label">EQ</span>
+            <select v-model="eq" class="ds-select" aria-label="Equivalent">
               <option value="UAH">UAH</option>
               <option value="HOUR">HOUR</option>
               <option value="EUR">EUR</option>
             </select>
           </div>
 
-          <div class="hud-chip">
-            <span class="hud-label">Layout</span>
-            <select v-model="layoutMode" class="hud-select" aria-label="Layout">
+          <div class="ds-panel ds-ov-metric">
+            <span class="ds-label">Layout</span>
+            <select v-model="layoutMode" class="ds-select" aria-label="Layout">
               <option value="admin-force">Organic cloud</option>
               <option value="community-clusters">Clusters</option>
               <option value="balance-split">Balance</option>
@@ -169,10 +169,10 @@ function short(s: string, n: number) {
             </select>
           </div>
 
-          <div class="hud-chip">
-            <span class="hud-label">Scenario</span>
+          <div class="ds-panel ds-ov-bar" aria-label="Scenario controls">
+            <span class="ds-label">Scenario</span>
             <select
-              class="hud-select"
+              class="ds-select"
               :value="selectedScenarioId"
               aria-label="Scenario"
               @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
@@ -182,19 +182,46 @@ function short(s: string, n: number) {
                 {{ s.label ? `${s.label} (${s.scenario_id})` : s.scenario_id }}
               </option>
             </select>
-            <button class="btn btn-xxs" type="button" :disabled="loadingScenarios" @click="props.refreshScenarios">↻</button>
-            <button class="btn btn-xs" type="button" :disabled="isRunActive || !selectedScenarioId" @click="props.startRun">
+            <button
+              class="ds-btn ds-btn--icon"
+              style="height: 28px; width: 28px"
+              type="button"
+              :disabled="loadingScenarios"
+              aria-label="Refresh scenarios"
+              @click="props.refreshScenarios"
+            >
+              ↻
+            </button>
+            <button
+              class="ds-btn ds-btn--primary"
+              style="height: 28px; padding: 0 10px"
+              type="button"
+              :disabled="isRunActive || !selectedScenarioId"
+              @click="props.startRun"
+            >
               {{ runId && !isRunActive ? 'New run' : 'Start' }}
             </button>
-            <button class="btn btn-xs" type="button" :disabled="!runId || !canPause" @click="props.pause">Pause</button>
-            <button class="btn btn-xs" type="button" :disabled="!runId || !canResume" @click="props.resume">Resume</button>
-            <button class="btn btn-xs btn-ghost" type="button" :disabled="!runId || !canStop" @click="props.stop">Stop</button>
+            <button class="ds-btn" style="height: 28px; padding: 0 10px" type="button" :disabled="!runId || !canPause" @click="props.pause">
+              Pause
+            </button>
+            <button class="ds-btn" style="height: 28px; padding: 0 10px" type="button" :disabled="!runId || !canResume" @click="props.resume">
+              Resume
+            </button>
+            <button
+              class="ds-btn ds-btn--ghost"
+              style="height: 28px; padding: 0 10px"
+              type="button"
+              :disabled="!runId || !canStop"
+              @click="props.stop"
+            >
+              Stop
+            </button>
           </div>
 
-          <div class="hud-chip">
-            <span class="hud-label">Mode</span>
+          <div class="ds-panel ds-ov-metric">
+            <span class="ds-label">Mode</span>
             <select
-              class="hud-select"
+              class="ds-select"
               :value="desiredMode"
               :disabled="isRunActive"
               aria-label="Run mode"
@@ -206,11 +233,11 @@ function short(s: string, n: number) {
             </select>
           </div>
 
-          <div class="hud-chip">
-            <span class="hud-label">Intensity</span>
+          <div class="ds-panel ds-ov-bar" aria-label="Intensity">
+            <span class="ds-label">Intensity</span>
             <input
-              class="hud-input"
-              style="width: 6ch"
+              class="ds-input"
+              style="width: 6ch; height: 28px"
               type="number"
               min="0"
               max="100"
@@ -219,60 +246,58 @@ function short(s: string, n: number) {
               aria-label="Intensity percent"
               @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
             />
-            <button class="btn btn-xxs" type="button" :disabled="!isRunActive" @click="props.applyIntensity">Apply</button>
+            <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" :disabled="!isRunActive" @click="props.applyIntensity">
+              Apply
+            </button>
           </div>
 
-          <div v-if="!loadingScenarios && scenarios.length === 0" class="hud-chip" aria-label="No scenarios">
-            <span class="hud-badge" data-tone="warn">No scenarios</span>
-            <span class="hud-label">Backend must return GET /simulator/scenarios</span>
+          <div v-if="!loadingScenarios && scenarios.length === 0" class="ds-panel ds-ov-bar" aria-label="No scenarios" style="opacity: 0.92">
+            <span class="ds-badge ds-badge--warn">No scenarios</span>
+            <span class="ds-label">Backend must return GET /simulator/scenarios</span>
           </div>
         </div>
       </div>
 
-      <div class="hud-status" aria-label="Run status">
-        <div class="hudbar" style="justify-content: flex-end">
-          <span class="hud-badge" :data-tone="sseTone">SSE {{ sseState }}</span>
-          <span class="hud-badge" :data-tone="runTone">Run {{ runStatus?.state ?? (runId ? '…' : '—') }}</span>
-          <span
-            v-if="runStatus?.state === 'stopped' && stopSummary"
-            class="hud-chip subtle"
-            style="gap: 6px"
-            aria-label="Stop reason"
-          >
-            <span class="hud-label">Stop</span>
-            <span class="hud-value mono" style="opacity: 0.9">{{ short(stopSummary, 64) }}</span>
-          </span>
-          <span class="hud-chip subtle" style="gap: 8px" aria-label="Stats">
-            <span class="hud-label">Tx</span>
-            <span class="hud-value">ok {{ runStats.committed }}</span>
-            <span class="hud-label">/</span>
-            <span class="hud-value">{{ runStats.attempts }}</span>
-            <span class="hud-label">SR</span>
-            <span class="hud-value">{{ successRatePct }}%</span>
-            <span class="hud-label">rej</span>
-            <span class="hud-value">{{ runStats.rejected }}</span>
-            <span class="hud-label">err</span>
-            <span class="hud-value">{{ runStats.errors }}</span>
-          </span>
-          <span v-if="runId" class="hud-chip subtle" style="gap: 6px">
-            <span class="hud-label">ID</span>
-            <span class="hud-value mono" style="opacity: 0.9">{{ short(runId, 18) }}</span>
-          </span>
+      <div class="ds-ov-status" aria-label="Run status">
+        <div class="ds-panel ds-ov-bar" style="justify-content: flex-end">
+          <span :class="['ds-badge', `ds-badge--${sseTone}`]">SSE {{ sseState }}</span>
+          <span :class="['ds-badge', `ds-badge--${runTone}`]">Run {{ runStatus?.state ?? (runId ? '…' : '—') }}</span>
+
+          <div v-if="runStatus?.state === 'stopped' && stopSummary" class="ds-panel ds-ov-metric" style="opacity: 0.92" aria-label="Stop reason">
+            <span class="ds-label">Stop</span>
+            <span class="ds-value ds-mono" style="opacity: 0.9">{{ short(stopSummary, 64) }}</span>
+          </div>
+
+          <div class="ds-panel ds-ov-metric" style="opacity: 0.92" aria-label="Stats">
+            <span class="ds-label">Tx</span>
+            <span class="ds-value">ok {{ runStats.committed }}</span>
+            <span class="ds-label">/</span>
+            <span class="ds-value">{{ runStats.attempts }}</span>
+            <span class="ds-label">SR</span>
+            <span class="ds-value">{{ successRatePct }}%</span>
+            <span class="ds-label">rej</span>
+            <span class="ds-value">{{ runStats.rejected }}</span>
+            <span class="ds-label">err</span>
+            <span class="ds-value">{{ runStats.errors }}</span>
+          </div>
+
+          <div v-if="runId" class="ds-panel ds-ov-metric" style="opacity: 0.92">
+            <span class="ds-label">ID</span>
+            <span class="ds-value ds-mono" style="opacity: 0.9">{{ short(runId, 18) }}</span>
+          </div>
         </div>
       </div>
 
-      <div v-if="lastError" class="hud-alert" data-tone="err" aria-label="Error">
-        <span class="hud-label">Error</span>
-        <div class="hud-alert__msg">
-          <span class="mono">{{ short(lastError, 160) }}</span>
-        </div>
+      <div v-if="lastError" class="ds-alert ds-alert--err ds-ov-full" aria-label="Error">
+        <span class="ds-alert__icon">✕</span>
+        <span class="ds-label">Error</span>
+        <span class="ds-value ds-mono" style="opacity: 0.92">{{ short(lastError, 160) }}</span>
       </div>
 
-      <div v-if="isCapacityStall" class="hud-alert" data-tone="warn" aria-label="Capacity stall">
-        <span class="hud-label">Stall</span>
-        <div class="hud-alert__msg">
-          <span class="mono">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
-        </div>
+      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn ds-ov-full" aria-label="Capacity stall">
+        <span class="ds-alert__icon">!</span>
+        <span class="ds-label">Stall</span>
+        <span class="ds-value ds-mono" style="opacity: 0.92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
       </div>
     </div>
   </div>
