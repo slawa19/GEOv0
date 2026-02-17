@@ -269,6 +269,114 @@ details[open].ds-ov-details > summary::after {
      like HUD can apply clip-path/scanlines consistently. */
 }
 
+/* Override panel-body padding for compact card context */
+.ds-ov-node-card .ds-panel__body {
+  padding: 12px;
+  position: relative;
+}
+
+/* Body: vertical stack — compact rhythm */
+.ds-ov-node-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Service actions: top-right overlay, does not consume layout height. */
+.ds-ov-node-card__service {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+/* ---- Identity (avatar + name/meta/balance + actions) -------------------- */
+
+.ds-ov-node-card__identity {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding-right: 56px;
+}
+
+.ds-ov-node-card__avatar {
+  width: 36px;
+  height: 36px;
+}
+
+/* Meta row: type·status left, balance right — uses dead space */
+.ds-ov-node-card__meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Balance inline with meta — color comes from node's viz_color_key (inline style) */
+.ds-ov-node-card__balance {
+  font-family: var(--ds-typo-numeric-font-family);
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ds-ov-node-card__action-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  opacity: 0.45;
+  transition: opacity 0.15s var(--ds-ease);
+}
+
+.ds-ov-node-card__action-btn:hover {
+  opacity: 1;
+}
+
+/* ---- Divider ------------------------------------------------------------ */
+
+.ds-ov-node-card__divider {
+  border: none;
+  border-top: 1px solid var(--ds-border-subtle);
+  margin: 0;
+}
+
+/* ---- Stats (3-column, label above value) -------------------------------- */
+
+.ds-ov-node-card__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 12px;
+}
+
+.ds-ov-node-card__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ds-ov-node-card__stat .ds-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Theme: HUD --------------------------------------------------------- */
+
+[data-theme='hud'] .ds-ov-node-card__divider {
+  border-color: rgba(0, 229, 255, 0.15);
+}
+
+[data-theme='hud'] .ds-ov-node-card__action-btn {
+  font-family: var(--ds-font-mono);
+}
+
 /* ──────────────────────────────────────────────────────────────
    Error / info overlays
    ────────────────────────────────────────────────────────────── */
