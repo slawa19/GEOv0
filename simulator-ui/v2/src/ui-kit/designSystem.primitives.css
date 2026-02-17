@@ -109,7 +109,50 @@
   text-transform: var(--ds-typo-panel-heading-text-transform);
 }
 
-.ds-muted { color: var(--ds-text-2); }
+/* Muted = tertiary text (matches reference: shadcn text-muted / HUD h-muted) */
+.ds-muted { color: var(--ds-text-3); }
+
+/* Secondary = slightly stronger than muted (kept for places that really need it). */
+.ds-secondary { color: var(--ds-text-2); }
+
+/* Help / description text (avoid using ds-label for sentences; ds-label is a label, may become uppercase in HUD). */
+.ds-help {
+  margin: 0;
+  color: var(--ds-text-3);
+}
+
+[data-theme='shadcn'] .ds-help {
+  font-family: var(--ds-font-sans);
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+[data-theme='hud'] .ds-help {
+  font-family: var(--ds-font-mono);
+  font-size: 0.78rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Paragraph reset: the reference pages use a full reset (* { margin:0 }),
+   so we must explicitly remove default <p> margins to keep spacing driven
+   by ds-stack gap / panel padding. */
+.ds-panel__body > p,
+.ds-stack > p,
+.ds-subpanel__header p {
+  margin: 0;
+}
+
+/* shadcn body text: match reference (.s-card-body > p) */
+[data-theme='shadcn'] .ds-panel__body > p,
+[data-theme='shadcn'] .ds-stack > p,
+[data-theme='shadcn'] .ds-subpanel__header p {
+  font-size: 0.8rem;
+  color: var(--ds-text-3);
+}
 
 /* Typography helpers (used across overlays/panels) */
 .ds-mono {
@@ -226,6 +269,9 @@
   color: var(--ds-accent);
   letter-spacing: 0.10em;
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 [data-theme='hud'] .ds-panel__header::before {
@@ -247,6 +293,16 @@
   gap: 12px;
 }
 
+/* shadcn panel header: match reference padding (0.75rem 1rem) */
+[data-theme='shadcn'] .ds-panel__header {
+  padding: 0.75rem 1rem;
+}
+
+/* shadcn panel body: match reference padding (1rem) */
+[data-theme='shadcn'] .ds-panel__body {
+  padding: 1rem;
+}
+
 .ds-panel__body {
   padding: var(--ds-space-4);
 }
@@ -255,6 +311,12 @@
 .ds-row { display: flex; gap: var(--ds-space-2); flex-wrap: wrap; align-items: center; }
 .ds-row--space { justify-content: space-between; }
 .ds-stack { display: flex; flex-direction: column; gap: var(--ds-space-3); }
+
+/* shadcn stack: match reference card body gap (0.85rem) */
+[data-theme='shadcn'] .ds-stack {
+  gap: 0.85rem;
+}
+
 .ds-two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ds-space-3); }
 @media (max-width: 680px) { .ds-two { grid-template-columns: 1fr; } }
 
@@ -298,6 +360,11 @@
 /* Field */
 .ds-field { display: flex; flex-direction: column; gap: var(--ds-space-1); }
 
+/* shadcn field: match reference gap (0.25rem) */
+[data-theme='shadcn'] .ds-field {
+  gap: 0.25rem;
+}
+
 /* Input & Select */
 .ds-input, .ds-select {
   height: var(--ds-control-height);
@@ -314,6 +381,13 @@
   transition: border-color var(--ds-dur) var(--ds-ease), box-shadow var(--ds-dur) var(--ds-ease), background var(--ds-dur) var(--ds-ease);
 }
 .ds-input::placeholder { color: var(--ds-text-3); }
+
+/* shadcn placeholder: match reference (color muted, opacity 0.6) */
+[data-theme='shadcn'] .ds-input::placeholder {
+  color: var(--ds-text-3);
+  opacity: 0.6;
+}
+
 .ds-input:focus, .ds-select:focus {
   outline: none;
   border-color: var(--ds-accent);
@@ -475,8 +549,8 @@
 }
 
 [data-theme='shadcn'] .ds-btn--danger {
-  background: rgba(239, 68, 68, 0.90);
-  border-color: rgba(239, 68, 68, 0.90);
+  background: rgba(220, 38, 38, 0.90);
+  border-color: rgba(220, 38, 38, 0.90);
   color: #fff;
 }
 
@@ -562,6 +636,15 @@
   text-shadow: 0 0 8px rgba(0, 229, 255, 0.30);
 }
 
+/* HUD body text: match reference (smaller, muted, monospace) */
+[data-theme='hud'] .ds-panel__body > p,
+[data-theme='hud'] .ds-stack > p,
+[data-theme='hud'] .ds-subpanel__header p {
+  font-size: 0.78rem;
+  color: var(--ds-text-3);
+  font-family: var(--ds-font-mono);
+}
+
 .ds-btn--secondary {
   background: rgba(255,255,255,0.05);
 }
@@ -579,6 +662,16 @@
   color: var(--ds-text-2);
 }
 .ds-btn--ghost:hover { background: rgba(255,255,255,0.06); color: var(--ds-text-1); }
+
+/* shadcn ghost button: muted text + solid hover bg (match reference) */
+[data-theme='shadcn'] .ds-btn--ghost {
+  color: var(--ds-text-3);
+}
+
+[data-theme='shadcn'] .ds-btn--ghost:hover {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-1);
+}
 
 .ds-btn--icon {
   width: 34px;
@@ -636,7 +729,6 @@
   padding: var(--ds-alert-padding-y) var(--ds-alert-padding-x);
   border-radius: var(--ds-radius-md);
   border: 1px solid;
-  background: rgba(255,255,255,0.03);
   font-family: var(--ds-typo-alert-font-family);
   font-size: var(--ds-typo-alert-font-size);
   font-weight: var(--ds-typo-alert-font-weight);
@@ -695,6 +787,28 @@
   box-shadow: 0 0 18px rgba(0,0,0,0.25);
   transition: width var(--ds-dur-slow) var(--ds-ease);
   position: relative;
+}
+
+/* shadcn progress fill: solid accent, no glow, slower easing in reference */
+[data-theme='shadcn'] .ds-progress__bar {
+  background: var(--ds-accent);
+  box-shadow: none;
+  transition: width 0.7s ease;
+}
+
+/* shadcn progress label: smaller + muted */
+[data-theme='shadcn'] .ds-progress__label {
+  font-size: 0.75rem;
+  color: var(--ds-text-3);
+}
+
+/* HUD progress label: monospace, uppercase, tighter */
+[data-theme='hud'] .ds-progress__label {
+  font-family: var(--ds-font-mono);
+  font-size: 0.7rem;
+  color: var(--ds-text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /* shadcn progress: no border, flat track */
@@ -762,23 +876,43 @@
 
 /* Node Card */
 .ds-node-card {
-  padding: var(--ds-space-3);
+  padding: 0.75rem;
   display: grid;
-  grid-template-columns: 44px 1fr auto;
-  gap: var(--ds-space-2);
+  grid-template-columns: 36px 1fr auto;
+  gap: 0.75rem;
   align-items: center;
 }
+
+/* shadcn node card: add border, background, hover effect (match reference .s-data-card) */
+[data-theme='shadcn'] .ds-node-card {
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  transition: border-color 0.15s var(--ds-ease);
+}
+
+[data-theme='shadcn'] .ds-node-card:hover {
+  border-color: var(--ds-border-strong);
+}
 .ds-node-card__avatar {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
   display: grid;
   place-items: center;
-  font-weight: 900;
-  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0;
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(0,0,0,0.18);
   color: var(--ds-accent);
+}
+
+/* shadcn node card avatar: match reference (no border, bg-hover background, muted text) */
+[data-theme='shadcn'] .ds-node-card__avatar {
+  border: none;
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-3);
 }
 
 [data-theme='hud'] .ds-node-card__avatar {
@@ -791,11 +925,52 @@
 [data-theme='hud'] .ds-node-card__balance {
   text-shadow: 0 0 8px rgba(0, 229, 255, 0.40);
 }
-.ds-node-card__name { font-weight: 800; letter-spacing: -0.01em; }
-.ds-node-card__meta { color: var(--ds-text-3); font-size: 12px; }
+
+/* HUD node card: match reference (.h-data-card) */
+[data-theme='hud'] .ds-node-card {
+  padding: 10px 14px;
+  gap: 12px;
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-border);
+  border-radius: 0;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% 100%,
+    8px 100%,
+    0 calc(100% - 8px)
+  );
+}
+
+[data-theme='hud'] .ds-node-card:hover {
+  border-color: var(--ds-accent);
+  box-shadow: 0 0 16px rgba(0, 229, 255, 0.15);
+}
+
+[data-theme='hud'] .ds-node-card__avatar {
+  width: 34px;
+  height: 34px;
+  font-weight: 700;
+}
+
+[data-theme='hud'] .ds-node-card__name {
+  font-size: 0.82rem;
+}
+
+[data-theme='hud'] .ds-node-card__meta {
+  font-size: 0.7rem;
+}
+
+[data-theme='hud'] .ds-node-card__balance {
+  font-size: 0.95rem;
+}
+.ds-node-card__name { font-size: 0.88rem; font-weight: 600; letter-spacing: 0; }
+.ds-node-card__meta { color: var(--ds-text-3); font-size: 0.75rem; }
 .ds-node-card__balance {
   font-family: var(--ds-typo-numeric-font-family);
-  font-weight: 900;
+  font-size: 1rem;
+  font-weight: 700;
   color: var(--ds-accent);
   font-variant-numeric: var(--ds-typo-numeric-font-variant);
 }

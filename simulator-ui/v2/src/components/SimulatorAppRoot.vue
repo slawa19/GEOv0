@@ -94,6 +94,7 @@ const {
 
   // selection + overlays
   isNodeCardOpen,
+  setNodeCardOpen,
   hoveredEdge,
   edgeDetailAnchor,
   clearHoveredEdge,
@@ -608,6 +609,7 @@ function onEdgeDetailCloseLine() {
       :is-pinned="isSelectedPinned"
       :pin="pinSelectedNode"
       :unpin="unpinSelectedNode"
+      @close="setNodeCardOpen(false)"
     />
 
 

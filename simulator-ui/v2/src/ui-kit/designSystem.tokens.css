@@ -46,7 +46,7 @@
   --ds-typo-badge-text-transform: uppercase;
   --ds-badge-height: 22px;
   --ds-badge-padding-y: 0px;
-  --ds-badge-padding-x: 10px;
+  --ds-badge-padding-x: 8px;
 
   /* Alert (inline notification row) */
   --ds-typo-alert-font-family: var(--ds-font-sans);
@@ -98,13 +98,13 @@
     Rationale: native spinner is one clickable control (top/bottom halves).
     This icon makes the two halves visually distinct without affecting behavior.
   */
-  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16' fill='none'%3E%3Cpolyline points='3.5 6.5 6 4 8.5 6.5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='8' x2='9' y2='8' stroke='%2394a3b8' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 9.5 6 12 8.5 9.5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='20' viewBox='0 0 12 20' fill='none'%3E%3Cpolyline points='3.5 5.5 6 2.5 8.5 5.5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='10' x2='9' y2='10' stroke='%2394a3b8' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 14.5 6 17.5 8.5 14.5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   /* Number input (Chromium) spinner geometry */
-  --ds-input-spin-width: 16px;
-  --ds-input-spin-padding-right: 22px;
+  --ds-input-spin-width: 18px;
+  --ds-input-spin-padding-right: 18px;
   --ds-input-spin-icon-size-x: 12px;
-  --ds-input-spin-icon-size-y: 16px;
+  --ds-input-spin-icon-size-y: 20px;
 
   /* Density-driven sizing (comfortable is the baseline) */
   --ds-control-height-base: 34px;
@@ -123,8 +123,8 @@
   --ds-control-padding-x: calc(var(--ds-control-padding-x-base) + var(--ds-density-control-padding-x-delta));
   --ds-button-height: calc(var(--ds-button-height-base) + var(--ds-density-button-height-delta));
   --ds-button-padding-x: calc(var(--ds-button-padding-x-base) + var(--ds-density-button-padding-x-delta));
-  --ds-input-spin-width: calc(16px + var(--ds-density-input-spin-width-delta));
-  --ds-input-spin-padding-right: calc(22px + var(--ds-density-input-spin-padding-right-delta));
+  --ds-input-spin-width: calc(18px + var(--ds-density-input-spin-width-delta));
+  --ds-input-spin-padding-right: calc(18px + var(--ds-density-input-spin-padding-right-delta));
 
   /* HUD casing control (kept token-driven to avoid hardcoding in primitives) */
   --ds-typo-label-text-transform: none;
@@ -133,9 +133,9 @@
   /* HUD geometry */
   --ds-cut: 12px; /* corner cut size for HUD clip-path */
 
-  --ds-radius-sm: 10px;
-  --ds-radius-md: 12px;
-  --ds-radius-lg: 14px;
+  --ds-radius-sm: 6px;
+  --ds-radius-md: 8px;
+  --ds-radius-lg: 10px;
 
   --ds-space-1: 6px;
   --ds-space-2: 10px;
@@ -377,7 +377,7 @@
   --ds-alert-icon-font-size: 1rem;
 
   /* Number input spin icon color (muted shadcn gray: #71717a) */
-  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16' fill='none'%3E%3Cpolyline points='3.5 6.5 6 4 8.5 6.5' stroke='%2371717a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='8' x2='9' y2='8' stroke='%2371717a' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 9.5 6 12 8.5 9.5' stroke='%2371717a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='20' viewBox='0 0 12 20' fill='none'%3E%3Cpolyline points='3.5 5.5 6 2.5 8.5 5.5' stroke='%2371717a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='10' x2='9' y2='10' stroke='%2371717a' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 14.5 6 17.5 8.5 14.5' stroke='%2371717a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --ds-input-spin-divider: var(--ds-border);
 
   /* Theme-specific base heights; density applies via deltas */
@@ -420,6 +420,17 @@
   --ds-err: #ff3d5a;
   --ds-info: #00b4ff;
 
+  /* HUD badge typography (match reference .h-badge) */
+  --ds-typo-badge-font-size: 0.68rem;
+  --ds-typo-badge-font-weight: 600;
+
+  /* HUD alert spacing/typography (match reference .h-alert) */
+  --ds-typo-alert-font-size: 0.78rem;
+  --ds-typo-alert-font-weight: 400;
+  --ds-alert-padding-y: 8px;
+  --ds-alert-gap: 8px;
+  --ds-alert-icon-font-size: 1rem;
+
   /* Reference uses glow, not drop shadow */
   --ds-shadow: none;
   --ds-shadow-soft: none;
@@ -458,7 +469,7 @@
   --ds-typo-button-letter-spacing: 0.06em;
 
   /* Number input spin icon color (HUD accent: #00e5ff) */
-  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16' fill='none'%3E%3Cpolyline points='3.5 6.5 6 4 8.5 6.5' stroke='%2300e5ff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='8' x2='9' y2='8' stroke='%2300e5ff' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 9.5 6 12 8.5 9.5' stroke='%2300e5ff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='20' viewBox='0 0 12 20' fill='none'%3E%3Cpolyline points='3.5 5.5 6 2.5 8.5 5.5' stroke='%2300e5ff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='10' x2='9' y2='10' stroke='%2300e5ff' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 14.5 6 17.5 8.5 14.5' stroke='%2300e5ff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --ds-input-spin-divider: var(--ds-border);
 
   /* Theme-specific base heights; density applies via deltas */

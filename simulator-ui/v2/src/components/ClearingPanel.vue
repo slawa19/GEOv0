@@ -70,7 +70,7 @@ function fmtInt(n: unknown): string {
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ state.error }}</div>
 
       <template v-if="isConfirm">
-        <div class="ds-label ds-muted">This will run a clearing cycle in backend.</div>
+        <div class="ds-help">This will run a clearing cycle in backend.</div>
 
         <div class="ds-row" style="justify-content: flex-end">
           <button class="ds-btn ds-btn--primary" type="button" :disabled="busyUi" @click="onConfirm">Confirm</button>
@@ -79,7 +79,7 @@ function fmtInt(n: unknown): string {
       </template>
 
       <template v-else-if="isPreview">
-        <div v-if="!last" class="ds-label ds-muted">Preparing preview…</div>
+        <div v-if="!last" class="ds-help">Preparing preview…</div>
         <div v-else class="ds-stack" style="gap: 6px">
           <div class="ds-label">
             Cycles: <span class="ds-mono">{{ cyclesCount }}</span>
@@ -97,7 +97,7 @@ function fmtInt(n: unknown): string {
       </template>
 
       <template v-else>
-        <div class="ds-label ds-muted">Running…</div>
+        <div class="ds-help">Running…</div>
       </template>
 
       <div v-if="!isConfirm" class="ds-row" style="justify-content: flex-end">
@@ -106,4 +106,5 @@ function fmtInt(n: unknown): string {
     </div>
   </div>
 </template>
+
 

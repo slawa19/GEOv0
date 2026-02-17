@@ -26,7 +26,7 @@ function bumpProgress() {
       <div class="ds-topbar__title">
         <div class="ds-kicker">GEO Simulator UI</div>
         <h1 class="ds-h1">Design System Demo</h1>
-        <p class="ds-muted">
+        <p class="ds-help">
           Пример архитектуры: <span class="ds-code">tokens → primitives → composition</span>. Переключайте тему,
           плотность и motion — компоненты меняются через CSS-переменные.
         </p>
@@ -66,7 +66,7 @@ function bumpProgress() {
       <section class="ds-panel ds-panel--elevated">
         <header class="ds-panel__header">
           <h2 class="ds-h2">Primitives</h2>
-          <div class="ds-muted">Один набор классов — разные темы через tokens.</div>
+          <p class="ds-help">Один набор классов — разные темы через tokens.</p>
         </header>
 
         <div class="ds-panel__body ds-stack">
@@ -147,7 +147,7 @@ function bumpProgress() {
       <section class="ds-panel ds-panel--elevated">
         <header class="ds-panel__header">
           <h2 class="ds-h2">Composed UI</h2>
-          <div class="ds-muted">Пример «экранных» композиций из примитивов.</div>
+          <p class="ds-help">Пример «экранных» композиций из примитивов.</p>
         </header>
 
         <div class="ds-panel__body ds-stack">
@@ -155,7 +155,7 @@ function bumpProgress() {
             <div class="ds-subpanel__header">
               <div>
                 <div class="ds-section-label">Manual Payment</div>
-                <div class="ds-muted">Создание ручного платежа между участниками сети GEO.</div>
+                <p class="ds-help">Создание ручного платежа между участниками сети GEO.</p>
               </div>
               <div class="ds-row">
                 <span class="ds-badge ds-badge--info">Tx</span>
@@ -212,16 +212,77 @@ function bumpProgress() {
               <div class="ds-node-card__balance">1,250.00</div>
             </div>
           </div>
+
+          <div class="ds-subpanel">
+            <div class="ds-subpanel__header">
+              <div>
+                <div class="ds-section-label">Node Details Card</div>
+                <p class="ds-help">Шаблон: референсный Node Card + фактические поля Simulator UI.</p>
+              </div>
+              <div class="ds-row">
+                <button class="ds-btn ds-btn--ghost" style="height: 28px; padding: 0 10px" type="button">Pin</button>
+                <button class="ds-btn ds-btn--ghost ds-btn--icon" aria-label="Close" title="Close" type="button">✕</button>
+              </div>
+            </div>
+
+            <div class="ds-subpanel__body ds-stack" style="gap: 12px">
+              <div class="ds-node-card" role="group" aria-label="Node identity">
+                <div class="ds-node-card__avatar">AL</div>
+                <div class="ds-node-card__info">
+                  <div class="ds-node-card__name">Alice</div>
+                  <div class="ds-node-card__meta">Node • Active</div>
+                </div>
+                <div class="ds-node-card__balance">1,250.00</div>
+              </div>
+
+              <div class="ds-two" style="gap: 8px 12px">
+                <div class="ds-row" style="gap: 6px; align-items: baseline">
+                  <span class="ds-label">Type</span>
+                  <span class="ds-value">Participant</span>
+                </div>
+
+                <div class="ds-row" style="gap: 6px; align-items: baseline">
+                  <span class="ds-label">Status</span>
+                  <span class="ds-value">Active</span>
+                </div>
+
+                <div class="ds-row" style="gap: 6px; align-items: baseline">
+                  <span class="ds-label">Out</span>
+                  <span class="ds-value ds-mono">13.00</span>
+                  <span class="ds-label ds-muted">EUR</span>
+                </div>
+
+                <div class="ds-row" style="gap: 6px; align-items: baseline">
+                  <span class="ds-label">In</span>
+                  <span class="ds-value ds-mono">5.00</span>
+                  <span class="ds-label ds-muted">EUR</span>
+                </div>
+
+                <div class="ds-row" style="gap: 6px; align-items: baseline">
+                  <span class="ds-label">Net</span>
+                  <span class="ds-value ds-mono">-1,250.00</span>
+                </div>
+
+                <div class="ds-row" style="gap: 6px; align-items: baseline">
+                  <span class="ds-label">Degree</span>
+                  <span class="ds-value ds-mono">3</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </main>
 
     <footer class="ds-footer">
-      <div class="ds-muted">
+      <p class="ds-help">
         Файлы: <span class="ds-code">designSystem.tokens.css</span> (tokens), <span class="ds-code">designSystem.primitives.css</span>
         (primitives), Vue-композиция в <span class="ds-code">DesignSystemDemoApp.vue</span>.
-      </div>
+      </p>
     </footer>
   </div>
 </template>
+
+
+
 

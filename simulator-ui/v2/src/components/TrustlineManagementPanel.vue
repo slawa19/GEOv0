@@ -249,8 +249,8 @@ function onTrustlinePick(key: string) {
         </select>
       </div>
 
-      <div v-if="isPickFrom" class="ds-label ds-muted" style="margin-top: 6px">Pick From node (canvas) or choose from dropdown.</div>
-      <div v-if="isPickTo" class="ds-label ds-muted" style="margin-top: 6px">Pick To node (canvas) or choose from dropdown.</div>
+      <div v-if="isPickFrom" class="ds-help" style="margin-top: 6px">Pick From node (canvas) or choose from dropdown.</div>
+      <div v-if="isPickTo" class="ds-help" style="margin-top: 6px">Pick To node (canvas) or choose from dropdown.</div>
 
       <div v-if="isEdit" class="ds-controls" style="padding: 0">
         <div class="ds-controls__row">
@@ -283,7 +283,7 @@ function onTrustlinePick(key: string) {
         </div>
       </div>
 
-      <div v-if="isCreate && !createValid && limit.trim()" class="ds-label ds-muted" style="margin-top: 6px">
+      <div v-if="isCreate && !createValid && limit.trim()" class="ds-help" style="margin-top: 6px">
         Limit must be greater than 0.
       </div>
 
@@ -340,4 +340,6 @@ function onTrustlinePick(key: string) {
     </div>
   </div>
 </template>
+
+
 

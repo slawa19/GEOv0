@@ -153,10 +153,10 @@ function onToChange(v: string) {
         </select>
       </div>
 
-      <div v-if="isPickFrom" class="ds-label ds-muted" style="margin: 6px 0 2px">
+      <div v-if="isPickFrom" class="ds-help" style="margin: 6px 0 2px">
         Pick From node (canvas) or choose from dropdown.
       </div>
-      <div v-if="isPickTo" class="ds-label ds-muted" style="margin: 6px 0 2px">Pick To node (canvas) or choose from dropdown.</div>
+      <div v-if="isPickTo" class="ds-help" style="margin: 6px 0 2px">Pick To node (canvas) or choose from dropdown.</div>
 
       <template v-if="isConfirm">
         <div class="ds-row ds-row--space">
@@ -211,4 +211,5 @@ function onToChange(v: string) {
     </div>
   </div>
 </template>
+
 

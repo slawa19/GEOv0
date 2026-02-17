@@ -87,8 +87,10 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     const p = deps.worldToScreen(node.__x, node.__y)
 
     const pad = 12
-    const cardW = 260
-    const cardH = 146
+    // Should match the visual width/height of the overlay card.
+    // NOTE: keep in sync with `.ds-ov-node-card` and NodeCardOverlay layout.
+    const cardW = 340
+    const cardH = 240
     const gap = 18
 
     // Nodes have a sizeable glow/halo (bloom + rim). `getNodeScreenSize()` returns the

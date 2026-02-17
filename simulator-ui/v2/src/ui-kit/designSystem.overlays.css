@@ -116,6 +116,22 @@ details.ds-ov-details > summary::marker {
   content: '';
 }
 
+details.ds-ov-details > summary::after {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--ds-text-3);
+  transition: transform var(--ds-dur) var(--ds-ease);
+  margin-left: auto;
+}
+
+details[open].ds-ov-details > summary::after {
+  transform: rotate(180deg);
+}
+
 .ds-ov-inset {
   position: absolute;
   inset: 12px;
@@ -243,17 +259,14 @@ details.ds-ov-details > summary::marker {
 
 .ds-ov-node-card {
   position: absolute;
-  width: 260px;
+  width: 340px;
+  max-width: min(420px, calc(100vw - 24px));
   z-index: 42;
   pointer-events: auto;
 
-  padding: 12px;
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-surface-2);
-  border: 1px solid var(--ds-border);
-  box-shadow: var(--ds-shadow);
-  backdrop-filter: var(--ds-blur);
-  -webkit-backdrop-filter: var(--ds-blur);
+  /* Layout-only wrapper.
+     Visual surface must be provided by primitives (e.g. ds-panel) so themes
+     like HUD can apply clip-path/scanlines consistently. */
 }
 
 /* ──────────────────────────────────────────────────────────────

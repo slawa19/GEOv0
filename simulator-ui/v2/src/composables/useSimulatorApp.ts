@@ -1548,6 +1548,7 @@ export function useSimulatorApp() {
 
     // selection + overlays
     isNodeCardOpen,
+    setNodeCardOpen,
     hoveredEdge,
     clearHoveredEdge,
     edgeDetailAnchor,
