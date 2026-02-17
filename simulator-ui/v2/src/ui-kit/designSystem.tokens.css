@@ -10,6 +10,126 @@
   --ds-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --ds-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 
+  /* =====================================================================
+     Typography tokens
+
+     Цель: совпасть с референсом из plans/ui-style-comparison.html.
+     База в референсе: html { font-size: 15px }, body { line-height: 1.6 }.
+     ===================================================================== */
+
+  /* Root sizing */
+  --ds-root-font-size: 15px;
+
+  /* Body / base text */
+  --ds-typo-body-font-family: var(--ds-font-sans);
+  --ds-typo-body-font-size: 1rem;
+  --ds-typo-body-line-height: 1.6;
+  --ds-typo-body-letter-spacing: 0;
+  --ds-typo-body-font-weight: 400;
+
+  /* Section labels (small uppercase labels above groups) */
+  --ds-typo-section-label-font-family: var(--ds-font-sans);
+  --ds-typo-section-label-font-size: 0.7rem;
+  --ds-typo-section-label-line-height: 1.4;
+  --ds-typo-section-label-letter-spacing: 0.08em;
+  --ds-typo-section-label-font-weight: 400;
+
+  /* Spacing: section label block rhythm */
+  --ds-section-label-margin-bottom: var(--ds-space-1);
+
+  /* Badge (small status pills) */
+  --ds-typo-badge-font-family: var(--ds-font-sans);
+  --ds-typo-badge-font-size: 11px;
+  --ds-typo-badge-line-height: 1;
+  --ds-typo-badge-letter-spacing: 0.06em;
+  --ds-typo-badge-font-weight: 800;
+  --ds-typo-badge-text-transform: uppercase;
+  --ds-badge-height: 22px;
+  --ds-badge-padding-y: 0px;
+  --ds-badge-padding-x: 10px;
+
+  /* Alert (inline notification row) */
+  --ds-typo-alert-font-family: var(--ds-font-sans);
+  --ds-typo-alert-font-size: 12px;
+  --ds-typo-alert-letter-spacing: 0;
+  --ds-typo-alert-font-weight: 650;
+  --ds-alert-padding-y: 10px;
+  --ds-alert-padding-x: 12px;
+  --ds-alert-gap: 10px;
+  --ds-alert-icon-font-size: 14px;
+
+  /* Form labels */
+  --ds-typo-label-font-family: var(--ds-font-sans);
+  --ds-typo-label-font-size: 0.8rem;
+  --ds-typo-label-line-height: 1.2;
+  --ds-typo-label-letter-spacing: 0;
+  --ds-typo-label-font-weight: 500;
+
+  /* Panel / section headings (card header) */
+  --ds-typo-panel-heading-font-family: var(--ds-font-sans);
+  --ds-typo-panel-heading-font-size: 0.88rem;
+  --ds-typo-panel-heading-line-height: 1.25;
+  --ds-typo-panel-heading-letter-spacing: 0;
+  --ds-typo-panel-heading-font-weight: 600;
+
+  /* Controls (inputs/selects) */
+  --ds-typo-control-font-family: var(--ds-font-sans);
+  --ds-typo-control-font-size: 0.85rem;
+  --ds-typo-control-line-height: 1;
+  --ds-typo-control-letter-spacing: 0;
+  --ds-typo-control-font-weight: 400;
+
+  /* Buttons */
+  --ds-typo-button-font-family: var(--ds-font-sans);
+  --ds-typo-button-font-size: 0.8rem;
+  --ds-typo-button-line-height: 1;
+  --ds-typo-button-letter-spacing: 0;
+  --ds-typo-button-font-weight: 500;
+
+  /* Numeric (amounts) */
+  --ds-typo-numeric-font-family: var(--ds-font-mono);
+  --ds-typo-numeric-font-variant: tabular-nums;
+
+  /* Number input (Chromium) spin buttons */
+  --ds-input-spin-bg: transparent;
+  --ds-input-spin-divider: var(--ds-border-subtle);
+  /*
+    Two separate chevrons + subtle middle divider.
+    Rationale: native spinner is one clickable control (top/bottom halves).
+    This icon makes the two halves visually distinct without affecting behavior.
+  */
+  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16' fill='none'%3E%3Cpolyline points='3.5 6.5 6 4 8.5 6.5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='8' x2='9' y2='8' stroke='%2394a3b8' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 9.5 6 12 8.5 9.5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  /* Number input (Chromium) spinner geometry */
+  --ds-input-spin-width: 16px;
+  --ds-input-spin-padding-right: 22px;
+  --ds-input-spin-icon-size-x: 12px;
+  --ds-input-spin-icon-size-y: 16px;
+
+  /* Density-driven sizing (comfortable is the baseline) */
+  --ds-control-height-base: 34px;
+  --ds-control-padding-x-base: 12px;
+  --ds-button-height-base: 34px;
+  --ds-button-padding-x-base: 14px;
+
+  --ds-density-control-height-delta: 0px;
+  --ds-density-control-padding-x-delta: 0px;
+  --ds-density-button-height-delta: 0px;
+  --ds-density-button-padding-x-delta: 0px;
+  --ds-density-input-spin-width-delta: 0px;
+  --ds-density-input-spin-padding-right-delta: 0px;
+
+  --ds-control-height: calc(var(--ds-control-height-base) + var(--ds-density-control-height-delta));
+  --ds-control-padding-x: calc(var(--ds-control-padding-x-base) + var(--ds-density-control-padding-x-delta));
+  --ds-button-height: calc(var(--ds-button-height-base) + var(--ds-density-button-height-delta));
+  --ds-button-padding-x: calc(var(--ds-button-padding-x-base) + var(--ds-density-button-padding-x-delta));
+  --ds-input-spin-width: calc(16px + var(--ds-density-input-spin-width-delta));
+  --ds-input-spin-padding-right: calc(22px + var(--ds-density-input-spin-padding-right-delta));
+
+  /* HUD casing control (kept token-driven to avoid hardcoding in primitives) */
+  --ds-typo-label-text-transform: none;
+  --ds-typo-panel-heading-text-transform: none;
+
   /* HUD geometry */
   --ds-cut: 12px; /* corner cut size for HUD clip-path */
 
@@ -69,6 +189,7 @@
   --ds-info: #38bdf8;
 
   --ds-blur: blur(10px);
+  --ds-blur-soft: blur(6px);
   --ds-gridline: rgba(56, 189, 248, 0.06);
 
   /* HUD FX */
@@ -78,11 +199,34 @@
 }
 
 /* Density */
+[data-density='comfortable'] {
+  /* Explicit baseline for toggles that set comfortable/compact dynamically */
+  --ds-space-1: 6px;
+  --ds-space-2: 10px;
+  --ds-space-3: 14px;
+  --ds-space-4: 18px;
+
+  --ds-density-control-height-delta: 0px;
+  --ds-density-control-padding-x-delta: 0px;
+  --ds-density-button-height-delta: 0px;
+  --ds-density-button-padding-x-delta: 0px;
+  --ds-density-input-spin-width-delta: 0px;
+  --ds-density-input-spin-padding-right-delta: 0px;
+}
+
 [data-density='compact'] {
+  /* Noticeably tighter vertical rhythm + smaller control heights (without changing font sizes) */
   --ds-space-1: 4px;
   --ds-space-2: 8px;
   --ds-space-3: 12px;
-  --ds-space-4: 16px;
+  --ds-space-4: 14px;
+
+  --ds-density-control-height-delta: -4px;
+  --ds-density-control-padding-x-delta: -1px;
+  --ds-density-button-height-delta: -4px;
+  --ds-density-button-padding-x-delta: -2px;
+  --ds-density-input-spin-width-delta: -2px;
+  --ds-density-input-spin-padding-right-delta: -4px;
 }
 
 /* Motion */
@@ -171,9 +315,10 @@
   --ds-border-subtle: #27272a;
   --ds-border-strong: #3f3f46;
 
-  --ds-text-1: rgba(250, 250, 250, 0.96);
-  --ds-text-2: rgba(212, 212, 216, 0.92);
-  --ds-text-3: rgba(113, 113, 122, 0.95);
+  /* Match reference exact text colors (avoid opacity drift) */
+  --ds-text-1: #fafafa;
+  --ds-text-2: #d4d4d8;
+  --ds-text-3: #71717a;
 
   --ds-accent: #0ea5e9;
   --ds-accent-2: #38bdf8;
@@ -203,6 +348,42 @@
   --ds-blur: none;
 
   --ds-gridline: rgba(255, 255, 255, 0.03);
+
+  /* Typography aligns with shadcn column in plans/ui-style-comparison.html */
+  --ds-typo-body-font-family: var(--ds-font-sans);
+
+  /* Section labels in reference have a slightly tighter rhythm (margin-bottom: 0.3rem) */
+  --ds-section-label-margin-bottom: 0.3rem;
+
+  /* Badge typography (reference .s-badge) */
+  --ds-typo-badge-font-family: var(--ds-font-sans);
+  --ds-typo-badge-font-size: 0.73rem;
+  --ds-typo-badge-line-height: 1.2;
+  --ds-typo-badge-letter-spacing: 0;
+  --ds-typo-badge-font-weight: 500;
+  --ds-typo-badge-text-transform: none;
+  --ds-badge-height: auto;
+  --ds-badge-padding-y: 0.1rem;
+  --ds-badge-padding-x: 0.5rem;
+
+  /* Alert typography/spacing (reference .s-alert) */
+  --ds-typo-alert-font-family: var(--ds-font-sans);
+  --ds-typo-alert-font-size: 0.8rem;
+  --ds-typo-alert-letter-spacing: 0;
+  --ds-typo-alert-font-weight: 400;
+  --ds-alert-padding-y: 0.5rem;
+  --ds-alert-padding-x: 0.75rem;
+  --ds-alert-gap: 0.5rem;
+  --ds-alert-icon-font-size: 1rem;
+
+  /* Number input spin icon color (muted shadcn gray: #71717a) */
+  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16' fill='none'%3E%3Cpolyline points='3.5 6.5 6 4 8.5 6.5' stroke='%2371717a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='8' x2='9' y2='8' stroke='%2371717a' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 9.5 6 12 8.5 9.5' stroke='%2371717a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --ds-input-spin-divider: var(--ds-border);
+
+  /* Theme-specific base heights; density applies via deltas */
+  --ds-control-height-base: 32px;
+  --ds-button-height-base: 32px;
+  --ds-button-padding-x-base: 12px;
 }
 
 /* THEME: HUD (sci-fi) */
@@ -251,5 +432,41 @@
   /* HUD typography */
   --ds-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --ds-font-mono: Consolas, 'Fira Code', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, 'Liberation Mono', 'Courier New', monospace;
+
+  /* Typography aligns with Sci-fi/HUD column in plans/ui-style-comparison.html */
+  --ds-typo-body-font-family: var(--ds-font-mono);
+  --ds-typo-section-label-font-family: var(--ds-font-mono);
+  --ds-typo-label-font-family: var(--ds-font-mono);
+  --ds-typo-panel-heading-font-family: var(--ds-font-mono);
+
+  /* HUD panel header in reference: font-size 0.82rem; weight 600; letter-spacing 0.10em; uppercase handled in primitives */
+  --ds-typo-panel-heading-font-size: 0.82rem;
+  --ds-typo-panel-heading-font-weight: 600;
+  --ds-typo-panel-heading-letter-spacing: 0.10em;
+  --ds-typo-control-font-family: var(--ds-font-mono);
+  --ds-typo-button-font-family: var(--ds-font-mono);
+
+  --ds-typo-label-font-size: 0.7rem;
+  --ds-typo-label-font-weight: 600;
+  --ds-typo-label-letter-spacing: 0.08em;
+
+  --ds-typo-section-label-letter-spacing: 0.08em;
+
+  --ds-typo-control-font-size: 0.82rem;
+  --ds-typo-button-font-size: 0.75rem;
+  --ds-typo-button-font-weight: 600;
+  --ds-typo-button-letter-spacing: 0.06em;
+
+  /* Number input spin icon color (HUD accent: #00e5ff) */
+  --ds-icon-input-spin: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16' fill='none'%3E%3Cpolyline points='3.5 6.5 6 4 8.5 6.5' stroke='%2300e5ff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='3' y1='8' x2='9' y2='8' stroke='%2300e5ff' stroke-opacity='0.35' stroke-width='1'/%3E%3Cpolyline points='3.5 9.5 6 12 8.5 9.5' stroke='%2300e5ff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --ds-input-spin-divider: var(--ds-border);
+
+  /* Theme-specific base heights; density applies via deltas */
+  --ds-control-height-base: 32px;
+  --ds-button-height-base: 32px;
+
+  /* HUD casing */
+  --ds-typo-label-text-transform: uppercase;
+  --ds-typo-panel-heading-text-transform: uppercase;
 }
 

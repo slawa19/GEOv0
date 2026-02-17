@@ -127,7 +127,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="enabled" class="perf" role="region" aria-label="Performance diagnostics">
+  <div v-if="enabled" class="perf ds-ov-item ds-ov-surface ds-ov-dev-perf" role="region" aria-label="Performance diagnostics">
     <div class="row">
       <div class="title">Perf probe</div>
       <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
@@ -148,20 +148,7 @@ onUnmounted(() => {
 
 <style scoped>
 .perf {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 50;
-  max-width: min(720px, calc(100vw - 24px));
-  max-height: min(70vh, 520px);
-  overflow: auto;
-  pointer-events: auto;
-  user-select: text;
-
-  background: rgba(2, 6, 23, 0.86);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px;
-  backdrop-filter: blur(6px);
+  /* visuals + placement live in DS overlays layer */
 }
 
 .row {
@@ -175,7 +162,7 @@ onUnmounted(() => {
 .title {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(226, 232, 240, 0.92);
+  color: var(--ds-text-1);
 }
 
 
@@ -184,7 +171,7 @@ onUnmounted(() => {
   padding: 0 12px 12px 12px;
   font-size: 11px;
   line-height: 1.35;
-  color: rgba(226, 232, 240, 0.88);
+  color: var(--ds-text-2);
   white-space: pre-wrap;
 }
 
@@ -192,14 +179,14 @@ onUnmounted(() => {
   margin: 0 12px 8px 12px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  background: rgba(120, 53, 15, 0.25);
-  color: rgba(254, 243, 199, 0.92);
+  border: 1px solid color-mix(in srgb, var(--ds-warn) 35%, transparent);
+  background: color-mix(in srgb, var(--ds-warn) 18%, transparent);
+  color: color-mix(in srgb, var(--ds-warn) 12%, var(--ds-text-1));
   font-size: 12px;
   line-height: 1.35;
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-family: var(--ds-font-mono);
 }
 </style>

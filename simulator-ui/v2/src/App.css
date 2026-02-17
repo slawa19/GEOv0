@@ -167,16 +167,16 @@
   font-size: 32px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  color: #fbbf24 !important;
+  color: var(--ds-warn) !important;
   animation: clearingPremiumPop 4.2s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
   text-shadow:
-    0 0 20px rgba(251, 191, 36, 0.9),
-    0 0 40px rgba(251, 191, 36, 0.5),
+    0 0 20px color-mix(in srgb, var(--ds-warn) 90%, transparent),
+    0 0 40px color-mix(in srgb, var(--ds-warn) 50%, transparent),
     0 0 6px rgba(0, 0, 0, 0.95),
     0 2px 4px rgba(0, 0, 0, 0.6);
   filter:
-    drop-shadow(0 0 12px rgba(251, 191, 36, 0.7))
-    drop-shadow(0 0 28px rgba(249, 115, 22, 0.35));
+    drop-shadow(0 0 12px color-mix(in srgb, var(--ds-warn) 70%, transparent))
+    drop-shadow(0 0 28px color-mix(in srgb, var(--ds-warn) 35%, transparent));
   white-space: nowrap;
   will-change: transform, opacity;
 }

@@ -135,6 +135,31 @@ details.ds-ov-details > summary::marker {
   max-width: min(560px, calc(100vw - 24px));
 }
 
+/* Edge detail popup (Interact mode) — visuals only; placement comes from inline style */
+.ds-ov-edge-detail {
+  padding: 10px 12px;
+  border-radius: var(--ds-radius-md);
+  box-shadow: none;
+}
+
+/* Dev perf overlay — corner placement + tokenized visuals */
+.ds-ov-dev-perf {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 50;
+  max-width: min(720px, calc(100vw - 24px));
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  pointer-events: auto;
+  user-select: text;
+
+  border-radius: var(--ds-radius-sm);
+  backdrop-filter: var(--ds-blur-soft);
+  -webkit-backdrop-filter: var(--ds-blur-soft);
+  box-shadow: none;
+}
+
 /* Dev/demo overlay (small control block in the corner) */
 .ds-ov-demo {
   position: absolute;

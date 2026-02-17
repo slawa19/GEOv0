@@ -111,13 +111,13 @@ onUnmounted(() => {
 <template>
   <div
     v-if="open"
-    class="popup"
+    class="popup ds-ov-item ds-ov-surface ds-ov-edge-detail"
     data-testid="edge-detail-popup"
     aria-label="Edge detail popup"
     :style="popupStyle"
   >
     <div class="popup__title">Edge</div>
-    <div class="popup__subtitle mono">{{ title }}</div>
+    <div class="popup__subtitle ds-mono">{{ title }}</div>
 
     <div class="popup__grid">
       <div class="ds-label">Used</div>
@@ -167,11 +167,6 @@ onUnmounted(() => {
   z-index: 42;
   min-width: 260px;
   max-width: min(460px, calc(100vw - 24px));
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  backdrop-filter: blur(10px);
   pointer-events: auto;
 }
 
@@ -200,8 +195,5 @@ onUnmounted(() => {
   margin-top: 10px;
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-}
 </style>
 
