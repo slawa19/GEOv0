@@ -16,6 +16,7 @@ import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRende
 import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
 import { ensureSession, adminGetAllRuns, adminStopAllRuns } from '../api/simulatorApi'
+import { ApiError } from '../api/http'
 import type { AdminRunSummary } from '../api/simulatorApi'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
@@ -260,7 +261,11 @@ export function useSimulatorApp() {
       const res = await adminGetAllRuns({ apiBase: real.apiBase, accessToken: real.accessToken })
       adminRunsList.value = res.items ?? []
     } catch (e: unknown) {
-      adminLastError.value = String((e as any)?.message ?? e)
+      if (e instanceof ApiError && e.status === 403) {
+        adminLastError.value = 'Admin token rejected (HTTP 403)'
+      } else {
+        adminLastError.value = String((e as any)?.message ?? e)
+      }
     } finally {
       adminRunsLoading.value = false
     }
@@ -273,7 +278,11 @@ export function useSimulatorApp() {
       // Refresh list after stop to reflect updated states.
       await adminGetRuns()
     } catch (e: unknown) {
-      adminLastError.value = String((e as any)?.message ?? e)
+      if (e instanceof ApiError && e.status === 403) {
+        adminLastError.value = 'Admin token rejected (HTTP 403)'
+      } else {
+        adminLastError.value = String((e as any)?.message ?? e)
+      }
     }
   }
 
@@ -1658,6 +1667,18 @@ export function useSimulatorApp() {
       lastError: adminLastError,
       getRuns: adminGetRuns,
       stopRuns: adminStopRuns,
+      attachRun: async (runId: string) => {
+        await realMode.attachToRun(runId)
+      },
+      stopRun: async (runId: string) => {
+        adminLastError.value = ''
+        try {
+          await realMode.stopRunById(runId, { source: 'ui', reason: 'admin_stop' })
+          await adminGetRuns()
+        } catch (e: unknown) {
+          adminLastError.value = String((e as any)?.message ?? e)
+        }
+      },
     },
 
     // state + prefs

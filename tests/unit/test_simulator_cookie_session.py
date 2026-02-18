@@ -271,22 +271,16 @@ def test_guardrail_allows_default_in_dev() -> None:
     s._guardrail_simulator_session_secret()
 
 
-def test_csrf_guardrail_warns_empty_allowlist_in_prod(caplog) -> None:
-    """Empty CSRF allowlist in production triggers warning log."""
-    import logging
+def test_csrf_guardrail_fails_fast_empty_allowlist_in_prod() -> None:
+    """Empty CSRF allowlist in production fails fast (startup guardrail)."""
     from app.config import Settings
 
     s = Settings()
     s.ENV = "production"
     s.SIMULATOR_CSRF_ORIGIN_ALLOWLIST = ""
 
-    with caplog.at_level(logging.WARNING, logger="app.config"):
+    with pytest.raises(RuntimeError, match="SIMULATOR_CSRF_ORIGIN_ALLOWLIST"):
         s._guardrail_csrf_allowlist()
-
-    assert any("SIMULATOR_CSRF_ORIGIN_ALLOWLIST" in msg for msg in caplog.messages), (
-        f"Ожидается warning о SIMULATOR_CSRF_ORIGIN_ALLOWLIST в production. "
-        f"Сообщения: {caplog.messages}"
-    )
 
 
 # ─── HTTP-тесты: POST /api/v1/simulator/session/ensure (TestClient) ──────────

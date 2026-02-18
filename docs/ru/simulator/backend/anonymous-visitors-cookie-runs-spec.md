@@ -538,7 +538,7 @@ Runtime сейчас in-process.
 ### Найденные и исправленные проблемы (Фаза 13 — Code Review)
 
 11. `restart()` не восстанавливал active mapping → исправлено с проверкой конфликта
-12. CSRF allowlist guardrail — пустой allowlist в prod → добавлен warning
+12. CSRF allowlist guardrail — пустой allowlist в prod → fail-fast RuntimeError
 13. Двойной `get_run()` в action endpoints → объединён в `_get_run_checked()`
 14. Guardrail не проверял пустую строку secret → добавлена проверка
 15. `upsert_run` — неявная обработка пустого `owner_id` → явная проверка с комментарием
@@ -554,3 +554,4 @@ Runtime сейчас in-process.
 22. Sort key `started_at or 0` в `_count_active_runs_for_owner_locked` — fragile при None → заменено на `datetime.min`
 23. Тесты CSRF (2 теста) проверяли `details.code` → обновлены на `exc.code` после исправления #20
 24. HTTP-тесты для `POST /session/ensure` — 3 теста через TestClient (set-cookie, reuse, replace invalid)
+25. `ensureSession` race на старте real-mode без токена → boot sequence и `startRun()` теперь await'ят `ensureSession()` перед первыми запросами

@@ -1732,6 +1732,12 @@ async def graph_snapshot_active_run(
     if run_id is None:
         # Active run is optional in MVP; return an empty snapshot.
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+    try:
+        run = runtime.get_run(run_id)
+    except NotFoundException:
+        return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+
+    _check_run_access(run, actor, run_id)
     return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
 
 
@@ -1746,6 +1752,12 @@ async def ego_snapshot_active_run(
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+    try:
+        run = runtime.get_run(run_id)
+    except NotFoundException:
+        return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
+
+    _check_run_access(run, actor, run_id)
     return await runtime.build_ego_snapshot(run_id=run_id, equivalent=equivalent, pid=pid, depth=depth, session=db)
 
 
@@ -1758,7 +1770,14 @@ async def events_stream_active_run(
 ):
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
 
-    # If there is no actual run, serve a stream with keep-alives only.
+    # If there is no actual run (or mapping is stale), serve a stream with keep-alives only.
+    if run_id is not None:
+        try:
+            run = runtime.get_run(run_id)
+            _check_run_access(run, actor, run_id)
+        except NotFoundException:
+            run_id = None
+
     if run_id is None:
 
         async def idle_stream() -> AsyncIterator[str]:

@@ -36,6 +36,10 @@ def _validate_run_for_storage(run: RunRecord) -> None:
         raise ValueError("mode is required")
     if not str(getattr(run, "state", "") or "").strip():
         raise ValueError("state is required")
+    # New runs must always have an owner_id (cookie/participant/admin/cli).
+    # Legacy rows in DB are handled by migration backfill (owner_id='legacy:unknown').
+    if not str(getattr(run, "owner_id", "") or "").strip():
+        raise ValueError("owner_id is required")
 
 
 async def upsert_run(run: RunRecord) -> None:

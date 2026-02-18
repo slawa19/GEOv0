@@ -171,20 +171,19 @@ class Settings(BaseSettings):
             )
 
     def _guardrail_csrf_allowlist(self) -> None:
-        """Warn if SIMULATOR_CSRF_ORIGIN_ALLOWLIST is empty in non-dev environment.
+        """Fail-fast if SIMULATOR_CSRF_ORIGIN_ALLOWLIST is empty in non-dev environment.
 
-        FIX-CR3: Empty allowlist = allow all origins for anon cookie endpoints.
-        This is intentional in dev but dangerous in production.
+        Empty allowlist = allow all origins for anon cookie endpoints.
+        This is intentional in dev/test but unsafe in production.
         """
         env = (self.ENV or "").strip().lower()
         if env in self._SAFE_ENVS:
             return
         if not self.SIMULATOR_CSRF_ORIGIN_ALLOWLIST:
-            _logger.warning(
-                "SIMULATOR_CSRF_ORIGIN_ALLOWLIST is empty in %s environment. "
-                "All origins will be allowed for anonymous cookie endpoints. "
-                "Set explicit origins for production security.",
-                env,
+            raise RuntimeError(
+                "SIMULATOR_CSRF_ORIGIN_ALLOWLIST must be set in non-dev environment. "
+                f"Got ENV={self.ENV!r}. "
+                "Set explicit origins via SIMULATOR_CSRF_ORIGIN_ALLOWLIST env var."
             )
 
     def _guardrail_default_secrets(self) -> None:

@@ -72,6 +72,12 @@ type Props = {
 
   /** Admin: stop all running runs. */
   adminStopRuns?: () => Promise<void>
+
+  /** Admin: attach UI to a specific run_id. */
+  adminAttachRun?: (runId: string) => Promise<void> | void
+
+  /** Admin: stop a specific run_id. */
+  adminStopRun?: (runId: string) => Promise<void> | void
 }
 
 const props = defineProps<Props>()
@@ -236,6 +242,18 @@ async function onAdminGetRuns() {
 async function onAdminStopRuns() {
   if (!props.adminStopRuns) return
   await props.adminStopRuns()
+}
+
+async function onAdminAttachRun(runId: string) {
+  if (!props.adminAttachRun) return
+  if (!runId) return
+  await props.adminAttachRun(runId)
+}
+
+async function onAdminStopRun(runId: string) {
+  if (!props.adminStopRun) return
+  if (!runId) return
+  await props.adminStopRun(runId)
 }
 </script>
 
@@ -511,9 +529,33 @@ async function onAdminStopRuns() {
                       class="ds-panel ds-ov-metric"
                       style="padding: 4px 8px; gap: 8px"
                     >
-                      <span class="ds-label ds-mono" style="font-size: 11px">{{ run.run_id.slice(0, 8) }}</span>
-                      <span :class="['ds-badge', run.state === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
-                      <span class="ds-label" style="opacity: 0.7; font-size: 11px">{{ (run as any).owner_kind ?? '' }}</span>
+                        <span class="ds-label ds-mono" style="font-size: 11px" :title="run.run_id">{{ run.run_id.slice(0, 8) }}</span>
+                        <span :class="['ds-badge', String(run.state ?? '').toLowerCase() === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
+                        <span class="ds-label" style="opacity: 0.7; font-size: 11px" :title="String((run as any).scenario_id ?? '')">{{ short(String((run as any).scenario_id ?? ''), 18) }}</span>
+                        <span class="ds-label ds-mono" style="opacity: 0.65; font-size: 11px" :title="String((run as any).owner_id ?? '')">{{ short(String((run as any).owner_id ?? ''), 18) }}</span>
+
+                        <div class="ds-row" style="margin-left: auto; gap: 6px; align-items: center">
+                          <button
+                            v-if="props.adminAttachRun"
+                            class="ds-btn ds-btn--secondary"
+                            style="height: 24px; padding: 0 8px"
+                            type="button"
+                            aria-label="Attach to selected run"
+                            @click="onAdminAttachRun(run.run_id)"
+                          >
+                            Attach
+                          </button>
+                          <button
+                            v-if="props.adminStopRun"
+                            class="ds-btn ds-btn--danger"
+                            style="height: 24px; padding: 0 8px"
+                            type="button"
+                            aria-label="Stop selected run"
+                            @click="onAdminStopRun(run.run_id)"
+                          >
+                            Stop
+                          </button>
+                        </div>
                     </div>
                   </div>
 

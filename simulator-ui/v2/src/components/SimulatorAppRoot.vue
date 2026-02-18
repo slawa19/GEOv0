@@ -464,6 +464,8 @@ function onEdgeDetailCloseLine() {
       :admin-last-error="admin.lastError.value"
       :admin-get-runs="admin.getRuns"
       :admin-stop-runs="admin.stopRuns"
+      :admin-attach-run="admin.attachRun"
+      :admin-stop-run="admin.stopRun"
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:desired-mode="realActions.setDesiredMode"
       @update:intensity-percent="realActions.setIntensityPercent"

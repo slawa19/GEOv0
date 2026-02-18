@@ -3,6 +3,7 @@ import { watch, type ComputedRef } from 'vue'
 import {
   artifactDownloadUrl,
   createRun,
+  ensureSession,
   getActiveRun,
   getRun,
   listArtifacts,
@@ -108,6 +109,10 @@ export function useSimulatorRealMode(opts: {
   applyIntensity: () => Promise<void>
   refreshArtifacts: () => Promise<void>
   downloadArtifact: (name: string) => Promise<void>
+
+  // Admin helpers
+  attachToRun: (runId: string) => Promise<void>
+  stopRunById: (runId: string, opts?: { source?: string; reason?: string }) => Promise<void>
 } {
   const {
     isRealMode,
@@ -230,6 +235,31 @@ export function useSimulatorRealMode(opts: {
   // refreshSnapshot() itself, so the scenario watcher's call is redundant and causes
   // a visible "Loading…" flash.
   let initialBootInProgress = false
+
+  // Anonymous visitors rely on cookie-auth (geo_sim_sid). Ensure the cookie exists
+  // before running real-mode boot calls like /scenarios or /runs/active.
+  let anonSessionEnsured = false
+  let anonSessionEnsuring: Promise<void> | null = null
+  async function ensureAnonSessionOnce(): Promise<void> {
+    const token = String(real.accessToken ?? '').trim()
+    if (token) return
+    if (anonSessionEnsured) return
+    if (anonSessionEnsuring) return await anonSessionEnsuring
+
+    anonSessionEnsuring = (async () => {
+      try {
+        await ensureSession({ apiBase: real.apiBase })
+        anonSessionEnsured = true
+      } catch {
+        // Best-effort: if session bootstrap fails, subsequent API calls may 401.
+        // Let existing per-call error handling surface the failure.
+      } finally {
+        anonSessionEnsuring = null
+      }
+    })()
+
+    await anonSessionEnsuring
+  }
 
   function cancelPendingRefreshSnapshotDebounce() {
     if (refreshSnapshotDebounceTimer !== null) {
@@ -833,6 +863,7 @@ export function useSimulatorRealMode(opts: {
 
   async function refreshScenarios() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    await ensureAnonSessionOnce()
     real.loadingScenarios = true
     real.lastError = ''
     try {
@@ -849,6 +880,8 @@ export function useSimulatorRealMode(opts: {
   async function startRun(startOpts?: { mode?: SimulatorMode; intensityPercent?: number; pauseImmediately?: boolean }) {
     if (!real.selectedScenarioId) return
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+
+    await ensureAnonSessionOnce()
 
     const st = String(real.runStatus?.state ?? '').toLowerCase()
     const isActive = !!real.runId && (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
@@ -972,6 +1005,40 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
+  /** Admin helper: attach UI to an arbitrary run_id (observer/control path). */
+  async function attachToRun(runId: string) {
+    const rid = String(runId ?? '').trim()
+    if (!rid) return
+
+    try {
+      teardownRefreshSnapshot()
+      stopSse()
+      cleanupRealRunFxAndTimers()
+
+      real.lastError = ''
+      real.runId = rid
+      real.runStatus = null
+      real.lastEventId = null
+      real.artifacts = []
+
+      await refreshRunStatus()
+      await refreshSnapshot()
+      void runSseLoop()
+    } catch (e: unknown) {
+      real.lastError = String((e as any)?.message ?? e)
+    }
+  }
+
+  /** Admin helper: stop a specific run_id (may be different from current run). */
+  async function stopRunById(runId: string, opts?: { source?: string; reason?: string }) {
+    const rid = String(runId ?? '').trim()
+    if (!rid) return
+    await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, rid, {
+      source: opts?.source ?? 'ui',
+      reason: opts?.reason ?? 'admin_stop',
+    })
+  }
+
   async function applyIntensity() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
@@ -1034,6 +1101,7 @@ export function useSimulatorRealMode(opts: {
       initialBootInProgress = true
       void (async () => {
         try {
+          await ensureAnonSessionOnce()
           await refreshScenarios()
 
           ensureScenarioSelectionValid()
@@ -1127,5 +1195,9 @@ export function useSimulatorRealMode(opts: {
     applyIntensity,
     refreshArtifacts,
     downloadArtifact,
+
+    // Admin helpers
+    attachToRun,
+    stopRunById,
   }
 }

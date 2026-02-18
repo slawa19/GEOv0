@@ -183,6 +183,32 @@ function Test-HttpEndpoint {
     return $false
 }
 
+function Show-RecentLog {
+    param(
+        [string]$Path,
+        [int]$Tail = 60,
+        [string]$Title = $null
+    )
+
+    if (-not $Path) { return }
+    if (-not (Test-Path $Path)) { return }
+
+    $label = if ($Title) { $Title } else { $Path }
+    Write-Host ("     --- Last {0} lines: {1} ---" -f $Tail, $label) -ForegroundColor DarkGray
+    try {
+        $lines = Get-Content -Path $Path -Tail $Tail -ErrorAction Stop
+        if ($null -eq $lines -or $lines.Count -eq 0) {
+            Write-Host "     (log is empty)" -ForegroundColor DarkGray
+        } else {
+            foreach ($line in $lines) {
+                Write-Host ("     {0}" -f $line)
+            }
+        }
+    } catch {
+        Write-Host "     (failed to read log)" -ForegroundColor DarkGray
+    }
+ }
+
 function Update-EnvLocal {
     param([string]$Path, [string]$BaseUrl, [bool]$IsSimulator = $false)
     
@@ -358,7 +384,8 @@ switch ($Action) {
                 $status = "Running (PID $listener)"
                 $color = "Green"
             } elseif ($savedProcId) {
-                $status = "Not listening (PID file $savedProcId)"
+                # PID file exists and process is alive (stale files are cleaned in Remove-StalePidFile).
+                $status = "Starting / Not listening yet (PID $savedProcId)"
                 $color = "Yellow"
             } else {
                 $status = "Stopped"
@@ -496,6 +523,8 @@ while ((Get-Date) -lt $adminUiDeadline) {
 if (-not (Get-ListeningPid -Port $AdminUiPort)) {
     Write-Host " Timeout!" -ForegroundColor Yellow
     Write-Host "     See logs: $AdminUiOutLogPath and $AdminUiErrLogPath" -ForegroundColor Gray
+    Show-RecentLog -Path $AdminUiErrLogPath -Tail 80 -Title 'admin-ui.err.log'
+    Show-RecentLog -Path $AdminUiOutLogPath -Tail 40 -Title 'admin-ui.out.log'
 }
 
 Write-Host "[8/8] Starting Simulator UI (Vite on port $SimulatorUiPort)..." -ForegroundColor Yellow
@@ -528,6 +557,8 @@ while ((Get-Date) -lt $simulatorUiDeadline) {
 if (-not (Get-ListeningPid -Port $SimulatorUiPort)) {
     Write-Host " Timeout!" -ForegroundColor Yellow
     Write-Host "     See logs: $SimulatorUiOutLogPath and $SimulatorUiErrLogPath" -ForegroundColor Gray
+    Show-RecentLog -Path $SimulatorUiErrLogPath -Tail 80 -Title 'simulator-ui.err.log'
+    Show-RecentLog -Path $SimulatorUiOutLogPath -Tail 40 -Title 'simulator-ui.out.log'
 }
 
 # Summary

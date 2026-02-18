@@ -329,6 +329,7 @@ def test_owner_header_invalid_after_trim_raises_e009(monkeypatch) -> None:
     with pytest.raises(GeoException) as exc_info:
         asyncio.run(_run())
 
-    assert exc_info.value.details.get("code") == "E009", (
-        f"Ожидался 'E009' в details['code'], получено: {exc_info.value.details}"
+    assert exc_info.value.code == "E009", (
+        f"Ожидался 'E009' в exc.code, получено: {exc_info.value.code}"
     )
+    assert exc_info.value.details.get("header") == "X-Simulator-Owner"

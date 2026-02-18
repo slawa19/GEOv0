@@ -231,6 +231,7 @@ def _check_csrf_origin(request: Request, actor: "SimulatorActor") -> None:
 
 async def require_simulator_actor(
     request: Request,
+    db: AsyncSession = Depends(get_db),
     x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
     x_simulator_owner: str | None = Header(default=None, alias="X-Simulator-Owner"),
     token: str | None = Depends(optional_oauth2),
@@ -262,7 +263,6 @@ async def require_simulator_actor(
                     "Invalid X-Simulator-Owner header",
                     code=ErrorCode.E009,
                     details={
-                        "code": "E009",
                         "header": "X-Simulator-Owner",
                         "value": x_simulator_owner,
                     },
@@ -282,6 +282,13 @@ async def require_simulator_actor(
         if payload:
             pid: str | None = payload.get("sub")
             if pid:
+                # Validate participant exists and is active.
+                result = await db.execute(select(Participant).where(Participant.pid == pid))
+                participant = result.scalar_one_or_none()
+                if not participant:
+                    raise UnauthorizedException("Participant not found")
+                if participant.status != "active":
+                    raise ForbiddenException("Participant account is not active")
                 _actor = SimulatorActor(
                     kind="participant",
                     owner_id=f"pid:{pid}",
