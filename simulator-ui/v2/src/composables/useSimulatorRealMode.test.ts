@@ -94,7 +94,10 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
     vi.useFakeTimers()
 
     const isRealModeRef = ref(true)
-    const real = createRealState()
+    // §10: Pre-set runId so the immediate watcher does not call getActiveRun and trigger an
+    // extra loadScene() before the test body runs. Anonymous visitors use cookie-auth, so
+    // getActiveRun is now called even without accessToken — the test must account for this.
+    const real = { ...createRealState(), runId: 'r1' as string | null, accessToken: 't' }
 
     const loadScene = vi.fn(async () => undefined)
 
@@ -131,9 +134,11 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
       wakeUp: () => undefined,
     })
 
-    // Enable refreshSnapshot guard conditions but avoid watcher-triggered refreshSnapshot.
-    real.accessToken = 't'
-    real.runId = 'r1'
+    // Wait for the immediate watcher (isRealMode) to complete its async boot sequence.
+    // It calls refreshRunStatus() + refreshSnapshot() because real.runId is already set.
+    // We need to drain those calls before the test body runs.
+    await vi.runAllTimersAsync()
+    loadScene.mockClear()
 
     // 1st call performs loadScene immediately; 2nd call marks pending while debounce timer is active.
     const p1 = h.refreshSnapshot()

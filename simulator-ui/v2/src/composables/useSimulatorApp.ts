@@ -15,6 +15,8 @@ import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRende
 
 import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
+import { ensureSession, adminGetAllRuns, adminStopAllRuns } from '../api/simulatorApi'
+import type { AdminRunSummary } from '../api/simulatorApi'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 
@@ -202,7 +204,75 @@ export function useSimulatorApp() {
     map[key] = (map[key] ?? 0) + 1
   }
 
-  
+  // ============================
+  // §10: Cookie session state (anonymous visitors)
+  // ============================
+
+  /** Actor kind returned by POST /session/ensure. `null` = not yet bootstrapped. */
+  const sessionActorKind = ref<string | null>(null)
+  /** Owner ID tied to the cookie session. */
+  const sessionOwnerId = ref<string | null>(null)
+  /** True while ensureSession is in-flight. */
+  const sessionBootstrapping = ref(false)
+
+  /**
+   * Bootstraps a cookie session for anonymous visitors.
+   * Called at startup in real mode when no accessToken is configured.
+   * Safe to call multiple times — skipped if already complete.
+   */
+  async function tryEnsureSession(): Promise<void> {
+    // Only needed when there is no explicit token (anonymous visitors path).
+    if (String(real.accessToken ?? '').trim()) return
+    if (sessionActorKind.value !== null) return // already done
+    if (sessionBootstrapping.value) return // in-flight
+
+    sessionBootstrapping.value = true
+    try {
+      const res = await ensureSession({ apiBase: real.apiBase })
+      sessionActorKind.value = res.actor_kind
+      sessionOwnerId.value = res.owner_id
+    } catch (e: unknown) {
+      // Non-fatal: log a warning, but let the UI proceed.
+      // The backend may reject unauthenticated requests with 401 if cookie fails,
+      // which will surface as a normal API error in the UI.
+      console.warn('[GEO] Cookie session bootstrap failed:', String((e as any)?.message ?? e))
+    } finally {
+      sessionBootstrapping.value = false
+    }
+  }
+
+  // ============================
+  // Admin state (requires admin token)
+  // ============================
+
+  const adminRunsList = ref<AdminRunSummary[]>([])
+  const adminRunsLoading = ref(false)
+  const adminLastError = ref('')
+
+  async function adminGetRuns(): Promise<void> {
+    adminRunsLoading.value = true
+    adminLastError.value = ''
+    try {
+      const res = await adminGetAllRuns({ apiBase: real.apiBase, accessToken: real.accessToken })
+      adminRunsList.value = res.items ?? []
+    } catch (e: unknown) {
+      adminLastError.value = String((e as any)?.message ?? e)
+    } finally {
+      adminRunsLoading.value = false
+    }
+  }
+
+  async function adminStopRuns(): Promise<void> {
+    adminLastError.value = ''
+    try {
+      await adminStopAllRuns({ apiBase: real.apiBase, accessToken: real.accessToken })
+      // Refresh list after stop to reflect updated states.
+      await adminGetRuns()
+    } catch (e: unknown) {
+      adminLastError.value = String((e as any)?.message ?? e)
+    }
+  }
+
 
   // tx.failed often represents a "clean rejection" (routing capacity, trustline constraints).
   // Those should not be surfaced as global "errors" in the HUD.
@@ -379,6 +449,13 @@ export function useSimulatorApp() {
     }
 
     rafId = window.requestAnimationFrame(loop)
+  })
+
+  // §10: Cookie bootstrap — ensure session for anonymous visitors at startup.
+  // Only runs in real mode, and only if no explicit accessToken is configured.
+  onMounted(() => {
+    if (!isRealMode.value) return
+    void tryEnsureSession()
   })
 
   // uiDerived reads camera.zoom (for overlay label scale). Keep this wiring robust
@@ -1494,6 +1571,23 @@ export function useSimulatorApp() {
       refreshSnapshot: realMode.refreshSnapshot,
       refreshArtifacts: realMode.refreshArtifacts,
       downloadArtifact: realMode.downloadArtifact,
+    },
+
+    // §10: Cookie session state (anonymous visitors)
+    session: {
+      actorKind: sessionActorKind,
+      ownerId: sessionOwnerId,
+      bootstrapping: sessionBootstrapping,
+      tryEnsure: tryEnsureSession,
+    },
+
+    // Admin controls (admin-token required)
+    admin: {
+      runs: adminRunsList,
+      loading: adminRunsLoading,
+      lastError: adminLastError,
+      getRuns: adminGetRuns,
+      stopRuns: adminStopRuns,
     },
 
     // state + prefs

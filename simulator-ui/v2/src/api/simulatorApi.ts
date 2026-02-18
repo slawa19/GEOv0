@@ -237,3 +237,54 @@ export function getTrustlinesList(
   }).toString()
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustlines-list?${q}`)
 }
+
+// ============================
+// Session bootstrap (§10 — anonymous/cookie auth)
+// ============================
+
+export type SessionEnsureResponse = {
+  actor_kind: string
+  owner_id: string
+}
+
+/**
+ * Ensures a cookie session exists (creates or validates `geo_sim_sid` cookie).
+ * Call on startup when no accessToken is present (anonymous visitors workflow).
+ * Uses credentials: 'include' via the underlying httpJson implementation.
+ */
+export function ensureSession(cfg: HttpConfig): Promise<SessionEnsureResponse> {
+  return httpJson(cfg, '/simulator/session/ensure', { method: 'POST' })
+}
+
+// ============================
+// Admin endpoints (require admin token)
+// ============================
+
+export type AdminRunSummary = {
+  run_id: string
+  owner_id: string
+  actor_kind: string
+  state: string
+  scenario_id?: string | null
+  created_at?: string | null
+}
+
+export type AdminRunsListResponse = {
+  items: AdminRunSummary[]
+}
+
+/**
+ * Returns all active/recent runs across all owners (admin only).
+ * Requires X-Admin-Token or equivalent admin auth header.
+ */
+export function adminGetAllRuns(cfg: HttpConfig): Promise<AdminRunsListResponse> {
+  return httpJson(cfg, '/simulator/admin/runs')
+}
+
+/**
+ * Stops all currently running simulator runs (admin only).
+ * Returns count of stopped runs.
+ */
+export function adminStopAllRuns(cfg: HttpConfig): Promise<{ stopped: number }> {
+  return httpJson(cfg, '/simulator/admin/runs/stop-all', { method: 'POST' })
+}

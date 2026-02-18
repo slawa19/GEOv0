@@ -22,7 +22,8 @@ class RunLifecycle:
         *,
         lock,
         runs: dict[str, RunRecord],
-        set_active_run_id: Callable[[str], None],
+        set_active_run_id: Callable,  # (run_id: str, owner_id: str = "") -> None
+        clear_active_run_id: Optional[Callable] = None,  # (owner_id: str = "", run_id: str = "") -> None
         utc_now,
         new_run_id: Callable[[], str],
         get_scenario_raw: Callable[[str], dict[str, Any]],
@@ -37,10 +38,13 @@ class RunLifecycle:
         get_max_active_runs: Callable[[], int],
         get_max_run_records: Callable[[], int],
         logger,
+        get_active_run_id_for_owner: Optional[Callable[[str], Optional[str]]] = None,
+        get_max_active_runs_per_owner: Optional[Callable[[], int]] = None,
     ) -> None:
         self._lock = lock
         self._runs = runs
         self._set_active_run_id = set_active_run_id
+        self._clear_active_run_id = clear_active_run_id
         self._utc_now = utc_now
         self._new_run_id = new_run_id
         self._get_scenario_raw = get_scenario_raw
@@ -55,6 +59,8 @@ class RunLifecycle:
         self._get_max_active_runs = get_max_active_runs
         self._get_max_run_records = get_max_run_records
         self._logger = logger
+        self._get_active_run_id_for_owner = get_active_run_id_for_owner
+        self._get_max_active_runs_per_owner = get_max_active_runs_per_owner
 
     def _count_active_runs_locked(self) -> int:
         active_states = {"running", "paused", "stopping"}
@@ -67,8 +73,12 @@ class RunLifecycle:
         active = self._count_active_runs_locked()
         if active >= max_active:
             raise ConflictException(
-                "Too many active simulator runs",
-                details={"max_active_runs": max_active, "active_runs": active},
+                "Global active runs limit reached",
+                details={
+                    "conflict_kind": "global_active_limit",
+                    "max_active_runs": max_active,
+                    "active_runs": active,
+                },
             )
 
     def _prune_run_records_locked(self) -> None:
@@ -110,7 +120,16 @@ class RunLifecycle:
             raise NotFoundException(f"Run {run_id} not found")
         return run
 
-    async def create_run(self, *, scenario_id: str, mode: RunMode, intensity_percent: int) -> str:
+    async def create_run(
+        self,
+        *,
+        scenario_id: str,
+        mode: RunMode,
+        intensity_percent: int,
+        owner_id: str = "",
+        owner_kind: str = "",
+        created_by: Optional[dict] = None,
+    ) -> str:
         # Validate scenario exists (even for real mode for now).
         _ = self._get_scenario_raw(scenario_id)
 
@@ -122,6 +141,9 @@ class RunLifecycle:
             scenario_id=scenario_id,
             mode=mode,
             state="running",
+            owner_id=owner_id,
+            owner_kind=owner_kind,
+            created_by=created_by,
             started_at=self._utc_now(),
             seed=seed,
             tick_index=0,
@@ -148,13 +170,27 @@ class RunLifecycle:
         run._clearing_pending_done_at_ms = None
 
         with self._lock:
+            # Per-owner limit check (§6.3): owner may have at most
+            # SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER active runs (default: 1).
+            if owner_id and self._get_active_run_id_for_owner is not None:
+                existing_run_id = self._get_active_run_id_for_owner(owner_id)
+                if existing_run_id is not None:
+                    raise ConflictException(
+                        "Owner already has an active run",
+                        details={
+                            "conflict_kind": "owner_active_exists",
+                            "active_run_id": existing_run_id,
+                            "owner_id": owner_id,
+                        },
+                    )
+
             self._enforce_active_run_limit_locked()
 
             # Minimal local artifacts (best-effort). Do it before exposing the run.
             self._artifacts.init_run_artifacts(run)
 
             self._runs[run_id] = run
-            self._set_active_run_id(run_id)
+            self._set_active_run_id(run_id, owner_id)
 
             # Start artifacts writer (best-effort; no-op if artifacts disabled).
             self._artifacts.start_events_writer(run_id)
@@ -246,6 +282,15 @@ class RunLifecycle:
                 run.state = "stopped"
             if run.stopped_at is None:
                 run.stopped_at = self._utc_now()
+
+        # Release per-owner active run slot.
+        if self._clear_active_run_id is not None:
+            try:
+                self._clear_active_run_id(owner_id=run.owner_id, run_id=run_id)
+            except Exception:
+                self._logger.exception(
+                    "simulator.run.clear_active_run_id_failed run_id=%s", run_id
+                )
 
         self._publish_run_status(run_id)
 

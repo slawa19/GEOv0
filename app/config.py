@@ -1,6 +1,9 @@
+import logging
 from typing import Any, ClassVar, FrozenSet
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -95,6 +98,13 @@ class Settings(BaseSettings):
     # Higher value = fewer DB scans, less accurate viz_size/viz_width_key.
     SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS: int = 10
 
+    # --- Simulator session (anonymous visitors) ---
+    SIMULATOR_SESSION_SECRET: str = "change-me-in-production"
+    SIMULATOR_SESSION_TTL_SEC: int = 604800  # 7 days
+    SIMULATOR_SESSION_CLOCK_SKEW_SEC: int = 300  # 5 min tolerance
+    SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER: int = 1
+    SIMULATOR_CSRF_ORIGIN_ALLOWLIST: str = ""  # comma-separated origins, empty = allow all in dev
+
     # Admin API (minimal MVP)
     # NOTE: Shared secret to unblock Admin UI integration in MVP.
     # Replace with proper role-based auth in production.
@@ -141,6 +151,20 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: Any) -> None:
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
         self._guardrail_default_secrets()
+        self._guardrail_simulator_session_secret()
+
+    def _guardrail_simulator_session_secret(self) -> None:
+        """Fail-fast when SIMULATOR_SESSION_SECRET uses the insecure default in non-dev (§4)."""
+        env = (self.ENV or "").strip().lower()
+        if env in self._SAFE_ENVS:
+            return
+        sim_secret = (self.SIMULATOR_SESSION_SECRET or "").strip()
+        if "change-me" in sim_secret.lower():
+            raise RuntimeError(
+                "SIMULATOR_SESSION_SECRET must be changed in non-dev environment. "
+                f"Got ENV={self.ENV!r}. "
+                "Set a secure secret via SIMULATOR_SESSION_SECRET env var."
+            )
 
     def _guardrail_default_secrets(self) -> None:
         env = (self.ENV or "").strip().lower()
@@ -179,3 +203,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Return the global settings instance.
+
+    Provided as a callable for FastAPI Depends() and test mocking convenience.
+    """
+    return settings

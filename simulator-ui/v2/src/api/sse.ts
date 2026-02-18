@@ -70,7 +70,9 @@ export async function connectSse(opts: SseConnectOpts): Promise<void> {
   headers.set('Accept', 'text/event-stream')
   if (opts.lastEventId) headers.set('Last-Event-ID', opts.lastEventId)
 
-  const res = await fetch(opts.url, { headers, signal: opts.signal })
+  // credentials: 'include' sends cookies (e.g. geo_sim_sid) with SSE requests.
+  // Required for anonymous-visitor cookie-auth (no Authorization header available for SSE).
+  const res = await fetch(opts.url, { headers, signal: opts.signal, credentials: 'include' })
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
     throw new Error(`SSE HTTP ${res.status} ${res.statusText}: ${bodyText}`)

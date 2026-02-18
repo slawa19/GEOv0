@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.config import ConfigDict
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
 
 from sqlalchemy import and_, func, or_, select
@@ -87,6 +87,40 @@ router = APIRouter(prefix="/simulator")
 
 # Uvicorn typically configures this logger at INFO level.
 logger = logging.getLogger("uvicorn.error")
+
+
+@router.post("/session/ensure", summary="Ensure anonymous session")
+async def ensure_session(request: Request, response: Response):
+    """If valid cookie exists — return actor info. Otherwise create new session cookie."""
+    from app.core.simulator.session import COOKIE_NAME, create_session, validate_session
+    from app.config import get_settings
+
+    _settings = get_settings()
+    cookie_value = request.cookies.get(COOKIE_NAME)
+
+    if cookie_value:
+        session = validate_session(
+            cookie_value,
+            _settings.SIMULATOR_SESSION_SECRET,
+            _settings.SIMULATOR_SESSION_TTL_SEC,
+            _settings.SIMULATOR_SESSION_CLOCK_SKEW_SEC,
+        )
+        if session:
+            return {"actor_kind": "anon", "owner_id": session.owner_id}
+
+    # Create new session
+    cookie_val, session_info = create_session(_settings.SIMULATOR_SESSION_SECRET)
+    _scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=cookie_val,
+        max_age=_settings.SIMULATOR_SESSION_TTL_SEC,
+        httponly=True,
+        samesite="lax",
+        secure=_scheme == "https",
+        path="/",
+    )
+    return {"actor_kind": "anon", "owner_id": session_info.owner_id}
 
 
 def _build_clearing_done_cycle_edges_payload(
@@ -231,6 +265,20 @@ def _action_error(
 ) -> JSONResponse:
     payload = SimulatorActionError(code=code, message=message, details=details).model_dump(mode="json")
     return JSONResponse(status_code=int(status_code), content=payload)
+
+
+def _check_run_access(run, actor: "deps.SimulatorActor", run_id: str) -> None:
+    """Check that actor has access to the run. Raises 403 if not owner and not admin.
+
+    Also raises 404 if run is None (convenience so callers can call with runtime.get_run result).
+
+    Deny-by-default (§7): if run.owner_id is empty/legacy, only admin may access.
+    """
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    if not actor.is_admin:
+        if not run.owner_id or run.owner_id != actor.owner_id:
+            raise HTTPException(status_code=403, detail="Access denied: not run owner")
 
 
 def _require_actions_enabled_or_error() -> Optional[JSONResponse]:
@@ -548,13 +596,14 @@ class ClearingOnceResponseBody(BaseModel):
 async def action_trustline_create(
     run_id: str,
     req: SimulatorActionTrustlineCreateRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
     if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
         return err
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -739,13 +788,14 @@ async def action_trustline_create(
 async def action_trustline_update(
     run_id: str,
     req: SimulatorActionTrustlineUpdateRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
     if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
         return err
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -882,13 +932,14 @@ async def action_trustline_update(
 async def action_trustline_close(
     run_id: str,
     req: SimulatorActionTrustlineCloseRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
     if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
         return err
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -1014,13 +1065,14 @@ async def action_trustline_close(
 async def action_payment_real(
     run_id: str,
     req: SimulatorActionPaymentRealRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
     if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
         return err
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
 
     from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
     if err is not None:
@@ -1180,13 +1232,14 @@ async def action_payment_real(
 async def action_clearing_real(
     run_id: str,
     req: SimulatorActionClearingRealRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
     if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
         return err
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
 
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
     if err is not None:
@@ -1289,13 +1342,16 @@ async def action_clearing_real(
 )
 async def action_participants_list(
     run_id: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
-        return err
+    # NOTE: intentionally no _require_run_accepts_actions_or_error here —
+    # participants-list is read-only and must work even for stopped/error runs.
+
+    # AuthZ: ownership check
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
 
     # Run/snapshot-scoped: build from current run snapshot (not global Participant table).
     try:
@@ -1338,13 +1394,16 @@ async def action_trustlines_list(
     run_id: str,
     equivalent: Optional[str] = Query(None),
     participant_pid: Optional[str] = Query(None),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
-        return err
+    # NOTE: intentionally no _require_run_accepts_actions_or_error here —
+    # trustlines-list is read-only and must work even for stopped/error runs.
+
+    # AuthZ: ownership check
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
 
     eq, err = await _resolve_equivalent_or_error(session=db, code=str(equivalent or ""))
     if err is not None:
@@ -1653,10 +1712,10 @@ async def _run_events_stream(
 @router.get("/graph/snapshot", response_model=SimulatorGraphSnapshot)
 async def graph_snapshot_active_run(
     equivalent: str = Query(...),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
-    run_id = runtime.get_active_run_id()
+    run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         # Active run is optional in MVP; return an empty snapshot.
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
@@ -1668,10 +1727,10 @@ async def ego_snapshot_active_run(
     equivalent: str = Query(...),
     pid: str = Query(...),
     depth: int = Query(1, ge=1, le=2),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
-    run_id = runtime.get_active_run_id()
+    run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         return SimulatorGraphSnapshot(equivalent=equivalent, generated_at=_utc_now(), nodes=[], links=[])
     return await runtime.build_ego_snapshot(run_id=run_id, equivalent=equivalent, pid=pid, depth=depth, session=db)
@@ -1682,12 +1741,12 @@ async def events_stream_active_run(
     request: Request,
     equivalent: str = Query(...),
     stop_after_types: Optional[str] = Query(None),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
-    run_id = runtime.get_active_run_id() or "active"
+    run_id = runtime.get_active_run_id(owner_id=actor.owner_id) or "active"
 
     # If there is no actual run, serve a stream with keep-alives only.
-    if runtime.get_active_run_id() is None:
+    if runtime.get_active_run_id(owner_id=actor.owner_id) is None:
 
         async def idle_stream() -> AsyncIterator[str]:
             while True:
@@ -1722,7 +1781,7 @@ async def events_stream_active_run(
 async def events_poll_active_run(
     equivalent: str = Query(...),
     after: Optional[str] = Query(None),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     # MVP: no replay buffer.
     return []
@@ -1735,7 +1794,7 @@ async def events_poll_active_run(
 
 @router.get("/scenarios", response_model=ScenariosListResponse)
 async def list_scenarios(
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     return ScenariosListResponse(items=runtime.list_scenarios())
 
@@ -1743,7 +1802,7 @@ async def list_scenarios(
 @router.post("/scenarios", response_model=ScenarioSummary)
 async def upload_scenario(
     body: ScenarioUploadRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     rec = runtime.save_uploaded_scenario(body.scenario)
     return rec.summary()
@@ -1752,7 +1811,7 @@ async def upload_scenario(
 @router.get("/scenarios/{scenario_id}", response_model=ScenarioSummary)
 async def get_scenario_summary(
     scenario_id: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     return runtime.get_scenario(scenario_id).summary()
 
@@ -1762,7 +1821,7 @@ async def scenario_graph_preview(
     scenario_id: str,
     equivalent: str = Query(...),
     mode: RunMode = Query("fixtures"),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
     """Preview the scenario graph topology without starting a run."""
@@ -1772,24 +1831,29 @@ async def scenario_graph_preview(
 @router.post("/runs", response_model=RunCreateResponse)
 async def start_run(
     body: RunCreateRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     run_id = await runtime.create_run(
-        scenario_id=body.scenario_id, mode=body.mode, intensity_percent=body.intensity_percent
+        scenario_id=body.scenario_id,
+        mode=body.mode,
+        intensity_percent=body.intensity_percent,
+        owner_id=actor.owner_id,
+        owner_kind=actor.kind,
+        created_by={"actor_kind": actor.kind, "owner_id": actor.owner_id},
     )
     return RunCreateResponse(run_id=run_id)
 
 
 @router.get("/runs/active", response_model=ActiveRunResponse)
 async def get_active_run(
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     """Return the current active run id (if any).
 
     Used by the Simulator UI to recover when `SIMULATOR_MAX_ACTIVE_RUNS` prevents
     creating a new run (e.g. another tab already has one running).
     """
-    run_id = runtime.get_active_run_id()
+    run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
     if run_id is None:
         return ActiveRunResponse(run_id=None)
 
@@ -1810,24 +1874,27 @@ async def get_active_run(
 @router.get("/runs/{run_id}", response_model=RunStatus)
 async def get_run_status(
     run_id: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return runtime.get_run_status(run_id)
 
 
 @router.post("/runs/{run_id}/pause", response_model=RunStatus)
 async def pause_run(
     run_id: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.pause(run_id)
 
 
 @router.post("/runs/{run_id}/resume", response_model=RunStatus)
 async def resume_run(
     run_id: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.resume(run_id)
 
 
@@ -1837,8 +1904,9 @@ async def stop_run(
     request: Request,
     source: Optional[str] = Query(default=None, description="Client source (e.g. ui, cli, script)"),
     reason: Optional[str] = Query(default=None, description="Human-readable stop reason"),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     client = getattr(request, "client", None)
     client_host = getattr(client, "host", None)
     source_s = str(source) if source else "<unspecified>"
@@ -1865,8 +1933,9 @@ async def stop_run(
 @router.post("/runs/{run_id}/restart", response_model=RunStatus)
 async def restart_run(
     run_id: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.restart(run_id)
 
 
@@ -1874,8 +1943,9 @@ async def restart_run(
 async def set_run_intensity(
     run_id: str,
     body: SetIntensityRequest,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.set_intensity(run_id, intensity_percent=body.intensity_percent)
 
 
@@ -1885,8 +1955,9 @@ async def run_events_stream(
     request: Request,
     equivalent: str = Query(...),
     stop_after_types: Optional[str] = Query(None),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     last_event_id = request.headers.get("Last-Event-ID")
     if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
         run_id=run_id, after_event_id=last_event_id
@@ -1908,9 +1979,10 @@ async def run_events_stream(
 async def action_tx_once(
     run_id: str,
     body: TxOnceRequestBody,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     _require_actions_enabled()
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     emitted = runtime.emit_debug_tx_once(
         run_id=run_id,
         equivalent=body.equivalent,
@@ -1927,9 +1999,10 @@ async def action_tx_once(
 async def action_clearing_once(
     run_id: str,
     body: ClearingOnceRequestBody,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     _require_actions_enabled()
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     plan_id, done_event_id, _eq = runtime.emit_debug_clearing_once(
         run_id=run_id,
         equivalent=body.equivalent,
@@ -1947,9 +2020,10 @@ async def action_clearing_once(
 async def graph_snapshot_for_run(
     run_id: str,
     equivalent: str = Query(...),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
 
 
@@ -1960,8 +2034,9 @@ async def metrics_for_run(
     from_ms: int = Query(..., ge=0),
     to_ms: int = Query(..., ge=0),
     step_ms: int = Query(..., ge=1),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.build_metrics(
         run_id=run_id,
         equivalent=equivalent,
@@ -1977,8 +2052,9 @@ async def bottlenecks_for_run(
     equivalent: str = Query(...),
     limit: int = Query(20, ge=1, le=200),
     min_score: Optional[float] = Query(None, ge=0.0, le=1.0),
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.build_bottlenecks(
         run_id=run_id,
         equivalent=equivalent,
@@ -1990,8 +2066,9 @@ async def bottlenecks_for_run(
 @router.get("/runs/{run_id}/artifacts", response_model=ArtifactIndex)
 async def artifacts_index(
     run_id: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     return await runtime.list_artifacts(run_id=run_id)
 
 
@@ -1999,7 +2076,86 @@ async def artifacts_index(
 async def artifacts_download(
     run_id: str,
     name: str,
-    _actor=Depends(deps.require_participant_or_admin),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    _check_run_access(runtime.get_run(run_id), actor, run_id)
     path = runtime.get_artifact_path(run_id=run_id, name=name)
     return FileResponse(path)
+
+
+# ---------------------------------------------------------------------------
+# Admin control plane endpoints (spec §8, §9)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/runs", summary="List all runs (admin)")
+async def admin_list_runs(
+    state: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
+):
+    """List all runs with optional filters. Admin only.
+
+    Query params:
+    - state: filter by run state (e.g. "running", "stopped", "error", "paused")
+    - owner_id: filter by owner_id exact match
+    - limit: page size (1..200, default 50)
+    - offset: pagination offset (default 0)
+
+    Returns paginated list with owner info for each run.
+    """
+    if not actor.is_admin:
+        raise ForbiddenException("Admin access required")
+
+    all_runs = runtime.list_runs(state=state, owner_id=owner_id)
+    total = len(all_runs)
+    page = all_runs[offset: offset + limit]
+
+    items = []
+    for run in page:
+        items.append({
+            "run_id": run.run_id,
+            "scenario_id": run.scenario_id,
+            "mode": run.mode,
+            "state": run.state,
+            "owner_id": run.owner_id,
+            "owner_kind": run.owner_kind,
+            "intensity_percent": run.intensity_percent,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "stopped_at": run.stopped_at.isoformat() if run.stopped_at else None,
+            "sim_time_ms": run.sim_time_ms,
+            "ops_sec": run.ops_sec,
+            "errors_total": run.errors_total,
+            "committed_total": run.committed_total,
+            "rejected_total": run.rejected_total,
+            "attempts_total": run.attempts_total,
+        })
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/admin/runs/stop-all", summary="Stop all active runs (admin)")
+async def admin_stop_all_runs(
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
+):
+    """Stop all currently active runs. Admin only.
+
+    Iterates over all active owner→run mappings and calls stop() for each.
+    Returns count of successfully stopped runs and any per-run errors.
+    """
+    if not actor.is_admin:
+        raise ForbiddenException("Admin access required")
+
+    active_runs = runtime.get_all_active_runs()  # dict owner_id → run_id
+    stopped = 0
+    errors = []
+    for _owner_id, run_id in active_runs.items():
+        try:
+            await runtime.stop(run_id, source="admin", reason="admin_stop_all")
+            stopped += 1
+        except Exception as exc:
+            errors.append({"run_id": run_id, "error": str(exc)})
+
+    return {"stopped": stopped, "errors": errors}

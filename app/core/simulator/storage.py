@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -71,6 +71,8 @@ async def upsert_run(run: RunRecord) -> None:
                 last_event_type=run.last_event_type,
                 current_phase=run.current_phase,
                 last_error=run.last_error,
+                owner_id=str(run.owner_id) if getattr(run, "owner_id", None) else None,
+                owner_kind=str(run.owner_kind) if getattr(run, "owner_kind", None) else None,
             )
             try:
                 await session.merge(row)
@@ -458,3 +460,46 @@ async def write_tick_bottlenecks(
         except Exception:
             pass
         return
+
+
+async def reconcile_stale_runs() -> int:
+    """Mark runs stuck in non-terminal state as error (server restart recovery).
+
+    Called once at startup (§12 Recovery reconciliation).  Any run still in
+    'running', 'paused', or 'stopping' state has no active process after a
+    restart, so we transition it to 'error' with last_error={"reason":
+    "server_restart"}.
+
+    Returns the number of reconciled runs (0 if DB is disabled or none found).
+    This is best-effort: DB errors are logged and swallowed so the server still
+    starts up cleanly.
+    """
+    if not db_enabled():
+        return 0
+
+    stale_states = ("running", "paused", "stopping")
+    try:
+        async with db.AsyncSessionLocal() as session:
+            result = await session.execute(
+                sql_update(SimulatorRun)
+                .where(SimulatorRun.state.in_(stale_states))
+                .values(
+                    state="error",
+                    last_error={"reason": "server_restart"},
+                )
+                .execution_options(synchronize_session=False)
+            )
+            count: int = result.rowcount if result.rowcount is not None else 0
+            await session.commit()
+
+        if count:
+            logger.warning(
+                "simulator.reconcile stale_runs=%d — marked as error (reason: server_restart)",
+                count,
+            )
+        else:
+            logger.info("simulator.reconcile no stale runs found at startup")
+        return count
+    except Exception:
+        logger.exception("simulator.reconcile_stale_runs failed (best-effort, server will still start)")
+        return 0

@@ -77,6 +77,21 @@ async def lifespan(app: FastAPI):
 
     await _sqlite_ensure_debts_version_column()
 
+    # §12 Recovery reconciliation: mark simulator runs that were still active
+    # before the previous server process died as 'error'.  Best-effort — any
+    # exception here must NOT prevent the server from starting.
+    try:
+        from app.core.simulator.storage import reconcile_stale_runs
+
+        _reconciled = await reconcile_stale_runs()
+        if _reconciled:
+            logger.warning(
+                "lifespan.simulator_reconcile reconciled=%d stale run(s) on startup",
+                _reconciled,
+            )
+    except Exception:
+        logger.exception("lifespan.simulator_reconcile_failed (non-fatal)")
+
     if settings.REDIS_ENABLED:
         import redis.asyncio as redis
         from app.utils import security

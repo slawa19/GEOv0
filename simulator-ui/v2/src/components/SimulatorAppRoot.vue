@@ -103,6 +103,7 @@ const {
   // real mode
   real,
   realActions,
+  admin,
 
   // state + prefs
   state,
@@ -457,6 +458,12 @@ function onEdgeDetailCloseLine() {
       :go-sandbox="goSandbox"
       :go-auto-run="goAutoRun"
       :go-interact="goInteract"
+      :access-token="real.accessToken"
+      :admin-runs="admin.runs.value"
+      :admin-runs-loading="admin.loading.value"
+      :admin-last-error="admin.lastError.value"
+      :admin-get-runs="admin.getRuns"
+      :admin-stop-runs="admin.stopRuns"
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:desired-mode="realActions.setDesiredMode"
       @update:intensity-percent="realActions.setIntensityPercent"

@@ -320,6 +320,24 @@
 
 ---
 
+## 2.10. `simulator.*` — Simulator Session (Anonymous Visitors) (restart required)
+
+Настройки анонимных сессий для Simulator Real Mode. Подробнее: [`docs/ru/simulator/backend/anonymous-visitors-cookie-runs-spec.md`](simulator/backend/anonymous-visitors-cookie-runs-spec.md).
+
+### Simulator Session (Anonymous Visitors)
+
+| Переменная | Тип | Default | Описание |
+|-----------|-----|---------|----------|
+| `SIMULATOR_SESSION_SECRET` | str | `change-me-in-production` | HMAC-SHA256 ключ для подписи cookie `geo_sim_sid`. **Обязательно сменить в production!** Guardrail: fail-fast `RuntimeError` при дефолтном значении в non-dev/non-test окружении. |
+| `SIMULATOR_SESSION_TTL_SEC` | int | `604800` (7 дней) | Время жизни анонимной сессии в секундах. Cookie `geo_sim_sid` выдаётся с этим TTL. |
+| `SIMULATOR_SESSION_CLOCK_SKEW_SEC` | int | `300` (5 мин) | Допустимое расхождение часов при валидации cookie. **Важно:** clock_skew применяется **только** для проверки `iat` в будущем (защита от Clock Skew при выдаче), но **не расширяет TTL** просроченной сессии. |
+| `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER` | int | `1` | Максимум активных run'ов на одного владельца (per-owner лимит). При превышении возвращается `409 Conflict` с `conflict_kind: owner_active_exists`. Глобальный лимит: `409` с `conflict_kind: global_active_limit`. |
+| `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` | str | `""` (пусто) | Comma-separated список разрешённых Origin для cookie-auth POST. Пусто = разрешить всё (dev). При CSRF нарушении возвращается `ForbiddenException` с кодом `E006` и `details.reason=csrf_origin`. |
+
+> ⚠️ **`SIMULATOR_SESSION_SECRET` guardrail:** при значении `change-me-in-production` в окружении с `ENV` не равным `dev` или `test` приложение **отказывается стартовать** с `RuntimeError`. Это fail-fast защита, а не просто предупреждение.
+
+---
+
 ## 3. Пример `geo-hub-config.yaml` (рекомендуемые дефолты для пилота)
 
 ```yaml

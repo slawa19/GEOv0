@@ -275,7 +275,8 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function refreshRunStatus() {
-    if (!real.runId || !real.accessToken) return
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!real.runId) return
     try {
       const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
       real.runStatus = st
@@ -292,8 +293,8 @@ export function useSimulatorRealMode(opts: {
 
   async function refreshSnapshot() {
     // Guard: never refresh snapshots when real mode is not active or context is missing.
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!isRealMode.value) return
-    if (!real.accessToken) return
     if (!real.runId && !real.selectedScenarioId) return
 
     // If a refresh is already in flight, mark as pending and return — the current call will re-invoke.
@@ -313,7 +314,7 @@ export function useSimulatorRealMode(opts: {
 
     const isContextStillValid = () => {
       if (!isRealMode.value) return false
-      if (!real.accessToken) return false
+      // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
 
       // Abort if a teardown/stop happened or a newer refresh started.
       if (refreshSnapshotSeq !== mySeq) return false
@@ -426,7 +427,9 @@ export function useSimulatorRealMode(opts: {
     stopSse()
 
     if (!isRealMode.value) return
-    if (!real.runId || !real.accessToken) return
+    // Note: accessToken is not required here — anonymous visitors use cookie-auth (geo_sim_sid).
+    // credentials: 'include' is set at the SSE/fetch layer; see api/sse.ts connectSse.
+    if (!real.runId) return
 
     const ctrl = new AbortController()
     sseAbort = ctrl
@@ -829,11 +832,7 @@ export function useSimulatorRealMode(opts: {
   )
 
   async function refreshScenarios() {
-    if (!real.accessToken) {
-      real.lastError = 'Missing access token'
-      return
-    }
-
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     real.loadingScenarios = true
     real.lastError = ''
     try {
@@ -849,10 +848,7 @@ export function useSimulatorRealMode(opts: {
 
   async function startRun(startOpts?: { mode?: SimulatorMode; intensityPercent?: number; pauseImmediately?: boolean }) {
     if (!real.selectedScenarioId) return
-    if (!real.accessToken) {
-      real.lastError = 'Missing access token'
-      return
-    }
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
 
     const st = String(real.runStatus?.state ?? '').toLowerCase()
     const isActive = !!real.runId && (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
@@ -931,7 +927,8 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function pause() {
-    if (!real.runId || !real.accessToken) return
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!real.runId) return
     try {
       real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
     } catch (e: unknown) {
@@ -940,7 +937,8 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function resume() {
-    if (!real.runId || !real.accessToken) return
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!real.runId) return
     try {
       real.runStatus = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
     } catch (e: unknown) {
@@ -949,7 +947,8 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function stop() {
-    if (!real.runId || !real.accessToken) return
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!real.runId) return
     try {
       teardownRefreshSnapshot()
       stopSse()
@@ -974,7 +973,8 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function applyIntensity() {
-    if (!real.runId || !real.accessToken) return
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!real.runId) return
     try {
       real.runStatus = await setIntensity(
         { apiBase: real.apiBase, accessToken: real.accessToken },
@@ -987,7 +987,8 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function refreshArtifacts() {
-    if (!real.runId || !real.accessToken) return
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!real.runId) return
     real.artifactsLoading = true
     try {
       const idx = await listArtifacts({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
@@ -1000,10 +1001,12 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function downloadArtifact(name: string) {
-    if (!real.runId || !real.accessToken) return
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!real.runId) return
     try {
       const url = artifactDownloadUrl({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId, name)
-      const res = await fetch(url, { headers: authHeaders(real.accessToken) })
+      // credentials: 'include' sends cookies (geo_sim_sid) for anonymous-visitor auth.
+      const res = await fetch(url, { headers: authHeaders(real.accessToken), credentials: 'include' })
       if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`)
       const blob = await res.blob()
       const blobUrl = URL.createObjectURL(blob)
@@ -1038,7 +1041,8 @@ export function useSimulatorRealMode(opts: {
           // If no runId is persisted locally, try to discover an already-active run.
           // This makes cross-tab / cross-browser runs visible immediately in the UI
           // and prevents the confusing "Start → HTTP 409" experience.
-          if (real.accessToken && !real.runId) {
+          // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+          if (!real.runId) {
             try {
               const active = await getActiveRun({ apiBase: real.apiBase, accessToken: real.accessToken })
               const activeRunId = String(active?.run_id ?? '').trim()
@@ -1050,7 +1054,8 @@ export function useSimulatorRealMode(opts: {
             }
           }
 
-          if (real.runId && real.accessToken) {
+          // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+          if (real.runId) {
             await refreshRunStatus()
             if (real.runId) {
               await refreshSnapshot()
@@ -1062,14 +1067,14 @@ export function useSimulatorRealMode(opts: {
           }
 
           // No active run on mount: show scenario preview immediately.
-          if (real.accessToken && real.selectedScenarioId && !real.runId) {
+          // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+          if (real.selectedScenarioId && !real.runId) {
             await refreshSnapshot()
           }
 
           const shouldAutoStart =
             import.meta.env.DEV &&
             isLocalhost &&
-            real.accessToken &&
             real.selectedScenarioId &&
             !real.runId &&
             new URLSearchParams(window.location.search).get('autostart') === '1'
@@ -1088,7 +1093,7 @@ export function useSimulatorRealMode(opts: {
     async ([scenarioId]) => {
       if (!isRealMode.value) return
       if (!scenarioId) return
-      if (!real.accessToken) return
+      // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
 
       // Block watcher from calling refreshSnapshot during startRun (it handles its own refresh).
       if (startRunInProgress) return

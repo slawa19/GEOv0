@@ -16,6 +16,10 @@ class SimulatorRun(Base):
     mode: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     state: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
+    # Per-owner tracking (Phase 2). Nullable until migration.
+    owner_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    owner_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stopped_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

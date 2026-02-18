@@ -45,14 +45,14 @@ Runtime симулятора — **in-process** (in-memory):
 
 ## 3) Архитектурное решение: actor → owner_id
 
-Каждый запрос к `/api/v1/simulator/*` должен вычислять `actor` и `owner_id` по правилам:
+Каждый запрос к `/api/v1/simulator/*` вычисляет `actor` и **всегда** получает `owner_id` (строка), по правилам:
 
-1) Если присутствует валидный `X-Admin-Token` → `actor.kind = admin`, `actor.is_admin = true`.
-2) Иначе если есть валидный `Bearer JWT` → `actor.kind = participant`, `owner_id = "pid:<sub>"`.
-3) Иначе если есть валидная анонимная cookie сессия → `actor.kind = anon`, `owner_id = "anon:<sid>"`.
-4) Иначе → для simulator endpoints:
-   - либо возвращаем 401
-   - либо (предпочтительнее для UX) выдаём cookie через отдельный endpoint `session/ensure` и дальше клиент повторяет запрос.
+**Порядок приоритета (важно):**
+1) Если присутствует валидный `X-Admin-Token` → `actor.kind = admin`, `actor.is_admin = true`, `owner_id = "admin"`.
+2) Если `X-Admin-Token` валиден **и** присутствует `X-Simulator-Owner` → `owner_id = "cli:<normalized>"` (admin-only override; см. раздел 9).
+3) Иначе если есть валидный `Authorization: Bearer <jwt>` → `actor.kind = participant`, `owner_id = "pid:<sub>"`.
+4) Иначе если есть валидная анонимная cookie-сессия → `actor.kind = anon`, `owner_id = "anon:<sid>"`.
+5) Иначе → 401 (для UI cookie-mode это исправляется вызовом `POST /session/ensure`).
 
 **Важно:** для SSE (EventSource) кастомные заголовки в браузере неудобны/ограничены. Cookie-actor даёт самый надёжный способ анонимной авторизации для SSE.
 
@@ -62,26 +62,47 @@ Runtime симулятора — **in-process** (in-memory):
 
 Cookie должна быть:
 - `HttpOnly` (чтобы JS не мог прочитать)
-- `SameSite=Lax` (или `Strict`, если UI и API всегда same-site)
-- `Secure=true` в prod
+- `SameSite=Lax` (default)
+- `Secure=true` в prod (в dev может быть `false`, если используется http)
 - `Path=/`.
 
 **Имя:** `geo_sim_sid` (v1)
 
-**Значение (stateless, подписанное):**
-- `sid` — random 128-bit (hex)
-- `iat` — issued-at epoch seconds
-- `sig` — HMAC-SHA256 от `sid|iat` с секретом `SIMULATOR_SESSION_SECRET`
+**Значение (stateless, подписанное, компактный формат):**
 
-Пример (логический, не буквальный):
-`base64url({sid,iat,sig})`.
+`v1.<sid_b64url>.<iat_dec>.<sig_b64url>`
+
+где:
+- `sid_b64url` — 16 байт random, base64url без `=` (128-bit entropy)
+- `iat_dec` — issued-at epoch seconds (десятичная строка)
+- `sig_b64url` — `HMAC-SHA256(secret, "v1|<sid_b64url>|<iat_dec>")`, base64url без `=`
+
+**Валидация:**
+- версия должна быть `v1`
+- `iat` не в будущем более чем на `SIMULATOR_SESSION_CLOCK_SKEW_SEC` (default 300)
+- `now - iat <= SIMULATOR_SESSION_TTL_SEC`
+- подпись совпадает (constant-time compare)
+
+**Секрет:** `SIMULATOR_SESSION_SECRET`.
+- В `dev/test` допускается дефолт (для удобства),
+- В остальных окружениях секрет **обязателен** (guardrail на старте процесса; см. `app/config.py`).
 
 ### 4.2 Retention
 
-- Cookie TTL: `SIMULATOR_SESSION_TTL_DAYS` (default 7)
+- Cookie TTL: `SIMULATOR_SESSION_TTL_SEC` (default 7d)
 - Сервер принимает cookie, если `now - iat <= TTL`.
 
-### 4.3 Endpoint bootstrap
+### 4.3 Revocation (важное ограничение)
+
+Так как cookie **stateless**, точечной “отзывной” системы в MVP нет.
+
+Поддерживаемые варианты:
+- истечение TTL
+- rotation `SIMULATOR_SESSION_SECRET` (инвалидирует **все** текущие cookie)
+
+Если потребуется точечный revoke (например, abuse), это отдельная задача (deny-list в DB/Redis).
+
+### 4.4 Endpoint bootstrap
 
 Добавить endpoint:
 
@@ -96,7 +117,30 @@ Cookie должна быть:
 - Если cookie отсутствует/просрочена/невалидна → установить новую и вернуть owner_id
 - Если валидна → вернуть текущий owner_id
 
+Ошибки:
+- если cookie-mode включён, но `SIMULATOR_SESSION_SECRET` не настроен (что не должно происходить вне dev/test из-за guardrail) → 500:
+   ```json
+   { "error": { "code": "E010", "message": "Internal server error", "details": { "reason": "simulator_session_secret_missing" } } }
+   ```
+
 **Примечание по dev cross-origin:** backend уже включает `allow_credentials=True` и allow-origin regex для localhost. UI запросы должны посылать cookie с `credentials: 'include'`.
+
+### 4.5 CSRF (cookie-mode)
+
+Cookie-mode добавляет CSRF-риски для **state-changing** запросов (POST/PATCH/PUT/DELETE).
+
+Минимальная политика для MVP (совместима с текущим dev-стеком `localhost:*`):
+- cookie `SameSite=Lax`
+- для state-changing запросов, которые авторизуются **через cookie** (т.е. нет `Authorization` и нет `X-Admin-Token`), backend требует `Origin` header
+   - `Origin` должен совпадать с allowlist (например, `http://localhost:5176`, `http://127.0.0.1:5176` в dev)
+   - если `Origin` отсутствует или не разрешён → 403:
+      ```json
+      { "error": { "code": "E006", "message": "Insufficient permissions", "details": { "reason": "csrf_origin" } } }
+      ```
+
+Расширение (не требуется для первой итерации, но совместимо): double-submit token:
+- cookie `geo_sim_csrf` (НЕ HttpOnly)
+- header `X-CSRF-Token: <cookie_value>`
 
 ## 5) Модель данных: owner поля в run
 
@@ -111,13 +155,17 @@ Cookie должна быть:
 ### 5.2 DB (опционально, если `SIMULATOR_DB_ENABLED=1`)
 
 Расширить таблицу `simulator_runs` (см. `app/db/models/simulator_storage.py`):
-- `owner_id TEXT NULL/NOT NULL` (рекомендуется NOT NULL при включенной DB)
+- `owner_id TEXT` (для новых записей **обязательное**)
 - `owner_kind TEXT NULL`
 
 Индексы:
 - `INDEX (owner_id, state, created_at)`
 
 Миграция должна быть совместимой с SQLite dev.
+
+**Миграция данных (важно):**
+- для существующих строк заполнить `owner_id = 'legacy:unknown'`, `owner_kind = NULL`
+- после этого можно сделать `owner_id` NOT NULL (SQLite: через copy-table миграцию alembic)
 
 ## 6) Runtime: active run per owner
 
@@ -135,7 +183,7 @@ Cookie должна быть:
 
 ### 6.3 Лимиты
 
-Нужно два уровня лимитов:
+Нужно два уровня лимитов и **два различимых вида конфликта**:
 
 1) **Per-owner**: `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER` (default 1)
    - предотвращает конфликт “две вкладки одного посетителя”
@@ -143,8 +191,40 @@ Cookie должна быть:
    - защита ресурсов процесса
 
 При `create_run` должны быть enforced оба:
-- если owner уже имеет активный → 409 (детали включают owner_id и active_run_id)
-- если глобальный лимит достигнут → 409 (детали включают max_active_runs, active_runs)
+
+1) Если owner уже имеет активный run → 409 `E008`:
+```json
+{
+   "error": {
+      "code": "E008",
+      "message": "State conflict",
+      "details": {
+         "conflict_kind": "owner_active_exists",
+         "owner_id": "anon:...",
+         "active_run_id": "run_..."
+      }
+   }
+}
+```
+
+2) Если глобальный лимит достигнут → 409 `E008`:
+```json
+{
+   "error": {
+      "code": "E008",
+      "message": "State conflict",
+      "details": {
+         "conflict_kind": "global_active_limit",
+         "max_active_runs": 1,
+         "active_runs": 1
+      }
+   }
+}
+```
+
+**UI правило:**
+- на `owner_active_exists` UI должен attach’иться к `active_run_id` (или через `/runs/active`)
+- на `global_active_limit` UI должен показать явную ошибку “сервер занят” (и не attach’иться к чужому run)
 
 ### 6.4 Поведение stop
 
@@ -193,6 +273,11 @@ Cookie должна быть:
 ### 8.1 Session
 - `POST /api/v1/simulator/session/ensure` (новый)
 
+Примечание по rate-limit: текущая реализация добавляет `deps.rate_limit` глобально на HTTP-роутеры.
+Для UX важно либо:
+- исключить `session/ensure` из rate-limit, либо
+- поднять лимит/отдельный bucket, чтобы страница не “умирала” от 429 при перезагрузках.
+
 ### 8.2 Runs
 
 Существующие эндпоинты сохраняются, но семантика меняется на per-owner:
@@ -202,7 +287,9 @@ Cookie должна быть:
 
 2) `GET /api/v1/simulator/runs/active`
    - возвращает active run **только для actor.owner_id**
-   - (admin override см. ниже)
+   - **контракт:** всегда 200
+     - если активного нет → `{ "run_id": null }`
+     - если есть → `{ "run_id": "..." }`
 
 3) Legacy active endpoints (без `{run_id}`):
    - `/api/v1/simulator/graph/snapshot`
@@ -219,14 +306,12 @@ Cookie должна быть:
    - query: `state` (optional), `owner_id` (optional), `limit`, `offset`
    - ответ: список run’ов с полями owner + state + timestamps + scenario
 
-2) `GET /api/v1/simulator/admin/runs/active`
-   - query: `owner_id` (required)
-   - ответ: `{ run_id: string|null }`
-
-3) `POST /api/v1/simulator/admin/runs/stop-all` (dev/ops helper)
+2) `POST /api/v1/simulator/admin/runs/stop-all` (dev/ops helper)
    - query: `state=running|paused|stopping|*` (default `*`)
    - body: `{ reason?: string }`
    - ответ: `{ stopped: number }`
+
+Примечание: “active run любого owner” для админа достигается через `GET /api/v1/simulator/runs/active` + `X-Simulator-Owner` (см. раздел 9), без отдельного `/admin/runs/active`.
 
 Примечание: админ и так может останавливать run через существующий `POST /runs/{run_id}/stop`, но stop-all нужен как быстрый “уборщик” после тестов/демо.
 
@@ -243,8 +328,14 @@ Cookie должна быть:
 - `X-Simulator-Owner: <string>`
 
 Правило:
-- если `X-Admin-Token` валиден и заголовок присутствует → использовать `owner_id = "cli:<value>"` (или напрямую `<value>` по договорённости)
+- если `X-Admin-Token` валиден и заголовок присутствует → использовать `owner_id = "cli:<normalized>"`
 - если admin token нет → игнорировать заголовок
+
+`<normalized>`:
+- trim
+- длина 1..64
+- допустимые символы: `[A-Za-z0-9._:-]`
+- иначе 422 `E009` (validation error)
 
 Где применяется:
 - `POST /simulator/runs`
@@ -314,8 +405,8 @@ UI должен уметь работать без `accessToken`, в режим�
 ## 11) Безопасность
 
 - Cookie auth требует защиты от CSRF на state-changing endpoints.
-  - Минимум: проверка `Origin`/`Referer` на same-site для `POST` в `/simulator/*`.
-  - Рекомендуемо: double-submit CSRF token (отдельная cookie + header).
+   - MVP: `SameSite=Lax` + обязательный `Origin` allowlist для cookie-auth запросов.
+   - Next: double-submit CSRF (cookie `geo_sim_csrf` + header `X-CSRF-Token`).
 - SSE: cookie auth предпочтительнее токена в query-string.
 - Admin override header `X-Simulator-Owner` принимается **только при валидном `X-Admin-Token`**.
 
@@ -330,14 +421,34 @@ Runtime сейчас in-process.
 2) добавить sticky-sessions на уровне балансировщика
 3) вынести runtime в общий storage (Redis/DB) — не входит в задачу
 
+### 12.1 Перезапуск backend (recovery/consistency)
+
+Текущий runtime in-process, поэтому при рестарте backend:
+- все “живые” прогоны в памяти прекращаются
+- `active_run_id_by_owner` теряется
+
+Если `SIMULATOR_DB_ENABLED=1`, нужно явно определить поведение, чтобы UI/админ не видели «фантомные running»:
+- на старте процесса выполнить best-effort reconciliation:
+   - найти в `simulator_runs` все записи со `state IN ('running','paused','stopping')`
+   - перевести их в `state='error'` (или `stopped`, по договорённости)
+   - выставить `stopped_at=now`, `last_error={"reason":"server_restart"}`
+
+Это отдельная небольшая recovery-задача (сейчас общий recovery в проекте симулятор не обслуживает).
+
+### 12.2 Очистка / retention (минимум)
+
+- in-memory структуры (events buffer, active mapping) очищаются автоматически вместе с процессом.
+- DB retention задаётся отдельной периодической job (см. общий подход в [docs/ru/simulator/backend/run-storage.md](run-storage.md)).
+
 ## 13) План внедрения (итеративно)
 
-1) Backend: actor model + cookie session endpoint + owner_id на RunRecord
-2) Backend: per-owner active mapping + per-owner лимит + авторизация run endpoints
-3) Backend: admin list endpoints + stop-all
-4) Backend: admin-only `X-Simulator-Owner` override для CLI/tests
-5) Tests: обновить `auth_headers` fixture (или отдельные тесты) чтобы задавать owner override при параллельных/нестабильных прогонах
-6) UI: cookie bootstrap + `credentials: 'include'` в fetch + SSE
+1) Backend: `SimulatorActor` + cookie `session/ensure` + `SIMULATOR_SESSION_SECRET` guardrail
+2) Backend: `owner_id` на `RunRecord` + per-owner active mapping + enforcement + 409 subtypes
+3) Backend: owner-based authZ на run endpoints (403 на чужие run_id)
+4) Backend: admin list endpoint + stop-all + admin-only `X-Simulator-Owner` override
+5) DB: миграция `simulator_runs.owner_id/owner_kind` + backfill `legacy:unknown`
+6) UI: cookie bootstrap + `credentials: 'include'` для HTTP + SSE
+7) Tests: добавить кейсы cookie-owner isolation + admin override для параллельных прогонов
 
 ## 14) Acceptance criteria
 
@@ -362,3 +473,49 @@ Runtime сейчас in-process.
 5) CLI/тесты:
    - могут создавать runs как раньше с `X-Admin-Token`
    - при заданном `X-Simulator-Owner` могут создавать runs параллельно без 409 per-owner
+
+6) Global limit:
+   - если `SIMULATOR_MAX_ACTIVE_RUNS` исчерпан, новый anon Start получает 409 с `conflict_kind=global_active_limit`
+   - UI показывает явное сообщение (без attach к чужому run)
+
+## §15. Статус реализации
+
+> Последнее обновление: 2026-02-18
+
+### Полностью реализовано ✅
+
+| Секция | Описание | Файлы | Тесты |
+|--------|----------|-------|-------|
+| §2 Config | 5 настроек: `SIMULATOR_SESSION_SECRET`, `SIMULATOR_SESSION_TTL_HOURS`, `SIMULATOR_COOKIE_DOMAIN`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`, `SIMULATOR_ANON_VISITORS_ENABLED` | `app/config.py` | `test_simulator_cookie_session.py` |
+| §3 SimulatorActor | Dataclass `{kind, owner_id, is_admin, participant_pid}`, priority chain Admin→JWT→Cookie→401 | `app/api/deps.py` | `test_simulator_actor_and_csrf.py` |
+| §4 Cookie Session | HMAC-SHA256, формат `v1.<sid>.<iat>.<sig>`, `geo_sim_sid`, Path=/, Secure via X-Forwarded-Proto | `app/core/simulator/session.py`, `app/api/v1/simulator.py` | `test_simulator_cookie_session.py` |
+| §5 DB миграция | `owner_id`, `owner_kind` nullable columns, backfill NULL для legacy | `migrations/versions/017_add_owner_to_simulator_runs.py` | — |
+| §6 Per-owner isolation | `_active_run_id_by_owner`, per-owner лимит (409 `owner_active_exists`), глобальный лимит (409 `global_active_limit`) | `app/core/simulator/runtime_impl.py`, `app/core/simulator/run_lifecycle.py` | `test_simulator_owner_isolation.py` |
+| §7 AuthZ | `_check_run_access()` deny-by-default, пустой owner → только admin | `app/api/v1/simulator.py` | `test_simulator_owner_isolation.py` |
+| §8 Admin control plane | `GET /admin/runs`, `POST /admin/runs/stop-all`, ForbiddenException | `app/api/v1/simulator.py` | `test_simulator_owner_isolation.py` |
+| §9 X-Simulator-Owner | `.strip()` + regex validation, E009 для невалидных | `app/api/deps.py` | `test_simulator_actor_and_csrf.py` |
+| §10 UI | `credentials: 'include'`, session bootstrap, admin controls TopBar | `simulator-ui/v2/src/api/`, `simulator-ui/v2/src/composables/`, `simulator-ui/v2/src/components/` | 217 frontend tests |
+| §11 CSRF | Origin check, ForbiddenException с E006, `details.reason=csrf_origin` | `app/api/deps.py` | `test_simulator_actor_and_csrf.py` |
+| §12 Recovery | `reconcile_stale_runs()` на startup, rate-limit exemption `/session/ensure` | `app/core/simulator/storage.py`, `app/main.py`, `app/api/deps.py` | — |
+| §4 Guardrail | Fail-fast RuntimeError в non-dev при дефолтном секрете | `app/config.py` | `test_simulator_cookie_session.py` |
+
+### Покрытие тестами
+
+- **Backend unit-тесты:** 64 теста (3 файла)
+  - `test_simulator_cookie_session.py` — 19 тестов (session, TTL boundary, guardrail)
+  - `test_simulator_owner_isolation.py` — 25 тестов (per-owner, conflict_kind, authZ deny-by-default)
+  - `test_simulator_actor_and_csrf.py` — 22 теста (actor, CSRF E006, trim, E009)
+- **Frontend тесты:** 217 passed
+
+### Найденные и исправленные проблемы (Фаза 10)
+
+1. Per-owner лимит не применялся при `POST /runs` → добавлена проверка с `conflict_kind`
+2. Cookie `Path=/api/v1/simulator` → исправлен на `Path=/`
+3. Cookie `Secure` не учитывал reverse proxy → добавлена проверка `X-Forwarded-Proto`
+4. Session TTL допускал просрочку до `clock_skew_sec` → clock_skew только для будущего iat
+5. Guardrail только warning → fail-fast `RuntimeError` вне dev/test
+6. CSRF/auth ошибки через `HTTPException` → `ForbiddenException`/`UnauthorizedException` с кодами E006
+7. `X-Simulator-Owner` без `.strip()` → добавлен trim + E009 для невалидных
+8. `_check_run_access()` разрешал доступ при пустом `owner_id` → deny-by-default для non-admin
+9. Миграция ставила `owner_kind='admin'` → исправлено на NULL (по спеке)
+10. Admin endpoints через `HTTPException(403)` → `ForbiddenException`

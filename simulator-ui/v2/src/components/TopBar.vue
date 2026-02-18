@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
+import type { AdminRunSummary } from '../api/simulatorApi'
 
 type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
 
@@ -53,6 +54,24 @@ type Props = {
   goSandbox: () => void
   goAutoRun: () => void
   goInteract: () => void
+
+  /** Current access token — used to determine if admin controls should be shown. */
+  accessToken?: string | null
+
+  /** Admin: list of all runs (populated after adminGetRuns). */
+  adminRuns?: AdminRunSummary[]
+
+  /** Admin: true while loading all runs. */
+  adminRunsLoading?: boolean
+
+  /** Admin: last error from admin actions. */
+  adminLastError?: string
+
+  /** Admin: fetch all runs across all owners. */
+  adminGetRuns?: () => Promise<void>
+
+  /** Admin: stop all running runs. */
+  adminStopRuns?: () => Promise<void>
 }
 
 const props = defineProps<Props>()
@@ -158,6 +177,33 @@ const stopSummary = computed(() => {
   if (!src && !reason) return ''
   return `${src || 'unknown'}${reason ? `: ${reason}` : ''}`
 })
+
+// ============================
+// §10: Admin controls
+// ============================
+
+/**
+ * Admin controls are only visible when an access token is present.
+ * Anonymous visitors (cookie-only) do not see admin panel.
+ */
+const showAdminControls = computed(() => {
+  const t = String(props.accessToken ?? '').trim()
+  return !!t && props.apiMode === 'real'
+})
+
+/** Toggle state for the admin panel (details element). */
+const adminPanelOpen = ref(false)
+
+async function onAdminGetRuns() {
+  if (!props.adminGetRuns) return
+  await props.adminGetRuns()
+  adminPanelOpen.value = true
+}
+
+async function onAdminStopRuns() {
+  if (!props.adminStopRuns) return
+  await props.adminStopRuns()
+}
 </script>
 
 <template>
@@ -363,6 +409,76 @@ const stopSummary = computed(() => {
         <span class="ds-label">Stall</span>
         <span class="ds-value ds-mono" style="opacity: 0.92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
       </div>
+
+      <!-- §10: Admin controls — shown only when accessToken is present (admin-only) -->
+      <details
+        v-if="showAdminControls"
+        class="ds-panel ds-ov-bar"
+        style="padding: 6px 10px"
+        aria-label="Admin controls"
+        :open="adminPanelOpen"
+        @toggle="adminPanelOpen = ($event.target as HTMLDetailsElement).open"
+      >
+        <summary class="ds-row" style="gap: 8px; cursor: pointer; list-style: none; user-select: none" aria-label="Admin">
+          <span class="ds-badge ds-badge--warn">Admin</span>
+          <span class="ds-label" style="opacity: 0.7; font-size: 11px">{{ adminPanelOpen ? '▲' : '▼' }}</span>
+        </summary>
+        <div class="ds-stack" style="margin-top: 8px; gap: 8px">
+          <div class="ds-row" style="gap: 6px; align-items: center; flex-wrap: wrap">
+            <button
+              class="ds-btn ds-btn--secondary"
+              style="height: 28px; padding: 0 10px; font-size: 12px"
+              type="button"
+              :disabled="adminRunsLoading"
+              aria-label="Get all runs"
+              @click="onAdminGetRuns"
+            >
+              {{ adminRunsLoading ? '…' : 'All Runs' }}
+            </button>
+            <button
+              class="ds-btn ds-btn--danger"
+              style="height: 28px; padding: 0 10px; font-size: 12px"
+              type="button"
+              aria-label="Stop all runs"
+              @click="onAdminStopRuns"
+            >
+              Stop All
+            </button>
+            <span
+              v-if="adminLastError"
+              class="ds-badge ds-badge--err"
+              style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+              :title="adminLastError"
+            >
+              {{ short(adminLastError, 40) }}
+            </span>
+          </div>
+          <div
+            v-if="adminRuns && adminRuns.length > 0"
+            class="ds-stack"
+            style="gap: 4px; max-height: 200px; overflow-y: auto"
+            aria-label="Runs list"
+          >
+            <div
+              v-for="run in adminRuns"
+              :key="run.run_id"
+              class="ds-panel ds-ov-metric"
+              style="padding: 4px 8px; gap: 8px"
+            >
+              <span class="ds-label ds-mono" style="font-size: 11px">{{ run.run_id.slice(0, 8) }}</span>
+              <span :class="['ds-badge', run.state === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
+              <span class="ds-label" style="opacity: 0.7; font-size: 11px">{{ run.actor_kind }}</span>
+            </div>
+          </div>
+          <div
+            v-else-if="adminRuns !== null && !adminRunsLoading"
+            class="ds-label"
+            style="opacity: 0.7; font-size: 11px"
+          >
+            No active runs
+          </div>
+        </div>
+      </details>
     </div>
   </div>
 </template>

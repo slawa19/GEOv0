@@ -54,7 +54,9 @@ export async function httpJson<T>(cfg: HttpConfig, path: string, init?: RequestI
   if (init?.body != null) headers.set('Content-Type', 'application/json')
   applyAuthHeaders(headers, cfg.accessToken)
 
-  const res = await fetch(url, { ...init, headers })
+  // credentials: 'include' ensures cookies (e.g. geo_sim_sid) are sent with every request.
+  // This enables anonymous-visitor cookie-auth when no accessToken is provided.
+  const res = await fetch(url, { credentials: 'include', ...init, headers })
 
   if (!res.ok) {
     let bodyText: string | undefined
@@ -77,7 +79,8 @@ export async function httpText(cfg: HttpConfig, path: string, init?: RequestInit
   headers.set('Accept', init?.headers && new Headers(init.headers).get('Accept') ? (new Headers(init.headers).get('Accept') as string) : '*/*')
   applyAuthHeaders(headers, cfg.accessToken)
 
-  const res = await fetch(url, { ...init, headers })
+  // credentials: 'include' ensures cookies (e.g. geo_sim_sid) are sent with every request.
+  const res = await fetch(url, { credentials: 'include', ...init, headers })
 
   if (!res.ok) {
     let bodyText: string | undefined

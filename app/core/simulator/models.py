@@ -112,6 +112,10 @@ class RunRecord:
     mode: RunMode
     state: RunState
 
+    owner_id: str = ""          # e.g. "admin", "pid:abc", "anon:xyz", "cli:label"
+    owner_kind: str = ""        # "admin", "participant", "anon"
+    created_by: Optional[dict] = field(default=None)  # {"actor_kind": "...", "owner_id": "...", "ip": "..."}
+
     started_at: Optional[datetime] = None
     stopped_at: Optional[datetime] = None
 

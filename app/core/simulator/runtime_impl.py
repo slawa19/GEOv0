@@ -93,7 +93,7 @@ class _SimulatorRuntimeBase:
         self._lock = threading.RLock()
         self._scenarios: dict[str, ScenarioRecord] = {}
         self._runs: dict[str, RunRecord] = {}
-        self._active_run_id: Optional[str] = None
+        self._active_run_id_by_owner: dict[str, str] = {}  # owner_id → run_id
 
         self._is_shutting_down = False
 
@@ -107,6 +107,9 @@ class _SimulatorRuntimeBase:
         )
         self._max_active_runs = _safe_int_env("SIMULATOR_MAX_ACTIVE_RUNS", 1)
         self._max_run_records = _safe_int_env("SIMULATOR_MAX_RUN_RECORDS", 200)
+        self._max_active_runs_per_owner = _safe_int_env(
+            "SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER", 1
+        )
 
         # DB persistence throttling for run status row.
         # Defaults reduce write amplification in heartbeat loop.
@@ -187,7 +190,8 @@ class _SimulatorRuntimeBase:
         self._run_lifecycle = RunLifecycle(
             lock=self._lock,
             runs=self._runs,
-            set_active_run_id=lambda run_id: setattr(self, "_active_run_id", run_id),
+            set_active_run_id=lambda run_id, owner_id="": self.set_active_run_id(run_id, owner_id=owner_id),
+            clear_active_run_id=lambda owner_id="", run_id="": self.clear_active_run_id(owner_id=owner_id, run_id=run_id),
             utc_now=_utc_now,
             new_run_id=_new_run_id,
             get_scenario_raw=lambda scenario_id: self.get_scenario(scenario_id).raw,
@@ -204,6 +208,10 @@ class _SimulatorRuntimeBase:
             get_max_active_runs=lambda: int(self._max_active_runs),
             get_max_run_records=lambda: int(self._max_run_records),
             logger=logger,
+            get_active_run_id_for_owner=lambda owner_id: (
+                self._active_run_id_by_owner.get(owner_id) if owner_id else None
+            ),
+            get_max_active_runs_per_owner=lambda: int(self._max_active_runs_per_owner),
         )
 
         self._fixtures_runner = FixturesRunner(
@@ -265,7 +273,7 @@ class _SimulatorRuntimeBase:
                 # may be started/stopped multiple times within one test process.
                 # Clear run state so the next lifespan can create runs again.
                 self._runs.clear()
-                self._active_run_id = None
+                self._active_run_id_by_owner.clear()
         finally:
             # Allow re-use after graceful shutdown completes.
             with self._lock:
@@ -281,6 +289,80 @@ class _SimulatorRuntimeBase:
         """
 
         return self._sse.is_replay_too_old(run_id=run_id, after_event_id=after_event_id)
+
+    # ------------------------------------------
+    # Per-owner active run management
+    # ------------------------------------------
+
+    def get_active_run_id(self, owner_id: str = "") -> Optional[str]:
+        """Get active run for a specific owner.
+
+        If owner_id is empty, return any active run (backward compat).
+        """
+        with self._lock:
+            if not owner_id:
+                # backward compat: return first active or None
+                return next(iter(self._active_run_id_by_owner.values()), None)
+            return self._active_run_id_by_owner.get(owner_id)
+
+    def set_active_run_id(self, run_id: str, owner_id: str = "") -> None:
+        """Register active run for owner."""
+        with self._lock:
+            self._active_run_id_by_owner[owner_id] = run_id
+
+    def clear_active_run_id(self, owner_id: str = "", run_id: str = "") -> None:
+        """Remove active run for owner.
+
+        If run_id is specified, only remove if it matches the stored value.
+        """
+        with self._lock:
+            if owner_id in self._active_run_id_by_owner:
+                if run_id and self._active_run_id_by_owner[owner_id] != run_id:
+                    return  # different run, don't clear
+                del self._active_run_id_by_owner[owner_id]
+
+    def get_all_active_runs(self) -> dict[str, str]:
+        """Return copy of all active owner→run mappings (for admin)."""
+        with self._lock:
+            return dict(self._active_run_id_by_owner)
+
+    def count_active_runs(self) -> int:
+        """Total number of active runs across all owners."""
+        with self._lock:
+            return len(self._active_run_id_by_owner)
+
+    def list_runs(
+        self,
+        *,
+        state: Optional[str] = None,
+        owner_id: Optional[str] = None,
+    ) -> list:
+        """Return all run records with optional filtering (admin use).
+
+        Args:
+            state: Filter by run state string (e.g. "running", "stopped", "error").
+            owner_id: Filter by owner_id exact match.
+
+        Returns:
+            List of RunRecord sorted newest-first by started_at; records
+            without started_at go last.
+        """
+        with self._lock:
+            runs = list(self._runs.values())
+
+        if state is not None:
+            runs = [r for r in runs if str(r.state or "") == state]
+        if owner_id is not None:
+            runs = [r for r in runs if r.owner_id == owner_id]
+
+        # Sort newest-first; runs without started_at go to the end.
+        runs.sort(
+            key=lambda r: (
+                r.started_at is None,
+                -(r.started_at.timestamp() if r.started_at else 0),
+            )
+        )
+        return runs
 
     # -----------------------------
     # Scenarios
@@ -330,10 +412,6 @@ class _SimulatorRuntimeBase:
     # Runs
     # -----------------------------
 
-    def get_active_run_id(self) -> Optional[str]:
-        with self._lock:
-            return self._active_run_id
-
     def get_run(self, run_id: str) -> RunRecord:
         with self._lock:
             run = self._runs.get(run_id)
@@ -346,7 +424,14 @@ class _SimulatorRuntimeBase:
         return _run_to_status(run)
 
     async def create_run(
-        self, *, scenario_id: str, mode: RunMode, intensity_percent: int
+        self,
+        *,
+        scenario_id: str,
+        mode: RunMode,
+        intensity_percent: int,
+        owner_id: str = "",
+        owner_kind: str = "",
+        created_by: Optional[dict] = None,
     ) -> str:
         with self._lock:
             if self._is_shutting_down:
@@ -355,6 +440,9 @@ class _SimulatorRuntimeBase:
             scenario_id=scenario_id,
             mode=mode,
             intensity_percent=intensity_percent,
+            owner_id=owner_id,
+            owner_kind=owner_kind,
+            created_by=created_by,
         )
 
     async def build_metrics(

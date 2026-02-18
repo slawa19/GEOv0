@@ -217,6 +217,7 @@ Real mode: артефакты (dev perf)
 - Actor источники: `X-Admin-Token` (admin), `Bearer JWT` (participant), cookie (anon).
 - Доступ к `run_id`: owner-only, кроме admin.
 - Для CLI/автотестов вводим admin-only owner override через `X-Simulator-Owner`.
+- Для cookie-mode: обязателен `SIMULATOR_SESSION_SECRET` (guardrail вне dev/test) и CSRF защита минимум через `Origin` allowlist.
 
 Каноничная спецификация: [simulator/backend/anonymous-visitors-cookie-runs-spec.md](simulator/backend/anonymous-visitors-cookie-runs-spec.md)
 

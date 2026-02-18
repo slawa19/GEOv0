@@ -81,3 +81,36 @@
 - Ссылки на тесты (pytest/playwright) с зелёным прогоном.
 - Для SB-01: набор позитивных/негативных примеров, подтверждающих валидацию схемы.
 - Для INT-01..03: воспроизводимый сценарий запуска (команды/скрипт) + запись успешного прогона теста.
+
+---
+
+## Anonymous Visitors / Cookie Runs — статус реализации
+
+> Последнее обновление: **2026-02-18** (Фаза 12 — финальная документация)
+
+- Спецификация: [`anonymous-visitors-cookie-runs-spec.md`](anonymous-visitors-cookie-runs-spec.md)
+- Статус: ✅ **Полностью реализовано** (11 фаз завершены)
+- Детали: см. §15 спецификации
+
+### Все критерии приёмки реализованы ✅
+
+| Критерий | Описание | Статус |
+|----------|----------|--------|
+| Анонимная идентичность | Cookie-based сессия (HMAC-SHA256, `geo_sim_sid`, Path=/, Secure via X-Forwarded-Proto) | ✅ Done |
+| Per-owner лимиты | `_active_run_id_by_owner`, 409 с `conflict_kind: owner_active_exists` / `global_active_limit` | ✅ Done |
+| Owner isolation | `_check_run_access()` deny-by-default, пустой owner → только admin | ✅ Done |
+| Admin control plane | `GET /admin/runs`, `POST /admin/runs/stop-all`, ForbiddenException | ✅ Done |
+| CLI override | `X-Simulator-Owner` с `.strip()` + regex validation, E009 | ✅ Done |
+| CSRF защита | Origin check, ForbiddenException с E006, `details.reason=csrf_origin` | ✅ Done |
+| Config guardrail | Fail-fast RuntimeError в non-dev при дефолтном секрете | ✅ Done |
+| DB миграция | `owner_id`, `owner_kind` nullable, backfill NULL для legacy | ✅ Done |
+| UI интеграция | `credentials: 'include'`, session bootstrap, admin controls TopBar | ✅ Done |
+| Recovery | `reconcile_stale_runs()` на startup, rate-limit exemption `/session/ensure` | ✅ Done |
+
+### Покрытие тестами
+
+- **Backend unit-тесты:** 64 теста (3 файла), 0.10s, 0 failures
+  - `tests/unit/test_simulator_cookie_session.py` — 19 тестов
+  - `tests/unit/test_simulator_owner_isolation.py` — 25 тестов
+  - `tests/unit/test_simulator_actor_and_csrf.py` — 22 теста
+- **Frontend тесты:** 217 passed

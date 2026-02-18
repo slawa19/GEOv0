@@ -80,6 +80,23 @@ vi.mock('../composables/useSimulatorApp', () => {
           downloadArtifact: vi.fn(),
         },
 
+        // §10: Cookie session state (anonymous visitors)
+        session: {
+          actorKind: ref<string | null>(null),
+          ownerId: ref<string | null>(null),
+          bootstrapping: ref(false),
+          tryEnsure: vi.fn(),
+        },
+
+        // Admin controls (admin-token required)
+        admin: {
+          runs: ref([] as any[]),
+          loading: ref(false),
+          lastError: ref(''),
+          getRuns: vi.fn(),
+          stopRuns: vi.fn(),
+        },
+
         // state + prefs
         state: reactive({
           loading: false,
