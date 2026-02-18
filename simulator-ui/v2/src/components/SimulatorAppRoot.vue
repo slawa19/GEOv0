@@ -12,22 +12,79 @@ import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
 
-import { computed, isRef, onMounted, onUnmounted } from 'vue'
+import { computed, isRef, onMounted, onUnmounted, ref } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
 
 type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
 
-const uiTheme = computed<UiThemeId>(() => {
+function normalizeThemeId(v: unknown): UiThemeId {
+  const s = String(v ?? '').trim().toLowerCase()
+  if (s === 'shadcn') return 'shadcn'
+  if (s === 'saas') return 'saas'
+  if (s === 'library') return 'library'
+  return 'hud'
+}
+
+function readThemeFromUrl(): UiThemeId {
   try {
-    const v = String(new URLSearchParams(window.location.search).get('theme') ?? '').trim().toLowerCase()
-    if (v === 'shadcn') return 'shadcn'
-    if (v === 'saas') return 'saas'
-    if (v === 'library') return 'library'
-    return 'hud'
+    return normalizeThemeId(new URLSearchParams(window.location.search).get('theme'))
   } catch {
     return 'hud'
   }
+}
+
+function readThemeFromStorage(): UiThemeId | null {
+  try {
+    const v = window.localStorage?.getItem('geo.uiTheme')
+    if (!v) return null
+    return normalizeThemeId(v)
+  } catch {
+    return null
+  }
+}
+
+function pickInitialTheme(): UiThemeId {
+  const url = readThemeFromUrl()
+  if (url !== 'hud') return url
+  const stored = readThemeFromStorage()
+  return stored ?? 'hud'
+}
+
+const uiTheme = ref<UiThemeId>(pickInitialTheme())
+
+function syncThemeFromUrl() {
+  const t = readThemeFromUrl()
+  uiTheme.value = t
+}
+
+function setUiTheme(next: UiThemeId) {
+  const theme = normalizeThemeId(next)
+  uiTheme.value = theme
+  try {
+    window.localStorage?.setItem('geo.uiTheme', theme)
+  } catch {
+    // ignore
+  }
+
+  try {
+    const u = new URL(window.location.href)
+    if (theme === 'hud') u.searchParams.delete('theme')
+    else u.searchParams.set('theme', theme)
+    window.history.replaceState({}, '', u.toString())
+  } catch {
+    // ignore
+  }
+
+}
+
+onMounted(() => {
+  // Allow browser back/forward to update theme without reload.
+  window.addEventListener('popstate', syncThemeFromUrl)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('popstate', syncThemeFromUrl)
 })
 
 import type { GraphLink } from '../types'
@@ -383,6 +440,8 @@ function onEdgeDetailCloseLine() {
       :api-mode="apiMode"
       :is-interact-ui="isInteractUi"
       :is-test-mode="isTestMode"
+      :ui-theme="uiTheme"
+      :set-ui-theme="setUiTheme"
       :loading-scenarios="real.loadingScenarios"
       :scenarios="real.scenarios"
       :selected-scenario-id="real.selectedScenarioId"

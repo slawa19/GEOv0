@@ -33,11 +33,11 @@ export function useAppPhysicsAndPinning(deps: {
     baselineLayoutPos: deps.baselineLayoutPos,
     getSelectedNodeId: deps.getSelectedNodeId,
     getLayoutNodeById: (id) => deps.getLayoutNodeById(id),
+    wakeUp: deps.wakeUp,
     physics: {
       pin: (id, x, y) => physics.pin(id, x, y),
       unpin: (id) => physics.unpin(id),
       syncFromLayout: () => physics.syncFromLayout(),
-      reheat: (alpha) => physics.reheat(alpha),
     },
   })
 

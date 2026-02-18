@@ -132,11 +132,18 @@ export function useCanvasInteractions(opts: {
       return
     }
 
+    // Important edge case: camera may decide not to start a pan session at all
+    // (e.g. when the graph is already fully visible). In that case onPointerUp()
+    // returns false, but we must NOT suppress the subsequent click; otherwise
+    // background clicks won't clear selection.
+    const panWasActive = opts.getPanActive()
     const wasClick = opts.cameraSystem.onPointerUp(ev)
     if (!wasClick) {
-      // Camera detected a pan (moved ≥ 3px). The browser may still fire `click`
-      // for small movements (3-10px). Suppress it to prevent unintended deselection.
-      markSuppressClick()
+      if (panWasActive) {
+        // Camera detected a pan (moved ≥ 3px). The browser may still fire `click`
+        // for small movements (3-10px). Suppress it to prevent unintended deselection.
+        markSuppressClick()
+      }
       return
     }
 

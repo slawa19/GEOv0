@@ -116,8 +116,8 @@ onUnmounted(() => {
     aria-label="Edge detail popup"
     :style="popupStyle"
   >
-    <div class="popup__title">Edge</div>
-    <div class="popup__subtitle ds-mono">{{ title }}</div>
+    <div class="popup__title ds-label">Edge</div>
+    <div class="popup__subtitle ds-value ds-mono">{{ title }}</div>
 
     <div class="popup__grid">
       <div class="ds-label">Used</div>
@@ -171,15 +171,12 @@ onUnmounted(() => {
 }
 
 .popup__title {
-  font-size: 12px;
-  font-weight: 750;
   opacity: 0.9;
 }
 
 .popup__subtitle {
   margin-top: 2px;
   margin-bottom: 8px;
-  font-size: 12px;
   opacity: 0.95;
 }
 

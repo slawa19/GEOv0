@@ -18,11 +18,11 @@ describe('usePinning', () => {
       baselineLayoutPos,
       getSelectedNodeId: () => null,
       getLayoutNodeById: (id) => nodes.find((n) => n.id === id) ?? null,
+      wakeUp: vi.fn(),
       physics: {
         pin: vi.fn(),
         unpin: vi.fn(),
         syncFromLayout: vi.fn(),
-        reheat: vi.fn(),
       },
     })
 
@@ -48,7 +48,6 @@ describe('usePinning', () => {
       pin: vi.fn(),
       unpin: vi.fn(),
       syncFromLayout: vi.fn(),
-      reheat: vi.fn(),
     }
 
     const selectedId = 'A'
@@ -58,6 +57,7 @@ describe('usePinning', () => {
       baselineLayoutPos,
       getSelectedNodeId: () => selectedId,
       getLayoutNodeById: (id) => nodes.find((n) => n.id === id) ?? null,
+      wakeUp: vi.fn(),
       physics,
     })
 
@@ -74,7 +74,7 @@ describe('usePinning', () => {
     pinning.unpinSelectedNode()
 
     expect(pinnedPos.has('A')).toBe(false)
-    expect(nodes[0]).toMatchObject({ id: 'A', __x: 5, __y: 6 })
+    expect(nodes[0]).toMatchObject({ id: 'A', __x: 100, __y: 200 })
     expect(physics.unpin).toHaveBeenCalledWith('A')
     expect(physics.syncFromLayout).toHaveBeenCalledTimes(1)
   })

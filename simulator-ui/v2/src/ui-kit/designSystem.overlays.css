@@ -87,6 +87,17 @@
   width: 100%;
 }
 
+/* Frameless bars: controls sit directly on the scene background.
+   Keep this override scoped to bars only (do not affect other ds-panel surfaces). */
+.ds-ov-topbar.ds-panel,
+.ds-ov-bottombar.ds-panel {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .ds-ov-topbar__left,
 .ds-ov-topbar__center,
 .ds-ov-topbar__right {
@@ -104,7 +115,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: 100%;
+  /* Match top-bar visual inset (ds-ov-top uses left/right: 12px). */
+  width: calc(100vw - 24px);
+  box-sizing: border-box;
+  /* Slightly roomier than generic ds-ov-bar for better balance. */
+  padding: var(--ds-space-2) var(--ds-space-3);
 }
 
 .ds-ov-bottombar__left,

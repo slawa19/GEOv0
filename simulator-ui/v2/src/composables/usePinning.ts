@@ -11,14 +11,16 @@ export function usePinning(opts: {
   getSelectedNodeId: () => string | null
   getLayoutNodeById: (id: string) => LayoutNode | null
 
+  /** Wake up render loop (without reheating physics). */
+  wakeUp?: () => void
+
   physics: {
     pin: (id: string, x: number, y: number) => void
     unpin: (id: string) => void
     syncFromLayout: () => void
-    reheat: (alpha?: number) => void
   }
 }) {
-  const { pinnedPos, baselineLayoutPos, getSelectedNodeId, getLayoutNodeById, physics } = opts
+  const { pinnedPos, baselineLayoutPos, getSelectedNodeId, getLayoutNodeById, physics, wakeUp } = opts
 
   const isSelectedPinned = computed(() => {
     const id = getSelectedNodeId()
@@ -49,7 +51,7 @@ export function usePinning(opts: {
 
     pinnedPos.set(id, { x: ln.__x, y: ln.__y })
     physics.pin(id, ln.__x, ln.__y)
-    physics.reheat()
+    wakeUp?.()
   }
 
   function unpinSelectedNode() {
@@ -59,15 +61,8 @@ export function usePinning(opts: {
     pinnedPos.delete(id)
     physics.unpin(id)
 
-    const base = baselineLayoutPos.get(id)
-    const ln = getLayoutNodeById(id)
-    if (ln && base) {
-      ln.__x = base.x
-      ln.__y = base.y
-    }
-
     physics.syncFromLayout()
-    physics.reheat()
+    wakeUp?.()
   }
 
   return {

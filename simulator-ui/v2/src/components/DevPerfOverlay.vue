@@ -129,7 +129,7 @@ onUnmounted(() => {
 <template>
   <div v-if="enabled" class="perf ds-ov-item ds-ov-surface ds-ov-dev-perf" role="region" aria-label="Performance diagnostics">
     <div class="row">
-      <div class="title">Perf probe</div>
+      <div class="title ds-label">Perf probe</div>
       <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
     </div>
 
@@ -139,10 +139,10 @@ onUnmounted(() => {
       role="note"
     >
       Hardware acceleration appears disabled (Microsoft Basic Render Driver). Expect severe slowness in Chrome.
-      Check <span class="mono">chrome://gpu</span> and enable hardware acceleration.
+      Check <span class="ds-mono">chrome://gpu</span> and enable hardware acceleration.
     </div>
 
-    <pre class="pre">{{ text }}</pre>
+    <pre class="pre ds-mono">{{ text }}</pre>
   </div>
 </template>
 
@@ -160,8 +160,6 @@ onUnmounted(() => {
 }
 
 .title {
-  font-size: 12px;
-  font-weight: 600;
   color: var(--ds-text-1);
 }
 
@@ -169,8 +167,8 @@ onUnmounted(() => {
 .pre {
   margin: 0;
   padding: 0 12px 12px 12px;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: var(--ds-typo-label-font-size);
+  line-height: var(--ds-typo-body-line-height);
   color: var(--ds-text-2);
   white-space: pre-wrap;
 }
@@ -182,11 +180,10 @@ onUnmounted(() => {
   border: 1px solid color-mix(in srgb, var(--ds-warn) 35%, transparent);
   background: color-mix(in srgb, var(--ds-warn) 18%, transparent);
   color: color-mix(in srgb, var(--ds-warn) 12%, var(--ds-text-1));
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.mono {
-  font-family: var(--ds-font-mono);
+  font-family: var(--ds-typo-alert-font-family);
+  font-size: var(--ds-typo-alert-font-size);
+  letter-spacing: var(--ds-typo-alert-letter-spacing);
+  font-weight: var(--ds-typo-alert-font-weight);
+  line-height: var(--ds-typo-body-line-height);
 }
 </style>

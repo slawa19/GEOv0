@@ -6,7 +6,12 @@
   /* Base app surface is driven by design-system tokens (themes via data-theme). */
   background: var(--ds-page-bg);
   color: var(--ds-text-1);
-  font-family: var(--ds-font-sans);
+  /* IMPORTANT: keep typography token-driven so themes (e.g. HUD) apply everywhere. */
+  font-size: var(--ds-root-font-size);
+  font-family: var(--ds-typo-body-font-family);
+  line-height: var(--ds-typo-body-line-height);
+  letter-spacing: var(--ds-typo-body-letter-spacing);
+  font-weight: var(--ds-typo-body-font-weight);
 }
 
 .canvas {
@@ -55,7 +60,7 @@
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New";
+  font-family: var(--ds-font-mono);
 }
 .floating-layer {
   position: absolute;

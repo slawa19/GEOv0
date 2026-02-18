@@ -2,12 +2,20 @@
 import { computed } from 'vue'
 import type { RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 
+type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
+
 type Props = {
   apiMode: 'fixtures' | 'real'
   isInteractUi: boolean
 
   /** True when UI runs in automation/deterministic mode (VITE_TEST_MODE=1). */
   isTestMode?: boolean
+
+  /** UI theme id (mapped to data-theme). */
+  uiTheme: UiThemeId
+
+  /** Switch theme without reload; should update URL/localStorage. */
+  setUiTheme: (v: UiThemeId) => void
 
   loadingScenarios: boolean
   scenarios: ScenarioSummary[]
@@ -139,6 +147,11 @@ function short(s: string, n: number) {
   return `${s.slice(0, n - 1)}…`
 }
 
+function onThemeChange(v: string) {
+  // Normalize at caller if needed.
+  props.setUiTheme((v as UiThemeId) || 'hud')
+}
+
 const stopSummary = computed(() => {
   const st = props.runStatus
   if (!st) return ''
@@ -154,7 +167,8 @@ const stopSummary = computed(() => {
     <div class="ds-ov-top-stack">
       <div class="ds-panel ds-ov-bar ds-ov-topbar" aria-label="Top bar">
         <div class="ds-ov-topbar__left" aria-label="Mode">
-          <div class="ds-segmented" role="group" aria-label="Simulator mode">
+          <div class="ds-row" style="gap: 10px; flex-wrap: wrap; align-items: center">
+            <div class="ds-segmented" role="group" aria-label="Simulator mode">
             <button
               type="button"
               class="ds-segment"
@@ -181,9 +195,26 @@ const stopSummary = computed(() => {
             >
               Interact
             </button>
-          </div>
+            </div>
 
-          <span v-if="showTestModeBadge" class="ds-badge ds-badge--warn" style="margin-left: 10px">TEST MODE</span>
+            <div class="ds-row" style="gap: 6px; align-items: center" aria-label="Theme">
+              <span class="ds-label">Theme</span>
+              <select
+                class="ds-select"
+                style="height: 28px"
+                :value="uiTheme"
+                aria-label="UI theme"
+                @change="onThemeChange(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="shadcn">shadcn/ui (dark)</option>
+                <option value="saas">SaaS (subtle)</option>
+                <option value="library">Library (Naive-like)</option>
+                <option value="hud">HUD (sci-fi)</option>
+              </select>
+            </div>
+
+            <span v-if="showTestModeBadge" class="ds-badge ds-badge--warn">TEST MODE</span>
+          </div>
         </div>
 
         <div class="ds-ov-topbar__center" aria-label="Run controls">
@@ -316,10 +347,9 @@ const stopSummary = computed(() => {
               <span class="ds-value ds-mono" style="opacity: 0.9">{{ short(stopSummary, 64) }}</span>
             </div>
 
-            <div v-if="runId" class="ds-panel ds-ov-metric" style="opacity: 0.92" aria-label="TX stats">
-              <span class="ds-label">Tx</span>
-              <span class="ds-value">{{ txCompact }}</span>
-            </div>
+            <span v-if="runId" class="ds-badge ds-badge--info" aria-label="TX">
+              TX {{ txCompact }}
+            </span>
           </div>
         </div>
       </div>
