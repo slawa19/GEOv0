@@ -186,9 +186,42 @@ const stopSummary = computed(() => {
  * Admin controls are only visible when an access token is present.
  * Anonymous visitors (cookie-only) do not see admin panel.
  */
+function isJwtLike(token: string): boolean {
+  const t = token.trim()
+  return t.split('.').length === 3
+}
+
+/**
+ * Admin controls are only visible when the token is an admin token (non-JWT).
+ * Participant JWTs should not show admin panel.
+ */
 const showAdminControls = computed(() => {
   const t = String(props.accessToken ?? '').trim()
-  return !!t && props.apiMode === 'real'
+  return !!t && !isJwtLike(t) && props.apiMode === 'real'
+})
+
+const adminRunsCountLabel = computed(() => {
+  if (props.adminRunsLoading) return '…'
+  if (!Array.isArray(props.adminRuns)) return '—'
+  return String(props.adminRuns.length)
+})
+
+const adminHasLoadedRuns = computed(() => Array.isArray(props.adminRuns))
+
+const adminHasActiveRuns = computed(() => {
+  if (!Array.isArray(props.adminRuns)) return false
+  const active = new Set(['running', 'paused', 'created', 'stopping'])
+  return props.adminRuns.some((r) => active.has(String(r.state ?? '').toLowerCase()))
+})
+
+const adminStopAllDisabled = computed(() => {
+  if (props.adminRunsLoading) return true
+  if (!adminHasLoadedRuns.value) return false
+  return !adminHasActiveRuns.value
+})
+
+const adminStopAllBtnClass = computed(() => {
+  return adminStopAllDisabled.value ? 'ds-btn ds-btn--secondary' : 'ds-btn ds-btn--danger'
 })
 
 /** Toggle state for the admin panel (details element). */
@@ -324,48 +357,59 @@ async function onAdminStopRuns() {
               Stop
             </button>
 
-            <details class="ds-panel ds-ov-metric ds-ov-details" aria-label="Advanced">
-              <summary class="ds-row" style="gap: 8px; cursor: pointer" aria-label="Advanced settings">
+            <details class="ds-ov-details" style="position: relative" aria-label="Advanced">
+              <summary
+                class="ds-panel ds-ov-metric ds-row"
+                style="gap: 8px; cursor: pointer"
+                aria-label="Advanced settings"
+              >
                 <span class="ds-badge ds-badge--info">⚙</span>
                 <span class="ds-label">Advanced</span>
               </summary>
-              <div class="ds-stack" style="margin-top: 8px; gap: 8px">
-                <div class="ds-row" style="gap: 6px">
-                  <span class="ds-label">Pipeline</span>
-                  <select
-                    class="ds-select"
-                    :value="desiredMode"
-                    :disabled="isRunActive"
-                    aria-label="Run pipeline"
-                    @change="setDesiredMode(($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="real">real (DB)</option>
-                    <option value="fixtures">sandbox (topology-only)</option>
-                  </select>
-                </div>
 
-                <div class="ds-row" style="gap: 6px" aria-label="Intensity">
-                  <span class="ds-label">Intensity</span>
-                  <input
-                    class="ds-input"
-                    style="width: 6ch; height: 28px"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    :value="intensityPercent"
-                    aria-label="Intensity percent"
-                    @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
-                  />
-                  <button
-                    class="ds-btn ds-btn--secondary"
-                    style="height: 28px; padding: 0 10px"
-                    type="button"
-                    :disabled="!isRunActive"
-                    @click="props.applyIntensity"
-                  >
-                    Apply
-                  </button>
+              <div
+                class="ds-panel ds-ov-surface"
+                style="position: absolute; left: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 320px; max-width: min(520px, calc(100vw - 24px)); z-index: 60"
+                aria-label="Advanced dropdown"
+              >
+                <div class="ds-stack" style="gap: 8px">
+                  <div class="ds-row" style="gap: 6px">
+                    <span class="ds-label">Pipeline</span>
+                    <select
+                      class="ds-select"
+                      :value="desiredMode"
+                      :disabled="isRunActive"
+                      aria-label="Run pipeline"
+                      @change="setDesiredMode(($event.target as HTMLSelectElement).value)"
+                    >
+                      <option value="real">real (DB)</option>
+                      <option value="fixtures">sandbox (topology-only)</option>
+                    </select>
+                  </div>
+
+                  <div class="ds-row" style="gap: 6px" aria-label="Intensity">
+                    <span class="ds-label">Intensity</span>
+                    <input
+                      class="ds-input"
+                      style="width: 6ch; height: 28px"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      :value="intensityPercent"
+                      aria-label="Intensity percent"
+                      @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
+                    />
+                    <button
+                      class="ds-btn ds-btn--secondary"
+                      style="height: 28px; padding: 0 10px"
+                      type="button"
+                      :disabled="!isRunActive"
+                      @click="props.applyIntensity"
+                    >
+                      Apply
+                    </button>
+                  </div>
                 </div>
               </div>
             </details>
@@ -394,6 +438,95 @@ async function onAdminStopRuns() {
             <span v-if="runId" class="ds-badge ds-badge--info" aria-label="TX">
               TX {{ txCompact }}
             </span>
+
+            <!-- §10: Admin controls — admin-only (requires admin token) -->
+            <details
+              v-if="showAdminControls"
+              class="ds-ov-details"
+              style="position: relative"
+              aria-label="Admin controls"
+              :open="adminPanelOpen"
+              @toggle="adminPanelOpen = ($event.target as HTMLDetailsElement).open"
+            >
+              <summary
+                class="ds-panel ds-ov-metric"
+                style="display: flex; gap: 6px; align-items: center; cursor: pointer"
+                aria-label="Admin"
+              >
+                <span class="ds-badge ds-badge--warn">Admin</span>
+                <span class="ds-label" style="opacity: 0.75">Runs: {{ adminRunsCountLabel }}</span>
+              </summary>
+
+              <div
+                class="ds-panel ds-ov-surface"
+                style="position: absolute; right: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 260px; max-width: min(520px, calc(100vw - 24px)); z-index: 60"
+                aria-label="Admin dropdown"
+              >
+                <div class="ds-stack" style="gap: 8px">
+                  <div class="ds-row" style="gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap">
+                    <button
+                      class="ds-btn ds-btn--secondary"
+                      style="height: 28px; padding: 0 10px"
+                      type="button"
+                      :disabled="adminRunsLoading"
+                      aria-label="Refresh runs list"
+                      @click="onAdminGetRuns"
+                    >
+                      {{ adminRunsLoading ? '…' : 'Refresh' }}
+                    </button>
+                    <button
+                      :class="adminStopAllBtnClass"
+                      style="height: 28px; padding: 0 10px"
+                      type="button"
+                      aria-label="Stop all runs"
+                      :disabled="adminStopAllDisabled"
+                      :title="adminStopAllDisabled && adminHasLoadedRuns ? 'No running runs' : ''"
+                      @click="onAdminStopRuns"
+                    >
+                      Stop all
+                    </button>
+                    <span
+                      v-if="adminLastError"
+                      class="ds-badge ds-badge--err"
+                      style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                      :title="adminLastError"
+                    >
+                      {{ short(adminLastError, 40) }}
+                    </span>
+                  </div>
+
+                  <div v-if="adminRunsLoading" class="ds-label" style="opacity: 0.75" aria-label="Runs loading">
+                    Loading…
+                  </div>
+
+                  <div
+                    v-else-if="adminRuns && adminRuns.length > 0"
+                    class="ds-stack"
+                    style="gap: 4px; max-height: 200px; overflow-y: auto"
+                    aria-label="Runs list"
+                  >
+                    <div
+                      v-for="run in adminRuns"
+                      :key="run.run_id"
+                      class="ds-panel ds-ov-metric"
+                      style="padding: 4px 8px; gap: 8px"
+                    >
+                      <span class="ds-label ds-mono" style="font-size: 11px">{{ run.run_id.slice(0, 8) }}</span>
+                      <span :class="['ds-badge', run.state === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
+                      <span class="ds-label" style="opacity: 0.7; font-size: 11px">{{ (run as any).owner_kind ?? '' }}</span>
+                    </div>
+                  </div>
+
+                  <div v-else-if="adminHasLoadedRuns" class="ds-label" style="opacity: 0.75" aria-label="Runs empty">
+                    No active runs
+                  </div>
+
+                  <div v-else class="ds-label" style="opacity: 0.75" aria-label="Runs not loaded">
+                    Press Refresh to load runs
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -410,75 +543,6 @@ async function onAdminStopRuns() {
         <span class="ds-value ds-mono" style="opacity: 0.92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
       </div>
 
-      <!-- §10: Admin controls — shown only when accessToken is present (admin-only) -->
-      <details
-        v-if="showAdminControls"
-        class="ds-panel ds-ov-bar"
-        style="padding: 6px 10px"
-        aria-label="Admin controls"
-        :open="adminPanelOpen"
-        @toggle="adminPanelOpen = ($event.target as HTMLDetailsElement).open"
-      >
-        <summary class="ds-row" style="gap: 8px; cursor: pointer; list-style: none; user-select: none" aria-label="Admin">
-          <span class="ds-badge ds-badge--warn">Admin</span>
-          <span class="ds-label" style="opacity: 0.7; font-size: 11px">{{ adminPanelOpen ? '▲' : '▼' }}</span>
-        </summary>
-        <div class="ds-stack" style="margin-top: 8px; gap: 8px">
-          <div class="ds-row" style="gap: 6px; align-items: center; flex-wrap: wrap">
-            <button
-              class="ds-btn ds-btn--secondary"
-              style="height: 28px; padding: 0 10px; font-size: 12px"
-              type="button"
-              :disabled="adminRunsLoading"
-              aria-label="Get all runs"
-              @click="onAdminGetRuns"
-            >
-              {{ adminRunsLoading ? '…' : 'All Runs' }}
-            </button>
-            <button
-              class="ds-btn ds-btn--danger"
-              style="height: 28px; padding: 0 10px; font-size: 12px"
-              type="button"
-              aria-label="Stop all runs"
-              @click="onAdminStopRuns"
-            >
-              Stop All
-            </button>
-            <span
-              v-if="adminLastError"
-              class="ds-badge ds-badge--err"
-              style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
-              :title="adminLastError"
-            >
-              {{ short(adminLastError, 40) }}
-            </span>
-          </div>
-          <div
-            v-if="adminRuns && adminRuns.length > 0"
-            class="ds-stack"
-            style="gap: 4px; max-height: 200px; overflow-y: auto"
-            aria-label="Runs list"
-          >
-            <div
-              v-for="run in adminRuns"
-              :key="run.run_id"
-              class="ds-panel ds-ov-metric"
-              style="padding: 4px 8px; gap: 8px"
-            >
-              <span class="ds-label ds-mono" style="font-size: 11px">{{ run.run_id.slice(0, 8) }}</span>
-              <span :class="['ds-badge', run.state === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
-              <span class="ds-label" style="opacity: 0.7; font-size: 11px">{{ run.actor_kind }}</span>
-            </div>
-          </div>
-          <div
-            v-else-if="adminRuns !== null && !adminRunsLoading"
-            class="ds-label"
-            style="opacity: 0.7; font-size: 11px"
-          >
-            No active runs
-          </div>
-        </div>
-      </details>
     </div>
   </div>
 </template>

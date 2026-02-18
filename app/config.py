@@ -152,18 +152,39 @@ class Settings(BaseSettings):
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
         self._guardrail_default_secrets()
         self._guardrail_simulator_session_secret()
+        self._guardrail_csrf_allowlist()
 
     def _guardrail_simulator_session_secret(self) -> None:
-        """Fail-fast when SIMULATOR_SESSION_SECRET uses the insecure default in non-dev (§4)."""
+        """Fail-fast when SIMULATOR_SESSION_SECRET is empty or insecure in non-dev (§4).
+
+        FIX-CR5: also check for empty string (not just "change-me" substring).
+        """
         env = (self.ENV or "").strip().lower()
         if env in self._SAFE_ENVS:
             return
-        sim_secret = (self.SIMULATOR_SESSION_SECRET or "").strip()
-        if "change-me" in sim_secret.lower():
+        sim_secret = self.SIMULATOR_SESSION_SECRET
+        if not sim_secret or "change-me" in (sim_secret or "").lower():
             raise RuntimeError(
-                "SIMULATOR_SESSION_SECRET must be changed in non-dev environment. "
+                "SIMULATOR_SESSION_SECRET must be set to a strong secret in non-dev environment. "
                 f"Got ENV={self.ENV!r}. "
                 "Set a secure secret via SIMULATOR_SESSION_SECRET env var."
+            )
+
+    def _guardrail_csrf_allowlist(self) -> None:
+        """Warn if SIMULATOR_CSRF_ORIGIN_ALLOWLIST is empty in non-dev environment.
+
+        FIX-CR3: Empty allowlist = allow all origins for anon cookie endpoints.
+        This is intentional in dev but dangerous in production.
+        """
+        env = (self.ENV or "").strip().lower()
+        if env in self._SAFE_ENVS:
+            return
+        if not self.SIMULATOR_CSRF_ORIGIN_ALLOWLIST:
+            _logger.warning(
+                "SIMULATOR_CSRF_ORIGIN_ALLOWLIST is empty in %s environment. "
+                "All origins will be allowed for anonymous cookie endpoints. "
+                "Set explicit origins for production security.",
+                env,
             )
 
     def _guardrail_default_secrets(self) -> None:

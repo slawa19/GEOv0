@@ -259,8 +259,8 @@ def test_csrf_error_is_forbidden_exception_with_e006(monkeypatch) -> None:
     with pytest.raises(ForbiddenException) as exc_info:
         _check_csrf_origin(request, actor)
 
-    assert exc_info.value.details.get("code") == "E006", (
-        f"Ожидался 'E006' в details['code'], получено: {exc_info.value.details}"
+    assert exc_info.value.code == "E006", (
+        f"Ожидался 'E006' в exc.code, получено: {exc_info.value.code}"
     )
     assert exc_info.value.details.get("reason") == "csrf_origin", (
         f"Ожидался 'csrf_origin' в details['reason'], получено: {exc_info.value.details}"
@@ -276,8 +276,8 @@ def test_csrf_missing_origin_is_forbidden_exception(monkeypatch) -> None:
     with pytest.raises(ForbiddenException) as exc_info:
         _check_csrf_origin(request, actor)
 
-    assert exc_info.value.details.get("code") == "E006", (
-        f"Ожидался 'E006' в details['code'], получено: {exc_info.value.details}"
+    assert exc_info.value.code == "E006", (
+        f"Ожидался 'E006' в exc.code, получено: {exc_info.value.code}"
     )
     assert exc_info.value.details.get("reason") == "csrf_origin", (
         f"Ожидался 'csrf_origin' в details['reason'], получено: {exc_info.value.details}"

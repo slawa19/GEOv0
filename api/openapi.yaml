@@ -1058,6 +1058,170 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /simulator/session/ensure:
+    post:
+      tags: [Simulator]
+      summary: Ensure anonymous session
+      description: |
+        If a valid `geo_sim_sid` cookie exists, returns actor info.
+        Otherwise, issues a new cookie session and returns actor info.
+
+        This endpoint is intentionally unauthenticated to support anonymous visitors.
+      security: []
+      responses:
+        '200':
+          description: Actor info (anonymous)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [actor_kind, owner_id]
+                properties:
+                  actor_kind:
+                    type: string
+                    enum: [anon]
+                  owner_id:
+                    type: string
+
+  /simulator/admin/runs:
+    get:
+      tags: [Simulator]
+      summary: List all runs (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: state
+          required: false
+          schema:
+            type: string
+          description: Optional state filter (e.g. running|paused|stopping|stopped|error)
+        - in: query
+          name: owner_id
+          required: false
+          schema:
+            type: string
+          description: Optional owner_id exact match filter
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Paginated list of runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [run_id, scenario_id, mode, state, owner_id]
+                      properties:
+                        run_id:
+                          type: string
+                        scenario_id:
+                          type: string
+                        mode:
+                          type: string
+                        state:
+                          type: string
+                        owner_id:
+                          type: string
+                        owner_kind:
+                          type: string
+                          nullable: true
+                        intensity_percent:
+                          type: integer
+                        started_at:
+                          type: string
+                          nullable: true
+                        stopped_at:
+                          type: string
+                          nullable: true
+                        sim_time_ms:
+                          type: integer
+                        ops_sec:
+                          type: number
+                        errors_total:
+                          type: integer
+                        committed_total:
+                          type: integer
+                        rejected_total:
+                          type: integer
+                        attempts_total:
+                          type: integer
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        '403':
+          $ref: '#/components/responses/Unauthorized'
+
+  /simulator/admin/runs/stop-all:
+    post:
+      tags: [Simulator]
+      summary: Stop all active runs (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: state
+          required: false
+          schema:
+            type: string
+            enum: [running, paused, stopping, '*']
+            default: '*'
+          description: State filter for stopping runs
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Stop-all result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stopped]
+                properties:
+                  stopped:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Unauthorized'
+
   /simulator/runs:
     post:
       tags: [Simulator]
@@ -1077,6 +1241,8 @@ paths:
                 $ref: '#/components/schemas/RunCreateResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
 

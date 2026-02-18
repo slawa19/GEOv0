@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.config import ConfigDict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
 
 from sqlalchemy import and_, func, or_, select
@@ -92,29 +92,29 @@ logger = logging.getLogger("uvicorn.error")
 @router.post("/session/ensure", summary="Ensure anonymous session")
 async def ensure_session(request: Request, response: Response):
     """If valid cookie exists — return actor info. Otherwise create new session cookie."""
+    # No auth required by design (§4.4) — creates cookie for any visitor.
+    # Rate-limit exempt via _RATE_LIMIT_EXEMPT_PATHS in deps.py.
     from app.core.simulator.session import COOKIE_NAME, create_session, validate_session
-    from app.config import get_settings
 
-    _settings = get_settings()
     cookie_value = request.cookies.get(COOKIE_NAME)
 
     if cookie_value:
         session = validate_session(
             cookie_value,
-            _settings.SIMULATOR_SESSION_SECRET,
-            _settings.SIMULATOR_SESSION_TTL_SEC,
-            _settings.SIMULATOR_SESSION_CLOCK_SKEW_SEC,
+            settings.SIMULATOR_SESSION_SECRET,
+            settings.SIMULATOR_SESSION_TTL_SEC,
+            settings.SIMULATOR_SESSION_CLOCK_SKEW_SEC,
         )
         if session:
             return {"actor_kind": "anon", "owner_id": session.owner_id}
 
     # Create new session
-    cookie_val, session_info = create_session(_settings.SIMULATOR_SESSION_SECRET)
+    cookie_val, session_info = create_session(settings.SIMULATOR_SESSION_SECRET)
     _scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     response.set_cookie(
         key=COOKIE_NAME,
         value=cookie_val,
-        max_age=_settings.SIMULATOR_SESSION_TTL_SEC,
+        max_age=settings.SIMULATOR_SESSION_TTL_SEC,
         httponly=True,
         samesite="lax",
         secure=_scheme == "https",
@@ -275,10 +275,35 @@ def _check_run_access(run, actor: "deps.SimulatorActor", run_id: str) -> None:
     Deny-by-default (§7): if run.owner_id is empty/legacy, only admin may access.
     """
     if run is None:
-        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        raise NotFoundException(f"Run {run_id} not found")
     if not actor.is_admin:
         if not run.owner_id or run.owner_id != actor.owner_id:
-            raise HTTPException(status_code=403, detail="Access denied: not run owner")
+            raise ForbiddenException("Access denied: not run owner")
+
+
+def _get_run_checked(run_id: str, actor: "deps.SimulatorActor"):
+    """Get run, check access and action-acceptance state. Returns RunRecord or raises.
+
+    Consolidates the _require_run_accepts_actions_or_error + _check_run_access(runtime.get_run())
+    pattern into a single get_run() call (FIX-CR4: eliminates double get_run).
+
+    Raises:
+        NotFoundException (404): run not found.
+        ForbiddenException (403): actor is not owner and not admin.
+        HTTPException (409): run is in terminal state (stopped/error).
+    """
+    run = runtime.get_run(run_id)  # raises NotFoundException if not found
+    _check_run_access(run, actor, run_id)
+    if run.state in ("stopped", "error"):
+        raise ConflictException(
+            "Run is in terminal state",
+            details={"run_id": run_id, "state": run.state, "conflict_kind": "run_terminal"},
+        )
+    return run
+
+
+class AdminStopAllRequest(BaseModel):
+    reason: Optional[str] = None
 
 
 def _require_actions_enabled_or_error() -> Optional[JSONResponse]:
@@ -601,9 +626,7 @@ async def action_trustline_create(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
-        return err
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
+    _get_run_checked(run_id, actor)  # validate access + state in one get_run() call (FIX-CR4)
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -793,9 +816,7 @@ async def action_trustline_update(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
-        return err
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
+    _get_run_checked(run_id, actor)  # validate access + state in one get_run() call (FIX-CR4)
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -937,9 +958,7 @@ async def action_trustline_close(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
-        return err
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
+    _get_run_checked(run_id, actor)  # validate access + state in one get_run() call (FIX-CR4)
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -1070,9 +1089,7 @@ async def action_payment_real(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
-        return err
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
+    run = _get_run_checked(run_id, actor)  # validate access + state; run reused in SSE (FIX-CR4)
 
     from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
     if err is not None:
@@ -1161,9 +1178,8 @@ async def action_payment_real(
             details=getattr(exc, "details", None) or {},
         )
 
-    # Success: emit best-effort tx.updated SSE.
+    # Success: emit best-effort tx.updated SSE. `run` already fetched by _get_run_checked above.
     try:
-        run = runtime.get_run(run_id)
         emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
 
         edges: list[dict[str, Any]] = []
@@ -1237,9 +1253,7 @@ async def action_clearing_real(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    if (err := _require_run_accepts_actions_or_error(run_id)) is not None:
-        return err
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
+    run = _get_run_checked(run_id, actor)  # validate access + state; run reused in SSE (FIX-CR4)
 
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
     if err is not None:
@@ -1285,10 +1299,9 @@ async def action_clearing_real(
         if not executed_this_round:
             break
 
-    # Best-effort SSE emission (clearing.done).
+    # Best-effort SSE emission (clearing.done). `run` already fetched by _get_run_checked above.
     try:
         if cleared_count > 0:
-            run = runtime.get_run(run_id)
             emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
 
             cycle_edges_payload = _build_clearing_done_cycle_edges_payload(executed)
@@ -1743,10 +1756,10 @@ async def events_stream_active_run(
     stop_after_types: Optional[str] = Query(None),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
-    run_id = runtime.get_active_run_id(owner_id=actor.owner_id) or "active"
+    run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
 
     # If there is no actual run, serve a stream with keep-alives only.
-    if runtime.get_active_run_id(owner_id=actor.owner_id) is None:
+    if run_id is None:
 
         async def idle_stream() -> AsyncIterator[str]:
             while True:
@@ -1914,7 +1927,6 @@ async def stop_run(
     client_s = str(client_host) if client_host else "<unknown>"
 
     # Avoid logging any sensitive auth material; admin token is a header.
-    print(f"simulator.run_stop_requested run_id={run_id} source={source_s} reason={reason_s} client={client_s}")
     logger.info(
         "simulator.run_stop_requested run_id=%s source=%s reason=%s client=%s",
         str(run_id),
@@ -2138,6 +2150,8 @@ async def admin_list_runs(
 
 @router.post("/admin/runs/stop-all", summary="Stop all active runs (admin)")
 async def admin_stop_all_runs(
+    body: AdminStopAllRequest = Body(default=AdminStopAllRequest()),
+    state: str = Query(default="*", description="State filter: running|paused|stopping|*"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     """Stop all currently active runs. Admin only.
@@ -2148,14 +2162,34 @@ async def admin_stop_all_runs(
     if not actor.is_admin:
         raise ForbiddenException("Admin access required")
 
+    state_s = str(state or "*").strip().lower()
+    allowed = {"running", "paused", "stopping", "*"}
+    if state_s not in allowed:
+        raise BadRequestException(
+            "Invalid state filter",
+            details={"reason": "invalid_state_filter", "state": state, "allowed": sorted(allowed)},
+        )
+
+    # get_all_active_runs() returns a copy; safe to iterate while stop()
+    # modifies the original mapping. Concurrent stop-all calls are safe
+    # because stop() is idempotent.
     active_runs = runtime.get_all_active_runs()  # dict owner_id → run_id
     stopped = 0
-    errors = []
+
     for _owner_id, run_id in active_runs.items():
         try:
-            await runtime.stop(run_id, source="admin", reason="admin_stop_all")
-            stopped += 1
-        except Exception as exc:
-            errors.append({"run_id": run_id, "error": str(exc)})
+            st = runtime.get_run_status(run_id)
+            if state_s != "*" and str(getattr(st, "state", "") or "").lower() != state_s:
+                continue
 
-    return {"stopped": stopped, "errors": errors}
+            await runtime.stop(
+                run_id,
+                source="admin",
+                reason=(str(body.reason).strip() if body.reason else "admin_stop_all"),
+            )
+            stopped += 1
+        except Exception:
+            # Best-effort: stop-all should not fail entirely due to one run.
+            logger.exception("simulator.admin.stop_all_failed run_id=%s", str(run_id))
+
+    return {"stopped": stopped}

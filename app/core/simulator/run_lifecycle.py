@@ -5,6 +5,7 @@ import copy
 import hashlib
 import os
 import random
+from datetime import datetime
 from typing import Any, Callable, Optional
 
 import app.core.simulator.storage as simulator_storage
@@ -65,6 +66,36 @@ class RunLifecycle:
     def _count_active_runs_locked(self) -> int:
         active_states = {"running", "paused", "stopping"}
         return sum(1 for r in self._runs.values() if str(getattr(r, "state", "")) in active_states)
+
+    def _count_active_runs_for_owner_locked(self, owner_id: str) -> tuple[int, Optional[str]]:
+        """Return (count, most_recent_active_run_id) for a given owner."""
+        owner = str(owner_id or "")
+        if not owner:
+            return 0, None
+
+        active_states = {"running", "paused", "stopping"}
+        active_runs: list[RunRecord] = [
+            r
+            for r in self._runs.values()
+            if str(getattr(r, "owner_id", "") or "") == owner
+            and str(getattr(r, "state", "") or "") in active_states
+        ]
+
+        if not active_runs:
+            return 0, None
+
+        # Deterministic: prefer most recent started_at.
+        active_runs.sort(
+            key=lambda r: (
+                getattr(r, "started_at", None) is None,
+                # sentinel for None: datetime.min ensures type-consistent comparison
+                getattr(r, "started_at", None) or datetime.min,
+                str(getattr(r, "run_id", "")),
+            ),
+            reverse=True,
+        )
+        most_recent_id = str(getattr(active_runs[0], "run_id", "") or "").strip() or None
+        return len(active_runs), most_recent_id
 
     def _enforce_active_run_limit_locked(self) -> None:
         max_active = int(self._get_max_active_runs() or 0)
@@ -170,19 +201,51 @@ class RunLifecycle:
         run._clearing_pending_done_at_ms = None
 
         with self._lock:
+            # Thread safety: RunRecord is created outside lock (cheap), but all
+            # state mutations (_runs, _active_run_id_by_owner) happen atomically
+            # inside this lock block.
+
             # Per-owner limit check (§6.3): owner may have at most
             # SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER active runs (default: 1).
-            if owner_id and self._get_active_run_id_for_owner is not None:
-                existing_run_id = self._get_active_run_id_for_owner(owner_id)
-                if existing_run_id is not None:
-                    raise ConflictException(
-                        "Owner already has an active run",
-                        details={
-                            "conflict_kind": "owner_active_exists",
-                            "active_run_id": existing_run_id,
-                            "owner_id": owner_id,
-                        },
-                    )
+            if owner_id:
+                max_per_owner = 1
+                if self._get_max_active_runs_per_owner is not None:
+                    try:
+                        max_per_owner = int(self._get_max_active_runs_per_owner() or 0)
+                    except Exception:
+                        max_per_owner = 1
+
+                if max_per_owner > 0:
+                    count, most_recent_run_id = self._count_active_runs_for_owner_locked(owner_id)
+                    mapped_run_id: Optional[str] = None
+                    if self._get_active_run_id_for_owner is not None:
+                        try:
+                            mapped_run_id = self._get_active_run_id_for_owner(owner_id)
+                        except Exception:
+                            mapped_run_id = None
+
+                    # The active mapping is the primary source of truth for "has an active run".
+                    # If it points to a run not present in _runs (e.g. tests or best-effort cleanup),
+                    # still treat it as an active slot for per-owner limit enforcement.
+                    if mapped_run_id:
+                        if mapped_run_id not in self._runs:
+                            count = max(count, 1)
+                        if most_recent_run_id is None:
+                            most_recent_run_id = mapped_run_id
+
+                    if count >= max_per_owner:
+                        active_run_id = most_recent_run_id
+
+                        raise ConflictException(
+                            "Owner already has an active run",
+                            details={
+                                "conflict_kind": "owner_active_exists",
+                                "active_run_id": active_run_id,
+                                "owner_id": owner_id,
+                                "active_runs": count,
+                                "max_active_runs_per_owner": max_per_owner,
+                            },
+                        )
 
             self._enforce_active_run_limit_locked()
 
@@ -351,6 +414,27 @@ class RunLifecycle:
 
             # Keep buffer but prune to avoid unbounded growth across long sessions.
             self._sse.prune_event_buffer_locked(run)
+
+            # Restore active mapping removed during stop(). Without this,
+            # get_active_run_id(owner_id) → None and admin stop-all won't see
+            # the restarted run (§FIX-CR2).
+            if run.owner_id:
+                existing: Optional[str] = None
+                if self._get_active_run_id_for_owner is not None:
+                    try:
+                        existing = self._get_active_run_id_for_owner(run.owner_id)
+                    except Exception:
+                        existing = None
+                if existing and existing != run_id:
+                    raise ConflictException(
+                        "Owner already has another active run",
+                        details={
+                            "conflict_kind": "owner_active_exists",
+                            "active_run_id": existing,
+                        },
+                    )
+                # _set_active_run_id is always set (non-Optional Callable)
+                self._set_active_run_id(run_id, run.owner_id)
 
         self._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)

@@ -75,7 +75,9 @@ Cookie должна быть:
 где:
 - `sid_b64url` — 16 байт random, base64url без `=` (128-bit entropy)
 - `iat_dec` — issued-at epoch seconds (десятичная строка)
-- `sig_b64url` — `HMAC-SHA256(secret, "v1|<sid_b64url>|<iat_dec>")`, base64url без `=`
+- `sig_b64url` — `HMAC-SHA256(secret, "v1.<sid_b64url>.<iat_dec>")`, base64url без `=`
+
+> **Примечание:** Разделитель в payload для HMAC — точка (`.`), совпадает с разделителем в самом cookie-значении.
 
 **Валидация:**
 - версия должна быть `v1`
@@ -266,6 +268,9 @@ Cookie-mode добавляет CSRF-риски для **state-changing** зап�
       participant_pid: str|None
   ```
 
+> **Реализация:** Используется `@dataclass` вместо `BaseModel` — функционально эквивалентно,
+> но легче по весу (не требует Pydantic validation overhead для внутреннего объекта).
+
 `require_participant_or_admin` остаётся для остальных API (не симуляторных).
 
 ## 8) API изменения (симулятор)
@@ -346,7 +351,12 @@ Cookie-mode добавляет CSRF-риски для **state-changing** зап�
 
 ### 9.3 Совместимость
 
-Если `X-Simulator-Owner` не задан, поведение для админ-токена остаётся “как раньше” (все запросы от одного owner), что позволяет не ломать последовательные тесты сразу.
+Если `X-Simulator-Owner` не задан, поведение для админ-токена остаётся "как раньше" (все запросы от одного owner), что позволяет не ломать последовательные тесты сразу.
+
+> **Примечание:** При использовании `X-Simulator-Owner`, `owner_kind` записывается как `actor.kind`
+> (обычно `"admin"`), а не как `"cli"`. Префикс `cli:` — часть `owner_id`, а не `owner_kind`.
+> Это намеренное поведение: `owner_kind` отражает тип аутентификации, а `owner_id` —
+> идентификатор владельца.
 
 ## 10) UI (Simulator UI v2) — требования к интеграции
 
@@ -409,6 +419,11 @@ UI должен уметь работать без `accessToken`, в режим�
    - Next: double-submit CSRF (cookie `geo_sim_csrf` + header `X-CSRF-Token`).
 - SSE: cookie auth предпочтительнее токена в query-string.
 - Admin override header `X-Simulator-Owner` принимается **только при валидном `X-Admin-Token`**.
+
+> **Примечание (CSRF error format):** При нарушении CSRF Origin check возвращается 403 с
+> `details={"reason": "csrf_origin"}`. Код ошибки `E006` передаётся на уровне envelope
+> (`error.code`), а **не** дублируется внутри `details`. Это намеренное решение: избегаем
+> избыточности `details.code` при наличии `error.code` на верхнем уровне.
 
 ## 12) Ограничения деплоя (важно заранее)
 
@@ -486,25 +501,25 @@ Runtime сейчас in-process.
 
 | Секция | Описание | Файлы | Тесты |
 |--------|----------|-------|-------|
-| §2 Config | 5 настроек: `SIMULATOR_SESSION_SECRET`, `SIMULATOR_SESSION_TTL_HOURS`, `SIMULATOR_COOKIE_DOMAIN`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`, `SIMULATOR_ANON_VISITORS_ENABLED` | `app/config.py` | `test_simulator_cookie_session.py` |
+| §2 Config | 5 настроек: `SIMULATOR_SESSION_SECRET`, `SIMULATOR_SESSION_TTL_SEC`, `SIMULATOR_SESSION_CLOCK_SKEW_SEC`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`, `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` | `app/config.py` | `test_simulator_cookie_session.py` |
 | §3 SimulatorActor | Dataclass `{kind, owner_id, is_admin, participant_pid}`, priority chain Admin→JWT→Cookie→401 | `app/api/deps.py` | `test_simulator_actor_and_csrf.py` |
 | §4 Cookie Session | HMAC-SHA256, формат `v1.<sid>.<iat>.<sig>`, `geo_sim_sid`, Path=/, Secure via X-Forwarded-Proto | `app/core/simulator/session.py`, `app/api/v1/simulator.py` | `test_simulator_cookie_session.py` |
-| §5 DB миграция | `owner_id`, `owner_kind` nullable columns, backfill NULL для legacy | `migrations/versions/017_add_owner_to_simulator_runs.py` | — |
+| §5 DB миграция | `owner_id`, `owner_kind` nullable columns; backfill: `owner_id='legacy:unknown'`, `owner_kind=NULL` для legacy; на Postgres `owner_id` становится NOT NULL | `migrations/versions/017_add_owner_to_simulator_runs.py` | — |
 | §6 Per-owner isolation | `_active_run_id_by_owner`, per-owner лимит (409 `owner_active_exists`), глобальный лимит (409 `global_active_limit`) | `app/core/simulator/runtime_impl.py`, `app/core/simulator/run_lifecycle.py` | `test_simulator_owner_isolation.py` |
 | §7 AuthZ | `_check_run_access()` deny-by-default, пустой owner → только admin | `app/api/v1/simulator.py` | `test_simulator_owner_isolation.py` |
 | §8 Admin control plane | `GET /admin/runs`, `POST /admin/runs/stop-all`, ForbiddenException | `app/api/v1/simulator.py` | `test_simulator_owner_isolation.py` |
 | §9 X-Simulator-Owner | `.strip()` + regex validation, E009 для невалидных | `app/api/deps.py` | `test_simulator_actor_and_csrf.py` |
-| §10 UI | `credentials: 'include'`, session bootstrap, admin controls TopBar | `simulator-ui/v2/src/api/`, `simulator-ui/v2/src/composables/`, `simulator-ui/v2/src/components/` | 217 frontend tests |
+| §10 UI | `credentials: 'include'`, session bootstrap, admin controls TopBar | `simulator-ui/v2/src/api/`, `simulator-ui/v2/src/composables/`, `simulator-ui/v2/src/components/` | vitest (unit) |
 | §11 CSRF | Origin check, ForbiddenException с E006, `details.reason=csrf_origin` | `app/api/deps.py` | `test_simulator_actor_and_csrf.py` |
-| §12 Recovery | `reconcile_stale_runs()` на startup, rate-limit exemption `/session/ensure` | `app/core/simulator/storage.py`, `app/main.py`, `app/api/deps.py` | — |
+| §12 Recovery | `reconcile_stale_runs()` на startup (включая `stopped_at=now`), rate-limit exemption `/session/ensure` | `app/core/simulator/storage.py`, `app/main.py`, `app/api/deps.py` | — |
 | §4 Guardrail | Fail-fast RuntimeError в non-dev при дефолтном секрете | `app/config.py` | `test_simulator_cookie_session.py` |
 
 ### Покрытие тестами
 
-- **Backend unit-тесты:** 64 теста (3 файла)
-  - `test_simulator_cookie_session.py` — 19 тестов (session, TTL boundary, guardrail)
-  - `test_simulator_owner_isolation.py` — 25 тестов (per-owner, conflict_kind, authZ deny-by-default)
-  - `test_simulator_actor_and_csrf.py` — 22 теста (actor, CSRF E006, trim, E009)
+- **Backend unit-тесты:** 70 тестов (3 файла)
+  - `test_simulator_cookie_session.py` — 23 теста (session, TTL boundary, guardrail, HTTP ensure_session)
+  - `test_simulator_owner_isolation.py` — 27 тестов (per-owner, conflict_kind, authZ deny-by-default; +2: restart mapping)
+  - `test_simulator_actor_and_csrf.py` — 22 теста (actor, CSRF E006, trim, E009; +1: CSRF guardrail пустой allowlist)
 - **Frontend тесты:** 217 passed
 
 ### Найденные и исправленные проблемы (Фаза 10)
@@ -519,3 +534,23 @@ Runtime сейчас in-process.
 8. `_check_run_access()` разрешал доступ при пустом `owner_id` → deny-by-default для non-admin
 9. Миграция ставила `owner_kind='admin'` → исправлено на NULL (по спеке)
 10. Admin endpoints через `HTTPException(403)` → `ForbiddenException`
+
+### Найденные и исправленные проблемы (Фаза 13 — Code Review)
+
+11. `restart()` не восстанавливал active mapping → исправлено с проверкой конфликта
+12. CSRF allowlist guardrail — пустой allowlist в prod → добавлен warning
+13. Двойной `get_run()` в action endpoints → объединён в `_get_run_checked()`
+14. Guardrail не проверял пустую строку secret → добавлена проверка
+15. `upsert_run` — неявная обработка пустого `owner_id` → явная проверка с комментарием
+
+### Найденные и исправленные проблемы (Фаза 14 — Расширенный Code Review)
+
+16. `_get_run_checked` бросал `HTTPException` вместо `ConflictException` → UI получал `{"detail":"..."}` вместо `{"error":{"code":"E008",...}}` → заменено на `ConflictException` с `conflict_kind=run_terminal`
+17. TOCTOU в `events_stream_active_run` — двойной вызов `get_active_run_id` → сведён к одному вызову, idle_stream проверяет сохранённый результат
+18. `print()` в `stop_run` дублировал `logger.info()` → удалён `print()`
+19. `ensure_session` использовал `get_settings()` вместо модульного синглтона `settings` → заменено для консистентности и производительности
+20. Дублирование `"code":"E006"` в `details` dict CSRF-ошибок → убрано из `details` (код уже на верхнем уровне `error.code`)
+21. `restart()` — избыточная проверка `if self._set_active_run_id:` при non-Optional типе → убрана, вызов напрямую
+22. Sort key `started_at or 0` в `_count_active_runs_for_owner_locked` — fragile при None → заменено на `datetime.min`
+23. Тесты CSRF (2 теста) проверяли `details.code` → обновлены на `exc.code` после исправления #20
+24. HTTP-тесты для `POST /session/ensure` — 3 теста через TestClient (set-cookie, reuse, replace invalid)

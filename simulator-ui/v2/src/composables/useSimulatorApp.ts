@@ -165,8 +165,12 @@ export function useSimulatorApp() {
     desiredMode: (lsGet('geo.sim.v2.desiredMode', 'real') === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode,
     // Default lower than demo to keep real-mode readable (avoid dozens of overlapping sparks).
     intensityPercent: (() => {
-      const n = Number(lsGet('geo.sim.v2.intensityPercent', '30'))
-      return Number.isFinite(n) ? n : 30
+      const fallback = 30
+      const raw = lsGet('geo.sim.v2.intensityPercent', '')
+      if (!raw) return fallback
+      const n = Number(raw)
+      if (!Number.isFinite(n)) return fallback
+      return Math.max(0, Math.min(100, Math.round(n)))
     })(),
     runId: lsGet('geo.sim.v2.runId', '') || null,
     runStatus: null as RunStatus | null,
@@ -273,6 +277,62 @@ export function useSimulatorApp() {
     }
   }
 
+  function isJwtLike(token: string): boolean {
+    const t = token.trim()
+    return t.split('.').length === 3
+  }
+
+  const hasAdminToken = computed(() => {
+    const t = String(real.accessToken ?? '').trim()
+    return !!t && !isJwtLike(t)
+  })
+
+  // Keep admin runs view fresh without constant polling.
+  // Triggers:
+  // - entering real mode with admin token (initial load)
+  // - run lifecycle changes (start/stop)
+  let adminRefreshTimer: number | null = null
+  function scheduleAdminRunsRefresh() {
+    if (!isRealMode.value) return
+    if (!hasAdminToken.value) return
+    if (adminRunsLoading.value) return
+
+    if (adminRefreshTimer != null) return
+    adminRefreshTimer = window.setTimeout(async () => {
+      adminRefreshTimer = null
+      // Double-check conditions at execution time.
+      if (!isRealMode.value || !hasAdminToken.value) return
+      if (adminRunsLoading.value) return
+      await adminGetRuns()
+    }, 200)
+  }
+
+  watch(
+    () => [isRealMode.value, hasAdminToken.value, real.apiBase] as const,
+    ([isReal, hasAdmin]) => {
+      if (!isReal || !hasAdmin) return
+      // Initial population so Admin shows count without requiring manual Refresh.
+      scheduleAdminRunsRefresh()
+    },
+    { immediate: true },
+  )
+
+  watch(
+    () => real.runId,
+    () => {
+      // When a new run is created/attached, refresh admin list.
+      scheduleAdminRunsRefresh()
+    },
+  )
+
+  watch(
+    () => String(real.runStatus?.state ?? '').toLowerCase(),
+    () => {
+      // When run transitions between states, refresh admin list.
+      scheduleAdminRunsRefresh()
+    },
+  )
+
 
   // tx.failed often represents a "clean rejection" (routing capacity, trustline constraints).
   // Those should not be surfaced as global "errors" in the HUD.
@@ -327,7 +387,11 @@ export function useSimulatorApp() {
   )
   watch(
     () => real.intensityPercent,
-    (v) => lsSet('geo.sim.v2.intensityPercent', String(v)),
+    (v) => {
+      // Interact UI must force intensity=0 locally, but should NOT clobber the user's Auto-Run preference.
+      if (isInteractUi.value && apiMode.value === 'real') return
+      lsSet('geo.sim.v2.intensityPercent', String(v))
+    },
   )
   watch(
     () => real.runId,
@@ -1318,7 +1382,13 @@ export function useSimulatorApp() {
     onAnySseEvent: markDemoActivity,
   })
 
-  // Interact UI contract: intensity must be forced to 0%.
+  // Real mode: if intensity ends up 0 (common after legacy Interact UI persistence),
+  // reset to a sensible default so a newly started run actually produces events.
+  if (!isInteractUi.value && isRealMode.value && real.intensityPercent === 0) {
+    real.intensityPercent = 30
+  }
+
+  // Interact UI contract: intensity must be forced to 0% (local-only).
   // Do this early (affects next started run) and also best-effort apply to an active run.
   if (isInteractUi.value && apiMode.value === 'real') {
     real.intensityPercent = 0

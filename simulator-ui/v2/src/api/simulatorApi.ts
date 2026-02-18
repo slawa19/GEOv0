@@ -263,7 +263,7 @@ export function ensureSession(cfg: HttpConfig): Promise<SessionEnsureResponse> {
 export type AdminRunSummary = {
   run_id: string
   owner_id: string
-  actor_kind: string
+  owner_kind: string
   state: string
   scenario_id?: string | null
   created_at?: string | null

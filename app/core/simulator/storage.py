@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import delete, select, update as sql_update
@@ -71,8 +71,8 @@ async def upsert_run(run: RunRecord) -> None:
                 last_event_type=run.last_event_type,
                 current_phase=run.current_phase,
                 last_error=run.last_error,
-                owner_id=str(run.owner_id) if getattr(run, "owner_id", None) else None,
-                owner_kind=str(run.owner_kind) if getattr(run, "owner_kind", None) else None,
+                owner_id=run.owner_id if run.owner_id else None,  # empty string → NULL intentionally
+                owner_kind=run.owner_kind if run.owner_kind else None,  # empty string → NULL intentionally
             )
             try:
                 await session.merge(row)
@@ -479,6 +479,7 @@ async def reconcile_stale_runs() -> int:
 
     stale_states = ("running", "paused", "stopping")
     try:
+        now = datetime.now(timezone.utc)
         async with db.AsyncSessionLocal() as session:
             result = await session.execute(
                 sql_update(SimulatorRun)
@@ -486,6 +487,7 @@ async def reconcile_stale_runs() -> int:
                 .values(
                     state="error",
                     last_error={"reason": "server_restart"},
+                    stopped_at=now,
                 )
                 .execution_options(synchronize_session=False)
             )

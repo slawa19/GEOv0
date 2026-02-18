@@ -103,14 +103,14 @@
 | CLI override | `X-Simulator-Owner` с `.strip()` + regex validation, E009 | ✅ Done |
 | CSRF защита | Origin check, ForbiddenException с E006, `details.reason=csrf_origin` | ✅ Done |
 | Config guardrail | Fail-fast RuntimeError в non-dev при дефолтном секрете | ✅ Done |
-| DB миграция | `owner_id`, `owner_kind` nullable, backfill NULL для legacy | ✅ Done |
+| DB миграция | `owner_id`, `owner_kind` nullable; backfill: `owner_id='legacy:unknown'`, `owner_kind=NULL` для legacy | ✅ Done |
 | UI интеграция | `credentials: 'include'`, session bootstrap, admin controls TopBar | ✅ Done |
-| Recovery | `reconcile_stale_runs()` на startup, rate-limit exemption `/session/ensure` | ✅ Done |
+| Recovery | `reconcile_stale_runs()` на startup (включая `stopped_at=now`), rate-limit exemption `/session/ensure` | ✅ Done |
 
 ### Покрытие тестами
 
-- **Backend unit-тесты:** 64 теста (3 файла), 0.10s, 0 failures
+- **Backend unit-тесты:** 67 тестов (3 файла), 0 failures
   - `tests/unit/test_simulator_cookie_session.py` — 19 тестов
-  - `tests/unit/test_simulator_owner_isolation.py` — 25 тестов
-  - `tests/unit/test_simulator_actor_and_csrf.py` — 22 теста
-- **Frontend тесты:** 217 passed
+  - `tests/unit/test_simulator_owner_isolation.py` — 27 тестов (+2: restart mapping)
+  - `tests/unit/test_simulator_actor_and_csrf.py` — 23 теста (+1: CSRF guardrail пустой allowlist)
+- **Frontend unit-тесты:** vitest — green

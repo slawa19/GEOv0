@@ -269,3 +269,87 @@ def test_guardrail_allows_default_in_dev() -> None:
 
     # Не должен бросать исключение в dev-режиме
     s._guardrail_simulator_session_secret()
+
+
+def test_csrf_guardrail_warns_empty_allowlist_in_prod(caplog) -> None:
+    """Empty CSRF allowlist in production triggers warning log."""
+    import logging
+    from app.config import Settings
+
+    s = Settings()
+    s.ENV = "production"
+    s.SIMULATOR_CSRF_ORIGIN_ALLOWLIST = ""
+
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        s._guardrail_csrf_allowlist()
+
+    assert any("SIMULATOR_CSRF_ORIGIN_ALLOWLIST" in msg for msg in caplog.messages), (
+        f"Ожидается warning о SIMULATOR_CSRF_ORIGIN_ALLOWLIST в production. "
+        f"Сообщения: {caplog.messages}"
+    )
+
+
+# ─── HTTP-тесты: POST /api/v1/simulator/session/ensure (TestClient) ──────────
+
+from starlette.testclient import TestClient
+from app.main import app
+
+_ENSURE_URL = "/api/v1/simulator/session/ensure"
+
+
+def test_ensure_session_sets_cookie_and_returns_owner() -> None:
+    """POST /session/ensure без cookie → 200, Set-Cookie с geo_sim_sid, owner_id='anon:…'."""
+    with TestClient(app, raise_server_exceptions=True) as client:
+        response = client.post(_ENSURE_URL)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.get("actor_kind") == "anon", (
+        f"actor_kind должен быть 'anon': {body!r}"
+    )
+    assert body.get("owner_id", "").startswith("anon:"), (
+        f"owner_id должен начинаться с 'anon:': {body!r}"
+    )
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "geo_sim_sid" in set_cookie, (
+        f"Ожидается Set-Cookie с 'geo_sim_sid', получено: {set_cookie!r}"
+    )
+
+
+def test_ensure_session_reuses_existing_valid_cookie() -> None:
+    """Два запроса в одной сессии: второй возвращает тот же owner_id, новой cookie нет."""
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp1 = client.post(_ENSURE_URL)
+        assert resp1.status_code == 200
+        owner_id_1 = resp1.json()["owner_id"]
+
+        # TestClient (httpx) сохраняет cookies между запросами в рамках одной сессии
+        resp2 = client.post(_ENSURE_URL)
+        assert resp2.status_code == 200
+        owner_id_2 = resp2.json()["owner_id"]
+
+    assert owner_id_1 == owner_id_2, (
+        f"owner_id должен совпадать при повторном запросе: {owner_id_1!r} != {owner_id_2!r}"
+    )
+    # Второй ответ не должен содержать Set-Cookie (cookie уже валидна)
+    assert "set-cookie" not in resp2.headers, (
+        f"Второй запрос с валидной cookie не должен возвращать Set-Cookie, "
+        f"получено: {resp2.headers.get('set-cookie')!r}"
+    )
+
+
+def test_ensure_session_replaces_invalid_cookie() -> None:
+    """POST /session/ensure с мусорной cookie → новая cookie установлена, owner_id='anon:…'."""
+    with TestClient(app, raise_server_exceptions=True) as client:
+        client.cookies.set("geo_sim_sid", "garbage")
+        response = client.post(_ENSURE_URL)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.get("owner_id", "").startswith("anon:"), (
+        f"owner_id должен начинаться с 'anon:': {body!r}"
+    )
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "geo_sim_sid" in set_cookie, (
+        f"Ожидается новая cookie geo_sim_sid при невалидном значении, получено: {set_cookie!r}"
+    )

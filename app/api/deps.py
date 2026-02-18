@@ -214,7 +214,7 @@ def _check_csrf_origin(request: Request, actor: "SimulatorActor") -> None:
     if not origin:
         raise ForbiddenException(
             "Missing Origin header for cookie-auth request",
-            details={"reason": "csrf_origin", "code": "E006"},
+            details={"reason": "csrf_origin"},
         )
 
     allowlist_raw = (settings.SIMULATOR_CSRF_ORIGIN_ALLOWLIST or "").strip()
@@ -225,7 +225,7 @@ def _check_csrf_origin(request: Request, actor: "SimulatorActor") -> None:
     if origin not in allowed:
         raise ForbiddenException(
             f"Origin {origin!r} not in CSRF allowlist",
-            details={"reason": "csrf_origin", "code": "E006", "origin": origin},
+            details={"reason": "csrf_origin", "origin": origin},
         )
 
 

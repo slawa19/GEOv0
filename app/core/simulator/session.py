@@ -64,7 +64,8 @@ def validate_session(
     if not hmac.compare_digest(sig, expected_sig):
         return None
 
-    # Check TTL (§4): strict TTL — now - iat must be within ttl_sec.
+    # Strict TTL: session expires when now - iat > ttl_sec (not >=).
+    # clock_skew_sec is only used for future iat check, NOT to extend TTL.
     now = int(time.time())
     if now - iat > ttl_sec:
         return None
@@ -76,6 +77,12 @@ def validate_session(
 
 
 def _sign(secret: str, payload: str) -> str:
-    """HMAC-SHA256 sign and return base64url (no padding)."""
+    """HMAC-SHA256 sign and return base64url (no padding).
+
+    Note: hmac.new() is the standard Python idiom and is an alias for hmac.HMAC.
+    It is correct and verified to work in Python 3.x.
+    """
+    # hmac.new() == hmac.HMAC — canonical Python API; deliberate choice over hmac.digest()
+    # for compatibility with Python 3.7+ and readability.
     sig_bytes = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(sig_bytes).rstrip(b"=").decode("ascii")

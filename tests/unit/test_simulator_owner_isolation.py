@@ -19,7 +19,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -447,19 +447,17 @@ def test_create_run_owner_limit_checked_before_global() -> None:
 
 def test_check_run_access_empty_owner_denies_non_admin() -> None:
     """run с owner_id='', actor non-admin → 403 (deny-by-default §7)."""
-    from fastapi import HTTPException
     from app.api.v1.simulator import _check_run_access
     from app.api.deps import SimulatorActor
+    from app.utils.exceptions import ForbiddenException
 
     run = _make_run("run-no-owner", owner_id="")
     actor = SimulatorActor(kind="anon", owner_id="anon:someone", is_admin=False)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ForbiddenException) as exc_info:
         _check_run_access(run, actor, "run-no-owner")
 
-    assert exc_info.value.status_code == 403, (
-        f"Ожидался 403, получено: {exc_info.value.status_code}"
-    )
+    assert exc_info.value.status_code == 403
 
 
 def test_check_run_access_empty_owner_allows_admin() -> None:
@@ -472,3 +470,89 @@ def test_check_run_access_empty_owner_allows_admin() -> None:
 
     # Не должно выбрасывать исключение
     _check_run_access(run, actor, "run-no-owner")
+
+
+# ─── Тесты: restart восстанавливает active_run_id ────────────────────────────
+
+def test_restart_restores_active_run_id() -> None:
+    """After stop + restart, active_run_id mapping is restored."""
+    active_map: dict[str, str] = {}
+    owner_id = "anon:restart-test-owner"
+    run_id = "run-restart-restore-001"
+
+    def _set_active(rid: str, oid: str) -> None:
+        if oid:
+            active_map[oid] = rid
+
+    lc = _make_lifecycle(
+        get_active_run_id_for_owner=lambda oid: active_map.get(oid),
+    )
+    # Подменяем set_active_run_id реальным хранилищем
+    lc._set_active_run_id = _set_active
+
+    # Добавляем run в stopped состоянии (маппинг пуст — как после stop())
+    run = _make_run(run_id, owner_id=owner_id, state="stopped")
+    lc._runs[run_id] = run
+    assert active_map.get(owner_id) is None, "Маппинг должен быть пустым перед restart"
+
+    async def _do_restart() -> None:
+        await lc.restart(run_id)
+
+    with patch("app.core.simulator.run_lifecycle.simulator_storage") as mock_storage:
+        mock_storage.upsert_run = AsyncMock(return_value=None)
+        asyncio.run(_do_restart())
+
+    # После restart маппинг должен быть восстановлен
+    assert active_map.get(owner_id) == run_id, (
+        f"Ожидается active_run_id={run_id!r} после restart, "
+        f"получено: {active_map.get(owner_id)!r}"
+    )
+
+
+def test_restart_conflict_with_another_active_run() -> None:
+    """Restart fails if owner already has a different active run."""
+    run1_id = "run-conflict-restart-r1"
+    run2_id = "run-conflict-restart-r2"
+    owner_id = "anon:conflict-restart-owner"
+
+    # Маппинг указывает на run2 (другой активный run того же owner)
+    active_map: dict[str, str] = {owner_id: run2_id}
+
+    lc = _make_lifecycle(
+        get_active_run_id_for_owner=lambda oid: active_map.get(oid),
+    )
+
+    # run1 в stopped состоянии, пытаемся его перезапустить
+    run1 = _make_run(run1_id, owner_id=owner_id, state="stopped")
+    lc._runs[run1_id] = run1
+
+    async def _do_restart() -> None:
+        await lc.restart(run1_id)
+
+    with pytest.raises(ConflictException) as exc_info:
+        asyncio.run(_do_restart())
+
+    assert exc_info.value.details["conflict_kind"] == "owner_active_exists", (
+        f"Ожидалось 'owner_active_exists', получено: {exc_info.value.details}"
+    )
+    assert exc_info.value.details["active_run_id"] == run2_id
+
+
+# ─── TODO: Тесты _get_run_checked helper ─────────────────────────────────────
+#
+# _get_run_checked зависит от глобального `runtime` объекта (см. _get_runtime()),
+# который требует полной инициализации _SimulatorRuntime (сценарии, БД и т.д.).
+# Unit-тестирование без патчинга глобального runtime нецелесообразно.
+#
+# _check_run_access уже покрыт тестами:
+#   - test_check_run_access_empty_owner_denies_non_admin
+#   - test_check_run_access_empty_owner_allows_admin
+#
+# def test_get_run_checked_returns_run_for_owner():
+#     """_get_run_checked returns run for matching owner."""
+#
+# def test_get_run_checked_raises_403_for_wrong_owner():
+#     """_get_run_checked raises 403 for non-owner non-admin."""
+#
+# def test_get_run_checked_raises_409_for_stopped_run():
+#     """_get_run_checked raises 409 if run is stopped."""
