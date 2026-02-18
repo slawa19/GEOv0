@@ -86,6 +86,7 @@ export function useCanvasInteractions(opts: {
 
     opts.setSelectedNodeId(null)
     opts.setNodeCardOpen(false)
+    opts.clearHoveredEdge()
   }
 
   function onCanvasDblClick(ev: MouseEvent) {
@@ -147,10 +148,9 @@ export function useCanvasInteractions(opts: {
       return
     }
 
-    // Click on empty background: clear selection.
-    opts.setSelectedNodeId(null)
-    opts.setNodeCardOpen(false)
-    opts.clearHoveredEdge()
+    // wasClick=true: the browser will fire a `click` event next.
+    // Delegate all selection logic (hit-test + clear on empty) to onCanvasClick
+    // to avoid double-firing: pointerup would clear, then click would re-set (flicker).
   }
 
   function onCanvasWheel(ev: WheelEvent) {

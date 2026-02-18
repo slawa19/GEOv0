@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import type { ParticipantInfo } from '../api/simulatorTypes'
+import { participantLabel } from '../utils/participants'
 
 type Props = {
   phase: InteractPhase
@@ -82,19 +83,11 @@ function titleText() {
   return 'Manual payment'
 }
 
-function labelFor(p: ParticipantInfo): string {
-  const pid = String(p.pid ?? '').trim()
-  const name = String(p.name ?? '').trim()
-  if (!pid) return name || '—'
-  if (!name || name === pid) return pid
-  return `${name} (${pid})`
-}
-
 const participantsSorted = computed(() => {
   const items = Array.isArray(props.participants) ? props.participants : []
   return [...items]
     .filter((p) => String(p?.pid ?? '').trim())
-    .sort((a, b) => labelFor(a).localeCompare(labelFor(b)))
+    .sort((a, b) => participantLabel(a).localeCompare(participantLabel(b)))
 })
 
 // UX guard: prevent selecting the same participant as both From and To.
@@ -134,7 +127,7 @@ function onToChange(v: string) {
           @change="onFromChange(($event.target as HTMLSelectElement).value)"
         >
           <option value="">—</option>
-          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
+          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
         </select>
       </div>
 
@@ -149,7 +142,7 @@ function onToChange(v: string) {
           @change="onToChange(($event.target as HTMLSelectElement).value)"
         >
           <option value="">—</option>
-          <option v-for="p in toParticipants" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
+          <option v-for="p in toParticipants" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
         </select>
       </div>
 
@@ -174,7 +167,8 @@ function onToChange(v: string) {
               style="flex: 1"
               inputmode="decimal"
               placeholder="0.00"
-              :aria-invalid="amountValid ? 'false' : 'true'"
+              :aria-invalid="amount.trim() && !amountValid ? 'true' : 'false'"
+              @keydown.enter.prevent="onConfirm"
             />
             <span class="ds-label ds-muted">{{ unit }}</span>
           </div>
@@ -196,7 +190,7 @@ function onToChange(v: string) {
           :disabled="!canConfirm"
           @click="onConfirm"
         >
-          Confirm
+          {{ busy ? 'Sending…' : 'Confirm' }}
         </button>
         <button
           class="ds-btn ds-btn--ghost"

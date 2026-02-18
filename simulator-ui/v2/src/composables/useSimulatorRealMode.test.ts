@@ -2,12 +2,15 @@ import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
+import { ApiError } from '../api/http'
 import { connectSse } from '../api/sse'
+import { createRun, getActiveRun } from '../api/simulatorApi'
 
 vi.mock('../api/simulatorApi', () => {
   return {
     artifactDownloadUrl: () => 'http://artifact',
     createRun: vi.fn(async () => ({ run_id: 'r1' })),
+    getActiveRun: vi.fn(async () => ({ run_id: 'r_active' })),
     getRun: vi.fn(async () => ({
       run_id: 'r1',
       scenario_id: 'sc1',
@@ -206,6 +209,58 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
     expect(loadScene).toHaveBeenCalledTimes(1)
 
     vi.useRealTimers()
+  })
+})
+
+describe('useSimulatorRealMode - startRun conflict attach', () => {
+  it('attaches to active run when createRun returns HTTP 409', async () => {
+    const createRunMock = vi.mocked(createRun)
+    const getActiveRunMock = vi.mocked(getActiveRun)
+
+    createRunMock.mockImplementationOnce(async () => {
+      throw new ApiError('HTTP 409 Conflict for /simulator/runs', { status: 409 })
+    })
+    // useSimulatorRealMode may call getActiveRun during boot discovery and again
+    // when handling the 409 attach-to-active flow. Keep it stable for this test.
+    getActiveRunMock.mockResolvedValue({ run_id: 'r_attached' } as any)
+
+    const real = createRealState()
+    real.apiBase = 'http://x'
+    real.accessToken = 't'
+    real.selectedScenarioId = 'sc1'
+
+    const loadScene = vi.fn(async () => undefined)
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => true),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+      real,
+
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+
+      loadScene,
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      pushTxAmountLabel: () => undefined,
+      clampRealTxTtlMs: () => 1200,
+      scheduleTimeout: () => undefined,
+      runRealTxFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+      wakeUp: () => undefined,
+    })
+
+    await h.startRun({ mode: 'real', intensityPercent: 0 })
+
+    expect(real.runId).toBe('r_attached')
+    expect(loadScene).toHaveBeenCalled()
+
+    h.stopSse()
   })
 })
 

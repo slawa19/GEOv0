@@ -139,7 +139,7 @@ describe('useCanvasInteractions', () => {
     expect(cameraMove).toHaveBeenCalledTimes(1)
   })
 
-  it('pointerup clears selection only when camera reports click', () => {
+  it('pointerup never directly clears selection — delegates entirely to onCanvasClick', () => {
     const setSelectedNodeId = vi.fn()
     const clearHoveredEdge = vi.fn()
     const setNodeCardOpen = vi.fn()
@@ -168,14 +168,16 @@ describe('useCanvasInteractions', () => {
       getPanActive: () => false,
     })
 
+    // wasClick=false: nothing should happen
     h.onCanvasPointerUp({} as any)
     expect(setSelectedNodeId).not.toHaveBeenCalled()
 
+    // wasClick=true: selection logic is delegated to onCanvasClick; pointerup must NOT clear it
     cameraUp.mockReturnValueOnce(true)
     h.onCanvasPointerUp({} as any)
-    expect(setSelectedNodeId).toHaveBeenLastCalledWith(null)
-    expect(setNodeCardOpen).toHaveBeenLastCalledWith(false)
-    expect(clearHoveredEdge).toHaveBeenCalledTimes(1)
+    expect(setSelectedNodeId).not.toHaveBeenCalled()
+    expect(setNodeCardOpen).not.toHaveBeenCalled()
+    expect(clearHoveredEdge).not.toHaveBeenCalled()
   })
 
   it('wheel is ignored during drag-to-pin active', () => {

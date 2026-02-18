@@ -21,7 +21,7 @@ type UseNodeCardDeps = {
 
 type UseNodeCardReturn = {
   selectedNode: ComputedRef<GraphNode | null>
-  nodeCardStyle: () => { left?: string; top?: string; display?: string }
+  nodeCardStyle: ComputedRef<{ left?: string; top?: string; display?: string }>
 }
 
 export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
@@ -76,7 +76,7 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     return counts
   }
 
-  function nodeCardStyle() {
+  const nodeCardStyle = computed(() => {
     const host = deps.hostEl.value
     if (!host || !selectedNode.value) return { display: 'none' }
 
@@ -197,7 +197,7 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     // Fallback: use the best edge-count candidate (legacy behavior).
     const best = evaluated[0]!
     return { left: `${best.t.x}px`, top: `${best.t.y}px` }
-  }
+  })
 
   return { selectedNode, nodeCardStyle }
 }

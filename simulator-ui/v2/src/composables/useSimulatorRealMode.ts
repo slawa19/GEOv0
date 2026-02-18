@@ -3,6 +3,7 @@ import { watch, type ComputedRef } from 'vue'
 import {
   artifactDownloadUrl,
   createRun,
+  getActiveRun,
   getRun,
   listArtifacts,
   listScenarios,
@@ -866,15 +867,32 @@ export function useSimulatorRealMode(opts: {
       cleanupRealRunFxAndTimers()
       resetRunStats()
 
-      const res = await createRun(
-        { apiBase: real.apiBase, accessToken: real.accessToken },
-        {
-          scenario_id: real.selectedScenarioId,
-          mode: startOpts?.mode ?? real.desiredMode,
-          intensity_percent: startOpts?.intensityPercent ?? real.intensityPercent,
-        },
-      )
-      real.runId = res.run_id
+      try {
+        const res = await createRun(
+          { apiBase: real.apiBase, accessToken: real.accessToken },
+          {
+            scenario_id: real.selectedScenarioId,
+            mode: startOpts?.mode ?? real.desiredMode,
+            intensity_percent: startOpts?.intensityPercent ?? real.intensityPercent,
+          },
+        )
+        real.runId = res.run_id
+      } catch (e: unknown) {
+        // If backend rejects creating a new run due to capacity (SIMULATOR_MAX_ACTIVE_RUNS),
+        // attach to the already-active run instead of failing silently.
+        if (e instanceof ApiError && e.status === 409) {
+          const active = await getActiveRun({ apiBase: real.apiBase, accessToken: real.accessToken })
+          const activeRunId = String((active as any)?.run_id ?? '').trim()
+          if (activeRunId) {
+            real.runId = activeRunId
+          } else {
+            throw e
+          }
+        } else {
+          throw e
+        }
+      }
+
       real.runStatus = null
       real.lastEventId = null
       real.artifacts = []
@@ -1016,6 +1034,21 @@ export function useSimulatorRealMode(opts: {
           await refreshScenarios()
 
           ensureScenarioSelectionValid()
+
+          // If no runId is persisted locally, try to discover an already-active run.
+          // This makes cross-tab / cross-browser runs visible immediately in the UI
+          // and prevents the confusing "Start → HTTP 409" experience.
+          if (real.accessToken && !real.runId) {
+            try {
+              const active = await getActiveRun({ apiBase: real.apiBase, accessToken: real.accessToken })
+              const activeRunId = String(active?.run_id ?? '').trim()
+              if (activeRunId) {
+                real.runId = activeRunId
+              }
+            } catch {
+              // Best-effort: if discovery fails, keep normal preview flow.
+            }
+          }
 
           if (real.runId && real.accessToken) {
             await refreshRunStatus()

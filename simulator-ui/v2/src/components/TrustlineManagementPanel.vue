@@ -1,8 +1,9 @@
-<script setup lang="ts">
+ <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
+import { participantLabel } from '../utils/participants'
 
 type Props = {
   phase: InteractPhase
@@ -68,7 +69,12 @@ const newLimitNum = computed(() => {
 
 // UX: don't allow creating a 0-limit trustline (no practical capacity).
 const createValid = computed(() => Number.isFinite(limitNum.value) && limitNum.value > 0)
-const updateValid = computed(() => newLimitNum.value >= usedNum.value)
+const updateValid = computed(() =>
+  Number.isFinite(newLimitNum.value) &&
+  newLimit.value.trim().length > 0 &&
+  newLimitNum.value > 0 &&
+  newLimitNum.value >= usedNum.value
+)
 
 async function onCreate() {
   if (props.busy) return
@@ -148,19 +154,17 @@ onUnmounted(() => {
   window.removeEventListener('geo:interact-esc', onInteractEsc)
 })
 
-function labelFor(p: ParticipantInfo): string {
-  const pid = String(p.pid ?? '').trim()
-  const name = String(p.name ?? '').trim()
-  if (!pid) return name || '—'
-  if (!name || name === pid) return pid
-  return `${name} (${pid})`
-}
-
 const participantsSorted = computed(() => {
   const items = Array.isArray(props.participants) ? props.participants : []
   return [...items]
     .filter((p) => String(p?.pid ?? '').trim())
-    .sort((a, b) => labelFor(a).localeCompare(labelFor(b)))
+    .sort((a, b) => participantLabel(a).localeCompare(participantLabel(b)))
+})
+
+const toParticipants = computed(() => {
+  const from = String(props.state.fromPid ?? '').trim()
+  if (!from) return participantsSorted.value
+  return participantsSorted.value.filter(p => String(p?.pid ?? '').trim() !== from)
 })
 
 const selectedTl = computed(() => {
@@ -184,16 +188,27 @@ const trustlinesSorted = computed(() => {
   })
 })
 
-function encodeTlKey(tl: TrustlineInfo): string {
-  return `${String(tl.from_pid ?? '')}→${String(tl.to_pid ?? '')}`
+function encodeTlKey(tl: { from_pid?: string | null; to_pid?: string | null }): string {
+  return `${encodeURIComponent(tl.from_pid ?? '')}|${encodeURIComponent(tl.to_pid ?? '')}`
 }
 
 function onTrustlinePick(key: string) {
-  const s = String(key ?? '')
-  const [from, to] = s.split('→')
+  const idx = key.indexOf('|')
+  if (idx < 0) return
+  const from = decodeURIComponent(key.slice(0, idx))
+  const to = decodeURIComponent(key.slice(idx + 1))
   if (!from || !to) return
   props.selectTrustline?.(from, to)
 }
+
+const newLimitInput = ref<HTMLInputElement | null>(null)
+
+defineExpose({
+  focusNewLimit: () => {
+    newLimitInput.value?.focus()
+    newLimitInput.value?.select()
+  },
+})
 </script>
 
 <template>
@@ -214,7 +229,7 @@ function onTrustlinePick(key: string) {
           @change="props.setFromPid?.(($event.target as HTMLSelectElement).value || null)"
         >
           <option value="">—</option>
-          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
+          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
         </select>
       </div>
 
@@ -229,7 +244,7 @@ function onTrustlinePick(key: string) {
           @change="props.setToPid?.(($event.target as HTMLSelectElement).value || null)"
         >
           <option value="">—</option>
-          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ labelFor(p) }}</option>
+          <option v-for="p in toParticipants" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
         </select>
       </div>
 
@@ -238,6 +253,9 @@ function onTrustlinePick(key: string) {
         <select
           id="tl-pick"
           class="ds-select"
+          :value="state.fromPid && state.toPid
+            ? encodeTlKey({ from_pid: state.fromPid, to_pid: state.toPid })
+            : ''"
           :disabled="busy"
           aria-label="Pick existing trustline"
           @change="onTrustlinePick(($event.target as HTMLSelectElement).value)"
@@ -277,7 +295,7 @@ function onTrustlinePick(key: string) {
             style="flex: 1"
             inputmode="decimal"
             placeholder="0.00"
-            :aria-invalid="createValid ? 'false' : 'true'"
+            :aria-invalid="limit.trim() && !createValid ? 'true' : 'false'"
           />
           <span class="ds-label ds-muted">{{ unit }}</span>
         </div>
@@ -292,12 +310,13 @@ function onTrustlinePick(key: string) {
         <div class="ds-row" style="flex-wrap: nowrap">
           <input
             id="tl-new-limit"
+            ref="newLimitInput"
             v-model="newLimit"
             class="ds-input ds-mono"
             style="flex: 1"
             inputmode="decimal"
             placeholder="0.00"
-            :aria-invalid="updateValid ? 'false' : 'true'"
+            :aria-invalid="newLimit.trim() && !updateValid ? 'true' : 'false'"
           />
           <span class="ds-label ds-muted">{{ unit }}</span>
         </div>
@@ -307,11 +326,11 @@ function onTrustlinePick(key: string) {
 
       <div class="ds-row" style="justify-content: flex-end">
         <button v-if="isCreate" class="ds-btn ds-btn--primary" type="button" :disabled="busy || !createValid" @click="onCreate">
-          Create
+          {{ busy ? 'Creating…' : 'Create' }}
         </button>
 
         <template v-else>
-          <button class="ds-btn ds-btn--primary" type="button" :disabled="busy || !updateValid" @click="onUpdate">Update</button>
+          <button class="ds-btn ds-btn--primary" type="button" :disabled="busy || !updateValid" @click="onUpdate">{{ busy ? 'Updating…' : 'Update' }}</button>
 
           <button
             class="ds-btn"

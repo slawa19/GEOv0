@@ -6,6 +6,7 @@ type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
 
 type Props = {
   apiMode: 'fixtures' | 'real'
+  activeSegment: 'sandbox' | 'auto' | 'interact'
   isInteractUi: boolean
 
   /** True when UI runs in automation/deterministic mode (VITE_TEST_MODE=1). */
@@ -62,12 +63,9 @@ const emit = defineEmits<{
   (e: 'update:intensity-percent', v: number): void
 }>()
 
-const activeSegment = computed<'sandbox' | 'auto' | 'interact'>(() => {
-  if (props.apiMode !== 'real') return 'sandbox'
-  return props.isInteractUi ? 'interact' : 'auto'
-})
+const STALL_THRESHOLD_TICKS = 3
 
-const showRunControls = computed(() => activeSegment.value === 'auto')
+const showRunControls = computed(() => props.activeSegment === 'auto')
 
 const showTestModeBadge = computed(() => {
   // Show only for humans; Playwright/WebDriver runs shouldn't change screenshots.
@@ -100,7 +98,7 @@ const canStop = computed(() => {
 
 const isCapacityStall = computed(() => {
   const ticks = Number(props.runStatus?.consec_all_rejected_ticks ?? 0)
-  return ticks >= 3
+  return ticks >= STALL_THRESHOLD_TICKS
 })
 
 const isRunActive = computed(() => {
@@ -272,7 +270,7 @@ const stopSummary = computed(() => {
             </button>
             <button
               v-if="canStop"
-              class="ds-btn ds-btn--ghost"
+              class="ds-btn ds-btn--danger"
               style="height: 28px; padding: 0 10px"
               type="button"
               @click="props.stop"

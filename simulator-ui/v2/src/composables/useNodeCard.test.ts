@@ -15,7 +15,7 @@ describe('useNodeCard', () => {
       worldToScreen: (x, y) => ({ x, y }),
     })
 
-    expect(api.nodeCardStyle()).toEqual({ display: 'none' })
+    expect(api.nodeCardStyle.value).toEqual({ display: 'none' })
   })
 
   it('computes clamped style from worldToScreen', () => {
@@ -34,7 +34,7 @@ describe('useNodeCard', () => {
       worldToScreen: () => ({ x: 1000, y: 1000 }),
     })
 
-    const s = api.nodeCardStyle()
+    const s = api.nodeCardStyle.value
     expect(typeof s.left).toBe('string')
     expect(typeof s.top).toBe('string')
   })

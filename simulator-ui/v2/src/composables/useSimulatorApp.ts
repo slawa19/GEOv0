@@ -36,7 +36,7 @@ import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
-import { getFxConfig, intensityScale } from '../config/fxConfig'
+import { getFxConfig, intensityScale, CLEARING_LABEL_COLOR } from '../config/fxConfig'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
 
@@ -1007,7 +1007,7 @@ export function useSimulatorApp() {
         pushFloatingLabelWhenReady({
           nodeId: topNodeId,
           text: `−${clearedAmount.replace(/^-/, '')} ${done.equivalent}`,
-          color: '#fbbf24',
+          color: CLEARING_LABEL_COLOR,
           ttlMs: 3800,
           offsetYPx: extraUpPx,
           throttleKey: `clearing-total:${done.plan_id}`,

@@ -7,6 +7,8 @@ type Props = {
   /** Accepts either a raw SystemBalance object or a computed ref (as returned by useSystemBalance(...).balance). */
   balance: SystemBalance | ComputedRef<SystemBalance>
   equivalent: string
+  /** Compact mode: shows only the most important metrics (for Auto-Run overlay). */
+  compact?: boolean
 }
 
 const props = defineProps<Props>()
@@ -27,9 +29,9 @@ function fmt(n: number): string {
 </script>
 
 <template>
-  <div class="system-balance-bar" aria-label="System balance">
+  <div class="system-balance-bar" :class="{ 'system-balance-bar--compact': compact }" aria-label="System balance">
     <div class="system-balance-bar__inner">
-      <div v-if="b.isClean" class="ds-panel ds-ov-metric">
+      <div v-if="b.isClean && !compact" class="ds-panel ds-ov-metric">
         <span class="ds-badge ds-badge--ok">Clean</span>
         <span class="ds-label">System is clean — no debts</span>
       </div>
@@ -39,17 +41,17 @@ function fmt(n: number): string {
         <span class="ds-value ds-mono">{{ fmt(b.totalUsed) }} {{ equivalent }}</span>
       </div>
 
-      <div class="ds-panel ds-ov-metric">
+      <div v-if="!compact" class="ds-panel ds-ov-metric">
         <span class="ds-label">Available Capacity</span>
         <span class="ds-value ds-mono">{{ fmt(b.totalAvailable) }} {{ equivalent }}</span>
       </div>
 
-      <div class="ds-panel ds-ov-metric">
+      <div v-if="!compact" class="ds-panel ds-ov-metric">
         <span class="ds-label">Trustlines</span>
         <span class="ds-value ds-mono">{{ fmt(b.activeTrustlines) }}</span>
       </div>
 
-      <div class="ds-panel ds-ov-metric">
+      <div v-if="!compact" class="ds-panel ds-ov-metric">
         <span class="ds-label">Participants</span>
         <span class="ds-value ds-mono">{{ fmt(b.activeParticipants) }}</span>
       </div>

@@ -6,6 +6,7 @@ import type { LabelsLod, Quality } from '../types/uiPrefs'
 type StorageLike = {
   getItem: (key: string) => string | null
   setItem: (key: string, value: string) => void
+  removeItem?: (key: string) => void
 }
 
 type TimersLike = {
@@ -13,7 +14,14 @@ type TimersLike = {
   clearTimeout: (id: number) => void
 }
 
-type PersistedKey = 'geo.sim.layoutMode' | 'geo.sim.quality' | 'geo.sim.labelsLod'
+type PersistedKey =
+  | 'geo.sim.layoutMode'
+  | 'geo.sim.quality'
+  | 'geo.sim.labelsLod'
+  | 'geo.uiTheme'
+  | 'geo.sim.v2.desiredMode'
+  | 'geo.sim.v2.fxDebugRun'
+  | 'geo.sim.v2.runId'
 
 type UsePersistedSimulatorPrefsDeps = {
   layoutMode: Ref<LayoutMode>
@@ -46,6 +54,14 @@ function safeGet(storage: StorageLike, key: PersistedKey): string {
 function safeSet(storage: StorageLike, key: PersistedKey, value: string) {
   try {
     storage.setItem(key, value)
+  } catch {
+    // ignore
+  }
+}
+
+function safeRemove(storage: StorageLike, key: PersistedKey) {
+  try {
+    storage.removeItem?.(key)
   } catch {
     // ignore
   }
@@ -122,4 +138,81 @@ export function usePersistedSimulatorPrefs(deps: UsePersistedSimulatorPrefsDeps)
   }
 
   return { loadFromStorage, dispose }
+}
+
+// ---------------------------------------------------------------------------
+// useSimulatorStorage — lightweight composable for ad-hoc storage operations
+// used by SimulatorAppRoot (theme, mode-switch helpers, fxDebugRun flag).
+// Unlike usePersistedSimulatorPrefs it has no reactive watchers and requires
+// no layout/quality dependencies.
+// ---------------------------------------------------------------------------
+
+type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
+
+function normalizeUiThemeId(v: unknown): UiThemeId {
+  const s = String(v ?? '').trim().toLowerCase()
+  if (s === 'shadcn') return 'shadcn'
+  if (s === 'saas') return 'saas'
+  if (s === 'library') return 'library'
+  return 'hud'
+}
+
+export function useSimulatorStorage(storage?: StorageLike) {
+  const _storage: StorageLike & { removeItem: (key: string) => void } =
+    storage != null
+      ? {
+          getItem: (k) => { try { return storage.getItem(k) } catch { return null } },
+          setItem: (k, v) => { try { storage.setItem(k, v) } catch { /* ignore */ } },
+          removeItem: (k) => { try { storage.removeItem?.(k) } catch { /* ignore */ } },
+        }
+      : typeof window !== 'undefined'
+        ? {
+            getItem: (k) => { try { return window.localStorage.getItem(k) } catch { return null } },
+            setItem: (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* ignore */ } },
+            removeItem: (k) => { try { window.localStorage.removeItem(k) } catch { /* ignore */ } },
+          }
+        : { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
+
+  /** Read persisted UI theme (null if absent). */
+  function readUiTheme(): UiThemeId | null {
+    const v = _storage.getItem('geo.uiTheme')
+    if (!v) return null
+    return normalizeUiThemeId(v)
+  }
+
+  /** Persist UI theme selection. */
+  function writeUiTheme(theme: UiThemeId) {
+    _storage.setItem('geo.uiTheme', theme)
+  }
+
+  /**
+   * Force desiredMode = 'real' on next load.
+   * Called before navigating away from Demo UI to avoid a topology-only preview snapshot.
+   */
+  function forceDesiredModeReal() {
+    _storage.setItem('geo.sim.v2.desiredMode', 'real')
+  }
+
+  /** Returns true when an active FX Debug run was persisted. */
+  function isFxDebugRun(): boolean {
+    return _storage.getItem('geo.sim.v2.fxDebugRun') === '1'
+  }
+
+  /**
+   * Clear the persisted FX Debug run state (runId + fxDebugRun flag).
+   * Called when exiting Demo UI to prevent a stale fixtures-run snapshot on next load.
+   */
+  function clearFxDebugRunState() {
+    if (!isFxDebugRun()) return
+    _storage.removeItem('geo.sim.v2.fxDebugRun')
+    _storage.removeItem('geo.sim.v2.runId')
+  }
+
+  return {
+    readUiTheme,
+    writeUiTheme,
+    forceDesiredModeReal,
+    isFxDebugRun,
+    clearFxDebugRunState,
+  }
 }

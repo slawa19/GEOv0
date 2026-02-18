@@ -110,6 +110,20 @@ export function getFxConfig(mode: 'demo' | 'real'): DemoFxConfig | RealFxConfig 
 }
 
 /**
+ * Equivalent currency/unit codes shown in the EQ selector (BottomBar).
+ * Single source of truth — avoids hardcoding in template HTML.
+ */
+export const EQUIVALENT_CODES = ['UAH', 'HOUR', 'EUR'] as const
+
+/**
+ * Colour for clearing floating labels.
+ * Corresponds to DS token --ds-warn (warning yellow).
+ * Expressed as a CSS custom property so the browser resolves the
+ * correct per-theme value at render time.
+ */
+export const CLEARING_LABEL_COLOR = 'var(--ds-warn)'
+
+/**
  * Unified intensity scaling function.
  *
  * Previously duplicated in the offline demo player and useSimulatorApp.ts.

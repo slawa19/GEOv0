@@ -9,8 +9,6 @@ type Props = {
   busy: boolean
 
   equivalent: string
-  /** System-wide context (from SystemBalanceBar). */
-  totalDebt?: number | null
 
   confirmClearing: () => Promise<void> | void
   cancel: () => void
@@ -31,16 +29,16 @@ function fmtInt(n: unknown): string {
   return v.toLocaleString(undefined, { maximumFractionDigits: 0 })
 }
 
-  async function onConfirm() {
-    if (props.busy) return
-    await props.confirmClearing()
-  }
+async function onConfirm() {
+  if (props.busy) return
+  await props.confirmClearing()
+}
 
-  const isRunning = computed(() => props.phase === 'clearing-running')
-  const isPreview = computed(() => props.phase === 'clearing-preview')
-  const isConfirm = computed(() => props.phase === 'confirm-clearing')
+const isRunning = computed(() => props.phase === 'clearing-running')
+const isPreview = computed(() => props.phase === 'clearing-preview')
+const isConfirm = computed(() => props.phase === 'confirm-clearing')
 
-  const busyUi = computed(() => props.busy || isRunning.value)
+const busyUi = computed(() => props.busy || isRunning.value)
 </script>
 
 <template>
@@ -62,9 +60,6 @@ function fmtInt(n: unknown): string {
       <div class="ds-label" style="margin-bottom: 2px">
         <span>Equivalent:</span>
         <span class="ds-mono">{{ equivalent }}</span>
-        <span v-if="totalDebt != null">
-          · Total Debt: <span class="ds-mono">{{ fmtInt(totalDebt) }} {{ equivalent }}</span>
-        </span>
       </div>
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ state.error }}</div>

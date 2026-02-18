@@ -119,7 +119,7 @@ onUnmounted(() => {
     <div class="popup__title ds-label">Edge</div>
     <div class="popup__subtitle ds-value ds-mono">{{ title }}</div>
 
-    <div class="popup__grid">
+    <div v-if="phase !== 'editing-trustline'" class="popup__grid">
       <div class="ds-label">Used</div>
       <div class="ds-value ds-mono">{{ used ?? '—' }} {{ unit }}</div>
       <div class="ds-label">Limit</div>

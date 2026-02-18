@@ -210,6 +210,16 @@ Real mode: артефакты (dev perf)
 - `asyncio.shield` запрещён для длинных операций в `RealTickOrchestrator`.
 - Задачи клиринга, не уложившиеся в time budget, отменяются (`task.cancel()`) и ожидаются, чтобы гарантировать освобождение ресурсов БД до начала следующей фазы платежей.
 
+### 1.13. Simulator (prod demo): анонимные посетители через cookie (per-owner runs)
+
+Решение: для прод-демо симулятора без логина используем **анонимную cookie-сессию**, которая задаёт `owner_id` для run’ов. Все control-plane эндпоинты симулятора работают в семантике **per-owner active run**.
+
+- Actor источники: `X-Admin-Token` (admin), `Bearer JWT` (participant), cookie (anon).
+- Доступ к `run_id`: owner-only, кроме admin.
+- Для CLI/автотестов вводим admin-only owner override через `X-Simulator-Owner`.
+
+Каноничная спецификация: [simulator/backend/anonymous-visitors-cookie-runs-spec.md](simulator/backend/anonymous-visitors-cookie-runs-spec.md)
+
 ---
 
 ## 2. Дефолты и лимиты

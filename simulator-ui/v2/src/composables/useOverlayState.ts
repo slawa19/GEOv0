@@ -307,11 +307,28 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     }
   }
 
-  // Reactive gate that forces floatingLabelsView to re-evaluate when there are
-  // "pending" labels (pushed but node was not yet in layout). Without this,
-  // getLayoutNodeById is not a reactive Vue dependency, so the computed would
-  // stay cached until some other reactive dep changes — causing intermittent
-  // receiver label dropouts during layout rebuilds / physics warmup.
+  // TD-4: floatingLabelsView computed uses getLayoutNodeById which is a plain
+  // function (non-reactive getter over a mutable Map). Vue cannot track it as a
+  // reactive dependency, so the computed would stay cached after a layout rebuild
+  // even if the node now exists — causing intermittent label dropouts during
+  // physics warmup / topology changes.
+  //
+  // The current workaround is a "retrigger gate" ref:
+  //   - When a label cannot resolve its node, schedulePendingLabelRetrigger() is called.
+  //   - After PENDING_LABEL_RETRIGGER_MS the timer bumps pendingLabelGate.value.
+  //   - The computed reads pendingLabelGate.value unconditionally, so Vue tracks it
+  //     as a dependency; bumping it re-runs the computed.
+  //
+  // This works correctly but is fragile: if the layout update takes longer than
+  // PENDING_LABEL_RETRIGGER_MS the label may still be dropped on that attempt.
+  //
+  // TODO (TD-4): A cleaner fix would be to replace the deps.getLayoutNodeById
+  // plain-function contract with a reactive source — e.g. pass a
+  //   layoutVersion: Ref<number>  (incremented on every layout rebuild)
+  // and read it inside the computed so Vue re-runs whenever the layout changes.
+  // That would eliminate the polling timer entirely. The change is deferred because
+  // it requires updating the API of useOverlayState + all callers (useAppFxOverlays,
+  // useSimulatorApp layout update path), which is a larger refactor.
   const pendingLabelGate = ref(0)
   let pendingLabelRetriggerTimer: ReturnType<typeof setTimeout> | null = null
   const PENDING_LABEL_RETRIGGER_MS = 120

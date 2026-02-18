@@ -12,9 +12,13 @@ import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
 
-import { computed, isRef, onMounted, onUnmounted, ref } from 'vue'
+import { computed, isRef, nextTick, onMounted, onUnmounted, ref } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
+import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
+
+// TD-1: all localStorage access is delegated to this composable.
+const simulatorStorage = useSimulatorStorage()
 
 type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
 
@@ -35,13 +39,8 @@ function readThemeFromUrl(): UiThemeId {
 }
 
 function readThemeFromStorage(): UiThemeId | null {
-  try {
-    const v = window.localStorage?.getItem('geo.uiTheme')
-    if (!v) return null
-    return normalizeThemeId(v)
-  } catch {
-    return null
-  }
+  // TD-1: delegated to composable — no direct localStorage access.
+  return simulatorStorage.readUiTheme()
 }
 
 function pickInitialTheme(): UiThemeId {
@@ -61,11 +60,8 @@ function syncThemeFromUrl() {
 function setUiTheme(next: UiThemeId) {
   const theme = normalizeThemeId(next)
   uiTheme.value = theme
-  try {
-    window.localStorage?.setItem('geo.uiTheme', theme)
-  } catch {
-    // ignore
-  }
+  // TD-1: delegated to composable — no direct localStorage access.
+  simulatorStorage.writeUiTheme(theme)
 
   try {
     const u = new URL(window.location.href)
@@ -193,6 +189,9 @@ const activeSegment = computed(() =>
   apiMode.value !== 'real' ? 'sandbox' : isInteractUi.value ? 'interact' : 'auto'
 )
 
+/** True when running in Auto-Run mode (real API, non-interact, non-demo). */
+const isAutoRunUi = computed(() => apiMode.value === 'real' && !isInteractUi.value && !isDemoUi.value)
+
 function isFormLikeTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null
   const tag = String((el as any)?.tagName ?? '').toLowerCase()
@@ -221,6 +220,10 @@ function onGlobalKeydown(ev: KeyboardEvent) {
   } catch {
     // ignore
   }
+
+  // Do not cancel the interact flow when focus is inside a form control.
+  // The user may be editing input and pressing ESC to clear the field (browser default).
+  if (isFormLikeTarget(ev.target)) return
 
   interact.mode.cancel()
 }
@@ -290,25 +293,16 @@ function forceDbEnrichedPreviewOnNextLoad() {
   // Avoid a transient topology-only preview snapshot right after a full reload.
   // The real-mode boot flow shows a scenario preview until an active run is discovered.
   // If persisted desiredMode is "fixtures", the preview looks "non-enriched" for a few seconds.
-  try {
-    localStorage.setItem('geo.sim.v2.desiredMode', 'real')
-  } catch {
-    // ignore
-  }
+  // TD-1: delegated to composable — no direct localStorage access.
+  simulatorStorage.forceDesiredModeReal()
 }
 
 function clearFxDebugRunOnNextLoad() {
   // FX Debug may autostart a fixtures run and persist its runId.
   // After exiting Demo UI we want to return to the normal real UI preview (DB-enriched),
   // not a topology-only fixtures run snapshot.
-  try {
-    const isFxDebugRun = localStorage.getItem('geo.sim.v2.fxDebugRun') === '1'
-    if (!isFxDebugRun) return
-    localStorage.removeItem('geo.sim.v2.fxDebugRun')
-    localStorage.setItem('geo.sim.v2.runId', '')
-  } catch {
-    // ignore
-  }
+  // TD-1: delegated to composable — no direct localStorage access.
+  simulatorStorage.clearFxDebugRunState()
 }
 
 function enterDemoUi() {
@@ -320,21 +314,28 @@ function enterDemoUi() {
   })
 }
 
+const isExiting = ref(false)
+
+const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
+
 async function exitDemoUi() {
+  isExiting.value = true
   forceDbEnrichedPreviewOnNextLoad()
 
   // Best-effort cleanup: if Demo UI auto-started an FX debug run, stop it server-side
   // before doing a full reload, otherwise it may keep running in the background.
+  // TD-1: delegated to composable — no direct localStorage access.
   try {
-    const isFxDebugRun = localStorage.getItem('geo.sim.v2.fxDebugRun') === '1'
-    if (isFxDebugRun) {
+    if (simulatorStorage.isFxDebugRun()) {
       const stopPromise = realActions.stop().catch(() => {
         // ignore
       })
-      await Promise.race([stopPromise, new Promise<void>((resolve) => setTimeout(resolve, 3000))])
+      await Promise.race([stopPromise, new Promise<void>((resolve) => setTimeout(resolve, 1500))])
     }
   } catch {
     // ignore
+  } finally {
+    isExiting.value = false
   }
 
   clearFxDebugRunOnNextLoad()
@@ -352,6 +353,7 @@ function toggleDemoUi() {
 }
 
 function goSandbox() {
+  if (isInteractActivePhase.value) interact.mode.cancel()
   setQueryAndReload((sp) => {
     sp.set('mode', 'fixtures')
     sp.delete('ui')
@@ -360,6 +362,7 @@ function goSandbox() {
 }
 
 function goAutoRun() {
+  if (isInteractActivePhase.value) interact.mode.cancel()
   setQueryAndReload((sp) => {
     sp.set('mode', 'real')
     sp.delete('ui')
@@ -368,6 +371,7 @@ function goAutoRun() {
 }
 
 function goInteract() {
+  if (isInteractUi.value) return
   setQueryAndReload((sp) => {
     sp.set('mode', 'real')
     sp.set('ui', 'interact')
@@ -378,17 +382,8 @@ function goInteract() {
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
 function onEdgeDetailChangeLimit() {
-  // Minimal wiring: focus the limit editor in TrustlineManagementPanel.
-  // NOTE: IDs are stable in the current UI.
-  try {
-    setTimeout(() => {
-      const el = document.getElementById('tl-new-limit') as HTMLInputElement | null
-      el?.focus()
-      el?.select?.()
-    }, 0)
-  } catch {
-    // ignore
-  }
+  // Focus the limit editor in TrustlineManagementPanel via template ref.
+  void nextTick(() => tlPanel.value?.focusNewLimit())
 }
 
 function onEdgeDetailCloseLine() {
@@ -438,6 +433,7 @@ function onEdgeDetailCloseLine() {
 
     <TopBar
       :api-mode="apiMode"
+      :active-segment="activeSegment"
       :is-interact-ui="isInteractUi"
       :is-test-mode="isTestMode"
       :ui-theme="uiTheme"
@@ -467,16 +463,17 @@ function onEdgeDetailCloseLine() {
     />
 
     <SystemBalanceBar
-      v-if="apiMode === 'real' && isInteractUi"
+      v-if="isInteractUi || isAutoRunUi"
       :balance="interact.systemBalance"
       :equivalent="effectiveEq"
+      :compact="isAutoRunUi"
     />
 
     <ActionBar
       v-if="apiMode === 'real' && isInteractUi"
       :phase="interactPhase"
-      :busy="interact.mode.busy?.value ?? false"
-      :actions-disabled="interact.actions.actionsDisabled?.value ?? false"
+      :busy="interact.mode.busy.value"
+      :actions-disabled="interact.actions.actionsDisabled.value"
       :run-terminal="interactRunTerminal"
       :start-payment-flow="interact.mode.startPaymentFlow"
       :start-trustline-flow="interact.mode.startTrustlineFlow"
@@ -488,10 +485,10 @@ function onEdgeDetailCloseLine() {
       :phase="interactPhase"
       :state="interact.mode.state"
       :unit="effectiveEq"
-      :available-capacity="interact.mode.availableCapacity?.value ?? '0'"
-      :participants="interact.mode.participants?.value ?? []"
-      :busy="interact.mode.busy?.value ?? false"
-      :can-send-payment="interact.mode.canSendPayment?.value ?? false"
+      :available-capacity="interact.mode.availableCapacity.value"
+      :participants="interact.mode.participants.value"
+      :busy="interact.mode.busy.value"
+      :can-send-payment="interact.mode.canSendPayment.value"
       :confirm-payment="interact.mode.confirmPayment"
       :set-from-pid="interact.mode.setPaymentFromPid"
       :set-to-pid="interact.mode.setPaymentToPid"
@@ -500,15 +497,16 @@ function onEdgeDetailCloseLine() {
 
     <TrustlineManagementPanel
       v-if="apiMode === 'real' && isInteractUi"
+      ref="tlPanel"
       :phase="interactPhase"
       :state="interact.mode.state"
       :unit="effectiveEq"
       :used="interactSelectedLink?.used ?? null"
       :current-limit="interactSelectedLink?.trust_limit ?? null"
       :available="interactSelectedLink?.available ?? null"
-      :participants="interact.mode.participants?.value ?? []"
-      :trustlines="interact.mode.trustlines?.value ?? []"
-      :busy="interact.mode.busy?.value ?? false"
+      :participants="interact.mode.participants.value"
+      :trustlines="interact.mode.trustlines.value"
+      :busy="interact.mode.busy.value"
       :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
       :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
       :confirm-trustline-close="interact.mode.confirmTrustlineClose"
@@ -522,9 +520,8 @@ function onEdgeDetailCloseLine() {
       v-if="apiMode === 'real' && isInteractUi"
       :phase="interactPhase"
       :state="interact.mode.state"
-      :busy="interact.mode.busy?.value ?? false"
+      :busy="interact.mode.busy.value"
       :equivalent="effectiveEq"
-      :total-debt="interact.systemBalance?.value?.totalUsed ?? 0"
       :confirm-clearing="interact.mode.confirmClearing"
       :cancel="interact.mode.cancel"
     />
@@ -539,7 +536,7 @@ function onEdgeDetailCloseLine() {
       :limit="interactSelectedLink?.trust_limit ?? null"
       :available="interactSelectedLink?.available ?? null"
       :status="(interactSelectedLink?.status as any) ?? null"
-      :busy="interact.mode.busy?.value ?? false"
+      :busy="interact.mode.busy.value"
       :close="interact.mode.cancel"
       @change-limit="onEdgeDetailChangeLimit"
       @close-line="onEdgeDetailCloseLine"
@@ -548,7 +545,7 @@ function onEdgeDetailCloseLine() {
     <NodeCardOverlay
       v-if="isNodeCardOpen && selectedNode && !dragToPin.dragState.active"
       :node="selectedNode"
-      :style="nodeCardStyle()"
+      :style="nodeCardStyle"
       :edge-stats="selectedNodeEdgeStats"
       :equivalent-text="state.snapshot?.equivalent ?? ''"
       :show-pin-actions="!isTestMode && !isWebDriver"
@@ -588,6 +585,7 @@ function onEdgeDetailCloseLine() {
       :is-test-mode="isTestMode"
       :is-e2e-screenshots="isE2eScreenshots"
       :is-demo-ui="isDemoUi"
+      :is-exiting="isExiting"
       :toggle-demo-ui="toggleDemoUi"
       :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"
       :fx-busy="fxDebug.busy.value"

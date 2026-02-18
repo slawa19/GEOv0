@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
+import { EQUIVALENT_CODES } from '../config/fxConfig'
 
 type Props = {
   apiMode: 'fixtures' | 'real'
@@ -27,6 +28,7 @@ type Props = {
   isE2eScreenshots: boolean
 
   isDemoUi: boolean
+  isExiting: boolean
   toggleDemoUi: () => void
 
   fxDebugEnabled: boolean
@@ -46,6 +48,8 @@ const scene = defineModel<SceneId>('scene', { required: true })
 const isDevToolsVisible = computed(
   () => import.meta.env.DEV && !props.isWebDriver && !props.isTestMode && !props.isE2eScreenshots
 )
+
+const allowDemoUi = import.meta.env.VITE_ALLOW_DEMO_UI === 'true'
 
 async function onRunTxOnce() {
   if (props.fxBusy) return
@@ -68,9 +72,7 @@ async function onRunClearingOnce() {
         </template>
         <template v-else>
           <select v-model="eq" class="ds-select" aria-label="Equivalent">
-            <option value="UAH">UAH</option>
-            <option value="HOUR">HOUR</option>
-            <option value="EUR">EUR</option>
+            <option v-for="code in EQUIVALENT_CODES" :key="code" :value="code">{{ code }}</option>
           </select>
         </template>
       </div>
@@ -151,11 +153,13 @@ async function onRunClearingOnce() {
                 style="height: 28px; padding: 0 10px"
                 type="button"
                 :disabled="!runId || artifactsLoading"
+                :title="!runId ? 'Start a run first' : 'Refresh artifacts'"
                 @click="refreshArtifacts"
               >
                 {{ artifactsLoading ? 'Loading…' : 'Refresh' }}
               </button>
-              <div v-if="!artifacts.length" class="ds-label" style="opacity: 0.85">No artifacts</div>
+              <div v-if="!runId" class="ds-label" style="opacity: 0.85">Start a run first</div>
+              <div v-else-if="!artifacts.length" class="ds-label" style="opacity: 0.85">No artifacts</div>
             </div>
             <div v-if="artifacts.length" class="ds-row" style="gap: 6px">
               <button
@@ -173,7 +177,7 @@ async function onRunClearingOnce() {
         </details>
 
         <details
-          v-if="isDevToolsVisible"
+          v-if="isDevToolsVisible || allowDemoUi"
           class="ds-panel ds-ov-metric ds-ov-details"
           style="opacity: 0.92"
           aria-label="Dev tools"
@@ -184,8 +188,14 @@ async function onRunClearingOnce() {
           </summary>
           <div class="ds-stack" style="margin-top: 8px; gap: 8px">
             <div class="ds-row" style="gap: 6px">
-              <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" @click="toggleDemoUi">
-                {{ isDemoUi ? 'Exit Demo UI' : 'Enter Demo UI' }}
+              <button
+                class="ds-btn ds-btn--secondary"
+                style="height: 28px; padding: 0 10px"
+                type="button"
+                :disabled="isDemoUi && isExiting"
+                @click="toggleDemoUi"
+              >
+                {{ isDemoUi ? (isExiting ? 'Exiting…' : 'Exit Demo UI') : 'Enter Demo UI' }}
               </button>
             </div>
 
