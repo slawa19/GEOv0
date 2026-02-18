@@ -5,9 +5,9 @@ function readHere(rel: string): string {
   return readFileSync(new URL(rel, import.meta.url), 'utf8')
 }
 
-describe('RealHudTop wiring smoke', () => {
+describe('TopBar wiring smoke', () => {
   it('emits kebab-case update events (HTML-safe)', () => {
-    const sfc = readHere('./RealHudTop.vue')
+    const sfc = readHere('./TopBar.vue')
 
     // Emits (child)
     expect(sfc).toContain("emit('update:selected-scenario-id'")

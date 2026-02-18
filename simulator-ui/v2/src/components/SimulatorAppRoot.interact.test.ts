@@ -102,11 +102,11 @@ vi.mock('../composables/useSimulatorApp', () => {
         // interact
         interact: {
           actions: {
-            actionsDisabled: false,
+            actionsDisabled: ref(false),
           },
           mode: {
             phase,
-            busy: false,
+            busy: ref(false),
             state: reactive({
               fromPid: 'alice',
               toPid: 'bob',
@@ -115,8 +115,16 @@ vi.mock('../composables/useSimulatorApp', () => {
               lastClearing: null,
             }),
 
-            availableCapacity: '0',
-            canSendPayment: true,
+            availableCapacity: ref('0'),
+            participants: ref([] as any[]),
+            trustlines: ref([] as any[]),
+            canSendPayment: ref(true),
+
+            setPaymentFromPid: vi.fn(),
+            setPaymentToPid: vi.fn(),
+            setTrustlineFromPid: vi.fn(),
+            setTrustlineToPid: vi.fn(),
+            selectTrustline: vi.fn(),
 
             startPaymentFlow: vi.fn(),
             startTrustlineFlow: vi.fn(),
@@ -130,14 +138,14 @@ vi.mock('../composables/useSimulatorApp', () => {
              confirmClearing: vi.fn(async () => undefined),
              cancel,
            },
-          systemBalance: reactive({
+          systemBalance: computed(() => ({
             isClean: true,
             totalUsed: 0,
             totalAvailable: 0,
             activeTrustlines: 0,
             activeParticipants: 0,
             utilization: 0,
-          }),
+          })),
         },
 
         // env
@@ -223,14 +231,19 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     app.mount(host)
     await nextTick()
 
-    // HUD presence
-    expect(host.textContent || '').toContain('INTERACT MODE')
+    // HUD presence (unified TopBar)
+    const interactBtn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === 'Interact') as
+      | HTMLButtonElement
+      | undefined
+    expect(interactBtn).toBeTruthy()
+    expect(interactBtn?.getAttribute('data-active')).toBe('1')
+
     // ActionBar presence
     expect(host.querySelector('[data-testid="actionbar-payment"]')).toBeTruthy()
     // Phase panel presence
     expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
 
-    // Interact Mode must hide intensity slider (it exists in RealHudTop only)
+    // Interact Mode must hide intensity slider (it exists in TopBar Auto-Run advanced only)
     expect(host.querySelector('[aria-label="Intensity percent"]')).toBeFalsy()
 
     app.unmount()

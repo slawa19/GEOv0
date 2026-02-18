@@ -23,6 +23,8 @@
 
 ## “Короткие” доки для разработки (конвенции)
 
+- Инструкция пользователя по HUD (элементы + поведение): [docs/hud-user-guide.md](docs/hud-user-guide.md)
+
 - Визуальный язык (цвета/ключи/приоритеты): [docs/visual-language.md](docs/visual-language.md)
 - FX playbook (эффекты, правила композиции): [docs/fx-playbook.md](docs/fx-playbook.md)
 - Правила рендера графа (узлы/рёбра/LOD): [docs/graph-rendering-rules.md](docs/graph-rendering-rules.md)

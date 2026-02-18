@@ -202,8 +202,79 @@
   background:
     linear-gradient(180deg, rgba(255,255,255,0.05), transparent 26%),
     radial-gradient(900px 300px at 30% 0%, var(--ds-gridline), transparent 60%),
+
     var(--ds-surface-2);
   box-shadow: var(--ds-shadow);
+}
+
+/* Segmented control (HUD / shadcn): primitive only; no raw colors. */
+.ds-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+  overflow: hidden;
+  background: var(--ds-surface-1);
+}
+
+[data-theme='hud'] .ds-segmented {
+  border-radius: 0;
+  background: transparent;
+  border-color: var(--ds-border);
+}
+
+.ds-segment {
+  appearance: none;
+  border: 0;
+  border-right: 1px solid var(--ds-border);
+  background: transparent;
+  color: var(--ds-text-2);
+  height: 28px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-family: var(--ds-typo-button-font-family);
+  font-weight: var(--ds-typo-button-font-weight);
+  font-size: var(--ds-typo-button-font-size);
+  line-height: var(--ds-typo-button-line-height);
+  letter-spacing: var(--ds-typo-button-letter-spacing);
+  transition: background var(--ds-dur) var(--ds-ease), color var(--ds-dur) var(--ds-ease);
+}
+
+.ds-segment:last-child { border-right: 0; }
+
+.ds-segment[data-active='1'] {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-1);
+}
+
+.ds-segment:hover { background: var(--ds-surface-hover); color: var(--ds-text-1); }
+.ds-segment:focus-visible { outline: none; box-shadow: var(--ds-focus-ring-btn); }
+
+.ds-segment:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+[data-theme='hud'] .ds-segment {
+  text-transform: uppercase;
+  border-right-color: var(--ds-border);
+}
+
+[data-theme='hud'] .ds-segment[data-active='1'] {
+  background: var(--ds-accent-surface);
+  color: var(--ds-accent);
+}
+
+/* Small dot indicator (used inside badges). */
+.ds-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  display: inline-block;
+  margin-right: 6px;
+  opacity: 0.95;
 }
 
 /* shadcn cards are flat (no sci-fi grid overlay) */

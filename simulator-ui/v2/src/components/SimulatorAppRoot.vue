@@ -1,11 +1,6 @@
 <script setup lang="ts">
-import FixturesHudBottom from './FixturesHudBottom.vue'
-import FixturesHudTop from './FixturesHudTop.vue'
-import RealHudBottom from './RealHudBottom.vue'
-import RealHudTop from './RealHudTop.vue'
-import DemoHudBottom from './DemoHudBottom.vue'
-import InteractHudTop from './InteractHudTop.vue'
-import InteractHudBottom from './InteractHudBottom.vue'
+import TopBar from './TopBar.vue'
+import BottomBar from './BottomBar.vue'
 import ActionBar from './ActionBar.vue'
 import SystemBalanceBar from './SystemBalanceBar.vue'
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
@@ -16,7 +11,6 @@ import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
-import FxDebugPanel from './FxDebugPanel.vue'
 
 import { computed, isRef, onMounted, onUnmounted } from 'vue'
 
@@ -138,6 +132,10 @@ const isInteractActivePhase = computed(() => {
   return String(interactPhase.value ?? '').toLowerCase() !== 'idle'
 })
 
+const activeSegment = computed(() =>
+  apiMode.value !== 'real' ? 'sandbox' : isInteractUi.value ? 'interact' : 'auto'
+)
+
 function isFormLikeTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null
   const tag = String((el as any)?.tagName ?? '').toLowerCase()
@@ -183,16 +181,6 @@ onUnmounted(() => {
 const interactRunTerminal = computed(() => {
   const st = String(real.runStatus?.state ?? '').toLowerCase()
   return st === 'stopped' || st === 'error'
-})
-
-const interactEquivalents = computed(() => {
-  // Minimal: prefer snapshot-provided equivalent when present, otherwise fall back to the known set.
-  // InteractHudTop must not hardcode options.
-  const s = new Set<string>()
-  const snapEq = String(state.snapshot?.equivalent ?? '').trim().toUpperCase()
-  if (snapEq) s.add(snapEq)
-  for (const e of ['UAH', 'HOUR', 'EUR']) s.add(e)
-  return Array.from(s)
 })
 
 const interactSelectedLink = computed<GraphLink | null>(() => {
@@ -306,17 +294,15 @@ function toggleDemoUi() {
   else enterDemoUi()
 }
 
-function enterInteractUi() {
-  forceDbEnrichedPreviewOnNextLoad()
+function goSandbox() {
   setQueryAndReload((sp) => {
-    sp.set('mode', 'real')
-    sp.set('ui', 'interact')
+    sp.set('mode', 'fixtures')
+    sp.delete('ui')
     sp.delete('debug')
   })
 }
 
-function exitInteractUi() {
-  forceDbEnrichedPreviewOnNextLoad()
+function goAutoRun() {
   setQueryAndReload((sp) => {
     sp.set('mode', 'real')
     sp.delete('ui')
@@ -324,28 +310,15 @@ function exitInteractUi() {
   })
 }
 
-function toggleInteractUi() {
-  if (isInteractUi.value) exitInteractUi()
-  else enterInteractUi()
+function goInteract() {
+  setQueryAndReload((sp) => {
+    sp.set('mode', 'real')
+    sp.set('ui', 'interact')
+    sp.delete('debug')
+  })
 }
 
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
-
-async function resetInteractScenario() {
-  // Interact UX: show errors (don't silently swallow failures).
-  real.lastError = ''
-  try {
-    await realActions.stop()
-  } catch (e: any) {
-    real.lastError = formatDemoActionError(e)
-  }
-
-  try {
-    await realActions.startRun({ mode: 'real', intensityPercent: 0 })
-  } catch (e: any) {
-    real.lastError = formatDemoActionError(e)
-  }
-}
 
 function onEdgeDetailChangeLimit() {
   // Minimal wiring: focus the limit editor in TrustlineManagementPanel.
@@ -406,163 +379,10 @@ function onEdgeDetailCloseLine() {
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
     />
 
-    <div
-      v-if="!isTestMode && !isWebDriver"
-      class="ds-ov-demo ds-panel"
-      :data-enabled="isDemoUi ? '1' : '0'"
-      aria-label="UI demo controls"
-    >
-      <div class="ds-panel__header" style="padding: 10px 10px 8px">
-        <div class="ds-kicker">UI</div>
-      </div>
-
-      <div class="ds-panel__body" style="padding: 10px">
-        <div class="ds-row">
-          <button class="ds-btn ds-btn--secondary" type="button" @click="toggleDemoUi">
-            {{ isDemoUi ? 'Exit' : 'Enter' }}
-          </button>
-
-          <button class="ds-btn ds-btn--secondary" type="button" @click="toggleInteractUi">
-            {{ isInteractUi ? 'Exit Interact' : 'Enter Interact' }}
-          </button>
-
-          <div v-if="apiMode === 'real' && isDemoUi" class="ds-row" style="gap: 6px">
-            <span class="ds-label">EQ</span>
-            <select v-model="eq" class="ds-select" aria-label="Equivalent">
-              <option value="UAH">UAH</option>
-              <option value="HOUR">HOUR</option>
-              <option value="EUR">EUR</option>
-            </select>
-          </div>
-
-          <div v-if="apiMode === 'real' && isDemoUi" class="ds-row" style="gap: 6px">
-            <span class="ds-label">Layout</span>
-            <select v-model="layoutMode" class="ds-select" aria-label="Layout">
-              <option value="admin-force">Organic cloud</option>
-              <option value="community-clusters">Clusters</option>
-              <option value="balance-split">Balance</option>
-              <option value="type-split">Type</option>
-              <option value="status-split">Status</option>
-            </select>
-          </div>
-
-          <div v-if="apiMode === 'real' && isDemoUi" class="ds-row" style="gap: 6px" aria-label="SSE status">
-            <span class="ds-label">SSE</span>
-            <span class="ds-value ds-mono">{{ real.sseState }}</span>
-          </div>
-        </div>
-
-        <div v-if="apiMode === 'real' && isDemoUi && real.lastError" class="ds-alert ds-alert--err ds-mono" style="margin-top: 8px">
-          {{ real.lastError }}
-        </div>
-      </div>
-    </div>
-
-
-    <InteractHudTop
-      v-if="apiMode === 'real' && isInteractUi"
-      v-model:eq="eq"
-      v-model:layoutMode="layoutMode"
-      :equivalents="interactEquivalents"
-      :loading-scenarios="real.loadingScenarios"
-      :scenarios="real.scenarios"
-      :selected-scenario-id="real.selectedScenarioId"
-      :run-id="real.runId"
-      :run-status="real.runStatus"
-      :sse-state="real.sseState"
-      :last-error="real.lastError"
-      :refresh-scenarios="realActions.refreshScenarios"
-      :start-run="realActions.startRun"
-      :pause="realActions.pause"
-      :resume="realActions.resume"
-      :stop="realActions.stop"
-      :reset-scenario="resetInteractScenario"
-      @update:selected-scenario-id="realActions.setSelectedScenarioId"
-    />
-
-    <SystemBalanceBar
-      v-if="apiMode === 'real' && isInteractUi"
-      :balance="interact.systemBalance"
-      :equivalent="effectiveEq"
-    />
-
-    <ActionBar
-      v-if="apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :busy="interact.mode.busy.value"
-      :actions-disabled="interact.actions.actionsDisabled.value"
-      :run-terminal="interactRunTerminal"
-      :start-payment-flow="interact.mode.startPaymentFlow"
-      :start-trustline-flow="interact.mode.startTrustlineFlow"
-      :start-clearing-flow="interact.mode.startClearingFlow"
-    />
-
-    <ManualPaymentPanel
-      v-if="apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :unit="effectiveEq"
-      :available-capacity="interact.mode.availableCapacity.value"
-      :participants="interact.mode.participants.value"
-      :busy="interact.mode.busy.value"
-      :can-send-payment="interact.mode.canSendPayment.value"
-      :confirm-payment="interact.mode.confirmPayment"
-      :set-from-pid="interact.mode.setPaymentFromPid"
-      :set-to-pid="interact.mode.setPaymentToPid"
-      :cancel="interact.mode.cancel"
-    />
-
-    <TrustlineManagementPanel
-      v-if="apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :unit="effectiveEq"
-      :used="interactSelectedLink?.used ?? null"
-      :current-limit="interactSelectedLink?.trust_limit ?? null"
-      :available="interactSelectedLink?.available ?? null"
-      :participants="interact.mode.participants.value"
-      :trustlines="interact.mode.trustlines.value"
-      :busy="interact.mode.busy.value"
-      :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
-      :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
-      :confirm-trustline-close="interact.mode.confirmTrustlineClose"
-      :set-from-pid="interact.mode.setTrustlineFromPid"
-      :set-to-pid="interact.mode.setTrustlineToPid"
-      :select-trustline="interact.mode.selectTrustline"
-      :cancel="interact.mode.cancel"
-    />
-
-    <ClearingPanel
-      v-if="apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :busy="interact.mode.busy.value"
-      :equivalent="effectiveEq"
-      :total-debt="interact.systemBalance.value.totalUsed"
-      :confirm-clearing="interact.mode.confirmClearing"
-      :cancel="interact.mode.cancel"
-    />
-
-    <EdgeDetailPopup
-      v-if="apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :anchor="edgeDetailAnchor"
-      :unit="effectiveEq"
-      :used="interactSelectedLink?.used ?? null"
-      :limit="interactSelectedLink?.trust_limit ?? null"
-      :available="interactSelectedLink?.available ?? null"
-      :status="(interactSelectedLink?.status as any) ?? null"
-      :busy="interact.mode.busy.value"
-      :close="interact.mode.cancel"
-      @change-limit="onEdgeDetailChangeLimit"
-      @close-line="onEdgeDetailCloseLine"
-    />
-
-    <RealHudTop
-      v-else-if="apiMode === 'real' && !isDemoUi"
-      v-model:eq="eq"
-      v-model:layoutMode="layoutMode"
+    <TopBar
+      :api-mode="apiMode"
+      :is-interact-ui="isInteractUi"
+      :is-test-mode="isTestMode"
       :loading-scenarios="real.loadingScenarios"
       :scenarios="real.scenarios"
       :selected-scenario-id="real.selectedScenarioId"
@@ -579,24 +399,91 @@ function onEdgeDetailCloseLine() {
       :stop="realActions.stop"
       :apply-intensity="realActions.applyIntensity"
       :run-stats="real.runStats"
+      :go-sandbox="goSandbox"
+      :go-auto-run="goAutoRun"
+      :go-interact="goInteract"
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:desired-mode="realActions.setDesiredMode"
       @update:intensity-percent="realActions.setIntensityPercent"
     />
 
-    <FixturesHudTop
-      v-else-if="apiMode !== 'real'"
-      v-model:eq="eq"
-      v-model:layoutMode="layoutMode"
-      v-model:scene="scene"
-      :is-demo-fixtures="isDemoFixtures"
-      :is-test-mode="isTestMode"
-      :is-web-driver="isWebDriver"
-      :effective-eq="effectiveEq"
-      :source-path="state.sourcePath"
-      :generated-at="state.snapshot?.generated_at"
-      :nodes-count="state.snapshot?.nodes.length"
-      :links-count="state.snapshot?.links.length"
+    <SystemBalanceBar
+      v-if="apiMode === 'real' && isInteractUi"
+      :balance="interact.systemBalance"
+      :equivalent="effectiveEq"
+    />
+
+    <ActionBar
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :busy="interact.mode.busy?.value ?? false"
+      :actions-disabled="interact.actions.actionsDisabled?.value ?? false"
+      :run-terminal="interactRunTerminal"
+      :start-payment-flow="interact.mode.startPaymentFlow"
+      :start-trustline-flow="interact.mode.startTrustlineFlow"
+      :start-clearing-flow="interact.mode.startClearingFlow"
+    />
+
+    <ManualPaymentPanel
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :unit="effectiveEq"
+      :available-capacity="interact.mode.availableCapacity?.value ?? '0'"
+      :participants="interact.mode.participants?.value ?? []"
+      :busy="interact.mode.busy?.value ?? false"
+      :can-send-payment="interact.mode.canSendPayment?.value ?? false"
+      :confirm-payment="interact.mode.confirmPayment"
+      :set-from-pid="interact.mode.setPaymentFromPid"
+      :set-to-pid="interact.mode.setPaymentToPid"
+      :cancel="interact.mode.cancel"
+    />
+
+    <TrustlineManagementPanel
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :unit="effectiveEq"
+      :used="interactSelectedLink?.used ?? null"
+      :current-limit="interactSelectedLink?.trust_limit ?? null"
+      :available="interactSelectedLink?.available ?? null"
+      :participants="interact.mode.participants?.value ?? []"
+      :trustlines="interact.mode.trustlines?.value ?? []"
+      :busy="interact.mode.busy?.value ?? false"
+      :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
+      :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
+      :confirm-trustline-close="interact.mode.confirmTrustlineClose"
+      :set-from-pid="interact.mode.setTrustlineFromPid"
+      :set-to-pid="interact.mode.setTrustlineToPid"
+      :select-trustline="interact.mode.selectTrustline"
+      :cancel="interact.mode.cancel"
+    />
+
+    <ClearingPanel
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :busy="interact.mode.busy?.value ?? false"
+      :equivalent="effectiveEq"
+      :total-debt="interact.systemBalance?.value?.totalUsed ?? 0"
+      :confirm-clearing="interact.mode.confirmClearing"
+      :cancel="interact.mode.cancel"
+    />
+
+    <EdgeDetailPopup
+      v-if="apiMode === 'real' && isInteractUi"
+      :phase="interactPhase"
+      :state="interact.mode.state"
+      :anchor="edgeDetailAnchor"
+      :unit="effectiveEq"
+      :used="interactSelectedLink?.used ?? null"
+      :limit="interactSelectedLink?.trust_limit ?? null"
+      :available="interactSelectedLink?.available ?? null"
+      :status="(interactSelectedLink?.status as any) ?? null"
+      :busy="interact.mode.busy?.value ?? false"
+      :close="interact.mode.cancel"
+      @change-limit="onEdgeDetailChangeLimit"
+      @close-line="onEdgeDetailCloseLine"
     />
 
     <NodeCardOverlay
@@ -613,65 +500,40 @@ function onEdgeDetailCloseLine() {
     />
 
 
-    <InteractHudBottom
-      v-if="apiMode === 'real' && isInteractUi"
-      v-model:quality="quality"
-      v-model:labelsLod="labelsLod"
-      :show-reset-view="showResetView"
-      :run-id="real.runId"
-      :run-status="real.runStatus"
-      :sse-state="real.sseState"
-      :refresh-snapshot="realActions.refreshSnapshot"
-      :reset-view="resetView"
-    />
 
-    <RealHudBottom
-      v-else-if="apiMode === 'real' && !isDemoUi"
+    <!-- E2E screenshot tests: minimal offline controls only (match stored snapshots). -->
+    <div v-if="isE2eScreenshots" class="ds-ov-bottom ds-panel ds-ov-bar">
+      <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runTxOnce">Single Tx</button>
+      <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runClearingOnce">Run Clearing</button>
+    </div>
+
+    <BottomBar
+      v-else
+      v-model:eq="eq"
+      v-model:layoutMode="layoutMode"
+      v-model:scene="scene"
       v-model:quality="quality"
       v-model:labelsLod="labelsLod"
+      :api-mode="apiMode"
+      :active-segment="activeSegment"
+      :is-demo-fixtures="isDemoFixtures"
       :show-reset-view="showResetView"
+      :reset-view="resetView"
       :run-id="real.runId"
-      :run-status="real.runStatus"
-      :sse-state="real.sseState"
       :refresh-snapshot="realActions.refreshSnapshot"
       :artifacts="real.artifacts"
       :artifacts-loading="real.artifactsLoading"
       :refresh-artifacts="realActions.refreshArtifacts"
       :download-artifact="realActions.downloadArtifact"
-      :reset-view="resetView"
-    />
-
-    <DemoHudBottom
-      v-else-if="apiMode === 'real' && isDemoUi"
-      v-model:quality="quality"
-      v-model:labelsLod="labelsLod"
-      :show-reset-view="showResetView"
-      :show-demo-controls="false"
-      :busy="fxDebug.busy.value"
-      :run-tx-once="demoRunTxOnce"
-      :run-clearing-once="demoRunClearingOnce"
-      :reset-view="resetView"
-    />
-
-    <!-- E2E screenshot tests: minimal offline controls only (match stored snapshots) -->
-    <div v-else-if="isE2eScreenshots" class="ds-ov-bottom ds-panel ds-ov-bar">
-      <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runTxOnce">Single Tx</button>
-      <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runClearingOnce">Run Clearing</button>
-    </div>
-
-    <FixturesHudBottom
-      v-else-if="apiMode !== 'real'"
-      v-model:quality="quality"
-      v-model:labelsLod="labelsLod"
-      :show-reset-view="showResetView"
-      :reset-view="resetView"
-    />
-
-    <FxDebugPanel
-      :enabled="apiMode === 'real' && !isDemoUi && fxDebug.enabled.value"
-      :is-busy="fxDebug.busy.value"
-      :run-tx-once="fxDebug.runTxOnce"
-      :run-clearing-once="fxDebug.runClearingOnce"
+      :is-web-driver="isWebDriver"
+      :is-test-mode="isTestMode"
+      :is-e2e-screenshots="isE2eScreenshots"
+      :is-demo-ui="isDemoUi"
+      :toggle-demo-ui="toggleDemoUi"
+      :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"
+      :fx-busy="fxDebug.busy.value"
+      :run-tx-once="isDemoUi ? demoRunTxOnce : fxDebug.runTxOnce"
+      :run-clearing-once="isDemoUi ? demoRunClearingOnce : fxDebug.runClearingOnce"
     />
 
     <!-- Loading / error overlay (fail-fast, but non-intrusive).

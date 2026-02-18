@@ -100,6 +100,26 @@ cd admin-ui
 npx playwright test
 ```
 
+---
+
+## 5. Simulator UI v2: smoke vs automation (VITE_TEST_MODE)
+
+`VITE_TEST_MODE=1` включает тестовое поведение UI (детерминизм/стабильность для automation).
+Для **ручного smoke/QA** это обычно не нужно: оно может отключать часть pointer-driven интеракций и упрощать поведение.
+
+Рекомендация:
+
+- **Smoke (полный функционал):** ничего специально не включать.
+  - `VITE_TEST_MODE` по умолчанию выключен (если переменная не задана).
+  - Запуск: `npm --prefix simulator-ui/v2 run dev`
+
+- **Automation (включать только в тестах):** тестовые раннеры выставляют `VITE_TEST_MODE=1` автоматически.
+  - Playwright: в `simulator-ui/v2/playwright.config.ts` dev‑сервер запускается с `VITE_TEST_MODE=1`.
+  - Vitest (unit): `npm --prefix simulator-ui/v2 run test:unit` запускается с `--mode test` и подхватывает `simulator-ui/v2/.env.test`.
+
+Важно:
+- Не задавайте `VITE_TEST_MODE=1` глобально в окружении/`*.local` для ручного smoke — иначе UI будет работать в «тестовом» режиме.
+
 ### 3.4 Валидация fixtures
 
 ```powershell

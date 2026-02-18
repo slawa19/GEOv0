@@ -9,6 +9,7 @@
 - Поведенческая модель экономики (real mode: behaviorProfiles/events): [backend/behavior-model-spec.md](backend/behavior-model-spec.md)
 
 - Контракт API симулятора (snapshot + events + `viz_*`): [frontend/docs/api.md](frontend/docs/api.md)
+- Инструкция пользователя по HUD (элементы + поведение): [frontend/docs/hud-user-guide.md](frontend/docs/hud-user-guide.md)
 - Backend: интеграция с платежами/клирингом и каноничные контракты: [backend/payment-integration.md](backend/payment-integration.md)
 - Backend: протокол realtime (SSE/WS payload): [backend/ws-protocol.md](backend/ws-protocol.md)
 - Backend: алгоритм runner: [backend/runner-algorithm.md](backend/runner-algorithm.md)

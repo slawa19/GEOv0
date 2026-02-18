@@ -25,6 +25,41 @@ npm run dev
 
 Open: http://localhost:5176/
 
+## HUD (TopBar + BottomBar)
+
+The v2 UI uses a unified HUD:
+
+- **TopBar** (top overlay): app mode switch + run controls + status.
+- **BottomBar** (bottom overlay): view settings (left) + tools (right).
+
+### Mode switch (Sandbox / Auto-Run / Interact)
+
+The segmented switch in the TopBar maps to URL params and triggers a **full reload** (by design, to fully re-init pipelines):
+
+- **Sandbox** → `?mode=fixtures`
+- **Auto-Run** → `?mode=real`
+- **Interact** → `?mode=real&ui=interact`
+
+Notes:
+- **Run controls** (scenario, Start/Pause/Resume/Stop) are shown in **Auto-Run**.
+- **Interact** may be disabled until an active run is discovered/started.
+
+### BottomBar: View settings + Tools
+
+- **View settings** (left): EQ, Layout, Scene (fixtures/offline only), Quality, Labels LOD.
+- **Tools** (right): Reset view, Refresh snapshot, Artifacts (Auto-Run only).
+
+### Dev tools (Demo UI + FX Debug)
+
+Demo/FX Debug controls live under **BottomBar → Tools → Dev** and are gated:
+
+- Visible only in `import.meta.env.DEV`
+- Hidden in test mode (`VITE_TEST_MODE=1`) and under WebDriver/Playwright (`navigator.webdriver=true`)
+
+Deep-links still work:
+- Demo UI: `?mode=real&ui=demo&debug=1`
+- FX Debug enabled: `?debug=1`
+
 ## Scenes (A–E)
 
 The **Scene** selector (A–E) switches the demo into predefined, repeatable states.

@@ -119,6 +119,11 @@ export function useCanvasInteractions(opts: {
   }
 
   function onCanvasPointerUp(ev: PointerEvent) {
+    // Keep tests deterministic: in test mode we don't run pointer-driven camera interactions.
+    // Also avoid suppressing the subsequent `click` event, otherwise background clicks
+    // won't clear selection when VITE_TEST_MODE=1.
+    if (opts.isTestMode()) return
+
     if (opts.dragToPin.onPointerUp(ev)) {
       // Drag-to-pin consumed this pointer-up. The browser may still fire a `click`
       // event for the same gesture. Suppress it so the drag doesn't accidentally

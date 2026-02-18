@@ -13,7 +13,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "npm run test:unit",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --mode test",
+    "test:unit:normal": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots"
   },
