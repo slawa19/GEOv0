@@ -284,11 +284,12 @@ export function useInteractMode(opts: {
 
   const availableCapacity = computed(() => {
     // Prefer backend trustlines list when present (can be more authoritative than snapshot).
-    const tl = findActiveTrustline(state.fromPid, state.toPid)
+    // Payment `from -> to` uses capacity of trustline `to -> from` (creditor -> debtor).
+    const tl = findActiveTrustline(state.toPid, state.fromPid)
     const tlAvail = parseAmountStringOrNull(tl?.available)
     if (tlAvail != null && String(tlAvail).trim()) return tlAvail
 
-    const l = findActiveLink(opts.snapshot.value, state.fromPid, state.toPid)
+    const l = findActiveLink(opts.snapshot.value, state.toPid, state.fromPid)
     return parseAmountStringOrNull(l?.available)
   })
 
@@ -302,6 +303,9 @@ export function useInteractMode(opts: {
   const canCreateTrustline = computed(() => {
     if (state.phase !== 'confirm-trustline-create') return false
     if (!state.fromPid || !state.toPid || state.fromPid === state.toPid) return false
+    // Prefer fetched trustlines list when present; snapshot can be stale.
+    const tl = findActiveTrustline(state.fromPid, state.toPid)
+    if (tl) return false
     const l = findActiveLink(opts.snapshot.value, state.fromPid, state.toPid)
     return !l
   })
@@ -310,12 +314,12 @@ export function useInteractMode(opts: {
   const availableTargetIds = computed<Set<string>>(() => {
     const phase = state.phase
 
-    // picking-payment-to: highlight nodes that have a trustline from the selected fromPid
+    // picking-payment-to: highlight nodes that have a trustline `to -> fromPid`
     if (phase === 'picking-payment-to' && state.fromPid) {
       const ids = new Set<string>()
       for (const tl of trustlines.value) {
-        if (tl.from_pid === state.fromPid && isActiveStatus(tl.status)) {
-          ids.add(tl.to_pid)
+        if (tl.to_pid === state.fromPid && isActiveStatus(tl.status)) {
+          ids.add(tl.from_pid)
         }
       }
       // Fallback: if trustlines not loaded, show all participants except from
@@ -429,13 +433,8 @@ export function useInteractMode(opts: {
       clearError()
       state.toPid = id
 
-      const existing = findActiveLink(opts.snapshot.value, state.fromPid, state.toPid)
-      if (existing && state.fromPid && state.toPid) {
-        state.selectedEdgeKey = keyEdge(state.fromPid, state.toPid)
-        state.phase = 'editing-trustline'
-      } else {
-        state.phase = 'confirm-trustline-create'
-      }
+      // Use the same trustline existence logic as dropdown setters.
+      recomputeTrustlinePhase()
       return
     }
   }

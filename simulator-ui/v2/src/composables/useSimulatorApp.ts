@@ -577,9 +577,14 @@ export function useSimulatorApp() {
       const clearingColor = VIZ_MAPPING.fx.clearing_debt
 
       const edgesAll: Array<{ from: string; to: string }> = []
+      const nodeIdSet = new Set<string>()
       for (const cycle of res.cycles ?? []) {
         for (const e of cycle.edges ?? []) {
-          if (e.from && e.to) edgesAll.push({ from: e.from, to: e.to })
+          if (e.from && e.to) {
+            edgesAll.push({ from: e.from, to: e.to })
+            nodeIdSet.add(e.from)
+            nodeIdSet.add(e.to)
+          }
         }
       }
 
@@ -594,6 +599,21 @@ export function useSimulatorApp() {
           seedPrefix: `interact-clearing:${nowMs.toFixed(0)}`,
           countPerEdge: 1,
           keyEdge,
+          seedFn: fnv1a,
+          isTestMode: isTestMode.value,
+        })
+      }
+
+      // BUG-3 (P3): spawn clearing node bursts on cycle-participant nodes.
+      const nodeIds = Array.from(nodeIdSet).slice(0, 40)
+      if (nodeIds.length > 0) {
+        spawnNodeBursts(_interactFxState, {
+          nodeIds,
+          nowMs,
+          durationMs: 2800,
+          color: clearingColor,
+          kind: 'clearing',
+          seedPrefix: `interact-clearing-burst:${nowMs.toFixed(0)}`,
           seedFn: fnv1a,
           isTestMode: isTestMode.value,
         })
@@ -826,6 +846,11 @@ export function useSimulatorApp() {
       isPhysicsRunning: () => physics.isRunning(),
       isDemoHoldActive: () => isDemoUi.value && demoHold.isWithinHoldWindow(),
     }),
+    // BUG-3 (P3): dim unavailable nodes during picking phases.
+    getDimmedNodeIds: () => {
+      const avail = interactMode.availableTargetIds.value
+      return avail.size > 0 ? avail : null
+    },
   })
 
   const fxState = fxAndRender.fxState

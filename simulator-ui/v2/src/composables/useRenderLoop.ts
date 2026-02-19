@@ -110,6 +110,9 @@ type UseRenderLoopDeps = {
   activeEdges: Map<string, number>
   activeNodes?: Set<string>
 
+  // Optional: node IDs available for picking — unlisted nodes are rendered dimmed.
+  getDimmedNodeIds?: () => Set<string> | null
+
   // Optional: reduce link drawing cost (used during drag).
   getLinkLod?: () => 'full' | 'focus'
 
@@ -456,6 +459,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       selectedNodeId: deps.getSelectedNodeId(),
       activeEdges: deps.activeEdges,
       activeNodes: deps.activeNodes,
+      dimmedNodeIds: deps.getDimmedNodeIds ? deps.getDimmedNodeIds() : null,
       cameraZoom: camera.zoom,
       quality: renderQuality,
       linkLod,

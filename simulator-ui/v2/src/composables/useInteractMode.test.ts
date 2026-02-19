@@ -35,7 +35,8 @@ describe('useInteractMode', () => {
         { id: 'alice', name: 'Alice', type: 'person', status: 'active' },
         { id: 'bob', name: 'Bob', type: 'person', status: 'active' },
       ],
-      links: [{ source: 'alice', target: 'bob', used: '0.00', available: '10.00', status: 'active' }],
+      // For payment alice -> bob, capacity is provided by trustline bob -> alice.
+      links: [{ source: 'bob', target: 'alice', used: '0.00', available: '10.00', status: 'active' }],
     })
 
     const actions = mkActions()
@@ -234,7 +235,8 @@ describe('useInteractMode', () => {
       equivalent: 'UAH',
       generated_at: '2026-01-01T00:00:00Z',
       nodes: [{ id: 'alice', status: 'active' }, { id: 'bob', status: 'active' }],
-      links: [{ source: 'alice', target: 'bob', used: '200', available: '800', status: 'active' }],
+      // For payment alice -> bob, capacity comes from trustline bob -> alice.
+      links: [{ source: 'bob', target: 'alice', used: '200', available: '800', status: 'active' }],
     })
     const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
 

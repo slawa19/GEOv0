@@ -30,7 +30,12 @@ def interact_actions_enabled(monkeypatch):
 
     monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
     # Avoid depending on in-memory runtime run registry.
-    monkeypatch.setattr(simulator_module, "_require_run_accepts_actions_or_error", lambda _run_id: None)
+    # NOTE: endpoints call `_get_run_checked()` which uses `runtime.get_run()` (FIX-CR4).
+    monkeypatch.setattr(
+        simulator_module.runtime,
+        "get_run",
+        lambda run_id: SimpleNamespace(run_id=str(run_id), state="running", owner_id=""),
+    )
 
     return simulator_module
 
@@ -553,6 +558,8 @@ async def test_action_payment_real_emits_tx_updated_with_edge_patch(
     # Fake runtime run record so SSE emission is executed (not swallowed by NotFound).
     run = SimpleNamespace(
         run_id="test-run",
+        state="running",
+        owner_id="",
         tick_index=0,
         _real_participants=[(alice.id, alice.pid), (bob.id, bob.pid)],
         _real_viz_by_eq={},
@@ -970,7 +977,12 @@ async def test_trustline_create_used_read_error_returns_503_and_error_envelope(
 
     monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
     # Keep the test focused on the used_now failure path.
-    monkeypatch.setattr(simulator_module, "_require_run_accepts_actions_or_error", lambda _run_id: None)
+    # NOTE: endpoints call `_get_run_checked()` which uses `runtime.get_run()`.
+    monkeypatch.setattr(
+        simulator_module.runtime,
+        "get_run",
+        lambda run_id: SimpleNamespace(run_id=str(run_id), state="running", owner_id=""),
+    )
 
     alice = Participant(
         pid="alice",

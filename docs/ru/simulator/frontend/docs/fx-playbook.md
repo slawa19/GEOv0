@@ -91,5 +91,29 @@ FX — это отдельный overlay canvas поверх базового г
 ## 5) Где смотреть конфликты
 
 - Цвета/ключи: `simulator-ui/v2/src/vizMapping.ts`
-- Базовые активные рёбра: `simulator-ui/v2/src/render/baseGraph.ts` (могут быть намеренно “electric cyan”).
+- Базовые активные рёбра: `simulator-ui/v2/src/render/baseGraph.ts` (могут быть намеренно "electric cyan").
 - FX рендер: `simulator-ui/v2/src/render/fxRenderer.ts`
+
+## 6) Interact Mode — дополнительные эффекты
+
+### 6.1 Clearing node bursts
+
+После завершения клиринга в Interact Mode, помимо стандартных `spawnEdgePulses()` (gold pulse по рёбрам циклов), вызывается `spawnNodeBursts()` для узлов, участвующих в найденных циклах:
+
+- **Вызов:** `spawnNodeBursts({ kind: 'clearing', durationMs: 2800, color: VIZ_MAPPING.fx.clearing_debt })`
+- **Где:** callback `onClearingDone` в [`useSimulatorApp.ts`](../../../../../simulator-ui/v2/src/composables/useSimulatorApp.ts)
+- **Ограничение:** до 40 узлов (для производительности)
+- **Визуально:** bloom + shockwave ring на каждом узле цикла, gold-цвет, длительность 2.8 секунды
+
+> **Правило:** `spawnNodeBursts(clearing)` вызывается **после** `spawnEdgePulses()` — это дополняющий эффект, а не заменяющий. Edge pulses подсвечивают маршрут цикла, node bursts акцентируют участников.
+
+### 6.2 Picking dimming (затемнение недоступных узлов)
+
+При выборе отправителя/получателя в Interact Mode недоступные узлы затемняются на уровне base graph (не FX):
+
+- **Параметр:** `dimmedNodeIds?: Set<string>` в [`drawBaseGraph()`](../../../../../simulator-ui/v2/src/render/baseGraph.ts)
+- **Эффект:** узлы, входящие в `dimmedNodeIds`, рендерятся с `globalAlpha = 0.25`
+- **Pipeline:** прокинуто через [`useRenderLoop.ts`](../../../../../simulator-ui/v2/src/composables/useRenderLoop.ts) → [`useAppRenderLoop.ts`](../../../../../simulator-ui/v2/src/composables/useAppRenderLoop.ts) → [`useAppFxAndRender.ts`](../../../../../simulator-ui/v2/src/composables/useAppFxAndRender.ts) → [`useSimulatorApp.ts`](../../../../../simulator-ui/v2/src/composables/useSimulatorApp.ts)
+- **Источник данных:** `availableTargetIds` computed в `useInteractMode` — набор доступных узлов; все остальные попадают в `dimmedNodeIds`
+
+> **Важно:** Это не FX-эффект, а параметр base graph рендера. При выходе из picking-фазы `dimmedNodeIds` сбрасывается (пустой Set), и все узлы возвращаются к нормальной отрисовке.

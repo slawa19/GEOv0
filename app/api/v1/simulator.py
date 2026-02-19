@@ -263,8 +263,79 @@ def _action_error(
     message: str,
     details: Optional[dict[str, Any]] = None,
 ) -> JSONResponse:
-    payload = SimulatorActionError(code=code, message=message, details=details).model_dump(mode="json")
+    payload = SimulatorActionError(code=code, message=message, details=details).model_dump(mode="json", by_alias=True)
     return JSONResponse(status_code=int(status_code), content=payload)
+
+
+def _get_run_checked_or_error(
+    run_id: str,
+    actor: "deps.SimulatorActor",
+) -> tuple[Optional[Any], Optional[JSONResponse]]:
+    """Get run and validate access/state; return action error envelope on failure.
+
+    This keeps Interact Mode action endpoints stable even when runtime.get_run
+    / access checks raise GeoException subclasses.
+    """
+
+    try:
+        return _get_run_checked(run_id, actor), None
+    except NotFoundException:
+        return None, _action_error(
+            status_code=404,
+            code="RUN_NOT_FOUND",
+            message="Run not found",
+            details={"run_id": str(run_id)},
+        )
+    except ForbiddenException as exc:
+        return None, _action_error(
+            status_code=403,
+            code="ACCESS_DENIED",
+            message=str(getattr(exc, "message", None) or str(exc) or "Access denied"),
+            details={"run_id": str(run_id)},
+        )
+    except ConflictException as exc:
+        # Spec mapping: run in terminal state.
+        det = getattr(exc, "details", None)
+        if not isinstance(det, dict):
+            det = {"run_id": str(run_id)}
+        return None, _action_error(
+            status_code=int(getattr(exc, "status_code", 409) or 409),
+            code="RUN_TERMINAL",
+            message="Run is in terminal state",
+            details=det,
+        )
+
+
+def _get_run_for_readonly_actions_or_error(
+    run_id: str,
+    actor: "deps.SimulatorActor",
+) -> tuple[Optional[Any], Optional[JSONResponse]]:
+    """Get run and validate access for read-only action endpoints.
+
+    Read-only endpoints intentionally work for stopped/error runs, so we only
+    validate existence + ownership.
+    """
+
+    try:
+        run = runtime.get_run(run_id)
+    except NotFoundException:
+        return None, _action_error(
+            status_code=404,
+            code="RUN_NOT_FOUND",
+            message="Run not found",
+            details={"run_id": str(run_id)},
+        )
+    try:
+        _check_run_access(run, actor, run_id)
+    except ForbiddenException as exc:
+        return None, _action_error(
+            status_code=403,
+            code="ACCESS_DENIED",
+            message=str(getattr(exc, "message", None) or str(exc) or "Access denied"),
+            details={"run_id": str(run_id)},
+        )
+
+    return run, None
 
 
 def _check_run_access(run, actor: "deps.SimulatorActor", run_id: str) -> None:
@@ -626,7 +697,9 @@ async def action_trustline_create(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    _get_run_checked(run_id, actor)  # validate access + state in one get_run() call (FIX-CR4)
+    _run, run_err = _get_run_checked_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -816,7 +889,9 @@ async def action_trustline_update(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    _get_run_checked(run_id, actor)  # validate access + state in one get_run() call (FIX-CR4)
+    _run, run_err = _get_run_checked_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -866,12 +941,32 @@ async def action_trustline_update(
         )
 
     old_limit_dec = Decimal(str(getattr(tl, "limit", 0) or 0))
-    used = await _trustline_used_amount(
-        db,
-        from_id=tl.from_participant_id,
-        to_id=tl.to_participant_id,
-        equivalent_id=eq.id,
-    )
+    try:
+        used = await _trustline_used_amount(
+            db,
+            from_id=tl.from_participant_id,
+            to_id=tl.to_participant_id,
+            equivalent_id=eq.id,
+        )
+    except Exception:
+        logger.error(
+            "Failed to read used amount for trustline-update: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
+            run_id,
+            eq.code,
+            from_p.pid,
+            to_p.pid,
+            exc_info=True,
+        )
+        return _action_error(
+            status_code=503,
+            code="TRUSTLINE_USED_UNAVAILABLE",
+            message="Temporary error while reading current used amount",
+            details={
+                "equivalent": eq.code,
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+            },
+        )
     if new_limit_dec < used:
         return _action_error(
             status_code=409,
@@ -958,7 +1053,9 @@ async def action_trustline_close(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    _get_run_checked(run_id, actor)  # validate access + state in one get_run() call (FIX-CR4)
+    _run, run_err = _get_run_checked_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
 
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
@@ -995,18 +1092,38 @@ async def action_trustline_close(
             details={"from_pid": from_p.pid, "to_pid": to_p.pid, "equivalent": eq.code},
         )
 
-    used = await _trustline_used_amount(
-        db,
-        from_id=tl.from_participant_id,
-        to_id=tl.to_participant_id,
-        equivalent_id=eq.id,
-    )
-    reverse_used = await _trustline_reverse_used_amount(
-        db,
-        from_id=tl.from_participant_id,
-        to_id=tl.to_participant_id,
-        equivalent_id=eq.id,
-    )
+    try:
+        used = await _trustline_used_amount(
+            db,
+            from_id=tl.from_participant_id,
+            to_id=tl.to_participant_id,
+            equivalent_id=eq.id,
+        )
+        reverse_used = await _trustline_reverse_used_amount(
+            db,
+            from_id=tl.from_participant_id,
+            to_id=tl.to_participant_id,
+            equivalent_id=eq.id,
+        )
+    except Exception:
+        logger.error(
+            "Failed to read used amount for trustline-close: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
+            run_id,
+            eq.code,
+            from_p.pid,
+            to_p.pid,
+            exc_info=True,
+        )
+        return _action_error(
+            status_code=503,
+            code="TRUSTLINE_USED_UNAVAILABLE",
+            message="Temporary error while reading current used amount",
+            details={
+                "equivalent": eq.code,
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+            },
+        )
     if used > 0 or reverse_used > 0:
         return _action_error(
             status_code=409,
@@ -1089,7 +1206,10 @@ async def action_payment_real(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    run = _get_run_checked(run_id, actor)  # validate access + state; run reused in SSE (FIX-CR4)
+    run, run_err = _get_run_checked_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
+    assert run is not None
 
     from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
     if err is not None:
@@ -1253,7 +1373,10 @@ async def action_clearing_real(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    run = _get_run_checked(run_id, actor)  # validate access + state; run reused in SSE (FIX-CR4)
+    run, run_err = _get_run_checked_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
+    assert run is not None
 
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
     if err is not None:
@@ -1283,7 +1406,8 @@ async def action_clearing_real(
                 debtor = str(e.get("debtor") or "").strip()
                 creditor = str(e.get("creditor") or "").strip()
                 if debtor and creditor and debtor != creditor:
-                    edges.append(SimulatorActionEdgeRef(from_=debtor, to=creditor))
+                    # Trustline direction is creditor -> debtor (see project guardrails).
+                    edges.append(SimulatorActionEdgeRef(from_=creditor, to=debtor))
 
             executed.append(
                 SimulatorActionClearingCycle(
@@ -1364,7 +1488,9 @@ async def action_participants_list(
     # participants-list is read-only and must work even for stopped/error runs.
 
     # AuthZ: ownership check
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
+    _run, run_err = _get_run_for_readonly_actions_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
 
     # Run/snapshot-scoped: build from current run snapshot (not global Participant table).
     try:
@@ -1416,7 +1542,9 @@ async def action_trustlines_list(
     # trustlines-list is read-only and must work even for stopped/error runs.
 
     # AuthZ: ownership check
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
+    _run, run_err = _get_run_for_readonly_actions_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
 
     eq, err = await _resolve_equivalent_or_error(session=db, code=str(equivalent or ""))
     if err is not None:

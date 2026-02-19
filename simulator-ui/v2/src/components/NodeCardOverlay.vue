@@ -26,6 +26,8 @@ type Props = {
   interactMode?: boolean
   /** All trustlines from useInteractMode — filtered internally by node.id. */
   interactTrustlines?: TrustlineInfo[]
+  /** True while trustlines are being fetched from the API. */
+  interactTrustlinesLoading?: boolean
   onInteractSendPayment?: (fromPid: string) => void
   onInteractNewTrustline?: (fromPid: string) => void
   onInteractEditTrustline?: (fromPid: string, toPid: string) => void
@@ -164,6 +166,7 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
               </span>
               <span class="nco-trustline-row__amounts ds-mono">
                 {{ tl.used }}&thinsp;/&thinsp;{{ tl.limit }}
+                <span class="nco-trustline-row__available ds-text-secondary">(avail:&thinsp;{{ tl.available }})</span>
               </span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
@@ -175,6 +178,9 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
                 ✏️
               </button>
             </div>
+          </div>
+          <div v-else-if="interactTrustlinesLoading" class="nco-trustlines__empty ds-label">
+            <span class="ds-text-secondary">Loading trustlines…</span>
           </div>
           <div v-else class="nco-trustlines__empty ds-label">
             No trustlines
@@ -235,6 +241,12 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
   flex-shrink: 0;
   font-size: 0.75rem;
   opacity: 0.8;
+}
+
+.nco-trustline-row__available {
+  font-size: 0.7rem;
+  opacity: 0.65;
+  margin-left: 2px;
 }
 
 .nco-trustline-row__edit {

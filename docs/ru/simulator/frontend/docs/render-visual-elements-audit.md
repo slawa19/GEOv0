@@ -249,6 +249,16 @@
 - **Описание:** Текстовые метки рёбер — отрисовываются через DOM overlay (не canvas). Не присутствуют в [`baseGraph.ts`](simulator-ui/v2/src/render/baseGraph.ts) напрямую.
 - **Стоимость:** DOM layout + paint — зависит от количества видимых меток
 
+#### 6. Dimmed Nodes (Interact Mode picking)
+
+- **Файл:** [`baseGraph.ts`](simulator-ui/v2/src/render/baseGraph.ts) — параметр `dimmedNodeIds?: Set<string>` в `drawBaseGraph()`
+- **Описание:** При interact picking (выбор отправителя/получателя) узлы, не входящие в набор доступных целей, рендерятся с пониженной прозрачностью.
+- **Условия видимости:** `dimmedNodeIds` не пуст (передаётся из `useInteractMode` через render pipeline)
+- **Поведение:** Узлы из `dimmedNodeIds` — `globalAlpha = 0.25`; остальные — без изменений
+- **Pipeline:** [`useSimulatorApp.ts`](simulator-ui/v2/src/composables/useSimulatorApp.ts) → [`useAppFxAndRender.ts`](simulator-ui/v2/src/composables/useAppFxAndRender.ts) → [`useAppRenderLoop.ts`](simulator-ui/v2/src/composables/useAppRenderLoop.ts) → [`useRenderLoop.ts`](simulator-ui/v2/src/composables/useRenderLoop.ts) → [`baseGraph.ts`](simulator-ui/v2/src/render/baseGraph.ts)
+- **Стоимость:** ⚡ Минимальная — только `globalAlpha` set/restore per node, без дополнительных draw calls
+- **Визуально:** Недоступные узлы полупрозрачны, доступные — нормальная яркость
+
 ---
 
 ### FX Effects ([`fxRenderer.ts`](simulator-ui/v2/src/render/fxRenderer.ts))
@@ -326,6 +336,7 @@
   - 🔴 Bloom: `shadowBlur = spx(30) * alpha * blurK` ([`:821`](simulator-ui/v2/src/render/fxRenderer.ts:821)) + `arc` fill
   - 🟡 Shockwave: `arc` stroke без blur, lineWidth уменьшается ([`:830`](simulator-ui/v2/src/render/fxRenderer.ts:830))
 - **Визуально:** Яркий центральный bloom + расширяющееся кольцо
+- **Interact Mode:** Используется в `onClearingDone` callback в [`useSimulatorApp.ts`](simulator-ui/v2/src/composables/useSimulatorApp.ts) — после `spawnEdgePulses()` вызывается `spawnNodeBursts()` с `kind: 'clearing'`, `durationMs: 2800` для узлов, участвующих в найденных циклах (до 40 узлов)
 
 #### 8. Flash Overlay (Screen-space)
 

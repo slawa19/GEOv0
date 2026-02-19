@@ -45,6 +45,9 @@ export function useAppFxAndRender(opts: {
   getLinkLod: () => 'focus' | 'full'
   getHiddenNodeId: () => string | null
 
+  // Optional: picking dim — nodes not in this set are rendered dimmed during picking phases.
+  getDimmedNodeIds?: () => Set<string> | null
+
   // hooks
   beforeDraw: () => void
 
@@ -88,6 +91,7 @@ export function useAppFxAndRender(opts: {
     activeNodes: fxOverlays.activeNodes,
     getLinkLod: opts.getLinkLod,
     getHiddenNodeId: opts.getHiddenNodeId,
+    getDimmedNodeIds: opts.getDimmedNodeIds,
     beforeDraw: opts.beforeDraw,
     isAnimating: opts.isAnimating,
   })

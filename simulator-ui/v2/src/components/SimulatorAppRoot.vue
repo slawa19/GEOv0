@@ -584,6 +584,7 @@ function onInteractEditTrustline(fromPid: string, toPid: string) {
       :unpin="unpinSelectedNode"
       :interact-mode="isInteractUi"
       :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
+      :interact-trustlines-loading="isInteractUi ? interact.mode.busy.value : undefined"
       :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
       :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
       :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"

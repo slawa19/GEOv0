@@ -29,6 +29,9 @@ export function useAppRenderLoop(opts: {
   getHiddenNodeId: () => string | null
   beforeDraw: () => void
 
+  // Optional: node IDs available for picking — unlisted nodes are rendered dimmed.
+  getDimmedNodeIds?: () => Set<string> | null
+
   // Optional: hint whether the scene is actively animating (pan/zoom, physics, playback).
   isAnimating?: () => boolean
 }) {
@@ -62,6 +65,7 @@ export function useAppRenderLoop(opts: {
     activeNodes: opts.activeNodes,
     getLinkLod: opts.getLinkLod,
     getHiddenNodeId: opts.getHiddenNodeId,
+    getDimmedNodeIds: opts.getDimmedNodeIds,
     beforeDraw: opts.beforeDraw,
     isAnimating: opts.isAnimating,
   })

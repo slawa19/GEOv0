@@ -44,6 +44,8 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   selectedNodeId: string | null
   activeEdges: Map<string, number>
   activeNodes?: Set<string>
+  /** When non-empty: nodes NOT in this set are rendered with reduced opacity (picking dim). */
+  dimmedNodeIds?: Set<string> | null
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
   linkLod?: 'full' | 'focus'
@@ -53,6 +55,9 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 }) {
   const { w, h, nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
   const activeNodes = opts.activeNodes
+  const dimmedNodeIds = opts.dimmedNodeIds
+  // A node is dimmed when dimmedNodeIds is non-null/non-empty AND the node is not in it.
+  const hasDim = !!dimmedNodeIds && dimmedNodeIds.size > 0
   const linkLod = opts.linkLod ?? 'full'
   const dragMode = opts.dragMode ?? false
   const hiddenNodeId = opts.hiddenNodeId ?? null
@@ -161,6 +166,9 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     if (hiddenNodeId && n.id === hiddenNodeId) continue
     const isSelected = selectedNodeId === n.id
     const isActiveNode = !!activeNodes && activeNodes.has(n.id)
+    const isDimmed = hasDim && !dimmedNodeIds!.has(n.id) && !isSelected
+
+    if (isDimmed) ctx.globalAlpha = 0.25
 
     if (isSelected && !dragMode) {
       // Focus Glow: "Light glow around the node"
@@ -228,6 +236,8 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       cameraZoom: z,
       quality: q,
     })
+
+    if (isDimmed) ctx.globalAlpha = 1
   }
 
   return pos
