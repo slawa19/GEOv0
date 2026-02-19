@@ -179,5 +179,157 @@ describe('useInteractMode', () => {
       vi.useRealTimers()
     }
   })
+
+  // BUG-11: additional coverage
+
+  it('trustline create flow: picking-from -> picking-to -> confirm-trustline-create', () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [{ id: 'alice', status: 'active' }, { id: 'carol', status: 'active' }],
+      links: [], // no existing trustline alice->carol
+    })
+    const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startTrustlineFlow()
+    expect(im.phase.value).toBe('picking-trustline-from')
+    im.selectNode('alice')
+    expect(im.phase.value).toBe('picking-trustline-to')
+    im.selectNode('carol')
+    // No existing link → confirm-trustline-create
+    expect(im.phase.value).toBe('confirm-trustline-create')
+    expect(im.state.fromPid).toBe('alice')
+    expect(im.state.toPid).toBe('carol')
+  })
+
+  it('setPaymentFromPid and setPaymentToPid update state in picking phases', () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    expect(im.phase.value).toBe('picking-payment-from')
+
+    im.setPaymentFromPid('alice')
+    expect(im.state.fromPid).toBe('alice')
+    expect(im.phase.value).toBe('picking-payment-to')
+
+    im.setPaymentToPid('bob')
+    expect(im.state.toPid).toBe('bob')
+    expect(im.phase.value).toBe('confirm-payment')
+  })
+
+  it('selectEdge transitions to editing-trustline phase', () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    // selectEdge should set phase to 'editing-trustline'
+    im.selectEdge('alice→bob')
+    expect(im.phase.value).toBe('editing-trustline')
+    expect(im.state.fromPid).toBe('alice')
+    expect(im.state.toPid).toBe('bob')
+  })
+
+  it('availableCapacity computed from snapshot link', () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [{ id: 'alice', status: 'active' }, { id: 'bob', status: 'active' }],
+      links: [{ source: 'alice', target: 'bob', used: '200', available: '800', status: 'active' }],
+    })
+    const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    im.selectNode('alice')
+    im.selectNode('bob')
+    expect(im.phase.value).toBe('confirm-payment')
+    expect(im.availableCapacity.value).toBe('800')
+  })
+
+  it('clearing flow with 0 cycles does not error', async () => {
+    vi.useFakeTimers()
+    try {
+      const snapshot = ref<GraphSnapshot | null>(null)
+      const actions = mkActions()
+      actions.runClearing.mockResolvedValueOnce({
+        ok: true,
+        cleared_cycles: 0,
+        total_cleared_amount: '0.00',
+        cycles: [],
+        equivalent: 'UAH',
+      } as any)
+
+      const clearingDoneCallback = vi.fn()
+      const im = useInteractMode({
+        actions: actions as any,
+        equivalent: computed(() => 'UAH'),
+        snapshot,
+        onClearingDone: clearingDoneCallback,
+      })
+
+      im.startClearingFlow()
+      const p = im.confirmClearing()
+
+      await vi.advanceTimersByTimeAsync(1100)
+      await p
+
+      expect(im.phase.value).toBe('idle')
+      expect(clearingDoneCallback).toHaveBeenCalledWith(
+        expect.objectContaining({ cleared_cycles: 0, cycles: [] }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('confirmPayment uses resetToIdle (not cancel) on success — epoch not double-incremented', async () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
+    const im = useInteractMode({ actions: actions as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    im.selectNode('alice')
+    im.selectNode('bob')
+
+    await im.confirmPayment('10.00')
+
+    // After success: phase=idle, busy=false, no error
+    expect(im.phase.value).toBe('idle')
+    expect(im.busy.value).toBe(false)
+    expect(im.state.error).toBeNull()
+
+    // Subsequent action should work immediately (epoch not corrupted)
+    im.startPaymentFlow()
+    expect(im.phase.value).toBe('picking-payment-from')
+  })
+
+  it('availableTargetIds is empty in idle phase', () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    expect(im.availableTargetIds.value.size).toBe(0)
+  })
+
+  it('availableTargetIds includes participants (excluding from) in picking-trustline-to', () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+        { id: 'carol', status: 'active' },
+      ],
+      links: [],
+    })
+    const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startTrustlineFlow()
+    im.setTrustlineFromPid('alice')
+    expect(im.phase.value).toBe('picking-trustline-to')
+
+    const ids = im.availableTargetIds.value
+    expect(ids.has('bob')).toBe(true)
+    expect(ids.has('carol')).toBe(true)
+    expect(ids.has('alice')).toBe(false) // excludes self
+  })
 })
 

@@ -42,6 +42,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
 </script>
 
 <template>
+  <Transition name="panel-slide">
   <div
     v-if="phase === 'confirm-clearing' || phase === 'clearing-preview' || phase === 'clearing-running'"
     class="ds-ov-panel ds-panel ds-panel--elevated"
@@ -100,6 +101,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 

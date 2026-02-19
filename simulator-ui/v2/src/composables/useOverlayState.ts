@@ -11,6 +11,11 @@ export type HoveredEdgeState = {
   amountText: string
   screenX: number
   screenY: number
+  // BUG-2: extended fields for Interact Mode EdgeTooltip
+  trustLimit?: string | number | null
+  used?: string | number | null
+  available?: string | number | null
+  edgeStatus?: string | null
 }
 
 export type FloatingLabel = {

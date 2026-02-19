@@ -125,5 +125,73 @@ describe('useInteractActions', () => {
       expect(String((e as any).message)).toContain('run_id')
     }
   })
+
+  // BUG-11: successful API response tests
+
+  it('sendPayment returns response on success and clears actionsDisabled', async () => {
+    const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+    const runId = ref('run_1')
+    const ia = useInteractActions({ httpConfig, runId })
+
+    const mockResponse = { ok: true, payment_id: 'pay_1', from_pid: 'a', to_pid: 'b', amount: '1.00', equivalent: 'UAH', status: 'COMMITTED' }
+    m.actionPaymentReal.mockResolvedValueOnce(mockResponse as any)
+
+    const result = await ia.sendPayment('a', 'b', '1.00', 'UAH')
+    expect(result).toMatchObject({ payment_id: 'pay_1', status: 'COMMITTED' })
+    expect(ia.actionsDisabled.value).toBe(false)
+  })
+
+  it('createTrustline returns response on success', async () => {
+    const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+    const runId = ref('run_1')
+    const ia = useInteractActions({ httpConfig, runId })
+
+    const mockResponse = { ok: true, trustline_id: 'tl_1', from_pid: 'a', to_pid: 'b', equivalent: 'UAH', limit: '1000' }
+    m.actionTrustlineCreate.mockResolvedValueOnce(mockResponse as any)
+
+    const result = await ia.createTrustline('a', 'b', '1000', 'UAH')
+    expect(result).toMatchObject({ trustline_id: 'tl_1', limit: '1000' })
+  })
+
+  it('runClearing returns response with cycles on success', async () => {
+    const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+    const runId = ref('run_1')
+    const ia = useInteractActions({ httpConfig, runId })
+
+    const cycle = { cleared_amount: '600', edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }] }
+    const mockResponse = { ok: true, equivalent: 'UAH', cleared_cycles: 1, total_cleared_amount: '600.00', cycles: [cycle] }
+    m.actionClearingReal.mockResolvedValueOnce(mockResponse as any)
+
+    const result = await ia.runClearing('UAH')
+    expect(result.cleared_cycles).toBe(1)
+    expect(result.cycles).toHaveLength(1)
+    expect(result.cycles[0]!.edges).toHaveLength(3)
+  })
+
+  it('fetchParticipants returns items array on success', async () => {
+    const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+    const runId = ref('run_1')
+    const ia = useInteractActions({ httpConfig, runId })
+
+    const items = [{ pid: 'alice', name: 'Alice', type: 'person', status: 'active' }]
+    m.getParticipantsList.mockResolvedValueOnce({ items } as any)
+
+    const result = await ia.fetchParticipants()
+    expect(result).toHaveLength(1)
+    expect(result[0]!.pid).toBe('alice')
+  })
+
+  it('fetchTrustlines returns items array filtered by equivalent', async () => {
+    const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+    const runId = ref('run_1')
+    const ia = useInteractActions({ httpConfig, runId })
+
+    const items = [{ from_pid: 'a', to_pid: 'b', equivalent: 'UAH', limit: '1000', used: '200', available: '800', status: 'active' }]
+    m.getTrustlinesList.mockResolvedValueOnce({ items } as any)
+
+    const result = await ia.fetchTrustlines('UAH')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.used).toBe('200')
+  })
 })
 

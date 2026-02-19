@@ -995,7 +995,7 @@
 }
 
 [data-theme='hud'] .ds-node-card__avatar {
-  border-color: rgba(0, 229, 255, 0.55);
+  border: none;
   background: var(--ds-accent-surface);
   color: var(--ds-accent);
   clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);

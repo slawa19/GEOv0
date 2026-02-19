@@ -1,5 +1,14 @@
 import { computed, reactive, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
+/** BUG-5: Entry in the Interact Mode history log. */
+export type InteractHistoryEntry = {
+  id: number
+  icon: string
+  text: string
+  timeText: string
+  timestampMs: number
+}
+
 import type { GraphSnapshot, GraphLink } from '../types'
 import { keyEdge, parseEdgeKey } from '../utils/edgeKey'
 import { parseAmountNumber } from '../utils/amount'
@@ -34,7 +43,7 @@ export type InteractState = {
 function findActiveLink(snapshot: GraphSnapshot | null, from: string | null, to: string | null): GraphLink | null {
   if (!snapshot || !from || !to) return null
   for (const l of snapshot.links ?? []) {
-    if (l.source === from && l.target === to && isActiveStatus((l as any)?.status)) return l
+    if (l.source === from && l.target === to && isActiveStatus(l.status)) return l
   }
   return null
 }
@@ -51,6 +60,8 @@ export function useInteractMode(opts: {
   equivalent: Ref<string>
   snapshot: Ref<GraphSnapshot | null>
   onNodeClick?: (nodeId: string) => void
+  /** BUG-3: called after successful clearing to trigger FX animation (gold pulse on cycle edges). */
+  onClearingDone?: (result: SimulatorActionClearingRealResponse) => void
 }): {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
@@ -77,6 +88,8 @@ export function useInteractMode(opts: {
    */
   trustlines: ComputedRef<TrustlineInfo[]>
   availableCapacity: ComputedRef<string | null>
+  /** BUG-4: node IDs that should be highlighted as available targets in the current picking phase. */
+  availableTargetIds: ComputedRef<Set<string>>
 
   // Flags
   busy: ComputedRef<boolean>
@@ -89,6 +102,9 @@ export function useInteractMode(opts: {
   setTrustlineFromPid: (pid: string | null) => void
   setTrustlineToPid: (pid: string | null) => void
   selectTrustline: (fromPid: string, toPid: string) => void
+
+  // BUG-5: history log
+  history: InteractHistoryEntry[]
 } {
   // UX: keep the clearing preview visible long enough to be noticed/read.
   const CLEARING_PREVIEW_DWELL_MS = 800
@@ -118,6 +134,19 @@ export function useInteractMode(opts: {
 
   const phase = computed(() => state.phase)
   const busy = computed(() => busyRef.value)
+
+  // BUG-5: inline history log (last N actions)
+  const MAX_HISTORY = 20
+  const history = reactive<InteractHistoryEntry[]>([])
+  let nextHistoryId = 1
+
+  function pushHistory(icon: string, text: string) {
+    const nowMs = Date.now()
+    const dt = new Date(nowMs)
+    const timeText = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}:${String(dt.getSeconds()).padStart(2, '0')}`
+    history.push({ id: nextHistoryId++, icon, text, timeText, timestampMs: nowMs })
+    if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY)
+  }
 
   // -------------------------
   // Participants (dropdown)
@@ -200,7 +229,7 @@ export function useInteractMode(opts: {
     }
   }
 
-  function findActiveTrustline(from: string | null, to: string | null): { available?: unknown } | null {
+  function findActiveTrustline(from: string | null, to: string | null): TrustlineInfo | null {
     if (!from || !to) return null
     const items = trustlines.value
     for (const tl of items ?? []) {
@@ -219,34 +248,34 @@ export function useInteractMode(opts: {
       }
 
       snapshotParticipants.value = (snap.nodes ?? []).map((n) => ({
-        pid: String((n as any)?.id ?? ''),
-        name: String((n as any)?.name ?? (n as any)?.id ?? ''),
-        type: String((n as any)?.type ?? ''),
-        status: String((n as any)?.status ?? 'active'),
+        pid: n.id,
+        name: n.name ?? n.id,
+        type: n.type ?? '',
+        status: n.status ?? 'active',
       }))
 
       const nameByPid = new Map<string, string>()
       for (const n of snap.nodes ?? []) {
-        const pid = String((n as any)?.id ?? '').trim()
+        const pid = n.id.trim()
         if (!pid) continue
-        const nm = String((n as any)?.name ?? pid).trim() || pid
+        const nm = (n.name ?? pid).trim() || pid
         nameByPid.set(pid, nm)
       }
 
       const eq = normalizeEq(snap.equivalent)
       snapshotTrustlines.value = (snap.links ?? []).map((l) => {
-        const from = String((l as any)?.source ?? '')
-        const to = String((l as any)?.target ?? '')
+        const from = l.source
+        const to = l.target
         return {
           from_pid: from,
           from_name: nameByPid.get(from) ?? from,
           to_pid: to,
           to_name: nameByPid.get(to) ?? to,
           equivalent: eq,
-          limit: String((l as any)?.trust_limit ?? ''),
-          used: String((l as any)?.used ?? ''),
-          available: String((l as any)?.available ?? ''),
-          status: String((l as any)?.status ?? 'active'),
+          limit: String(l.trust_limit ?? ''),
+          used: String(l.used ?? ''),
+          available: String(l.available ?? ''),
+          status: l.status ?? 'active',
         }
       })
     },
@@ -256,11 +285,11 @@ export function useInteractMode(opts: {
   const availableCapacity = computed(() => {
     // Prefer backend trustlines list when present (can be more authoritative than snapshot).
     const tl = findActiveTrustline(state.fromPid, state.toPid)
-    const tlAvail = parseAmountStringOrNull((tl as any)?.available)
+    const tlAvail = parseAmountStringOrNull(tl?.available)
     if (tlAvail != null && String(tlAvail).trim()) return tlAvail
 
     const l = findActiveLink(opts.snapshot.value, state.fromPid, state.toPid)
-    return parseAmountStringOrNull((l as any)?.available)
+    return parseAmountStringOrNull(l?.available)
   })
 
   const canSendPayment = computed(() => {
@@ -275,6 +304,46 @@ export function useInteractMode(opts: {
     if (!state.fromPid || !state.toPid || state.fromPid === state.toPid) return false
     const l = findActiveLink(opts.snapshot.value, state.fromPid, state.toPid)
     return !l
+  })
+
+  /** BUG-4: Node IDs available as picking targets in the current phase (for visual highlight). */
+  const availableTargetIds = computed<Set<string>>(() => {
+    const phase = state.phase
+
+    // picking-payment-to: highlight nodes that have a trustline from the selected fromPid
+    if (phase === 'picking-payment-to' && state.fromPid) {
+      const ids = new Set<string>()
+      for (const tl of trustlines.value) {
+        if (tl.from_pid === state.fromPid && isActiveStatus(tl.status)) {
+          ids.add(tl.to_pid)
+        }
+      }
+      // Fallback: if trustlines not loaded, show all participants except from
+      if (ids.size === 0) {
+        for (const p of participants.value) {
+          if (p.pid !== state.fromPid) ids.add(p.pid)
+        }
+      }
+      return ids
+    }
+
+    // picking-trustline-to: highlight all participants except fromPid
+    if (phase === 'picking-trustline-to' && state.fromPid) {
+      const ids = new Set<string>()
+      for (const p of participants.value) {
+        if (p.pid !== state.fromPid) ids.add(p.pid)
+      }
+      return ids
+    }
+
+    // picking-*-from: highlight all participants
+    if (phase === 'picking-payment-from' || phase === 'picking-trustline-from') {
+      const ids = new Set<string>()
+      for (const p of participants.value) ids.add(p.pid)
+      return ids
+    }
+
+    return new Set<string>()
   })
 
   function clearError() {
@@ -423,53 +492,69 @@ export function useInteractMode(opts: {
 
   async function confirmPayment(amount: string): Promise<void> {
     clearError()
-    await runBusy(async ({ isCurrent }) => {
-      if (!state.fromPid || !state.toPid) throw new Error('Select From and To first')
-      await opts.actions.sendPayment(state.fromPid, state.toPid, amount, opts.equivalent.value)
+    const from = state.fromPid
+    const to = state.toPid
+    await runBusy(async ({ isCurrent, resetToIdle }) => {
+      if (!from || !to) throw new Error('Select From and To first')
+      await opts.actions.sendPayment(from, to, amount, opts.equivalent.value)
       if (!isCurrent()) return
 
+      // BUG-5: log to history
+      pushHistory('💸', `Payment ${amount} ${opts.equivalent.value}: ${from} → ${to}`)
       // Payment changes used/available; refresh trustlines so dropdowns/capacity can update.
       void refreshTrustlines({ force: true })
-      cancel()
+      resetToIdle()
     })
   }
 
   async function confirmTrustlineCreate(limit: string): Promise<void> {
     clearError()
-    await runBusy(async ({ isCurrent }) => {
-      if (!state.fromPid || !state.toPid) throw new Error('Select From and To first')
-      await opts.actions.createTrustline(state.fromPid, state.toPid, limit, opts.equivalent.value)
+    const from = state.fromPid
+    const to = state.toPid
+    await runBusy(async ({ isCurrent, resetToIdle }) => {
+      if (!from || !to) throw new Error('Select From and To first')
+      await opts.actions.createTrustline(from, to, limit, opts.equivalent.value)
       if (!isCurrent()) return
 
+      // BUG-5: log to history
+      pushHistory('🔗', `Trustline created: ${from} → ${to} (${limit})`)
       invalidateTrustlinesCache(opts.equivalent.value)
       void refreshTrustlines({ force: true })
-      cancel()
+      resetToIdle()
     })
   }
 
   async function confirmTrustlineUpdate(newLimit: string): Promise<void> {
     clearError()
-    await runBusy(async ({ isCurrent }) => {
-      if (!state.fromPid || !state.toPid) throw new Error('Select trustline first')
-      await opts.actions.updateTrustline(state.fromPid, state.toPid, newLimit, opts.equivalent.value)
+    const from = state.fromPid
+    const to = state.toPid
+    await runBusy(async ({ isCurrent, resetToIdle }) => {
+      if (!from || !to) throw new Error('Select trustline first')
+      await opts.actions.updateTrustline(from, to, newLimit, opts.equivalent.value)
       if (!isCurrent()) return
 
+      // BUG-5: log to history
+      pushHistory('✏️', `Trustline updated: ${from} → ${to} → limit ${newLimit}`)
       invalidateTrustlinesCache(opts.equivalent.value)
       void refreshTrustlines({ force: true })
-      cancel()
+      resetToIdle()
     })
   }
 
   async function confirmTrustlineClose(): Promise<void> {
     clearError()
-    await runBusy(async ({ isCurrent }) => {
-      if (!state.fromPid || !state.toPid) throw new Error('Select trustline first')
-      await opts.actions.closeTrustline(state.fromPid, state.toPid, opts.equivalent.value)
+    const from = state.fromPid
+    const to = state.toPid
+    await runBusy(async ({ isCurrent, resetToIdle }) => {
+      if (!from || !to) throw new Error('Select trustline first')
+      await opts.actions.closeTrustline(from, to, opts.equivalent.value)
       if (!isCurrent()) return
 
+      // BUG-5: log to history
+      pushHistory('🗑️', `Trustline closed: ${from} → ${to}`)
       invalidateTrustlinesCache(opts.equivalent.value)
       void refreshTrustlines({ force: true })
-      cancel()
+      resetToIdle()
     })
   }
 
@@ -624,13 +709,28 @@ export function useInteractMode(opts: {
   async function confirmClearing(): Promise<void> {
     clearError()
     await runBusy(async ({ isCurrent, resetToIdle }) => {
-      // Two-phase (minimal): preview (store cycles) -> running (brief) -> idle.
+      // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
       state.phase = 'clearing-preview'
       state.lastClearing = null
 
       const res = await opts.actions.runClearing(opts.equivalent.value)
       if (!isCurrent()) return
       state.lastClearing = res
+
+      // BUG-5: log to history
+      const clearedCycles = res.cleared_cycles ?? 0
+      const clearedAmt = res.total_cleared_amount ?? '0'
+      if (clearedCycles > 0) {
+        pushHistory('🌀', `Clearing: ${clearedCycles} cycle(s), −${clearedAmt} ${opts.equivalent.value}`)
+      } else {
+        pushHistory('🌀', `Clearing: no cycles found`)
+      }
+
+      // BUG-3: trigger FX animation immediately after receiving clearing response.
+      // This call is fire-and-forget — errors are intentionally ignored.
+      if (res && typeof opts.onClearingDone === 'function') {
+        try { opts.onClearingDone(res) } catch { /* ignore */ }
+      }
 
       // Let Vue paint the preview at least once (even if very briefly).
       await Promise.resolve()
@@ -674,6 +774,7 @@ export function useInteractMode(opts: {
     participants,
     trustlines,
     availableCapacity,
+    availableTargetIds,
 
     busy,
     canSendPayment,
@@ -684,6 +785,8 @@ export function useInteractMode(opts: {
     setTrustlineFromPid,
     setTrustlineToPid,
     selectTrustline,
+
+    history,
   }
 }
 

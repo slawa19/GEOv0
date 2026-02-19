@@ -53,6 +53,11 @@ export function useEdgeHover(deps: UseEdgeHoverDeps) {
         deps.hoveredEdge.amountText = deps.formatEdgeAmountText(link)
         deps.hoveredEdge.screenX = sp.x
         deps.hoveredEdge.screenY = sp.y
+        // BUG-2: populate trustline metadata for Interact Mode EdgeTooltip
+        deps.hoveredEdge.trustLimit = link?.trust_limit ?? null
+        deps.hoveredEdge.used = link?.used ?? null
+        deps.hoveredEdge.available = link?.available ?? null
+        deps.hoveredEdge.edgeStatus = link?.status ?? null
       } else {
         deps.clearHoveredEdge()
       }

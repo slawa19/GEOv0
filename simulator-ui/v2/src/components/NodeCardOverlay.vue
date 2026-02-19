@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { GraphNode } from '../types'
+import type { TrustlineInfo } from '../api/simulatorTypes'
 import { VIZ_MAPPING } from '../vizMapping'
 
 type NodeEdgeStats = {
@@ -20,6 +21,14 @@ type Props = {
   isPinned: boolean
   pin: () => void
   unpin: () => void
+
+  // BUG-1: Interact Mode extensions
+  interactMode?: boolean
+  /** All trustlines from useInteractMode — filtered internally by node.id. */
+  interactTrustlines?: TrustlineInfo[]
+  onInteractSendPayment?: (fromPid: string) => void
+  onInteractNewTrustline?: (fromPid: string) => void
+  onInteractEditTrustline?: (fromPid: string, toPid: string) => void
 }
 
 const emit = defineEmits<{ close: [] }>()
@@ -47,6 +56,15 @@ function netText(node: GraphNode): string | null {
   if (sign === 0) return '0'
   return s
 }
+
+/** Trustlines that involve this node (outgoing or incoming). */
+const nodeTrustlines = computed<TrustlineInfo[]>(() => {
+  if (!props.interactMode || !props.interactTrustlines?.length) return []
+  const id = props.node.id
+  return props.interactTrustlines.filter(
+    (tl) => tl.from_pid === id || tl.to_pid === id,
+  )
+})
 </script>
 
 <template>
@@ -54,41 +72,38 @@ function netText(node: GraphNode): string | null {
     <div class="ds-panel ds-panel--elevated" role="dialog" aria-label="Node details">
       <div class="ds-panel__body ds-ov-node-card__body">
 
-        <!-- Service actions (Pin / Close) ---------------------------------->
-        <!-- Positioned absolutely; should not consume layout height. -->
-        <div class="ds-ov-node-card__service">
-          <button
-            v-if="showPinActions"
-            class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
-            type="button"
-            :aria-label="isPinned ? 'Unpin' : 'Pin'"
-            :title="isPinned ? 'Unpin' : 'Pin'"
-            @click="isPinned ? unpin() : pin()"
-          >
-            {{ isPinned ? '◆' : '◇' }}
-          </button>
-          <button
-            class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
-            type="button"
-            aria-label="Close"
-            title="Close"
-            @click="emit('close')"
-          >
-            ×
-          </button>
-        </div>
-
         <!-- Identity + Balance (merged) ------------------------------------>
         <div class="ds-ov-node-card__identity">
           <div class="ds-node-card__avatar ds-ov-node-card__avatar">
             {{ String(node.name ?? node.id).slice(0, 2).toUpperCase() }}
           </div>
-          <div class="ds-node-card__info">
+          <div class="ds-ov-node-card__text">
             <div class="ds-node-card__name">{{ node.name ?? node.id }}</div>
-            <div class="ds-ov-node-card__meta-row">
-              <span class="ds-node-card__meta">{{ node.type ?? '—' }} · {{ node.status ?? '—' }}</span>
-              <span class="ds-ov-node-card__balance" :style="{ color: nodeColor }">{{ netText(node) ?? '—' }}</span>
+            <div class="ds-node-card__meta">{{ node.type ?? '—' }} · {{ node.status ?? '—' }}</div>
+          </div>
+          <div class="ds-ov-node-card__right">
+            <div class="ds-ov-node-card__service">
+              <button
+                v-if="showPinActions"
+                class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
+                type="button"
+                :aria-label="isPinned ? 'Unpin' : 'Pin'"
+                :title="isPinned ? 'Unpin' : 'Pin'"
+                @click="isPinned ? unpin() : pin()"
+              >
+                {{ isPinned ? '◆' : '◇' }}
+              </button>
+              <button
+                class="ds-btn ds-btn--ghost ds-btn--icon ds-ov-node-card__action-btn"
+                type="button"
+                aria-label="Close"
+                title="Close"
+                @click="emit('close')"
+              >
+                ×
+              </button>
             </div>
+            <div class="ds-ov-node-card__balance" :style="{ color: nodeColor }">{{ netText(node) ?? '—' }}</div>
           </div>
         </div>
 
@@ -111,7 +126,133 @@ function netText(node: GraphNode): string | null {
           </div>
         </div>
 
+        <!-- BUG-1: Interact Mode Trustlines section --------------------------->
+        <template v-if="interactMode">
+          <hr class="ds-ov-node-card__divider" />
+
+          <!-- Quick-action buttons -->
+          <div class="nco-interact-actions">
+            <button
+              class="ds-btn ds-btn--primary ds-btn--sm"
+              type="button"
+              @click="onInteractSendPayment?.(node.id)"
+            >
+              💸 Send Payment
+            </button>
+            <button
+              class="ds-btn ds-btn--secondary ds-btn--sm"
+              type="button"
+              @click="onInteractNewTrustline?.(node.id)"
+            >
+              ＋ New Trustline
+            </button>
+          </div>
+
+          <!-- Trustlines list -->
+          <div v-if="nodeTrustlines.length > 0" class="nco-trustlines">
+            <div class="nco-trustlines__header ds-label">Trustlines</div>
+            <div
+              v-for="tl in nodeTrustlines"
+              :key="`${tl.from_pid}→${tl.to_pid}`"
+              class="nco-trustline-row"
+            >
+              <span class="nco-trustline-row__dir" aria-hidden="true">
+                {{ tl.from_pid === node.id ? '→' : '←' }}
+              </span>
+              <span class="nco-trustline-row__peer ds-mono">
+                {{ tl.from_pid === node.id ? tl.to_name : tl.from_name }}
+              </span>
+              <span class="nco-trustline-row__amounts ds-mono">
+                {{ tl.used }}&thinsp;/&thinsp;{{ tl.limit }}
+              </span>
+              <button
+                class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
+                type="button"
+                title="Edit trustline"
+                aria-label="Edit trustline"
+                @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
+              >
+                ✏️
+              </button>
+            </div>
+          </div>
+          <div v-else class="nco-trustlines__empty ds-label">
+            No trustlines
+          </div>
+        </template>
+
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Interact Mode: quick-action buttons */
+.nco-interact-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+/* Trustlines list */
+.nco-trustlines {
+  margin-top: 1px;
+}
+
+.nco-trustlines__header {
+  font-size: 0.72rem;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 3px;
+}
+
+.nco-trustline-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 0;
+  font-size: 0.8rem;
+}
+
+.nco-trustline-row__dir {
+  flex-shrink: 0;
+  width: 1.2em;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.nco-trustline-row__peer {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nco-trustline-row__amounts {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.nco-trustline-row__edit {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  padding: 1px 3px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.nco-trustline-row__edit:hover {
+  opacity: 1;
+}
+
+.nco-trustlines__empty {
+  font-size: 0.75rem;
+  opacity: 0.5;
+  font-style: italic;
+}
+</style>

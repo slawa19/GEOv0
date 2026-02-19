@@ -241,3 +241,22 @@
     transform: translate3d(-50%, calc(-50% - 30px), 0) scale(calc(var(--overlay-scale, 1) * 1.12));
   }
 }
+
+/* ── BUG-7: Interact Mode panel slide transitions ── */
+
+.panel-slide-enter-active,
+.panel-slide-leave-active {
+  transition: opacity 0.2s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.panel-slide-enter-from,
+.panel-slide-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+/* Low quality: disable panel slide animation */
+.root[data-quality='low'] .panel-slide-enter-active,
+.root[data-quality='low'] .panel-slide-leave-active {
+  transition: none;
+}

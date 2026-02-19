@@ -212,6 +212,7 @@ defineExpose({
 </script>
 
 <template>
+  <Transition name="panel-slide">
   <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" data-testid="trustline-panel" aria-label="Trustline management panel">
     <div class="ds-panel__header">
       <div class="ds-h2">{{ title }}</div>
@@ -358,6 +359,7 @@ defineExpose({
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 

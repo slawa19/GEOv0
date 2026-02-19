@@ -110,6 +110,7 @@ function onToChange(v: string) {
 </script>
 
 <template>
+  <Transition name="panel-slide">
   <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" data-testid="manual-payment-panel" aria-label="Manual payment panel">
     <div class="ds-panel__header">
       <div class="ds-h2">{{ titleText() }}</div>
@@ -204,6 +205,7 @@ function onToChange(v: string) {
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 

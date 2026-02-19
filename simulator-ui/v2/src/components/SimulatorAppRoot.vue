@@ -11,6 +11,8 @@ import EdgeTooltip from './EdgeTooltip.vue'
 import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
+import ErrorToast from './ErrorToast.vue'
+import InteractHistoryLog from './InteractHistoryLog.vue'
 
 import { computed, isRef, nextTick, onMounted, onUnmounted, ref } from 'vue'
 
@@ -392,6 +394,24 @@ function onEdgeDetailCloseLine() {
   if (interactPhase.value !== 'editing-trustline') return
   void interact.mode.confirmTrustlineClose()
 }
+
+// BUG-1: NodeCardOverlay interact mode handlers
+function onInteractSendPayment(fromPid: string) {
+  setNodeCardOpen(false)
+  interact.mode.startPaymentFlow()
+  interact.mode.setPaymentFromPid(fromPid)
+}
+
+function onInteractNewTrustline(fromPid: string) {
+  setNodeCardOpen(false)
+  interact.mode.startTrustlineFlow()
+  interact.mode.setTrustlineFromPid(fromPid)
+}
+
+function onInteractEditTrustline(fromPid: string, toPid: string) {
+  setNodeCardOpen(false)
+  interact.mode.selectTrustline(fromPid, toPid)
+}
 </script>
 
 <template>
@@ -430,6 +450,7 @@ function onEdgeDetailCloseLine() {
       :edge="hoveredEdge"
       :style="edgeTooltipStyle()"
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
+      :interact-mode="isInteractUi"
     />
 
     <TopBar
@@ -561,6 +582,11 @@ function onEdgeDetailCloseLine() {
       :is-pinned="isSelectedPinned"
       :pin="pinSelectedNode"
       :unpin="unpinSelectedNode"
+      :interact-mode="isInteractUi"
+      :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
+      :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
+      :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
+      :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
       @close="setNodeCardOpen(false)"
     />
 
@@ -624,6 +650,22 @@ function onEdgeDetailCloseLine() {
     />
 
     <DevPerfOverlay :enabled="showPerfOverlay" :perf="perf" />
+
+    <!-- BUG-6: Error toast for Interact Mode (auto-dismiss 4s). -->
+    <ErrorToast
+      v-if="isInteractUi"
+      :message="interact.mode.state.error"
+      @dismiss="interact.mode.state.error = null"
+    />
+
+    <!-- BUG-5: Interact Mode inline history log. -->
+    <div
+      v-if="isInteractUi && interact.mode.history.length > 0"
+      class="ds-ov-bottom"
+      style="right: 12px; left: auto; bottom: 68px; padding: 6px 10px; pointer-events: none"
+    >
+      <InteractHistoryLog :entries="interact.mode.history" :max-visible="8" />
+    </div>
   </div>
 </template>
 

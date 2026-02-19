@@ -318,8 +318,8 @@ details[open].ds-ov-details > summary::after {
 
 .ds-ov-node-card {
   position: absolute;
-  width: 340px;
-  max-width: min(420px, calc(100vw - 24px));
+  width: 320px;
+  max-width: min(400px, calc(100vw - 24px));
   z-index: 42;
   pointer-events: auto;
 
@@ -330,7 +330,7 @@ details[open].ds-ov-details > summary::after {
 
 /* Override panel-body padding for compact card context */
 .ds-ov-node-card .ds-panel__body {
-  padding: 12px;
+  padding: 10px;
   position: relative;
 }
 
@@ -338,40 +338,60 @@ details[open].ds-ov-details > summary::after {
 .ds-ov-node-card__body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 /* Service actions: top-right overlay, does not consume layout height. */
 .ds-ov-node-card__service {
-  position: absolute;
-  top: 6px;
-  right: 6px;
   display: flex;
   gap: 2px;
   align-items: center;
+  justify-content: flex-end;
+  align-self: flex-end;
 }
 
 /* ---- Identity (avatar + name/meta/balance + actions) -------------------- */
 
 .ds-ov-node-card__identity {
   display: grid;
-  grid-template-columns: 36px 1fr;
-  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  column-gap: 8px;
   align-items: center;
-  padding-right: 56px;
+}
+
+.ds-ov-node-card__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+[data-theme='hud'] .ds-ov-node-card__text {
+  gap: 0px;
+}
+
+.ds-ov-node-card__text .ds-node-card__name,
+.ds-ov-node-card__text .ds-node-card__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-ov-node-card__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+[data-theme='hud'] .ds-ov-node-card__right {
+  gap: 0px;
 }
 
 .ds-ov-node-card__avatar {
   width: 36px;
   height: 36px;
-}
-
-/* Meta row: type·status left, balance right — uses dead space */
-.ds-ov-node-card__meta-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 /* Balance inline with meta — color comes from node's viz_color_key (inline style) */
@@ -386,15 +406,36 @@ details[open].ds-ov-details > summary::after {
 }
 
 .ds-ov-node-card__action-btn {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   font-size: 13px;
+  display: grid;
+  place-items: center;
+  line-height: 1;
   opacity: 0.45;
   transition: opacity 0.15s var(--ds-ease);
 }
 
 .ds-ov-node-card__action-btn:hover {
   opacity: 1;
+}
+
+/* HUD: icon actions should not look like boxed buttons (no contour). */
+[data-theme='hud'] .ds-ov-node-card__action-btn {
+  border: none;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-theme='hud'] .ds-ov-node-card__action-btn:hover {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-theme='hud'] .ds-ov-node-card__action-btn:focus-visible {
+  box-shadow: var(--ds-focus-ring-btn);
 }
 
 /* ---- Divider ------------------------------------------------------------ */
@@ -410,13 +451,13 @@ details[open].ds-ov-details > summary::after {
 .ds-ov-node-card__stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 4px 12px;
+  gap: 3px 10px;
 }
 
 .ds-ov-node-card__stat {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0px;
   min-width: 0;
 }
 

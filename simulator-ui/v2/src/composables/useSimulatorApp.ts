@@ -556,6 +556,11 @@ export function useSimulatorApp() {
   const interactHttpConfig = computed(() => ({ apiBase: real.apiBase, accessToken: real.accessToken }))
   const interactRunId = computed(() => String(real.runId ?? ''))
   const interactActions = useInteractActions({ httpConfig: interactHttpConfig, runId: interactRunId })
+
+  // BUG-3: Late-binding holder for FxState (initialized after useAppFxAndRender below).
+  // onClearingDone is only called at runtime, never during init, so this pattern is safe.
+  let _interactFxState: ReturnType<typeof import('./useAppFxAndRender').useAppFxAndRender>['fxState'] | null = null
+
   const interactMode = useInteractMode({
     actions: interactActions,
     equivalent: effectiveEq,
@@ -563,6 +568,36 @@ export function useSimulatorApp() {
     // Keep node selection highlight in sync with picking-driven flows.
     onNodeClick: (id) => {
       selectNode(id)
+    },
+    // BUG-3: spawn gold edge pulses on clearing cycle edges after successful clearing.
+    onClearingDone: (res) => {
+      if (!_interactFxState) return
+
+      const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const clearingColor = VIZ_MAPPING.fx.clearing_debt
+
+      const edgesAll: Array<{ from: string; to: string }> = []
+      for (const cycle of res.cycles ?? []) {
+        for (const e of cycle.edges ?? []) {
+          if (e.from && e.to) edgesAll.push({ from: e.from, to: e.to })
+        }
+      }
+
+      const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
+      if (edgesFx.length > 0) {
+        spawnEdgePulses(_interactFxState, {
+          edges: edgesFx,
+          nowMs,
+          durationMs: 4200,
+          color: clearingColor,
+          thickness: 3.2,
+          seedPrefix: `interact-clearing:${nowMs.toFixed(0)}`,
+          countPerEdge: 1,
+          keyEdge,
+          seedFn: fnv1a,
+          isTestMode: isTestMode.value,
+        })
+      }
     },
   })
   const systemBalance = useSystemBalance(snapshotRef).balance
@@ -794,6 +829,8 @@ export function useSimulatorApp() {
   })
 
   const fxState = fxAndRender.fxState
+  // BUG-3: bind FxState for interact clearing FX (late-binding via closure above).
+  _interactFxState = fxState
   const hoveredEdge = fxAndRender.hoveredEdge
   const clearHoveredEdge = fxAndRender.clearHoveredEdge
   const edgeDetailAnchor = ref<{ x: number; y: number } | null>(null)
@@ -812,6 +849,18 @@ export function useSimulatorApp() {
   const stopRenderLoop = fxAndRender.stopRenderLoop
   const renderOnce = fxAndRender.renderOnce
   wakeUpImpl = fxAndRender.wakeUp
+
+  // BUG-4: highlight available picking targets via activeNodes glow.
+  // Watch uses a short TTL so nodes fade naturally once the picking phase ends.
+  watch(
+    () => interactMode.availableTargetIds.value,
+    (ids) => {
+      if (ids.size === 0) return
+      const PICKING_HIGHLIGHT_TTL_MS = 800
+      for (const id of ids) addActiveNode(id, PICKING_HIGHLIGHT_TTL_MS)
+    },
+    { immediate: false },
+  )
 
   const showPerfOverlay = computed(() => {
     if (isTestMode.value) return false

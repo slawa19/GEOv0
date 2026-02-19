@@ -154,6 +154,7 @@ vi.mock('../composables/useSimulatorApp', () => {
              confirmTrustlineClose,
              confirmClearing: vi.fn(async () => undefined),
              cancel,
+             history: reactive([] as any[]),
            },
           systemBalance: computed(() => ({
             isClean: true,
