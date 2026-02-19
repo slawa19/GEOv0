@@ -61,8 +61,16 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const q = opts.quality ?? 'high'
 
   const pos = opts.pos ?? new Map<string, LayoutNode>()
-  pos.clear()
-  for (const n of nodes) pos.set(n.id, n)
+  // Optimization: rebuild pos Map only when the nodes array reference changes.
+  // When physics updates __x/__y in-place (same array, same object refs), the Map
+  // entries are already current — no need to clear + rebuild O(n) every frame.
+  // Also rebuild when the Map was cleared externally (e.g., on snapshot change in useRenderLoop).
+  const prevNodesRef = (pos as any).__nodesRef as LayoutNode[] | undefined
+  if (prevNodesRef !== nodes || pos.size === 0) {
+    pos.clear()
+    for (const n of nodes) pos.set(n.id, n)
+    ;(pos as any).__nodesRef = nodes
+  }
 
   // Links: base pass = strictly semantic viz_* (no focus/active overrides).
   for (const link of links) {

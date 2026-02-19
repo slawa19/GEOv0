@@ -139,6 +139,28 @@ function Get-ListeningPid {
     return $null
 }
 
+function Ensure-LogFilePath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+
+    $dir = Split-Path -Parent $Path
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $ext = [System.IO.Path]::GetExtension($Path)
+
+    # If a previous process still holds the log file handle, trying to create/truncate it can fail on Windows.
+    # To keep startup robust, never touch an existing file: just pick a fresh unique path.
+    if (-not (Test-Path $Path)) { return $Path }
+
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    for ($i = 1; $i -le 50; $i++) {
+        $candidate = Join-Path $dir "$base.$stamp.$i$ext"
+        if (-not (Test-Path $candidate)) { return $candidate }
+    }
+
+    return $Path
+}
+
 function Remove-StalePidFile {
     param([string]$Path)
     $procId = Get-PidFromFile -Path $Path
@@ -499,8 +521,8 @@ if (-not $NoInstall) {
 }
 
 Write-Host "[7/8] Starting Admin UI (Vite on port $AdminUiPort)..." -ForegroundColor Yellow
-$null = New-Item -ItemType File -Force -Path $AdminUiOutLogPath | Out-Null
-$null = New-Item -ItemType File -Force -Path $AdminUiErrLogPath | Out-Null
+$AdminUiOutLogPath = Ensure-LogFilePath -Path $AdminUiOutLogPath
+$AdminUiErrLogPath = Ensure-LogFilePath -Path $AdminUiErrLogPath
 
 $adminUiArgs = @('run', 'dev', '--', '--port', "$AdminUiPort", '--strictPort')
 $adminUiCmdArgs = @('/c', 'npm') + $adminUiArgs
@@ -533,8 +555,8 @@ Write-Host "[8/8] Starting Simulator UI (Vite on port $SimulatorUiPort)..." -For
 $env:VITE_API_MODE = 'real'
 $env:VITE_GEO_BACKEND_ORIGIN = $backendUrl
 
-$null = New-Item -ItemType File -Force -Path $SimulatorUiOutLogPath | Out-Null
-$null = New-Item -ItemType File -Force -Path $SimulatorUiErrLogPath | Out-Null
+$SimulatorUiOutLogPath = Ensure-LogFilePath -Path $SimulatorUiOutLogPath
+$SimulatorUiErrLogPath = Ensure-LogFilePath -Path $SimulatorUiErrLogPath
 
 $simulatorUiArgs = @('run', 'dev', '--', '--port', "$SimulatorUiPort", '--strictPort')
 $simulatorUiCmdArgs = @('/c', 'npm') + $simulatorUiArgs

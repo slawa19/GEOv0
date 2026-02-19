@@ -30,20 +30,44 @@
   z-index: 0;
 }
 
-/* Low quality OR no-GPU: disable expensive backdrop blurs (big perf win in Chrome). */
+/* Low/Med quality OR no-GPU: disable expensive backdrop blurs (big perf win in Chrome). */
 .root[data-quality='low'] .drag-preview,
+.root[data-quality='low'] .ds-panel,
 .root[data-quality='low'] .ds-ov-tooltip,
 .root[data-quality='low'] .ds-ov-node-card,
 .root[data-quality='low'] .ds-ov-message,
 .root[data-quality='low'] .ds-ov-surface,
+.root[data-quality='low'] .ds-ov-dev-perf,
+
+.root[data-quality='med'] .drag-preview,
+.root[data-quality='med'] .ds-panel,
+.root[data-quality='med'] .ds-ov-tooltip,
+.root[data-quality='med'] .ds-ov-node-card,
+.root[data-quality='med'] .ds-ov-message,
+.root[data-quality='med'] .ds-ov-surface,
+.root[data-quality='med'] .ds-ov-dev-perf,
 
 .root[data-gpu='0'] .drag-preview,
+.root[data-gpu='0'] .ds-panel,
 .root[data-gpu='0'] .ds-ov-tooltip,
 .root[data-gpu='0'] .ds-ov-node-card,
 .root[data-gpu='0'] .ds-ov-message,
-.root[data-gpu='0'] .ds-ov-surface {
+.root[data-gpu='0'] .ds-ov-surface,
+.root[data-gpu='0'] .ds-ov-dev-perf {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+/* Low quality: pause HUD infinite CSS animations to reduce GPU compositor load. */
+.root[data-quality='low'] .ds-panel--elevated,
+.root[data-quality='low'] .ds-panel--elevated::before,
+.root[data-quality='low'] .ds-panel__header::before {
+  animation: none;
+}
+
+/* Med quality: pause the heaviest scanline animation (but keep borderGlow + pulseGlow). */
+.root[data-quality='med'] .ds-panel--elevated::before {
+  animation: none;
 }
 
 .drag-preview {

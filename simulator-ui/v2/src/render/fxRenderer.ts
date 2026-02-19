@@ -50,8 +50,12 @@ import { sizeForNode } from './nodePainter'
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 
-// Per-frame caches (cleared once per renderFxFrame call).
+// Persistent Path2D cache: survives multiple frames to avoid rebuilding on every tick.
+// Key includes rounded position (1px grid) so physics micro-movements don't thrash the cache.
+// LRU with size cap; invalidated on snapshot change (see renderFxFrame opts.snapshotKey).
+const MAX_NODE_OUTLINE_CACHE = 512
 const nodeOutlinePath2DCache = new Map<string, Path2D>()
+let _nodeOutlineCacheSnapshotKey: string | null | undefined = undefined
 
 function worldRectForCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, padPx = 96) {
   // Current transform includes camera pan/zoom. Invert it to convert screen-space canvas bounds
@@ -107,10 +111,16 @@ function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1
 }
 
 function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
-  // Cache per-frame: this can be called multiple times for the same node.
-  const cacheKey = `${n.id}:${String((n as any).viz_shape_key ?? '')}:${n.__x}:${n.__y}:${scale}:${invZoom}`
+  // Cache across frames: key uses rounded positions (1px grid) to maximise hit rate
+  // during physics micro-movements while still detecting real positional changes.
+  const cacheKey = `${n.id}|${Math.round(n.__x)}|${Math.round(n.__y)}|${String((n as any).viz_shape_key ?? '')}|${Math.round(scale * 100)}|${Math.round(invZoom * 1000)}`
   const cached = nodeOutlinePath2DCache.get(cacheKey)
-  if (cached) return cached
+  if (cached) {
+    // Touch for LRU.
+    nodeOutlinePath2DCache.delete(cacheKey)
+    nodeOutlinePath2DCache.set(cacheKey, cached)
+    return cached
+  }
 
   const { w: w0, h: h0 } = sizeForNode(n)
   const w = w0 * invZoom
@@ -123,16 +133,21 @@ function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
   const x = n.__x - ww / 2
   const y = n.__y - hh / 2
 
+  let p: Path2D
   if (isRoundedRect) {
-    const p = roundedRectPath2D(x, y, ww, hh, rr * scale)
-    nodeOutlinePath2DCache.set(cacheKey, p)
-    return p
+    p = roundedRectPath2D(x, y, ww, hh, rr * scale)
+  } else {
+    p = new Path2D()
+    const r = Math.max(ww, hh) / 2
+    p.arc(n.__x, n.__y, r, 0, Math.PI * 2)
   }
-
-  const p = new Path2D()
-  const r = Math.max(ww, hh) / 2
-  p.arc(n.__x, n.__y, r, 0, Math.PI * 2)
   nodeOutlinePath2DCache.set(cacheKey, p)
+  // LRU trim: evict oldest entries when over capacity.
+  while (nodeOutlinePath2DCache.size > MAX_NODE_OUTLINE_CACHE) {
+    const first = nodeOutlinePath2DCache.keys().next().value as string | undefined
+    if (first !== undefined) nodeOutlinePath2DCache.delete(first)
+    else break
+  }
   return p
 }
 
@@ -354,6 +369,8 @@ export function renderFxFrame(opts: {
   isTestMode: boolean
   cameraZoom?: number
   quality?: 'low' | 'med' | 'high'
+  /** Pass snapshot identity key so the Path2D cache can be invalidated on scene changes. */
+  snapshotKey?: string | null
 }): void {
   const { nowMs, ctx, pos, w, h, mapping, fxState, isTestMode } = opts
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
@@ -364,10 +381,14 @@ export function renderFxFrame(opts: {
   // but remove Interaction Quality dependencies from the FX stack.
   // Low quality should still keep a minimal blur so FX sprites don't degrade into hard geometry.
   const shadowBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.3
-  // Gradients are always allowed (Phase 2 cleanup: remove dead branch).
 
-  // Clear per-frame caches.
-  nodeOutlinePath2DCache.clear()
+  // Snapshot-based Path2D cache invalidation: clear only when snapshot identity changes,
+  // NOT every frame (per-frame clear was negating the entire cache benefit).
+  const sk = opts.snapshotKey
+  if (sk !== undefined && sk !== _nodeOutlineCacheSnapshotKey) {
+    nodeOutlinePath2DCache.clear()
+    _nodeOutlineCacheSnapshotKey = sk ?? null
+  }
 
   // Lazily computed world-space view rect (getTransform().inverse is not cheap).
   let cachedWorldView: { x: number; y: number; w: number; h: number } | null = null
@@ -436,6 +457,61 @@ export function renderFxFrame(opts: {
         const trailStartX = start.x + dx * trailStartT
         const trailStartY = start.y + dy * trailStartT
 
+        // Low quality: only draw the head dot — skip all trail gradient work.
+        if (q === 'low') {
+          const r = Math.max(spx(3.0), th * 4.2)
+          ctx.save()
+          ctx.globalCompositeOperation = 'lighter'
+          ctx.globalAlpha = alpha
+          drawGlowSprite(ctx, {
+            kind: 'fx-dot',
+            x: headX,
+            y: headY,
+            color: s.colorCore,
+            r,
+            blurPx: Math.max(spx(16), r * 5) * shadowBlurK,
+            composite: 'lighter',
+          })
+          ctx.restore()
+          continue
+        }
+
+        // Med quality: simplified solid-color trail (no gradient objects).
+        if (q === 'med') {
+          const baseAlpha = Math.max(0, Math.min(1, alpha * 0.55))
+          ctx.save()
+          ctx.globalCompositeOperation = 'lighter'
+          ctx.lineCap = 'round'
+          ctx.lineJoin = 'round'
+          ctx.strokeStyle = s.colorTrail
+          ctx.lineWidth = Math.max(spx(1.8), th * 4.6)
+          ctx.globalAlpha = 0.9 * baseAlpha
+          ctx.beginPath()
+          ctx.moveTo(trailStartX, trailStartY)
+          ctx.lineTo(headX, headY)
+          ctx.stroke()
+          ctx.lineWidth = Math.max(spx(0.9), th * 1.25)
+          ctx.globalAlpha = baseAlpha
+          ctx.beginPath()
+          ctx.moveTo(trailStartX, trailStartY)
+          ctx.lineTo(headX, headY)
+          ctx.stroke()
+          const r = Math.max(spx(3.0), th * 4.2)
+          ctx.globalAlpha = alpha
+          drawGlowSprite(ctx, {
+            kind: 'fx-dot',
+            x: headX,
+            y: headY,
+            color: s.colorCore,
+            r,
+            blurPx: Math.max(spx(16), r * 5) * shadowBlurK,
+            composite: 'lighter',
+          })
+          ctx.restore()
+          continue
+        }
+
+        // High quality: full gradient trail.
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
         ctx.lineCap = 'round'
@@ -474,7 +550,7 @@ export function renderFxFrame(opts: {
           ctx.stroke()
         }
 
-        // Moving bright “packet” segment near the head
+        // Moving bright "packet" segment near the head
         {
           const segLen = Math.max(spx(18), Math.min(spx(54), len * 0.22))
           const tailX = headX - ux * segLen
@@ -543,12 +619,68 @@ export function renderFxFrame(opts: {
       const tailX = x - ux * trailLen
       const tailY = y - uy * trailLen
 
-      ctx.save()
-      ctx.globalCompositeOperation = 'lighter'
-
       const life = 1 - t0
       const alphaTrail = Math.max(0, Math.min(1, life * 0.75))
       const alphaCore = Math.max(0, Math.min(1, life * 0.95))
+
+      // Low quality: only draw the head dot — skip all trail gradient work.
+      if (q === 'low') {
+        const th = s.thickness * invZ
+        const r = Math.max(spx(1.6), th * 2.4)
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.globalAlpha = alphaCore
+        drawGlowSprite(ctx, {
+          kind: 'fx-dot',
+          x,
+          y,
+          color: s.colorCore,
+          r,
+          blurPx: Math.max(spx(10), r * 6) * shadowBlurK,
+          composite: 'lighter',
+        })
+        ctx.restore()
+        continue
+      }
+
+      // Med quality: simplified solid-color trail (no gradient objects).
+      if (q === 'med') {
+        const th = s.thickness * invZ
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.strokeStyle = s.colorTrail
+        ctx.lineWidth = Math.max(spx(1.8), th * 4.2)
+        ctx.globalAlpha = alphaTrail * 0.9
+        ctx.beginPath()
+        ctx.moveTo(tailX, tailY)
+        ctx.lineTo(x, y)
+        ctx.stroke()
+        ctx.lineWidth = Math.max(spx(0.9), th * 1.9)
+        ctx.globalAlpha = alphaTrail
+        ctx.beginPath()
+        ctx.moveTo(tailX, tailY)
+        ctx.lineTo(x, y)
+        ctx.stroke()
+        const r = Math.max(spx(1.6), th * 2.4)
+        ctx.globalAlpha = alphaCore
+        drawGlowSprite(ctx, {
+          kind: 'fx-dot',
+          x,
+          y,
+          color: s.colorCore,
+          r,
+          blurPx: Math.max(spx(10), r * 6) * shadowBlurK,
+          composite: 'lighter',
+        })
+        ctx.restore()
+        continue
+      }
+
+      // High quality: full gradient trail.
+      ctx.save()
+      ctx.globalCompositeOperation = 'lighter'
 
       // Trail (glow pass)
       {

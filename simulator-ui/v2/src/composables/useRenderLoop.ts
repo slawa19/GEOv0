@@ -189,6 +189,14 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   let fxBudgetScale = 1
   let lastFps = 60
 
+  // Flash radial gradient cache: recreate only when canvas dimensions change.
+  // The gradient colors are constant (from mapping), and opacity is driven by ctx.globalAlpha —
+  // so the gradient object itself is reusable across frames as long as layout is stable.
+  let flashGradCache: CanvasGradient | null = null
+  let flashGradCacheW = 0
+  let flashGradCacheH = 0
+  let flashGradCacheFx: CanvasRenderingContext2D | null = null
+
   function clamp01(v: number) {
     return Math.max(0, Math.min(1, v))
   }
@@ -379,17 +387,25 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       const t = clamp01(flash)
       fx.save()
       fx.globalAlpha = t
-      const grad = fx.createRadialGradient(
-        layout.w / 2,
-        layout.h / 2,
-        0,
-        layout.w / 2,
-        layout.h / 2,
-        Math.max(layout.w, layout.h) * 0.7,
-      )
-      grad.addColorStop(0, deps.mapping.fx.flash.clearing.from)
-      grad.addColorStop(1, deps.mapping.fx.flash.clearing.to)
-      fx.fillStyle = grad
+      // Reuse cached gradient when layout dimensions are unchanged.
+      // Gradient colors are constant; opacity is driven by globalAlpha set above.
+      if (flashGradCache === null || flashGradCacheW !== layout.w || flashGradCacheH !== layout.h || flashGradCacheFx !== fx) {
+        const g = fx.createRadialGradient(
+          layout.w / 2,
+          layout.h / 2,
+          0,
+          layout.w / 2,
+          layout.h / 2,
+          Math.max(layout.w, layout.h) * 0.7,
+        )
+        g.addColorStop(0, deps.mapping.fx.flash.clearing.from)
+        g.addColorStop(1, deps.mapping.fx.flash.clearing.to)
+        flashGradCache = g
+        flashGradCacheW = layout.w
+        flashGradCacheH = layout.h
+        flashGradCacheFx = fx
+      }
+      fx.fillStyle = flashGradCache
       fx.fillRect(0, 0, layout.w, layout.h)
       fx.restore()
       deps.setFlash(Math.max(0, flash - 0.03))
@@ -459,6 +475,9 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       isTestMode: deps.isTestMode(),
       cameraZoom: camera.zoom,
       quality: renderQuality,
+      // Pass snapshot identity so the fxRenderer can invalidate its Path2D cache
+      // when the scene changes, rather than clearing it every single frame.
+      snapshotKey: key,
     })
 
     // Mark only after we've made it through the draw path (no early-return).
