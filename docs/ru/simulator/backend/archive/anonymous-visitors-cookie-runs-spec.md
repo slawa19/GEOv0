@@ -1,6 +1,6 @@
 # Anonymous visitors (cookie) → per-owner simulator runs + admin control (spec)
 
-**Status:** draft (2026-02-18)
+**Status:** done (2026-02-20)
 
 ## 0) Контекст и проблема
 
@@ -518,8 +518,8 @@ Runtime сейчас in-process.
 
 - **Backend unit-тесты:** 70 тестов (3 файла)
   - `test_simulator_cookie_session.py` — 23 теста (session, TTL boundary, guardrail, HTTP ensure_session)
-  - `test_simulator_owner_isolation.py` — 27 тестов (per-owner, conflict_kind, authZ deny-by-default; +2: restart mapping)
-  - `test_simulator_actor_and_csrf.py` — 22 теста (actor, CSRF E006, trim, E009; +1: CSRF guardrail пустой allowlist)
+  - `test_simulator_owner_isolation.py` — 25 тестов (per-owner, conflict_kind, authZ deny-by-default, restart mapping)
+  - `test_simulator_actor_and_csrf.py` — 22 теста (actor, CSRF E006, trim, E009, CSRF guardrail пустой allowlist)
 - **Frontend тесты:** 217 passed
 
 ### Найденные и исправленные проблемы (Фаза 10)

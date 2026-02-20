@@ -51,14 +51,35 @@ Notes:
 
 ### Dev tools (Demo UI + FX Debug)
 
-Demo/FX Debug controls live under **BottomBar → Tools → Dev** and are gated:
+Demo/FX Debug controls live under **BottomBar → Tools → Dev**.
 
-- Visible only in `import.meta.env.DEV`
-- Hidden in test mode (`VITE_TEST_MODE=1`) and under WebDriver/Playwright (`navigator.webdriver=true`)
+Visibility matches code in `src/components/BottomBar.vue`:
 
-Deep-links still work:
-- Demo UI: `?mode=real&ui=demo&debug=1`
-- FX Debug enabled: `?debug=1`
+- Shown when **either**:
+	- `import.meta.env.DEV` **and** not running under WebDriver/Playwright, and not in test-mode (`VITE_TEST_MODE=1`), and not in the E2E screenshot harness, **or**
+	- `VITE_ALLOW_DEMO_UI='true'` (build-time env; forces the Dev tools group visible even when `import.meta.env.DEV=false`).
+
+Deep-links / query flags:
+
+- FX Debug is considered enabled when `ui=demo` **or** `debug=1` is present in the URL (see `useSimulatorApp.ts`).
+- Note: if the Dev tools group is hidden (no `DEV` and no `VITE_ALLOW_DEMO_UI`), the underlying flags may still take effect, but the UI buttons (Enter/Exit Demo UI, Single Tx, Run Clearing) are not shown.
+
+#### Glossary (plain English)
+
+These are not end-user settings — they exist to keep automation stable and to avoid exposing dev-only controls unintentionally.
+
+- **DEV** (`import.meta.env.DEV`): running via Vite dev server (`npm run dev`). Dev-only buttons and helpers may be visible.
+- **WebDriver** (`navigator.webdriver=true`): the browser is controlled by automation (Playwright/Selenium). UI hides some controls to avoid flaky or non-deterministic behavior.
+- **Test mode** (`VITE_TEST_MODE=1`): enables deterministic behavior for visual/screenshot tests (e.g., FX spawning is suppressed). Some interactive controls are hidden.
+- **E2E screenshots**: effectively “test mode + WebDriver”. In this case the app forces the fixtures/offline pipeline for deterministic snapshots.
+
+Build-time override:
+
+- **`VITE_ALLOW_DEMO_UI='true'`**: forces the **Dev tools** group to be visible even when `import.meta.env.DEV=false` (useful on shared demo/staging builds). This only affects visibility of the UI controls — backend still enforces its own guardrails.
+
+Dev hook:
+
+- In DEV builds only, the UI installs `window.__geoSim` (see `src/dev/geoSimDevHook.ts`) to help debugging and E2E harnesses. It is not available in production builds.
 
 ## Scenes (A–E)
 

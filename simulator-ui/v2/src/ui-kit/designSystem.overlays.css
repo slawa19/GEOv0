@@ -204,9 +204,14 @@ details[open].ds-ov-details > summary::after {
 
 .ds-ov-inset {
   position: absolute;
-  inset: 12px;
-  z-index: 20;
+  inset: 0;
+  z-index: 60;
   pointer-events: none;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
 }
 
 /* Overlay right-side panels (Interact panels) */
