@@ -135,7 +135,16 @@ const isRunActive = computed(() => {
 
 const canEnterInteract = computed(() => {
   if (props.isInteractUi) return true  // уже в interact — не блокировать
-  return props.apiMode === 'real' && isRunActive.value
+  // Interact UI can auto-bootstrap a paused demo run on entry.
+  // Still require real mode because actions rely on backend state.
+  return props.apiMode === 'real'
+})
+
+const interactDisabledTitle = computed(() => {
+  if (canEnterInteract.value) return ''
+  if (props.apiMode !== 'real') return 'Real mode only'
+  if (!isRunActive.value) return 'Start a run first'
+  return ''
 })
 
 const successRatePct = computed(() => {
@@ -285,7 +294,7 @@ async function onAdminStopRun(runId: string) {
               class="ds-segment"
               :data-active="activeSegment === 'interact' ? '1' : '0'"
               :disabled="!canEnterInteract"
-              :title="!canEnterInteract ? 'Start a run first' : ''"
+              :title="!canEnterInteract ? interactDisabledTitle : ''"
               @click="props.goInteract"
             >
               Interact

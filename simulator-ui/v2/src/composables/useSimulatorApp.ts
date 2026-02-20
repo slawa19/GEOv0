@@ -1665,6 +1665,64 @@ export function useSimulatorApp() {
     )
   }
 
+  // ── Interact UI: auto-bootstrap demo run (no manual Start required) ───
+  // Goal: let users open `?mode=real&ui=interact` on a clean system and
+  // immediately experiment with payments/trustlines/clearing without first
+  // starting a scenario in Auto-Run.
+  const INTERACT_AUTOSTART_SCENARIO_ID = 'clearing-demo-10'
+  let _ensureInteractRunPromise: Promise<void> | null = null
+
+  async function ensureRunForInteract(): Promise<void> {
+    if (!isInteractUi.value || !isRealMode.value) return
+    if (real.runId) return
+
+    // Ensure we have scenarios; anonymous visitors use cookie-auth.
+    if (!String(real.selectedScenarioId ?? '').trim()) {
+      if (!real.loadingScenarios && (real.scenarios?.length ?? 0) === 0) {
+        await realMode.refreshScenarios()
+      }
+
+      const preferred = (real.scenarios ?? []).find((s) => String((s as any)?.scenario_id ?? '') === INTERACT_AUTOSTART_SCENARIO_ID)
+      if (preferred) {
+        real.selectedScenarioId = INTERACT_AUTOSTART_SCENARIO_ID
+      } else if ((real.scenarios?.length ?? 0) > 0) {
+        real.selectedScenarioId = String((real.scenarios[0] as any)?.scenario_id ?? '').trim()
+      }
+    }
+
+    if (!String(real.selectedScenarioId ?? '').trim()) return
+
+    // Start paused with intensity=0 to avoid background activity/flicker.
+    await realMode.startRun({ mode: 'real', intensityPercent: 0, pauseImmediately: true })
+  }
+
+  function ensureRunForInteractSerialized(): Promise<void> {
+    if (!_ensureInteractRunPromise) {
+      _ensureInteractRunPromise = ensureRunForInteract().finally(() => {
+        _ensureInteractRunPromise = null
+      })
+    }
+    return _ensureInteractRunPromise
+  }
+
+  if (isInteractUi.value && isRealMode.value) {
+    const stopAutoBootstrap = watch(
+      () => !state.loading && !real.runId,
+      async (ready) => {
+        if (!ready) return
+        try {
+          await ensureRunForInteractSerialized()
+        } catch {
+          // Best-effort: user can still start a run manually if needed.
+        }
+
+        // Stop only after we successfully attached/created a run.
+        if (real.runId) stopAutoBootstrap()
+      },
+      { flush: 'post' },
+    )
+  }
+
   const devHook = useGeoSimDevHookSetup({
     isDev: () => import.meta.env.DEV,
     isTestMode: () => isTestMode.value,
