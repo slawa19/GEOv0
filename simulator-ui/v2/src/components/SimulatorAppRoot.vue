@@ -14,7 +14,7 @@ import DevPerfOverlay from './DevPerfOverlay.vue'
 import ErrorToast from './ErrorToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 
-import { computed, isRef, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, isRef, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
 import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
@@ -88,6 +88,8 @@ onUnmounted(() => {
 import type { GraphLink } from '../types'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
+import { emptyToNull } from '../utils/valueFormat'
+import { handleEscOverlayStack } from '../utils/escOverlayStack'
 
 const app = useSimulatorApp()
 
@@ -146,7 +148,6 @@ const {
   isNodeCardOpen,
   setNodeCardOpen,
   hoveredEdge,
-  edgeDetailAnchor,
   clearHoveredEdge,
   edgeTooltipStyle,
   selectedNode,
@@ -183,6 +184,14 @@ const interactPhase = computed<InteractPhase>(() => {
   return (isRef(p) ? p.value : p) as InteractPhase
 })
 
+const activePanelType = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
+  const p = String(interactPhase.value ?? '').toLowerCase()
+  if (p.includes('payment')) return 'payment'
+  if (p.includes('trustline')) return 'trustline'
+  if (p.includes('clearing')) return 'clearing'
+  return null
+})
+
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false
   return String(interactPhase.value ?? '').toLowerCase() !== 'idle'
@@ -195,6 +204,9 @@ const activeSegment = computed(() =>
 /** True when running in Auto-Run mode (real API, non-interact, non-demo). */
 const isAutoRunUi = computed(() => apiMode.value === 'real' && !isInteractUi.value && !isDemoUi.value)
 
+/** True when initial data has loaded (or we already have a snapshot from a previous load). */
+const dataReady = computed(() => !state.loading || !!state.snapshot)
+
 function isFormLikeTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null
   const tag = String((el as any)?.tagName ?? '').toLowerCase()
@@ -202,33 +214,23 @@ function isFormLikeTarget(t: EventTarget | null): boolean {
 }
 
 function onGlobalKeydown(ev: KeyboardEvent) {
-  const k = String(ev.key ?? '')
-  const isEsc = k === 'Escape' || k === 'Esc' || (ev as any).keyCode === 27
-  if (!isEsc) return
+  handleEscOverlayStack(ev, {
+    isNodeCardOpen: () => isNodeCardOpen.value,
+    closeNodeCard: () => setNodeCardOpen(false),
 
-  // Interact-only: allow ESC to cancel the active flow.
-  if (!isInteractActivePhase.value) return
+    isInteractActive: () => isInteractActivePhase.value,
+    cancelInteract: () => interact.mode.cancel(),
 
-  // Minimal guard: keep default ESC behavior for form controls.
-  if (!isFormLikeTarget(ev.target)) {
-    ev.preventDefault()
-  }
-
-  // Give overlays/panels a chance to consume ESC (e.g. disarm a destructive confirmation).
-  // Convention: listeners call preventDefault() on the custom event to stop the global cancel.
-  try {
-    const escEvt = new CustomEvent('geo:interact-esc', { cancelable: true })
-    const notCanceled = window.dispatchEvent(escEvt)
-    if (!notCanceled) return
-  } catch {
-    // ignore
-  }
-
-  // Do not cancel the interact flow when focus is inside a form control.
-  // The user may be editing input and pressing ESC to clear the field (browser default).
-  if (isFormLikeTarget(ev.target)) return
-
-  interact.mode.cancel()
+    isFormLikeTarget,
+    dispatchInteractEsc: () => {
+      try {
+        const escEvt = new CustomEvent('geo:interact-esc', { cancelable: true })
+        return window.dispatchEvent(escEvt)
+      } catch {
+        return true
+      }
+    },
+  })
 }
 
 onMounted(() => {
@@ -247,11 +249,30 @@ const interactRunTerminal = computed(() => {
 })
 
 const interactSelectedLink = computed<GraphLink | null>(() => {
-  const snap = state.snapshot
-  if (!snap) return null
   const from = interact.mode.state.fromPid
   const to = interact.mode.state.toPid
   if (!from || !to) return null
+
+  // NEW-3: prefer backend-fetched trustlines (Interact Mode cache) as the source of truth.
+  // This keeps EdgeDetailPopup and TrustlineManagementPanel consistent.
+  const tls = interact.mode.trustlines.value
+  if (Array.isArray(tls) && tls.length > 0) {
+    const tl = tls.find((t) => t.from_pid === from && t.to_pid === to) ?? null
+    if (tl) {
+      return {
+        source: from,
+        target: to,
+        trust_limit: tl.limit,
+        used: tl.used,
+        available: tl.available,
+        status: tl.status ?? undefined,
+      }
+    }
+  }
+
+  // Fallback: snapshot link (may be stale, but always available in fixtures/topology-only views).
+  const snap = state.snapshot
+  if (!snap) return null
   for (const l of snap.links ?? []) {
     if (l.source === from && l.target === to) return l
   }
@@ -321,6 +342,30 @@ const isExiting = ref(false)
 
 const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
 
+/** Local anchor for positioning TrustlineManagementPanel near the node
+ *  when opened from NodeCardOverlay. Separate from state.edgeAnchor
+ *  (which drives EdgeDetailPopup visibility). */
+const trustlinePanelAnchor = ref<{ x: number; y: number } | null>(null)
+
+/**
+ * Controls which UI to show in `editing-trustline` phase:
+ * - `true`  → TrustlineManagementPanel (full editing — from NodeCard ✏️, ActionBar, or "Change Limit")
+ * - `false` → EdgeDetailPopup (quick info — from edge click on canvas)
+ *
+ * For non-editing-trustline phases (picking, confirm-create, etc.),
+ * TrustlineManagementPanel is always shown regardless of this flag.
+ */
+const useFullTrustlineEditor = ref(false)
+
+/** Computed: should TrustlineManagementPanel be shown? */
+const showTrustlinePanel = computed(() => {
+  if (activePanelType.value !== 'trustline') return false
+  // For editing-trustline phase, show panel only if explicitly requested
+  if (interactPhase.value === 'editing-trustline') return useFullTrustlineEditor.value
+  // For all other trustline phases (picking, confirm-create, etc.) always show the panel
+  return true
+})
+
 async function exitDemoUi() {
   isExiting.value = true
   forceDbEnrichedPreviewOnNextLoad()
@@ -385,6 +430,8 @@ function goInteract() {
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
 function onEdgeDetailChangeLimit() {
+  // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
+  useFullTrustlineEditor.value = true
   // Focus the limit editor in TrustlineManagementPanel via template ref.
   void nextTick(() => tlPanel.value?.focusNewLimit())
 }
@@ -409,9 +456,79 @@ function onInteractNewTrustline(fromPid: string) {
 }
 
 function onInteractEditTrustline(fromPid: string, toPid: string) {
+  // Capture the NodeCard's screen position as anchor before closing it,
+  // so the TrustlineManagementPanel opens near the node instead of
+  // jumping to the fixed top-right corner.
+  const style = nodeCardStyle.value
+  let anchor: { x: number; y: number } | null = null
+  if (style.left && style.top) {
+    const x = parseInt(style.left as string, 10)
+    const y = parseInt(style.top as string, 10)
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      anchor = { x, y }
+    }
+  }
+
+  useFullTrustlineEditor.value = true
   setNodeCardOpen(false)
   interact.mode.selectTrustline(fromPid, toPid)
+
+  // Set anchor AFTER the phase change so the interactPhase watcher
+  // (which clears the anchor on every transition) has already fired.
+  if (anchor) {
+    void nextTick(() => {
+      trustlinePanelAnchor.value = anchor
+    })
+  }
 }
+
+function onActionStartPaymentFlow() {
+  setNodeCardOpen(false)
+  trustlinePanelAnchor.value = null
+  interact.mode.startPaymentFlow()
+}
+
+function onActionStartTrustlineFlow() {
+  setNodeCardOpen(false)
+  trustlinePanelAnchor.value = null
+  useFullTrustlineEditor.value = true
+  interact.mode.startTrustlineFlow()
+}
+
+function onActionStartClearingFlow() {
+  setNodeCardOpen(false)
+  trustlinePanelAnchor.value = null
+  interact.mode.startClearingFlow()
+}
+
+// Mutual exclusion: when an interact panel activates, close NodeCard.
+// When leaving trustline phase, clear the position anchor.
+watch(activePanelType, (t, prev) => {
+  // Any interact panel opens → close NodeCard to avoid overlapping windows.
+  if (t !== null && t !== prev) {
+    setNodeCardOpen(false)
+  }
+  // Leaving trustline phase → clear anchor.
+  if (t !== 'trustline') {
+    trustlinePanelAnchor.value = null
+  }
+})
+
+// When phase changes, reset local UI flags.
+// - Clear anchor (only set explicitly by onInteractEditTrustline)
+// - Reset useFullTrustlineEditor when leaving trustline phases (idle, payment, clearing)
+//   so the NEXT edge click shows EdgeDetailPopup (not full editor).
+//   NOTE: do NOT reset when transitioning between trustline sub-phases
+//   (e.g. picking-trustline-to → editing-trustline) to preserve the ActionBar intent.
+watch(interactPhase, (phase) => {
+  trustlinePanelAnchor.value = null
+
+  const p = String(phase ?? '').toLowerCase()
+  const isTrustlinePhase = p.includes('trustline')
+  if (!isTrustlinePhase) {
+    useFullTrustlineEditor.value = false
+  }
+})
 </script>
 
 <template>
@@ -493,80 +610,88 @@ function onInteractEditTrustline(fromPid: string, toPid: string) {
     />
 
     <SystemBalanceBar
-      v-if="isInteractUi || isAutoRunUi"
+      v-if="dataReady && (isInteractUi || isAutoRunUi)"
       :balance="interact.systemBalance"
       :equivalent="effectiveEq"
       :compact="isAutoRunUi"
     />
 
     <ActionBar
-      v-if="apiMode === 'real' && isInteractUi"
+      v-if="dataReady && apiMode === 'real' && isInteractUi"
       :phase="interactPhase"
       :busy="interact.mode.busy.value"
       :actions-disabled="interact.actions.actionsDisabled.value"
       :run-terminal="interactRunTerminal"
-      :start-payment-flow="interact.mode.startPaymentFlow"
-      :start-trustline-flow="interact.mode.startTrustlineFlow"
-      :start-clearing-flow="interact.mode.startClearingFlow"
+      :start-payment-flow="onActionStartPaymentFlow"
+      :start-trustline-flow="onActionStartTrustlineFlow"
+      :start-clearing-flow="onActionStartClearingFlow"
     />
 
-    <ManualPaymentPanel
-      v-if="apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :unit="effectiveEq"
-      :available-capacity="interact.mode.availableCapacity.value"
-      :participants="interact.mode.participants.value"
-      :busy="interact.mode.busy.value"
-      :can-send-payment="interact.mode.canSendPayment.value"
-      :confirm-payment="interact.mode.confirmPayment"
-      :set-from-pid="interact.mode.setPaymentFromPid"
-      :set-to-pid="interact.mode.setPaymentToPid"
-      :cancel="interact.mode.cancel"
-    />
+    <Transition name="panel-slide" mode="out-in">
+      <ManualPaymentPanel
+        v-if="apiMode === 'real' && isInteractUi && activePanelType === 'payment'"
+        key="payment"
+        :phase="interactPhase"
+        :state="interact.mode.state"
+        :unit="effectiveEq"
+        :available-capacity="interact.mode.availableCapacity.value"
+        :participants="interact.mode.participants.value"
+        :busy="interact.mode.busy.value"
+        :can-send-payment="interact.mode.canSendPayment.value"
+        :confirm-payment="interact.mode.confirmPayment"
+        :set-from-pid="interact.mode.setPaymentFromPid"
+        :set-to-pid="interact.mode.setPaymentToPid"
+        :cancel="interact.mode.cancel"
+      />
 
-    <TrustlineManagementPanel
-      v-if="apiMode === 'real' && isInteractUi"
-      ref="tlPanel"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :unit="effectiveEq"
-      :used="interactSelectedLink?.used ?? null"
-      :current-limit="interactSelectedLink?.trust_limit ?? null"
-      :available="interactSelectedLink?.available ?? null"
-      :participants="interact.mode.participants.value"
-      :trustlines="interact.mode.trustlines.value"
-      :busy="interact.mode.busy.value"
-      :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
-      :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
-      :confirm-trustline-close="interact.mode.confirmTrustlineClose"
-      :set-from-pid="interact.mode.setTrustlineFromPid"
-      :set-to-pid="interact.mode.setTrustlineToPid"
-      :select-trustline="interact.mode.selectTrustline"
-      :cancel="interact.mode.cancel"
-    />
+      <TrustlineManagementPanel
+        v-else-if="apiMode === 'real' && isInteractUi && showTrustlinePanel"
+        key="trustline"
+        ref="tlPanel"
+        :phase="interactPhase"
+        :state="interact.mode.state"
+        :unit="effectiveEq"
+        :used="emptyToNull(interactSelectedLink?.used)"
+        :current-limit="emptyToNull(interactSelectedLink?.trust_limit)"
+        :available="emptyToNull(interactSelectedLink?.available)"
+        :participants="interact.mode.participants.value"
+        :trustlines="interact.mode.trustlines.value"
+        :busy="interact.mode.busy.value"
+        :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
+        :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
+        :confirm-trustline-close="interact.mode.confirmTrustlineClose"
+        :set-from-pid="interact.mode.setTrustlineFromPid"
+        :set-to-pid="interact.mode.setTrustlineToPid"
+        :select-trustline="interact.mode.selectTrustline"
+        :cancel="interact.mode.cancel"
+        :edge-anchor="trustlinePanelAnchor"
+        :host-el="hostEl"
+      />
 
-    <ClearingPanel
-      v-if="apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :busy="interact.mode.busy.value"
-      :equivalent="effectiveEq"
-      :confirm-clearing="interact.mode.confirmClearing"
-      :cancel="interact.mode.cancel"
-    />
+      <ClearingPanel
+        v-else-if="apiMode === 'real' && isInteractUi && activePanelType === 'clearing'"
+        key="clearing"
+        :phase="interactPhase"
+        :state="interact.mode.state"
+        :busy="interact.mode.busy.value"
+        :equivalent="effectiveEq"
+        :confirm-clearing="interact.mode.confirmClearing"
+        :cancel="interact.mode.cancel"
+      />
+    </Transition>
 
     <EdgeDetailPopup
       v-if="apiMode === 'real' && isInteractUi"
       :phase="interactPhase"
       :state="interact.mode.state"
-      :anchor="edgeDetailAnchor"
+      :host-el="hostEl"
       :unit="effectiveEq"
-      :used="interactSelectedLink?.used ?? null"
-      :limit="interactSelectedLink?.trust_limit ?? null"
-      :available="interactSelectedLink?.available ?? null"
-      :status="(interactSelectedLink?.status as any) ?? null"
+      :used="emptyToNull(interactSelectedLink?.used)"
+      :limit="emptyToNull(interactSelectedLink?.trust_limit)"
+      :available="emptyToNull(interactSelectedLink?.available)"
+      :status="(emptyToNull(interactSelectedLink?.status) as any) ?? null"
       :busy="interact.mode.busy.value"
+      :force-hidden="useFullTrustlineEditor"
       :close="interact.mode.cancel"
       @change-limit="onEdgeDetailChangeLimit"
       @close-line="onEdgeDetailCloseLine"
@@ -584,7 +709,8 @@ function onInteractEditTrustline(fromPid: string, toPid: string) {
       :unpin="unpinSelectedNode"
       :interact-mode="isInteractUi"
       :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
-      :interact-trustlines-loading="isInteractUi ? interact.mode.busy.value : undefined"
+      :trustlines-loading="isInteractUi ? interact.mode.trustlinesLoading.value : undefined"
+      :interact-busy="isInteractUi ? interact.mode.busy.value : undefined"
       :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
       :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
       :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
@@ -663,7 +789,7 @@ function onInteractEditTrustline(fromPid: string, toPid: string) {
     <div
       v-if="isInteractUi && interact.mode.history.length > 0"
       class="ds-ov-bottom"
-      style="right: 12px; left: auto; bottom: 68px; padding: 6px 10px; pointer-events: none"
+      style="right: 12px; left: auto; bottom: 120px; padding: 6px 10px; pointer-events: none"
     >
       <InteractHistoryLog :entries="interact.mode.history" :max-visible="8" />
     </div>

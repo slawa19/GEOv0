@@ -70,7 +70,7 @@ onUnmounted(() => {
   bottom: 68px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 200;
+  z-index: var(--ds-z-alert, 200);
   display: flex;
   align-items: center;
   gap: 8px;

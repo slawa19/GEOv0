@@ -396,7 +396,7 @@ async function onAdminStopRun(runId: string) {
 
               <div
                 class="ds-panel ds-ov-surface"
-                style="position: absolute; left: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 320px; max-width: min(520px, calc(100vw - 24px)); z-index: 60"
+                style="position: absolute; left: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 320px; max-width: min(520px, calc(100vw - 24px)); z-index: var(--ds-z-inset, 60)"
                 aria-label="Advanced dropdown"
               >
                 <div class="ds-stack" style="gap: 8px">
@@ -486,7 +486,7 @@ async function onAdminStopRun(runId: string) {
 
               <div
                 class="ds-panel ds-ov-surface"
-                style="position: absolute; right: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 260px; max-width: min(520px, calc(100vw - 24px)); z-index: 60"
+                style="position: absolute; right: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 260px; max-width: min(520px, calc(100vw - 24px)); z-index: var(--ds-z-inset, 60)"
                 aria-label="Admin dropdown"
               >
                 <div class="ds-stack" style="gap: 8px">

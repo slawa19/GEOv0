@@ -858,7 +858,6 @@ export function useSimulatorApp() {
   _interactFxState = fxState
   const hoveredEdge = fxAndRender.hoveredEdge
   const clearHoveredEdge = fxAndRender.clearHoveredEdge
-  const edgeDetailAnchor = ref<{ x: number; y: number } | null>(null)
   const activeEdges = fxAndRender.activeEdges
   const addActiveEdge = fxAndRender.addActiveEdge
   const pruneActiveEdges = fxAndRender.pruneActiveEdges
@@ -1280,13 +1279,7 @@ export function useSimulatorApp() {
 
   const isInteractPickingPhase = computed(() => {
     if (!isInteractUi.value) return false
-    const p = String(interactMode.phase.value ?? '')
-    return (
-      p === 'picking-payment-from' ||
-      p === 'picking-payment-to' ||
-      p === 'picking-trustline-from' ||
-      p === 'picking-trustline-to'
-    )
+    return !!interactMode.isPickingPhase.value
   })
 
   function selectNodeFromCanvas(id: string | null) {
@@ -1294,6 +1287,16 @@ export function useSimulatorApp() {
     if (id && isInteractPickingPhase.value) {
       interactMode.selectNode(id)
       return
+    }
+
+    // Clicking empty space while an interact panel is active → cancel the flow.
+    // This ensures trustline/payment/clearing panels close on background click.
+    if (!id && isInteractUi.value) {
+      const p = String(interactMode.phase.value ?? '').toLowerCase()
+      if (p !== 'idle') {
+        interactMode.cancel()
+        // Fall through to also clear node selection below.
+      }
     }
 
     // Default: regular selection for NodeCard/hover.
@@ -1332,19 +1335,11 @@ export function useSimulatorApp() {
       if (!isInteractUi.value) return false
       if (apiMode.value !== 'real') return false
 
-      // In Interact UI: edge click opens trustline editing (and selects one endpoint for context).
-      try {
-        const host = hostEl.value
-        const rect = host?.getBoundingClientRect()
-        if (rect) {
-          edgeDetailAnchor.value = { x: ptr.clientX - rect.left, y: ptr.clientY - rect.top }
-        } else {
-          edgeDetailAnchor.value = { x: ptr.clientX, y: ptr.clientY }
-        }
-      } catch {
-        edgeDetailAnchor.value = null
-      }
-      interactMode.selectEdge(edge.key)
+      // Interact UI: edge click opens trustline editing.
+      // IMPORTANT: anchor must be in the same coordinate system as popup clamping/placement.
+      // Use host-relative screen coordinates (clientToScreen).
+      const anchor = hostEl.value ? clientToScreen(ptr.clientX, ptr.clientY) : { x: ptr.clientX, y: ptr.clientY }
+      interactMode.selectEdge(edge.key, anchor)
       selectNode(edge.fromId)
       return true
     },
@@ -1353,6 +1348,27 @@ export function useSimulatorApp() {
     edgeHover,
     getPanActive: () => panState.active,
   })
+
+  // Interact UX: in picking phases, dblclick should not open NodeCard.
+  // Treat it as a regular click (select node for the current step).
+  // When an interact panel IS active (editing-trustline, confirm-payment, etc.),
+  // cancel it first so NodeCard opens cleanly without two overlapping windows.
+  function onCanvasDblClickGuarded(ev: MouseEvent) {
+    if (isInteractPickingPhase.value) {
+      canvasInteractionsWiring.onCanvasClick(ev)
+      return
+    }
+
+    // Cancel any active interact panel before opening NodeCard (mutual exclusion).
+    if (isInteractUi.value) {
+      const p = String(interactMode.phase.value ?? '').toLowerCase()
+      if (p !== 'idle') {
+        interactMode.cancel()
+      }
+    }
+
+    canvasInteractionsWiring.onCanvasDblClick(ev)
+  }
 
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
     if (!isRealMode.value) return loadSnapshotFixtures(eq)
@@ -1868,7 +1884,6 @@ export function useSimulatorApp() {
     setNodeCardOpen,
     hoveredEdge,
     clearHoveredEdge,
-    edgeDetailAnchor,
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
     selectedNode: viewWiring.selectedNode,
     nodeCardStyle: viewWiring.nodeCardStyle,
@@ -1882,7 +1897,7 @@ export function useSimulatorApp() {
 
     // handlers
     onCanvasClick: canvasInteractionsWiring.onCanvasClick,
-    onCanvasDblClick: canvasInteractionsWiring.onCanvasDblClick,
+    onCanvasDblClick: onCanvasDblClickGuarded,
     onCanvasPointerDown: canvasInteractionsWiring.onCanvasPointerDown,
     onCanvasPointerMove: canvasInteractionsWiring.onCanvasPointerMove,
     onCanvasPointerUp: canvasInteractionsWiring.onCanvasPointerUp,

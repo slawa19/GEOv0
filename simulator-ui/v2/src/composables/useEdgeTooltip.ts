@@ -1,6 +1,8 @@
 import type { Ref } from 'vue'
 import type { GraphLink } from '../types'
 
+import { placeOverlayNearAnchor } from '../utils/overlayPosition'
+
 type HoveredEdgeLike = {
   key: string | null
   screenX: number
@@ -38,15 +40,42 @@ export function useEdgeTooltip(deps: UseEdgeTooltipDeps): UseEdgeTooltipReturn {
     return `from: ${fromTxt} / to: ${toTxt} ${unit}`
   }
 
+  // §7.1 — Cached overlay size to avoid layout thrash on every pointermove.
+  // DOM measurement (querySelector + getBoundingClientRect) is performed only
+  // once per "show" event — when hoveredEdge.key transitions from null to a
+  // non-null value — and the result is cached for subsequent pointermove calls.
+  const FALLBACK_W = 260
+  const FALLBACK_H = 120
+  const cachedOverlaySize = { w: FALLBACK_W, h: FALLBACK_H }
+  let prevKey: string | null = null
+
   function edgeTooltipStyle() {
     const host = deps.hostEl.value
-    if (!host || !deps.hoveredEdge.key) return { display: 'none' }
+    if (!host || !deps.hoveredEdge.key) {
+      prevKey = null
+      return { display: 'none' }
+    }
+
+    // Measure overlay size once on show (null→key transition), not on every pointermove.
+    if (prevKey === null) {
+      const tooltipEl = host.querySelector('[aria-label="Edge tooltip"]') as HTMLElement | null
+      const tooltipRect = tooltipEl?.getBoundingClientRect()
+      if (tooltipRect && tooltipRect.width > 0) {
+        cachedOverlaySize.w = tooltipRect.width
+        cachedOverlaySize.h = tooltipRect.height
+      }
+    }
+    prevKey = deps.hoveredEdge.key
 
     const rect = host.getBoundingClientRect()
-    const pad = 10
-    const x = deps.clamp(deps.hoveredEdge.screenX + 12, pad, rect.width - pad)
-    const y = deps.clamp(deps.hoveredEdge.screenY + 12, pad, rect.height - pad)
-    return { left: `${x}px`, top: `${y}px` }
+
+    return placeOverlayNearAnchor({
+      // Hover coords are relative to host; clamp within host bounds.
+      anchor: { x: deps.hoveredEdge.screenX, y: deps.hoveredEdge.screenY },
+      overlaySize: { w: cachedOverlaySize.w, h: cachedOverlaySize.h },
+      viewport: { w: rect.width, h: rect.height },
+      pad: 10,
+    })
   }
 
   return { formatEdgeAmountText, edgeTooltipStyle }

@@ -147,6 +147,7 @@ describe('Interact Mode UI (components)', () => {
       fromPid: null as string | null,
       toPid: null as string | null,
       selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
       lastClearing: null as any,
     })

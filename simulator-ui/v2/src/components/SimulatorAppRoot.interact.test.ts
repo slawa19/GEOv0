@@ -19,6 +19,13 @@ vi.mock('../composables/useSimulatorApp', () => {
       const isInteractUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'interact')
 
       const phase = ref(String((globalThis as any).__GEO_TEST_INTERACT_PHASE ?? 'idle'))
+      ;(globalThis as any).__GEO_TEST_PHASE_REF = phase
+
+      const nodeCardOpen = ref(Boolean((globalThis as any).__GEO_TEST_NODE_CARD_OPEN ?? false))
+      const setNodeCardOpen = vi.fn((open: boolean) => {
+        nodeCardOpen.value = !!open
+      })
+      ;(globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN = setNodeCardOpen
 
       const cancel = vi.fn()
       ;(globalThis as any).__GEO_TEST_INTERACT_CANCEL = cancel
@@ -128,6 +135,7 @@ vi.mock('../composables/useSimulatorApp', () => {
               fromPid: 'alice',
               toPid: 'bob',
               selectedEdgeKey: null,
+              edgeAnchor: { x: 10, y: 10 },
               error: '',
               lastClearing: null,
             }),
@@ -144,7 +152,9 @@ vi.mock('../composables/useSimulatorApp', () => {
             selectTrustline: vi.fn(),
 
             startPaymentFlow: vi.fn(),
-            startTrustlineFlow: vi.fn(),
+            startTrustlineFlow: vi.fn(() => {
+              phase.value = 'picking-trustline-from'
+            }),
             startClearingFlow: vi.fn(() => {
               phase.value = 'confirm-clearing'
             }),
@@ -194,9 +204,9 @@ vi.mock('../composables/useSimulatorApp', () => {
         },
 
         // selection + overlays
-        isNodeCardOpen: computed(() => false),
+        isNodeCardOpen: computed(() => nodeCardOpen.value),
+        setNodeCardOpen,
         hoveredEdge: reactive({ key: null, fromId: '', toId: '', amountText: '' }),
-        edgeDetailAnchor: ref(null as any),
         clearHoveredEdge: vi.fn(),
         edgeTooltipStyle: () => ({}),
         selectedNode: computed(() => null),
@@ -379,7 +389,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   })
 
   it('TrustlineManagementPanel: Close TL requires 2 clicks (armed confirmation)', async () => {
-    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    // Enter via ActionBar to set useFullTrustlineEditor=true, then advance to editing-trustline.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
@@ -387,6 +398,17 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
     const app = createApp({ render: () => h(SimulatorAppRoot as any) })
     app.mount(host)
+    await nextTick()
+
+    // Click ActionBar trustline button → useFullTrustlineEditor=true, phase=picking-trustline-from
+    const tlBtn = host.querySelector('[data-testid="actionbar-trustline"]') as HTMLButtonElement | null
+    expect(tlBtn).toBeTruthy()
+    tlBtn?.click()
+    await nextTick()
+
+    // Advance to editing-trustline (simulates FSM progression)
+    const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF
+    phaseRef.value = 'editing-trustline'
     await nextTick()
 
     const confirmClose = (globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE as ReturnType<typeof vi.fn>
@@ -410,8 +432,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE
   })
 
-  it('EdgeDetailPopup: Close line requires 2 clicks (armed confirmation)', async () => {
-    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+  it('EdgeDetailPopup: hidden when TrustlineManagementPanel is visible (no duplicate windows)', async () => {
+    // Enter via ActionBar so useFullTrustlineEditor=true → TrustlineManagementPanel shown,
+    // EdgeDetailPopup hidden via forceHidden prop.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
@@ -421,19 +445,23 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     app.mount(host)
     await nextTick()
 
-    const confirmClose = (globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE as ReturnType<typeof vi.fn>
-    expect(confirmClose).toBeTruthy()
+    // Click ActionBar trustline button → useFullTrustlineEditor=true
+    const tlBtn = host.querySelector('[data-testid="actionbar-trustline"]') as HTMLButtonElement | null
+    expect(tlBtn).toBeTruthy()
+    tlBtn?.click()
+    await nextTick()
 
+    // Advance to editing-trustline
+    const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF
+    phaseRef.value = 'editing-trustline'
+    await nextTick()
+
+    // EdgeDetailPopup should NOT render (forceHidden=true because useFullTrustlineEditor=true).
     const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
-    expect(btn).toBeTruthy()
+    expect(btn).toBeFalsy()
 
-    btn?.click()
-    await nextTick()
-    expect(confirmClose).toHaveBeenCalledTimes(0)
-
-    btn?.click()
-    await nextTick()
-    expect(confirmClose).toHaveBeenCalledTimes(1)
+    // TrustlineManagementPanel should render instead.
+    expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
 
     app.unmount()
     host.remove()
@@ -443,7 +471,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   })
 
   it('Escape disarms Close TL confirmation (does not cancel flow)', async () => {
-    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    // Enter via ActionBar to set useFullTrustlineEditor=true, then advance to editing-trustline.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
@@ -451,6 +480,17 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
     const app = createApp({ render: () => h(SimulatorAppRoot as any) })
     app.mount(host)
+    await nextTick()
+
+    // Click ActionBar trustline button → useFullTrustlineEditor=true
+    const tlBtn = host.querySelector('[data-testid="actionbar-trustline"]') as HTMLButtonElement | null
+    expect(tlBtn).toBeTruthy()
+    tlBtn?.click()
+    await nextTick()
+
+    // Advance to editing-trustline
+    const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF
+    phaseRef.value = 'editing-trustline'
     await nextTick()
 
     const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
@@ -469,5 +509,35 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
     delete (globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE
+  })
+
+  it('Escape closes NodeCardOverlay first (does not cancel idle interact)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    app.mount(host)
+    await nextTick()
+
+    const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+    expect(cancel).toBeTruthy()
+
+    const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
+    expect(setOpen).toBeTruthy()
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(setOpen).toHaveBeenCalledWith(false)
+    expect(cancel).toHaveBeenCalledTimes(0)
+
+    app.unmount()
+    host.remove()
+    delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+    delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+    delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
+    delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
   })
 })

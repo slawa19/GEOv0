@@ -4,6 +4,7 @@ import type { CSSProperties } from 'vue'
 import type { GraphNode } from '../types'
 import type { TrustlineInfo } from '../api/simulatorTypes'
 import { VIZ_MAPPING } from '../vizMapping'
+import { renderOrDash } from '../utils/valueFormat'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -27,7 +28,9 @@ type Props = {
   /** All trustlines from useInteractMode — filtered internally by node.id. */
   interactTrustlines?: TrustlineInfo[]
   /** True while trustlines are being fetched from the API. */
-  interactTrustlinesLoading?: boolean
+  trustlinesLoading?: boolean
+  /** True while Interact Mode is busy (disable quick actions). */
+  interactBusy?: boolean
   onInteractSendPayment?: (fromPid: string) => void
   onInteractNewTrustline?: (fromPid: string) => void
   onInteractEditTrustline?: (fromPid: string, toPid: string) => void
@@ -137,6 +140,7 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
             <button
               class="ds-btn ds-btn--primary ds-btn--sm"
               type="button"
+              :disabled="!!interactBusy"
               @click="onInteractSendPayment?.(node.id)"
             >
               💸 Send Payment
@@ -144,6 +148,7 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
             <button
               class="ds-btn ds-btn--secondary ds-btn--sm"
               type="button"
+              :disabled="!!interactBusy"
               @click="onInteractNewTrustline?.(node.id)"
             >
               ＋ New Trustline
@@ -165,8 +170,8 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
                 {{ tl.from_pid === node.id ? tl.to_name : tl.from_name }}
               </span>
               <span class="nco-trustline-row__amounts ds-mono">
-                {{ tl.used }}&thinsp;/&thinsp;{{ tl.limit }}
-                <span class="nco-trustline-row__available ds-text-secondary">(avail:&thinsp;{{ tl.available }})</span>
+                {{ renderOrDash(tl.used) }}&thinsp;/&thinsp;{{ renderOrDash(tl.limit) }}
+                <span class="nco-trustline-row__available ds-text-secondary">(avail:&thinsp;{{ renderOrDash(tl.available) }})</span>
               </span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
@@ -179,7 +184,7 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
               </button>
             </div>
           </div>
-          <div v-else-if="interactTrustlinesLoading" class="nco-trustlines__empty ds-label">
+          <div v-else-if="trustlinesLoading" class="nco-trustlines__empty ds-label">
             <span class="ds-text-secondary">Loading trustlines…</span>
           </div>
           <div v-else class="nco-trustlines__empty ds-label">

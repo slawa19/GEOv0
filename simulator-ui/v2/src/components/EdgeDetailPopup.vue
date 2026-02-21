@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
+import { placeOverlayNearAnchor } from '../utils/overlayPosition'
+import { renderOrDash } from '../utils/valueFormat'
+
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 
 type Props = {
   phase: InteractPhase
   state: InteractState
 
-  /** Screen-space anchor (relative to app root). When provided, popup positions near it. */
-  anchor?: { x: number; y: number } | null
+  /** Host element used as the overlay viewport (for clamping). */
+  hostEl?: HTMLElement | null
+
+  // Anchor is stored in FSM state: `state.edgeAnchor` (host-relative screen coordinates).
 
   unit: string
   used?: string | number | null
@@ -18,6 +23,9 @@ type Props = {
 
   /** Disable action buttons while interact-mode is busy. */
   busy?: boolean
+
+  /** When true, the popup is forced hidden (parent shows TrustlineManagementPanel instead). */
+  forceHidden?: boolean
 
   close: () => void
 }
@@ -29,24 +37,47 @@ const emit = defineEmits<{
   (e: 'closeLine'): void
 }>()
 
-const open = computed(() => props.phase === 'editing-trustline')
-
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v))
-}
+// UX: show the small EDGE popup as a standalone quick-info overlay when
+// the user clicks on an edge on the canvas. Requires phase = editing-trustline
+// and an edge anchor (set by edge click).
+// The popup is hidden when the full TrustlineManagementPanel is shown instead
+// (i.e. when the user came from NodeCard ✏️ or ActionBar or clicked "Change Limit").
+// This is controlled by the parent via the `forceHidden` prop.
+const open = computed(() => {
+  if (props.forceHidden) return false
+  if (props.phase !== 'editing-trustline') return false
+  if (!props.state.edgeAnchor) return false
+  return true
+})
 
 const popupStyle = computed(() => {
+  let anchor = props.state.edgeAnchor
   // Default (legacy) placement.
-  if (!props.anchor) return { left: '12px', bottom: '76px' }
+  if (!anchor) return { left: '12px', bottom: '76px' }
 
-  const pad = 10
-  // Best-effort clamp to viewport; in real app `.root` occupies the viewport.
-  const w = typeof window !== 'undefined' ? window.innerWidth : 10_000
-  const h = typeof window !== 'undefined' ? window.innerHeight : 10_000
+  const MIN_POPUP_W = 260
+  const MIN_POPUP_H = 140
 
-  const x = clamp(props.anchor.x + 12, pad, w - pad)
-  const y = clamp(props.anchor.y + 12, pad, h - pad)
-  return { left: `${x}px`, top: `${y}px` }
+  const rect = props.hostEl?.getBoundingClientRect()
+
+  // Safety: tolerate mixed coordinate systems.
+  // `edgeAnchor` is expected to be host-relative (clientToScreen), but some callers
+  // may still pass viewport-based coords (clientX/clientY). When we have host bounds,
+  // detect that case and convert to host-relative.
+  if (rect && rect.width > 0 && rect.height > 0) {
+    const withinHost = anchor.x >= 0 && anchor.y >= 0 && anchor.x <= rect.width && anchor.y <= rect.height
+    const withinViewportRect =
+      anchor.x >= rect.left && anchor.y >= rect.top && anchor.x <= rect.right && anchor.y <= rect.bottom
+    if (!withinHost && withinViewportRect) {
+      anchor = { x: anchor.x - rect.left, y: anchor.y - rect.top }
+    }
+  }
+
+  return placeOverlayNearAnchor({
+    anchor,
+    overlaySize: { w: MIN_POPUP_W, h: MIN_POPUP_H },
+    viewport: rect ? { w: rect.width, h: rect.height } : undefined,
+  })
 })
 
 const title = computed(() => {
@@ -119,15 +150,15 @@ onUnmounted(() => {
     <div class="popup__title ds-label">Edge</div>
     <div class="popup__subtitle ds-value ds-mono">{{ title }}</div>
 
-    <div v-if="phase !== 'editing-trustline'" class="popup__grid">
+    <div class="popup__grid">
       <div class="ds-label">Used</div>
-      <div class="ds-value ds-mono">{{ used ?? '—' }} {{ unit }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(used) }} {{ unit }}</div>
       <div class="ds-label">Limit</div>
-      <div class="ds-value ds-mono">{{ limit ?? '—' }} {{ unit }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(limit) }} {{ unit }}</div>
       <div class="ds-label">Available</div>
-      <div class="ds-value ds-mono">{{ available ?? '—' }} {{ unit }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(available) }} {{ unit }}</div>
       <div class="ds-label">Status</div>
-      <div class="ds-value ds-mono">{{ status ?? '—' }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(status) }}</div>
     </div>
 
     <div class="popup__actions">
@@ -164,7 +195,7 @@ onUnmounted(() => {
 <style scoped>
 .popup {
   position: absolute;
-  z-index: 42;
+  z-index: var(--ds-z-panel, 42);
   min-width: 260px;
   max-width: min(460px, calc(100vw - 24px));
   pointer-events: auto;
@@ -188,6 +219,8 @@ onUnmounted(() => {
 
 .popup__actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   justify-content: flex-end;
   margin-top: 10px;
 }

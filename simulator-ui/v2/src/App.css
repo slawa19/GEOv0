@@ -12,17 +12,34 @@
   line-height: var(--ds-typo-body-line-height);
   letter-spacing: var(--ds-typo-body-letter-spacing);
   font-weight: var(--ds-typo-body-font-weight);
+
+  /* Interact overlays z-index scale (single source of truth for app-level layers). */
+  --ds-z-canvas: 1;
+  --ds-z-canvas-fx: 3;
+  --ds-z-drag-preview: 6;
+
+  /* World-space labels and transient floating labels must be BELOW UI windows/panels. */
+  --ds-z-world-labels: 20;
+
+  /* HUD + overlays (design-system defaults use the same numbers). */
+  --ds-z-bottom: 30;
+  --ds-z-top: 40;
+  --ds-z-panel: 42;
+  --ds-z-dev: 50;
+  --ds-z-tooltip: 55;
+  --ds-z-inset: 60;
+  --ds-z-alert: 200;
 }
 
 .canvas {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: var(--ds-z-canvas);
 }
 
 .canvas-fx {
   pointer-events: none;
-  z-index: 3;
+  z-index: var(--ds-z-canvas-fx);
 }
 
 .root[data-webdriver='1'] .canvas-fx {
@@ -74,7 +91,7 @@
   position: absolute;
   left: 0;
   top: 0;
-  z-index: 6;
+  z-index: var(--ds-z-drag-preview);
   display: none;
   pointer-events: none;
   will-change: transform;
@@ -90,7 +107,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 50;
+  z-index: var(--ds-z-world-labels);
   /* Isolate layout/paint of transient labels from the rest of the UI. */
   contain: layout paint;
 }
@@ -99,7 +116,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 45;
+  z-index: var(--ds-z-world-labels);
   contain: layout paint;
 }
 

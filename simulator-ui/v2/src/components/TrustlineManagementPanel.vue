@@ -4,6 +4,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { participantLabel } from '../utils/participants'
+import { renderOrDash } from '../utils/valueFormat'
+import { placeOverlayNearAnchor } from '../utils/overlayPosition'
 
 type Props = {
   phase: InteractPhase
@@ -29,6 +31,12 @@ type Props = {
   confirmTrustlineUpdate: (newLimit: string) => Promise<void> | void
   confirmTrustlineClose: () => Promise<void> | void
   cancel: () => void
+
+  /** Optional anchor (host-relative screen coords) for positioning near the node
+   *  when opened from NodeCard. When null/undefined, falls back to CSS default (top-right). */
+  edgeAnchor?: { x: number; y: number } | null
+  /** Host element used as overlay viewport for clamping. */
+  hostEl?: HTMLElement | null
 }
 
 const props = defineProps<Props>()
@@ -42,7 +50,7 @@ watch(
     // Pre-fill edit field when entering edit phase.
     if (p === 'editing-trustline') {
       const cur = props.currentLimit
-      if (cur != null && String(cur).trim()) newLimit.value = String(cur)
+      newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
     }
     // Reset create field when entering create phase.
     if (p === 'confirm-trustline-create') {
@@ -52,8 +60,40 @@ watch(
   { immediate: true },
 )
 
+// BUGFIX: phase watcher above only runs on phase transitions.
+// When switching trustlines via dropdown while staying in editing phase,
+// keep the edit field in sync with the newly selected trustline.
+watch(
+  () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}`,
+  () => {
+    if (props.phase !== 'editing-trustline') return
+    const cur = props.currentLimit
+    newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
+  },
+)
+
+const selectedTl = computed(() => {
+  const from = String(props.state.fromPid ?? '').trim()
+  const to = String(props.state.toPid ?? '').trim()
+  if (!from || !to) return null
+  const items = Array.isArray(props.trustlines) ? props.trustlines : []
+  return items.find((tl) => tl.from_pid === from && tl.to_pid === to) ?? null
+})
+
+const effectiveData = computed(() => {
+  return {
+    used: selectedTl.value?.used ?? props.used,
+    limit: selectedTl.value?.limit ?? props.currentLimit,
+    available: selectedTl.value?.available ?? props.available,
+  }
+})
+
+const effectiveUsed = computed(() => effectiveData.value.used)
+const effectiveLimit = computed(() => effectiveData.value.limit)
+const effectiveAvailable = computed(() => effectiveData.value.available)
+
 const usedNum = computed(() => {
-  const v = Number(props.used ?? 0)
+  const v = Number(effectiveUsed.value ?? 0)
   return Number.isFinite(v) ? v : 0
 })
 
@@ -167,18 +207,6 @@ const toParticipants = computed(() => {
   return participantsSorted.value.filter(p => String(p?.pid ?? '').trim() !== from)
 })
 
-const selectedTl = computed(() => {
-  const from = String(props.state.fromPid ?? '').trim()
-  const to = String(props.state.toPid ?? '').trim()
-  if (!from || !to) return null
-  const items = Array.isArray(props.trustlines) ? props.trustlines : []
-  return items.find((tl) => tl.from_pid === from && tl.to_pid === to) ?? null
-})
-
-const effectiveUsed = computed(() => selectedTl.value?.used ?? props.used)
-const effectiveLimit = computed(() => selectedTl.value?.limit ?? props.currentLimit)
-const effectiveAvailable = computed(() => selectedTl.value?.available ?? props.available)
-
 const trustlinesSorted = computed(() => {
   const items = Array.isArray(props.trustlines) ? props.trustlines : []
   return [...items].sort((a, b) => {
@@ -186,6 +214,12 @@ const trustlinesSorted = computed(() => {
     const kb = `${b.from_name || b.from_pid} → ${b.to_name || b.to_pid}`
     return ka.localeCompare(kb)
   })
+})
+
+const trustlinesForFrom = computed(() => {
+  const from = String(props.state.fromPid ?? '').trim()
+  if (!from) return trustlinesSorted.value
+  return trustlinesSorted.value.filter((tl) => String(tl.from_pid ?? '').trim() === from)
 })
 
 function encodeTlKey(tl: { from_pid?: string | null; to_pid?: string | null }): string {
@@ -201,6 +235,31 @@ function onTrustlinePick(key: string) {
   props.selectTrustline?.(from, to)
 }
 
+/** Dynamic positioning: when edgeAnchor is provided (opened from NodeCard),
+ *  place the panel near the anchor instead of the fixed CSS top-right position.
+ *  When no anchor, return empty object to let CSS `.ds-ov-panel` defaults apply. */
+const anchorPositionStyle = computed(() => {
+  const anchor = props.edgeAnchor
+  if (!anchor) return {}
+
+  const PANEL_W = 360
+  const PANEL_H = 340
+  const rect = props.hostEl?.getBoundingClientRect()
+
+  const pos = placeOverlayNearAnchor({
+    anchor,
+    overlaySize: { w: PANEL_W, h: PANEL_H },
+    offset: { x: 0, y: 0 },
+    pad: 12,
+    viewport: rect ? { w: rect.width, h: rect.height } : undefined,
+  })
+
+  return {
+    ...pos,
+    right: 'auto',   // override CSS `right: 12px`
+  }
+})
+
 const newLimitInput = ref<HTMLInputElement | null>(null)
 
 defineExpose({
@@ -213,13 +272,13 @@ defineExpose({
 
 <template>
   <Transition name="panel-slide">
-  <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" data-testid="trustline-panel" aria-label="Trustline management panel">
+  <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" :style="anchorPositionStyle" data-testid="trustline-panel" aria-label="Trustline management panel">
     <div class="ds-panel__header">
       <div class="ds-h2">{{ title }}</div>
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div v-if="participantsSorted.length" class="ds-controls__row">
+      <div v-if="participantsSorted.length && isPickFrom" class="ds-controls__row">
         <label class="ds-label" for="tl-from">From</label>
         <select
           id="tl-from"
@@ -234,13 +293,14 @@ defineExpose({
         </select>
       </div>
 
-      <div v-if="participantsSorted.length" class="ds-controls__row">
+      <div v-if="participantsSorted.length && (isPickTo || isCreate)" class="ds-controls__row">
         <label class="ds-label" for="tl-to">To</label>
         <select
           id="tl-to"
           class="ds-select"
           :value="state.toPid ?? ''"
           :disabled="busy || !state.fromPid"
+          :title="!state.fromPid && !busy ? 'Select \'From\' participant first' : undefined"
           aria-label="Trustline to participant"
           @change="props.setToPid?.(($event.target as HTMLSelectElement).value || null)"
         >
@@ -249,7 +309,7 @@ defineExpose({
         </select>
       </div>
 
-      <div v-if="trustlinesSorted.length" class="ds-controls__row">
+      <div v-if="(isCreate || isEdit) && trustlinesSorted.length" class="ds-controls__row">
         <label class="ds-label" for="tl-pick">Existing</label>
         <select
           id="tl-pick"
@@ -258,11 +318,12 @@ defineExpose({
             ? encodeTlKey({ from_pid: state.fromPid, to_pid: state.toPid })
             : ''"
           :disabled="busy"
+          title="Available only in edit/create mode"
           aria-label="Pick existing trustline"
           @change="onTrustlinePick(($event.target as HTMLSelectElement).value)"
         >
           <option value="">—</option>
-          <option v-for="tl in trustlinesSorted" :key="encodeTlKey(tl)" :value="encodeTlKey(tl)">
+          <option v-for="tl in trustlinesForFrom" :key="encodeTlKey(tl)" :value="encodeTlKey(tl)">
             {{ (tl.from_name || tl.from_pid) + ' → ' + (tl.to_name || tl.to_pid) }}
           </option>
         </select>
@@ -271,18 +332,18 @@ defineExpose({
       <div v-if="isPickFrom" class="ds-help" style="margin-top: 6px">Pick From node (canvas) or choose from dropdown.</div>
       <div v-if="isPickTo" class="ds-help" style="margin-top: 6px">Pick To node (canvas) or choose from dropdown.</div>
 
-      <div v-if="isEdit" class="ds-controls" style="padding: 0">
-        <div class="ds-controls__row">
+      <div v-if="isEdit" class="tl-stats" aria-label="Trustline stats">
+        <div class="tl-stats__item">
           <div class="ds-label">Used</div>
-          <div class="ds-value ds-mono">{{ effectiveUsed ?? '—' }} {{ unit }}</div>
+          <div class="ds-value ds-mono">{{ renderOrDash(effectiveUsed) }} {{ unit }}</div>
         </div>
-        <div class="ds-controls__row">
+        <div class="tl-stats__item">
           <div class="ds-label">Limit</div>
-          <div class="ds-value ds-mono">{{ effectiveLimit ?? '—' }} {{ unit }}</div>
+          <div class="ds-value ds-mono">{{ renderOrDash(effectiveLimit) }} {{ unit }}</div>
         </div>
-        <div class="ds-controls__row">
+        <div class="tl-stats__item">
           <div class="ds-label">Available</div>
-          <div class="ds-value ds-mono">{{ effectiveAvailable ?? '—' }} {{ unit }}</div>
+          <div class="ds-value ds-mono">{{ renderOrDash(effectiveAvailable) }} {{ unit }}</div>
         </div>
       </div>
 
@@ -361,6 +422,25 @@ defineExpose({
   </div>
   </Transition>
 </template>
+
+<style scoped>
+.tl-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ds-space-2);
+  margin-top: 2px;
+}
+
+.tl-stats__item {
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+  .tl-stats {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
 
 
 

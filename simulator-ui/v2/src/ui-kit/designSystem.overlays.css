@@ -21,11 +21,11 @@
 }
 
 .ds-ov-layer--ui {
-  z-index: 40;
+  z-index: var(--ds-z-top, 40);
 }
 
 .ds-ov-layer--floating {
-  z-index: 50;
+  z-index: var(--ds-z-dev, 50);
   contain: layout paint;
 }
 
@@ -38,7 +38,7 @@
   top: 12px;
   left: 12px;
   right: 12px;
-  z-index: 40;
+  z-index: var(--ds-z-top, 40);
   pointer-events: none;
 }
 
@@ -47,7 +47,7 @@
   left: 50%;
   bottom: 12px;
   transform: translateX(-50%);
-  z-index: 30;
+  z-index: var(--ds-z-bottom, 30);
   pointer-events: auto;
 }
 
@@ -205,7 +205,7 @@ details[open].ds-ov-details > summary::after {
 .ds-ov-inset {
   position: absolute;
   inset: 0;
-  z-index: 60;
+  z-index: var(--ds-z-inset, 60);
   pointer-events: none;
 
   display: flex;
@@ -219,7 +219,7 @@ details[open].ds-ov-details > summary::after {
   position: absolute;
   right: 12px;
   top: 110px;
-  z-index: 42;
+  z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
   min-width: 320px;
@@ -238,7 +238,7 @@ details[open].ds-ov-details > summary::after {
   position: absolute;
   right: 12px;
   bottom: 12px;
-  z-index: 50;
+  z-index: var(--ds-z-dev, 50);
   max-width: min(720px, calc(100vw - 24px));
   max-height: min(70vh, 520px);
   overflow: auto;
@@ -289,7 +289,7 @@ details[open].ds-ov-details > summary::after {
   position: absolute;
   left: 0;
   top: 0;
-  z-index: 55;
+  z-index: var(--ds-z-tooltip, 55);
   pointer-events: none;
   transform: translate3d(0, 0, 0);
 
@@ -325,7 +325,7 @@ details[open].ds-ov-details > summary::after {
   position: absolute;
   width: 320px;
   max-width: min(400px, calc(100vw - 24px));
-  z-index: 42;
+  z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
   /* Layout-only wrapper.

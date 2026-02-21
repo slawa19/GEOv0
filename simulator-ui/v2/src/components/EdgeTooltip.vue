@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
 
+import { renderOrDash } from '../utils/valueFormat'
+
 type HoveredEdge = {
   key: string | null
   fromId: string
@@ -36,15 +38,15 @@ defineProps<Props>()
       <div class="ds-ov-tooltip__divider" />
       <div class="ds-ov-tooltip__row">
         <span class="ds-ov-tooltip__label">Limit</span>
-        <span class="ds-ov-tooltip__val">{{ edge.trustLimit ?? '—' }}</span>
+        <span class="ds-ov-tooltip__val">{{ renderOrDash(edge.trustLimit) }}</span>
       </div>
       <div class="ds-ov-tooltip__row">
         <span class="ds-ov-tooltip__label">Used</span>
-        <span class="ds-ov-tooltip__val">{{ edge.used ?? '—' }}</span>
+        <span class="ds-ov-tooltip__val">{{ renderOrDash(edge.used) }}</span>
       </div>
       <div class="ds-ov-tooltip__row">
         <span class="ds-ov-tooltip__label">Avail</span>
-        <span class="ds-ov-tooltip__val">{{ edge.available ?? '—' }}</span>
+        <span class="ds-ov-tooltip__val">{{ renderOrDash(edge.available) }}</span>
       </div>
       <div v-if="edge.edgeStatus" class="ds-ov-tooltip__row">
         <span class="ds-ov-tooltip__label">Status</span>

@@ -1,57 +1,26 @@
-import { computed, reactive, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
+import { computed, ref, type ComputedRef, type Reactive, type Ref } from 'vue'
 
-/** BUG-5: Entry in the Interact Mode history log. */
-export type InteractHistoryEntry = {
-  id: number
-  icon: string
-  text: string
-  timeText: string
-  timestampMs: number
-}
-
-import type { GraphSnapshot, GraphLink } from '../types'
-import { keyEdge, parseEdgeKey } from '../utils/edgeKey'
+import type { GraphSnapshot } from '../types'
 import { parseAmountNumber } from '../utils/amount'
 import { isActiveStatus } from '../utils/status'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
+import { useInteractDataCache } from './interact/useInteractDataCache'
+import { useInteractFSM, type InteractPhase, type InteractState } from './interact/useInteractFSM'
+import { useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT } from './interact/useInteractHistory'
 
-export type InteractPhase =
-  | 'idle'
-  | 'picking-payment-from'
-  | 'picking-payment-to'
-  | 'confirm-payment'
-  | 'picking-trustline-from'
-  | 'picking-trustline-to'
-  | 'confirm-trustline-create'
-  | 'editing-trustline'
-  | 'confirm-clearing'
-  | 'clearing-preview'
-  | 'clearing-running'
+/** BUG-5: Entry in the Interact Mode history log. */
+export type InteractHistoryEntry = InteractHistoryEntryT
 
-export type InteractState = {
-  phase: InteractPhase
-  fromPid: string | null
-  toPid: string | null
-  selectedEdgeKey: string | null
-  error: string | null
-
-  /** Last clearing action response (populated in `clearing-preview`). */
-  lastClearing: SimulatorActionClearingRealResponse | null
-}
-
-function findActiveLink(snapshot: GraphSnapshot | null, from: string | null, to: string | null): GraphLink | null {
-  if (!snapshot || !from || !to) return null
-  for (const l of snapshot.links ?? []) {
-    if (l.source === from && l.target === to && isActiveStatus(l.status)) return l
-  }
-  return null
-}
+export type { InteractPhase, InteractState }
 
 function parseAmountStringOrNull(v: unknown): string | null {
   if (v == null) return null
   if (typeof v === 'number') return Number.isFinite(v) ? String(v) : null
-  if (typeof v === 'string') return v
+  if (typeof v === 'string') {
+    const s = v.trim()
+    return s ? s : null
+  }
   return null
 }
 
@@ -71,7 +40,7 @@ export function useInteractMode(opts: {
   startTrustlineFlow: () => void
   startClearingFlow: () => void
   selectNode: (nodeId: string) => void
-  selectEdge: (edgeKey: string) => void
+  selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => void
   cancel: () => void
 
   // Actions
@@ -87,6 +56,8 @@ export function useInteractMode(opts: {
    * Used by Interact UI dropdowns and as a more authoritative source for capacity/limits.
    */
   trustlines: ComputedRef<TrustlineInfo[]>
+  /** True while a trustlines fetch is in-flight (best-effort). */
+  trustlinesLoading: ComputedRef<boolean>
   availableCapacity: ComputedRef<string | null>
   /** BUG-4: node IDs that should be highlighted as available targets in the current picking phase. */
   availableTargetIds: ComputedRef<Set<string>>
@@ -95,6 +66,9 @@ export function useInteractMode(opts: {
   busy: ComputedRef<boolean>
   canSendPayment: ComputedRef<boolean>
   canCreateTrustline: ComputedRef<boolean>
+
+  /** REF-3: exported helper for canvas/UI wiring. */
+  isPickingPhase: ComputedRef<boolean>
 
   // UI helpers (dropdowns)
   setPaymentFromPid: (pid: string | null) => void
@@ -110,16 +84,6 @@ export function useInteractMode(opts: {
   const CLEARING_PREVIEW_DWELL_MS = 800
   const CLEARING_RUNNING_DWELL_MS = 200
 
-  const state = reactive<InteractState>({
-    phase: 'idle',
-    fromPid: null,
-    toPid: null,
-    selectedEdgeKey: null,
-    error: null,
-
-    lastClearing: null,
-  })
-
   const busyRef = ref(false)
 
   // Epoch that invalidates any in-flight async results.
@@ -132,165 +96,41 @@ export function useInteractMode(opts: {
   let epoch = 0
   let busyOwnerEpoch: number | null = null
 
-  const phase = computed(() => state.phase)
   const busy = computed(() => busyRef.value)
 
   // BUG-5: inline history log (last N actions)
-  const MAX_HISTORY = 20
-  const history = reactive<InteractHistoryEntry[]>([])
-  let nextHistoryId = 1
+  const { history, pushHistory } = useInteractHistory({ max: 20 })
 
-  function pushHistory(icon: string, text: string) {
-    const nowMs = Date.now()
-    const dt = new Date(nowMs)
-    const timeText = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}:${String(dt.getSeconds()).padStart(2, '0')}`
-    history.push({ id: nextHistoryId++, icon, text, timeText, timestampMs: nowMs })
-    if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY)
-  }
-
-  // -------------------------
-  // Participants (dropdown)
-  // -------------------------
-
-  const snapshotParticipants = ref<ParticipantInfo[]>([])
-  const fetchedParticipants = ref<ParticipantInfo[] | null>(null)
-  let participantsFetchedAtMs = 0
-  let participantsFetchEpoch = 0
-
-  const participants = computed(() => fetchedParticipants.value ?? snapshotParticipants.value)
-
-  async function refreshParticipants(o?: { force?: boolean }) {
-    // Best-effort only: dropdowns can fall back to snapshot.
-    const now = Date.now()
-    if (!o?.force && fetchedParticipants.value && now - participantsFetchedAtMs < 30_000) return
-
-    const myEpoch = ++participantsFetchEpoch
-    try {
-      const items = await opts.actions.fetchParticipants()
-      // Ignore stale result.
-      if (participantsFetchEpoch !== myEpoch) return
-      // Safety: don't replace snapshot-derived data with an empty list.
-      if (Array.isArray(items) && items.length > 0) {
-        fetchedParticipants.value = items
-        participantsFetchedAtMs = now
-      }
-    } catch {
-      // ignore (fallback on snapshot)
-    }
-  }
-
-  // -------------------------
-  // Trustlines (dropdown + capacity)
-  // -------------------------
-
-  const snapshotTrustlines = ref<TrustlineInfo[]>([])
-  const fetchedTrustlines = ref<TrustlineInfo[] | null>(null)
-  const fetchedTrustlinesEq = ref<string>('')
-  let trustlinesFetchedAtMs = 0
-  let trustlinesFetchEpoch = 0
-
-  const trustlines = computed(() => {
-    const eq = normalizeEq(opts.equivalent.value)
-    const fetchedOk = normalizeEq(fetchedTrustlinesEq.value) === eq && fetchedTrustlines.value != null
-    return (fetchedOk ? fetchedTrustlines.value : null) ?? snapshotTrustlines.value
+  const dataCache = useInteractDataCache({
+    actions: opts.actions,
+    equivalent: opts.equivalent,
+    snapshot: opts.snapshot,
+    parseAmountStringOrNull,
   })
 
-  function normalizeEq(v: unknown): string {
-    return String(v ?? '').trim().toUpperCase()
-  }
+  const participants = dataCache.participants
+  const trustlines = dataCache.trustlines
+  const trustlinesLoading = dataCache.trustlinesLoading
+  const refreshParticipants = dataCache.refreshParticipants
+  const refreshTrustlines = dataCache.refreshTrustlines
+  const invalidateTrustlinesCache = dataCache.invalidateTrustlinesCache
+  const findActiveTrustline = dataCache.findActiveTrustline
 
-  function invalidateTrustlinesCache(eq?: string) {
-    const curEq = normalizeEq(eq ?? opts.equivalent.value)
-    if (normalizeEq(fetchedTrustlinesEq.value) !== curEq) return
-    fetchedTrustlines.value = null
-    fetchedTrustlinesEq.value = ''
-    trustlinesFetchedAtMs = 0
-  }
+  const fsm = useInteractFSM({
+    snapshot: opts.snapshot,
+    findActiveTrustline,
+    onNodeClick: opts.onNodeClick,
+  })
 
-  async function refreshTrustlines(o?: { force?: boolean }) {
-    // Best-effort only: dropdowns can fall back to snapshot.
-    const eq = normalizeEq(opts.equivalent.value)
-    const now = Date.now()
-    const cachedForEq = normalizeEq(fetchedTrustlinesEq.value) === eq && !!fetchedTrustlines.value
-    if (!o?.force && cachedForEq && now - trustlinesFetchedAtMs < 15_000) return
-
-    const myEpoch = ++trustlinesFetchEpoch
-    try {
-      const items = await opts.actions.fetchTrustlines(eq)
-      // Ignore stale result.
-      if (trustlinesFetchEpoch !== myEpoch) return
-      if (Array.isArray(items)) {
-        fetchedTrustlines.value = items
-        fetchedTrustlinesEq.value = eq
-        trustlinesFetchedAtMs = now
-      }
-    } catch {
-      // ignore (fallback on snapshot)
-    }
-  }
-
-  function findActiveTrustline(from: string | null, to: string | null): TrustlineInfo | null {
-    if (!from || !to) return null
-    const items = trustlines.value
-    for (const tl of items ?? []) {
-      if (tl.from_pid === from && tl.to_pid === to && isActiveStatus(tl.status)) return tl
-    }
-    return null
-  }
-
-  watch(
-    () => opts.snapshot.value,
-    (snap) => {
-      if (!snap) {
-        snapshotParticipants.value = []
-        snapshotTrustlines.value = []
-        return
-      }
-
-      snapshotParticipants.value = (snap.nodes ?? []).map((n) => ({
-        pid: n.id,
-        name: n.name ?? n.id,
-        type: n.type ?? '',
-        status: n.status ?? 'active',
-      }))
-
-      const nameByPid = new Map<string, string>()
-      for (const n of snap.nodes ?? []) {
-        const pid = n.id.trim()
-        if (!pid) continue
-        const nm = (n.name ?? pid).trim() || pid
-        nameByPid.set(pid, nm)
-      }
-
-      const eq = normalizeEq(snap.equivalent)
-      snapshotTrustlines.value = (snap.links ?? []).map((l) => {
-        const from = l.source
-        const to = l.target
-        return {
-          from_pid: from,
-          from_name: nameByPid.get(from) ?? from,
-          to_pid: to,
-          to_name: nameByPid.get(to) ?? to,
-          equivalent: eq,
-          limit: String(l.trust_limit ?? ''),
-          used: String(l.used ?? ''),
-          available: String(l.available ?? ''),
-          status: l.status ?? 'active',
-        }
-      })
-    },
-    { immediate: true },
-  )
+  const state = fsm.state
+  const phase = fsm.phase
+  const isPickingPhase = fsm.isPickingPhase
 
   const availableCapacity = computed(() => {
     // Prefer backend trustlines list when present (can be more authoritative than snapshot).
     // Payment `from -> to` uses capacity of trustline `to -> from` (creditor -> debtor).
     const tl = findActiveTrustline(state.toPid, state.fromPid)
-    const tlAvail = parseAmountStringOrNull(tl?.available)
-    if (tlAvail != null && String(tlAvail).trim()) return tlAvail
-
-    const l = findActiveLink(opts.snapshot.value, state.toPid, state.fromPid)
-    return parseAmountStringOrNull(l?.available)
+    return parseAmountStringOrNull(tl?.available)
   })
 
   const canSendPayment = computed(() => {
@@ -306,8 +146,8 @@ export function useInteractMode(opts: {
     // Prefer fetched trustlines list when present; snapshot can be stale.
     const tl = findActiveTrustline(state.fromPid, state.toPid)
     if (tl) return false
-    const l = findActiveLink(opts.snapshot.value, state.fromPid, state.toPid)
-    return !l
+    // Snapshot trustlines are included in `trustlines` computed already; if tl not found, assume none.
+    return true
   })
 
   /** BUG-4: Node IDs available as picking targets in the current phase (for visual highlight). */
@@ -350,38 +190,22 @@ export function useInteractMode(opts: {
     return new Set<string>()
   })
 
-  function clearError() {
-    state.error = null
-  }
-
-  function startNewFlow(phase: InteractPhase) {
-    if (busyRef.value) return
-    clearError()
-    state.phase = phase
-    state.fromPid = null
-    state.toPid = null
-    state.selectedEdgeKey = null
-
-    // Best-effort prefetch for dropdown UX.
-    void refreshParticipants()
-  }
-
   function cancel() {
     // Invalidate any in-flight result (success/error) so it can't update state after cancel.
     epoch += 1
-    state.phase = 'idle'
-    state.fromPid = null
-    state.toPid = null
-    state.selectedEdgeKey = null
-    state.error = null
+    fsm.resetToIdle()
   }
 
   function startPaymentFlow() {
-    startNewFlow('picking-payment-from')
+    if (busyRef.value) return
+    fsm.startPaymentFlow()
+    void refreshParticipants()
   }
 
   function startTrustlineFlow() {
-    startNewFlow('picking-trustline-from')
+    if (busyRef.value) return
+    fsm.startTrustlineFlow()
+    void refreshParticipants()
 
     // Best-effort prefetch for trustline dropdowns / more up-to-date limits.
     void refreshTrustlines()
@@ -389,65 +213,17 @@ export function useInteractMode(opts: {
 
   function startClearingFlow() {
     if (busyRef.value) return
-    clearError()
-    state.phase = 'confirm-clearing'
-    state.fromPid = null
-    state.toPid = null
-    state.selectedEdgeKey = null
-
-    // Clear stale results so the panel doesn't flash previous cycles.
-    state.lastClearing = null
+    fsm.startClearingFlow()
   }
 
   function selectNode(nodeId: string) {
     if (busyRef.value) return
-    const id = String(nodeId ?? '').trim()
-    if (!id) return
-
-    opts.onNodeClick?.(id)
-
-    if (state.phase === 'picking-payment-from') {
-      clearError()
-      state.fromPid = id
-      state.toPid = null
-      state.phase = 'picking-payment-to'
-      return
-    }
-
-    if (state.phase === 'picking-payment-to') {
-      clearError()
-      state.toPid = id
-      state.phase = 'confirm-payment'
-      return
-    }
-
-    if (state.phase === 'picking-trustline-from') {
-      clearError()
-      state.fromPid = id
-      state.toPid = null
-      state.phase = 'picking-trustline-to'
-      return
-    }
-
-    if (state.phase === 'picking-trustline-to') {
-      clearError()
-      state.toPid = id
-
-      // Use the same trustline existence logic as dropdown setters.
-      recomputeTrustlinePhase()
-      return
-    }
+    fsm.selectNode(nodeId)
   }
 
-  function selectEdge(edgeKey: string) {
+  function selectEdge(edgeKey: string, anchor?: { x: number; y: number } | null) {
     if (busyRef.value) return
-    const parsed = parseEdgeKey(edgeKey)
-    if (!parsed) return
-    clearError()
-    state.fromPid = parsed.from
-    state.toPid = parsed.to
-    state.selectedEdgeKey = keyEdge(parsed.from, parsed.to)
-    state.phase = 'editing-trustline'
+    fsm.selectEdge(edgeKey, anchor)
 
     // Opening edit UI: try to have trustlines list ready for dropdown + accurate details.
     void refreshParticipants()
@@ -467,11 +243,7 @@ export function useInteractMode(opts: {
 
     const resetToIdle = () => {
       // NOTE: do NOT bump epoch here; this is a success-path reset.
-      state.phase = 'idle'
-      state.fromPid = null
-      state.toPid = null
-      state.selectedEdgeKey = null
-      state.error = null
+      fsm.resetToIdle()
     }
 
     try {
@@ -490,7 +262,7 @@ export function useInteractMode(opts: {
   }
 
   async function confirmPayment(amount: string): Promise<void> {
-    clearError()
+    fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle }) => {
@@ -507,7 +279,7 @@ export function useInteractMode(opts: {
   }
 
   async function confirmTrustlineCreate(limit: string): Promise<void> {
-    clearError()
+    fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle }) => {
@@ -524,7 +296,7 @@ export function useInteractMode(opts: {
   }
 
   async function confirmTrustlineUpdate(newLimit: string): Promise<void> {
-    clearError()
+    fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle }) => {
@@ -541,7 +313,7 @@ export function useInteractMode(opts: {
   }
 
   async function confirmTrustlineClose(): Promise<void> {
-    clearError()
+    fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle }) => {
@@ -563,158 +335,43 @@ export function useInteractMode(opts: {
 
   function setPaymentFromPid(pid: string | null) {
     if (busyRef.value) return
-    clearError()
-
-    const v = pid ? String(pid).trim() || null : null
-
-    if (state.phase === 'picking-payment-from') {
-      state.fromPid = v
-      state.toPid = null
-      if (v) state.phase = 'picking-payment-to'
-      return
-    }
-
-    if (state.phase === 'picking-payment-to') {
-      // Allow changing From during To-step (UX).
-      state.fromPid = v
-      state.toPid = null
-      state.phase = v ? 'picking-payment-to' : 'picking-payment-from'
-      return
-    }
-
-    if (state.phase === 'confirm-payment') {
-      state.fromPid = v
-      if (!v) {
-        state.toPid = null
-        state.phase = 'picking-payment-from'
-      }
-      return
-    }
+    fsm.setPaymentFromPid(pid)
   }
 
   function setPaymentToPid(pid: string | null) {
     if (busyRef.value) return
-    clearError()
-
-    const v = pid ? String(pid).trim() || null : null
-
-    if (state.phase === 'picking-payment-to') {
-      state.toPid = v
-      if (v) state.phase = 'confirm-payment'
-      return
-    }
-
-    if (state.phase === 'confirm-payment') {
-      state.toPid = v
-      if (!v) state.phase = 'picking-payment-to'
-      return
-    }
-  }
-
-  function recomputeTrustlinePhase() {
-    if (!state.fromPid || !state.toPid) return
-    if (state.fromPid === state.toPid) return
-
-    // Prefer fetched trustlines list when present.
-    const tl = findActiveTrustline(state.fromPid, state.toPid)
-    const snapLink = findActiveLink(opts.snapshot.value, state.fromPid, state.toPid)
-    const has = !!tl || !!snapLink
-
-    if (has) {
-      state.selectedEdgeKey = keyEdge(state.fromPid, state.toPid)
-      state.phase = 'editing-trustline'
-    } else {
-      state.selectedEdgeKey = null
-      state.phase = 'confirm-trustline-create'
-    }
+    fsm.setPaymentToPid(pid)
   }
 
   function setTrustlineFromPid(pid: string | null) {
     if (busyRef.value) return
-    clearError()
-
-    const v = pid ? String(pid).trim() || null : null
-
-    if (state.phase === 'picking-trustline-from') {
-      state.fromPid = v
-      state.toPid = null
-      if (v) state.phase = 'picking-trustline-to'
-      return
-    }
-
-    if (state.phase === 'picking-trustline-to') {
-      // Allow changing From during To-step.
-      state.fromPid = v
-      state.toPid = null
-      state.phase = v ? 'picking-trustline-to' : 'picking-trustline-from'
-      return
-    }
-
-    if (state.phase === 'editing-trustline' || state.phase === 'confirm-trustline-create') {
-      state.fromPid = v
-      recomputeTrustlinePhase()
-      return
-    }
+    fsm.setTrustlineFromPid(pid)
   }
 
   function setTrustlineToPid(pid: string | null) {
     if (busyRef.value) return
-    clearError()
-
-    const v = pid ? String(pid).trim() || null : null
-
-    if (state.phase === 'picking-trustline-to') {
-      state.toPid = v
-      if (v) recomputeTrustlinePhase()
-      return
-    }
-
-    if (state.phase === 'editing-trustline' || state.phase === 'confirm-trustline-create') {
-      state.toPid = v
-      if (!v) {
-        state.phase = 'picking-trustline-to'
-        state.selectedEdgeKey = null
-        return
-      }
-      recomputeTrustlinePhase()
-      return
-    }
+    fsm.setTrustlineToPid(pid)
   }
 
   function selectTrustline(fromPid: string, toPid: string) {
     if (busyRef.value) return
-    clearError()
-    state.fromPid = String(fromPid ?? '').trim() || null
-    state.toPid = String(toPid ?? '').trim() || null
-    if (!state.fromPid || !state.toPid) return
-    state.selectedEdgeKey = keyEdge(state.fromPid, state.toPid)
-    state.phase = 'editing-trustline'
+    fsm.selectTrustline(fromPid, toPid)
+
+    // NEW-1: entering edit flow via NodeCard should refresh cached data
+    // similarly to edge click (selectEdge) so the panel can show backend-authoritative values.
+    void refreshParticipants()
+    void refreshTrustlines()
   }
 
-  // Keep trustlines cache keyed by equivalent.
-  watch(
-    () => normalizeEq(opts.equivalent.value),
-    () => {
-      // Switching EQ changes the trustlines list semantics.
-      // Clear immediately so UI can't show stale trustlines while fetch is in-flight.
-      fetchedTrustlines.value = null
-      fetchedTrustlinesEq.value = ''
-      trustlinesFetchedAtMs = 0
-      void refreshTrustlines()
-    },
-    { immediate: true },
-  )
-
   async function confirmClearing(): Promise<void> {
-    clearError()
+    fsm.clearError()
     await runBusy(async ({ isCurrent, resetToIdle }) => {
       // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
-      state.phase = 'clearing-preview'
-      state.lastClearing = null
+      fsm.enterClearingPreview()
 
       const res = await opts.actions.runClearing(opts.equivalent.value)
       if (!isCurrent()) return
-      state.lastClearing = res
+      fsm.setLastClearing(res)
 
       // BUG-5: log to history
       const clearedCycles = res.cleared_cycles ?? 0
@@ -739,7 +396,7 @@ export function useInteractMode(opts: {
       await new Promise((r) => setTimeout(r, CLEARING_PREVIEW_DWELL_MS))
       if (!isCurrent()) return
 
-      state.phase = 'clearing-running'
+      fsm.enterClearingRunning()
 
       // Let Vue paint the running state at least once.
       await Promise.resolve()
@@ -772,12 +429,14 @@ export function useInteractMode(opts: {
 
     participants,
     trustlines,
+    trustlinesLoading,
     availableCapacity,
     availableTargetIds,
 
     busy,
     canSendPayment,
     canCreateTrustline,
+    isPickingPhase,
 
     setPaymentFromPid,
     setPaymentToPid,

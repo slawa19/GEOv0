@@ -22,6 +22,8 @@ const props = defineProps<Props>()
 
 const isDisabled = computed(() => !!props.busy || !!props.actionsDisabled || !!props.runTerminal)
 
+const isIdle = computed(() => String(props.phase ?? '').toLowerCase() === 'idle')
+
 const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
   const p = String(props.phase ?? '').toLowerCase()
   if (p.includes('payment')) return 'payment'
@@ -29,6 +31,11 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
   if (p.includes('clearing')) return 'clearing'
   return null
 })
+
+function titleFor(key: 'payment' | 'trustline' | 'clearing', idleTitle: string): string {
+  if (!isIdle.value && activeKey.value !== key) return 'Cancel current action first'
+  return idleTitle
+}
 </script>
 
 <template>
@@ -36,11 +43,12 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
     <div class="ds-panel ds-ov-bar">
       <button
         class="ds-btn ds-btn--secondary"
+        :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'payment' }"
         type="button"
         :disabled="isDisabled"
         :data-active="activeKey === 'payment' ? '1' : '0'"
         data-testid="actionbar-payment"
-        title="Send a manual payment"
+        :title="titleFor('payment', 'Send a manual payment')"
         @click="startPaymentFlow"
       >
         Send Payment
@@ -48,11 +56,12 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
 
       <button
         class="ds-btn ds-btn--secondary"
+        :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'trustline' }"
         type="button"
         :disabled="isDisabled"
         :data-active="activeKey === 'trustline' ? '1' : '0'"
         data-testid="actionbar-trustline"
-        title="Create/update/close a trustline"
+        :title="titleFor('trustline', 'Create/update/close a trustline')"
         @click="startTrustlineFlow"
       >
         Manage Trustline
@@ -60,11 +69,12 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
 
       <button
         class="ds-btn ds-btn--secondary"
+        :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'clearing' }"
         type="button"
         :disabled="isDisabled"
         :data-active="activeKey === 'clearing' ? '1' : '0'"
         data-testid="actionbar-clearing"
-        title="Run clearing"
+        :title="titleFor('clearing', 'Run clearing')"
         @click="startClearingFlow"
       >
         Run Clearing
@@ -77,6 +87,10 @@ const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
 .ds-btn[data-active='1'] {
   border-color: var(--ds-accent);
   background: var(--ds-accent-surface);
+}
+
+.ds-btn--muted {
+  opacity: 0.65;
 }
 </style>
 
