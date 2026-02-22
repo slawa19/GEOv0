@@ -27,6 +27,9 @@
     { "from": "shop", "to": "olena", "equivalent": "UAH", "limit": 800 },
     { "from": "shop", "to": "dmytro", "equivalent": "UAH", "limit": 800 },
 
+    { "from": "shop", "to": "natalya", "equivalent": "UAH", "limit": 700 },
+    { "from": "shop", "to": "vasyl", "equivalent": "UAH", "limit": 700 },
+
     { "from": "farmer", "to": "shop", "equivalent": "UAH", "limit": 1500 },
     { "from": "bakery", "to": "shop", "equivalent": "UAH", "limit": 1200 },
     { "from": "workshop", "to": "shop", "equivalent": "UAH", "limit": 1000 },

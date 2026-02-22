@@ -607,25 +607,27 @@ watch(interactPhase, (phase) => {
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:desired-mode="realActions.setDesiredMode"
       @update:intensity-percent="realActions.setIntensityPercent"
-    />
+    >
+      <!-- HUD elements stacked below TopBar rows (inside ds-ov-top-stack via slot) -->
+      <div v-if="dataReady && (isInteractUi || isAutoRunUi)" class="interact-hud-bar">
+        <SystemBalanceBar
+          :balance="interact.systemBalance"
+          :equivalent="effectiveEq"
+          :compact="isAutoRunUi"
+        />
 
-    <SystemBalanceBar
-      v-if="dataReady && (isInteractUi || isAutoRunUi)"
-      :balance="interact.systemBalance"
-      :equivalent="effectiveEq"
-      :compact="isAutoRunUi"
-    />
-
-    <ActionBar
-      v-if="dataReady && apiMode === 'real' && isInteractUi"
-      :phase="interactPhase"
-      :busy="interact.mode.busy.value"
-      :actions-disabled="interact.actions.actionsDisabled.value"
-      :run-terminal="interactRunTerminal"
-      :start-payment-flow="onActionStartPaymentFlow"
-      :start-trustline-flow="onActionStartTrustlineFlow"
-      :start-clearing-flow="onActionStartClearingFlow"
-    />
+        <ActionBar
+          v-if="apiMode === 'real' && isInteractUi"
+          :phase="interactPhase"
+          :busy="interact.mode.busy.value"
+          :actions-disabled="interact.actions.actionsDisabled.value"
+          :run-terminal="interactRunTerminal"
+          :start-payment-flow="onActionStartPaymentFlow"
+          :start-trustline-flow="onActionStartTrustlineFlow"
+          :start-clearing-flow="onActionStartClearingFlow"
+        />
+      </div>
+    </TopBar>
 
     <Transition name="panel-slide" mode="out-in">
       <ManualPaymentPanel

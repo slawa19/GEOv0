@@ -31,6 +31,16 @@
   --ds-z-alert: 200;
 }
 
+/* Interact HUD: SystemBalanceBar + ActionBar — stacks inside TopBar's ds-ov-top-stack */
+.interact-hud-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
 .canvas {
   position: absolute;
   inset: 0;

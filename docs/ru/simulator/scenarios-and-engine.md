@@ -78,6 +78,14 @@
   - `trustlines[].equivalent` должен входить в `equivalents[]` (если используете `equivalents[]`)
   - для real mode: `participants[].id` должны существовать в БД (они будут сидироваться)
 
+Практическое правило для ручных платежей (Interact Mode):
+- чтобы отправить платёж `From=A` → `To=B`, в графе должен существовать активный trustline **`B → A`**
+  (получатель кредитует отправителя; trustline всегда creditor → debtor).
+  Пример: «Алиса покупает у Магазина» означает платёж `alice → shop`, поэтому нужен trustline `shop → alice`.
+
+Правила «реалистичных сценариев» (realistic-v2) и чек-лист требований к входным данным:
+- `docs/ru/simulator/realistic-scenarios.md`
+
 **B) Проверить формат (schema)**
 
 Формальная схема: [../../../fixtures/simulator/scenario.schema.json](../../../fixtures/simulator/scenario.schema.json)

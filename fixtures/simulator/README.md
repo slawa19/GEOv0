@@ -3,6 +3,7 @@
 Каноничные `scenario.json` сценарии и JSON Schema для симулятора.
 
 Документация (RU): [`docs/ru/simulator/scenarios-and-engine.md`](../../docs/ru/simulator/scenarios-and-engine.md)
+Правила realistic-v2 (RU, единая точка истины): [`docs/ru/simulator/realistic-scenarios.md`](../../docs/ru/simulator/realistic-scenarios.md)
 
 ---
 

@@ -5,6 +5,7 @@
 ## Быстрые ссылки (актуальные)
 
 - Сценарии и движок запуска (обзор + техподробности): [scenarios-and-engine.md](scenarios-and-engine.md)
+- Реалистичные сценарии (realistic-v2): правила входных данных + чек-лист: [realistic-scenarios.md](realistic-scenarios.md)
 - Online-анализ проблем экономики сети (insights/уведомления): [network-economy-analyzer-spec.md](network-economy-analyzer-spec.md)
 - Поведенческая модель экономики (real mode: behaviorProfiles/events): [backend/behavior-model-spec.md](backend/behavior-model-spec.md)
 

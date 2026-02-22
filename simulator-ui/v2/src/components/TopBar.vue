@@ -594,6 +594,9 @@ async function onAdminStopRun(runId: string) {
         <span class="ds-value ds-mono" style="opacity: 0.92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
       </div>
 
+      <!-- Slot for HUD elements (SystemBalanceBar, ActionBar) that stack below TopBar rows -->
+      <slot />
+
     </div>
   </div>
 </template>
