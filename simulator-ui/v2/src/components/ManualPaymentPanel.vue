@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import type { ParticipantInfo } from '../api/simulatorTypes'
 import { participantLabel } from '../utils/participants'
+import { useOverlayPositioning } from '../utils/overlayPosition'
 
 type Props = {
   phase: InteractPhase
@@ -24,9 +25,21 @@ type Props = {
 
   confirmPayment: (amount: string) => Promise<void> | void
   cancel: () => void
+
+  /** Optional anchor для позиционирования рядом с источником открытия.
+   *  При null/undefined применяется CSS default (right: 12px, top: 110px). */
+  anchor?: { x: number; y: number } | null
+  /** Host element used as overlay viewport for clamping. */
+  hostEl?: HTMLElement | null
 }
 
 const props = defineProps<Props>()
+
+const anchorPositionStyle = useOverlayPositioning(
+  () => props.anchor,
+  () => props.hostEl,
+  { w: 360, h: 420 },
+)
 
 const amount = ref('')
 
@@ -111,7 +124,7 @@ function onToChange(v: string) {
 
 <template>
   <Transition name="panel-slide">
-  <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" data-testid="manual-payment-panel" aria-label="Manual payment panel">
+  <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" :style="anchorPositionStyle" data-testid="manual-payment-panel" aria-label="Manual payment panel">
     <div class="ds-panel__header">
       <div class="ds-h2">{{ titleText() }}</div>
     </div>
@@ -166,7 +179,12 @@ function onToChange(v: string) {
               v-model="amount"
               class="ds-input ds-mono"
               style="flex: 1"
+              type="text"
               inputmode="decimal"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
               placeholder="0.00"
               :aria-invalid="amount.trim() && !amountValid ? 'true' : 'false'"
               @keydown.enter.prevent="onConfirm"

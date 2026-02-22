@@ -17,6 +17,8 @@ import InteractHistoryLog from './InteractHistoryLog.vue'
 import { computed, isRef, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
+import { useInteractPanelPosition } from '../composables/useInteractPanelPosition'
+import type { Point } from '../composables/useInteractPanelPosition'
 import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
 
 // TD-1: all localStorage access is delegated to this composable.
@@ -342,10 +344,31 @@ const isExiting = ref(false)
 
 const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
 
-/** Local anchor for positioning TrustlineManagementPanel near the node
- *  when opened from NodeCardOverlay. Separate from state.edgeAnchor
- *  (which drives EdgeDetailPopup visibility). */
-const trustlinePanelAnchor = ref<{ x: number; y: number } | null>(null)
+/**
+ * Централизованное управление anchor-позицией Interact-панелей.
+ * Заменяет ручной trustlinePanelAnchor ref + разрозненные watches.
+ *
+ * Таблица позиционирования:
+ * | Сценарий                         | source          | anchor              | Позиция                 |
+ * |----------------------------------|-----------------|---------------------|-------------------------|
+ * | "Change Limit" в EdgeDetailPopup | 'change-limit'  | state.edgeAnchor    | рядом с ребром          |
+ * | ✏️ из NodeCard                   | 'node-card'     | nodeCardStyle pos   | рядом с нодой           |
+ * | ActionBar → Manage Trustline     | 'action-bar'    | null                | CSS default right/top   |
+ * | ActionBar → Send Payment         | 'action-bar'    | null                | CSS default right/top   |
+ * | ActionBar → Run Clearing         | 'action-bar'    | null                | CSS default right/top   |
+ *
+ * ActionBar-сценарии используют CSS default намеренно: кнопки físicamente
+ * находятся в правом верхнем углу, CSS default открывает панели прямо под ними.
+ */
+const { panelAnchor, openFrom: openPanelFrom } = useInteractPanelPosition(interactPhase)
+
+/** Парсит nodeCardStyle в Point; вызывать ДО закрытия карточки (snapshot). */
+function parseNodeCardAnchor(style: Record<string, unknown>): Point | null {
+  if (!style.left || !style.top) return null
+  const x = parseInt(style.left as string, 10)
+  const y = parseInt(style.top as string, 10)
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+}
 
 /**
  * Controls which UI to show in `editing-trustline` phase:
@@ -430,6 +453,9 @@ function goInteract() {
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
 function onEdgeDetailChangeLimit() {
+  // Позиционируем TrustlineManagementPanel рядом с тем же ребром.
+  openPanelFrom('change-limit', interact.mode.state.edgeAnchor ?? null)
+
   // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
   useFullTrustlineEditor.value = true
   // Focus the limit editor in TrustlineManagementPanel via template ref.
@@ -456,76 +482,55 @@ function onInteractNewTrustline(fromPid: string) {
 }
 
 function onInteractEditTrustline(fromPid: string, toPid: string) {
-  // Capture the NodeCard's screen position as anchor before closing it,
-  // so the TrustlineManagementPanel opens near the node instead of
-  // jumping to the fixed top-right corner.
-  const style = nodeCardStyle.value
-  let anchor: { x: number; y: number } | null = null
-  if (style.left && style.top) {
-    const x = parseInt(style.left as string, 10)
-    const y = parseInt(style.top as string, 10)
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      anchor = { x, y }
-    }
-  }
+  // Снапшот позиции NodeCard ДО закрытия (после закрытия nodeCardStyle теряется).
+  const snapshot = parseNodeCardAnchor(nodeCardStyle.value)
 
   useFullTrustlineEditor.value = true
   setNodeCardOpen(false)
   interact.mode.selectTrustline(fromPid, toPid)
 
-  // Set anchor AFTER the phase change so the interactPhase watcher
-  // (which clears the anchor on every transition) has already fired.
-  if (anchor) {
-    void nextTick(() => {
-      trustlinePanelAnchor.value = anchor
-    })
-  }
+  // nextTick: дожидаемся, пока watcher на interactPhase в composable сбросит anchor,
+  // только потом устанавливаем новый (иначе composable-watcher перезапишет).
+  void nextTick(() => openPanelFrom('node-card', snapshot))
 }
 
 function onActionStartPaymentFlow() {
   setNodeCardOpen(false)
-  trustlinePanelAnchor.value = null
+  // anchor сбрасывается автоматически при смене phase в useInteractPanelPosition
   interact.mode.startPaymentFlow()
 }
 
 function onActionStartTrustlineFlow() {
   setNodeCardOpen(false)
-  trustlinePanelAnchor.value = null
+  // anchor сбрасывается автоматически при смене phase в useInteractPanelPosition
   useFullTrustlineEditor.value = true
   interact.mode.startTrustlineFlow()
 }
 
 function onActionStartClearingFlow() {
   setNodeCardOpen(false)
-  trustlinePanelAnchor.value = null
+  // anchor сбрасывается автоматически при смене phase в useInteractPanelPosition
   interact.mode.startClearingFlow()
 }
 
 // Mutual exclusion: when an interact panel activates, close NodeCard.
-// When leaving trustline phase, clear the position anchor.
+// Anchor clearing delegated to useInteractPanelPosition (watches interactPhase).
 watch(activePanelType, (t, prev) => {
   // Any interact panel opens → close NodeCard to avoid overlapping windows.
   if (t !== null && t !== prev) {
     setNodeCardOpen(false)
   }
-  // Leaving trustline phase → clear anchor.
-  if (t !== 'trustline') {
-    trustlinePanelAnchor.value = null
-  }
 })
 
 // When phase changes, reset local UI flags.
-// - Clear anchor (only set explicitly by onInteractEditTrustline)
-// - Reset useFullTrustlineEditor when leaving trustline phases (idle, payment, clearing)
-//   so the NEXT edge click shows EdgeDetailPopup (not full editor).
-//   NOTE: do NOT reset when transitioning between trustline sub-phases
-//   (e.g. picking-trustline-to → editing-trustline) to preserve the ActionBar intent.
+// Anchor clearing delegated to useInteractPanelPosition.
+// Reset useFullTrustlineEditor when leaving trustline phases (idle, payment, clearing)
+// so the NEXT edge click shows EdgeDetailPopup (not full editor).
+// NOTE: do NOT reset when transitioning between trustline sub-phases
+// (e.g. picking-trustline-to → editing-trustline) to preserve the ActionBar intent.
 watch(interactPhase, (phase) => {
-  trustlinePanelAnchor.value = null
-
   const p = String(phase ?? '').toLowerCase()
-  const isTrustlinePhase = p.includes('trustline')
-  if (!isTrustlinePhase) {
+  if (!p.includes('trustline')) {
     useFullTrustlineEditor.value = false
   }
 })
@@ -644,6 +649,8 @@ watch(interactPhase, (phase) => {
         :set-from-pid="interact.mode.setPaymentFromPid"
         :set-to-pid="interact.mode.setPaymentToPid"
         :cancel="interact.mode.cancel"
+        :anchor="panelAnchor"
+        :host-el="hostEl"
       />
 
       <TrustlineManagementPanel
@@ -666,7 +673,7 @@ watch(interactPhase, (phase) => {
         :set-to-pid="interact.mode.setTrustlineToPid"
         :select-trustline="interact.mode.selectTrustline"
         :cancel="interact.mode.cancel"
-        :edge-anchor="trustlinePanelAnchor"
+        :anchor="panelAnchor"
         :host-el="hostEl"
       />
 
@@ -679,6 +686,8 @@ watch(interactPhase, (phase) => {
         :equivalent="effectiveEq"
         :confirm-clearing="interact.mode.confirmClearing"
         :cancel="interact.mode.cancel"
+        :anchor="panelAnchor"
+        :host-el="hostEl"
       />
     </Transition>
 

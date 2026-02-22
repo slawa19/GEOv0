@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
+import { useOverlayPositioning } from '../utils/overlayPosition'
 
 type Props = {
   phase: InteractPhase
@@ -12,9 +13,21 @@ type Props = {
 
   confirmClearing: () => Promise<void> | void
   cancel: () => void
+
+  /** Optional anchor для позиционирования рядом с источником открытия.
+   *  При null/undefined применяется CSS default (right: 12px, top: 110px). */
+  anchor?: { x: number; y: number } | null
+  /** Host element used as overlay viewport for clamping. */
+  hostEl?: HTMLElement | null
 }
 
 const props = defineProps<Props>()
+
+const anchorPositionStyle = useOverlayPositioning(
+  () => props.anchor,
+  () => props.hostEl,
+  { w: 360, h: 280 },
+)
 
 const last = computed(() => props.state.lastClearing)
 const cycles = computed(() => last.value?.cycles ?? [])
@@ -46,6 +59,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
   <div
     v-if="phase === 'confirm-clearing' || phase === 'clearing-preview' || phase === 'clearing-running'"
     class="ds-ov-panel ds-panel ds-panel--elevated"
+    :style="anchorPositionStyle"
     data-testid="clearing-panel"
     aria-label="Clearing panel"
   >

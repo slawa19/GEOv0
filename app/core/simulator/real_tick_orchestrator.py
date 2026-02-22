@@ -228,9 +228,16 @@ class RealTickOrchestrator:
             async with db_session.AsyncSessionLocal() as session:
                 try:
                     if not run._real_seeded:
-                        await rr._seed_scenario_into_db(session, scenario)
-                        await session.commit()
-                        run._real_seeded = True
+                        with rr._lock:
+                            if run._real_seeding_lock is None:
+                                run._real_seeding_lock = asyncio.Lock()
+                            seeding_lock = run._real_seeding_lock
+
+                        async with seeding_lock:
+                            if not run._real_seeded:
+                                await rr._seed_scenario_into_db(session, scenario)
+                                await session.commit()
+                                run._real_seeded = True
 
                     if run._real_participants is None or run._real_equivalents is None:
                         run._real_participants = await rr._load_real_participants(

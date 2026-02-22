@@ -186,6 +186,7 @@ class RunRecord:
 
     # Real-mode in-process runner state (best-effort MVP).
     _real_seeded: bool = False
+    _real_seeding_lock: asyncio.Lock | None = None
     _real_participants: list[tuple[uuid.UUID, str]] | None = None
     _real_equivalents: list[str] | None = None
 

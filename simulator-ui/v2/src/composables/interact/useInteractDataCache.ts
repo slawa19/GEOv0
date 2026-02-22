@@ -21,6 +21,7 @@ export function useInteractDataCache(opts: {
   refreshParticipants: (o?: { force?: boolean }) => Promise<void>
   refreshTrustlines: (o?: { force?: boolean }) => Promise<void>
   invalidateTrustlinesCache: (eq?: string) => void
+  patchTrustlineLimitLocal: (from: string, to: string, newLimit: string, eq?: string) => void
   findActiveTrustline: (from: string | null, to: string | null) => TrustlineInfo | null
 } {
   // -------------------------
@@ -79,6 +80,56 @@ export function useInteractDataCache(opts: {
     fetchedTrustlines.value = null
     fetchedTrustlinesEq.value = ''
     trustlinesFetchedAtMs = 0
+  }
+
+  function normalizeAmount(v: string): string {
+    const s = String(v ?? '').trim()
+    return opts.parseAmountStringOrNull(s) ?? s
+  }
+
+  function recomputeAvailable(used: string | null | undefined, limit: string): string | null {
+    const usedNum = Number(used ?? NaN)
+    const limitNum = Number(limit ?? NaN)
+    if (!Number.isFinite(usedNum) || !Number.isFinite(limitNum)) return null
+    return opts.parseAmountStringOrNull(limitNum - usedNum)
+  }
+
+  function patchList(items: TrustlineInfo[] | null, from: string, to: string, limit: string): TrustlineInfo[] | null {
+    if (!Array.isArray(items) || items.length === 0) return items
+    let changed = false
+    const next = items.map((tl) => {
+      if (tl.from_pid !== from || tl.to_pid !== to) return tl
+      const available = recomputeAvailable(tl.used ?? null, limit)
+      changed = true
+      return {
+        ...tl,
+        limit,
+        ...(available != null ? { available } : {}),
+      }
+    })
+    return changed ? next : items
+  }
+
+  /**
+   * Best-effort optimistic patch so UI reflects the new limit immediately.
+   * Also helps when `fetchTrustlines` fails (it is intentionally swallowed).
+   */
+  function patchTrustlineLimitLocal(from: string, to: string, newLimit: string, eq?: string) {
+    const fromPid = String(from ?? '').trim()
+    const toPid = String(to ?? '').trim()
+    if (!fromPid || !toPid) return
+
+    const targetEq = normalizeEq(eq ?? opts.equivalent.value)
+    const limit = normalizeAmount(newLimit)
+    if (!limit) return
+
+    // Patch fetched list only if it's for the active equivalent.
+    if (normalizeEq(fetchedTrustlinesEq.value) === targetEq) {
+      fetchedTrustlines.value = patchList(fetchedTrustlines.value, fromPid, toPid, limit)
+    }
+
+    // Patch snapshot-derived list (used as fallback).
+    snapshotTrustlines.value = (patchList(snapshotTrustlines.value, fromPid, toPid, limit) ?? snapshotTrustlines.value) as TrustlineInfo[]
   }
 
   async function refreshTrustlines(o?: { force?: boolean }) {
@@ -185,6 +236,7 @@ export function useInteractDataCache(opts: {
     refreshParticipants,
     refreshTrustlines,
     invalidateTrustlinesCache,
+    patchTrustlineLimitLocal,
     findActiveTrustline,
   }
 }

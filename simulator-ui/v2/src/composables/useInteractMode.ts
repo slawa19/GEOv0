@@ -306,6 +306,9 @@ export function useInteractMode(opts: {
 
       // BUG-5: log to history
       pushHistory('✏️', `Trustline updated: ${from} → ${to} → limit ${newLimit}`)
+      const patchTrustlineLimitLocal = dataCache.patchTrustlineLimitLocal
+      // Optimistic UI: patch cache immediately (fetch may be slow or fail silently).
+      patchTrustlineLimitLocal(from, to, newLimit, opts.equivalent.value)
       invalidateTrustlinesCache(opts.equivalent.value)
       void refreshTrustlines({ force: true })
       resetToIdle()

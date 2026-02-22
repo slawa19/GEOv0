@@ -25,6 +25,7 @@ from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
 from app.core.simulator.sse_broadcast import SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
@@ -388,6 +389,97 @@ def _require_actions_enabled_or_error() -> Optional[JSONResponse]:
     return None
 
 
+_real_scenario_seeder = RealScenarioSeeder()
+
+
+async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
+    """Lazily seed scenario participants/equivalents/trustlines into the DB for a real-mode run.
+
+    In Interact Mode the run starts paused (intensity=0), so the real tick orchestrator's
+    'if not run._real_seeded: seed…' branch may never execute before the first interact
+    action arrives.  This helper ensures seeding happens on demand, before any action
+    that reads trust_lines from the DB.
+
+    Safe to call multiple times: RealScenarioSeeder.seed_scenario_into_db is idempotent
+    (skips already-existing rows) and run._real_seeded acts as a fast-path guard.
+
+    Returns:
+        None on success/already-seeded, or a JSONResponse with the standard action
+        error envelope on failure.
+
+    Race-safety: uses a per-run asyncio.Lock with double-checked locking to prevent
+    concurrent requests from seeding the same run simultaneously.
+    """
+    try:
+        run = runtime.get_run(run_id)
+    except Exception:
+        return _action_error(
+            status_code=404,
+            code="RUN_NOT_FOUND",
+            message="Run not found",
+            details={"run_id": str(run_id)},
+        )
+
+    # Fast-path: already seeded, no lock needed
+    if run._real_seeded:
+        return None
+
+    # Acquire per-run lock (create if missing). Use runtime lock to avoid
+    # concurrent overwrites that would break coordination with the tick seeder.
+    with runtime._lock:
+        if getattr(run, "_real_seeding_lock", None) is None:
+            run._real_seeding_lock = asyncio.Lock()
+        lock = run._real_seeding_lock
+
+    async with lock:
+        # Re-check after acquiring lock (another coroutine may have seeded while we waited)
+        if run._real_seeded:
+            return None
+
+        scenario = getattr(run, "_scenario_raw", None)
+        if not scenario:
+            try:
+                scenario = runtime.get_scenario(run.scenario_id).raw
+            except Exception:
+                return _action_error(
+                    status_code=503,
+                    code="SEEDING_FAILED",
+                    message="Failed to seed scenario into database. Please retry.",
+                    details={
+                        "run_id": str(run_id),
+                        "scenario_id": str(getattr(run, "scenario_id", "") or ""),
+                        "reason": "scenario_unavailable",
+                    },
+                )
+
+        try:
+            await _real_scenario_seeder.seed_scenario_into_db(session=session, scenario=scenario)
+            await session.commit()
+            run._real_seeded = True
+            logger.debug(
+                "interact.ensure_seeded: seeded scenario for run_id=%s scenario_id=%s",
+                run_id,
+                run.scenario_id,
+            )
+        except Exception:
+            logger.error(
+                "interact.ensure_seeded: seeding failed for run_id=%s",
+                run_id,
+                exc_info=True,
+            )
+            return _action_error(
+                status_code=503,
+                code="SEEDING_FAILED",
+                message="Failed to seed scenario into database. Please retry.",
+                details={
+                    "run_id": str(run_id),
+                    "scenario_id": str(getattr(run, "scenario_id", "") or ""),
+                },
+            )
+
+    return None
+
+
 def _require_run_accepts_actions_or_error(run_id: str) -> Optional[JSONResponse]:
     try:
         st = runtime.get_run_status(run_id)
@@ -717,6 +809,11 @@ async def action_trustline_create(
             details={"limit": req.limit},
         )
 
+    # Ensure scenario is seeded into DB so participants/equivalents/trustlines exist.
+    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return seed_err
+
     from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
     if err is not None:
         return err
@@ -908,6 +1005,11 @@ async def action_trustline_update(
             details={"new_limit": req.new_limit},
         )
 
+    # Ensure scenario is seeded into DB before searching for trustlines.
+    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return seed_err
+
     from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
     if err is not None:
         return err
@@ -1060,6 +1162,11 @@ async def action_trustline_close(
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
 
+    # Ensure scenario is seeded into DB before searching for trustlines.
+    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return seed_err
+
     from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
     if err is not None:
         return err
@@ -1210,6 +1317,11 @@ async def action_payment_real(
     if run_err is not None:
         return run_err
     assert run is not None
+
+    # Ensure scenario is seeded into DB so participants/equivalents/trustlines exist.
+    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return seed_err
 
     from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
     if err is not None:
@@ -1377,6 +1489,11 @@ async def action_clearing_real(
     if run_err is not None:
         return run_err
     assert run is not None
+
+    # Ensure scenario is seeded into DB so trustlines/participants exist for clearing.
+    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return seed_err
 
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
     if err is not None:

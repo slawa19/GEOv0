@@ -5,7 +5,7 @@ import type { InteractPhase, InteractState } from '../composables/useInteractMod
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { participantLabel } from '../utils/participants'
 import { renderOrDash } from '../utils/valueFormat'
-import { placeOverlayNearAnchor } from '../utils/overlayPosition'
+import { useOverlayPositioning } from '../utils/overlayPosition'
 
 type Props = {
   phase: InteractPhase
@@ -32,9 +32,9 @@ type Props = {
   confirmTrustlineClose: () => Promise<void> | void
   cancel: () => void
 
-  /** Optional anchor (host-relative screen coords) for positioning near the node
-   *  when opened from NodeCard. When null/undefined, falls back to CSS default (top-right). */
-  edgeAnchor?: { x: number; y: number } | null
+  /** Optional anchor (host-relative screen coords) для позиционирования панели рядом с
+   *  кликнутым ребром или нодой. При null/undefined применяется CSS default (right/top). */
+  anchor?: { x: number; y: number } | null
   /** Host element used as overlay viewport for clamping. */
   hostEl?: HTMLElement | null
 }
@@ -235,30 +235,14 @@ function onTrustlinePick(key: string) {
   props.selectTrustline?.(from, to)
 }
 
-/** Dynamic positioning: when edgeAnchor is provided (opened from NodeCard),
+/** Dynamic positioning: when anchor is provided (opened from NodeCard or edge click),
  *  place the panel near the anchor instead of the fixed CSS top-right position.
- *  When no anchor, return empty object to let CSS `.ds-ov-panel` defaults apply. */
-const anchorPositionStyle = computed(() => {
-  const anchor = props.edgeAnchor
-  if (!anchor) return {}
-
-  const PANEL_W = 360
-  const PANEL_H = 340
-  const rect = props.hostEl?.getBoundingClientRect()
-
-  const pos = placeOverlayNearAnchor({
-    anchor,
-    overlaySize: { w: PANEL_W, h: PANEL_H },
-    offset: { x: 0, y: 0 },
-    pad: 12,
-    viewport: rect ? { w: rect.width, h: rect.height } : undefined,
-  })
-
-  return {
-    ...pos,
-    right: 'auto',   // override CSS `right: 12px`
-  }
-})
+ *  When no anchor, returns {} to let CSS `.ds-ov-panel` defaults apply. */
+const anchorPositionStyle = useOverlayPositioning(
+  () => props.anchor,
+  () => props.hostEl,
+  { w: 340, h: 340 },
+)
 
 const newLimitInput = ref<HTMLInputElement | null>(null)
 
@@ -354,8 +338,13 @@ defineExpose({
             id="tl-limit"
             v-model="limit"
             class="ds-input ds-mono"
-            style="flex: 1"
+            style="width: 125px; flex: none"
+            type="text"
             inputmode="decimal"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
             placeholder="0.00"
             :aria-invalid="limit.trim() && !createValid ? 'true' : 'false'"
           />
@@ -375,8 +364,13 @@ defineExpose({
             ref="newLimitInput"
             v-model="newLimit"
             class="ds-input ds-mono"
-            style="flex: 1"
+            style="width: 125px; flex: none"
+            type="text"
             inputmode="decimal"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
             placeholder="0.00"
             :aria-invalid="newLimit.trim() && !updateValid ? 'true' : 'false'"
           />
@@ -424,6 +418,35 @@ defineExpose({
 </template>
 
 <style scoped>
+/* Compact: shrink panel to content width, cap at viewport */
+.ds-ov-panel {
+  width: fit-content;
+  min-width: 0;
+  max-width: min(380px, calc(100vw - 24px));
+}
+
+/* Compact panel padding override (global --ds-space-4 ≥ 18px is too wide here) */
+.ds-ov-panel :deep(.ds-panel__header),
+.ds-ov-panel :deep(.ds-panel__body) {
+  padding: 12px;
+}
+
+/* Select fields: don't stretch to full 1fr column width */
+.ds-controls__row .ds-select {
+  max-width: 180px;
+  min-width: 120px;
+}
+
+/* Fix: input+suffix (.ds-row) must not overflow the 1fr grid column.
+   Without min-width:0, the flex/grid item keeps its intrinsic size
+   and the row becomes wider than the select rows above it. */
+.ds-controls__row .ds-row {
+  min-width: 0;
+}
+.ds-controls__row .ds-row .ds-input {
+  min-width: 0;
+}
+
 .tl-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
