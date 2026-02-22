@@ -10,6 +10,9 @@ from typing import Any, Optional
 
 from app.schemas.simulator import SIMULATOR_API_VERSION, RunStatus
 from app.core.simulator.models import RunRecord
+from app.core.simulator.scenario_equivalent import (
+    effective_equivalent,
+)
 
 
 def utc_now() -> datetime:
@@ -134,7 +137,7 @@ def edges_by_equivalent(raw: dict[str, Any]) -> dict[str, list[tuple[str, str]]]
         status = str(tl.get("status") or "active").strip().lower()
         if status != "active":
             continue
-        eq = str(tl.get("equivalent") or "").strip()
+        eq = str(effective_equivalent(raw, tl) or "").strip().upper()
         if not eq:
             continue
         src = str(tl.get("from") or "").strip()

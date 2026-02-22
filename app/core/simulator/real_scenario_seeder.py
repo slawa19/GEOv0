@@ -10,6 +10,10 @@ from sqlalchemy import select
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.core.simulator.scenario_equivalent import (
+    effective_equivalent,
+    scenario_default_equivalent,
+)
 
 
 class RealScenarioSeeder:
@@ -43,8 +47,26 @@ class RealScenarioSeeder:
 
     async def seed_scenario_into_db(self, *, session: Any, scenario: dict[str, Any]) -> None:
         # Equivalents
-        eq_codes = [str(x).strip().upper() for x in (scenario.get("equivalents") or [])]
-        eq_codes = [c for c in eq_codes if c]
+        # Scenarios may omit the top-level 'equivalents' list (schema doesn't require it).
+        # Derive equivalent codes from:
+        # - scenario.equivalents[]
+        # - optional MVP shorthand: scenario.equivalent
+        # - trustlines[].equivalent (and fall back to scenario.equivalent)
+        eq_set: set[str] = set(
+            str(x).strip().upper() for x in (scenario.get("equivalents") or [])
+        )
+        eq_set.discard("")
+
+        default_eq = scenario_default_equivalent(scenario)
+        if default_eq:
+            eq_set.add(default_eq)
+
+        for tl in (scenario.get("trustlines") or []):
+            eq = effective_equivalent(scenario, tl)
+            if eq:
+                eq_set.add(str(eq).strip().upper())
+
+        eq_codes = sorted(eq_set)
 
         if eq_codes:
             existing_eq = (
@@ -119,7 +141,6 @@ class RealScenarioSeeder:
                 "blocked_participants": [],
             }
 
-            # Load ids
             eq_rows = (
                 (
                     await session.execute(
@@ -143,7 +164,7 @@ class RealScenarioSeeder:
             p_by_pid = {p.pid: p for p in p_rows}
 
             for tl in trustlines:
-                eq = str(tl.get("equivalent") or "").strip().upper()
+                eq = str(effective_equivalent(scenario, tl) or "").strip().upper()
                 if not eq or eq not in eq_by_code:
                     continue
                 from_pid = str(tl.get("from") or "").strip()

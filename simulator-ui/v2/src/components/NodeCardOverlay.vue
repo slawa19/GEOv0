@@ -70,6 +70,28 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
     (tl) => tl.from_pid === id || tl.to_pid === id,
   )
 })
+
+/** Format amount: drop redundant .00 fraction */
+function fmtAmt(v: string | number | null | undefined): string {
+  if (v == null) return '—'
+  const n = typeof v === 'number' ? v : parseFloat(String(v))
+  if (!Number.isFinite(n)) return renderOrDash(v)
+  return Number.isInteger(n) ? String(Math.round(n)) : String(n)
+}
+
+/** OUT trustlines (node = debtor), sorted by used DESC */
+const outTrustlines = computed<TrustlineInfo[]>(() =>
+  nodeTrustlines.value
+    .filter((tl) => tl.from_pid === props.node.id)
+    .sort((a, b) => parseFloat(b.used) - parseFloat(a.used)),
+)
+
+/** IN trustlines (node = creditor), sorted by used DESC */
+const inTrustlines = computed<TrustlineInfo[]>(() =>
+  nodeTrustlines.value
+    .filter((tl) => tl.to_pid === props.node.id)
+    .sort((a, b) => parseFloat(b.used) - parseFloat(a.used)),
+)
 </script>
 
 <template>
@@ -155,34 +177,41 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
             </button>
           </div>
 
-          <!-- Trustlines list -->
+          <!-- Trustlines list: grouped OUT / IN -->
           <div v-if="nodeTrustlines.length > 0" class="nco-trustlines">
-            <div class="nco-trustlines__header ds-label">Trustlines</div>
+
+            <!-- OUT group -->
+            <div class="nco-tl-group-header">OUT → {{ outTrustlines.length }}</div>
             <div
-              v-for="tl in nodeTrustlines"
+              v-for="tl in outTrustlines"
               :key="`${tl.from_pid}→${tl.to_pid}`"
               class="nco-trustline-row"
+              :title="`avail: ${fmtAmt(tl.available)}`"
             >
-              <span class="nco-trustline-row__dir" aria-hidden="true">
-                {{ tl.from_pid === node.id ? '→' : '←' }}
-              </span>
-              <span class="nco-trustline-row__peer ds-mono">
-                {{ tl.from_pid === node.id ? tl.to_name : tl.from_name }}
-              </span>
-              <span class="nco-trustline-row__amounts ds-mono">
-                {{ renderOrDash(tl.used) }}&thinsp;/&thinsp;{{ renderOrDash(tl.limit) }}
-                <span class="nco-trustline-row__available ds-text-secondary">(avail:&thinsp;{{ renderOrDash(tl.available) }})</span>
-              </span>
+              <span class="nco-trustline-row__peer ds-mono">{{ tl.to_name }}</span>
+              <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
                 title="Edit trustline"
                 aria-label="Edit trustline"
                 @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
-              >
-                ✏️
-              </button>
+              >✏️</button>
             </div>
+
+            <!-- IN group -->
+            <div class="nco-tl-group-header nco-tl-group-header--gap">IN ← {{ inTrustlines.length }}</div>
+            <div
+              v-for="tl in inTrustlines"
+              :key="`${tl.from_pid}→${tl.to_pid}`"
+              class="nco-trustline-row"
+              :title="`avail: ${fmtAmt(tl.available)}`"
+            >
+              <span class="nco-trustline-row__peer ds-mono">{{ tl.from_name }}</span>
+              <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
+              <span class="nco-trustline-row__no-edit" aria-hidden="true"></span>
+            </div>
+
           </div>
           <div v-else-if="trustlinesLoading" class="nco-trustlines__empty ds-label">
             <span class="ds-text-secondary">Loading trustlines…</span>
@@ -211,51 +240,48 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
   margin-top: 1px;
 }
 
-.nco-trustlines__header {
-  font-size: 0.72rem;
-  opacity: 0.6;
+/* Group heading: OUT → N / IN ← N */
+.nco-tl-group-header {
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 3px;
+  letter-spacing: 0.08em;
+  opacity: 0.55;
+  margin-bottom: 2px;
 }
 
+.nco-tl-group-header--gap {
+  margin-top: 5px;
+}
+
+/* Grid row: [peer-name] [used/limit] [edit-btn or placeholder] */
 .nco-trustline-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(60px, 80px) 1fr auto;
   align-items: center;
   gap: 4px;
   padding: 1px 0;
   font-size: 0.8rem;
 }
 
-.nco-trustline-row__dir {
-  flex-shrink: 0;
-  width: 1.2em;
-  text-align: center;
-  opacity: 0.7;
-}
-
 .nco-trustline-row__peer {
-  flex: 1 1 auto;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .nco-trustline-row__amounts {
-  flex-shrink: 0;
   font-size: 0.75rem;
+  text-align: right;
   opacity: 0.8;
+  font-variant-numeric: tabular-nums;
 }
 
-.nco-trustline-row__available {
-  font-size: 0.7rem;
-  opacity: 0.65;
-  margin-left: 2px;
+/* Empty placeholder in the edit column for IN rows keeps alignment */
+.nco-trustline-row__no-edit {
+  width: 1.6em;
 }
 
 .nco-trustline-row__edit {
-  flex-shrink: 0;
   font-size: 0.75rem;
   padding: 1px 3px;
   line-height: 1;

@@ -15,6 +15,7 @@ from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord, ScenarioRecord
 from app.core.simulator.net_balance_utils import atoms_to_net_sign, net_decimal_to_atoms
 from app.core.simulator import viz_rules
+from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.schemas.simulator import (
     SIMULATOR_API_VERSION,
     SimulatorGraphLink,
@@ -327,6 +328,7 @@ class SnapshotBuilder:
 def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> SimulatorGraphSnapshot:
     participants = raw.get("participants") or []
     trustlines = raw.get("trustlines") or []
+    eq_norm = str(equivalent or "").strip().upper()
 
     # Nodes
     nodes: list[SimulatorGraphNode] = []
@@ -357,7 +359,8 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
     # Links (only those matching equivalent)
     links: list[SimulatorGraphLink] = []
     for tl in trustlines:
-        if str(tl.get("equivalent") or "") != str(equivalent):
+        tl_eq = effective_equivalent(scenario=raw, payload=(tl or {}))
+        if tl_eq != eq_norm:
             continue
         src = str(tl.get("from") or "")
         dst = str(tl.get("to") or "")

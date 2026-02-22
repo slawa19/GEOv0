@@ -192,6 +192,14 @@ def _read_scenario_info(scenario_path: Path) -> ScenarioInfo:
     else:
         _die(f"equivalents must be an array of strings: {scenario_path}")
 
+    base_eq_raw = data.get("baseEquivalent")
+    if base_eq_raw is not None:
+        if not isinstance(base_eq_raw, str) or not base_eq_raw.strip():
+            _die(f"baseEquivalent must be a non-empty string when present: {scenario_path}")
+        base_eq = base_eq_raw.strip().upper()
+        if base_eq and base_eq not in set(x.strip().upper() for x in equivalents):
+            equivalents = _stable_sorted_strs([*equivalents, base_eq])
+
     participants_raw = data.get("participants")
     if not isinstance(participants_raw, list):
         _die(f"participants must be an array: {scenario_path}")

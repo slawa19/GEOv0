@@ -11,6 +11,10 @@ from app.config import settings
 from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.models import RunRecord
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
+from app.core.simulator.scenario_equivalent import (
+    effective_equivalent,
+    scenario_default_equivalent,
+)
 from app.db.models.audit_log import IntegrityAuditLog
 
 
@@ -243,11 +247,22 @@ class RealTickOrchestrator:
                         run._real_participants = await rr._load_real_participants(
                             session, scenario
                         )
-                        run._real_equivalents = [
-                            str(x)
+                        eq_set: set[str] = set(
+                            str(x).strip().upper()
                             for x in (scenario.get("equivalents") or [])
-                            if str(x).strip()
-                        ]
+                        )
+                        eq_set.discard("")
+
+                        default_eq = scenario_default_equivalent(scenario)
+                        if default_eq:
+                            eq_set.add(default_eq)
+
+                        for tl in (scenario.get("trustlines") or []):
+                            eq = effective_equivalent(scenario, tl)
+                            if eq:
+                                eq_set.add(str(eq).strip().upper())
+
+                        run._real_equivalents = sorted(eq_set)
 
                     participants = run._real_participants or []
                     equivalents = run._real_equivalents or []

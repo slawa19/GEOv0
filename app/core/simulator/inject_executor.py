@@ -23,6 +23,7 @@ from app.schemas.simulator import (
     TopologyChangedNodeRef,
     TopologyChangedPayload,
 )
+from app.core.simulator.scenario_equivalent import effective_equivalent
 
 
 def invalidate_caches_after_inject(
@@ -265,7 +266,7 @@ class InjectExecutor:
         async def op_inject_debt(eff: dict[str, Any]) -> bool:
             nonlocal applied, skipped, total_applied
 
-            eq = str(eff.get("equivalent") or "").strip().upper()
+            eq = effective_equivalent(scenario=scenario, payload=(eff or {}))
             # Contract: prefer from/to (creditor->debtor), but keep
             # backward-compatible debtor/creditor keys.
             creditor_pid = str(eff.get("creditor") or eff.get("from") or "").strip()
@@ -432,7 +433,7 @@ class InjectExecutor:
                         if not isinstance(itl, dict):
                             continue
                         sponsor_pid = str(itl.get("sponsor") or "").strip()
-                        eq_code = str(itl.get("equivalent") or "").strip().upper()
+                        eq_code = effective_equivalent(scenario=scenario, payload=(itl or {}))
                         raw_limit = itl.get("limit")
                         direction = str(itl.get("direction") or "sponsor_credits_new").strip()
 
@@ -529,7 +530,7 @@ class InjectExecutor:
             try:
                 from_pid_val = str(eff.get("from") or "").strip()
                 to_pid_val = str(eff.get("to") or "").strip()
-                eq_code = str(eff.get("equivalent") or "").strip().upper()
+                eq_code = effective_equivalent(scenario=scenario, payload=(eff or {}))
                 raw_limit = eff.get("limit")
 
                 if not from_pid_val or not to_pid_val or not eq_code:
@@ -696,7 +697,7 @@ class InjectExecutor:
                         to = str(tl.get("to") or "").strip()
                         if frm != freeze_pid and to != freeze_pid:
                             continue
-                        eq = str(tl.get("equivalent") or "").strip().upper()
+                        eq = effective_equivalent(scenario=scenario, payload=(tl or {}))
                         if eq:
                             incident_eqs.add(eq)
 
@@ -769,7 +770,7 @@ class InjectExecutor:
                         continue
                     frm = str(tl.get("from") or "").strip()
                     to = str(tl.get("to") or "").strip()
-                    eq = str(tl.get("equivalent") or "").strip()
+                    eq = effective_equivalent(scenario=scenario, payload=(tl or {}))
                     st = str(tl.get("status") or "").strip().lower()
                     if (frm in frozen_set or to in frozen_set) and st == "active":
                         frozen_edges_for_sse.append(

@@ -6,6 +6,7 @@ from typing import Any
 
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.models import RunRecord
+from app.core.simulator.scenario_equivalent import effective_equivalent
 
 
 def invalidate_routing_cache(*, equivalents: set[str]) -> None:
@@ -63,7 +64,7 @@ def invalidate_caches_after_inject(
         # 6. run._edges_by_equivalent — add edges for new trustlines.
         if new_trustlines_scenario and run._edges_by_equivalent is not None:
             for tl_dict in new_trustlines_scenario:
-                eq = str(tl_dict.get("equivalent") or "").strip()
+                eq = effective_equivalent(scenario=scenario, payload=tl_dict)
                 src = str(tl_dict.get("from") or "").strip()
                 dst = str(tl_dict.get("to") or "").strip()
                 if eq and src and dst:

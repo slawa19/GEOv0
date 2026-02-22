@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import select
 
 from app.config import settings
 from app.db.models.debt import Debt
@@ -34,7 +35,14 @@ def interact_actions_enabled(monkeypatch):
     monkeypatch.setattr(
         simulator_module.runtime,
         "get_run",
-        lambda run_id: SimpleNamespace(run_id=str(run_id), state="running", owner_id=""),
+        lambda run_id: SimpleNamespace(
+            run_id=str(run_id),
+            state="running",
+            owner_id="",
+            # New lazy seeding helper accesses these fields.
+            _real_seeded=True,
+            _real_seeding_lock=None,
+        ),
     )
 
     return simulator_module
@@ -62,6 +70,92 @@ async def _seed_alice_bob_uah(db_session):
     db_session.add_all([alice, bob, uah])
     await db_session.commit()
     return alice, bob, uah
+
+
+@pytest.mark.asyncio
+async def test_action_trustline_close_seeds_when_run_paused(client, db_session, monkeypatch):
+    """Regression: Interact Mode run can start paused (no real ticks), so DB may be unseeded.
+
+    trustline-close must lazily seed scenario participants/equivalents/trustlines into DB
+    and then close the requested trustline (no TRUSTLINE_NOT_FOUND).
+    """
+
+    import app.api.v1.simulator as simulator_module
+
+    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+
+    scenario = {
+        "participants": [
+            {"id": "SHOP", "name": "Магазин", "type": "business", "status": "active"},
+            {"id": "VASYL", "name": "Василь", "type": "person", "status": "active"},
+        ],
+        "trustlines": [
+            {"from": "SHOP", "to": "VASYL", "equivalent": "UAH", "limit": "700", "status": "active"}
+        ],
+    }
+
+    # Provide a real-mode RunRecord-like object compatible with _get_run_checked + _ensure_run_seeded.
+    run = SimpleNamespace(
+        run_id="test-run",
+        scenario_id="scenario-1",
+        mode="real",
+        state="paused",
+        owner_id="",
+        _scenario_raw=scenario,
+        _real_seeded=False,
+        _real_seeding_lock=None,
+    )
+
+    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda run_id: run)
+    monkeypatch.setattr(
+        simulator_module.runtime,
+        "get_scenario",
+        lambda scenario_id: SimpleNamespace(scenario_id=str(scenario_id), raw=scenario),
+    )
+
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    # Act
+    r = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-close",
+        headers=headers,
+        json={
+            "from_pid": "SHOP",
+            "to_pid": "VASYL",
+            "equivalent": "UAH",
+            "client_action_id": "c_tl_close_seeded_1",
+        },
+    )
+
+    # Assert
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload.get("ok") is True
+    assert isinstance(payload.get("trustline_id"), str) and payload["trustline_id"]
+
+    # And DB should now contain the closed trustline row.
+    shop = (
+        await db_session.execute(select(Participant).where(Participant.pid == "SHOP"))
+    ).scalar_one_or_none()
+    vasyl = (
+        await db_session.execute(select(Participant).where(Participant.pid == "VASYL"))
+    ).scalar_one_or_none()
+    eq = (
+        await db_session.execute(select(Equivalent).where(Equivalent.code == "UAH"))
+    ).scalar_one_or_none()
+    assert shop is not None and vasyl is not None and eq is not None
+
+    tl = (
+        await db_session.execute(
+            select(TrustLine).where(
+                TrustLine.from_participant_id == shop.id,
+                TrustLine.to_participant_id == vasyl.id,
+                TrustLine.equivalent_id == eq.id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert tl is not None
+    assert str(tl.status) == "closed"
 
 
 def test_build_clearing_done_cycle_edges_payload_merges_cycles_stable_and_dedup() -> None:
@@ -558,11 +652,15 @@ async def test_action_payment_real_emits_tx_updated_with_edge_patch(
     # Fake runtime run record so SSE emission is executed (not swallowed by NotFound).
     run = SimpleNamespace(
         run_id="test-run",
+        scenario_id="scenario-1",
         state="running",
         owner_id="",
         tick_index=0,
         _real_participants=[(alice.id, alice.pid), (bob.id, bob.pid)],
         _real_viz_by_eq={},
+        # New lazy seeding helper accesses these fields.
+        _real_seeded=True,
+        _real_seeding_lock=None,
     )
     monkeypatch.setattr(simulator_module.runtime, "get_run", lambda _run_id: run)
 
@@ -981,7 +1079,15 @@ async def test_trustline_create_used_read_error_returns_503_and_error_envelope(
     monkeypatch.setattr(
         simulator_module.runtime,
         "get_run",
-        lambda run_id: SimpleNamespace(run_id=str(run_id), state="running", owner_id=""),
+        lambda run_id: SimpleNamespace(
+            run_id=str(run_id),
+            scenario_id="scenario-1",
+            state="running",
+            owner_id="",
+            # New lazy seeding helper accesses these fields.
+            _real_seeded=True,
+            _real_seeding_lock=None,
+        ),
     )
 
     alice = Participant(

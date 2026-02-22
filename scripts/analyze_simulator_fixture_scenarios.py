@@ -93,7 +93,17 @@ def _scenario_row(path: Path) -> ScenarioRow:
     scenario_id = str(data.get("scenario_id") or path.parent.name)
     participants = data.get("participants") or []
     trustlines = data.get("trustlines") or []
+    eq_set: set[str] = set()
     equivalents = data.get("equivalents") or []
+    if isinstance(equivalents, list):
+        for x in equivalents:
+            if isinstance(x, str) and x.strip():
+                eq_set.add(x.strip().upper())
+
+    base_eq_raw = data.get("baseEquivalent")
+    base_eq = str(base_eq_raw or "").strip().upper() if base_eq_raw is not None else ""
+    if base_eq:
+        eq_set.add(base_eq)
     events = data.get("events") or []
     settings = data.get("settings") or {}
 
@@ -117,12 +127,24 @@ def _scenario_row(path: Path) -> ScenarioRow:
             auto_tx_proxy = True
             break
 
-    by_eq: dict[str, list[tuple[str, str]]] = {eq: [] for eq in equivalents}
+    # If trustlines omit equivalent, fall back to scenario baseEquivalent.
+    for tl in trustlines:
+        if not isinstance(tl, dict):
+            continue
+        eq = str(tl.get("equivalent") or "").strip().upper() or base_eq
+        if eq:
+            eq_set.add(eq)
+
+    equivalents_out = sorted(eq_set)
+
+    by_eq: dict[str, list[tuple[str, str]]] = {eq: [] for eq in equivalents_out}
     if not by_eq:
         by_eq = {"<none>": []}
 
     for tl in trustlines:
-        eq = tl.get("equivalent") or (equivalents[0] if equivalents else "<none>")
+        if not isinstance(tl, dict):
+            continue
+        eq = str(tl.get("equivalent") or "").strip().upper() or base_eq or "<none>"
         by_eq.setdefault(eq, []).append((tl.get("from"), tl.get("to")))
 
     cycle_hint: dict[str, dict[str, int | bool]] = {}
@@ -143,7 +165,7 @@ def _scenario_row(path: Path) -> ScenarioRow:
         rel_path=path.relative_to(ROOT).as_posix(),
         participants=len(participants),
         trustlines=len(trustlines),
-        equivalents=list(equivalents),
+        equivalents=list(equivalents_out),
         manual_mode=manual_mode,
         auto_tx_proxy=auto_tx_proxy,
         warmup_ticks=warmup_ticks,

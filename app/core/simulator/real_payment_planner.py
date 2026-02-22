@@ -6,6 +6,8 @@ import random
 from decimal import Decimal, ROUND_DOWN
 from typing import Any, Callable
 
+from app.core.simulator.scenario_equivalent import effective_equivalent
+
 
 class RealPaymentPlanner:
     def __init__(
@@ -122,7 +124,7 @@ class RealPaymentPlanner:
             if status != "active":
                 continue
 
-            eq = str(tl.get("equivalent") or "").strip()
+            eq = effective_equivalent(scenario=scenario, payload=(tl or {}))
             frm = str(tl.get("from") or "").strip()
             to = str(tl.get("to") or "").strip()
             if not eq or not frm or not to:

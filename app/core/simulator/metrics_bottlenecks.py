@@ -21,6 +21,7 @@ from app.schemas.simulator import (
     MetricsResponse,
 )
 from app.utils.exceptions import BadRequestException, NotFoundException
+from app.core.simulator.scenario_equivalent import effective_equivalent
 
 
 class MetricsBottlenecks:
@@ -281,7 +282,12 @@ class MetricsBottlenecks:
                 pass
 
         # Read trustlines so we have access to limits.
-        tls = [tl for tl in (scenario.get("trustlines") or []) if str(tl.get("equivalent") or "") == str(equivalent)]
+        eq_norm = str(equivalent or "").strip().upper()
+        tls = [
+            tl
+            for tl in (scenario.get("trustlines") or [])
+            if effective_equivalent(scenario=scenario, payload=(tl or {})) == eq_norm
+        ]
 
         def seed_f(*parts: str) -> float:
             h = hashlib.sha256("|".join(parts).encode("utf-8")).digest()

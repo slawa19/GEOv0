@@ -9,6 +9,10 @@ from typing import Any, Optional
 from jsonschema import Draft202012Validator
 
 from app.core.simulator.models import ScenarioRecord
+from app.core.simulator.scenario_equivalent import (
+    effective_equivalent,
+    scenario_default_equivalent,
+)
 from app.utils.exceptions import BadRequestException
 
 
@@ -72,7 +76,22 @@ def scenario_to_record(
 
     participants = raw.get("participants") or []
     trustlines = raw.get("trustlines") or []
-    equivalents = raw.get("equivalents") or []
+    equivalents_raw = raw.get("equivalents")
+    eq_set: set[str] = set(
+        str(x).strip().upper() for x in (equivalents_raw or [])
+    )
+    eq_set.discard("")
+
+    default_eq = scenario_default_equivalent(raw)
+    if default_eq:
+        eq_set.add(default_eq)
+
+    for tl in (trustlines or []):
+        eq = effective_equivalent(raw, tl)
+        if eq:
+            eq_set.add(str(eq).strip().upper())
+
+    equivalents = sorted(eq_set)
 
     name = raw.get("name")
     return ScenarioRecord(

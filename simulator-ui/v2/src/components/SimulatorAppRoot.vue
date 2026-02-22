@@ -470,15 +470,29 @@ function onEdgeDetailCloseLine() {
 
 // BUG-1: NodeCardOverlay interact mode handlers
 function onInteractSendPayment(fromPid: string) {
+  // Снапшот позиции NodeCard ДО закрытия (после закрытия nodeCardStyle теряется).
+  const snapshot = parseNodeCardAnchor(nodeCardStyle.value)
+
   setNodeCardOpen(false)
   interact.mode.startPaymentFlow()
   interact.mode.setPaymentFromPid(fromPid)
+
+  // nextTick: дожидаемся, пока watcher на interactPhase в composable сбросит anchor,
+  // только потом устанавливаем новый (иначе composable-watcher перезапишет).
+  void nextTick(() => openPanelFrom('node-card', snapshot))
 }
 
 function onInteractNewTrustline(fromPid: string) {
+  // Снапшот позиции NodeCard ДО закрытия (после закрытия nodeCardStyle теряется).
+  const snapshot = parseNodeCardAnchor(nodeCardStyle.value)
+
   setNodeCardOpen(false)
   interact.mode.startTrustlineFlow()
   interact.mode.setTrustlineFromPid(fromPid)
+
+  // nextTick: дожидаемся, пока watcher на interactPhase в composable сбросит anchor,
+  // только потом устанавливаем новый (иначе composable-watcher перезапишет).
+  void nextTick(() => openPanelFrom('node-card', snapshot))
 }
 
 function onInteractEditTrustline(fromPid: string, toPid: string) {

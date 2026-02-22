@@ -14,6 +14,7 @@ from app.core.simulator.models import (
     TrustDriftConfig,
     TrustDriftResult,
 )
+from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.db.models.equivalent import Equivalent
 from app.db.models.trustline import TrustLine
@@ -107,7 +108,7 @@ class TrustDriftEngine:
 
         trustlines = scenario.get("trustlines") or []
         for tl in trustlines:
-            eq = str(tl.get("equivalent") or "").strip().upper()
+            eq = str(effective_equivalent(scenario, tl) or "").strip().upper()
             creditor_pid = str(tl.get("from") or "").strip()
             debtor_pid = str(tl.get("to") or "").strip()
             if not eq or not creditor_pid or not debtor_pid:
@@ -258,7 +259,10 @@ class TrustDriftEngine:
                     if (
                         str(s_tl.get("from") or "").strip() == creditor_pid
                         and str(s_tl.get("to") or "").strip() == debtor_pid
-                        and str(s_tl.get("equivalent") or "").strip().upper() == eq_upper
+                        and str(effective_equivalent(scenario, s_tl) or "")
+                        .strip()
+                        .upper()
+                        == eq_upper
                     ):
                         s_tl["limit"] = float(new_limit)
                         break
@@ -314,7 +318,7 @@ class TrustDriftEngine:
         trustlines = scenario.get("trustlines") or []
 
         for tl in trustlines:
-            eq_code = str(tl.get("equivalent") or "").strip().upper()
+            eq_code = str(effective_equivalent(scenario, tl) or "").strip().upper()
             creditor_pid = str(tl.get("from") or "").strip()
             debtor_pid = str(tl.get("to") or "").strip()
             status = str(tl.get("status") or "active").strip().lower()

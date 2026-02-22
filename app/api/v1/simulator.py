@@ -26,6 +26,7 @@ from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.sse_broadcast import SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
@@ -684,7 +685,10 @@ def _mutate_runtime_trustline_topology_best_effort(
                             if not isinstance(tl, dict):
                                 continue
                             if (
-                                str(tl.get("equivalent") or "").strip().upper() == eq
+                                str(effective_equivalent(scenario, tl) or "")
+                                .strip()
+                                .upper()
+                                == eq
                                 and _norm_pid(tl.get("from")) == fp
                                 and _norm_pid(tl.get("to")) == tp
                             ):
@@ -708,7 +712,10 @@ def _mutate_runtime_trustline_topology_best_effort(
                             for tl in tls
                             if not (
                                 isinstance(tl, dict)
-                                and str(tl.get("equivalent") or "").strip().upper() == eq
+                                and str(effective_equivalent(scenario, tl) or "")
+                                .strip()
+                                .upper()
+                                == eq
                                 and _norm_pid(tl.get("from")) == fp
                                 and _norm_pid(tl.get("to")) == tp
                             )
@@ -1662,6 +1669,11 @@ async def action_trustlines_list(
     _run, run_err = _get_run_for_readonly_actions_or_error(run_id, actor)
     if run_err is not None:
         return run_err
+
+    # Ensure scenario is seeded into DB so equivalent/participant resolution works.
+    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return seed_err
 
     eq, err = await _resolve_equivalent_or_error(session=db, code=str(equivalent or ""))
     if err is not None:
