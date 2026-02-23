@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
+import { type ActivePanelKey, useActivePanelState } from '../composables/useActivePanelState'
 
 type Props = {
   phase: InteractPhase
@@ -24,15 +25,9 @@ const isDisabled = computed(() => !!props.busy || !!props.actionsDisabled || !!p
 
 const isIdle = computed(() => String(props.phase ?? '').toLowerCase() === 'idle')
 
-const activeKey = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
-  const p = String(props.phase ?? '').toLowerCase()
-  if (p.includes('payment')) return 'payment'
-  if (p.includes('trustline')) return 'trustline'
-  if (p.includes('clearing')) return 'clearing'
-  return null
-})
+const { activeKey } = useActivePanelState(computed(() => props.phase))
 
-function titleFor(key: 'payment' | 'trustline' | 'clearing', idleTitle: string): string {
+function titleFor(key: ActivePanelKey, idleTitle: string): string {
   if (!isIdle.value && activeKey.value !== key) return 'Cancel current action first'
   return idleTitle
 }

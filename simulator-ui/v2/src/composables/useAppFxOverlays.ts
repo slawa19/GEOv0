@@ -2,6 +2,7 @@ import { createFxState, resetFxState } from '../render/fxRenderer'
 import { createTimerRegistry } from '../demo/timerRegistry'
 import { useFloatingLabelsViewFx } from './useFloatingLabelsViewFx'
 import { type LayoutNodeLike, useOverlayState } from './useOverlayState'
+import { getCurrentInstance, onUnmounted } from 'vue'
 
 export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   getLayoutNodeById: (id: string) => N | undefined
@@ -19,6 +20,15 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
 }) {
   const fxState = createFxState()
   const timers = createTimerRegistry()
+
+  // M19: Timer registry is local to this composable instance; ensure we clean up
+  // all scheduled timeouts on component unmount to avoid leaking ticking timers.
+  // Guard against calling composable outside of a component setup() (tests).
+  if (getCurrentInstance()) {
+    onUnmounted(() => {
+      timers.clearAll()
+    })
+  }
 
   // Dev-only diagnostics (plan §10): expose timer stats on localhost.
   // This helps validate keepCritical behavior during snapshot refreshes.

@@ -1,6 +1,7 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { LayoutLink } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
+import { clamp01 } from '../utils/math'
 import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
@@ -20,10 +21,6 @@ function linkAlpha(l: GraphLink, mapping: VizMapping): number {
 
 function isIncident(link: LayoutLink, nodeId: string) {
   return link.source === nodeId || link.target === nodeId
-}
-
-function clamp01(v: number) {
-  return Math.max(0, Math.min(1, v))
 }
 
 type Palette = Record<string, { color: string; label?: string }>

@@ -1,8 +1,8 @@
 import { readonly, ref, watch } from 'vue'
 import type { Ref } from 'vue'
+import type { Point } from '../types/layout'
+export type { Point } from '../types/layout'
 import type { InteractPhase } from './useInteractMode'
-
-export type Point = { x: number; y: number }
 
 /**
  * Источник открытия панели.

@@ -1,7 +1,9 @@
- <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
+import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
+import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { participantLabel } from '../utils/participants'
 import { renderOrDash } from '../utils/valueFormat'
@@ -131,28 +133,21 @@ async function onUpdate() {
 async function onClose() {
   if (props.busy) return
 
-  // Destructive confirmation: first click arms, second confirms.
-  if (!closeArmed.value) {
-    closeArmed.value = true
-    return
-  }
-
-  closeArmed.value = false
-  await props.confirmTrustlineClose()
+  void confirmCloseOrArm(async () => {
+    await props.confirmTrustlineClose()
+  })
 }
 
-const closeArmed = ref(false)
-
-function disarmClose() {
-  closeArmed.value = false
-}
-
-function onInteractEsc(ev: Event) {
-  if (!closeArmed.value) return
-  disarmClose()
-  // Consume ESC: prevent the global interact cancel (SimulatorAppRoot).
-  ev.preventDefault()
-}
+const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm } = useDestructiveConfirmation({
+  disarmOn: [
+    // When changing phase, always cancel the confirmation state.
+    { source: () => props.phase },
+    // When switching selected trustline, cancel the confirmation state.
+    { source: () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}` },
+    // When the UI becomes busy, cancel the confirmation state.
+    { source: () => props.busy, when: (b) => !!b },
+  ],
+})
 
 const title = computed(() => {
   const from = props.state.fromPid
@@ -167,44 +162,9 @@ const isCreate = computed(() => props.phase === 'confirm-trustline-create')
 const isEdit = computed(() => props.phase === 'editing-trustline')
 const open = computed(() => isPickFrom.value || isPickTo.value || isCreate.value || isEdit.value)
 
-watch(
-  () => props.phase,
-  () => disarmClose(),
-)
-
-watch(
-  () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}`,
-  () => disarmClose(),
-)
-
-watch(
-  () => props.busy,
-  (b) => {
-    if (b) disarmClose()
-  },
-)
-
-onMounted(() => {
-  if (typeof window === 'undefined') return
-  window.addEventListener('geo:interact-esc', onInteractEsc)
-})
-
-onUnmounted(() => {
-  if (typeof window === 'undefined') return
-  window.removeEventListener('geo:interact-esc', onInteractEsc)
-})
-
-const participantsSorted = computed(() => {
-  const items = Array.isArray(props.participants) ? props.participants : []
-  return [...items]
-    .filter((p) => String(p?.pid ?? '').trim())
-    .sort((a, b) => participantLabel(a).localeCompare(participantLabel(b)))
-})
-
-const toParticipants = computed(() => {
-  const from = String(props.state.fromPid ?? '').trim()
-  if (!from) return participantsSorted.value
-  return participantsSorted.value.filter(p => String(p?.pid ?? '').trim() !== from)
+const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
+  participants: () => props.participants,
+  fromParticipantId: () => props.state.fromPid,
 })
 
 const trustlinesSorted = computed(() => {

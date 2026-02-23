@@ -1,8 +1,7 @@
 import type { GraphLink } from '../types'
+import type { Point } from '../types/layout'
 import type { HoveredEdgeState } from './useOverlayState'
 import { closestPointOnSegment, type EdgeSeg } from './usePicking'
-
-type Point = { x: number; y: number }
 
 type UseEdgeHoverDeps = {
   hoveredEdge: HoveredEdgeState

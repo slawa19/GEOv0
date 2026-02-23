@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed } from 'vue'
 
 import { placeOverlayNearAnchor } from '../utils/overlayPosition'
 import { renderOrDash } from '../utils/valueFormat'
+
+import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 
@@ -87,56 +89,21 @@ const title = computed(() => {
   return props.state.selectedEdgeKey ?? 'Edge'
 })
 
-const closeArmed = ref(false)
-
-function disarmClose() {
-  closeArmed.value = false
-}
+const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm } = useDestructiveConfirmation({
+  disarmOn: [
+    // When popup closes (including forceHidden), cancel the confirmation state.
+    { source: open, when: (isOpen) => !isOpen },
+    // When switching the selected trustline, cancel the confirmation state.
+    { source: () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}` },
+    // When the UI becomes busy, cancel the confirmation state.
+    { source: () => props.busy, when: (b) => !!b },
+  ],
+})
 
 function onCloseLine() {
   if (props.busy) return
-
-  // Destructive confirmation: first click arms, second confirms.
-  if (!closeArmed.value) {
-    closeArmed.value = true
-    return
-  }
-
-  closeArmed.value = false
-  emit('closeLine')
+  void confirmCloseOrArm(() => emit('closeLine'))
 }
-
-function onInteractEsc(ev: Event) {
-  if (!closeArmed.value) return
-  disarmClose()
-  ev.preventDefault()
-}
-
-watch(open, (isOpen) => {
-  if (!isOpen) disarmClose()
-})
-
-watch(
-  () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}`,
-  () => disarmClose(),
-)
-
-watch(
-  () => props.busy,
-  (b) => {
-    if (b) disarmClose()
-  },
-)
-
-onMounted(() => {
-  if (typeof window === 'undefined') return
-  window.addEventListener('geo:interact-esc', onInteractEsc)
-})
-
-onUnmounted(() => {
-  if (typeof window === 'undefined') return
-  window.removeEventListener('geo:interact-esc', onInteractEsc)
-})
 </script>
 
 <template>

@@ -2,8 +2,7 @@
 import { computed, ref } from 'vue'
 import type { RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import type { AdminRunSummary } from '../api/simulatorApi'
-
-type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
+import type { UiThemeId } from '../types/uiPrefs'
 
 type Props = {
   apiMode: 'fixtures' | 'real'

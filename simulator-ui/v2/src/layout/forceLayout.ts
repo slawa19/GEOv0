@@ -398,14 +398,14 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     }
   })
 
-  const posCheck = new Map(nodes.map((nn) => [nn.id, nn]))
   const links: LayoutLink[] = snapshot.links.map((l) => ({
     ...l,
     __key: keyEdge(l.source, l.target),
   }))
 
   for (const l of links) {
-    if (!posCheck.has(l.source) || !posCheck.has(l.target)) {
+    // Avoid per-call Map allocation in hot path: idxById already indexes all nodes.
+    if (!idxById.has(l.source) || !idxById.has(l.target)) {
       throw new Error(`Dangling link in layout: ${l.source}→${l.target}`)
     }
   }

@@ -1,7 +1,7 @@
 import type { Ref, WatchStopHandle } from 'vue'
 import { watch } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
-import type { LabelsLod, Quality } from '../types/uiPrefs'
+import { normalizeUiThemeId, type LabelsLod, type Quality, type UiThemeId } from '../types/uiPrefs'
 
 type StorageLike = {
   getItem: (key: string) => string | null
@@ -146,16 +146,6 @@ export function usePersistedSimulatorPrefs(deps: UsePersistedSimulatorPrefsDeps)
 // Unlike usePersistedSimulatorPrefs it has no reactive watchers and requires
 // no layout/quality dependencies.
 // ---------------------------------------------------------------------------
-
-type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
-
-function normalizeUiThemeId(v: unknown): UiThemeId {
-  const s = String(v ?? '').trim().toLowerCase()
-  if (s === 'shadcn') return 'shadcn'
-  if (s === 'saas') return 'saas'
-  if (s === 'library') return 'library'
-  return 'hud'
-}
 
 export function useSimulatorStorage(storage?: StorageLike) {
   const _storage: StorageLike & { removeItem: (key: string) => void } =

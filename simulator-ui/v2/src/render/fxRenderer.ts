@@ -42,13 +42,12 @@
 
 import type { VizMapping } from '../vizMapping'
 import type { LayoutNode } from './nodePainter'
+import { clamp01 } from '../utils/math'
 import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
 import { roundedRectPath, roundedRectPath2D } from './roundedRect'
 import { sizeForNode } from './nodePainter'
-
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 
 // Persistent Path2D cache: survives multiple frames to avoid rebuilding on every tick.
 // Key includes rounded position (1px grid) so physics micro-movements don't thrash the cache.

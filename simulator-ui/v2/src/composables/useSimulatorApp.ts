@@ -39,7 +39,7 @@ import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
-import { getFxConfig, intensityScale, CLEARING_LABEL_COLOR } from '../config/fxConfig'
+import { FX_CONFIG, intensityScale, CLEARING_LABEL_COLOR } from '../config/fxConfig'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
 
@@ -1098,7 +1098,7 @@ export function useSimulatorApp() {
     }
   }
 
-  const REAL_CLEARING_FX = getFxConfig('real')
+  const REAL_CLEARING_FX = FX_CONFIG.clearing
 
   function pushFloatingLabelWhenReady(
     opts: Parameters<typeof pushFloatingLabel>[0],

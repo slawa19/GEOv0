@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import type { UiThemeId } from '../types/uiPrefs'
 
-type ThemeId = 'shadcn' | 'saas' | 'library' | 'hud'
-
-const theme = ref<ThemeId>('hud')
+const theme = ref<UiThemeId>('hud')
 const density = ref<'comfortable' | 'compact'>('comfortable')
 const reducedMotion = ref(false)
 

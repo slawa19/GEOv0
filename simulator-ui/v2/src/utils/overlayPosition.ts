@@ -1,10 +1,9 @@
 import { computed, type ComputedRef } from 'vue'
+import type { Point } from '../types/layout'
 
-export type Point = { x: number; y: number }
+import { clamp } from './math'
 
-export function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v))
-}
+export type { Point } from '../types/layout'
 
 /**
  * Clamp an overlay with known (or fallback) size to the viewport.

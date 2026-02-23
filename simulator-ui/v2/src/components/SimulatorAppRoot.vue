@@ -14,29 +14,21 @@ import DevPerfOverlay from './DevPerfOverlay.vue'
 import ErrorToast from './ErrorToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 
-import { computed, isRef, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
-import type { InteractPhase } from '../composables/useInteractMode'
-import { useInteractPanelPosition } from '../composables/useInteractPanelPosition'
-import type { Point } from '../composables/useInteractPanelPosition'
-import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
+ import type { InteractPhase } from '../composables/useInteractMode'
+ import { useActivePanelState } from '../composables/useActivePanelState'
+ import { useInteractPanelPosition } from '../composables/useInteractPanelPosition'
+ import type { Point } from '../composables/useInteractPanelPosition'
+ import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
+ import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
 
 // TD-1: all localStorage access is delegated to this composable.
 const simulatorStorage = useSimulatorStorage()
 
-type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
-
-function normalizeThemeId(v: unknown): UiThemeId {
-  const s = String(v ?? '').trim().toLowerCase()
-  if (s === 'shadcn') return 'shadcn'
-  if (s === 'saas') return 'saas'
-  if (s === 'library') return 'library'
-  return 'hud'
-}
-
 function readThemeFromUrl(): UiThemeId {
   try {
-    return normalizeThemeId(new URLSearchParams(window.location.search).get('theme'))
+    return normalizeUiThemeId(new URLSearchParams(window.location.search).get('theme'))
   } catch {
     return 'hud'
   }
@@ -62,7 +54,7 @@ function syncThemeFromUrl() {
 }
 
 function setUiTheme(next: UiThemeId) {
-  const theme = normalizeThemeId(next)
+  const theme = normalizeUiThemeId(next)
   uiTheme.value = theme
   // TD-1: delegated to composable — no direct localStorage access.
   simulatorStorage.writeUiTheme(theme)
@@ -75,7 +67,6 @@ function setUiTheme(next: UiThemeId) {
   } catch {
     // ignore
   }
-
 }
 
 onMounted(() => {
@@ -180,19 +171,9 @@ const {
   resetView,
 } = app
 
-const interactPhase = computed<InteractPhase>(() => {
-  // Real app: `phase` is a Ref. Unit tests may mock it as a plain string.
-  const p = interact.mode.phase as any
-  return (isRef(p) ? p.value : p) as InteractPhase
-})
+const interactPhase = computed<InteractPhase>(() => interact.mode.phase.value as InteractPhase)
 
-const activePanelType = computed<'payment' | 'trustline' | 'clearing' | null>(() => {
-  const p = String(interactPhase.value ?? '').toLowerCase()
-  if (p.includes('payment')) return 'payment'
-  if (p.includes('trustline')) return 'trustline'
-  if (p.includes('clearing')) return 'clearing'
-  return null
-})
+const { activePanelType } = useActivePanelState(interactPhase)
 
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false

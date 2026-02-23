@@ -1,8 +1,6 @@
-export type Rgb = { r: number; g: number; b: number }
+import { clamp01 } from '../utils/math'
 
-function clamp01(v: number) {
-  return Math.max(0, Math.min(1, v))
-}
+export type Rgb = { r: number; g: number; b: number }
 
 const DEFAULT_MAX_RGB_CACHE = 512
 const rgbCache = new Map<string, Rgb | null>()

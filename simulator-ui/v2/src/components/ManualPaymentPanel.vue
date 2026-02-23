@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
+import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo } from '../api/simulatorTypes'
 import { participantLabel } from '../utils/participants'
 import { useOverlayPositioning } from '../utils/overlayPosition'
@@ -96,18 +97,9 @@ function titleText() {
   return 'Manual payment'
 }
 
-const participantsSorted = computed(() => {
-  const items = Array.isArray(props.participants) ? props.participants : []
-  return [...items]
-    .filter((p) => String(p?.pid ?? '').trim())
-    .sort((a, b) => participantLabel(a).localeCompare(participantLabel(b)))
-})
-
-// UX guard: prevent selecting the same participant as both From and To.
-const toParticipants = computed(() => {
-  const from = String(props.state.fromPid ?? '').trim()
-  if (!from) return participantsSorted.value
-  return participantsSorted.value.filter((p) => String(p?.pid ?? '').trim() !== from)
+const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
+  participants: () => props.participants,
+  fromParticipantId: () => props.state.fromPid,
 })
 
 function onFromChange(v: string) {

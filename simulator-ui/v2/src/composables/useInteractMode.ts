@@ -1,7 +1,7 @@
 import { computed, ref, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
-import { parseAmountNumber } from '../utils/amount'
+import { parseAmountNumber, parseAmountStringOrNull } from '../utils/amount'
 import { isActiveStatus } from '../utils/status'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
@@ -13,16 +13,6 @@ import { useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT 
 export type InteractHistoryEntry = InteractHistoryEntryT
 
 export type { InteractPhase, InteractState }
-
-function parseAmountStringOrNull(v: unknown): string | null {
-  if (v == null) return null
-  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : null
-  if (typeof v === 'string') {
-    const s = v.trim()
-    return s ? s : null
-  }
-  return null
-}
 
 export function useInteractMode(opts: {
   actions: ReturnType<typeof useInteractActions>

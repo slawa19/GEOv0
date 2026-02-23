@@ -3,14 +3,10 @@
  * ========================
  * Single source of truth for all visual effects parameters.
  *
- * Architecture:
- * - `shared`: Parameters identical for both modes
- * - `demo`: Overrides for demo mode (dense playlist events)
- * - `real`: Overrides for real mode (sporadic events; needs visibility)
- *
- * Use `getFxConfig(mode)` to get merged config for a specific mode.
- *
- * DO NOT duplicate these constants elsewhere.
+ * NOTE:
+ * Previously this module had a split between `demo` and `real` configs.
+ * They were identical, which added false complexity and risk of drift.
+ * The config is now canonical and mode-agnostic.
  *
  * Responsibility split:
  * - `vizMapping.ts`: colors, semantic keys, and visual styles
@@ -19,10 +15,9 @@
 
 export const FX_CONFIG = {
   /**
-   * Shared parameters (used by both Demo and Real modes)
-   * These are identical regardless of mode.
+   * Clearing/Tx FX parameters (canonical, mode-agnostic).
    */
-  shared: {
+  clearing: {
     /** Gap between consecutive spark spawns (ms) */
     microGapMs: 110,
     /** Duration of floating debt label (ms) */
@@ -35,15 +30,7 @@ export const FX_CONFIG = {
     cleanupPadMs: 220,
     /** Throttle interval for label spawning (ms) */
     labelThrottleMs: 80,
-  },
 
-  /**
-   * Demo mode overrides
-   *
-   * IMPORTANT: Demo visuals must match real visuals 1:1.
-   * Demo is a different *source* of events (fixtures/playlists), not a different visual language.
-   */
-  demo: {
     /** Duration of edge highlight glow (ms) */
     highlightPulseMs: 5200,
     /** Time-to-live for beam spark particles (ms) */
@@ -54,26 +41,6 @@ export const FX_CONFIG = {
     /** Beam spark thickness multiplier */
     microThickness: 1.25,
     /** Node burst duration (ms) */
-    nodeBurstMs: 1100,
-  },
-
-  /**
-   * Real mode overrides
-   *
-   * Rationale: Real mode has sporadic events (controlled by intensityPercent).
-   * Longer durations ensure effects are noticeable before they fade.
-   */
-  real: {
-    /** Duration of edge highlight glow (ms) — longer for sporadic events */
-    highlightPulseMs: 5200,
-    /** Time-to-live for beam spark particles (ms) */
-    microTtlMs: 860,
-
-    /** Edge highlight thickness multiplier (real-only) */
-    highlightThickness: 2.9,
-    /** Beam spark thickness multiplier (real-only) */
-    microThickness: 1.25,
-    /** Node burst duration (ms) (real-only) */
     nodeBurstMs: 1100,
   },
 
@@ -93,21 +60,7 @@ export const FX_CONFIG = {
   },
 } as const
 
-type SharedConfig = typeof FX_CONFIG.shared
-type DemoConfig = typeof FX_CONFIG.demo
-type RealConfig = typeof FX_CONFIG.real
-
-export type DemoFxConfig = SharedConfig & DemoConfig
-export type RealFxConfig = SharedConfig & RealConfig
-
-export function getFxConfig(mode: 'demo'): DemoFxConfig
-export function getFxConfig(mode: 'real'): RealFxConfig
-export function getFxConfig(mode: 'demo' | 'real'): DemoFxConfig | RealFxConfig {
-  return {
-    ...FX_CONFIG.shared,
-    ...(mode === 'demo' ? FX_CONFIG.demo : FX_CONFIG.real),
-  }
-}
+export type FxClearingConfig = typeof FX_CONFIG.clearing
 
 /**
  * Equivalent currency/unit codes shown in the EQ selector (BottomBar).

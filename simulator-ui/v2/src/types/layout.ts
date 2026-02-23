@@ -1,5 +1,7 @@
 import type { GraphLink, GraphNode } from '../types'
 
+export type Point = { x: number; y: number }
+
 export type LayoutNode = GraphNode & { __x: number; __y: number }
 export type LayoutLink = GraphLink & { __key: string }
 

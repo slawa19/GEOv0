@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
 import { clearGradientCache } from '../render/gradientCache'
+import { clamp01 } from '../utils/math'
 
 type Quality = 'low' | 'med' | 'high'
 
@@ -199,10 +200,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   let flashGradCacheW = 0
   let flashGradCacheH = 0
   let flashGradCacheFx: CanvasRenderingContext2D | null = null
-
-  function clamp01(v: number) {
-    return Math.max(0, Math.min(1, v))
-  }
 
   function baseDprClampForQuality(q: Quality): number {
     if (q === 'low') return 1

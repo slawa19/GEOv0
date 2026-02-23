@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createApp, defineComponent } from 'vue'
 
 import { useAppFxOverlays } from './useAppFxOverlays'
 
@@ -69,6 +70,60 @@ describe('useAppFxOverlays.scheduleTimeout()', () => {
     vi.advanceTimersByTime(50)
 
     expect(calls).toEqual(['fn'])
+  })
+
+  it('cleans up scheduled timers on component unmount', () => {
+    vi.useFakeTimers()
+
+    const win = (globalThis as any).window as Window
+    const prevSetTimeout = (win as any).setTimeout
+    const prevClearTimeout = (win as any).clearTimeout
+
+    // timerRegistry uses window.setTimeout/window.clearTimeout.
+    // Ensure those are the fake-timers functions so vi.advanceTimersByTime() drives them.
+    ;(win as any).setTimeout = globalThis.setTimeout.bind(globalThis)
+    ;(win as any).clearTimeout = globalThis.clearTimeout.bind(globalThis)
+
+    const clearTimeoutSpy = vi.spyOn(win as any, 'clearTimeout')
+
+    try {
+      const calls: string[] = []
+
+      const Comp = defineComponent({
+        setup() {
+          const fx = useAppFxOverlays({
+            getLayoutNodeById: () => ({ __x: 0, __y: 0 } as any),
+            sizeForNode: () => ({ w: 10, h: 10 }),
+            getCameraZoom: () => 1,
+            setFlash: () => undefined,
+            isWebDriver: () => false,
+            getLayoutNodes: () => [],
+            worldToScreen: (x, y) => ({ x, y }),
+          })
+
+          fx.scheduleTimeout(() => calls.push('fn'), 100)
+
+          return () => null
+        },
+      })
+
+      const el = document.createElement('div')
+      document.body.appendChild(el)
+
+      const app = createApp(Comp)
+      app.mount(el)
+      app.unmount()
+
+      // After unmount, the composable's onUnmounted cleanup must cancel pending timers.
+      vi.advanceTimersByTime(200)
+
+      expect(calls).toEqual([])
+      expect(clearTimeoutSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      clearTimeoutSpy.mockRestore()
+      ;(win as any).setTimeout = prevSetTimeout
+      ;(win as any).clearTimeout = prevClearTimeout
+    }
   })
 })
 
