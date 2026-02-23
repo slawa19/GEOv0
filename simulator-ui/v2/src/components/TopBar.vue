@@ -268,7 +268,7 @@ function onApplyIntensity() {
     <div class="ds-ov-top-stack">
       <div class="ds-panel ds-ov-bar ds-ov-topbar" aria-label="Top bar">
         <div class="ds-ov-topbar__left" aria-label="Mode">
-          <div class="ds-row" style="gap: 10px; flex-wrap: wrap; align-items: center">
+          <div class="ds-row tb-mode-row">
             <div class="ds-segmented" role="group" aria-label="Simulator mode">
             <button
               type="button"
@@ -298,11 +298,10 @@ function onApplyIntensity() {
             </button>
             </div>
 
-            <div class="ds-row" style="gap: 6px; align-items: center" aria-label="Theme">
+            <div class="ds-row tb-theme-row" aria-label="Theme">
               <span class="ds-label">Theme</span>
               <select
-                class="ds-select"
-                style="height: 28px"
+                class="ds-select tb-select-28"
                 :value="ctx.uiTheme.value"
                 aria-label="UI theme"
                 @change="onThemeChange(($event.target as HTMLSelectElement).value)"
@@ -319,7 +318,7 @@ function onApplyIntensity() {
         </div>
 
         <div class="ds-ov-topbar__center" aria-label="Run controls">
-          <div v-if="showRunControls" class="ds-row" style="gap: 8px; flex-wrap: wrap">
+          <div v-if="showRunControls" class="ds-row tb-run-controls">
             <span class="ds-label">Scenario</span>
             <select
               class="ds-select"
@@ -333,8 +332,7 @@ function onApplyIntensity() {
               </option>
             </select>
             <button
-              class="ds-btn ds-btn--icon"
-              style="height: 28px; width: 28px"
+              class="ds-btn ds-btn--icon tb-icon-28"
               type="button"
               :disabled="ctx.loadingScenarios.value"
               aria-label="Refresh scenarios"
@@ -377,10 +375,9 @@ function onApplyIntensity() {
               Stop
             </button>
 
-            <details class="ds-ov-details" style="position: relative" aria-label="Advanced">
+            <details class="ds-ov-details" aria-label="Advanced">
               <summary
-                class="ds-panel ds-ov-metric ds-row"
-                style="gap: 8px; cursor: pointer"
+                class="ds-panel ds-ov-metric ds-row tb-adv-summary"
                 aria-label="Advanced settings"
               >
                 <span class="ds-badge ds-badge--info">⚙</span>
@@ -391,8 +388,8 @@ function onApplyIntensity() {
                 class="ds-panel ds-ov-surface ds-ov-dropdown"
                 aria-label="Advanced dropdown"
               >
-                <div class="ds-stack" style="gap: 8px">
-                  <div class="ds-row" style="gap: 6px">
+                <div class="ds-stack tb-adv-stack">
+                  <div class="ds-row tb-adv-row">
                     <span class="ds-label">Pipeline</span>
                     <select
                       class="ds-select"
@@ -406,11 +403,10 @@ function onApplyIntensity() {
                     </select>
                   </div>
 
-                  <div class="ds-row" style="gap: 6px" aria-label="Intensity">
+                  <div class="ds-row tb-adv-row" aria-label="Intensity">
                     <span class="ds-label">Intensity</span>
                     <input
-                      class="ds-input"
-                      style="width: 6ch; height: 28px"
+                      class="ds-input tb-intensity-input"
                       type="number"
                       min="0"
                       max="100"
@@ -432,7 +428,7 @@ function onApplyIntensity() {
               </div>
             </details>
 
-            <div v-if="!ctx.loadingScenarios.value && ctx.scenarios.value.length === 0" class="ds-panel ds-ov-bar" aria-label="No scenarios" style="opacity: 0.92">
+            <div v-if="!ctx.loadingScenarios.value && ctx.scenarios.value.length === 0" class="ds-panel ds-ov-bar tb-fade-92" aria-label="No scenarios">
               <span class="ds-badge ds-badge--warn">No scenarios</span>
               <span class="ds-label">Backend must return GET /simulator/scenarios</span>
             </div>
@@ -440,7 +436,7 @@ function onApplyIntensity() {
         </div>
 
         <div class="ds-ov-topbar__right" aria-label="Status">
-          <div v-if="ctx.apiMode.value === 'real'" class="ds-row" style="gap: 8px; justify-content: flex-end; flex-wrap: wrap">
+          <div v-if="ctx.apiMode.value === 'real'" class="ds-row tb-status-row">
             <span :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE">
               <span class="ds-dot" aria-hidden="true" /> SSE
             </span>
@@ -448,9 +444,9 @@ function onApplyIntensity() {
               <span class="ds-dot" aria-hidden="true" /> Run {{ ctx.runStatus.value?.state ?? (ctx.runId.value ? '…' : '—') }}
             </span>
 
-            <div v-if="ctx.runStatus.value?.state === 'stopped' && stopSummary" class="ds-panel ds-ov-metric" style="opacity: 0.92" aria-label="Stop reason">
+            <div v-if="ctx.runStatus.value?.state === 'stopped' && stopSummary" class="ds-panel ds-ov-metric tb-fade-92" aria-label="Stop reason">
               <span class="ds-label">Stop</span>
-              <span class="ds-value ds-mono" style="opacity: 0.9">{{ short(stopSummary, 64) }}</span>
+              <span class="ds-value ds-mono tb-fade-90">{{ short(stopSummary, 64) }}</span>
             </div>
 
             <span v-if="ctx.runId.value" class="ds-badge ds-badge--info" aria-label="TX">
@@ -461,26 +457,24 @@ function onApplyIntensity() {
             <details
               v-if="showAdminControls"
               class="ds-ov-details"
-              style="position: relative"
               aria-label="Admin controls"
               :open="adminPanelOpen"
               @toggle="adminPanelOpen = ($event.target as HTMLDetailsElement).open"
             >
               <summary
-                class="ds-panel ds-ov-metric"
-                style="display: flex; gap: 6px; align-items: center; cursor: pointer"
+                class="ds-panel ds-ov-metric tb-admin-summary"
                 aria-label="Admin"
               >
                 <span class="ds-badge ds-badge--warn">Admin</span>
-                <span class="ds-label" style="opacity: 0.75">Runs: {{ adminRunsCountLabel }}</span>
+                <span class="ds-label tb-fade-75">Runs: {{ adminRunsCountLabel }}</span>
               </summary>
 
               <div
                 class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right ds-ov-dropdown--narrow"
                 aria-label="Admin dropdown"
               >
-                <div class="ds-stack" style="gap: 8px">
-                  <div class="ds-row" style="gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap">
+                <div class="ds-stack tb-admin-stack">
+                  <div class="ds-row tb-admin-actions">
                     <button
                       class="ds-btn ds-btn--secondary ds-btn--sm"
                       type="button"
@@ -502,40 +496,36 @@ function onApplyIntensity() {
                     </button>
                     <span
                       v-if="ctx.adminLastError.value"
-                      class="ds-badge ds-badge--err"
-                      style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                      class="ds-badge ds-badge--err tb-admin-last-error"
                       :title="ctx.adminLastError.value"
                     >
                       {{ short(ctx.adminLastError.value, 40) }}
                     </span>
                   </div>
 
-                  <div v-if="ctx.adminRunsLoading.value" class="ds-label" style="opacity: 0.75" aria-label="Runs loading">
+                  <div v-if="ctx.adminRunsLoading.value" class="ds-label tb-fade-75" aria-label="Runs loading">
                     Loading…
                   </div>
 
                   <div
                     v-else-if="ctx.adminRuns.value && ctx.adminRuns.value.length > 0"
-                    class="ds-stack"
-                    style="gap: 4px; max-height: 200px; overflow-y: auto"
+                    class="ds-stack tb-runs-list"
                     aria-label="Runs list"
                   >
                     <div
                       v-for="run in ctx.adminRuns.value"
                       :key="run.run_id"
-                      class="ds-panel ds-ov-metric"
-                      style="padding: 4px 8px; gap: 8px"
+                      class="ds-panel ds-ov-metric tb-run-item"
                     >
-                        <span class="ds-label ds-mono" style="font-size: 11px" :title="run.run_id">{{ run.run_id.slice(0, 8) }}</span>
+                        <span class="ds-label ds-mono tb-run-id" :title="run.run_id">{{ run.run_id.slice(0, 8) }}</span>
                         <span :class="['ds-badge', toLower(run.state) === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
-                        <span class="ds-label" style="opacity: 0.7; font-size: 11px" :title="String((run as any).scenario_id ?? '')">{{ short(String((run as any).scenario_id ?? ''), 18) }}</span>
-                        <span class="ds-label ds-mono" style="opacity: 0.65; font-size: 11px" :title="String((run as any).owner_id ?? '')">{{ short(String((run as any).owner_id ?? ''), 18) }}</span>
+                        <span class="ds-label tb-run-scenario" :title="String((run as any).scenario_id ?? '')">{{ short(String((run as any).scenario_id ?? ''), 18) }}</span>
+                        <span class="ds-label ds-mono tb-run-owner" :title="String((run as any).owner_id ?? '')">{{ short(String((run as any).owner_id ?? ''), 18) }}</span>
 
-                        <div class="ds-row" style="margin-left: auto; gap: 6px; align-items: center">
+                        <div class="ds-row tb-run-actions">
                           <button
                             v-if="ctx.adminCanAttachRun.value"
-                            class="ds-btn ds-btn--secondary"
-                            style="height: 24px; padding: 0 8px"
+                            class="ds-btn ds-btn--secondary tb-run-btn"
                             type="button"
                             aria-label="Attach to selected run"
                             @click="onAdminAttachRun(run.run_id)"
@@ -544,8 +534,7 @@ function onApplyIntensity() {
                           </button>
                           <button
                             v-if="ctx.adminCanStopRun.value"
-                            class="ds-btn ds-btn--danger"
-                            style="height: 24px; padding: 0 8px"
+                            class="ds-btn ds-btn--danger tb-run-btn"
                             type="button"
                             aria-label="Stop selected run"
                             @click="onAdminStopRun(run.run_id)"
@@ -556,11 +545,11 @@ function onApplyIntensity() {
                     </div>
                   </div>
 
-                  <div v-else-if="adminHasLoadedRuns" class="ds-label" style="opacity: 0.75" aria-label="Runs empty">
+                  <div v-else-if="adminHasLoadedRuns" class="ds-label tb-fade-75" aria-label="Runs empty">
                     No active runs
                   </div>
 
-                  <div v-else class="ds-label" style="opacity: 0.75" aria-label="Runs not loaded">
+                  <div v-else class="ds-label tb-fade-75" aria-label="Runs not loaded">
                     Press Refresh to load runs
                   </div>
                 </div>
@@ -573,13 +562,13 @@ function onApplyIntensity() {
       <div v-if="ctx.lastError.value" class="ds-alert ds-alert--err" aria-label="Error">
         <span class="ds-alert__icon">✕</span>
         <span class="ds-label">Error</span>
-        <span class="ds-value ds-mono" style="opacity: 0.92">{{ short(String(ctx.lastError.value), 160) }}</span>
+        <span class="ds-value ds-mono tb-fade-92">{{ short(String(ctx.lastError.value), 160) }}</span>
       </div>
 
       <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall">
         <span class="ds-alert__icon">!</span>
         <span class="ds-label">Stall</span>
-        <span class="ds-value ds-mono" style="opacity: 0.92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
+        <span class="ds-value ds-mono tb-fade-92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
       </div>
 
       <!-- Slot for HUD elements (SystemBalanceBar, ActionBar) that stack below TopBar rows -->
@@ -588,3 +577,125 @@ function onApplyIntensity() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.tb-mode-row {
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tb-theme-row {
+  gap: 6px;
+  align-items: center;
+}
+
+.tb-select-28 {
+  height: 28px;
+}
+
+.tb-run-controls {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tb-icon-28 {
+  height: 28px;
+  width: 28px;
+}
+
+.tb-adv-summary {
+  gap: 8px;
+}
+
+.tb-adv-stack {
+  gap: 8px;
+}
+
+.tb-adv-row {
+  gap: 6px;
+}
+
+.tb-intensity-input {
+  width: 6ch;
+  height: 28px;
+}
+
+.tb-status-row {
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.tb-admin-summary {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tb-admin-stack {
+  gap: 8px;
+}
+
+.tb-admin-actions {
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.tb-admin-last-error {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-runs-list {
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.tb-run-item {
+  padding: 4px 8px;
+  gap: 8px;
+}
+
+.tb-run-id {
+  font-size: 11px;
+}
+
+.tb-run-scenario {
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+.tb-run-owner {
+  opacity: 0.65;
+  font-size: 11px;
+}
+
+.tb-run-actions {
+  margin-left: auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.tb-run-btn {
+  height: 24px;
+  padding: 0 8px;
+}
+
+.tb-fade-75 {
+  opacity: 0.75;
+}
+
+.tb-fade-90 {
+  opacity: 0.9;
+}
+
+.tb-fade-92 {
+  opacity: 0.92;
+}
+</style>

@@ -4,7 +4,7 @@
  * Displays the last N user actions in a compact inline list.
  */
 import { computed } from 'vue'
-import type { InteractHistoryEntry } from '../composables/useInteractMode'
+import type { InteractHistoryEntry } from '../composables/interact/useInteractHistory'
 
 const props = withDefaults(
   defineProps<{

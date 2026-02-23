@@ -1,12 +1,12 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { LayoutLink } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
-import { getNodeShape } from '../types/nodeShape'
 import { clamp01 } from '../utils/math'
 import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
-import { drawNodeShape, fillForNode, sizeForNode, type LayoutNode } from './nodePainter'
+import { getNodeBaseGeometry } from './nodeGeometry'
+import { drawNodeShape, fillForNode, type LayoutNode } from './nodePainter'
 
 export type { LayoutLink } from '../types/layout'
 
@@ -62,6 +62,28 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
+
+  function drawNodeOverlayGlow(
+    n: LayoutNode,
+    glow: string,
+    params: { kind: 'selection' | 'active'; blurK: number; lineWidthMinPx: number; lineWidthK: number },
+  ) {
+    const { shape, w, h, r, rr } = getNodeBaseGeometry(n, invZ)
+    drawGlowSprite(ctx, {
+      kind: params.kind,
+      shape,
+      x: n.__x,
+      y: n.__y,
+      w,
+      h,
+      r,
+      rr,
+      color: glow,
+      blurPx: r * params.blurK,
+      lineWidthPx: Math.max(params.lineWidthMinPx * invZ, r * params.lineWidthK),
+      composite: 'screen',
+    })
+  }
 
   const pos = opts.pos ?? new Map<string, LayoutNode>()
   // Optimization: rebuild pos Map only when the nodes array reference changes.
@@ -172,61 +194,18 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       // Focus Glow: "Light glow around the node"
       // Stronger but diffuse (not a sharp second contour)
       
-      const { w: nw0, h: nh0 } = sizeForNode(n as GraphNode)
-      const nw = nw0 * invZ
-      const nh = nh0 * invZ
       const glow = fillForNode(n as GraphNode, mapping)
-      const shapeKey = getNodeShape(n) ?? 'circle'
-      const isRoundedRect = shapeKey === 'rounded-rect'
-      
-      const r = Math.max(nw, nh) / 2
-      const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
       
       // Phase 1: selection glow via pre-rendered sprite (no on-screen shadowBlur).
       // Keep minimum lineWidth similar to the previous high-quality stroke.
-      drawGlowSprite(ctx, {
-        kind: 'selection',
-        shape: isRoundedRect ? 'rounded-rect' : 'circle',
-        x: n.__x,
-        y: n.__y,
-        w: nw,
-        h: nh,
-        r,
-        rr,
-        color: glow,
-        // Match the previous outer blur ~= r*1.2 (core pass is baked in glowSprites).
-        blurPx: r * 1.2,
-        lineWidthPx: Math.max(4 * invZ, r * 0.25),
-        composite: 'screen',
-      })
+      drawNodeOverlayGlow(n, glow, { kind: 'selection', blurK: 1.2, lineWidthMinPx: 4, lineWidthK: 0.25 })
     }
 
     if (isActiveNode && !isSelected && !dragMode) {
-      const { w: nw0, h: nh0 } = sizeForNode(n as GraphNode)
-      const nw = nw0 * invZ
-      const nh = nh0 * invZ
       const glow = mapping.fx.clearing_debt
-      const shapeKey = getNodeShape(n) ?? 'circle'
-      const isRoundedRect = shapeKey === 'rounded-rect'
-
-      const r = Math.max(nw, nh) / 2
-      const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
 
       // Phase 1: active glow via pre-rendered sprite (no on-screen shadowBlur).
-      drawGlowSprite(ctx, {
-        kind: 'active',
-        shape: isRoundedRect ? 'rounded-rect' : 'circle',
-        x: n.__x,
-        y: n.__y,
-        w: nw,
-        h: nh,
-        r,
-        rr,
-        color: glow,
-        blurPx: r * 0.55,
-        lineWidthPx: Math.max(3.0 * invZ, r * 0.18),
-        composite: 'screen',
-      })
+      drawNodeOverlayGlow(n, glow, { kind: 'active', blurK: 0.55, lineWidthMinPx: 3.0, lineWidthK: 0.18 })
     }
 
     drawNodeShape(ctx, n, {

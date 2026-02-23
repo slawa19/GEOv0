@@ -29,7 +29,7 @@ import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '..
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
-import { toLower } from '../utils/stringHelpers'
+import { toLower, toLowerTrim } from '../utils/stringHelpers'
 
 export type RealModeState = {
   apiBase: string
@@ -191,8 +191,8 @@ export function useSimulatorRealMode(opts: {
   const PROCESSED_EVENT_IDS_PRUNE_BATCH = 500
 
   function markEventProcessed(runId: string, eventId: string): boolean {
-    const rid = String(runId ?? '')
-    const eid = String(eventId ?? '')
+    const rid = runId
+    const eid = eventId
     if (!rid || !eid) return true
 
     if (processedEventIdsRunId !== rid) {
@@ -690,16 +690,16 @@ export function useSimulatorRealMode(opts: {
               }
 
               const nodeColorKey = (type?: string | null, status?: string | null): string => {
-                const st = String(status ?? '').trim().toLowerCase()
+                const st = toLowerTrim(status ?? '')
                 if (st === 'suspended' || st === 'left' || st === 'deleted') return st
-                const tp = String(type ?? '').trim().toLowerCase()
+                const tp = toLowerTrim(type ?? '')
                 if (tp === 'business' || tp === 'person') return tp
                 return 'unknown'
               }
 
               const ensureNodeDefaults = (n: any) => {
                 if (!n) return
-                const tp = String(n.type ?? '').trim().toLowerCase()
+                const tp = toLowerTrim(String(n.type ?? ''))
                 const isBiz = tp === 'business'
                 if (!n.viz_shape_key) n.viz_shape_key = isBiz ? 'rounded-rect' : 'circle'
                 if (!n.viz_size) n.viz_size = isBiz ? { w: 26, h: 22 } : { w: 16, h: 16 }
@@ -1007,7 +1007,7 @@ export function useSimulatorRealMode(opts: {
 
   /** Admin helper: attach UI to an arbitrary run_id (observer/control path). */
   async function attachToRun(runId: string) {
-    const rid = String(runId ?? '').trim()
+    const rid = runId.trim()
     if (!rid) return
 
     try {
@@ -1031,7 +1031,7 @@ export function useSimulatorRealMode(opts: {
 
   /** Admin helper: stop a specific run_id (may be different from current run). */
   async function stopRunById(runId: string, opts?: { source?: string; reason?: string }) {
-    const rid = String(runId ?? '').trim()
+    const rid = runId.trim()
     if (!rid) return
     await stopRun({ apiBase: real.apiBase, accessToken: real.accessToken }, rid, {
       source: opts?.source ?? 'ui',

@@ -1,13 +1,14 @@
 import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
-import { getNodeShape } from '../types/nodeShape'
 import { withAlpha } from './color'
 import { getLinearGradient2Stops } from './gradientCache'
 import { drawGlowSprite } from './glowSprites'
+import { getNodeBaseGeometry } from './nodeGeometry'
 import { roundedRectPath } from './roundedRect'
 
 export type { LayoutNode } from '../types/layout'
+export { sizeForNode } from './nodeSizing'
 
 /* ------------------------------------------------------------------ */
 /*  Lightweight icon / badge helpers                                  */
@@ -98,23 +99,6 @@ function drawNodeBadge(
   ctx.restore()
 }
 
-const sizeCache = new WeakMap<GraphNode, { key: string; size: { w: number; h: number } }>()
-
-export function sizeForNode(n: GraphNode): { w: number; h: number } {
-  const s = n.viz_size
-  const key = `${String(s?.w ?? '')}:${String(s?.h ?? '')}`
-  const cached = sizeCache.get(n)
-  if (cached && cached.key === key) return cached.size
-
-  // Backend-first: do not derive visual size from domain fields like `type`.
-  // If `viz_size` is missing, use a neutral default.
-  const w = Math.max(6, Number(s?.w ?? 12))
-  const h = Math.max(6, Number(s?.h ?? 12))
-  const size = { w, h }
-  sizeCache.set(n, { key, size })
-  return size
-}
-
 export function fillForNode(n: GraphNode, mapping: VizMapping): string {
   // Backend-first: UI only interprets viz keys; never derives colors from `type`.
   const key = String(n.viz_color_key ?? 'unknown')
@@ -139,11 +123,10 @@ export function drawNodeShape(
   // (Even in low, we keep a modest glow for readability.)
   const glowK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
   const fill = fillForNode(node, mapping)
-  const { w: w0, h: h0 } = sizeForNode(node)
-  const w = w0 * invZ
-  const h = h0 * invZ
-  const shapeKey = getNodeShape(node) ?? 'circle'
-  const isRoundedRect = shapeKey === 'rounded-rect'
+  const geom = getNodeBaseGeometry(node, invZ)
+  const w = geom.w
+  const h = geom.h
+  const isRoundedRect = geom.shape === 'rounded-rect'
 
   // IMPORTANT: node appearance follows the prototypes:
   // - business: emerald square
@@ -153,7 +136,7 @@ export function drawNodeShape(
 
   const x = node.__x - w / 2
   const y = node.__y - h / 2
-  const rr = Math.max(0, Math.min(px(4), Math.min(w, h) * 0.18))
+  const rr = geom.rr
 
   // Phase 6: node painting should use a single path (drag & non-drag).
   // TODO(phase-6.3): if perf becomes an issue, consider a *minimal* drag fallback

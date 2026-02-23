@@ -3,7 +3,7 @@ export function keyEdge(a: string, b: string) {
 }
 
 export function parseEdgeKey(edgeKey: string): { from: string; to: string } | null {
-  const s = String(edgeKey ?? '')
+  const s = edgeKey
   const i = s.indexOf('→')
   if (i <= 0) return null
   const from = s.slice(0, i)

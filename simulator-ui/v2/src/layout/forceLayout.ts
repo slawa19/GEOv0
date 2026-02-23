@@ -34,7 +34,22 @@ function computeOrganicGroupAnchors(opts: {
   isTestMode: boolean
 }): ForceGroupAnchors {
   const { keys, w, h, seedPrefix, isTestMode } = opts
-  const margin = 22
+  const MARGIN_PX = 22
+  const JITTER_BUCKET = 1000
+  const JITTER_SCALE = 0.08
+  const RANDOM_BUCKET = 4096
+  const ITERS_TEST = 60
+  const ITERS_NORMAL = 90
+  const DAMPING = 0.82
+  const CENTER_STRENGTH = 0.08
+  const REPULSE_K = 0.12
+  const REPULSE_MULT = 0.9
+  const SOFTENING2 = 64
+  const MIN_DIST_MIN_PX = 140
+  const MIN_DIST_K = 1.1
+  const PUSH_MULT = 0.7
+
+  const margin = MARGIN_PX
   const availW = Math.max(1, w - margin * 2)
   const availH = Math.max(1, h - margin * 2)
   const cx = w / 2
@@ -52,8 +67,10 @@ function computeOrganicGroupAnchors(opts: {
   for (let i = 0; i < m; i++) {
     const key = ordered[i]!
     const seed = fnv1a(`${seedPrefix}:${key}`)
-    const jx = (((seed % 1000) / 1000) - 0.5) * Math.min(availW, availH) * 0.08
-    const jy = ((((Math.floor(seed / 1000) % 1000) / 1000) - 0.5) * Math.min(availW, availH) * 0.08)
+    const jx = (((seed % JITTER_BUCKET) / JITTER_BUCKET) - 0.5) * Math.min(availW, availH) * JITTER_SCALE
+    const jy =
+      ((((Math.floor(seed / JITTER_BUCKET) % JITTER_BUCKET) / JITTER_BUCKET) - 0.5) * Math.min(availW, availH) *
+        JITTER_SCALE)
 
     if (m <= 3) {
       const t = m === 1 ? 0.5 : m === 2 ? (i === 0 ? 0.33 : 0.67) : 0.25 + (i * 0.5)
@@ -65,20 +82,20 @@ function computeOrganicGroupAnchors(opts: {
     }
 
     // More groups: spread through area with deterministic pseudo-random.
-    const rx = (seed % 4096) / 4096
-    const ry = ((Math.floor(seed / 4096) % 4096) / 4096)
+    const rx = (seed % RANDOM_BUCKET) / RANDOM_BUCKET
+    const ry = (Math.floor(seed / RANDOM_BUCKET) % RANDOM_BUCKET) / RANDOM_BUCKET
     ax[i] = margin + rx * availW + jx
     ay[i] = margin + ry * availH + jy
   }
 
   const area = availW * availH
   const k = Math.sqrt(area / Math.max(1, m))
-  const iters = isTestMode ? 60 : 90
-  const damping = 0.82
-  const centerStrength = 0.08
-  const repulseStrength = Math.max(0.001, k * k) * 0.12
-  const softening2 = 64
-  const minDist = Math.max(140, k * 1.1)
+  const iters = isTestMode ? ITERS_TEST : ITERS_NORMAL
+  const damping = DAMPING
+  const centerStrength = CENTER_STRENGTH
+  const repulseStrength = Math.max(0.001, k * k) * REPULSE_K
+  const softening2 = SOFTENING2
+  const minDist = Math.max(MIN_DIST_MIN_PX, k * MIN_DIST_K)
 
   for (let it = 0; it < iters; it++) {
     const alpha = 1 - it / iters
@@ -96,14 +113,14 @@ function computeOrganicGroupAnchors(opts: {
         const ux = dx / dist
         const uy = dy / dist
 
-        const fRep = (repulseStrength / dist2) * 0.9
+        const fRep = (repulseStrength / dist2) * REPULSE_MULT
         vx[i] += ux * fRep
         vy[i] += uy * fRep
         vx[j] -= ux * fRep
         vy[j] -= uy * fRep
 
         if (dist < minDist) {
-          const push = ((minDist - dist) / minDist) * 0.7
+          const push = ((minDist - dist) / minDist) * PUSH_MULT
           vx[i] += ux * push
           vy[i] += uy * push
           vx[j] -= ux * push
@@ -152,7 +169,39 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   // - Repulsion (many-body / charge)
   // - Link distance (springs)
   // - Collision
-  const margin = 22
+  const MARGIN_PX = 22
+  const SEED_BUCKET = 4096
+  const NODE_RADIUS_MIN_PX = 8
+  const NODE_RADIUS_K = 0.56
+  const COLLIDE_PAD_PX = 6
+  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
+  const SUNFLOWER_MAX_RAD_MIN_PX = 90
+  const SUNFLOWER_MAX_RAD_VIEWPORT_K = 0.46
+  const SUNFLOWER_MAX_RAD_K = 3.0
+  const SUNFLOWER_JITTER_BUCKET = 1024
+  const SUNFLOWER_JITTER_ANGLE_K = 0.18
+  const SUNFLOWER_JITTER_R_BASE = 0.96
+  const SUNFLOWER_JITTER_R_K = 0.10
+  const GROUP_SEED_BASE_RAD_MIN_PX = 56
+  const GROUP_SEED_BASE_RAD_VIEWPORT_K = 0.34
+  const GROUP_SEED_BASE_RAD_K = 2.2
+  const ITERS_TEST = 140
+  const ITERS_NORMAL = 180
+  const DAMPING = 0.88
+  const MAX_SPEED_MIN = 0.8
+  const MAX_SPEED_K = 0.35
+  const CENTER_STRENGTH_DEFAULT = 0.052
+  const CHARGE_K = 0.055
+  const SPRING_STRENGTH = 0.022
+  const LINK_DISTANCE_MIN_PX = 24
+  const LINK_DISTANCE_K = 1.25
+  const COLLISION_STRENGTH = 0.70
+  const SOFTENING2 = 36
+  const LINK_DIST_SAME_DEFAULT = 0.90
+  const LINK_DIST_CROSS_DEFAULT = 1.12
+  const REPULSE_FAR_K = 2.2
+
+  const margin = MARGIN_PX
 
   const cx = w / 2
   const cy = h / 2
@@ -170,9 +219,9 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
 
   const r = nodesSorted.map((node) => {
     const s = sizeForNode(node)
-    return Math.max(8, Math.max(s.w, s.h) * 0.56)
+    return Math.max(NODE_RADIUS_MIN_PX, Math.max(s.w, s.h) * NODE_RADIUS_K)
   })
-  const collidePad = 6
+  const collidePad = COLLIDE_PAD_PX
 
   // Initial positions: around group anchors (if provided), else centered disc.
   const x = new Float64Array(n)
@@ -185,17 +234,23 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   if (!hasGroups) {
     // Deterministic spacious seed: sunflower spiral over the whole viewport.
     // This prevents the "clump then spread" feel right after start.
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5))
-    const a0 = ((fnv1a(`${snapshot.equivalent}:${seedKey}:a0`) % 4096) / 4096) * Math.PI * 2
-    const maxRad = Math.max(90, Math.min(Math.min(availW, availH) * 0.46, k * 3.0))
+    const goldenAngle = GOLDEN_ANGLE
+    const a0 = ((fnv1a(`${snapshot.equivalent}:${seedKey}:a0`) % SEED_BUCKET) / SEED_BUCKET) * Math.PI * 2
+    const maxRad = Math.max(
+      SUNFLOWER_MAX_RAD_MIN_PX,
+      Math.min(Math.min(availW, availH) * SUNFLOWER_MAX_RAD_VIEWPORT_K, k * SUNFLOWER_MAX_RAD_K),
+    )
 
     for (let i = 0; i < n; i++) {
       const node = nodesSorted[i]!
       const seed = fnv1a(`${snapshot.equivalent}:${seedKey}:${node.id}`)
       const t = (i + 0.5) / n
 
-      const jitterA = (((seed % 1024) / 1024) - 0.5) * 0.18
-      const jitterR = 0.96 + ((((Math.floor(seed / 1024) % 1024) / 1024) - 0.5) * 0.10)
+      const jitterA = (((seed % SUNFLOWER_JITTER_BUCKET) / SUNFLOWER_JITTER_BUCKET) - 0.5) * SUNFLOWER_JITTER_ANGLE_K
+      const jitterR =
+        SUNFLOWER_JITTER_R_BASE +
+        (((Math.floor(seed / SUNFLOWER_JITTER_BUCKET) % SUNFLOWER_JITTER_BUCKET) / SUNFLOWER_JITTER_BUCKET) - 0.5) *
+          SUNFLOWER_JITTER_R_K
 
       const a = a0 + i * goldenAngle + jitterA
       const rad = Math.sqrt(t) * maxRad * jitterR
@@ -207,12 +262,15 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     }
   } else {
     // Grouped layouts: seed around anchors, but start further apart so clusters don't collapse.
-    const baseRad = Math.max(56, Math.min(Math.min(availW, availH) * 0.34, k * 2.2))
+    const baseRad = Math.max(
+      GROUP_SEED_BASE_RAD_MIN_PX,
+      Math.min(Math.min(availW, availH) * GROUP_SEED_BASE_RAD_VIEWPORT_K, k * GROUP_SEED_BASE_RAD_K),
+    )
     for (let i = 0; i < n; i++) {
       const node = nodesSorted[i]!
       const seed = fnv1a(`${snapshot.equivalent}:${seedKey}:${node.id}`)
-      const a = ((seed % 4096) / 4096) * Math.PI * 2
-      const rr = Math.sqrt(((Math.floor(seed / 4096) % 4096) / 4096))
+      const a = ((seed % SEED_BUCKET) / SEED_BUCKET) * Math.PI * 2
+      const rr = Math.sqrt((Math.floor(seed / SEED_BUCKET) % SEED_BUCKET) / SEED_BUCKET)
       const rad = baseRad * rr
 
       const gKey = groupKeyByNodeId?.get(node.id)
@@ -229,21 +287,21 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     keyEdge(a.source, a.target).localeCompare(keyEdge(b.source, b.target)),
   )
 
-  const iterations = isTestMode ? 140 : 180
-  const damping = 0.88
-  const maxSpeed = Math.max(0.8, k * 0.35)
+  const iterations = isTestMode ? ITERS_TEST : ITERS_NORMAL
+  const damping = DAMPING
+  const maxSpeed = Math.max(MAX_SPEED_MIN, k * MAX_SPEED_K)
 
-  const cStrength = centerStrength ?? 0.052
+  const cStrength = centerStrength ?? CENTER_STRENGTH_DEFAULT
   const gStrength = groupStrength ?? 0
   // Increased spacing: stronger repulsion + longer link distances
-  const chargeStrength = Math.max(0.001, k * k) * 0.055
-  const springStrength = 0.022
-  const linkDistanceBase = Math.max(24, k * 1.25)
-  const collisionStrength = 0.70
-  const softening2 = 36
+  const chargeStrength = Math.max(0.001, k * k) * CHARGE_K
+  const springStrength = SPRING_STRENGTH
+  const linkDistanceBase = Math.max(LINK_DISTANCE_MIN_PX, k * LINK_DISTANCE_K)
+  const collisionStrength = COLLISION_STRENGTH
+  const softening2 = SOFTENING2
 
-  const sameK = linkDistanceScaleSameGroup ?? 0.90
-  const crossK = linkDistanceScaleCrossGroup ?? 1.12
+  const sameK = linkDistanceScaleSameGroup ?? LINK_DIST_SAME_DEFAULT
+  const crossK = linkDistanceScaleCrossGroup ?? LINK_DIST_CROSS_DEFAULT
 
   for (let it = 0; it < iterations; it++) {
     const alpha = 1 - it / iterations
@@ -274,7 +332,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
         const dist2 = dx * dx + dy * dy + softening2
         const dist = Math.sqrt(dist2)
 
-        const far = dist / (k * 2.2)
+        const far = dist / (k * REPULSE_FAR_K)
         const falloff = 1 / (1 + far * far)
         const fRep = (chargeStrength / dist2) * falloff
         const ux = dx / dist

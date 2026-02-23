@@ -3,7 +3,6 @@ import { computed } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import { useOverlayPositioning } from '../utils/overlayPosition'
-import { fmtInt } from '../utils/numberFormat'
 
 type Props = {
   phase: InteractPhase
@@ -66,7 +65,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div class="ds-label" style="margin-bottom: 2px">
+      <div class="ds-label cp-equivalent-row">
         <span>Equivalent:</span>
         <span class="ds-mono">{{ equivalent }}</span>
       </div>
@@ -76,7 +75,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
       <template v-if="isConfirm">
         <div class="ds-help">This will run a clearing cycle in backend.</div>
 
-        <div class="ds-row" style="justify-content: flex-end">
+        <div class="ds-row cp-actions">
           <button class="ds-btn ds-btn--primary" type="button" :disabled="busyUi" @click="onConfirm">Confirm</button>
           <button class="ds-btn ds-btn--ghost" type="button" :disabled="busyUi" @click="cancel">Cancel</button>
         </div>
@@ -84,7 +83,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
 
       <template v-else-if="isPreview">
         <div v-if="!last" class="ds-help">Preparing preview…</div>
-        <div v-else class="ds-stack" style="gap: 6px">
+        <div v-else class="ds-stack cp-preview-stack">
           <div class="ds-label">
             Cycles: <span class="ds-mono">{{ cyclesCount }}</span>
           </div>
@@ -92,7 +91,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
             Total cleared: <span class="ds-mono">{{ last.total_cleared_amount }} {{ equivalent }}</span>
           </div>
 
-          <ol v-if="cycles.length" class="ds-mono" style="margin: 8px 0 0; padding-left: 18px; max-height: 140px; overflow: auto">
+          <ol v-if="cycles.length" class="ds-mono cp-cycles">
             <li v-for="(c, i) in cycles" :key="i">
               {{ c.cleared_amount }} {{ equivalent }} · edges: {{ c.edges.length }}
             </li>
@@ -104,11 +103,32 @@ const busyUi = computed(() => props.busy || isRunning.value)
         <div class="ds-help">Running…</div>
       </template>
 
-      <div v-if="!isConfirm" class="ds-row" style="justify-content: flex-end">
+      <div v-if="!isConfirm" class="ds-row cp-actions">
         <button class="ds-btn ds-btn--ghost" type="button" :disabled="busyUi" @click="cancel">Close</button>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.cp-equivalent-row {
+  margin-bottom: 2px;
+}
+
+.cp-actions {
+  justify-content: flex-end;
+}
+
+.cp-preview-stack {
+  gap: 6px;
+}
+
+.cp-cycles {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  max-height: 140px;
+  overflow: auto;
+}
+</style>
 
 

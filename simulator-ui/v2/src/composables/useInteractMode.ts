@@ -1,16 +1,13 @@
 import { computed, ref, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
-import { parseAmountNumber, parseAmountStringOrNull } from '../utils/amount'
+import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { isActiveStatus } from '../utils/status'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
 import { useInteractDataCache } from './interact/useInteractDataCache'
 import { useInteractFSM, type InteractPhase, type InteractState } from './interact/useInteractFSM'
 import { useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT } from './interact/useInteractHistory'
-
-/** BUG-5: Entry in the Interact Mode history log. */
-export type InteractHistoryEntry = InteractHistoryEntryT
 
 export type { InteractPhase, InteractState }
 
@@ -68,7 +65,7 @@ export function useInteractMode(opts: {
   selectTrustline: (fromPid: string, toPid: string) => void
 
   // BUG-5: history log
-  history: InteractHistoryEntry[]
+  history: InteractHistoryEntryT[]
 } {
   // UX: keep the clearing preview visible long enough to be noticed/read.
   const CLEARING_PREVIEW_DWELL_MS = 800

@@ -54,8 +54,8 @@ const open = computed(() => {
 
 const popupStyle = computed(() => {
   let anchor = props.state.edgeAnchor
-  // Default (legacy) placement.
-  if (!anchor) return { left: '12px', bottom: '76px' }
+  // Safety: if anchor is missing, fall back to CSS defaults.
+  if (!anchor) return {}
 
   const MIN_POPUP_W = 260
   const MIN_POPUP_H = 140

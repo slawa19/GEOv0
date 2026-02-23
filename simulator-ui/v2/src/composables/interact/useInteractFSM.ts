@@ -189,14 +189,14 @@ export function useInteractFSM(opts: {
     }
   }
 
-  function selectEdge(edgeKey: string, anchor?: { x: number; y: number } | null) {
+  function selectEdge(edgeKey: string, anchor: { x: number; y: number } | null = null) {
     const parsed = parseEdgeKey(edgeKey)
     if (!parsed) return
     clearError()
     state.fromPid = parsed.from
     state.toPid = parsed.to
     state.selectedEdgeKey = keyEdge(parsed.from, parsed.to)
-    state.edgeAnchor = anchor ?? null
+    state.edgeAnchor = anchor
     state.phase = 'editing-trustline'
   }
 
@@ -297,8 +297,8 @@ export function useInteractFSM(opts: {
 
   function selectTrustline(fromPid: string, toPid: string) {
     clearError()
-    state.fromPid = String(fromPid ?? '').trim() || null
-    state.toPid = String(toPid ?? '').trim() || null
+    state.fromPid = fromPid.trim() || null
+    state.toPid = toPid.trim() || null
     if (!state.fromPid || !state.toPid) return
     state.selectedEdgeKey = keyEdge(state.fromPid, state.toPid)
     state.edgeAnchor = null

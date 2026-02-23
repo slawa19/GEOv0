@@ -135,7 +135,10 @@ export function createPhysicsEngine(opts: {
   links: LayoutLink[]
   config: PhysicsConfig
 }): PhysicsEngine {
-  const { nodes, links, config } = opts
+  const { nodes, links } = opts
+  // Keep config immutable from the caller's perspective.
+  // The engine may still adjust its internal viewport width/height.
+  const config: PhysicsConfig = { ...opts.config }
 
   // IMPORTANT:
   // - We reuse the same node objects (layout.nodes) so App.vue can mutate __x/__y during drag.

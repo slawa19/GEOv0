@@ -23,8 +23,10 @@ import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
+import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
+import { normalizeTxAmountLabelInput } from '../utils/txAmountLabel'
 import { createPatchApplier } from '../demo/patches'
-import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
+import { spawnEdgePulses, spawnNodeBursts, spawnSparks, type FxState } from '../render/fxRenderer'
 
 import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
@@ -43,10 +45,11 @@ import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
 import { useNodeSelectionAndCardOpen } from './useNodeSelectionAndCardOpen'
 import { useAppPickingAndHover } from './useAppPickingAndHover'
-import { useAppFxAndRender } from './useAppFxAndRender'
+import { useAppFxOverlays } from './useAppFxOverlays'
+import { useAppRenderLoop } from './useAppRenderLoop'
 import { useAppPhysicsAndPinningWiring } from './useAppPhysicsAndPinningWiring'
 import { useAppLayoutWiring } from './useAppLayoutWiring'
-import { useAppDragToPinWiring } from './useAppDragToPinWiring'
+import { useAppDragToPinAndPreview } from './useAppDragToPinAndPreview'
 import { useAppCanvasInteractionsWiring } from './useAppCanvasInteractionsWiring'
 import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
@@ -370,12 +373,7 @@ export function useSimulatorApp() {
   // Note: backend-authoritative stats arrive in run_status every ~1s and
   // overwrite local optimistic counters, so this is only for the gap.
   function isUserFacingRunError(code: string): boolean {
-    const c = String(code ?? '').toUpperCase()
-    if (!c) return false
-    if (c === 'PAYMENT_TIMEOUT') return true
-    if (c === 'INTERNAL_ERROR') return true
-    // Everything else is treated as a clean rejection for UX purposes.
-    return false
+    return isUserFacingRunErrorCode(code)
   }
 
   function pickDefaultScenarioId(scenarios: ScenarioSummary[]): string {
@@ -574,9 +572,9 @@ export function useSimulatorApp() {
   const interactRunId = computed(() => String(real.runId ?? ''))
   const interactActions = useInteractActions({ httpConfig: interactHttpConfig, runId: interactRunId })
 
-  // BUG-3: Late-binding holder for FxState (initialized after useAppFxAndRender below).
+  // BUG-3: Late-binding holder for FxState (initialized after FX wiring below).
   // onClearingDone is only called at runtime, never during init, so this pattern is safe.
-  let _interactFxState: ReturnType<typeof import('./useAppFxAndRender').useAppFxAndRender>['fxState'] | null = null
+  let _interactFxState: FxState | null = null
 
   const interactMode = useInteractMode({
     actions: interactActions,
@@ -822,10 +820,23 @@ export function useSimulatorApp() {
     getSelectedNodeId: () => state.selectedNodeId,
   }).selectedNodeEdgeStats
 
-  const fxAndRender = useAppFxAndRender({
+  const fxOverlays = useAppFxOverlays({
+    getLayoutNodeById: (id) => getLayoutNodeById(id) ?? undefined,
+    sizeForNode,
+    getCameraZoom: () => camera.zoom,
+    setFlash: (v) => {
+      state.flash = v
+    },
+    isWebDriver: () => isWebDriver,
+    getLayoutNodes: () => layout.nodes,
+    worldToScreen,
+    // Important: FX timers must wake up render loop before mutating FX state.
+    wakeUp,
+  })
+
+  const renderLoop = useAppRenderLoop({
     canvasEl,
     fxCanvasEl,
-    hostEl,
     getSnapshot: () => state.snapshot,
     getLayout: () => ({
       w: layout.w,
@@ -833,20 +844,21 @@ export function useSimulatorApp() {
       nodes: layout.nodes,
       links: layout.links,
     }),
-    getLayoutNodes: () => layout.nodes,
-    getLayoutNodeById: (id) => getLayoutNodeById(id) ?? undefined,
     getCamera: () => camera,
-    worldToScreen,
-    sizeForNode,
     isTestMode: () => isTestMode.value,
-    isWebDriver: () => isWebDriver,
     getQuality: () => quality.value,
     getFlash: () => state.flash,
     setFlash: (v) => {
       state.flash = v
     },
+    pruneActiveEdges: fxOverlays.pruneActiveEdges,
+    pruneActiveNodes: fxOverlays.pruneActiveNodes,
+    pruneFloatingLabels: fxOverlays.pruneFloatingLabels,
     mapping: VIZ_MAPPING,
+    fxState: fxOverlays.fxState,
     getSelectedNodeId: () => state.selectedNodeId,
+    activeEdges: fxOverlays.activeEdges,
+    activeNodes: fxOverlays.activeNodes,
     // Use 'focus' LOD during drag OR while physics is settling — both enable dragMode fast-path in baseGraph.
     getLinkLod: () => {
       if (dragToPin.dragState.active && dragToPin.dragState.dragging) return 'focus'
@@ -870,26 +882,29 @@ export function useSimulatorApp() {
     },
   })
 
-  const fxState = fxAndRender.fxState
+  // Bind after render loop is created.
+  wakeUpImpl = renderLoop.wakeUp
+
+  const fxState = fxOverlays.fxState
   // BUG-3: bind FxState for interact clearing FX (late-binding via closure above).
   _interactFxState = fxState
-  const hoveredEdge = fxAndRender.hoveredEdge
-  const clearHoveredEdge = fxAndRender.clearHoveredEdge
-  const activeEdges = fxAndRender.activeEdges
-  const addActiveEdge = fxAndRender.addActiveEdge
-  const pruneActiveEdges = fxAndRender.pruneActiveEdges
-  const activeNodes = fxAndRender.activeNodes
-  const addActiveNode = fxAndRender.addActiveNode
-  const pruneActiveNodes = fxAndRender.pruneActiveNodes
-  const pushFloatingLabel = fxAndRender.pushFloatingLabel
-  const resetOverlays = fxAndRender.resetOverlays
-  const floatingLabelsViewFx = fxAndRender.floatingLabelsViewFx
-  const scheduleTimeout = fxAndRender.scheduleTimeout
-  const clearScheduledTimeouts = fxAndRender.clearScheduledTimeouts
-  const ensureRenderLoop = fxAndRender.ensureRenderLoop
-  const stopRenderLoop = fxAndRender.stopRenderLoop
-  const renderOnce = fxAndRender.renderOnce
-  wakeUpImpl = fxAndRender.wakeUp
+  const hoveredEdge = fxOverlays.hoveredEdge
+  const clearHoveredEdge = fxOverlays.clearHoveredEdge
+  const activeEdges = fxOverlays.activeEdges
+  const addActiveEdge = fxOverlays.addActiveEdge
+  const pruneActiveEdges = fxOverlays.pruneActiveEdges
+  const activeNodes = fxOverlays.activeNodes
+  const addActiveNode = fxOverlays.addActiveNode
+  const pruneActiveNodes = fxOverlays.pruneActiveNodes
+  const pushFloatingLabel = fxOverlays.pushFloatingLabel
+  const resetOverlays = fxOverlays.resetOverlays
+  const floatingLabelsViewFx = fxOverlays.floatingLabelsViewFx
+  const scheduleTimeout = fxOverlays.scheduleTimeout
+  const clearScheduledTimeouts = fxOverlays.clearScheduledTimeouts
+
+  const ensureRenderLoop = renderLoop.ensureRenderLoop
+  const stopRenderLoop = renderLoop.stopRenderLoop
+  const renderOnce = renderLoop.renderOnce
 
   // BUG-4: highlight available picking targets via activeNodes glow.
   // Watch uses a short TTL so nodes fade naturally once the picking phase ends.
@@ -1141,14 +1156,12 @@ export function useSimulatorApp() {
     unit: string,
     opts?: { throttleMs?: number },
   ) {
-    const id = String(nodeId ?? '').trim()
-    if (!id) return
+    const input = normalizeTxAmountLabelInput(nodeId, signedAmount)
+    if (!input) return
 
-    const raw = String(signedAmount ?? '').trim()
-    if (!raw) return
-
-    const sign = raw.startsWith('-') ? '-' : '+'
-    const amountText = raw.replace(/^\+/, '')
+    const id = input.nodeId
+    const sign = input.sign
+    const amountText = input.amountText
     const color = sign === '+' ? VIZ_MAPPING.fx.tx_spark.trail : VIZ_MAPPING.fx.clearing_debt
 
     // Use direction-aware throttle key so sender (−) and receiver (+) labels
@@ -1321,25 +1334,30 @@ export function useSimulatorApp() {
     selectNode(id)
   }
 
-  const dragToPinWiring = useAppDragToPinWiring({
+  const { dragToPin, hideDragPreview } = useAppDragToPinAndPreview({
     dragPreviewEl,
     isTestMode: () => isTestMode.value,
+
     pickNodeAt,
     getLayoutNodeById: (id) => layoutIndex.value.nodeById.get(id) ?? null,
     setSelectedNodeId: selectNode,
     clearHoveredEdge,
+
     clientToScreen,
     screenToWorld,
-    canvasEl,
+    getCanvasEl: () => canvasEl.value,
+
     renderOnce,
-    physics,
-    pinnedPos,
+
+    pinNodeLive: (id, x, y) => physics.pin(id, x, y),
+    commitPinnedPos: (id, x, y) => pinnedPos.set(id, { x, y }),
+    reheatPhysics: (alpha) => physics.reheat(alpha),
+
     getNodeById,
     getCamera: () => camera,
+    sizeForNode,
+    fillForNode: (n) => fillForNode(n, VIZ_MAPPING),
   })
-
-  const dragToPin = dragToPinWiring.dragToPin
-  const hideDragPreview = dragToPinWiring.hideDragPreview
 
   const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,

@@ -19,7 +19,7 @@ import InteractHistoryLog from './InteractHistoryLog.vue'
  import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
  import type { InteractPhase } from '../composables/useInteractMode'
- import { useActivePanelState } from '../composables/useActivePanelState'
+import { provideActivePanelState } from '../composables/useActivePanelState'
  import { useInteractPanelPosition } from '../composables/useInteractPanelPosition'
  import type { Point } from '../composables/useInteractPanelPosition'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
@@ -145,7 +145,7 @@ const {
   setNodeCardOpen,
   hoveredEdge,
   clearHoveredEdge,
-  edgeTooltipStyle,
+  edgeTooltipStyle: calcEdgeTooltipStyle,
   selectedNode,
   nodeCardStyle,
   selectedNodeEdgeStats,
@@ -176,7 +176,11 @@ const {
 
 const interactPhase = computed<InteractPhase>(() => interact.mode.phase.value as InteractPhase)
 
-const { activePanelType } = useActivePanelState(interactPhase)
+// LOW (L2): avoid calling a function directly from template.
+// This also gives Vue a chance to cache style until hoveredEdge/host changes.
+const edgeTooltipStyle = computed(() => calcEdgeTooltipStyle())
+
+const { activePanelType } = provideActivePanelState(interactPhase)
 
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false
@@ -304,20 +308,18 @@ function formatDemoActionError(e: any): string {
 }
 
 const demoRunTxOnce = async () => {
-  if (fxDebug.busy.value) return
-  real.lastError = ''
-  try {
-    await fxDebug.runTxOnce()
-  } catch (e: any) {
-    real.lastError = formatDemoActionError(e)
-  }
+  return runDemoFxOnce(() => fxDebug.runTxOnce())
 }
 
 const demoRunClearingOnce = async () => {
+  return runDemoFxOnce(() => fxDebug.runClearingOnce())
+}
+
+async function runDemoFxOnce(action: () => Promise<void>): Promise<void> {
   if (fxDebug.busy.value) return
   real.lastError = ''
   try {
-    await fxDebug.runClearingOnce()
+    await action()
   } catch (e: any) {
     real.lastError = formatDemoActionError(e)
   }
@@ -616,7 +618,7 @@ watch(interactPhase, (phase) => {
 
     <EdgeTooltip
       :edge="hoveredEdge"
-      :style="edgeTooltipStyle()"
+      :style="edgeTooltipStyle"
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
       :interact-mode="isInteractUi"
     />
@@ -826,8 +828,7 @@ watch(interactPhase, (phase) => {
     <!-- BUG-5: Interact Mode inline history log. -->
     <div
       v-if="isInteractUi && interact.mode.history.length > 0"
-      class="ds-ov-bottom"
-      style="right: 12px; left: auto; bottom: 120px; padding: 6px 10px; pointer-events: none"
+      class="ds-ov-bottom sar-interact-history-overlay"
     >
       <InteractHistoryLog :entries="interact.mode.history" :max-visible="8" />
     </div>
@@ -835,4 +836,11 @@ watch(interactPhase, (phase) => {
 </template>
 
 <style scoped>
+.sar-interact-history-overlay {
+  right: 12px;
+  left: auto;
+  bottom: 120px;
+  padding: 6px 10px;
+  pointer-events: none;
+}
 </style>

@@ -2,6 +2,7 @@ import { withAlpha } from './color'
 import { roundedRectPath } from './roundedRect'
 
 import { quantize } from '../utils/math'
+import { LruCache } from '../utils/lruCache'
 
 type Shape = 'circle' | 'rounded-rect'
 
@@ -53,10 +54,10 @@ type FxGlowSpriteOpts =
 
 type GlowSpriteOpts = NodeGlowSpriteOpts | FxGlowSpriteOpts
 
-const cache = new Map<string, HTMLCanvasElement>()
 // Phase 1: node glow sprites are used widely (node bloom/rim + selection + active).
 // Keep cache larger to avoid thrashing when zoom/size varies.
 const MAX_CACHE = 500
+const cache = new LruCache<string, HTMLCanvasElement>({ max: MAX_CACHE })
 
 /**
  * Runtime cleanup hook for the module-level glow sprite cache.
@@ -101,9 +102,6 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
   const key = keyFor(opts)
   const cached = cache.get(key)
   if (cached) {
-    // Poor-man LRU: refresh insertion order.
-    cache.delete(key)
-    cache.set(key, cached)
     return cached
   }
 
@@ -270,10 +268,6 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
   ctx.restore()
 
   cache.set(key, c)
-  if (cache.size > MAX_CACHE) {
-    const first = cache.keys().next().value
-    if (first) cache.delete(first)
-  }
 
   return c
 }
@@ -301,6 +295,6 @@ export const __testing = {
   MAX_CACHE,
   _cacheClear: resetGlowSpritesCache,
   _cacheHas: (key: string) => cache.has(key),
-  _cacheKeys: () => Array.from(cache.keys()),
+  _cacheKeys: () => cache.keys(),
   _getGlowSprite: getGlowSprite,
 }

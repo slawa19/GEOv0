@@ -272,8 +272,8 @@ defineExpose({
         </select>
       </div>
 
-      <div v-if="isPickFrom" class="ds-help" style="margin-top: 6px">Pick From node (canvas) or choose from dropdown.</div>
-      <div v-if="isPickTo" class="ds-help" style="margin-top: 6px">Pick To node (canvas) or choose from dropdown.</div>
+      <div v-if="isPickFrom" class="ds-help tl-pick-help">Pick From node (canvas) or choose from dropdown.</div>
+      <div v-if="isPickTo" class="ds-help tl-pick-help">Pick To node (canvas) or choose from dropdown.</div>
 
       <div v-if="isEdit" class="tl-stats" aria-label="Trustline stats">
         <div class="tl-stats__item">
@@ -292,12 +292,11 @@ defineExpose({
 
       <div v-if="isCreate" class="ds-controls__row">
         <label class="ds-label" for="tl-limit">Limit</label>
-        <div class="ds-row" style="flex-wrap: nowrap">
+        <div class="ds-row tl-input-row">
           <input
             id="tl-limit"
             v-model="limit"
-            class="ds-input ds-mono"
-            style="width: 125px; flex: none"
+            class="ds-input ds-mono tl-limit-input"
             type="text"
             inputmode="decimal"
             autocomplete="off"
@@ -311,19 +310,18 @@ defineExpose({
         </div>
       </div>
 
-      <div v-if="isCreate && !createValid && limit.trim()" class="ds-help" style="margin-top: 6px">
+      <div v-if="isCreate && !createValid && limit.trim()" class="ds-help tl-pick-help">
         Limit must be greater than 0.
       </div>
 
       <div v-if="isEdit" class="ds-controls__row">
         <label class="ds-label" for="tl-new-limit">New limit</label>
-        <div class="ds-row" style="flex-wrap: nowrap">
+        <div class="ds-row tl-input-row">
           <input
             id="tl-new-limit"
             ref="newLimitInput"
             v-model="newLimit"
-            class="ds-input ds-mono"
-            style="width: 125px; flex: none"
+            class="ds-input ds-mono tl-limit-input"
             type="text"
             inputmode="decimal"
             autocomplete="off"
@@ -339,7 +337,7 @@ defineExpose({
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
 
-      <div class="ds-row" style="justify-content: flex-end">
+      <div class="ds-row tl-actions">
         <button v-if="isCreate" class="ds-btn ds-btn--primary" type="button" :disabled="busy || !createValid" @click="onCreate">
           {{ busy ? 'Creating…' : 'Create' }}
         </button>
@@ -403,6 +401,23 @@ defineExpose({
 }
 .ds-controls__row .ds-row .ds-input {
   min-width: 0;
+}
+
+.tl-pick-help {
+  margin-top: 6px;
+}
+
+.tl-input-row {
+  flex-wrap: nowrap;
+}
+
+.tl-limit-input {
+  width: 125px;
+  flex: none;
+}
+
+.tl-actions {
+  justify-content: flex-end;
 }
 
 .tl-stats {

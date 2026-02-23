@@ -5,7 +5,7 @@ function stripTrailingSlashes(v: string): string {
 }
 
 export function normalizeApiBase(input: string, fallback = DEFAULT_API_PREFIX): string {
-  const raw = String(input ?? '').trim().replace(/\\/g, '/')
+  const raw = input.trim().replace(/\\/g, '/')
   if (!raw) return fallback
 
   const v = stripTrailingSlashes(raw)

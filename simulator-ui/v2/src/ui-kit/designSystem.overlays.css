@@ -176,6 +176,11 @@ details.ds-ov-details > summary {
   display: flex;
   align-items: center;
   gap: 8px;
+  cursor: pointer;
+}
+
+.ds-ov-details {
+  position: relative;
 }
 
 details.ds-ov-details > summary::-webkit-details-marker {

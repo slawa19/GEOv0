@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
-import { type ActivePanelKey, useActivePanelState } from '../composables/useActivePanelState'
+import { type ActivePanelKey, useActivePanelStateShared } from '../composables/useActivePanelState'
 import { toLower } from '../utils/stringHelpers'
 
 type Props = {
@@ -30,7 +30,7 @@ const isIdle = computed(() => toLower(props.phase) === 'idle')
 // When a flow is active (phase != idle), ActionBar must not allow starting any flow.
 const isFlowActive = computed(() => !isIdle.value)
 
-const { activeKey } = useActivePanelState(computed(() => props.phase))
+const { activeKey } = useActivePanelStateShared(computed(() => props.phase))
 
 function titleFor(_key: ActivePanelKey, idleTitle: string): string {
   if (isFlowActive.value) return 'Cancel current action first'

@@ -74,7 +74,7 @@ function parseActionErrorJson(bodyText: string | undefined): SimulatorActionErro
     return {
       code,
       message,
-      details: (details && typeof details === 'object' ? (details as Record<string, unknown>) : null) ?? null,
+      details: details && typeof details === 'object' ? (details as Record<string, unknown>) : null,
     }
   } catch {
     return null
@@ -137,7 +137,7 @@ export function useInteractActions(opts: {
   const actionsDisabled = ref(false)
 
   function requireRunId(): string {
-    const id = String(opts.runId.value ?? '').trim()
+    const id = opts.runId.value.trim()
     if (!id) throw mapToInteractActionError(new Error('No active run_id'))
     return id
   }

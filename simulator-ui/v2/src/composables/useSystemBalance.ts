@@ -1,7 +1,7 @@
 import { computed, type ComputedRef, getCurrentScope, onScopeDispose, type Ref, shallowRef, watch } from 'vue'
 
 import type { GraphSnapshot } from '../types'
-import { parseAmountNumber } from '../utils/amount'
+import { parseAmountNumber } from '../utils/numberFormat'
 import { isActiveStatus } from '../utils/status'
 
 export type SystemBalance = {

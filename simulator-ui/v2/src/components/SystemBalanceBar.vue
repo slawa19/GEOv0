@@ -56,10 +56,10 @@ function fmt(n: number): string {
         <span class="ds-value ds-mono">{{ fmt(b.activeParticipants) }}</span>
       </div>
 
-      <div class="ds-panel ds-ov-metric" style="gap: 10px">
+      <div class="ds-panel ds-ov-metric sbb-util">
         <span class="ds-label">Utilization</span>
         <span class="ds-value ds-mono">{{ utilPct }}%</span>
-        <div class="ds-progress__track" style="width: 110px; height: 6px">
+        <div class="ds-progress__track sbb-track">
           <div class="ds-progress__bar" :style="{ width: utilPct + '%' }" />
         </div>
       </div>
@@ -75,6 +75,15 @@ function fmt(n: number): string {
   align-items: center;
   justify-content: center;
   pointer-events: auto;
+}
+
+.sbb-util {
+  gap: 10px;
+}
+
+.sbb-track {
+  width: 110px;
+  height: 6px;
 }
 
 .ds-progress__bar {

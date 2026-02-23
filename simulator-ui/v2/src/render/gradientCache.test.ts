@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { __testing, clearGradientCache, getLinearGradient2Stops } from './gradientCache'
+import { __testing, clearGradientCache, getLinearGradient2Stops, getLinearGradient3Stops } from './gradientCache'
 
 function createMockCtx() {
   const calls: Array<{ x0: number; y0: number; x1: number; y1: number }> = []
@@ -70,6 +70,24 @@ describe('render/gradientCache — unit', () => {
 
     getLinearGradient2Stops(ctx, 0, 0, 10, 10, 0, 'a', 1, 'b')
     // Cache was cleared => re-created.
+    expect(ctx.createLinearGradient).toHaveBeenCalledTimes(2)
+  })
+
+  it('caches 3-stop gradients per ctx', () => {
+    const ctx = createMockCtx()
+
+    getLinearGradient3Stops(ctx, 0, 0, 10, 10, 0, 'a', 0.5, 'b', 1, 'c')
+    getLinearGradient3Stops(ctx, 0, 0, 10, 10, 0, 'a', 0.5, 'b', 1, 'c')
+    expect(ctx.createLinearGradient).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not mix 2-stop and 3-stop cache keys', () => {
+    const ctx = createMockCtx()
+
+    getLinearGradient2Stops(ctx, 0, 0, 10, 10, 0, 'a', 1, 'b')
+    getLinearGradient3Stops(ctx, 0, 0, 10, 10, 0, 'a', 0.5, 'b', 1, 'c')
+
+    // Different key families => two creations.
     expect(ctx.createLinearGradient).toHaveBeenCalledTimes(2)
   })
 })

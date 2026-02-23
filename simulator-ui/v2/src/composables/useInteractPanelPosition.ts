@@ -27,7 +27,7 @@ export type PanelOpenSource =
  * const { panelAnchor, openFrom } = useInteractPanelPosition(interactPhase)
  *
  * // При открытии из EdgeDetailPopup "Change Limit":
- * openFrom('change-limit', interact.mode.state.edgeAnchor ?? null)
+ * openFrom('change-limit', interact.mode.state.edgeAnchor)
  *
  * // При открытии из NodeCard ✏️ (nextTick нужен — watcher phase сбрасывает anchor):
  * void nextTick(() => openFrom('node-card', parseNodeCardAnchor(nodeCardStyle.value)))
@@ -72,8 +72,8 @@ export function useInteractPanelPosition(phase: Ref<InteractPhase>) {
    * @param source   — читаемое имя источника (для понимания кода и дебага)
    * @param snapshot — координаты { x, y } или null/undefined (→ CSS default)
    */
-  function openFrom(_source: PanelOpenSource, snapshot?: Point | null): void {
-    _anchor.value = snapshot ?? null
+  function openFrom(_source: PanelOpenSource, snapshot: Point | null = null): void {
+    _anchor.value = snapshot
   }
 
   return {

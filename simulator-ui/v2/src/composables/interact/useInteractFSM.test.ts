@@ -53,4 +53,30 @@ describe('useInteractFSM', () => {
       expect(state.phase).toBe('idle')
     })
   })
+
+  it('selectEdge defaults anchor to null', () => {
+    const { state, selectEdge } = useInteractFSM(makeOpts())
+
+    selectEdge(keyEdge('node-A', 'node-B'))
+    expect(state.edgeAnchor).toBeNull()
+    expect(state.selectedEdgeKey).toBe(keyEdge('node-A', 'node-B'))
+  })
+
+  it('selectTrustline trims ids and keeps idle if invalid', () => {
+    const { state, selectTrustline } = useInteractFSM(makeOpts())
+
+    selectTrustline('  node-A  ', ' node-B ')
+    expect(state.fromPid).toBe('node-A')
+    expect(state.toPid).toBe('node-B')
+    expect(state.selectedEdgeKey).toBe(keyEdge('node-A', 'node-B'))
+    expect(state.phase).toBe('editing-trustline')
+
+    // New instance: invalid selection should not transition phase.
+    const h2 = useInteractFSM(makeOpts())
+    h2.selectTrustline('   ', 'node-B')
+    expect(h2.state.fromPid).toBeNull()
+    expect(h2.state.toPid).toBe('node-B')
+    expect(h2.state.selectedEdgeKey).toBeNull()
+    expect(h2.state.phase).toBe('idle')
+  })
 })

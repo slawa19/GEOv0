@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { ApiError } from '../api/http'
 import { connectSse } from '../api/sse'
-import { createRun, getActiveRun } from '../api/simulatorApi'
+import { createRun, getActiveRun, getRun, stopRun } from '../api/simulatorApi'
 
 vi.mock('../api/simulatorApi', () => {
   return {
@@ -214,6 +214,107 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
     expect(loadScene).toHaveBeenCalledTimes(1)
 
     vi.useRealTimers()
+  })
+})
+
+describe('useSimulatorRealMode - admin helpers', () => {
+  it('attachToRun trims runId and no-ops on blank', async () => {
+    const isRealModeRef = ref(false)
+    const real = createRealState()
+
+    const loadScene = vi.fn(async () => undefined)
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => isRealModeRef.value),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: {
+        loading: false,
+        error: '',
+        sourcePath: '',
+        snapshot: null,
+        selectedNodeId: null,
+        flash: 0,
+      },
+      real,
+
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+
+      loadScene,
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      pushTxAmountLabel: () => undefined,
+      clampRealTxTtlMs: () => 0,
+
+      scheduleTimeout: () => undefined,
+      runRealTxFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+      wakeUp: () => undefined,
+    })
+
+    vi.mocked(getRun).mockClear()
+    await h.attachToRun('   ')
+    expect(real.runId).toBeNull()
+    expect(getRun).toHaveBeenCalledTimes(0)
+    expect(loadScene).toHaveBeenCalledTimes(0)
+
+    await h.attachToRun('  r1  ')
+    expect(real.runId).toBe('r1')
+    expect(getRun).toHaveBeenCalledTimes(1)
+    expect(loadScene).toHaveBeenCalledTimes(0) // isRealMode=false -> refreshSnapshot no-op
+  })
+
+  it('stopRunById trims runId and no-ops on blank', async () => {
+    const isRealModeRef = ref(false)
+    const real = createRealState()
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => isRealModeRef.value),
+      isLocalhost: false,
+      effectiveEq: computed(() => 'EUR'),
+      state: {
+        loading: false,
+        error: '',
+        sourcePath: '',
+        snapshot: null,
+        selectedNodeId: null,
+        flash: 0,
+      },
+      real,
+
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+
+      loadScene: async () => undefined,
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      pushTxAmountLabel: () => undefined,
+      clampRealTxTtlMs: () => 0,
+
+      scheduleTimeout: () => undefined,
+      runRealTxFx: () => undefined,
+      runRealClearingDoneFx: () => undefined,
+      wakeUp: () => undefined,
+    })
+
+    vi.mocked(stopRun).mockClear()
+
+    await h.stopRunById('   ')
+    expect(stopRun).toHaveBeenCalledTimes(0)
+
+    await h.stopRunById('  r2  ')
+    expect(stopRun).toHaveBeenCalledTimes(1)
+
+    // Verify the trimmed id is used.
+    const args = vi.mocked(stopRun).mock.calls[0]
+    expect(args?.[1]).toBe('r2')
   })
 })
 

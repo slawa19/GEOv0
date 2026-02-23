@@ -151,10 +151,10 @@ function onToChange(v: string) {
         </select>
       </div>
 
-      <div v-if="isPickFrom" class="ds-help" style="margin: 6px 0 2px">
+      <div v-if="isPickFrom" class="ds-help mp-pick-help">
         Pick From node (canvas) or choose from dropdown.
       </div>
-      <div v-if="isPickTo" class="ds-help" style="margin: 6px 0 2px">Pick To node (canvas) or choose from dropdown.</div>
+      <div v-if="isPickTo" class="ds-help mp-pick-help">Pick To node (canvas) or choose from dropdown.</div>
 
       <template v-if="isConfirm">
         <div class="ds-row ds-row--space">
@@ -164,12 +164,11 @@ function onToChange(v: string) {
 
         <div class="ds-controls__row">
           <label class="ds-label" for="mp-amount">Amount</label>
-          <div class="ds-row" style="flex-wrap: nowrap">
+          <div class="ds-row mp-amount-row">
             <input
               id="mp-amount"
               v-model="amount"
-              class="ds-input ds-mono"
-              style="flex: 1"
+              class="ds-input ds-mono mp-amount-input"
               type="text"
               inputmode="decimal"
               autocomplete="off"
@@ -191,7 +190,7 @@ function onToChange(v: string) {
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
 
-      <div class="ds-row" style="justify-content: flex-end">
+      <div class="ds-row mp-actions">
         <button
           v-if="isConfirm"
           class="ds-btn ds-btn--primary"
@@ -215,5 +214,23 @@ function onToChange(v: string) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.mp-pick-help {
+  margin: 6px 0 2px;
+}
+
+.mp-amount-row {
+  flex-wrap: nowrap;
+}
+
+.mp-amount-input {
+  flex: 1;
+}
+
+.mp-actions {
+  justify-content: flex-end;
+}
+</style>
 
 
