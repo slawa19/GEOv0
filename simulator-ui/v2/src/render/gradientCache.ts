@@ -6,6 +6,8 @@
  * allocations of createLinearGradient() in high-quality rendering.
  */
 
+import { quantize } from '../utils/math'
+
 type CacheKey = string
 
 const DEFAULT_MAX_CACHE = 300
@@ -56,14 +58,9 @@ class LruCache<V> {
   }
 }
 
-function q(v: number, step = 0.5) {
-  if (!Number.isFinite(v)) return 0
-  return Math.round(v / step) * step
-}
-
 function q01(v: number) {
   // Color stop offsets are in [0..1]; quantize more finely.
-  return q(v, 0.01)
+  return quantize(v, 0.01)
 }
 
 function keyForLinear2Stops(
@@ -80,10 +77,10 @@ function keyForLinear2Stops(
   // Geometry is quantized to increase cache hit rate while keeping visuals stable.
   return [
     'lg2',
-    q(x0),
-    q(y0),
-    q(x1),
-    q(y1),
+    quantize(x0),
+    quantize(y0),
+    quantize(x1),
+    quantize(y1),
     q01(s0Offset),
     s0Color,
     q01(s1Offset),
@@ -142,7 +139,7 @@ export function clearGradientCache(ctx: CanvasRenderingContext2D) {
 }
 
 export const __testing = {
-  q,
+  q: quantize,
   keyForLinear2Stops,
   _setMaxCacheForTests(max: number) {
     config.maxCache = Math.max(0, Math.floor(max))

@@ -35,7 +35,7 @@ vi.mock('../composables/useSimulatorApp', () => {
 
       const isInteractPickingPhase = computed(() => {
         if (!isInteractUi.value) return false
-        const p = String(phase.value ?? '')
+        const p = phase.value
         return (
           p === 'picking-payment-from' ||
           p === 'picking-payment-to' ||

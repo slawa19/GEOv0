@@ -21,12 +21,29 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   const fxState = createFxState()
   const timers = createTimerRegistry()
 
+  // Optional dev hook to inspect timer registry stats from the console.
+  // Keep it instance-safe: uninstall only if it still points to our hook.
+  let timersStatsHook: (() => unknown) | null = null
+
   // M19: Timer registry is local to this composable instance; ensure we clean up
   // all scheduled timeouts on component unmount to avoid leaking ticking timers.
   // Guard against calling composable outside of a component setup() (tests).
   if (getCurrentInstance()) {
     onUnmounted(() => {
       timers.clearAll()
+
+      try {
+        if (timersStatsHook && (globalThis as any).__geo_timers_stats === timersStatsHook) {
+          ;(globalThis as any).__geo_timers_stats = undefined
+          try {
+            delete (globalThis as any).__geo_timers_stats
+          } catch {
+            // Best-effort.
+          }
+        }
+      } catch {
+        // ignore
+      }
     })
   }
 
@@ -35,7 +52,8 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   try {
     const host = globalThis?.location?.hostname
     if (host === 'localhost' || host === '127.0.0.1') {
-      ;(globalThis as any).__geo_timers_stats = () => timers.getStats()
+      timersStatsHook = () => timers.getStats()
+      ;(globalThis as any).__geo_timers_stats = timersStatsHook
     }
   } catch {
     // ignore

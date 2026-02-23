@@ -281,6 +281,27 @@ details[open].ds-ov-details > summary::after {
   min-width: 0;
 }
 
+/* Dropdown container positioning for <details> based menus (TopBar Advanced/Admin). */
+.ds-ov-dropdown {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  padding: 8px 10px;
+  min-width: 320px;
+  max-width: min(520px, calc(100vw - 24px));
+  z-index: var(--ds-z-inset, 60);
+  pointer-events: auto;
+}
+
+.ds-ov-dropdown--right {
+  left: auto;
+  right: 0;
+}
+
+.ds-ov-dropdown--narrow {
+  min-width: 260px;
+}
+
 /* ──────────────────────────────────────────────────────────────
    Tooltip composition
    ────────────────────────────────────────────────────────────── */

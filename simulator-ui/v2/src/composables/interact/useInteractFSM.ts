@@ -88,7 +88,7 @@ export function useInteractFSM(opts: {
   })
 
   const phase = computed(() => state.phase)
-  const isPickingPhase = computed(() => String(state.phase ?? '').startsWith('picking-'))
+  const isPickingPhase = computed(() => state.phase.startsWith('picking-'))
 
   function clearError() {
     state.error = null
@@ -154,7 +154,7 @@ export function useInteractFSM(opts: {
   }
 
   function selectNode(nodeId: string) {
-    const id = String(nodeId ?? '').trim()
+    const id = nodeId.trim()
     if (!id) return
 
     opts.onNodeClick?.(id)

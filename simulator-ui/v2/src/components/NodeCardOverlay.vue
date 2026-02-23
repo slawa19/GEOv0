@@ -4,7 +4,7 @@ import type { CSSProperties } from 'vue'
 import type { GraphNode } from '../types'
 import type { TrustlineInfo } from '../api/simulatorTypes'
 import { VIZ_MAPPING } from '../vizMapping'
-import { renderOrDash } from '../utils/valueFormat'
+import { fmtAmt } from '../utils/numberFormat'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -40,6 +40,11 @@ const emit = defineEmits<{ close: [] }>()
 
 const props = defineProps<Props>()
 
+function safeNum(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
 const nodeColor = computed(() => {
   const key = String(props.node.viz_color_key ?? 'unknown')
   return VIZ_MAPPING.node.color[key]?.fill ?? VIZ_MAPPING.node.color.unknown.fill
@@ -71,26 +76,18 @@ const nodeTrustlines = computed<TrustlineInfo[]>(() => {
   )
 })
 
-/** Format amount: drop redundant .00 fraction */
-function fmtAmt(v: string | number | null | undefined): string {
-  if (v == null) return '—'
-  const n = typeof v === 'number' ? v : parseFloat(String(v))
-  if (!Number.isFinite(n)) return renderOrDash(v)
-  return Number.isInteger(n) ? String(Math.round(n)) : String(n)
-}
-
 /** OUT trustlines (node = debtor), sorted by used DESC */
 const outTrustlines = computed<TrustlineInfo[]>(() =>
   nodeTrustlines.value
     .filter((tl) => tl.from_pid === props.node.id)
-    .sort((a, b) => parseFloat(b.used) - parseFloat(a.used)),
+    .sort((a, b) => safeNum(b.used) - safeNum(a.used)),
 )
 
 /** IN trustlines (node = creditor), sorted by used DESC */
 const inTrustlines = computed<TrustlineInfo[]>(() =>
   nodeTrustlines.value
     .filter((tl) => tl.to_pid === props.node.id)
-    .sort((a, b) => parseFloat(b.used) - parseFloat(a.used)),
+    .sort((a, b) => safeNum(b.used) - safeNum(a.used)),
 )
 </script>
 
@@ -193,6 +190,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
+                :disabled="!!interactBusy"
                 title="Edit trustline"
                 aria-label="Edit trustline"
                 @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"

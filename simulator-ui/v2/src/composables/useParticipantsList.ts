@@ -23,14 +23,14 @@ export function useParticipantsList<P extends { pid?: string | null; name?: stri
     const arr = Array.isArray(items) ? items : []
 
     return [...arr]
-      .filter((p) => String(p?.pid ?? '').trim())
+      .filter((p) => (p?.pid ?? '').trim())
       .sort((a, b) => participantLabel(a).localeCompare(participantLabel(b)))
   })
 
   const toParticipants = computed<P[]>(() => {
-    const from = String(input.fromParticipantId ? toValue(input.fromParticipantId) : '').trim()
+    const from = ((input.fromParticipantId ? toValue(input.fromParticipantId) : '') ?? '').trim()
     if (!from) return participantsSorted.value
-    return participantsSorted.value.filter((p) => String(p?.pid ?? '').trim() !== from)
+    return participantsSorted.value.filter((p) => (p?.pid ?? '').trim() !== from)
   })
 
   return { participantsSorted, toParticipants }

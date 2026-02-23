@@ -5,8 +5,11 @@ export function useAppLifecycle(opts: {
   resizeAndLayout: () => void
   persistedPrefs: { loadFromStorage: () => void; dispose: () => void }
   setupDevHook: () => void
+  disposeDevHook?: () => void
   sceneState: { setup: () => void; teardown: () => void }
   hideDragPreview: () => void
+  /** Optional runtime cleanup for render/FX module-level caches. */
+  resetFxRendererCaches?: () => void
   physics: {
     stop: () => void
     updateViewport: (w: number, h: number, alpha?: number) => void
@@ -39,7 +42,9 @@ export function useAppLifecycle(opts: {
   onUnmounted(() => {
     opts.hideDragPreview()
     opts.persistedPrefs.dispose()
+    opts.disposeDevHook?.()
     opts.physics.stop()
+    opts.resetFxRendererCaches?.()
     opts.sceneState.teardown()
   })
 }

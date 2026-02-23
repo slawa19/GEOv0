@@ -72,15 +72,22 @@ export function usePersistedSimulatorPrefs(deps: UsePersistedSimulatorPrefsDeps)
 
   const storage: StorageLike =
     deps.storage ??
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    (typeof window !== 'undefined' ? window.localStorage : ({ getItem: () => null, setItem: () => undefined } as any))
+    (() => {
+      try {
+        return (((globalThis as any).window as any)?.localStorage ?? { getItem: () => null, setItem: () => undefined }) as any
+      } catch {
+        return { getItem: () => null, setItem: () => undefined } as any
+      }
+    })()
 
   const timers: TimersLike =
     deps.timers ??
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    (typeof window !== 'undefined'
-      ? { setTimeout: (fn, ms) => window.setTimeout(fn, ms), clearTimeout: (id) => window.clearTimeout(id) }
-      : ({ setTimeout: () => 0, clearTimeout: () => undefined } as any))
+    (() => {
+      const w = (globalThis as any).window as any
+      return w
+        ? { setTimeout: (fn: () => void, ms: number) => w.setTimeout(fn, ms), clearTimeout: (id: number) => w.clearTimeout(id) }
+        : ({ setTimeout: () => 0, clearTimeout: () => undefined } as any)
+    })()
 
   const allowedLayoutModes: readonly LayoutMode[] = [
     'admin-force',
@@ -155,11 +162,11 @@ export function useSimulatorStorage(storage?: StorageLike) {
           setItem: (k, v) => { try { storage.setItem(k, v) } catch { /* ignore */ } },
           removeItem: (k) => { try { storage.removeItem?.(k) } catch { /* ignore */ } },
         }
-      : typeof window !== 'undefined'
+      : ((globalThis as any).window as any)?.localStorage
         ? {
-            getItem: (k) => { try { return window.localStorage.getItem(k) } catch { return null } },
-            setItem: (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* ignore */ } },
-            removeItem: (k) => { try { window.localStorage.removeItem(k) } catch { /* ignore */ } },
+            getItem: (k) => { try { return ((globalThis as any).window as any).localStorage.getItem(k) } catch { return null } },
+            setItem: (k, v) => { try { ((globalThis as any).window as any).localStorage.setItem(k, v) } catch { /* ignore */ } },
+            removeItem: (k) => { try { ((globalThis as any).window as any).localStorage.removeItem(k) } catch { /* ignore */ } },
           }
         : { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
 

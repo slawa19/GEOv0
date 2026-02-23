@@ -1,6 +1,8 @@
 import { withAlpha } from './color'
 import { roundedRectPath } from './roundedRect'
 
+import { quantize } from '../utils/math'
+
 type Shape = 'circle' | 'rounded-rect'
 
 type NodeGlowSpriteOpts = {
@@ -56,29 +58,35 @@ const cache = new Map<string, HTMLCanvasElement>()
 // Keep cache larger to avoid thrashing when zoom/size varies.
 const MAX_CACHE = 500
 
-function q(v: number, step = 0.5) {
-  if (!Number.isFinite(v)) return 0
-  return Math.round(v / step) * step
+/**
+ * Runtime cleanup hook for the module-level glow sprite cache.
+ *
+ * This does NOT change the existing cap/LRU semantics for normal operation.
+ * It provides an explicit lifecycle-oriented way to drop all cached canvases,
+ * e.g. on app unmount / scene teardown.
+ */
+export function resetGlowSpritesCache(): void {
+  cache.clear()
 }
 
 function keyFor(o: GlowSpriteOpts) {
   if (o.kind === 'fx-dot' || o.kind === 'fx-bloom') {
-    return [o.kind, o.color, q(o.r), q(o.blurPx)].join('|')
+    return [o.kind, o.color, quantize(o.r), quantize(o.blurPx)].join('|')
   }
   if (o.kind === 'fx-ring') {
-    return [o.kind, o.color, q(o.r), q(o.thicknessPx), q(o.blurPx)].join('|')
+    return [o.kind, o.color, quantize(o.r), quantize(o.thicknessPx), quantize(o.blurPx)].join('|')
   }
 
   return [
     o.kind,
     o.shape,
     o.color,
-    q(o.w),
-    q(o.h),
-    q(o.r),
-    q(o.rr),
-    q(o.blurPx),
-    q(o.lineWidthPx),
+    quantize(o.w),
+    quantize(o.h),
+    quantize(o.r),
+    quantize(o.rr),
+    quantize(o.blurPx),
+    quantize(o.lineWidthPx),
   ].join('|')
 }
 
@@ -288,10 +296,10 @@ export function drawGlowSprite(
 
 // Exposed for unit tests (cache keys / quantization invariants / LRU eviction).
 export const __testing = {
-  q,
+  q: quantize,
   keyFor,
   MAX_CACHE,
-  _cacheClear: () => cache.clear(),
+  _cacheClear: resetGlowSpritesCache,
   _cacheHas: (key: string) => cache.has(key),
   _cacheKeys: () => Array.from(cache.keys()),
   _getGlowSprite: getGlowSprite,

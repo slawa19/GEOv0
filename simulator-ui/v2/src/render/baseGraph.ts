@@ -1,6 +1,7 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { LayoutLink } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
+import { getNodeShape } from '../types/nodeShape'
 import { clamp01 } from '../utils/math'
 import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
@@ -175,7 +176,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const nw = nw0 * invZ
       const nh = nh0 * invZ
       const glow = fillForNode(n as GraphNode, mapping)
-      const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+      const shapeKey = getNodeShape(n) ?? 'circle'
       const isRoundedRect = shapeKey === 'rounded-rect'
       
       const r = Math.max(nw, nh) / 2
@@ -205,7 +206,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const nw = nw0 * invZ
       const nh = nh0 * invZ
       const glow = mapping.fx.clearing_debt
-      const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+      const shapeKey = getNodeShape(n) ?? 'circle'
       const isRoundedRect = shapeKey === 'rounded-rect'
 
       const r = Math.max(nw, nh) / 2

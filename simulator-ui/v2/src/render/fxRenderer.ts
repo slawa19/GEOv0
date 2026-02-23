@@ -43,6 +43,7 @@
 import type { VizMapping } from '../vizMapping'
 import type { LayoutNode } from './nodePainter'
 import { clamp01 } from '../utils/math'
+import { getNodeShape } from '../types/nodeShape'
 import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
@@ -55,6 +56,36 @@ import { sizeForNode } from './nodePainter'
 const MAX_NODE_OUTLINE_CACHE = 512
 const nodeOutlinePath2DCache = new Map<string, Path2D>()
 let _nodeOutlineCacheSnapshotKey: string | null | undefined = undefined
+
+/**
+ * Reset module-level caches used by the FX renderer.
+ *
+ * This is a runtime lifecycle hook for scene/app unmounts to prevent cache data
+ * from living longer than the owning component.
+ *
+ * Idempotent by design.
+ */
+export function resetFxRendererCaches(): void {
+  nodeOutlinePath2DCache.clear()
+  _nodeOutlineCacheSnapshotKey = undefined
+}
+
+/**
+ * Minimal internal hooks for unit tests.
+ * Keep surface area small: sizes + a warmup entrypoint.
+ */
+export const __testing = {
+  _nodeOutlinePath2DCacheSize(): number {
+    return nodeOutlinePath2DCache.size
+  },
+  _nodeOutlineCacheSnapshotKey(): string | null | undefined {
+    return _nodeOutlineCacheSnapshotKey
+  },
+  _warmNodeOutlinePath2DCache(n: LayoutNode, scale = 1, invZoom = 1): void {
+    // Ensure at least one cache entry is created.
+    void nodeOutlinePath2D(n, scale, invZoom)
+  },
+}
 
 function worldRectForCanvas(ctx: CanvasRenderingContext2D, w: number, h: number, padPx = 96) {
   // Current transform includes camera pan/zoom. Invert it to convert screen-space canvas bounds
@@ -91,7 +122,7 @@ function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1
   const { w: w0, h: h0 } = sizeForNode(n)
   const w = w0 * invZoom
   const h = h0 * invZoom
-  const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+  const shapeKey = getNodeShape(n) ?? 'circle'
   const isRoundedRect = shapeKey === 'rounded-rect'
   const rr = Math.max(0, Math.min(4 * invZoom, Math.min(w, h) * 0.18))
   const ww = w * scale
@@ -112,7 +143,8 @@ function nodeOutlinePath(ctx: CanvasRenderingContext2D, n: LayoutNode, scale = 1
 function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
   // Cache across frames: key uses rounded positions (1px grid) to maximise hit rate
   // during physics micro-movements while still detecting real positional changes.
-  const cacheKey = `${n.id}|${Math.round(n.__x)}|${Math.round(n.__y)}|${String((n as any).viz_shape_key ?? '')}|${Math.round(scale * 100)}|${Math.round(invZoom * 1000)}`
+  const shapeKeyForCache = getNodeShape(n) ?? ''
+  const cacheKey = `${n.id}|${Math.round(n.__x)}|${Math.round(n.__y)}|${shapeKeyForCache}|${Math.round(scale * 100)}|${Math.round(invZoom * 1000)}`
   const cached = nodeOutlinePath2DCache.get(cacheKey)
   if (cached) {
     // Touch for LRU.
@@ -124,7 +156,7 @@ function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1) {
   const { w: w0, h: h0 } = sizeForNode(n)
   const w = w0 * invZoom
   const h = h0 * invZoom
-  const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+  const shapeKey = getNodeShape(n) ?? 'circle'
   const isRoundedRect = shapeKey === 'rounded-rect'
   const rr = Math.max(0, Math.min(4 * invZoom, Math.min(w, h) * 0.18))
   const ww = w * scale
@@ -870,7 +902,7 @@ export function renderFxFrame(opts: {
         const nw = nw0 * invZ
         const nh = nh0 * invZ
         const nodeR = Math.max(nw, nh) / 2
-        const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+        const shapeKey = getNodeShape(n) ?? 'circle'
         const isRoundedRect = shapeKey === 'rounded-rect'
         const rr = Math.max(0, Math.min(4 * invZ, Math.min(nw, nh) * 0.18))
 

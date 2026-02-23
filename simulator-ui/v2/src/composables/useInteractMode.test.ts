@@ -90,10 +90,7 @@ describe('useInteractMode', () => {
     actions.sendPayment.mockRejectedValueOnce(new Error('boom'))
     const im = useInteractMode({ actions: actions as any, equivalent: computed(() => 'UAH'), snapshot })
 
-    im.startClearingFlow()
-    expect(im.phase.value).toBe('confirm-clearing')
-
-    // Force an error state.
+    // Force an error state (failed payment confirm).
     im.startPaymentFlow()
     im.selectNode('alice')
     im.selectNode('bob')
@@ -332,6 +329,21 @@ describe('useInteractMode', () => {
     expect(ids.has('bob')).toBe(true)
     expect(ids.has('carol')).toBe(true)
     expect(ids.has('alice')).toBe(false) // excludes self
+  })
+
+  it('does not start an alternative flow when phase is not idle (one flow at a time)', () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    expect(im.phase.value).toBe('picking-payment-from')
+
+    // Attempt to start a different flow while current flow is active.
+    im.startTrustlineFlow()
+    expect(im.phase.value).toBe('picking-payment-from')
+
+    im.startClearingFlow()
+    expect(im.phase.value).toBe('picking-payment-from')
   })
 })
 

@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
+import { getNodeShape } from '../types/nodeShape'
 
 export function useDragPreview(opts: {
   el: Ref<HTMLDivElement | null>
@@ -47,7 +48,7 @@ export function useDragPreview(opts: {
     node.style.background = `linear-gradient(135deg, ${fill}88, ${fill}44)`
     node.style.borderColor = `${fill}aa`
     node.style.boxShadow = `0 0 0 1px rgba(255,255,255,0.18), 0 12px 30px rgba(0,0,0,0.45), 0 0 24px ${fill}55`
-    const shapeKey = String((n as any).viz_shape_key ?? 'circle')
+    const shapeKey = getNodeShape(n) ?? 'circle'
     node.style.borderRadius = shapeKey === 'rounded-rect' ? '5px' : '999px'
   }
 

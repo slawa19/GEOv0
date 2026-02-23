@@ -219,7 +219,7 @@ function bumpProgress() {
                 <p class="ds-help">Шаблон: референсный Node Card + фактические поля Simulator UI.</p>
               </div>
               <div class="ds-row">
-                <button class="ds-btn ds-btn--ghost" style="height: 28px; padding: 0 10px" type="button">Pin</button>
+                <button class="ds-btn ds-btn--ghost ds-btn--sm" type="button">Pin</button>
                 <button class="ds-btn ds-btn--ghost ds-btn--icon" aria-label="Close" title="Close" type="button">✕</button>
               </div>
             </div>

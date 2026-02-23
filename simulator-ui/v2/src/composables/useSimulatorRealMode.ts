@@ -28,6 +28,8 @@ import { ApiError, authHeaders } from '../api/http'
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { resolveTxDirection } from '../utils/txDirection'
+import { incCounter } from '../utils/counters'
+import { toLower } from '../utils/stringHelpers'
 
 export type RealModeState = {
   apiBase: string
@@ -158,9 +160,7 @@ export function useSimulatorRealMode(opts: {
     ;(globalThis as any).__geo_real_mode_diag = diag
   }
 
-  function incDiag(map: Record<string, number>, key: string) {
-    map[key] = (map[key] ?? 0) + 1
-  }
+  const incDiag = incCounter
 
   function getBurstLabelThrottleMs(): number {
     const ops = Number(real.runStatus?.ops_sec ?? 0)
@@ -883,7 +883,7 @@ export function useSimulatorRealMode(opts: {
 
     await ensureAnonSessionOnce()
 
-    const st = String(real.runStatus?.state ?? '').toLowerCase()
+    const st = toLower(real.runStatus?.state)
     const isActive = !!real.runId && (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
     if (real.runId && !isActive) {
       resetStaleRun({ clearError: true })
@@ -1170,7 +1170,7 @@ export function useSimulatorRealMode(opts: {
       // refreshSnapshot() after refreshScenarios() — this watcher would duplicate it.
       if (initialBootInProgress) return
 
-      const st = String(real.runStatus?.state ?? '').toLowerCase()
+      const st = toLower(real.runStatus?.state)
       const isActive =
         !!real.runId &&
         // Optimistic: if we have runId but status not fetched yet, treat it as active.

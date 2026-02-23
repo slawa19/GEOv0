@@ -1,9 +1,9 @@
 import { reactive } from 'vue'
 
-import type { LayoutNodeLike as BaseLayoutNodeLike } from '../types/layout'
+import type { LayoutNodeLike } from '../types/layout'
 import { clamp } from '../utils/math'
 
-export type LayoutNodeLike = BaseLayoutNodeLike
+export type { LayoutNodeLike }
 
 type UseCameraDeps<N extends LayoutNodeLike> = {
   canvasEl: { value: HTMLCanvasElement | null }

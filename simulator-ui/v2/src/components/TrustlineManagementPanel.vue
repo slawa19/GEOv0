@@ -66,7 +66,7 @@ watch(
 // When switching trustlines via dropdown while staying in editing phase,
 // keep the edit field in sync with the newly selected trustline.
 watch(
-  () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}`,
+  () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}`,
   () => {
     if (props.phase !== 'editing-trustline') return
     const cur = props.currentLimit
@@ -75,8 +75,8 @@ watch(
 )
 
 const selectedTl = computed(() => {
-  const from = String(props.state.fromPid ?? '').trim()
-  const to = String(props.state.toPid ?? '').trim()
+  const from = (props.state.fromPid ?? '').trim()
+  const to = (props.state.toPid ?? '').trim()
   if (!from || !to) return null
   const items = Array.isArray(props.trustlines) ? props.trustlines : []
   return items.find((tl) => tl.from_pid === from && tl.to_pid === to) ?? null
@@ -143,7 +143,7 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     // When changing phase, always cancel the confirmation state.
     { source: () => props.phase },
     // When switching selected trustline, cancel the confirmation state.
-    { source: () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}` },
+    { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
     // When the UI becomes busy, cancel the confirmation state.
     { source: () => props.busy, when: (b) => !!b },
   ],
@@ -177,9 +177,9 @@ const trustlinesSorted = computed(() => {
 })
 
 const trustlinesForFrom = computed(() => {
-  const from = String(props.state.fromPid ?? '').trim()
+  const from = (props.state.fromPid ?? '').trim()
   if (!from) return trustlinesSorted.value
-  return trustlinesSorted.value.filter((tl) => String(tl.from_pid ?? '').trim() === from)
+  return trustlinesSorted.value.filter((tl) => (tl.from_pid ?? '').trim() === from)
 })
 
 function encodeTlKey(tl: { from_pid?: string | null; to_pid?: string | null }): string {
@@ -215,7 +215,6 @@ defineExpose({
 </script>
 
 <template>
-  <Transition name="panel-slide">
   <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" :style="anchorPositionStyle" data-testid="trustline-panel" aria-label="Trustline management panel">
     <div class="ds-panel__header">
       <div class="ds-h2">{{ title }}</div>
@@ -374,7 +373,6 @@ defineExpose({
       </div>
     </div>
   </div>
-  </Transition>
 </template>
 
 <style scoped>

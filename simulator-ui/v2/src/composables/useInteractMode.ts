@@ -188,12 +188,14 @@ export function useInteractMode(opts: {
 
   function startPaymentFlow() {
     if (busyRef.value) return
+    if (state.phase !== 'idle') return
     fsm.startPaymentFlow()
     void refreshParticipants()
   }
 
   function startTrustlineFlow() {
     if (busyRef.value) return
+    if (state.phase !== 'idle') return
     fsm.startTrustlineFlow()
     void refreshParticipants()
 
@@ -203,6 +205,7 @@ export function useInteractMode(opts: {
 
   function startClearingFlow() {
     if (busyRef.value) return
+    if (state.phase !== 'idle') return
     fsm.startClearingFlow()
   }
 

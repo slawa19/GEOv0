@@ -25,13 +25,38 @@ export function placeOverlayNearAnchor(o: {
   const offX = o.offset?.x ?? 12
   const offY = o.offset?.y ?? 12
 
-  const vw = o.viewport?.w ?? (typeof window !== 'undefined' ? window.innerWidth : 10_000)
-  const vh = o.viewport?.h ?? (typeof window !== 'undefined' ? window.innerHeight : 10_000)
+  const w = (globalThis as any).window as any
+  const vw = o.viewport?.w ?? (w?.innerWidth ?? 10_000)
+  const vh = o.viewport?.h ?? (w?.innerHeight ?? 10_000)
 
   const left = clamp(o.anchor.x + offX, pad, vw - o.overlaySize.w - pad)
   const top = clamp(o.anchor.y + offY, pad, vh - o.overlaySize.h - pad)
 
   return { left: `${left}px`, top: `${top}px` }
+}
+
+/**
+ * Normalizes an overlay anchor to a host-relative coordinate system.
+ *
+ * Some call sites historically mixed coordinate systems:
+ * - expected: host-relative coords (e.g. clientToScreen)
+ * - sometimes provided: viewport-based coords (clientX/clientY)
+ *
+ * When host bounds are available, we detect the viewport-based case and convert it.
+ *
+ * IMPORTANT: behavior is intentionally heuristic and must remain stable
+ * (see call sites in EdgeDetailPopup + useOverlayPositioning).
+ */
+export function normalizeAnchorToHostViewport(anchor: Point, hostRect: DOMRect | null | undefined): Point {
+  const rect = hostRect
+  if (!rect || !(rect.width > 0) || !(rect.height > 0)) return anchor
+
+  const withinHost = anchor.x >= 0 && anchor.y >= 0 && anchor.x <= rect.width && anchor.y <= rect.height
+  const withinViewportRect = anchor.x >= rect.left && anchor.y >= rect.top && anchor.x <= rect.right && anchor.y <= rect.bottom
+  if (!withinHost && withinViewportRect) {
+    return { x: anchor.x - rect.left, y: anchor.y - rect.top }
+  }
+  return anchor
 }
 
 /**
@@ -66,18 +91,8 @@ export function useOverlayPositioning(
 
     const rect = getHostEl()?.getBoundingClientRect()
 
-    // Safety: tolerate mixed coordinate systems.
-    // `anchor` is expected to be host-relative, but some callers may pass
-    // viewport-based coords (clientX/clientY). When we have host bounds,
-    // detect that case and convert to host-relative.
-    if (rect && rect.width > 0 && rect.height > 0) {
-      const withinHost = anchor.x >= 0 && anchor.y >= 0 && anchor.x <= rect.width && anchor.y <= rect.height
-      const withinViewportRect =
-        anchor.x >= rect.left && anchor.y >= rect.top && anchor.x <= rect.right && anchor.y <= rect.bottom
-      if (!withinHost && withinViewportRect) {
-        anchor = { x: anchor.x - rect.left, y: anchor.y - rect.top }
-      }
-    }
+    // Safety: tolerate mixed coordinate systems (host-relative vs viewport-based).
+    anchor = normalizeAnchorToHostViewport(anchor, rect)
 
     const pos = placeOverlayNearAnchor({
       anchor,

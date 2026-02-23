@@ -1,6 +1,7 @@
 import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
+import { getNodeShape } from '../types/nodeShape'
 import { withAlpha } from './color'
 import { getLinearGradient2Stops } from './gradientCache'
 import { drawGlowSprite } from './glowSprites'
@@ -141,7 +142,7 @@ export function drawNodeShape(
   const { w: w0, h: h0 } = sizeForNode(node)
   const w = w0 * invZ
   const h = h0 * invZ
-  const shapeKey = String(node.viz_shape_key ?? 'circle')
+  const shapeKey = getNodeShape(node) ?? 'circle'
   const isRoundedRect = shapeKey === 'rounded-rect'
 
   // IMPORTANT: node appearance follows the prototypes:

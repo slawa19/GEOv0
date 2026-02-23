@@ -72,11 +72,11 @@ function __nodesSignatureForCachedPosHygiene(snapshotNodes: Array<{ id: string }
   const len = snapshotNodes.length
   if (len <= 0) return '0'
 
-  const first = String(snapshotNodes[0]?.id ?? '')
-  const second = len > 1 ? String(snapshotNodes[1]?.id ?? '') : ''
-  const mid = String(snapshotNodes[(len / 2) | 0]?.id ?? '')
-  const penultimate = len > 1 ? String(snapshotNodes[len - 2]?.id ?? '') : ''
-  const last = String(snapshotNodes[len - 1]?.id ?? '')
+  const first = snapshotNodes[0]?.id ?? ''
+  const second = len > 1 ? snapshotNodes[1]?.id ?? '' : ''
+  const mid = snapshotNodes[(len / 2) | 0]?.id ?? ''
+  const penultimate = len > 1 ? snapshotNodes[len - 2]?.id ?? '' : ''
+  const last = snapshotNodes[len - 1]?.id ?? ''
 
   // Intentionally do not include all IDs (would be O(n)).
   return `${len}|${first}|${second}|${mid}|${penultimate}|${last}`
@@ -357,7 +357,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     // DPR clamp: static per user quality (no adaptive downscaling).
     if (!deps.isTestMode()) {
-      const win = typeof window !== 'undefined' ? window : (globalThis as any)
+      const win = ((globalThis as any).window ?? (globalThis as any)) as any
       const deviceDpr = Math.max(1, Number(win.devicePixelRatio ?? 1))
       const baseClamp = baseDprClampForQuality(userQuality)
       // Canvas resize creates a visible flash; avoid unnecessary DPR changes.
@@ -510,7 +510,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   function scheduleNext(nowMs: number) {
     if (!running) return
 
-    const win = typeof window !== 'undefined' ? window : (globalThis as any)
+    const win = ((globalThis as any).window ?? (globalThis as any)) as any
 
     // Keep full-speed rendering briefly after activity ends to avoid flicker.
     const active = isAnimatingNow()
@@ -557,7 +557,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
   function ensureRenderLoop() {
     if (rafId !== null || timeoutId !== null) return
-    const win = typeof window !== 'undefined' ? window : (globalThis as any)
+    const win = ((globalThis as any).window ?? (globalThis as any)) as any
     running = true
     const nowMs = win.performance?.now?.() ?? Date.now()
     lastActiveAtMs = nowMs
@@ -566,7 +566,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   }
 
   function stopRenderLoop() {
-    const win = typeof window !== 'undefined' ? window : (globalThis as any)
+    const win = ((globalThis as any).window ?? (globalThis as any)) as any
     if (rafId !== null) win.cancelAnimationFrame(rafId)
     if (timeoutId !== null) win.clearTimeout(timeoutId)
     rafId = null
@@ -582,7 +582,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
    * - User interacts with the canvas (mouse/touch)
    */
   function wakeUp() {
-    const win = typeof window !== 'undefined' ? window : (globalThis as any)
+    const win = ((globalThis as any).window ?? (globalThis as any)) as any
     const nowMs = win.performance?.now?.() ?? Date.now()
 
     lastActivityTime = nowMs

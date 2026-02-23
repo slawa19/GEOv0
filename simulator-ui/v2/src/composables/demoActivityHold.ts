@@ -9,7 +9,7 @@ export type DemoActivityHold = {
 }
 
 function defaultNowMs(): number {
-  const win = typeof window !== 'undefined' ? window : (globalThis as any)
+  const win = ((globalThis as any).window ?? (globalThis as any)) as any
   const perfNow = win?.performance?.now
   return typeof perfNow === 'function' ? perfNow.call(win.performance) : Date.now()
 }

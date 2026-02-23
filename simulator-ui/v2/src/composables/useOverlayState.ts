@@ -1,6 +1,8 @@
 import { computed, reactive, ref } from 'vue'
 
-import type { LayoutNodeLike as BaseLayoutNodeLike } from '../types/layout'
+import type { LayoutNodeLike } from '../types/layout'
+
+export type { LayoutNodeLike }
 
 const MAX_FLOATING_LABELS = 120
 
@@ -40,8 +42,6 @@ export type FloatingLabel = {
 }
 
 export type FloatingLabelView = { id: number; x: number; y: number; text: string; color: string; cssClass?: string }
-
-export type LayoutNodeLike = BaseLayoutNodeLike
 
 type UseOverlayStateDeps<N extends LayoutNodeLike> = {
   getLayoutNodeById: (id: string) => N | undefined
@@ -134,7 +134,7 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
   function addActiveNode(id: string, ttlMs = 2000) {
     const nowMs = deps.nowMs ? deps.nowMs() : performance.now()
     const expiresAtMs = nowMs + Math.max(0, ttlMs)
-    const key = String(id ?? '').trim()
+    const key = id.trim()
     if (!key) return
 
     activeNodes.add(key)

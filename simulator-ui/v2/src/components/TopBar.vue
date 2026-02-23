@@ -1,104 +1,49 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
-import type { AdminRunSummary } from '../api/simulatorApi'
+import { computed, ref, watch } from 'vue'
+import type { SimulatorMode } from '../api/simulatorTypes'
 import type { UiThemeId } from '../types/uiPrefs'
+import { toLower } from '../utils/stringHelpers'
 
-type Props = {
-  apiMode: 'fixtures' | 'real'
-  activeSegment: 'sandbox' | 'auto' | 'interact'
-  isInteractUi: boolean
+import { useTopBarContext } from '../composables/useTopBarContext'
 
-  /** True when UI runs in automation/deterministic mode (VITE_TEST_MODE=1). */
-  isTestMode?: boolean
-
-  /** UI theme id (mapped to data-theme). */
-  uiTheme: UiThemeId
-
-  /** Switch theme without reload; should update URL/localStorage. */
-  setUiTheme: (v: UiThemeId) => void
-
-  loadingScenarios: boolean
-  scenarios: ScenarioSummary[]
-  selectedScenarioId: string
-
-  desiredMode: SimulatorMode
-  intensityPercent: number
-
-  runId: string | null
-  runStatus: RunStatus | null
-
-  sseState: string
-  lastError: string | null
-
-  refreshScenarios: () => void
-  startRun: () => void
-
-  pause: () => void
-  resume: () => void
-  stop: () => void
-  applyIntensity: () => void
-
-  runStats: {
-    startedAtMs: number
-    attempts: number
-    committed: number
-    rejected: number
-    errors: number
-    timeouts: number
-    rejectedByCode: Record<string, number>
-    errorsByCode: Record<string, number>
-  }
-
-  goSandbox: () => void
-  goAutoRun: () => void
-  goInteract: () => void
-
-  /** Current access token — used to determine if admin controls should be shown. */
-  accessToken?: string | null
-
-  /** Admin: list of all runs (populated after adminGetRuns). */
-  adminRuns?: AdminRunSummary[]
-
-  /** Admin: true while loading all runs. */
-  adminRunsLoading?: boolean
-
-  /** Admin: last error from admin actions. */
-  adminLastError?: string
-
-  /** Admin: fetch all runs across all owners. */
-  adminGetRuns?: () => Promise<void>
-
-  /** Admin: stop all running runs. */
-  adminStopRuns?: () => Promise<void>
-
-  /** Admin: attach UI to a specific run_id. */
-  adminAttachRun?: (runId: string) => Promise<void> | void
-
-  /** Admin: stop a specific run_id. */
-  adminStopRun?: (runId: string) => Promise<void> | void
-}
-
-const props = defineProps<Props>()
+const ctx = useTopBarContext()
 
 const emit = defineEmits<{
   (e: 'update:selected-scenario-id', v: string): void
   (e: 'update:desired-mode', v: SimulatorMode): void
   (e: 'update:intensity-percent', v: number): void
+
+  (e: 'go-sandbox'): void
+  (e: 'go-auto-run'): void
+  (e: 'go-interact'): void
+
+  (e: 'set-ui-theme', v: UiThemeId): void
+
+  (e: 'refresh-scenarios'): void
+  (e: 'start-run'): void
+  (e: 'pause'): void
+  (e: 'resume'): void
+  (e: 'stop'): void
+  (e: 'apply-intensity'): void
+
+  (e: 'admin-get-runs'): void
+  (e: 'admin-stop-runs'): void
+  (e: 'admin-attach-run', runId: string): void
+  (e: 'admin-stop-run', runId: string): void
 }>()
 
 const STALL_THRESHOLD_TICKS = 3
 
-const showRunControls = computed(() => props.activeSegment === 'auto')
+const showRunControls = computed(() => ctx.activeSegment.value === 'auto')
 
 const showTestModeBadge = computed(() => {
   // Show only for humans; Playwright/WebDriver runs shouldn't change screenshots.
   const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
-  return !!props.isTestMode && !isWebDriver
+  return !!ctx.isTestMode.value && !isWebDriver
 })
 
 const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
-  const s = String(props.sseState ?? '').toLowerCase()
+  const s = toLower(ctx.sseState.value)
   if (s === 'open') return 'ok'
   if (s === 'reconnecting' || s === 'connecting') return 'warn'
   if (s === 'closed') return 'err'
@@ -106,56 +51,56 @@ const sseTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
 })
 
 const runTone = computed<'ok' | 'warn' | 'err' | 'info'>(() => {
-  const s = String(props.runStatus?.state ?? '').toLowerCase()
+  const s = toLower(ctx.runStatus.value?.state)
   if (s === 'running') return 'ok'
   if (s === 'paused') return 'warn'
   if (s === 'error') return 'err'
   return 'info'
 })
 
-const canPause = computed(() => props.runStatus?.state === 'running')
-const canResume = computed(() => props.runStatus?.state === 'paused')
+const canPause = computed(() => ctx.runStatus.value?.state === 'running')
+const canResume = computed(() => ctx.runStatus.value?.state === 'paused')
 const canStop = computed(() => {
-  const s = props.runStatus?.state
+  const s = ctx.runStatus.value?.state
   return s === 'running' || s === 'paused' || s === 'created'
 })
 
 const isCapacityStall = computed(() => {
-  const ticks = Number(props.runStatus?.consec_all_rejected_ticks ?? 0)
+  const ticks = Number(ctx.runStatus.value?.consec_all_rejected_ticks ?? 0)
   return ticks >= STALL_THRESHOLD_TICKS
 })
 
 const isRunActive = computed(() => {
-  if (!props.runId) return false
-  if (!props.runStatus) return true
-  const s = String(props.runStatus?.state ?? '').toLowerCase()
+  if (!ctx.runId.value) return false
+  if (!ctx.runStatus.value) return true
+  const s = toLower(ctx.runStatus.value?.state)
   return s === 'running' || s === 'paused' || s === 'created' || s === 'stopping'
 })
 
 const canEnterInteract = computed(() => {
-  if (props.isInteractUi) return true  // уже в interact — не блокировать
+  if (ctx.isInteractUi.value) return true  // уже в interact — не блокировать
   // Interact UI can auto-bootstrap a paused demo run on entry.
   // Still require real mode because actions rely on backend state.
-  return props.apiMode === 'real'
+  return ctx.apiMode.value === 'real'
 })
 
 const interactDisabledTitle = computed(() => {
   if (canEnterInteract.value) return ''
-  if (props.apiMode !== 'real') return 'Real mode only'
+  if (ctx.apiMode.value !== 'real') return 'Real mode only'
   if (!isRunActive.value) return 'Start a run first'
   return ''
 })
 
 const successRatePct = computed(() => {
-  const a = Number(props.runStats?.attempts ?? 0)
-  const ok = Number(props.runStats?.committed ?? 0)
+  const a = Number(ctx.runStats.value?.attempts ?? 0)
+  const ok = Number(ctx.runStats.value?.committed ?? 0)
   if (a <= 0) return 0
   return Math.round((ok / a) * 100)
 })
 
 const txCompact = computed(() => {
-  const ok = Number(props.runStats?.committed ?? 0)
-  const a = Number(props.runStats?.attempts ?? 0)
+  const ok = Number(ctx.runStats.value?.committed ?? 0)
+  const a = Number(ctx.runStats.value?.attempts ?? 0)
   return `ok ${ok}/${a} · ${successRatePct.value}%`
 })
 
@@ -180,11 +125,11 @@ function short(s: string, n: number) {
 
 function onThemeChange(v: string) {
   // Normalize at caller if needed.
-  props.setUiTheme((v as UiThemeId) || 'hud')
+  emit('set-ui-theme', (v as UiThemeId) || 'hud')
 }
 
 const stopSummary = computed(() => {
-  const st = props.runStatus
+  const st = ctx.runStatus.value
   if (!st) return ''
   const src = String(st.stop_source ?? '').trim()
   const reason = String(st.stop_reason ?? '').trim()
@@ -210,58 +155,111 @@ function isJwtLike(token: string): boolean {
  * Participant JWTs should not show admin panel.
  */
 const showAdminControls = computed(() => {
-  const t = String(props.accessToken ?? '').trim()
-  return !!t && !isJwtLike(t) && props.apiMode === 'real'
+  const t = String(ctx.accessToken.value ?? '').trim()
+  return !!t && !isJwtLike(t) && ctx.apiMode.value === 'real'
 })
 
 const adminRunsCountLabel = computed(() => {
-  if (props.adminRunsLoading) return '…'
-  if (!Array.isArray(props.adminRuns)) return '—'
-  return String(props.adminRuns.length)
+  if (ctx.adminRunsLoading.value) return '…'
+  if (!Array.isArray(ctx.adminRuns.value)) return '—'
+  return String(ctx.adminRuns.value.length)
 })
 
-const adminHasLoadedRuns = computed(() => Array.isArray(props.adminRuns))
+const adminHasLoadedRuns = computed(() => Array.isArray(ctx.adminRuns.value))
 
 const adminHasActiveRuns = computed(() => {
-  if (!Array.isArray(props.adminRuns)) return false
+  if (!Array.isArray(ctx.adminRuns.value)) return false
   const active = new Set(['running', 'paused', 'created', 'stopping'])
-  return props.adminRuns.some((r) => active.has(String(r.state ?? '').toLowerCase()))
+  return ctx.adminRuns.value.some((r) => active.has(toLower(r.state)))
 })
 
 const adminStopAllDisabled = computed(() => {
-  if (props.adminRunsLoading) return true
+  if (ctx.adminRunsLoading.value) return true
   if (!adminHasLoadedRuns.value) return false
   return !adminHasActiveRuns.value
 })
 
 const adminStopAllBtnClass = computed(() => {
-  return adminStopAllDisabled.value ? 'ds-btn ds-btn--secondary' : 'ds-btn ds-btn--danger'
+  return adminStopAllDisabled.value ? 'ds-btn ds-btn--secondary ds-btn--sm' : 'ds-btn ds-btn--danger ds-btn--sm'
 })
 
 /** Toggle state for the admin panel (details element). */
 const adminPanelOpen = ref(false)
 
+/** Preserve previous UX: open admin panel after a successful runs fetch. */
+const shouldOpenAdminPanelAfterLoad = ref(false)
+
+watch(
+  () => ctx.adminRuns.value,
+  (runs) => {
+    if (!shouldOpenAdminPanelAfterLoad.value) return
+    if (!Array.isArray(runs)) return
+    adminPanelOpen.value = true
+    shouldOpenAdminPanelAfterLoad.value = false
+  }
+)
+
 async function onAdminGetRuns() {
-  if (!props.adminGetRuns) return
-  await props.adminGetRuns()
-  adminPanelOpen.value = true
+  if (!ctx.adminCanGetRuns.value) return
+  if (adminHasLoadedRuns.value) {
+    adminPanelOpen.value = true
+  } else {
+    shouldOpenAdminPanelAfterLoad.value = true
+  }
+  emit('admin-get-runs')
 }
 
 async function onAdminStopRuns() {
-  if (!props.adminStopRuns) return
-  await props.adminStopRuns()
+  if (!ctx.adminCanStopRuns.value) return
+  emit('admin-stop-runs')
 }
 
 async function onAdminAttachRun(runId: string) {
-  if (!props.adminAttachRun) return
+  if (!ctx.adminCanAttachRun.value) return
   if (!runId) return
-  await props.adminAttachRun(runId)
+  emit('admin-attach-run', runId)
 }
 
 async function onAdminStopRun(runId: string) {
-  if (!props.adminStopRun) return
+  if (!ctx.adminCanStopRun.value) return
   if (!runId) return
-  await props.adminStopRun(runId)
+  emit('admin-stop-run', runId)
+}
+
+function onGoSandbox() {
+  emit('go-sandbox')
+}
+
+function onGoAutoRun() {
+  emit('go-auto-run')
+}
+
+function onGoInteract() {
+  emit('go-interact')
+}
+
+function onRefreshScenarios() {
+  emit('refresh-scenarios')
+}
+
+function onStartRun() {
+  emit('start-run')
+}
+
+function onPause() {
+  emit('pause')
+}
+
+function onResume() {
+  emit('resume')
+}
+
+function onStop() {
+  emit('stop')
+}
+
+function onApplyIntensity() {
+  emit('apply-intensity')
 }
 </script>
 
@@ -275,26 +273,26 @@ async function onAdminStopRun(runId: string) {
             <button
               type="button"
               class="ds-segment"
-              :data-active="activeSegment === 'sandbox' ? '1' : '0'"
-              @click="props.goSandbox"
+              :data-active="ctx.activeSegment.value === 'sandbox' ? '1' : '0'"
+              @click="onGoSandbox"
             >
               Sandbox
             </button>
             <button
               type="button"
               class="ds-segment"
-              :data-active="activeSegment === 'auto' ? '1' : '0'"
-              @click="props.goAutoRun"
+              :data-active="ctx.activeSegment.value === 'auto' ? '1' : '0'"
+              @click="onGoAutoRun"
             >
               Auto-Run
             </button>
             <button
               type="button"
               class="ds-segment"
-              :data-active="activeSegment === 'interact' ? '1' : '0'"
+              :data-active="ctx.activeSegment.value === 'interact' ? '1' : '0'"
               :disabled="!canEnterInteract"
               :title="!canEnterInteract ? interactDisabledTitle : ''"
-              @click="props.goInteract"
+              @click="onGoInteract"
             >
               Interact
             </button>
@@ -305,7 +303,7 @@ async function onAdminStopRun(runId: string) {
               <select
                 class="ds-select"
                 style="height: 28px"
-                :value="uiTheme"
+                :value="ctx.uiTheme.value"
                 aria-label="UI theme"
                 @change="onThemeChange(($event.target as HTMLSelectElement).value)"
               >
@@ -325,12 +323,12 @@ async function onAdminStopRun(runId: string) {
             <span class="ds-label">Scenario</span>
             <select
               class="ds-select"
-              :value="selectedScenarioId"
+              :value="ctx.selectedScenarioId.value"
               aria-label="Scenario"
               @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
             >
               <option value="">— select —</option>
-              <option v-for="s in scenarios" :key="s.scenario_id" :value="s.scenario_id">
+              <option v-for="s in ctx.scenarios.value" :key="s.scenario_id" :value="s.scenario_id">
                 {{ s.label ? `${s.label} (${s.scenario_id})` : s.scenario_id }}
               </option>
             </select>
@@ -338,47 +336,43 @@ async function onAdminStopRun(runId: string) {
               class="ds-btn ds-btn--icon"
               style="height: 28px; width: 28px"
               type="button"
-              :disabled="loadingScenarios"
+              :disabled="ctx.loadingScenarios.value"
               aria-label="Refresh scenarios"
-              @click="props.refreshScenarios"
+              @click="onRefreshScenarios"
             >
               ↻
             </button>
 
             <button
               v-if="!isRunActive"
-              class="ds-btn ds-btn--primary"
-              style="height: 28px; padding: 0 10px"
+              class="ds-btn ds-btn--primary ds-btn--sm"
               type="button"
-              :disabled="!selectedScenarioId"
-              @click="props.startRun"
+              :disabled="!ctx.selectedScenarioId.value"
+              @click="onStartRun"
             >
               Start
             </button>
             <button
               v-if="canPause"
-              class="ds-btn"
-              style="height: 28px; padding: 0 10px"
+              class="ds-btn ds-btn--sm"
               type="button"
-              @click="props.pause"
+              @click="onPause"
             >
               Pause
             </button>
             <button
               v-if="canResume"
-              class="ds-btn"
-              style="height: 28px; padding: 0 10px"
+              class="ds-btn ds-btn--sm"
               type="button"
-              @click="props.resume"
+              @click="onResume"
             >
               Resume
             </button>
             <button
               v-if="canStop"
-              class="ds-btn ds-btn--danger"
-              style="height: 28px; padding: 0 10px"
+              class="ds-btn ds-btn--danger ds-btn--sm"
               type="button"
-              @click="props.stop"
+              @click="onStop"
             >
               Stop
             </button>
@@ -394,8 +388,7 @@ async function onAdminStopRun(runId: string) {
               </summary>
 
               <div
-                class="ds-panel ds-ov-surface"
-                style="position: absolute; left: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 320px; max-width: min(520px, calc(100vw - 24px)); z-index: var(--ds-z-inset, 60)"
+                class="ds-panel ds-ov-surface ds-ov-dropdown"
                 aria-label="Advanced dropdown"
               >
                 <div class="ds-stack" style="gap: 8px">
@@ -403,7 +396,7 @@ async function onAdminStopRun(runId: string) {
                     <span class="ds-label">Pipeline</span>
                     <select
                       class="ds-select"
-                      :value="desiredMode"
+                      :value="ctx.desiredMode.value"
                       :disabled="isRunActive"
                       aria-label="Run pipeline"
                       @change="setDesiredMode(($event.target as HTMLSelectElement).value)"
@@ -422,16 +415,15 @@ async function onAdminStopRun(runId: string) {
                       min="0"
                       max="100"
                       step="1"
-                      :value="intensityPercent"
+                      :value="ctx.intensityPercent.value"
                       aria-label="Intensity percent"
                       @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
                     />
                     <button
-                      class="ds-btn ds-btn--secondary"
-                      style="height: 28px; padding: 0 10px"
+                      class="ds-btn ds-btn--secondary ds-btn--sm"
                       type="button"
                       :disabled="!isRunActive"
-                      @click="props.applyIntensity"
+                      @click="onApplyIntensity"
                     >
                       Apply
                     </button>
@@ -440,7 +432,7 @@ async function onAdminStopRun(runId: string) {
               </div>
             </details>
 
-            <div v-if="!loadingScenarios && scenarios.length === 0" class="ds-panel ds-ov-bar" aria-label="No scenarios" style="opacity: 0.92">
+            <div v-if="!ctx.loadingScenarios.value && ctx.scenarios.value.length === 0" class="ds-panel ds-ov-bar" aria-label="No scenarios" style="opacity: 0.92">
               <span class="ds-badge ds-badge--warn">No scenarios</span>
               <span class="ds-label">Backend must return GET /simulator/scenarios</span>
             </div>
@@ -448,20 +440,20 @@ async function onAdminStopRun(runId: string) {
         </div>
 
         <div class="ds-ov-topbar__right" aria-label="Status">
-          <div v-if="apiMode === 'real'" class="ds-row" style="gap: 8px; justify-content: flex-end; flex-wrap: wrap">
+          <div v-if="ctx.apiMode.value === 'real'" class="ds-row" style="gap: 8px; justify-content: flex-end; flex-wrap: wrap">
             <span :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE">
               <span class="ds-dot" aria-hidden="true" /> SSE
             </span>
             <span :class="['ds-badge', `ds-badge--${runTone}`]" aria-label="Run state">
-              <span class="ds-dot" aria-hidden="true" /> Run {{ runStatus?.state ?? (runId ? '…' : '—') }}
+              <span class="ds-dot" aria-hidden="true" /> Run {{ ctx.runStatus.value?.state ?? (ctx.runId.value ? '…' : '—') }}
             </span>
 
-            <div v-if="runStatus?.state === 'stopped' && stopSummary" class="ds-panel ds-ov-metric" style="opacity: 0.92" aria-label="Stop reason">
+            <div v-if="ctx.runStatus.value?.state === 'stopped' && stopSummary" class="ds-panel ds-ov-metric" style="opacity: 0.92" aria-label="Stop reason">
               <span class="ds-label">Stop</span>
               <span class="ds-value ds-mono" style="opacity: 0.9">{{ short(stopSummary, 64) }}</span>
             </div>
 
-            <span v-if="runId" class="ds-badge ds-badge--info" aria-label="TX">
+            <span v-if="ctx.runId.value" class="ds-badge ds-badge--info" aria-label="TX">
               TX {{ txCompact }}
             </span>
 
@@ -484,67 +476,64 @@ async function onAdminStopRun(runId: string) {
               </summary>
 
               <div
-                class="ds-panel ds-ov-surface"
-                style="position: absolute; right: 0; top: calc(100% + 6px); padding: 8px 10px; min-width: 260px; max-width: min(520px, calc(100vw - 24px)); z-index: var(--ds-z-inset, 60)"
+                class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right ds-ov-dropdown--narrow"
                 aria-label="Admin dropdown"
               >
                 <div class="ds-stack" style="gap: 8px">
                   <div class="ds-row" style="gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap">
                     <button
-                      class="ds-btn ds-btn--secondary"
-                      style="height: 28px; padding: 0 10px"
+                      class="ds-btn ds-btn--secondary ds-btn--sm"
                       type="button"
-                      :disabled="adminRunsLoading"
+                      :disabled="ctx.adminRunsLoading.value || !ctx.adminCanGetRuns.value"
                       aria-label="Refresh runs list"
                       @click="onAdminGetRuns"
                     >
-                      {{ adminRunsLoading ? '…' : 'Refresh' }}
+                      {{ ctx.adminRunsLoading.value ? '…' : 'Refresh' }}
                     </button>
                     <button
                       :class="adminStopAllBtnClass"
-                      style="height: 28px; padding: 0 10px"
                       type="button"
                       aria-label="Stop all runs"
-                      :disabled="adminStopAllDisabled"
+                      :disabled="adminStopAllDisabled || !ctx.adminCanStopRuns.value"
                       :title="adminStopAllDisabled && adminHasLoadedRuns ? 'No running runs' : ''"
                       @click="onAdminStopRuns"
                     >
                       Stop all
                     </button>
                     <span
-                      v-if="adminLastError"
+                      v-if="ctx.adminLastError.value"
                       class="ds-badge ds-badge--err"
                       style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
-                      :title="adminLastError"
+                      :title="ctx.adminLastError.value"
                     >
-                      {{ short(adminLastError, 40) }}
+                      {{ short(ctx.adminLastError.value, 40) }}
                     </span>
                   </div>
 
-                  <div v-if="adminRunsLoading" class="ds-label" style="opacity: 0.75" aria-label="Runs loading">
+                  <div v-if="ctx.adminRunsLoading.value" class="ds-label" style="opacity: 0.75" aria-label="Runs loading">
                     Loading…
                   </div>
 
                   <div
-                    v-else-if="adminRuns && adminRuns.length > 0"
+                    v-else-if="ctx.adminRuns.value && ctx.adminRuns.value.length > 0"
                     class="ds-stack"
                     style="gap: 4px; max-height: 200px; overflow-y: auto"
                     aria-label="Runs list"
                   >
                     <div
-                      v-for="run in adminRuns"
+                      v-for="run in ctx.adminRuns.value"
                       :key="run.run_id"
                       class="ds-panel ds-ov-metric"
                       style="padding: 4px 8px; gap: 8px"
                     >
                         <span class="ds-label ds-mono" style="font-size: 11px" :title="run.run_id">{{ run.run_id.slice(0, 8) }}</span>
-                        <span :class="['ds-badge', String(run.state ?? '').toLowerCase() === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
+                        <span :class="['ds-badge', toLower(run.state) === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
                         <span class="ds-label" style="opacity: 0.7; font-size: 11px" :title="String((run as any).scenario_id ?? '')">{{ short(String((run as any).scenario_id ?? ''), 18) }}</span>
                         <span class="ds-label ds-mono" style="opacity: 0.65; font-size: 11px" :title="String((run as any).owner_id ?? '')">{{ short(String((run as any).owner_id ?? ''), 18) }}</span>
 
                         <div class="ds-row" style="margin-left: auto; gap: 6px; align-items: center">
                           <button
-                            v-if="props.adminAttachRun"
+                            v-if="ctx.adminCanAttachRun.value"
                             class="ds-btn ds-btn--secondary"
                             style="height: 24px; padding: 0 8px"
                             type="button"
@@ -554,7 +543,7 @@ async function onAdminStopRun(runId: string) {
                             Attach
                           </button>
                           <button
-                            v-if="props.adminStopRun"
+                            v-if="ctx.adminCanStopRun.value"
                             class="ds-btn ds-btn--danger"
                             style="height: 24px; padding: 0 8px"
                             type="button"
@@ -581,10 +570,10 @@ async function onAdminStopRun(runId: string) {
         </div>
       </div>
 
-      <div v-if="lastError" class="ds-alert ds-alert--err" aria-label="Error">
+      <div v-if="ctx.lastError.value" class="ds-alert ds-alert--err" aria-label="Error">
         <span class="ds-alert__icon">✕</span>
         <span class="ds-label">Error</span>
-        <span class="ds-value ds-mono" style="opacity: 0.92">{{ short(String(lastError), 160) }}</span>
+        <span class="ds-value ds-mono" style="opacity: 0.92">{{ short(String(ctx.lastError.value), 160) }}</span>
       </div>
 
       <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall">

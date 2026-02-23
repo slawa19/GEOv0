@@ -16,11 +16,36 @@ type InstallGeoSimDevHookDeps = {
   runClearingOnce: () => Promise<void> | void
 }
 
-export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps) {
-  if (!deps.isDev()) return
-  if (typeof window === 'undefined') return
+function clearGeoSimDevHook(expected?: unknown) {
+  const w = (globalThis as any).window as any
+  if (!w) return
 
-  ;(window as any).__geoSim = {
+  if (expected !== undefined && w.__geoSim !== expected) return
+
+  // Ensure we don't keep stale references between HMR / remounts.
+  if ('__geoSim' in w) {
+    w.__geoSim = undefined
+    try {
+      delete w.__geoSim
+    } catch {
+      // Best-effort: some environments may not allow deleting.
+    }
+  }
+}
+
+export function uninstallGeoSimDevHook() {
+  clearGeoSimDevHook()
+}
+
+export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps): (() => void) | undefined {
+  if (!deps.isDev()) return
+  const w = (globalThis as any).window as any
+  if (!w) return
+
+  // Idempotent safe re-install: always detach previous instance first.
+  uninstallGeoSimDevHook()
+
+  const hook = {
     get isTestMode() {
       return deps.isTestMode()
     },
@@ -40,4 +65,9 @@ export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps) {
     runTxOnce: deps.runTxOnce,
     runClearingOnce: deps.runClearingOnce,
   }
+
+  w.__geoSim = hook
+
+  // Cleanup is safe to call even after a newer re-install.
+  return () => clearGeoSimDevHook(hook)
 }

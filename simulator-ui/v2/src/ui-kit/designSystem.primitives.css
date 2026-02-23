@@ -751,6 +751,12 @@
   font-size: 14px;
 }
 
+/* Small toolbar button size (layout only; visuals come from ds-btn variants). */
+.ds-btn--sm {
+  --ds-button-height: 28px;
+  --ds-button-padding-x: 10px;
+}
+
 [data-theme='shadcn'] .ds-btn--icon {
   width: 32px;
   font-size: 1rem;

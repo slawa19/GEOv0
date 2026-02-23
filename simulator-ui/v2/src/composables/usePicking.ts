@@ -1,9 +1,8 @@
 import { computed } from 'vue'
 
-import type { LayoutLinkLike as BaseLayoutLinkLike, LayoutNodeWithId as BaseLayoutNodeWithId } from '../types/layout'
+import type { LayoutLinkLike, LayoutNodeWithId } from '../types/layout'
 
-export type LayoutNodeLike = BaseLayoutNodeWithId
-export type LayoutLinkLike = BaseLayoutLinkLike
+export type { LayoutLinkLike }
 
 export type EdgeSeg = { key: string; fromId: string; toId: string; ax: number; ay: number; bx: number; by: number }
 
@@ -37,7 +36,7 @@ export function closestPointOnSegment(px: number, py: number, ax: number, ay: nu
   return { x: ax + abx * t, y: ay + aby * t, t }
 }
 
-type UsePickingDeps<N extends LayoutNodeLike, L extends LayoutLinkLike> = {
+type UsePickingDeps<N extends LayoutNodeWithId, L extends LayoutLinkLike> = {
   getLayoutNodes: () => N[]
   getLayoutLinks: () => L[]
   getCameraZoom: () => number
@@ -47,7 +46,7 @@ type UsePickingDeps<N extends LayoutNodeLike, L extends LayoutLinkLike> = {
   isReady?: () => boolean
 }
 
-export function usePicking<N extends LayoutNodeLike, L extends LayoutLinkLike>(deps: UsePickingDeps<N, L>) {
+export function usePicking<N extends LayoutNodeWithId, L extends LayoutLinkLike>(deps: UsePickingDeps<N, L>) {
   const nodePickGrid = computed(() => {
     const cellSizeW = 180
     const cells = new Map<string, N[]>()

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import { placeOverlayNearAnchor } from '../utils/overlayPosition'
+import { normalizeAnchorToHostViewport, placeOverlayNearAnchor } from '../utils/overlayPosition'
 import { renderOrDash } from '../utils/valueFormat'
 
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
@@ -62,18 +62,8 @@ const popupStyle = computed(() => {
 
   const rect = props.hostEl?.getBoundingClientRect()
 
-  // Safety: tolerate mixed coordinate systems.
-  // `edgeAnchor` is expected to be host-relative (clientToScreen), but some callers
-  // may still pass viewport-based coords (clientX/clientY). When we have host bounds,
-  // detect that case and convert to host-relative.
-  if (rect && rect.width > 0 && rect.height > 0) {
-    const withinHost = anchor.x >= 0 && anchor.y >= 0 && anchor.x <= rect.width && anchor.y <= rect.height
-    const withinViewportRect =
-      anchor.x >= rect.left && anchor.y >= rect.top && anchor.x <= rect.right && anchor.y <= rect.bottom
-    if (!withinHost && withinViewportRect) {
-      anchor = { x: anchor.x - rect.left, y: anchor.y - rect.top }
-    }
-  }
+  // Safety: tolerate mixed coordinate systems (host-relative vs viewport-based).
+  anchor = normalizeAnchorToHostViewport(anchor, rect)
 
   return placeOverlayNearAnchor({
     anchor,
@@ -94,7 +84,7 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     // When popup closes (including forceHidden), cancel the confirmation state.
     { source: open, when: (isOpen) => !isOpen },
     // When switching the selected trustline, cancel the confirmation state.
-    { source: () => `${String(props.state.fromPid ?? '')}→${String(props.state.toPid ?? '')}` },
+    { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
     // When the UI becomes busy, cancel the confirmation state.
     { source: () => props.busy, when: (b) => !!b },
   ],
@@ -129,12 +119,11 @@ function onCloseLine() {
     </div>
 
     <div class="popup__actions">
-      <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" :disabled="!!busy" @click="emit('changeLimit')">
+      <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="!!busy" @click="emit('changeLimit')">
         Change limit
       </button>
       <button
-        class="ds-btn ds-btn--danger"
-        style="height: 28px; padding: 0 10px"
+        class="ds-btn ds-btn--danger ds-btn--sm"
         type="button"
         :disabled="!!busy"
         data-testid="edge-close-line-btn"
@@ -145,8 +134,7 @@ function onCloseLine() {
 
       <button
         v-if="closeArmed"
-        class="ds-btn ds-btn--ghost"
-        style="height: 28px; padding: 0 10px"
+        class="ds-btn ds-btn--ghost ds-btn--sm"
         type="button"
         :disabled="!!busy"
         data-testid="edge-close-line-cancel"
@@ -154,7 +142,7 @@ function onCloseLine() {
       >
         Cancel
       </button>
-      <button class="ds-btn ds-btn--ghost" style="height: 28px; padding: 0 10px" type="button" @click="close">Close</button>
+      <button class="ds-btn ds-btn--ghost ds-btn--sm" type="button" @click="close">Close</button>
     </div>
   </div>
 </template>

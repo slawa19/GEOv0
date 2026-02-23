@@ -1,3 +1,5 @@
+import { toLowerTrim } from '../utils/stringHelpers'
+
 export type LabelsLod = 'off' | 'selection' | 'neighbors'
 
 export type Quality = 'low' | 'med' | 'high'
@@ -15,7 +17,7 @@ export type UiThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
  * - Defaults to 'hud'
  */
 export function normalizeUiThemeId(v: unknown): UiThemeId {
-  const s = String(v ?? '').trim().toLowerCase()
+  const s = toLowerTrim(v)
   if (s === 'shadcn') return 'shadcn'
   if (s === 'saas') return 'saas'
   if (s === 'library') return 'library'

@@ -1,3 +1,14 @@
+/**
+ * Facade / stable entry point for the simulator app composable layer.
+ *
+ * Why it exists:
+ * - the app wiring is implemented as a set of focused `useApp*` composables (view wiring, canvas interactions,
+ *   double-click handlers, etc.) and their internal structure may evolve;
+ * - this file provides a single, stable import path for developers and documentation.
+ *
+ * Important: this is intentionally a thin wiring entry point — avoid changing behavior here unless necessary.
+ */
+
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
@@ -10,6 +21,8 @@ import type { SimulatorAppState } from '../types/simulatorApp'
 import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
+import { incCounter } from '../utils/counters'
+import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 
@@ -67,7 +80,7 @@ export function useSimulatorApp() {
     // Force fixtures pipeline regardless of a developer's local `.env.local` (which may enable real mode).
     if (isE2eScreenshots.value) return 'fixtures'
     try {
-      const p = new URLSearchParams(window.location.search).get('mode')?.toLowerCase()
+      const p = toLower(new URLSearchParams(window.location.search).get('mode'))
       if (p === 'real') return 'real'
       if (p === 'fixtures') return 'fixtures'
       // Backward-compat: legacy param value.
@@ -75,7 +88,7 @@ export function useSimulatorApp() {
     } catch {
       // ignore
     }
-    const env = String(import.meta.env.VITE_API_MODE ?? '').trim().toLowerCase()
+    const env = toLowerTrim(import.meta.env.VITE_API_MODE)
     if (env === 'real') return 'real'
     if (env === 'fixtures') return 'fixtures'
     if (env === 'demo') return 'fixtures'
@@ -85,19 +98,25 @@ export function useSimulatorApp() {
 
   const isRealMode = computed(() => apiMode.value === 'real')
 
-  const isLocalhost =
-    typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+  const isLocalhost = (() => {
+    try {
+      const host = String(((globalThis as any).window as any)?.location?.hostname ?? '')
+      return ['localhost', '127.0.0.1', '::1'].includes(host)
+    } catch {
+      return false
+    }
+  })()
 
   const isFxDebugEnabled = computed(() => {
     try {
       const sp = new URLSearchParams(window.location.search)
 
       // Demo UI implies FX Debug should be available (backend-driven, canonical SSE pipeline).
-      const ui = String(sp.get('ui') ?? '').toLowerCase()
+      const ui = toLower(sp.get('ui'))
       if (ui === 'demo') return true
 
       const p = sp.get('debug')
-      return p === '1' || String(p || '').toLowerCase() === 'true'
+      return p === '1' || toLower(p) === 'true'
     } catch {
       return false
     }
@@ -105,7 +124,7 @@ export function useSimulatorApp() {
 
   const isDemoUi = computed(() => {
     try {
-      const ui = String(new URLSearchParams(window.location.search).get('ui') ?? '').toLowerCase()
+      const ui = toLower(new URLSearchParams(window.location.search).get('ui'))
       return ui === 'demo'
     } catch {
       return false
@@ -114,7 +133,7 @@ export function useSimulatorApp() {
 
   const isInteractUi = computed(() => {
     try {
-      const ui = String(new URLSearchParams(window.location.search).get('ui') ?? '').toLowerCase()
+      const ui = toLower(new URLSearchParams(window.location.search).get('ui'))
       return ui === 'interact'
     } catch {
       return false
@@ -205,9 +224,7 @@ export function useSimulatorApp() {
     real.runStats.errorsByCode = {}
   }
 
-  function inc(map: Record<string, number>, key: string) {
-    map[key] = (map[key] ?? 0) + 1
-  }
+  const inc = incCounter
 
   // ============================
   // §10: Cookie session state (anonymous visitors)
@@ -335,7 +352,7 @@ export function useSimulatorApp() {
   )
 
   watch(
-    () => String(real.runStatus?.state ?? '').toLowerCase(),
+    () => toLower(real.runStatus?.state),
     () => {
       // When run transitions between states, refresh admin list.
       scheduleAdminRunsRefresh()
@@ -888,9 +905,10 @@ export function useSimulatorApp() {
 
   const showPerfOverlay = computed(() => {
     if (isTestMode.value) return false
-    if (typeof window === 'undefined') return false
+    const w = (globalThis as any).window as any
+    if (!w) return false
     try {
-      return new URLSearchParams(window.location.search).get('perf') === '1'
+      return new URLSearchParams(w.location.search).get('perf') === '1'
     } catch {
       return false
     }
@@ -1292,7 +1310,7 @@ export function useSimulatorApp() {
     // Clicking empty space while an interact panel is active → cancel the flow.
     // This ensures trustline/payment/clearing panels close on background click.
     if (!id && isInteractUi.value) {
-      const p = String(interactMode.phase.value ?? '').toLowerCase()
+      const p = toLower(interactMode.phase.value)
       if (p !== 'idle') {
         interactMode.cancel()
         // Fall through to also clear node selection below.
@@ -1361,7 +1379,7 @@ export function useSimulatorApp() {
 
     // Cancel any active interact panel before opening NodeCard (mutual exclusion).
     if (isInteractUi.value) {
-      const p = String(interactMode.phase.value ?? '').toLowerCase()
+      const p = toLower(interactMode.phase.value)
       if (p !== 'idle') {
         interactMode.cancel()
       }
@@ -1376,7 +1394,7 @@ export function useSimulatorApp() {
     const runId = real.runId
     const scenarioId = real.selectedScenarioId
 
-    const runState = String(real.runStatus?.state ?? '').toLowerCase()
+    const runState = toLower(real.runStatus?.state)
     const isActiveRun =
       !!runId &&
       // Optimistic: if runId exists but status not fetched yet, assume active to avoid falling back to preview.
@@ -1527,7 +1545,7 @@ export function useSimulatorApp() {
         // best-effort; refreshRunStatus already handles 404 by resetting stale run
       }
 
-      const st = String(real.runStatus?.state ?? '').toLowerCase()
+      const st = toLower(real.runStatus?.state)
       const isTerminal = st === 'stopped' || st === 'error'
 
       if (isTerminal) {
@@ -1588,7 +1606,7 @@ export function useSimulatorApp() {
             await realMode.refreshRunStatus()
             // If we attached to a running fixtures run (likely from a previous FX debug attempt), pause it.
             try {
-              const st = String(real.runStatus?.state ?? '').toLowerCase()
+              const st = toLower(real.runStatus?.state)
               const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
               if (shouldPause) {
                 await realMode.pause()
@@ -1754,8 +1772,18 @@ export function useSimulatorApp() {
     resizeAndLayout,
     persistedPrefs,
     setupDevHook: devHook.setupDevHook,
+    disposeDevHook: devHook.disposeDevHook,
     sceneState,
     hideDragPreview,
+    resetFxRendererCaches: () => {
+      // Fire-and-forget: lifecycle teardown should not depend on dynamic import timing.
+      // Also ensure we don't surface unhandled rejections if import fails during HMR/teardown.
+      void import('../render/fxRenderer')
+        .then((m) => m.resetFxRendererCaches())
+        .catch(() => {
+          // Best-effort.
+        })
+    },
     physics,
     getLayoutSize: () => ({ w: layout.w, h: layout.h }),
   })

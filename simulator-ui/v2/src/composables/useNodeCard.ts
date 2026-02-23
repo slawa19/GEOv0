@@ -1,22 +1,19 @@
 import type { ComputedRef, Ref } from 'vue'
 import { computed } from 'vue'
 import type { GraphNode } from '../types'
-import type { LayoutLinkLike as BaseLayoutLinkLike, LayoutNodeWithId as BaseLayoutNodeWithId } from '../types/layout'
+import type { LayoutLinkLike, LayoutNodeWithId } from '../types/layout'
 import { clamp } from '../utils/math'
-
-type LayoutNodeLike = BaseLayoutNodeWithId
-type LayoutLinkLike = BaseLayoutLinkLike
 
 type UseNodeCardDeps = {
   hostEl: Ref<HTMLElement | null>
   selectedNodeId: Ref<string | null>
   getNodeById: (id: string | null) => GraphNode | null
-  getLayoutNodeById: (id: string) => LayoutNodeLike | null
+  getLayoutNodeById: (id: string) => LayoutNodeWithId | null
   getNodeScreenSize: (node: GraphNode) => { w: number; h: number }
   worldToScreen: (x: number, y: number) => { x: number; y: number }
   // New: get incident edges for positioning
   getIncidentEdges?: (nodeId: string) => LayoutLinkLike[]
-  getLayoutNodes?: () => LayoutNodeLike[]
+  getLayoutNodes?: () => LayoutNodeWithId[]
 }
 
 type UseNodeCardReturn = {

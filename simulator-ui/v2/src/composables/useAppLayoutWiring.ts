@@ -35,9 +35,17 @@ export function useAppLayoutWiring(opts: {
   wakeUp?: () => void
 }) {
   let computeLayoutImpl: ((snapshot: GraphSnapshot, w: number, h: number, mode: LayoutMode) => void) | null = null
+  let pendingComputeLayout:
+    | { snapshot: GraphSnapshot; w: number; h: number; mode: LayoutMode }
+    | null = null
 
   function computeLayout(snapshot: GraphSnapshot, w: number, h: number, mode: LayoutMode) {
-    if (!computeLayoutImpl) throw new Error('computeLayout called before computeLayoutImpl init')
+    if (!computeLayoutImpl) {
+      // Graceful behavior: layout coordinator may trigger compute before wiring is fully initialized.
+      // Buffer the latest request and replay it once `initComputeLayout()` is called.
+      pendingComputeLayout = { snapshot, w, h, mode }
+      return
+    }
     computeLayoutImpl(snapshot, w, h, mode)
   }
 
@@ -68,6 +76,12 @@ export function useAppLayoutWiring(opts: {
         deps.physics.recreateForCurrentLayout({ w: ctx.w, h: ctx.h })
       },
     })
+
+    if (pendingComputeLayout) {
+      const pending = pendingComputeLayout
+      pendingComputeLayout = null
+      computeLayoutImpl(pending.snapshot, pending.w, pending.h, pending.mode)
+    }
   }
 
   return {

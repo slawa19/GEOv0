@@ -16,12 +16,15 @@ import InteractHistoryLog from './InteractHistoryLog.vue'
 
  import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
+ import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
+
  import type { InteractPhase } from '../composables/useInteractMode'
  import { useActivePanelState } from '../composables/useActivePanelState'
  import { useInteractPanelPosition } from '../composables/useInteractPanelPosition'
  import type { Point } from '../composables/useInteractPanelPosition'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
+ import { toLower } from '../utils/stringHelpers'
 
 // TD-1: all localStorage access is delegated to this composable.
 const simulatorStorage = useSimulatorStorage()
@@ -81,7 +84,7 @@ onUnmounted(() => {
 import type { GraphLink } from '../types'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
-import { emptyToNull } from '../utils/valueFormat'
+import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
 import { handleEscOverlayStack } from '../utils/escOverlayStack'
 
 const app = useSimulatorApp()
@@ -177,12 +180,46 @@ const { activePanelType } = useActivePanelState(interactPhase)
 
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false
-  return String(interactPhase.value ?? '').toLowerCase() !== 'idle'
+  return toLower(interactPhase.value) !== 'idle'
 })
 
 const activeSegment = computed(() =>
   apiMode.value !== 'real' ? 'sandbox' : isInteractUi.value ? 'interact' : 'auto'
 )
+
+ const topBarCtx: TopBarContext = {
+   apiMode,
+   activeSegment,
+   isInteractUi,
+   isTestMode,
+
+   uiTheme,
+
+   loadingScenarios: computed(() => real.loadingScenarios),
+   scenarios: computed(() => real.scenarios),
+   selectedScenarioId: computed(() => real.selectedScenarioId),
+   desiredMode: computed(() => real.desiredMode),
+   intensityPercent: computed(() => real.intensityPercent),
+
+   runId: computed(() => real.runId),
+   runStatus: computed(() => real.runStatus),
+   sseState: computed(() => real.sseState),
+   lastError: computed(() => real.lastError),
+
+   runStats: computed(() => real.runStats),
+
+   accessToken: computed(() => real.accessToken),
+   adminRuns: computed(() => admin.runs.value),
+   adminRunsLoading: computed(() => admin.loading.value),
+   adminLastError: computed(() => admin.lastError.value),
+
+   adminCanGetRuns: computed(() => typeof admin.getRuns === 'function'),
+   adminCanStopRuns: computed(() => typeof admin.stopRuns === 'function'),
+   adminCanAttachRun: computed(() => typeof admin.attachRun === 'function'),
+   adminCanStopRun: computed(() => typeof admin.stopRun === 'function'),
+ }
+
+ provideTopBarContext(topBarCtx)
 
 /** True when running in Auto-Run mode (real API, non-interact, non-demo). */
 const isAutoRunUi = computed(() => apiMode.value === 'real' && !isInteractUi.value && !isDemoUi.value)
@@ -192,7 +229,7 @@ const dataReady = computed(() => !state.loading || !!state.snapshot)
 
 function isFormLikeTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null
-  const tag = String((el as any)?.tagName ?? '').toLowerCase()
+  const tag = toLower((el as any)?.tagName)
   return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
@@ -217,17 +254,15 @@ function onGlobalKeydown(ev: KeyboardEvent) {
 }
 
 onMounted(() => {
-  if (typeof window === 'undefined') return
   window.addEventListener('keydown', onGlobalKeydown)
 })
 
 onUnmounted(() => {
-  if (typeof window === 'undefined') return
   window.removeEventListener('keydown', onGlobalKeydown)
 })
 
 const interactRunTerminal = computed(() => {
-  const st = String(real.runStatus?.state ?? '').toLowerCase()
+  const st = toLower(real.runStatus?.state)
   return st === 'stopped' || st === 'error'
 })
 
@@ -289,7 +324,6 @@ const demoRunClearingOnce = async () => {
 }
 
 function setQueryAndReload(mut: (sp: URLSearchParams) => void) {
-  if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
   mut(url.searchParams)
   // Setting href ensures full re-init (important when switching between pipelines).
@@ -449,63 +483,80 @@ function onEdgeDetailCloseLine() {
   void interact.mode.confirmTrustlineClose()
 }
 
-// BUG-1: NodeCardOverlay interact mode handlers
-function onInteractSendPayment(fromPid: string) {
-  // Снапшот позиции NodeCard ДО закрытия (после закрытия nodeCardStyle теряется).
+function startFlowFromNodeCard(opts: {
+  openEditor?: boolean
+  start: () => void
+}) {
+  // Snapshot NodeCard anchor BEFORE closing it (after close, nodeCardStyle is lost).
   const snapshot = parseNodeCardAnchor(nodeCardStyle.value)
 
+  if (opts.openEditor) useFullTrustlineEditor.value = true
   setNodeCardOpen(false)
-  interact.mode.startPaymentFlow()
-  interact.mode.setPaymentFromPid(fromPid)
+  opts.start()
 
-  // nextTick: дожидаемся, пока watcher на interactPhase в composable сбросит anchor,
-  // только потом устанавливаем новый (иначе composable-watcher перезапишет).
+  // nextTick: wait until the interactPhase watcher in useInteractPanelPosition
+  // clears the anchor, then set the new anchor (otherwise it can be overwritten).
   void nextTick(() => openPanelFrom('node-card', snapshot))
+}
+
+function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void }) {
+  setNodeCardOpen(false)
+  // anchor resets automatically on phase change in useInteractPanelPosition
+  if (opts.openEditor) useFullTrustlineEditor.value = true
+  opts.start()
+}
+
+// BUG-1: NodeCardOverlay interact mode handlers
+function onInteractSendPayment(fromPid: string) {
+  startFlowFromNodeCard({
+    start: () => {
+      interact.mode.startPaymentFlow()
+      interact.mode.setPaymentFromPid(fromPid)
+    },
+  })
 }
 
 function onInteractNewTrustline(fromPid: string) {
-  // Снапшот позиции NodeCard ДО закрытия (после закрытия nodeCardStyle теряется).
-  const snapshot = parseNodeCardAnchor(nodeCardStyle.value)
-
-  setNodeCardOpen(false)
-  interact.mode.startTrustlineFlow()
-  interact.mode.setTrustlineFromPid(fromPid)
-
-  // nextTick: дожидаемся, пока watcher на interactPhase в composable сбросит anchor,
-  // только потом устанавливаем новый (иначе composable-watcher перезапишет).
-  void nextTick(() => openPanelFrom('node-card', snapshot))
+  startFlowFromNodeCard({
+    start: () => {
+      interact.mode.startTrustlineFlow()
+      interact.mode.setTrustlineFromPid(fromPid)
+    },
+  })
 }
 
 function onInteractEditTrustline(fromPid: string, toPid: string) {
-  // Снапшот позиции NodeCard ДО закрытия (после закрытия nodeCardStyle теряется).
-  const snapshot = parseNodeCardAnchor(nodeCardStyle.value)
-
-  useFullTrustlineEditor.value = true
-  setNodeCardOpen(false)
-  interact.mode.selectTrustline(fromPid, toPid)
-
-  // nextTick: дожидаемся, пока watcher на interactPhase в composable сбросит anchor,
-  // только потом устанавливаем новый (иначе composable-watcher перезапишет).
-  void nextTick(() => openPanelFrom('node-card', snapshot))
+  startFlowFromNodeCard({
+    openEditor: true,
+    start: () => {
+      interact.mode.selectTrustline(fromPid, toPid)
+    },
+  })
 }
 
 function onActionStartPaymentFlow() {
-  setNodeCardOpen(false)
-  // anchor сбрасывается автоматически при смене phase в useInteractPanelPosition
-  interact.mode.startPaymentFlow()
+  startFlowFromActionBar({
+    start: () => {
+      interact.mode.startPaymentFlow()
+    },
+  })
 }
 
 function onActionStartTrustlineFlow() {
-  setNodeCardOpen(false)
-  // anchor сбрасывается автоматически при смене phase в useInteractPanelPosition
-  useFullTrustlineEditor.value = true
-  interact.mode.startTrustlineFlow()
+  startFlowFromActionBar({
+    openEditor: true,
+    start: () => {
+      interact.mode.startTrustlineFlow()
+    },
+  })
 }
 
 function onActionStartClearingFlow() {
-  setNodeCardOpen(false)
-  // anchor сбрасывается автоматически при смене phase в useInteractPanelPosition
-  interact.mode.startClearingFlow()
+  startFlowFromActionBar({
+    start: () => {
+      interact.mode.startClearingFlow()
+    },
+  })
 }
 
 // Mutual exclusion: when an interact panel activates, close NodeCard.
@@ -524,7 +575,7 @@ watch(activePanelType, (t, prev) => {
 // NOTE: do NOT reset when transitioning between trustline sub-phases
 // (e.g. picking-trustline-to → editing-trustline) to preserve the ActionBar intent.
 watch(interactPhase, (phase) => {
-  const p = String(phase ?? '').toLowerCase()
+  const p = toLower(phase)
   if (!p.includes('trustline')) {
     useFullTrustlineEditor.value = false
   }
@@ -571,39 +622,20 @@ watch(interactPhase, (phase) => {
     />
 
     <TopBar
-      :api-mode="apiMode"
-      :active-segment="activeSegment"
-      :is-interact-ui="isInteractUi"
-      :is-test-mode="isTestMode"
-      :ui-theme="uiTheme"
-      :set-ui-theme="setUiTheme"
-      :loading-scenarios="real.loadingScenarios"
-      :scenarios="real.scenarios"
-      :selected-scenario-id="real.selectedScenarioId"
-      :desired-mode="real.desiredMode"
-      :intensity-percent="real.intensityPercent"
-      :run-id="real.runId"
-      :run-status="real.runStatus"
-      :sse-state="real.sseState"
-      :last-error="real.lastError"
-      :refresh-scenarios="realActions.refreshScenarios"
-      :start-run="realActions.startRun"
-      :pause="realActions.pause"
-      :resume="realActions.resume"
-      :stop="realActions.stop"
-      :apply-intensity="realActions.applyIntensity"
-      :run-stats="real.runStats"
-      :go-sandbox="goSandbox"
-      :go-auto-run="goAutoRun"
-      :go-interact="goInteract"
-      :access-token="real.accessToken"
-      :admin-runs="admin.runs.value"
-      :admin-runs-loading="admin.loading.value"
-      :admin-last-error="admin.lastError.value"
-      :admin-get-runs="admin.getRuns"
-      :admin-stop-runs="admin.stopRuns"
-      :admin-attach-run="admin.attachRun"
-      :admin-stop-run="admin.stopRun"
+      @go-sandbox="goSandbox"
+      @go-auto-run="goAutoRun"
+      @go-interact="goInteract"
+      @set-ui-theme="setUiTheme"
+      @refresh-scenarios="realActions.refreshScenarios"
+      @start-run="realActions.startRun"
+      @pause="realActions.pause"
+      @resume="realActions.resume"
+      @stop="realActions.stop"
+      @apply-intensity="realActions.applyIntensity"
+      @admin-get-runs="admin.getRuns"
+      @admin-stop-runs="admin.stopRuns"
+      @admin-attach-run="admin.attachRun"
+      @admin-stop-run="admin.stopRun"
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:desired-mode="realActions.setDesiredMode"
       @update:intensity-percent="realActions.setIntensityPercent"
@@ -695,7 +727,7 @@ watch(interactPhase, (phase) => {
       :used="emptyToNull(interactSelectedLink?.used)"
       :limit="emptyToNull(interactSelectedLink?.trust_limit)"
       :available="emptyToNull(interactSelectedLink?.available)"
-      :status="(emptyToNull(interactSelectedLink?.status) as any) ?? null"
+      :status="emptyToNullString(interactSelectedLink?.status)"
       :busy="interact.mode.busy.value"
       :force-hidden="useFullTrustlineEditor"
       :close="interact.mode.cancel"

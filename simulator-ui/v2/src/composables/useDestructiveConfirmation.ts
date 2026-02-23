@@ -111,12 +111,11 @@ export function useDestructiveConfirmation(options: UseDestructiveConfirmationOp
 
   onMounted(() => {
     if (!escEnabled) return
-    if (typeof window === 'undefined') return
     window.addEventListener(escEventName, onEsc)
   })
 
   onUnmounted(() => {
-    if (escEnabled && typeof window !== 'undefined') {
+    if (escEnabled) {
       window.removeEventListener(escEventName, onEsc)
     }
     clearAutoDisarmTimer()

@@ -23,8 +23,8 @@ export type EscOverlayStackDeps = {
  * 5) Otherwise cancel the Interact flow.
  */
 export function handleEscOverlayStack(ev: KeyboardEvent, deps: EscOverlayStackDeps): boolean {
-  const k = String(ev.key ?? '')
-  const isEsc = k === 'Escape' || k === 'Esc' || (ev as any).keyCode === 27
+  const k = ev.key
+  const isEsc = k === 'Escape' || k === 'Esc'
   if (!isEsc) return false
 
   // Step 1: close NodeCard first (always highest priority).
@@ -33,9 +33,9 @@ export function handleEscOverlayStack(ev: KeyboardEvent, deps: EscOverlayStackDe
     deps.closeNodeCard()
     return true
   }
-
+  
   // Step 2: Interact-only beyond this point.
-  if (!deps.isInteractActive()) return true
+  if (!deps.isInteractActive()) return false
 
   // Minimal guard: keep default ESC behavior for form controls.
   if (!deps.isFormLikeTarget(ev.target)) {

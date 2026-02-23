@@ -1,6 +1,7 @@
 import { computed, unref, type ComputedRef, type Ref } from 'vue'
 
 import type { InteractPhase } from './useInteractMode'
+import { toLower } from '../utils/stringHelpers'
 
 export type ActivePanelKey = 'payment' | 'trustline' | 'clearing'
 export type ActivePanelKeyOrNull = ActivePanelKey | null
@@ -23,7 +24,7 @@ export function useActivePanelState(
   activePanelType: ComputedRef<ActivePanelKeyOrNull>
   activeKey: ComputedRef<ActivePanelKeyOrNull>
 } {
-  const phaseNorm = computed(() => String(unref(phase) ?? '').toLowerCase())
+  const phaseNorm = computed(() => toLower(unref(phase)))
 
   const activeKey = computed<ActivePanelKeyOrNull>(() => {
     const p = phaseNorm.value

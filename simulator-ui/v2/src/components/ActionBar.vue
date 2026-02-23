@@ -3,6 +3,7 @@ import { computed } from 'vue'
 
 import type { InteractPhase } from '../composables/useInteractMode'
 import { type ActivePanelKey, useActivePanelState } from '../composables/useActivePanelState'
+import { toLower } from '../utils/stringHelpers'
 
 type Props = {
   phase: InteractPhase
@@ -23,13 +24,24 @@ const props = defineProps<Props>()
 
 const isDisabled = computed(() => !!props.busy || !!props.actionsDisabled || !!props.runTerminal)
 
-const isIdle = computed(() => String(props.phase ?? '').toLowerCase() === 'idle')
+const isIdle = computed(() => toLower(props.phase) === 'idle')
+
+// Contract: one flow at a time (see Interact Mode user guide).
+// When a flow is active (phase != idle), ActionBar must not allow starting any flow.
+const isFlowActive = computed(() => !isIdle.value)
 
 const { activeKey } = useActivePanelState(computed(() => props.phase))
 
-function titleFor(key: ActivePanelKey, idleTitle: string): string {
-  if (!isIdle.value && activeKey.value !== key) return 'Cancel current action first'
+function titleFor(_key: ActivePanelKey, idleTitle: string): string {
+  if (isFlowActive.value) return 'Cancel current action first'
   return idleTitle
+}
+
+function guardedStart(fn: () => void) {
+  // If ActionBar is globally disabled (busy/feature flags/run terminal) or a flow is active,
+  // do nothing. Buttons are also disabled in template, but this is a safety guard.
+  if (isDisabled.value || isFlowActive.value) return
+  fn()
 }
 </script>
 
@@ -40,11 +52,11 @@ function titleFor(key: ActivePanelKey, idleTitle: string): string {
         class="ds-btn ds-btn--secondary"
         :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'payment' }"
         type="button"
-        :disabled="isDisabled"
+        :disabled="isDisabled || isFlowActive"
         :data-active="activeKey === 'payment' ? '1' : '0'"
         data-testid="actionbar-payment"
         :title="titleFor('payment', 'Send a manual payment')"
-        @click="startPaymentFlow"
+        @click="guardedStart(startPaymentFlow)"
       >
         Send Payment
       </button>
@@ -53,11 +65,11 @@ function titleFor(key: ActivePanelKey, idleTitle: string): string {
         class="ds-btn ds-btn--secondary"
         :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'trustline' }"
         type="button"
-        :disabled="isDisabled"
+        :disabled="isDisabled || isFlowActive"
         :data-active="activeKey === 'trustline' ? '1' : '0'"
         data-testid="actionbar-trustline"
         :title="titleFor('trustline', 'Create/update/close a trustline')"
-        @click="startTrustlineFlow"
+        @click="guardedStart(startTrustlineFlow)"
       >
         Manage Trustline
       </button>
@@ -66,14 +78,23 @@ function titleFor(key: ActivePanelKey, idleTitle: string): string {
         class="ds-btn ds-btn--secondary"
         :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'clearing' }"
         type="button"
-        :disabled="isDisabled"
+        :disabled="isDisabled || isFlowActive"
         :data-active="activeKey === 'clearing' ? '1' : '0'"
         data-testid="actionbar-clearing"
         :title="titleFor('clearing', 'Run clearing')"
-        @click="startClearingFlow"
+        @click="guardedStart(startClearingFlow)"
       >
         Run Clearing
       </button>
+
+      <span
+        v-if="isFlowActive"
+        class="action-bar__hint"
+        data-testid="actionbar-locked-hint"
+        aria-label="Action Bar locked hint"
+      >
+        Cancel current action first
+      </span>
     </div>
   </div>
 </template>
@@ -86,6 +107,13 @@ function titleFor(key: ActivePanelKey, idleTitle: string): string {
 
 .ds-btn--muted {
   opacity: 0.65;
+}
+
+.action-bar__hint {
+  margin-left: 10px;
+  opacity: 0.75;
+  font-size: 12px;
+  white-space: nowrap;
 }
 </style>
 

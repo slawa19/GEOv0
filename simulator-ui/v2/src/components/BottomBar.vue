@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
-import { EQUIVALENT_CODES } from '../config/fxConfig'
+import { EQUIVALENT_CODES } from '../config/equivalents'
 
 type Props = {
   apiMode: 'fixtures' | 'real'
@@ -117,8 +117,7 @@ async function onRunClearingOnce() {
     <div class="ds-ov-bottombar__right" aria-label="Tools">
       <div v-if="apiMode === 'real'" class="ds-ov-btn-group" aria-label="Run tools">
         <button
-          class="ds-btn ds-btn--ghost"
-          style="height: 28px; padding: 0 10px"
+          class="ds-btn ds-btn--ghost ds-btn--sm"
           type="button"
           :disabled="!runId"
           @click="refreshSnapshot"
@@ -128,8 +127,7 @@ async function onRunClearingOnce() {
 
         <button
           v-if="showResetView"
-          class="ds-btn ds-btn--ghost"
-          style="height: 28px; padding: 0 10px"
+          class="ds-btn ds-btn--ghost ds-btn--sm"
           type="button"
           @click="resetView"
         >
@@ -149,8 +147,7 @@ async function onRunClearingOnce() {
           <div class="ds-stack" style="margin-top: 8px; gap: 8px">
             <div class="ds-row" style="gap: 6px">
               <button
-                class="ds-btn ds-btn--secondary"
-                style="height: 28px; padding: 0 10px"
+                class="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
                 :disabled="!runId || artifactsLoading"
                 :title="!runId ? 'Start a run first' : 'Refresh artifacts'"
@@ -165,8 +162,7 @@ async function onRunClearingOnce() {
               <button
                 v-for="a in artifacts"
                 :key="a.name"
-                class="ds-btn ds-btn--secondary"
-                style="height: 28px; padding: 0 10px"
+                class="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
                 @click="downloadArtifact(a.name)"
               >
@@ -189,8 +185,7 @@ async function onRunClearingOnce() {
           <div class="ds-stack" style="margin-top: 8px; gap: 8px">
             <div class="ds-row" style="gap: 6px">
               <button
-                class="ds-btn ds-btn--secondary"
-                style="height: 28px; padding: 0 10px"
+                class="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
                 :disabled="isDemoUi && isExiting"
                 @click="toggleDemoUi"
@@ -204,10 +199,10 @@ async function onRunClearingOnce() {
                 <span class="ds-label">FX Debug</span>
               </div>
               <div class="ds-row" style="gap: 6px">
-                <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" :disabled="fxBusy" @click="onRunTxOnce">
+                <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="fxBusy" @click="onRunTxOnce">
                   Single Tx
                 </button>
-                <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" :disabled="fxBusy" @click="onRunClearingOnce">
+                <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="fxBusy" @click="onRunClearingOnce">
                   Run Clearing
                 </button>
               </div>
@@ -219,8 +214,7 @@ async function onRunClearingOnce() {
       <div v-else class="ds-ov-btn-group" aria-label="Offline tools">
         <button
           v-if="showResetView"
-          class="ds-btn ds-btn--ghost"
-          style="height: 28px; padding: 0 10px"
+          class="ds-btn ds-btn--ghost ds-btn--sm"
           type="button"
           @click="resetView"
         >

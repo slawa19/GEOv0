@@ -13,6 +13,10 @@
  * - this module: FX timings, thresholds, and multipliers
  */
 
+import { toLowerTrim } from '../utils/stringHelpers'
+
+export { EQUIVALENT_CODES } from './equivalents'
+
 export const FX_CONFIG = {
   /**
    * Clearing/Tx FX parameters (canonical, mode-agnostic).
@@ -66,8 +70,6 @@ export type FxClearingConfig = typeof FX_CONFIG.clearing
  * Equivalent currency/unit codes shown in the EQ selector (BottomBar).
  * Single source of truth — avoids hardcoding in template HTML.
  */
-export const EQUIVALENT_CODES = ['UAH', 'HOUR', 'EUR'] as const
-
 /**
  * Colour for clearing floating labels.
  * Corresponds to DS token --ds-warn (warning yellow).
@@ -82,7 +84,7 @@ export const CLEARING_LABEL_COLOR = 'var(--ds-warn)'
  * Previously duplicated in the offline demo player and useSimulatorApp.ts.
  */
 export function intensityScale(intensityKey?: string): number {
-  const k = String(intensityKey ?? '').trim().toLowerCase()
+  const k = toLowerTrim(intensityKey)
   if (!k) return 1
 
   // Keep this conservative to avoid overblown visuals and perf regressions.

@@ -21,7 +21,7 @@ const props = defineProps<{
 type GpuInfo = { vendor: string | null; renderer: string | null }
 
 const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+const dpr = (((globalThis as any).window as any)?.devicePixelRatio as number | undefined) || 1
 
 const gpu = ref<GpuInfo>({ vendor: null, renderer: null })
 
@@ -130,7 +130,7 @@ onUnmounted(() => {
   <div v-if="enabled" class="perf ds-ov-item ds-ov-surface ds-ov-dev-perf" role="region" aria-label="Performance diagnostics">
     <div class="row">
       <div class="title ds-label">Perf probe</div>
-      <button class="ds-btn ds-btn--secondary" style="height: 28px; padding: 0 10px" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
+      <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
     </div>
 
     <div

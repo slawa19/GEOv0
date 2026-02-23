@@ -43,11 +43,12 @@ type UseLayoutCoordinatorReturn<N, L> = {
 }
 
 function getWin(): any {
-  return typeof window !== 'undefined' ? window : globalThis
+  return ((globalThis as any).window ?? globalThis) as any
 }
 
 function getDoc(): any {
-  return typeof document !== 'undefined' ? document : (globalThis as any).document
+  const w = (globalThis as any).window as any
+  return ((globalThis as any).document ?? w?.document) as any
 }
 
 function addMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {

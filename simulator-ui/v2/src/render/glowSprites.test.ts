@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { __testing } from './glowSprites'
+import { __testing, resetGlowSpritesCache } from './glowSprites'
 
 describe('render/glowSprites — unit', () => {
   const originalDocument = (globalThis as any).document
@@ -37,6 +37,33 @@ describe('render/glowSprites — unit', () => {
 
   beforeEach(() => {
     __testing._cacheClear()
+  })
+
+  it('resetGlowSpritesCache() empties the cache; next request creates a new sprite', () => {
+    const opts: any = {
+      kind: 'bloom',
+      shape: 'circle',
+      color: '#ffffff',
+      w: 10,
+      h: 10,
+      r: 10,
+      rr: 0,
+      blurPx: 2,
+      lineWidthPx: 1,
+    }
+
+    const key = __testing.keyFor(opts)
+    const s1 = __testing._getGlowSprite(opts)
+    expect(__testing._cacheHas(key)).toBe(true)
+    expect(__testing._cacheKeys().length).toBe(1)
+
+    resetGlowSpritesCache()
+    expect(__testing._cacheHas(key)).toBe(false)
+    expect(__testing._cacheKeys().length).toBe(0)
+
+    const s2 = __testing._getGlowSprite(opts)
+    expect(__testing._cacheKeys().length).toBe(1)
+    expect(s2).not.toBe(s1)
   })
 
   describe('q()', () => {
