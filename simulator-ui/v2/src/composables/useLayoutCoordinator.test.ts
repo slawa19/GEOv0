@@ -1,6 +1,6 @@
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { useLayoutCoordinator } from './useLayoutCoordinator'
+import { computeSnapshotStructuralKey, useLayoutCoordinator } from './useLayoutCoordinator'
 
 type Listener = (ev?: any) => void
 
@@ -75,6 +75,66 @@ function withMockWindowAndDocument<T>(fn: (ctx: { win: any; doc: any }) => T): T
 }
 
 describe('useLayoutCoordinator', () => {
+  it('computeSnapshotStructuralKey changes when node IDs set changes (even if lengths are equal)', () => {
+    const k1 = computeSnapshotStructuralKey({
+      nodes: [{ id: 'A' }, { id: 'B' }],
+      links: [{}, {}],
+    })
+    const k2 = computeSnapshotStructuralKey({
+      nodes: [{ id: 'A' }, { id: 'C' }],
+      links: [{}, {}],
+    })
+
+    expect(k1).not.toEqual(k2)
+    expect(k1.split('|').slice(0, 2)).toEqual(['2', '2'])
+  })
+
+  it('snapshot structural watcher triggers relayout on in-place node ID replacement (same counts)', async () => {
+    vi.useFakeTimers()
+
+    const snapshotRef = ref({
+      generated_at: 't1',
+      nodes: [{ id: 'A' }, { id: 'B' }],
+      links: [],
+    })
+
+    const computeLayout = vi.fn()
+
+    const coordinator = useLayoutCoordinator({
+      canvasEl: ref(null),
+      fxCanvasEl: ref(null),
+      hostEl: ref(null),
+      snapshot: computed(() => snapshotRef.value),
+      layoutMode: ref<'admin-force'>('admin-force'),
+      dprClamp: computed(() => 1),
+      isTestMode: computed(() => false),
+      getSourcePath: () => 'src',
+      computeLayout,
+      clampCameraPan: vi.fn(),
+    })
+
+    coordinator.layout.w = 800
+    coordinator.layout.h = 600
+
+    // Baseline: one compute.
+    coordinator.requestRelayoutDebounced(0)
+    vi.runAllTimers()
+    expect(computeLayout).toHaveBeenCalledTimes(1)
+
+    // Mutate snapshot in-place (SSE topology patch style): replace one node ID.
+    snapshotRef.value.nodes[0]!.id = 'Z'
+
+    // Watcher is flush:'post' so wait for Vue post-flush queue.
+    await nextTick()
+
+    // Relayout is scheduled via requestRelayoutDebounced(0) which uses RAF/setTimeout.
+    vi.runAllTimers()
+
+    expect(computeLayout).toHaveBeenCalledTimes(2)
+
+    vi.useRealTimers()
+  })
+
   it('visibility/DPR relayout runs strictly after resize updates layout.w/h (ordering regression)', () => {
     vi.useFakeTimers()
 
@@ -249,6 +309,82 @@ describe('useLayoutCoordinator', () => {
 		vi.useRealTimers()
 	})
 
+  it('coalesces relayout RAF + resize-relayout RAF into a single compute (ITEM-18)', () => {
+    vi.useFakeTimers()
+
+    withMockWindowAndDocument(({ win }) => {
+      const wakeUp = vi.fn()
+      const computeLayout = vi.fn()
+
+      const host = createMockHost(640, 480)
+
+      const coordinator = useLayoutCoordinator({
+        canvasEl: ref(createMockCanvas()),
+        fxCanvasEl: ref(createMockCanvas()),
+        hostEl: ref(host),
+        snapshot: computed(() => ({ generated_at: 't1', nodes: [], links: [] })),
+        layoutMode: ref<'admin-force'>('admin-force'),
+        dprClamp: computed(() => 10),
+        isTestMode: computed(() => false),
+        getSourcePath: () => 'src',
+        computeLayout,
+        clampCameraPan: vi.fn(),
+        wakeUp,
+      })
+
+      coordinator.setupResizeListener()
+
+      // Same animation frame: schedule relayout and then resize-relayout.
+      coordinator.requestRelayoutDebounced(0)
+      win.dispatchEvent({ type: 'resize' })
+
+      vi.runAllTimers()
+
+      expect(computeLayout).toHaveBeenCalledTimes(1)
+      expect(computeLayout).toHaveBeenCalledWith(expect.anything(), 640, 480, 'admin-force')
+      expect(wakeUp).toHaveBeenCalledTimes(1)
+
+      coordinator.teardownResizeListener()
+    })
+
+    withMockWindowAndDocument(({ win }) => {
+      const wakeUp = vi.fn()
+      const computeLayout = vi.fn()
+
+      const host = createMockHost(640, 480)
+
+      const coordinator = useLayoutCoordinator({
+        canvasEl: ref(createMockCanvas()),
+        fxCanvasEl: ref(createMockCanvas()),
+        hostEl: ref(host),
+        snapshot: computed(() => ({ generated_at: 't1', nodes: [], links: [] })),
+        layoutMode: ref<'admin-force'>('admin-force'),
+        dprClamp: computed(() => 10),
+        isTestMode: computed(() => false),
+        getSourcePath: () => 'src',
+        computeLayout,
+        clampCameraPan: vi.fn(),
+        wakeUp,
+      })
+
+      coordinator.setupResizeListener()
+
+      // Same animation frame: schedule resize-relayout and then relayout.
+      win.dispatchEvent({ type: 'resize' })
+      coordinator.requestRelayoutDebounced(0)
+
+      vi.runAllTimers()
+
+      expect(computeLayout).toHaveBeenCalledTimes(1)
+      expect(computeLayout).toHaveBeenCalledWith(expect.anything(), 640, 480, 'admin-force')
+      expect(wakeUp).toHaveBeenCalledTimes(1)
+
+      coordinator.teardownResizeListener()
+    })
+
+    vi.useRealTimers()
+  })
+
 	it('does not wakeUp / recompute when resize signals arrive but size did not change', () => {
 		vi.useFakeTimers()
 
@@ -361,6 +497,68 @@ describe('useLayoutCoordinator', () => {
     })
 
     vi.useRealTimers()
+  })
+
+  it('DPR listener setup does not throw when matchMedia throws (sandbox SecurityError)', () => {
+    withMockWindowAndDocument(({ win }) => {
+      win.matchMedia = () => {
+        throw new Error('SecurityError')
+      }
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+      const coordinator = useLayoutCoordinator({
+        canvasEl: ref(createMockCanvas()),
+        fxCanvasEl: ref(createMockCanvas()),
+        hostEl: ref(null),
+        snapshot: computed(() => ({ generated_at: 't1', nodes: [], links: [] })),
+        layoutMode: ref<'admin-force'>('admin-force'),
+        dprClamp: computed(() => 10),
+        isTestMode: computed(() => false),
+        getSourcePath: () => 'src',
+        computeLayout: vi.fn(),
+        clampCameraPan: vi.fn(),
+      })
+
+      expect(() => coordinator.setupResizeListener()).not.toThrow()
+      expect(() => coordinator.teardownResizeListener()).not.toThrow()
+
+      warnSpy.mockRestore()
+    })
+  })
+
+  it('DPR listener setup supports legacy MediaQueryList.addListener API (no addEventListener)', () => {
+    withMockWindowAndDocument(({ win }) => {
+      const listeners: Listener[] = []
+      win.matchMedia = (query: string) => {
+        return {
+          media: query,
+          matches: true,
+          addListener: (cb: Listener) => listeners.push(cb),
+          removeListener: (cb: Listener) => {
+            const idx = listeners.indexOf(cb)
+            if (idx >= 0) listeners.splice(idx, 1)
+          },
+        } as any
+      }
+
+      const coordinator = useLayoutCoordinator({
+        canvasEl: ref(createMockCanvas()),
+        fxCanvasEl: ref(createMockCanvas()),
+        hostEl: ref(null),
+        snapshot: computed(() => ({ generated_at: 't1', nodes: [], links: [] })),
+        layoutMode: ref<'admin-force'>('admin-force'),
+        dprClamp: computed(() => 10),
+        isTestMode: computed(() => false),
+        getSourcePath: () => 'src',
+        computeLayout: vi.fn(),
+        clampCameraPan: vi.fn(),
+      })
+
+      expect(() => coordinator.setupResizeListener()).not.toThrow()
+      expect(listeners.length).toBe(1)
+      expect(() => coordinator.teardownResizeListener()).not.toThrow()
+    })
   })
 
   it('debounced relayout respects lastLayoutKey cache', async () => {

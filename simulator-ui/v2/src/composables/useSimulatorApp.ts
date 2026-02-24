@@ -63,6 +63,18 @@ import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
 import { useSystemBalance } from './useSystemBalance'
 
+export function __autoBootstrapMaybeFillUiError(opts: {
+  real: { lastError?: string | null }
+  state: { error?: string | null }
+  err: unknown
+}): void {
+  const hasRealError = !!String(opts.real.lastError ?? '').trim()
+  const hasStateError = !!String(opts.state.error ?? '').trim()
+  if (hasRealError || hasStateError) return
+
+  opts.state.error = `Auto-start failed: ${String((opts.err as any)?.message ?? opts.err)}`
+}
+
 export function useSimulatorApp() {
   const eq = ref('UAH')
   const scene = ref<SceneId>('A')
@@ -684,6 +696,18 @@ export function useSimulatorApp() {
   const selectedIncidentEdgeKeys = layoutIndexHelpers.selectedIncidentEdgeKeys
   const getLayoutNodeById = layoutIndexHelpers.getLayoutNodeById
 
+  // Layout nodes are raw (non-reactive) for physics performance.
+  // Any consumer that uses Vue `computed()` based on node.__x/__y must explicitly depend on
+  // layoutCoordinator.layoutVersion to re-evaluate during physics/drag updates.
+  const getLayoutNodesLive = () => {
+    layoutCoordinator.layoutVersion.value
+    return layout.nodes
+  }
+  const getLayoutNodeByIdLive = (id: string) => {
+    layoutCoordinator.layoutVersion.value
+    return getLayoutNodeById(id)
+  }
+
   function syncLayoutFromSnapshot(snapshot: GraphSnapshot) {
     // Layout nodes/links are copies (see forceLayout.ts spreads base objects).
     // When the scene loader decides an update is incremental (same node IDs), it may skip relayout.
@@ -805,7 +829,7 @@ export function useSimulatorApp() {
   const viewWiring = useAppViewWiring({
     canvasEl,
     hostEl,
-    getLayoutNodes: () => layout.nodes,
+    getLayoutNodes: getLayoutNodesLive,
     getLayoutW: () => layout.w,
     getLayoutH: () => layout.h,
     isTestMode: () => isTestMode.value,
@@ -822,7 +846,7 @@ export function useSimulatorApp() {
       state.selectedNodeId = id
     },
     getNodeById,
-    getLayoutNodeById: (id) => getLayoutNodeById(id),
+    getLayoutNodeById: (id) => getLayoutNodeByIdLive(id),
     getNodeScreenSize: (n) => sizeForNode(n),
     getIncidentEdges: (nodeId) => layout.links.filter((l) => l.source === nodeId || l.target === nodeId),
   })
@@ -849,14 +873,14 @@ export function useSimulatorApp() {
   }).selectedNodeEdgeStats
 
   const fxOverlays = useAppFxOverlays({
-    getLayoutNodeById: (id) => getLayoutNodeById(id) ?? undefined,
+    getLayoutNodeById: (id) => getLayoutNodeByIdLive(id) ?? undefined,
     sizeForNode,
     getCameraZoom: () => camera.zoom,
     setFlash: (v) => {
       state.flash = v
     },
     isWebDriver: () => isWebDriver,
-    getLayoutNodes: () => layout.nodes,
+    getLayoutNodes: getLayoutNodesLive,
     worldToScreen,
     // Important: FX timers must wake up render loop before mutating FX state.
     wakeUp,
@@ -895,9 +919,8 @@ export function useSimulatorApp() {
     },
     getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
     beforeDraw: () => {
-      if (physics.isRunning()) {
-        physics.tickAndSyncToLayout()
-      }
+      const didTick = physics.tickAndSyncToLayout()
+      if (didTick || (dragToPin.dragState.active && dragToPin.dragState.dragging)) layoutCoordinator.bumpLayoutVersion()
     },
     isAnimating: createSimulatorIsAnimating({
       isPhysicsRunning: () => physics.isRunning(),
@@ -1306,7 +1329,7 @@ export function useSimulatorApp() {
     getSnapshot: () => state.snapshot,
     getSelectedNodeId: () => state.selectedNodeId,
     getLayoutLinks: () => layout.links,
-    getLayoutNodeById: (id) => getLayoutNodeById(id),
+    getLayoutNodeById: (id) => getLayoutNodeByIdLive(id),
     getNodeById,
     getCameraZoom: () => camera.zoom,
     sizeForNode: (n) => sizeForNode(n),
@@ -1316,7 +1339,7 @@ export function useSimulatorApp() {
   const pickingAndHover = useAppPickingAndHover({
     hostEl,
     canvasEl,
-    getLayoutNodes: () => layout.nodes,
+    getLayoutNodes: getLayoutNodesLive,
     getLayoutLinks: () => layout.links,
     getCameraZoom: () => camera.zoom,
     clientToScreen,
@@ -1756,8 +1779,10 @@ export function useSimulatorApp() {
         stopAutoBootstrap()
         try {
           await ensureRunForFxDebugSerialized()
-        } catch {
+        } catch (err) {
           // Best-effort: user can still trigger manually via button click.
+          console.warn('[auto-bootstrap] best-effort failed:', err)
+          __autoBootstrapMaybeFillUiError({ real, state, err })
         }
       },
       { flush: 'post' },
@@ -1811,8 +1836,10 @@ export function useSimulatorApp() {
         if (!ready) return
         try {
           await ensureRunForInteractSerialized()
-        } catch {
+        } catch (err) {
           // Best-effort: user can still start a run manually if needed.
+          console.warn('[auto-bootstrap] best-effort failed:', err)
+          __autoBootstrapMaybeFillUiError({ real, state, err })
         }
 
         // Stop only after we successfully attached/created a run.

@@ -67,8 +67,8 @@ export function useAppLayoutWiring(opts: {
       isTestMode: () => opts.isTestMode.value,
       computeLayoutForMode: opts.computeLayoutForMode,
       setLayout: (nodes, links) => {
-        layoutCoordinator.layout.nodes = nodes
-        layoutCoordinator.layout.links = links
+        // Critical: keep layout.nodes/links raw (non-reactive) for physics tick performance.
+        layoutCoordinator.setLayout(nodes, links)
       },
       onAfterLayout: (result, ctx) => {
         deps.pinning.captureBaseline(result.nodes)

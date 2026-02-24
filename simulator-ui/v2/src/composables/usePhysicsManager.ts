@@ -7,7 +7,8 @@ export type PhysicsManager = {
   stop: () => void
   recreateForCurrentLayout: (viewport: { w: number; h: number }) => void
   updateViewport: (w: number, h: number, reheatAlpha?: number) => void
-  tickAndSyncToLayout: () => void
+  /** @returns true when a tick+sync was performed (not throttled and engine running). */
+  tickAndSyncToLayout: () => boolean
   pin: (id: string, x: number, y: number) => void
   unpin: (id: string) => void
   syncFromLayout: () => void
@@ -81,21 +82,23 @@ export function createPhysicsManager(opts: {
   }
 
   function tickAndSyncToLayout() {
-    if (!engine) return
+    if (!engine) return false
     // Once the simulation cools down, doing syncToLayout every frame becomes pure overhead.
     // This is especially visible in full Chrome even when the user hasn't started any scenario.
-    if (!engine.isRunning()) return
+    if (!engine.isRunning()) return false
 
     // d3-force can be surprisingly expensive on large graphs; avoid ticking at full RAF rate.
     // Throttle more aggressively: physics doesn't need 60fps visual update, 20-30fps is smooth enough.
     const q = getQuality()
     const intervalMs = q === 'low' ? 50 : q === 'med' ? 40 : 33 // ~20-30 fps for physics
     const nowMs = performance.now()
-    if (lastTickAtMs > 0 && nowMs - lastTickAtMs < intervalMs) return
+    if (lastTickAtMs > 0 && nowMs - lastTickAtMs < intervalMs) return false
     lastTickAtMs = nowMs
 
     engine.tick()
     engine.syncToLayout()
+
+    return true
   }
 
   function pin(id: string, x: number, y: number) {

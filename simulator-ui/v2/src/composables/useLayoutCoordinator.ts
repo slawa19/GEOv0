@@ -1,5 +1,6 @@
 import type { ComputedRef, Ref } from 'vue'
-import { reactive, watch } from 'vue'
+import { markRaw, ref, shallowReactive, toRaw, watch } from 'vue'
+import { fnv1a } from '../utils/hash'
 
 export type LayoutState<N, L> = {
   nodes: N[]
@@ -29,6 +30,19 @@ type UseLayoutCoordinatorDeps<N, L, M extends string, S extends { generated_at: 
 
 type UseLayoutCoordinatorReturn<N, L> = {
   layout: LayoutState<N, L>
+
+  /**
+   * Manual invalidation gate for consumers that used to rely on deep-reactive node coords.
+   * Bump after physics sync so computed-based consumers (picking/labels/node-card) can re-evaluate.
+   */
+  layoutVersion: Ref<number>
+  bumpLayoutVersion: () => void
+
+  /**
+   * Replace layout arrays with non-reactive (raw) arrays.
+   * Critical for physics tick performance: avoids Vue proxy setter storms on __x/__y.
+   */
+  setLayout: (nodes: N[], links: L[]) => void
 
   resizeAndLayout: () => void
   requestResizeAndLayout: () => void
@@ -62,24 +76,63 @@ function removeMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {
   else if (typeof (mql as any).removeListener === 'function') (mql as any).removeListener(cb)
 }
 
+export function computeSnapshotStructuralKey(snapshot: { nodes: unknown[]; links: unknown[] } | null): string {
+  if (!snapshot) return '0|0|0'
+
+  const nodesLen = snapshot.nodes?.length ?? 0
+  const linksLen = snapshot.links?.length ?? 0
+  const idsJoined = (snapshot.nodes as Array<{ id: unknown }>).map((n) => String(n.id)).join('|')
+  const hash = fnv1a(idsJoined)
+
+  return `${nodesLen}|${linksLen}|${hash}`
+}
+
 export function useLayoutCoordinator<
   N,
   L,
   M extends string,
   S extends { generated_at: string; nodes: unknown[]; links: unknown[] },
 >(deps: UseLayoutCoordinatorDeps<N, L, M, S>): UseLayoutCoordinatorReturn<N, L> {
-  const layout = reactive({
-    nodes: [] as N[],
-    links: [] as L[],
+  // IMPORTANT: keep nodes/links RAW.
+  // We still want `layout.w/h` to be reactive, but layout.nodes/links must NOT be Vue proxies.
+  // Physics writes to node.__x/__y on every tick; proxied nodes would trigger massive overhead.
+  const layout = shallowReactive({
+    nodes: markRaw([] as N[]),
+    links: markRaw([] as L[]),
     w: 0,
     h: 0,
   }) as unknown as LayoutState<N, L>
+
+  const layoutVersion = ref(0)
+  function bumpLayoutVersion() {
+    layoutVersion.value++
+  }
+
+  function setLayout(nodes: N[], links: L[]) {
+    // Always store RAW arrays + RAW elements.
+    // Callers might pass Vue proxies (e.g. from accidental deep-reactive wrapping elsewhere).
+    const nodesArr = toRaw(nodes) as unknown as N[]
+    const linksArr = toRaw(links) as unknown as L[]
+
+    // If elements are proxies, unwrap them too (relayout is infrequent, so O(n) here is fine).
+    const rawNodes = nodesArr.map((n) => toRaw(n)) as unknown as N[]
+    const rawLinks = linksArr.map((l) => toRaw(l)) as unknown as L[]
+
+    layout.nodes = markRaw(rawNodes)
+    layout.links = markRaw(rawLinks)
+  }
 
 	let resizeRafId: number | null = null
 	let resizeRelayoutRafId: number | null = null
 	let relayoutDebounceId: number | null = null
 	let relayoutRafId: number | null = null
 	let relayoutAfterResizePending = false
+
+  // ITEM-18 (LOW): coordinate RAF scheduling between resize-relayout and plain relayout.
+  // Without coordination, `requestResizeRelayoutAndWakeUpCoalesced()` and `requestRelayoutDebounced(0)`
+  // can schedule two compute passes in the same animation frame.
+  let relayoutRafResizePending = false
+  let relayoutForcedInResizeRelayout = false
 	let lastLayoutKey: string | null = null
 
   let listenersActive = false
@@ -248,17 +301,23 @@ export function useLayoutCoordinator<
 	}
 
 	function requestResizeRelayoutAndWakeUpCoalesced() {
+		// If a relayout RAF is already pending, don't schedule a separate resize+relayout RAF.
+		// Instead, request the pending relayout to resize first, so compute runs only once.
+		if (relayoutRafId !== null) {
+			relayoutRafResizePending = true
+			return
+		}
+
 		if (resizeRelayoutRafId !== null) return
 		const raf = getRafScheduler()
 		resizeRelayoutRafId = raf(() => {
 			resizeRelayoutRafId = null
 
 			const changed = resizeCanvases()
-			if (!changed) return
+			if (!changed && !relayoutForcedInResizeRelayout) return
+			relayoutForcedInResizeRelayout = false
 
-			recomputeLayout()
-			clampCameraPanFn()
-			deps.wakeUp?.()
+			performRelayoutNow()
 		})
 	}
 
@@ -278,10 +337,25 @@ export function useLayoutCoordinator<
         return
       }
 
+      // If a resize+relayout RAF is already pending, force it to run the relayout even
+      // when resizeCanvases() detects no size changes.
+      if (resizeRelayoutRafId !== null) {
+        relayoutForcedInResizeRelayout = true
+        return
+      }
+
       if (relayoutRafId !== null) return
       const raf = getRafScheduler()
       relayoutRafId = raf(() => {
         relayoutRafId = null
+
+        // If resize signals arrived while this relayout RAF was pending, apply size updates
+        // first so computeLayout is keyed on fresh layout.w/h.
+        if (relayoutRafResizePending) {
+          relayoutRafResizePending = false
+          resizeCanvases()
+        }
+
         performRelayoutNow()
       })
       return
@@ -295,6 +369,11 @@ export function useLayoutCoordinator<
       // after size update to keep computeLayout keyed by fresh layout.w/h.
       if (resizeRafId !== null) {
         relayoutAfterResizePending = true
+        return
+      }
+
+      if (resizeRelayoutRafId !== null) {
+        relayoutForcedInResizeRelayout = true
         return
       }
 
@@ -330,11 +409,30 @@ export function useLayoutCoordinator<
     const win = getWin()
     if (typeof win.matchMedia !== 'function') return
 
-    const dpr = win.devicePixelRatio || 1
-    dprMql = win.matchMedia(`(resolution: ${dpr}dppx)`)
-    if (!dprMql) return
+    // In some sandbox/iframe environments, `matchMedia()` (or even listener registration)
+    // may throw (e.g. SecurityError). DPR listener is a best-effort enhancement and must
+    // never crash the UI.
+    let mql: MediaQueryList | null = null
+    try {
+      const dpr = win.devicePixelRatio || 1
+      mql = win.matchMedia(`(resolution: ${dpr}dppx)`)
+      if (!mql) return
 
-    addMqlListener(dprMql, onDprChange)
+      dprMql = mql
+      addMqlListener(mql, onDprChange)
+    } catch (err) {
+      // If setup failed mid-way, ensure the state is consistent and cleanup is safe.
+      if (mql) {
+        try {
+          removeMqlListener(mql, onDprChange)
+        } catch {
+          // ignore
+        }
+      }
+      dprMql = null
+
+      if (import.meta.env.DEV) console.warn('[layout] dpr listener setup failed:', err)
+    }
   }
 
   function onDprChange() {
@@ -412,6 +510,8 @@ export function useLayoutCoordinator<
     }
 
     relayoutAfterResizePending = false
+    relayoutRafResizePending = false
+    relayoutForcedInResizeRelayout = false
 
     if (relayoutDebounceId !== null) {
       win.clearTimeout(relayoutDebounceId)
@@ -440,7 +540,7 @@ export function useLayoutCoordinator<
     () => {
       const s = deps.snapshot.value
       // Relayout should be driven by topology (node/link composition), not timestamps.
-      return [s?.nodes?.length ?? 0, s?.links?.length ?? 0] as const
+      return computeSnapshotStructuralKey(s)
     },
     () => {
       if (!deps.snapshot.value) return
@@ -451,6 +551,9 @@ export function useLayoutCoordinator<
 
   return {
     layout,
+    layoutVersion,
+    bumpLayoutVersion,
+    setLayout,
     resizeAndLayout,
     requestResizeAndLayout,
     requestRelayoutDebounced,
