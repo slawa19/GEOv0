@@ -65,6 +65,48 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   let lastSnapshotNodeIds: Set<string> | null = null
   let hasLoadedOnce = false
 
+  function parseSceneContext(sourcePath: string | null | undefined): { kind: 'scenario' | 'run' | 'other'; id: string } {
+    const s = String(sourcePath ?? '').trim()
+    if (!s) return { kind: 'other', id: '' }
+
+    // We intentionally parse from the debug `sourcePath` string (not from app state),
+    // because `loadSnapshot()` already knows the effective source of truth.
+    // Examples:
+    // - GET http://.../simulator/scenarios/<id>/graph/preview?... -> scenario:<id>
+    // - GET http://.../simulator/runs/<id>/graph/snapshot?...     -> run:<id>
+    const mScenario = s.match(/\/simulator\/scenarios\/([^/\s?]+)\/graph\/preview/i)
+    if (mScenario && mScenario[1]) return { kind: 'scenario', id: decodeURIComponent(mScenario[1]) }
+
+    const mRun = s.match(/\/simulator\/runs\/([^/\s?]+)\/graph\/snapshot/i)
+    if (mRun && mRun[1]) return { kind: 'run', id: decodeURIComponent(mRun[1]) }
+
+    return { kind: 'other', id: s }
+  }
+
+  function shouldTreatAsIncrementalUpdate(opts: {
+    prevSourcePath: string
+    nextSourcePath: string
+    nodeIdsMatch: boolean
+  }): boolean {
+    if (!opts.nodeIdsMatch) return false
+
+    const prev = parseSceneContext(opts.prevSourcePath)
+    const next = parseSceneContext(opts.nextSourcePath)
+
+    // Default: keep prior behavior when we can't confidently infer context.
+    if (prev.kind === 'other' || next.kind === 'other') return true
+
+    // Same context: incremental.
+    if (prev.kind === next.kind && prev.id === next.id) return true
+
+    // Smooth transition preview -> run (avoid camera/layout reset when startRun begins).
+    if (prev.kind === 'scenario' && next.kind === 'run') return true
+
+    // Scenario switching (preview -> preview with different id) must be treated as a full scene change
+    // to ensure layout + overlays reflect the new scenario deterministically.
+    return false
+  }
+
   function snapshotNodeIdsMatch(oldIds: Set<string> | null, snapshot: GraphSnapshot): boolean {
     if (!oldIds) return false
     if (oldIds.size !== snapshot.nodes.length) return false
@@ -90,8 +132,15 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       // Detect if this is an "incremental" update (same node IDs) vs. a full scene change.
       // Incremental: skip camera reset, overlay clear, and layout cache invalidation.
       // This prevents "explosion" animations when transitioning preview → run with the same graph.
+      const nodeIdsMatch = snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
       const isIncrementalUpdate =
-        hasLoadedOnce && deps.state.snapshot !== null && snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
+        hasLoadedOnce &&
+        deps.state.snapshot !== null &&
+        shouldTreatAsIncrementalUpdate({
+          prevSourcePath: deps.state.sourcePath,
+          nextSourcePath: sourcePath,
+          nodeIdsMatch,
+        })
 
       // Only treat *node composition* changes as structural.
       // Link count can differ between preview → run (or between run snapshots) while we still

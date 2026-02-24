@@ -193,5 +193,27 @@ describe('useInteractActions', () => {
     expect(result).toHaveLength(1)
     expect(result[0]!.used).toBe('200')
   })
+
+  it('clears runId and returns empty list on 404 from trustlines-list', async () => {
+    const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+    const runId = ref('run_stale')
+    const ia = useInteractActions({ httpConfig, runId })
+
+    m.getTrustlinesList.mockRejectedValueOnce(new ApiError('HTTP 404 Not Found for /x', { status: 404 }))
+
+    await expect(ia.fetchTrustlines('UAH')).resolves.toEqual([])
+    expect(runId.value).toBe('')
+  })
+
+  it('clears runId and returns empty list on 404 from participants-list', async () => {
+    const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+    const runId = ref('run_stale')
+    const ia = useInteractActions({ httpConfig, runId })
+
+    m.getParticipantsList.mockRejectedValueOnce(new ApiError('HTTP 404 Not Found for /x', { status: 404 }))
+
+    await expect(ia.fetchParticipants()).resolves.toEqual([])
+    expect(runId.value).toBe('')
+  })
 })
 

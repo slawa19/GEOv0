@@ -1122,16 +1122,20 @@ export function useSimulatorRealMode(opts: {
             }
           }
 
+          // If a runId is present (persisted or discovered), try to attach to it.
+          // IMPORTANT: refreshRunStatus() may clear a stale runId (HTTP 404). In that case
+          // we must fall through to the scenario preview flow below.
           // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
           if (real.runId) {
             await refreshRunStatus()
             if (real.runId) {
               await refreshSnapshot()
               if (real.runId) {
-                await runSseLoop()
+                // SSE loop is long-lived; do not await it during boot.
+                void runSseLoop()
               }
+              return
             }
-            return
           }
 
           // No active run on mount: show scenario preview immediately.
@@ -1173,8 +1177,10 @@ export function useSimulatorRealMode(opts: {
       const st = toLower(real.runStatus?.state)
       const isActive =
         !!real.runId &&
-        // Optimistic: if we have runId but status not fetched yet, treat it as active.
-        (!real.runStatus || st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
+        // Consider a run active only when we have a known status.
+        // This allows scenario preview switching even when a stale runId exists but status cannot be fetched.
+        !!real.runStatus &&
+        (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
       if (isActive) return
 
       await refreshSnapshot()

@@ -76,7 +76,17 @@ export function useSimulatorApp() {
   // Use it to keep screenshot tests stable even if someone runs the dev server with VITE_TEST_MODE=1.
   const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
 
-  const isE2eScreenshots = computed(() => isTestMode.value && isWebDriver)
+  const allowRealModeInWebDriver = computed(() => {
+    if (!isTestMode.value) return false
+    if (!isWebDriver) return false
+    try {
+      return new URLSearchParams(window.location.search).get('e2eReal') === '1'
+    } catch {
+      return false
+    }
+  })
+
+  const isE2eScreenshots = computed(() => isTestMode.value && isWebDriver && !allowRealModeInWebDriver.value)
 
   const apiMode = computed<'fixtures' | 'real'>(() => {
     // E2E screenshot tests must be fully offline/deterministic.
@@ -677,7 +687,7 @@ export function useSimulatorApp() {
   function syncLayoutFromSnapshot(snapshot: GraphSnapshot) {
     // Layout nodes/links are copies (see forceLayout.ts spreads base objects).
     // When the scene loader decides an update is incremental (same node IDs), it may skip relayout.
-    // In that case we must sync viz fields into the existing layout objects used for rendering.
+    // In that case we must sync viz fields AND reconcile topology into the existing layout objects used for rendering.
     const snapNodeById = new Map(snapshot.nodes.map((n) => [n.id, n] as const))
     for (const n of layout.nodes as any[]) {
       const src = snapNodeById.get(String(n.id))
@@ -695,19 +705,37 @@ export function useSimulatorApp() {
       n.viz_badge_key = src.viz_badge_key
     }
 
-    const snapLinkByKey = new Map(snapshot.links.map((l) => [keyEdge(l.source, l.target), l] as const))
+    // Links are more volatile than nodes (preview → run, scenario switch, live run updates).
+    // We want to keep node positions/camera stable, but we MUST reflect link add/remove changes.
+    const oldLinkByKey = new Map<string, any>()
     for (const l of layout.links as any[]) {
       const k = String(l.__key ?? keyEdge(String(l.source), String(l.target)))
-      const src = snapLinkByKey.get(k)
-      if (!src) continue
-      l.trust_limit = src.trust_limit
-      l.used = src.used
-      l.available = src.available
-      l.status = src.status
-      l.viz_color_key = src.viz_color_key
-      l.viz_width_key = src.viz_width_key
-      l.viz_alpha_key = src.viz_alpha_key
+      oldLinkByKey.set(k, l)
     }
+
+    const nextLinks: any[] = []
+    for (const src of snapshot.links as any[]) {
+      const k = keyEdge(String(src.source), String(src.target))
+      const existing = oldLinkByKey.get(k)
+      if (existing) {
+        existing.source = src.source
+        existing.target = src.target
+        existing.trust_limit = src.trust_limit
+        existing.used = src.used
+        existing.available = src.available
+        existing.status = src.status
+        existing.viz_color_key = src.viz_color_key
+        existing.viz_width_key = src.viz_width_key
+        existing.viz_alpha_key = src.viz_alpha_key
+        existing.__key = k
+        nextLinks.push(existing)
+      } else {
+        nextLinks.push({ ...src, __key: k })
+      }
+    }
+
+    // Assign even if length matches: link composition/order may change.
+    ;(layout as any).links = nextLinks
 
     wakeUp()
   }
@@ -1415,28 +1443,47 @@ export function useSimulatorApp() {
     const runState = toLower(real.runStatus?.state)
     const isActiveRun =
       !!runId &&
-      // Optimistic: if runId exists but status not fetched yet, assume active to avoid falling back to preview.
-      (!real.runStatus || runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')
+      // Treat as active only when we have a known status.
+      // This avoids getting stuck on an unreachable/stale runId (scenario switching should still show previews).
+      !!real.runStatus &&
+      (runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')
 
     // Real mode: if we have a run, use run snapshot
     if (isActiveRun) {
-      if (!real.accessToken) throw new Error('Missing access token')
-      const snapshot = await getSnapshot({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, eq)
-      // Real snapshots currently don't declare FX limits; apply a sane default cap so long sessions
-      // can't accumulate too many particles (sparks + pulses + bursts).
-      if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
-      return { snapshot, sourcePath: `GET ${real.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot` }
+      try {
+        const snapshot = await getSnapshot({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, eq)
+        // Real snapshots currently don't declare FX limits; apply a sane default cap so long sessions
+        // can't accumulate too many particles (sparks + pulses + bursts).
+        if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
+        return {
+          snapshot,
+          sourcePath: `GET ${real.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(eq)}`,
+        }
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) {
+          // Stale runId (e.g. deleted/expired). Clear it so we don't keep calling
+          // run-scoped endpoints like /runs/:id/actions/* and /runs/:id.
+          real.runId = null
+          real.runStatus = null
+          real.lastEventId = null
+        }
+        // Non-fatal: if run snapshot is unreachable (401/404/stale), fall back to scenario preview.
+        console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
+      }
     }
 
     // Real mode: no run, but have scenario selected - show preview
     // Use desiredMode so UI can toggle between sandbox(topology-only) and real(DB-enriched) previews.
-    if (scenarioId && real.accessToken) {
+    if (scenarioId) {
       try {
         const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq, {
           mode: real.desiredMode,
         })
         if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
-        return { snapshot, sourcePath: `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview` }
+        return {
+          snapshot,
+          sourcePath: `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`,
+        }
       } catch (e) {
         // Fallback to empty if preview fails
         console.warn('Failed to load scenario preview:', e)

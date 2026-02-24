@@ -145,8 +145,9 @@ export function createPhysicsEngine(opts: {
   // - We must NOT reuse layout.links, because d3-force mutates link.source/target into node objects.
   const d3Nodes = nodes as unknown as D3Node[]
   for (const n of d3Nodes) {
-    n.x = n.__x
-    n.y = n.__y
+    // Defensive: never let NaN propagate into the simulation.
+    n.x = Number.isFinite(n.__x) ? n.__x : opts.config.width / 2
+    n.y = Number.isFinite(n.__y) ? n.__y : opts.config.height / 2
   }
 
   const d3Links: D3Link[] = links.map((l) => ({ source: l.source, target: l.target }))
@@ -223,16 +224,18 @@ export function createPhysicsEngine(opts: {
     const h = config.height
 
     for (const n of d3Nodes) {
-      const x = typeof n.x === 'number' ? n.x : w / 2
-      const y = typeof n.y === 'number' ? n.y : h / 2
+      // `typeof n.x === 'number'` includes NaN; treat non-finite values as unset.
+      const x = typeof n.x === 'number' && Number.isFinite(n.x) ? n.x : w / 2
+      const y = typeof n.y === 'number' && Number.isFinite(n.y) ? n.y : h / 2
 
       const cx = clamp(x, margin, w - margin)
       const cy = clamp(y, margin, h - margin)
       n.x = cx
       n.y = cy
 
-      if (n.fx != null) n.fx = clamp(n.fx, margin, w - margin)
-      if (n.fy != null) n.fy = clamp(n.fy, margin, h - margin)
+      // If a pinned coordinate is invalid, unpin rather than locking the node in NaN.
+      if (n.fx != null) n.fx = Number.isFinite(n.fx) ? clamp(n.fx, margin, w - margin) : null
+      if (n.fy != null) n.fy = Number.isFinite(n.fy) ? clamp(n.fy, margin, h - margin) : null
     }
   }
 
@@ -259,17 +262,19 @@ export function createPhysicsEngine(opts: {
 
     syncFromLayout: () => {
       for (const n of d3Nodes) {
-        n.x = n.__x
-        n.y = n.__y
-        if (n.fx != null) n.fx = n.__x
-        if (n.fy != null) n.fy = n.__y
+        const x = Number.isFinite(n.__x) ? n.__x : config.width / 2
+        const y = Number.isFinite(n.__y) ? n.__y : config.height / 2
+        n.x = x
+        n.y = y
+        if (n.fx != null) n.fx = x
+        if (n.fy != null) n.fy = y
       }
     },
 
     syncToLayout: () => {
       for (const n of d3Nodes) {
-        if (typeof n.x === 'number') n.__x = n.x
-        if (typeof n.y === 'number') n.__y = n.y
+        if (typeof n.x === 'number' && Number.isFinite(n.x)) n.__x = n.x
+        if (typeof n.y === 'number' && Number.isFinite(n.y)) n.__y = n.y
       }
     },
 

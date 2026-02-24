@@ -32,15 +32,18 @@ export function roundedRectPath(
   ctx.beginPath()
 
   const r = Math.max(0, Math.min(rad, Math.min(w, h) / 2))
-  const nativeRoundRect = (ctx as unknown as { roundRect?: (x: number, y: number, w: number, h: number, radii: number) => void })
-    .roundRect
+  const nativeRoundRect = (ctx as unknown as {
+    roundRect?: (x: number, y: number, w: number, h: number, radii: number) => void
+  }).roundRect
 
   if (typeof nativeRoundRect === 'function') {
     if (r <= 0.01) {
       ctx.rect(x, y, w, h)
       return
     }
-    nativeRoundRect(x, y, w, h, r)
+    // IMPORTANT: canvas native methods require the correct `this` binding.
+    // Calling an extracted function reference can throw `TypeError: Illegal invocation`.
+    nativeRoundRect.call(ctx, x, y, w, h, r)
     return
   }
 

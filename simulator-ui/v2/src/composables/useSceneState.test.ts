@@ -71,6 +71,90 @@ describe('useSceneState', () => {
     expect(clearScheduledTimeouts).toHaveBeenCalled()
   })
 
+  it('treats scenario preview -> preview (different scenario id) as a full scene change even if node IDs match', async () => {
+    const eq = ref('UAH')
+    const scene = ref<'A' | 'B' | 'C'>('A')
+    const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>('admin-force')
+    const effectiveEq = computed(() => eq.value)
+
+    const state = reactive({
+      loading: false,
+      error: '',
+      sourcePath: '',
+      snapshot: null as GraphSnapshot | null,
+      selectedNodeId: null as string | null,
+    })
+
+    const snapshot1: GraphSnapshot = {
+      equivalent: 'UAH',
+      generated_at: '2026-02-01T00:00:00Z',
+      nodes: [
+        { id: 'A', name: 'Alice' } as any,
+        { id: 'B', name: 'Bob' } as any,
+      ],
+      links: [{ source: 'A', target: 'B' } as any],
+    }
+
+    const snapshot2: GraphSnapshot = {
+      ...snapshot1,
+      generated_at: '2026-02-01T00:00:01Z',
+      // Same node IDs, but represent a different scenario context.
+      links: [{ source: 'B', target: 'A' } as any],
+    }
+
+    const loadSnapshot = vi.fn()
+    loadSnapshot.mockResolvedValueOnce({
+      snapshot: snapshot1,
+      sourcePath: 'GET http://127.0.0.1:18000/api/v1/simulator/scenarios/S1/graph/preview?equivalent=UAH&mode=real',
+    })
+    loadSnapshot.mockResolvedValueOnce({
+      snapshot: snapshot2,
+      sourcePath: 'GET http://127.0.0.1:18000/api/v1/simulator/scenarios/S2/graph/preview?equivalent=UAH&mode=real',
+    })
+
+    const clearScheduledTimeouts = vi.fn()
+    const resetCamera = vi.fn()
+    const resetLayoutKeyCache = vi.fn()
+    const resetOverlays = vi.fn()
+    const resizeAndLayout = vi.fn()
+    const ensureRenderLoop = vi.fn()
+    const onIncrementalSnapshotLoaded = vi.fn()
+
+    const s = useSceneState({
+      eq,
+      scene,
+      layoutMode,
+      allowEqDeepLink: () => true,
+      isEqAllowed: () => true,
+      effectiveEq,
+      state,
+      loadSnapshot,
+      clearScheduledTimeouts,
+      resetCamera,
+      resetLayoutKeyCache,
+      resetOverlays,
+      resizeAndLayout,
+      ensureRenderLoop,
+      onIncrementalSnapshotLoaded,
+      setupResizeListener: vi.fn(),
+      teardownResizeListener: vi.fn(),
+      stopRenderLoop: vi.fn(),
+    })
+
+    await s.loadScene()
+    expect(resetCamera).toHaveBeenCalledTimes(1)
+    expect(resetLayoutKeyCache).toHaveBeenCalledTimes(1)
+    expect(resetOverlays).toHaveBeenCalledTimes(1)
+    expect(onIncrementalSnapshotLoaded).toHaveBeenCalledTimes(0)
+
+    await s.loadScene()
+    // Different scenario preview must be treated as full reload.
+    expect(resetCamera).toHaveBeenCalledTimes(2)
+    expect(resetLayoutKeyCache).toHaveBeenCalledTimes(2)
+    expect(resetOverlays).toHaveBeenCalledTimes(2)
+    expect(onIncrementalSnapshotLoaded).toHaveBeenCalledTimes(0)
+  })
+
   it('non-incremental loadScene clears ALL timers (including critical) because node context changed', async () => {
     const eq = ref('UAH')
     const scene = ref<'A' | 'B' | 'C'>('A')

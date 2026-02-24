@@ -150,6 +150,13 @@ export function useInteractActions(opts: {
     } catch (e) {
       const mapped = mapToInteractActionError(e)
       if (mapped.actionsDisabled) actionsDisabled.value = true
+
+      // If the run no longer exists, stop issuing run-scoped calls.
+      // This can happen if a previously stored runId becomes stale (backend restart, TTL, cleanup).
+      if (mapped.status === 404) {
+        opts.runId.value = ''
+      }
+
       throw mapped
     }
   }
@@ -215,15 +222,25 @@ export function useInteractActions(opts: {
         }),
       ),
 
-    fetchParticipants: () => wrap(async () => {
-      const res = await getParticipantsList(opts.httpConfig.value, requireRunId())
-      return res.items
-    }),
+    fetchParticipants: async () => {
+      try {
+        const res = await wrap(() => getParticipantsList(opts.httpConfig.value, requireRunId()))
+        return res.items
+      } catch (e) {
+        if (isInteractActionError(e) && e.status === 404) return []
+        throw e
+      }
+    },
 
-    fetchTrustlines: (eq, pid) => wrap(async () => {
-      const res = await getTrustlinesList(opts.httpConfig.value, requireRunId(), eq, pid)
-      return res.items
-    }),
+    fetchTrustlines: async (eq, pid) => {
+      try {
+        const res = await wrap(() => getTrustlinesList(opts.httpConfig.value, requireRunId(), eq, pid))
+        return res.items
+      } catch (e) {
+        if (isInteractActionError(e) && e.status === 404) return []
+        throw e
+      }
+    },
   }
 }
 

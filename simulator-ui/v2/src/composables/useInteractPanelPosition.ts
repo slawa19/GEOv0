@@ -3,6 +3,20 @@ import type { Ref } from 'vue'
 import type { Point } from '../types/layout'
 export type { Point } from '../types/layout'
 import type { InteractPhase } from './useInteractMode'
+import { toLower } from '../utils/stringHelpers'
+
+/**
+ * Derives the panel group from an interact phase string.
+ * Same convention as `useActivePanelState`: phase name contains 'payment', 'trustline', or 'clearing'.
+ * Returns null for 'idle' and any unrecognized phase.
+ */
+export function panelGroupOf(phase: string): 'payment' | 'trustline' | 'clearing' | null {
+  const p = toLower(phase)
+  if (p.includes('payment')) return 'payment'
+  if (p.includes('trustline')) return 'trustline'
+  if (p.includes('clearing')) return 'clearing'
+  return null
+}
 
 /**
  * Источник открытия панели.
@@ -62,8 +76,10 @@ export function useInteractPanelPosition(phase: Ref<InteractPhase>) {
    * см. onInteractEditTrustline), поэтому этот watcher всегда видит "старый"
    * anchor и очищает его первым, а затем обработчик задаёт новый.
    */
-  watch(phase, () => {
-    _anchor.value = null
+  watch(phase, (cur, prev) => {
+    if (panelGroupOf(cur) !== panelGroupOf(prev ?? '')) {
+      _anchor.value = null
+    }
   }, { flush: 'sync' })
 
   /**
