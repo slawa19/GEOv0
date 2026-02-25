@@ -45,7 +45,15 @@ const PHYSICS_DEFAULTS = {
   VIEWPORT_MARGIN_PX: 30,
 } as const
 
-const SIGNIFICANT_VIEWPORT_AREA_RATIO = 4
+const SIGNIFICANT_VIEWPORT_AREA_RATIO_DEFAULT = 3
+
+function readSignificantViewportAreaRatio(): number {
+  const raw = Number(import.meta.env.VITE_SIM_PHYSICS_VIEWPORT_RETUNE_AREA_RATIO ?? SIGNIFICANT_VIEWPORT_AREA_RATIO_DEFAULT)
+  if (!Number.isFinite(raw)) return SIGNIFICANT_VIEWPORT_AREA_RATIO_DEFAULT
+  return Math.max(1.5, Math.min(8, raw))
+}
+
+const SIGNIFICANT_VIEWPORT_AREA_RATIO = readSignificantViewportAreaRatio()
 
 function viewportArea(w: number, h: number): number {
   return Math.max(1, w) * Math.max(1, h)
@@ -342,7 +350,8 @@ export function createPhysicsEngine(opts: {
       cy?.y(h / 2)
 
       // ITEM-16 (MINOR): retune forces that depend on viewport size after significant resize.
-      // Criterion: area changed by >=4x (or <=0.25x).
+      // Criterion: area changed by >= SIGNIFICANT_VIEWPORT_AREA_RATIO
+      // (or <= 1 / SIGNIFICANT_VIEWPORT_AREA_RATIO).
       if (isSignificantViewportResize(prevW, prevH, w, h)) {
         const nextLinkDistance = __testOnly_computeLinkDistancePx({ width: w, height: h, nodeCount: d3Nodes.length })
         if (nextLinkDistance !== config.linkDistance) {

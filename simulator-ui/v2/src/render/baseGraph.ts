@@ -14,6 +14,10 @@ export type { LayoutLink } from '../types/layout'
 const warnOrphanLink = createThrottledWarn(5000)
 let orphanLinkSkippedCount = 0
 
+function isTestRuntime(): boolean {
+  return import.meta.env.MODE === 'test' || String(import.meta.env.VITE_TEST_MODE ?? '0') === '1'
+}
+
 function linkWidthPx(l: GraphLink, mapping: VizMapping): number {
   const k = String(l.viz_width_key ?? 'hairline')
   return mapping.link.width_px[k] ?? mapping.link.width_px.hairline
@@ -66,6 +70,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const q = opts.quality ?? 'high'
+  const allowDevWarn = import.meta.env.DEV && !isTestRuntime()
 
   function drawNodeOverlayGlow(
     n: LayoutNode,
@@ -114,7 +119,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     if (!a || !b) {
       orphanLinkSkippedCount++
       warnOrphanLink(
-        import.meta.env.DEV,
+        allowDevWarn,
         `[baseGraph] orphan link skipped (total ${orphanLinkSkippedCount}):`,
         link.source,
         '→',
@@ -161,7 +166,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       if (!a || !b) {
         orphanLinkSkippedCount++
         warnOrphanLink(
-          import.meta.env.DEV,
+          allowDevWarn,
           `[baseGraph] orphan link skipped (total ${orphanLinkSkippedCount}):`,
           link.source,
           '→',
