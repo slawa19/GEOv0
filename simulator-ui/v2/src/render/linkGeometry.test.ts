@@ -52,6 +52,47 @@ describe('getLinkTermination()', () => {
     expect(p.y).toBeCloseTo(-4)
   })
 
+  it('returns finite coordinates when viz_size contains NaN/Infinity', () => {
+    const n = node({ x: 0, y: 0, shape: 'circle' })
+    // Manually override viz_size to contain non-finite values.
+    ;(n as any).viz_size = { w: Number.NaN, h: Number.POSITIVE_INFINITY }
+    const target = { __x: 10, __y: 0 }
+
+    const p = getLinkTermination(n, target, 1)
+    expect(Number.isFinite(p.x)).toBe(true)
+    expect(Number.isFinite(p.y)).toBe(true)
+  })
+
+  it('returns finite coordinates when invZoom is 0 (cameraZoom===0 guard)', () => {
+    const n = node({ x: 0, y: 0, shape: 'circle', w: 12, h: 12 })
+    const target = { __x: 10, __y: 0 }
+
+    // invZoom = 1/0 === Infinity — guard must fall back to 1.
+    const p = getLinkTermination(n, target, 0)
+    expect(Number.isFinite(p.x)).toBe(true)
+    expect(Number.isFinite(p.y)).toBe(true)
+  })
+
+  it('returns finite coordinates when invZoom is Infinity', () => {
+    const n = node({ x: 0, y: 0, shape: 'circle', w: 12, h: 12 })
+    const target = { __x: 10, __y: 0 }
+
+    const p = getLinkTermination(n, target, Infinity)
+    expect(Number.isFinite(p.x)).toBe(true)
+    expect(Number.isFinite(p.y)).toBe(true)
+  })
+
+  it('uses defaults (w=12, h=12) when viz_size is absent (null)', () => {
+    // node() sets viz_size=null when w/h are undefined.
+    const n = node({ x: 0, y: 0, shape: 'circle' })
+    const target = { __x: 10, __y: 0 }
+
+    // r = max(12,12)/2 = 6, direction (1,0) → x should be 6.
+    const p = getLinkTermination(n, target, 1)
+    expect(p.x).toBeCloseTo(6)
+    expect(p.y).toBeCloseTo(0)
+  })
+
   it('reuses point objects across calls (hot-path allocation guard)', () => {
     const n = node({ x: 0, y: 0, shape: 'circle', w: 10, h: 14 })
     const target = { __x: 10, __y: 0 }

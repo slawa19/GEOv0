@@ -27,6 +27,7 @@ import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { normalizeTxAmountLabelInput } from '../utils/txAmountLabel'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks, type FxState } from '../render/fxRenderer'
+import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
@@ -1287,30 +1288,53 @@ export function useSimulatorApp() {
       for (const e of edgesAll) addActiveEdge(keyEdge(e.from, e.to), 5200)
     }
 
-    // Show total cleared amount as a premium floating label at the TOP of the clearing figure.
+    // Show total cleared amount as a premium floating label near the CENTER of the clearing figure.
     if (nodeIds.length > 0) {
-      // Find the topmost node in the cycle (smallest __y = highest on screen).
-      let topNodeId = nodeIds[0]!
-      let topY = Infinity
+      // Pick an origin node that is closest to the centroid of the cycle.
+      // This makes the label appear to originate from the clearing cluster itself,
+      // rather than from the visually topmost participant.
+      const coords: Array<{ id: string; x: number; y: number }> = []
       for (const id of nodeIds) {
         const ln = getLayoutNodeById(id)
         if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
-          if (ln.__y < topY) {
-            topY = ln.__y
-            topNodeId = id
-          }
+          coords.push({ id, x: ln.__x, y: ln.__y })
         }
       }
 
-      // Extra negative offset so the label starts above the top node's bounding box,
-      // giving the impression it originates from the top edge of the clearing figure
-      // and drifts upward into the dark background.
-      const extraUpPx = -18
+      // Fallback to the first id if layout coords are missing (should be rare; guarded by retry).
+      let originNodeId = nodeIds[0]!
+      if (coords.length > 0) {
+        let sumX = 0
+        let sumY = 0
+        for (const c of coords) {
+          sumX += c.x
+          sumY += c.y
+        }
+        const cx = sumX / coords.length
+        const cy = sumY / coords.length
+
+        let bestId = coords[0]!.id
+        let bestD2 = Infinity
+        for (const c of coords) {
+          const dx = c.x - cx
+          const dy = c.y - cy
+          const d2 = dx * dx + dy * dy
+          if (d2 < bestD2) {
+            bestD2 = d2
+            bestId = c.id
+          }
+        }
+        originNodeId = bestId
+      }
+
+      // Slight negative offset so the label doesn't fully overlap the origin node.
+      // It still drifts upward into the dark background.
+      const extraUpPx = -12
 
       const clearedAmount = String(done.cleared_amount ?? '').trim()
       if (clearedAmount && clearedAmount !== '0' && clearedAmount !== '0.0' && clearedAmount !== '0.00') {
         pushFloatingLabelWhenReady({
-          nodeId: topNodeId,
+          nodeId: originNodeId,
           text: `−${clearedAmount.replace(/^-/, '')} ${done.equivalent}`,
           color: CLEARING_LABEL_COLOR,
           ttlMs: 3800,
@@ -1868,6 +1892,9 @@ export function useSimulatorApp() {
     sceneState,
     hideDragPreview,
     resetFxRendererCaches: () => {
+      // glowSprites is a synchronous, already-loaded module — reset its cache immediately
+      // to avoid race conditions where the cache is read before async teardown completes.
+      resetGlowSpritesCache()
       // Fire-and-forget: lifecycle teardown should not depend on dynamic import timing.
       // Also ensure we don't surface unhandled rejections if import fails during HMR/teardown.
       void import('../render/fxRenderer')

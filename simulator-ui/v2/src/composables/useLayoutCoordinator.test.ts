@@ -1,6 +1,6 @@
 import { computed, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { computeSnapshotStructuralKey, useLayoutCoordinator } from './useLayoutCoordinator'
+import { computeSnapshotStructuralKey, topologyFingerprint, useLayoutCoordinator } from './useLayoutCoordinator'
 
 type Listener = (ev?: any) => void
 
@@ -74,6 +74,49 @@ function withMockWindowAndDocument<T>(fn: (ctx: { win: any; doc: any }) => T): T
   }
 }
 
+// ---------------------------------------------------------------------------
+// topologyFingerprint — pure function tests (ITEM-2+7, NOTE C-1)
+// ---------------------------------------------------------------------------
+describe('topologyFingerprint', () => {
+  it('returns different fingerprints for same count but different last node ID', () => {
+    const fp1 = topologyFingerprint({
+      nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+      links: [],
+    })
+    const fp2 = topologyFingerprint({
+      nodes: [{ id: 'A' }, { id: 'B' }, { id: 'Z' }],
+      links: [],
+    })
+    expect(fp1).not.toEqual(fp2)
+  })
+
+  it('returns different fingerprints for same node IDs but edge swap (A→B vs A→C)', () => {
+    const fp1 = topologyFingerprint({
+      nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+      links: [{ source: 'A', target: 'B' }],
+    })
+    const fp2 = topologyFingerprint({
+      nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+      links: [{ source: 'A', target: 'C' }],
+    })
+    expect(fp1).not.toEqual(fp2)
+  })
+
+  it('returns the same fingerprint for identical snapshots', () => {
+    const snap = { nodes: [{ id: 'X' }], links: [{ source: 'X', target: 'Y' }] }
+    expect(topologyFingerprint(snap)).toEqual(topologyFingerprint(snap))
+  })
+
+  it('returns different fingerprints for empty edges vs one edge (same nodes)', () => {
+    const fp1 = topologyFingerprint({ nodes: [{ id: 'A' }], links: [] })
+    const fp2 = topologyFingerprint({ nodes: [{ id: 'A' }], links: [{ source: 'A', target: 'B' }] })
+    expect(fp1).not.toEqual(fp2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// useLayoutCoordinator — integration tests
+// ---------------------------------------------------------------------------
 describe('useLayoutCoordinator', () => {
   it('computeSnapshotStructuralKey changes when node IDs set changes (even if lengths are equal)', () => {
     const k1 = computeSnapshotStructuralKey({
@@ -87,6 +130,110 @@ describe('useLayoutCoordinator', () => {
 
     expect(k1).not.toEqual(k2)
     expect(k1.split('|').slice(0, 2)).toEqual(['2', '2'])
+  })
+
+  it('computeSnapshotStructuralKey changes when edge changes (same node IDs, same counts)', () => {
+    const k1 = computeSnapshotStructuralKey({
+      nodes: [{ id: 'A' }, { id: 'B' }],
+      links: [{ source: 'A', target: 'B' }],
+    })
+    const k2 = computeSnapshotStructuralKey({
+      nodes: [{ id: 'A' }, { id: 'B' }],
+      links: [{ source: 'A', target: 'C' }], // edge swap: A→B → A→C
+    })
+    expect(k1).not.toEqual(k2)
+    // counts are the same, so the leading segments must match
+    expect(k1.split('|').slice(0, 2)).toEqual(['2', '1'])
+    expect(k2.split('|').slice(0, 2)).toEqual(['2', '1'])
+  })
+
+  it('snapshot structural watcher triggers relayout on edge swap (same node IDs)', async () => {
+    vi.useFakeTimers()
+
+    const snapshotRef = ref({
+      generated_at: 't1',
+      nodes: [{ id: 'A' }, { id: 'B' }],
+      links: [{ source: 'A', target: 'B' }],
+    })
+
+    const computeLayout = vi.fn()
+
+    const coordinator = useLayoutCoordinator({
+      canvasEl: ref(null),
+      fxCanvasEl: ref(null),
+      hostEl: ref(null),
+      snapshot: computed(() => snapshotRef.value),
+      layoutMode: ref<'admin-force'>('admin-force'),
+      dprClamp: computed(() => 1),
+      isTestMode: computed(() => false),
+      getSourcePath: () => 'src',
+      computeLayout,
+      clampCameraPan: vi.fn(),
+    })
+
+    coordinator.layout.w = 800
+    coordinator.layout.h = 600
+
+    // Baseline: one compute.
+    coordinator.requestRelayoutDebounced(0)
+    vi.runAllTimers()
+    expect(computeLayout).toHaveBeenCalledTimes(1)
+
+    // Edge swap in-place (SSE topology patch style): same node IDs, same counts.
+    snapshotRef.value.links[0]!.target = 'C' // was A→B, now A→C
+
+    await nextTick()
+    vi.runAllTimers()
+
+    expect(computeLayout).toHaveBeenCalledTimes(2)
+
+    vi.useRealTimers()
+  })
+
+  it('edge swap with same node IDs and counts invalidates snapKey → triggers relayout', () => {
+    vi.useFakeTimers()
+
+    const snapshotRef = ref({
+      generated_at: 't1',
+      nodes: [{ id: 'A' }, { id: 'B' }],
+      links: [{ source: 'A', target: 'B' }],
+    })
+
+    const computeLayout = vi.fn()
+
+    const coordinator = useLayoutCoordinator({
+      canvasEl: ref(null),
+      fxCanvasEl: ref(null),
+      hostEl: ref(null),
+      snapshot: computed(() => snapshotRef.value),
+      layoutMode: ref<'admin-force'>('admin-force'),
+      dprClamp: computed(() => 1),
+      isTestMode: computed(() => false),
+      getSourcePath: () => 'src',
+      computeLayout,
+      clampCameraPan: vi.fn(),
+    })
+
+    coordinator.layout.w = 800
+    coordinator.layout.h = 600
+
+    coordinator.requestRelayoutDebounced(0)
+    vi.runAllTimers()
+    expect(computeLayout).toHaveBeenCalledTimes(1)
+
+    // Direct ref swap: same node IDs and same counts, only edge target changes.
+    snapshotRef.value = {
+      ...snapshotRef.value,
+      links: [{ source: 'A', target: 'C' }], // was A→B, now A→C
+    }
+
+    coordinator.requestRelayoutDebounced(0)
+    vi.runAllTimers()
+
+    // snapKey must differ → computeLayout called again.
+    expect(computeLayout).toHaveBeenCalledTimes(2)
+
+    vi.useRealTimers()
   })
 
   it('snapshot structural watcher triggers relayout on in-place node ID replacement (same counts)', async () => {

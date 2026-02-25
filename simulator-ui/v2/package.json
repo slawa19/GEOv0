@@ -20,9 +20,11 @@
   },
   "dependencies": {
     "d3-force": "^3.0.0",
+    "d3-quadtree": "^3.0.1",
     "vue": "^3.5.26"
   },
   "devDependencies": {
+    "@types/d3-quadtree": "^3.0.6",
     "@types/d3-force": "^3.0.10",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.1",

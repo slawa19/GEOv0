@@ -76,13 +76,28 @@ function removeMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {
   else if (typeof (mql as any).removeListener === 'function') (mql as any).removeListener(cb)
 }
 
+/**
+ * Computes a topology fingerprint covering ALL node IDs and ALL edge source→target pairs.
+ *
+ * Uses NUL ('\0') as separator between the node-segment and edge-segment to prevent
+ * hash collisions (e.g. "A|B" + "C>D" vs "A" + "B|C>D").
+ *
+ * Exported for unit tests.
+ */
+export function topologyFingerprint(snap: { nodes: unknown[]; links: unknown[] }): number {
+  const allNodeIds = (snap.nodes as Array<{ id: unknown }>).map((n) => String(n.id)).join('|')
+  const allEdges = (snap.links as Array<{ source: unknown; target: unknown }>)
+    .map((l) => `${String(l.source)}>${String(l.target)}`)
+    .join('|')
+  return fnv1a(allNodeIds + '\0' + allEdges)
+}
+
 export function computeSnapshotStructuralKey(snapshot: { nodes: unknown[]; links: unknown[] } | null): string {
   if (!snapshot) return '0|0|0'
 
   const nodesLen = snapshot.nodes?.length ?? 0
   const linksLen = snapshot.links?.length ?? 0
-  const idsJoined = (snapshot.nodes as Array<{ id: unknown }>).map((n) => String(n.id)).join('|')
-  const hash = fnv1a(idsJoined)
+  const hash = topologyFingerprint(snapshot)
 
   return `${nodesLen}|${linksLen}|${hash}`
 }
@@ -226,17 +241,9 @@ export function useLayoutCoordinator<
     // (node/link composition) is unchanged. Recomputing layout in that case recreates physics
     // and causes a visible "graph jump".
     //
-    // However, keying only on (sourcePath, nodeCount, linkCount) is too coarse: two different
-    // snapshots can share the same source path and counts but have different node IDs (e.g.
-    // after a scenario reset with a different participant set). Include a lightweight fingerprint
-    // of the first N node IDs so those cases trigger a re-layout without hurting the common
-    // "patch-only update" path (where IDs are stable).
-    const NODE_ID_SAMPLE = 8
-    const nodeIdFingerprint = (snap.nodes as Array<{ id: unknown }>)
-      .slice(0, NODE_ID_SAMPLE)
-      .map((n) => String(n.id))
-      .join('~')
-    const snapKey = `${deps.getSourcePath()}|${snap.nodes.length}|${snap.links.length}|${nodeIdFingerprint}`
+    // topologyFingerprint covers ALL node IDs and ALL edge source→target pairs, so edge swaps
+    // at stable counts correctly invalidate the layout cache (ITEM-2+7, NOTE C-1).
+    const snapKey = `${deps.getSourcePath()}|${snap.nodes.length}|${snap.links.length}|${topologyFingerprint(snap)}`
     const key = `${snapKey}|${deps.layoutMode.value}|${layout.w}x${layout.h}`
     if (key === lastLayoutKey) return
     lastLayoutKey = key

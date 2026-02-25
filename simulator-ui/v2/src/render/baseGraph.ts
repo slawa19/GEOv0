@@ -10,6 +10,9 @@ import { drawNodeShape, fillForNode, type LayoutNode } from './nodePainter'
 
 export type { LayoutLink } from '../types/layout'
 
+/** Module-level timestamp for throttling orphan-link dev warnings (5 s). */
+let orphanWarnTs = 0
+
 function linkWidthPx(l: GraphLink, mapping: VizMapping): number {
   const k = String(l.viz_width_key ?? 'hairline')
   return mapping.link.width_px[k] ?? mapping.link.width_px.hairline
@@ -105,8 +108,15 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       if (!isActive && !isFocusIncident) continue
     }
 
-    const a = pos.get(link.source)!
-    const b = pos.get(link.target)!
+    const a = pos.get(link.source)
+    const b = pos.get(link.target)
+    if (!a || !b) {
+      if (import.meta.env.DEV && Date.now() - orphanWarnTs > 5000) {
+        console.warn('[baseGraph] orphan link skipped:', link.source, '→', link.target)
+        orphanWarnTs = Date.now()
+      }
+      continue
+    }
 
     const start = getLinkTermination(a, b, invZ)
     const end = getLinkTermination(b, a, invZ)
@@ -141,8 +151,15 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const isFocusIncident = !!selectedNodeId && isIncident(link, selectedNodeId)
       if (!isActive && !isFocusIncident) continue
 
-      const a = pos.get(link.source)!
-      const b = pos.get(link.target)!
+      const a = pos.get(link.source)
+      const b = pos.get(link.target)
+      if (!a || !b) {
+        if (import.meta.env.DEV && Date.now() - orphanWarnTs > 5000) {
+          console.warn('[baseGraph] orphan link skipped:', link.source, '→', link.target)
+          orphanWarnTs = Date.now()
+        }
+        continue
+      }
       const start = getLinkTermination(a, b, invZ)
       const end = getLinkTermination(b, a, invZ)
 

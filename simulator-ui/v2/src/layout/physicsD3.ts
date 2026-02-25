@@ -12,7 +12,7 @@ import {
 
 import type { LayoutLink, LayoutNode } from './forceLayout'
 import { sizeForNode } from '../render/nodePainter'
-import { clamp } from '../utils/math'
+import { clamp, safeClampToViewport } from '../utils/math'
 
 export type PhysicsQuality = 'low' | 'med' | 'high'
 
@@ -263,14 +263,14 @@ export function createPhysicsEngine(opts: {
       const x = __testOnly_nanFallbackCoord(n.x, w / 2)
       const y = __testOnly_nanFallbackCoord(n.y, h / 2)
 
-      const cx = clamp(x, margin, w - margin)
-      const cy = clamp(y, margin, h - margin)
+      const cx = safeClampToViewport(x, margin, w)
+      const cy = safeClampToViewport(y, margin, h)
       n.x = cx
       n.y = cy
 
       // If a pinned coordinate is invalid, unpin rather than locking the node in NaN.
-      if (n.fx != null) n.fx = Number.isFinite(n.fx) ? clamp(n.fx, margin, w - margin) : null
-      if (n.fy != null) n.fy = Number.isFinite(n.fy) ? clamp(n.fy, margin, h - margin) : null
+      if (n.fx != null) n.fx = Number.isFinite(n.fx) ? safeClampToViewport(n.fx, margin, w) : null
+      if (n.fy != null) n.fy = Number.isFinite(n.fy) ? safeClampToViewport(n.fy, margin, h) : null
     }
   }
 

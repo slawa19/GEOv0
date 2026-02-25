@@ -171,37 +171,82 @@ export function renderFxFrame(opts: {
           continue
         }
 
-        // Med quality: simplified solid-color trail (no gradient objects).
+        // Med quality: gradient trail + bright packet segment (like HIGH), but no embers.
+        // Per-frame gradient cost (2 objects per beam) is negligible for typical counts (≤28 beams).
         if (q === 'med') {
-          const baseAlpha = Math.max(0, Math.min(1, alpha * BEAM_TRAIL_ALPHA_K))
           ctx.save()
           ctx.globalCompositeOperation = 'lighter'
           ctx.lineCap = 'round'
           ctx.lineJoin = 'round'
-          ctx.strokeStyle = s.colorTrail
-          ctx.lineWidth = Math.max(spx(BEAM_HALO_MIN_SPX), th * BEAM_HALO_TH_K)
-          ctx.globalAlpha = BEAM_HALO_GLOBAL_ALPHA * baseAlpha
-          ctx.beginPath()
-          ctx.moveTo(trailStartX, trailStartY)
-          ctx.lineTo(headX, headY)
-          ctx.stroke()
-          ctx.lineWidth = Math.max(spx(BEAM_CORE_MIN_SPX), th * BEAM_CORE_TH_K)
-          ctx.globalAlpha = baseAlpha
-          ctx.beginPath()
-          ctx.moveTo(trailStartX, trailStartY)
-          ctx.lineTo(headX, headY)
-          ctx.stroke()
-          const r = Math.max(spx(HEAD_DOT_MIN_SPX), th * HEAD_DOT_TH_K)
-          ctx.globalAlpha = alpha
-          drawGlowSprite(ctx, {
-            kind: 'fx-dot',
-            x: headX,
-            y: headY,
-            color: s.colorCore,
-            r,
-            blurPx: Math.max(spx(GLOW_BLUR_MIN_SPX), r * GLOW_BLUR_R_K) * shadowBlurK,
-            composite: 'lighter',
-          })
+
+          // Gradient trail (transparent tail → bright head)
+          {
+            const baseAlpha = Math.max(0, Math.min(1, alpha * BEAM_TRAIL_ALPHA_K))
+
+            const trailStroke = (() => {
+              const g = ctx.createLinearGradient(trailStartX, trailStartY, headX, headY)
+              g.addColorStop(0, withAlpha(s.colorTrail, 0))
+              g.addColorStop(0.5, withAlpha(s.colorTrail, baseAlpha * 0.35))
+              g.addColorStop(1, withAlpha(s.colorTrail, baseAlpha))
+              return g
+            })()
+
+            ctx.globalAlpha = BEAM_HALO_GLOBAL_ALPHA
+            ctx.strokeStyle = trailStroke
+            ctx.lineWidth = Math.max(spx(BEAM_HALO_MIN_SPX), th * BEAM_HALO_TH_K)
+            ctx.beginPath()
+            ctx.moveTo(trailStartX, trailStartY)
+            ctx.lineTo(headX, headY)
+            ctx.stroke()
+
+            ctx.globalAlpha = 1
+            ctx.strokeStyle = trailStroke
+            ctx.lineWidth = Math.max(spx(BEAM_CORE_MIN_SPX), th * BEAM_CORE_TH_K)
+            ctx.beginPath()
+            ctx.moveTo(trailStartX, trailStartY)
+            ctx.lineTo(headX, headY)
+            ctx.stroke()
+          }
+
+          // Bright "packet" segment near the head
+          {
+            const segLen = Math.max(spx(BEAM_SEG_MIN_SPX), Math.min(spx(BEAM_SEG_MAX_SPX), len * BEAM_SEG_LEN_FRAC))
+            const tailX = headX - ux * segLen
+            const tailY = headY - uy * segLen
+            ctx.globalAlpha = 1
+            const grad = ctx.createLinearGradient(headX, headY, tailX, tailY)
+            grad.addColorStop(0, withAlpha(s.colorCore, alpha * 1.0))
+            grad.addColorStop(0.35, withAlpha(s.colorTrail, alpha * BEAM_TRAIL_ALPHA_K))
+            grad.addColorStop(1, withAlpha(s.colorTrail, 0))
+            ctx.strokeStyle = grad
+            ctx.lineWidth = Math.max(spx(BEAM_SEG_HALO_MIN_SPX), th * BEAM_SEG_HALO_TH_K)
+            ctx.beginPath()
+            ctx.moveTo(tailX, tailY)
+            ctx.lineTo(headX, headY)
+            ctx.stroke()
+
+            ctx.lineWidth = Math.max(spx(BEAM_SEG_CORE_MIN_SPX), th * BEAM_SEG_CORE_TH_K)
+            ctx.beginPath()
+            ctx.moveTo(tailX, tailY)
+            ctx.lineTo(headX, headY)
+            ctx.stroke()
+          }
+
+          // Head dot with glow
+          {
+            const r = Math.max(spx(HEAD_DOT_MIN_SPX), th * HEAD_DOT_TH_K)
+            ctx.globalAlpha = alpha
+            drawGlowSprite(ctx, {
+              kind: 'fx-dot',
+              x: headX,
+              y: headY,
+              color: s.colorCore,
+              r,
+              blurPx: Math.max(spx(GLOW_BLUR_MIN_SPX), r * GLOW_BLUR_R_K) * shadowBlurK,
+              composite: 'lighter',
+            })
+          }
+
           ctx.restore()
           continue
         }

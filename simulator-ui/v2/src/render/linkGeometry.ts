@@ -33,9 +33,15 @@ export function getLinkTermination(n: LayoutNode, target: { __x: number; __y: nu
 
   // Inline `sizeForNode()` to avoid its per-call string key allocation.
   // Must match behaviour 1-to-1: clamp to >= 6, default to 12, numeric coercion via `Number()`.
+  // Guard on invZoom: cameraZoom===0 → invZoom=Infinity → w*Infinity=Infinity (Canvas no-op).
+  const safeInvZoom = Number.isFinite(invZoom) && invZoom > 0 ? invZoom : 1
+  const DEFAULT = 12
+  const MIN = 6
   const s = n.viz_size
-  const w = Math.max(6, Number(s?.w ?? 12)) * invZoom
-  const h = Math.max(6, Number(s?.h ?? 12)) * invZoom
+  const wRaw = Number(s?.w ?? DEFAULT)
+  const hRaw = Number(s?.h ?? DEFAULT)
+  const w = Math.max(MIN, Number.isFinite(wRaw) ? wRaw : DEFAULT) * safeInvZoom
+  const h = Math.max(MIN, Number.isFinite(hRaw) ? hRaw : DEFAULT) * safeInvZoom
 
   const shapeKey = getNodeShape(n) ?? 'circle'
   const isRoundedRect = shapeKey === 'rounded-rect'

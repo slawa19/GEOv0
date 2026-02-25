@@ -1,9 +1,13 @@
 import type { GraphNode, GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
+import { quadtree } from 'd3-quadtree'
 import { sizeForNode } from '../render/nodePainter'
 import { fnv1a } from '../utils/hash'
-import { clamp } from '../utils/math'
+import { clamp, safeClampToViewport } from '../utils/math'
 import { keyEdge } from '../utils/edgeKey'
+
+/** Module-level timestamp for throttling dangling-link dev warnings (5 s). ITEM-17. */
+let danglingWarnTs = 0
 
 export type LayoutMode = 'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'
 
@@ -17,6 +21,9 @@ export type ForceLayoutOptions = {
   h: number
   seedKey: string
   isTestMode: boolean
+
+  /** Barnes–Hut theta for many-body repulsion (speed/accuracy). Default: 0.9. ITEM-6. */
+  chargeTheta?: number
 
   groupKeyByNodeId?: Map<string, string>
   groupAnchors?: ForceGroupAnchors
@@ -76,8 +83,8 @@ function computeOrganicGroupAnchors(opts: {
       const t = m === 1 ? 0.5 : m === 2 ? (i === 0 ? 0.33 : 0.67) : 0.25 + (i * 0.5)
       const x = majorIsX ? margin + availW * t : cx + jx
       const y = majorIsX ? cy + jy : margin + availH * t
-      ax[i] = clamp(x, margin, w - margin)
-      ay[i] = clamp(y, margin, h - margin)
+      ax[i] = safeClampToViewport(x, margin, w)
+      ay[i] = safeClampToViewport(y, margin, h)
       continue
     }
 
@@ -108,10 +115,23 @@ function computeOrganicGroupAnchors(opts: {
       for (let j = i + 1; j < m; j++) {
         const dx = ax[i] - ax[j]
         const dy = ay[i] - ay[j]
-        const dist2 = dx * dx + dy * dy + softening2
-        const dist = Math.sqrt(dist2)
-        const ux = dx / dist
-        const uy = dy / dist
+        const rawDist2 = dx * dx + dy * dy
+        const dist2 = rawDist2 + softening2
+        const invDist = 1 / Math.sqrt(dist2)
+
+        // Softened unit vector to avoid NaN/Inf when two anchors are very close.
+        let ux = dx * invDist
+        let uy = dy * invDist
+
+        // If two anchors are exactly coincident (dx=dy=0), direction is undefined and the
+        // repulsion/collision forces become zero. Provide a deterministic direction so
+        // coincident anchors can separate.
+        if (rawDist2 === 0) {
+          const hash = (((i + 1) * 73856093) ^ ((j + 1) * 19349663)) >>> 0
+          const angle = ((hash % 1024) / 1024) * Math.PI * 2
+          ux = Math.cos(angle)
+          uy = Math.sin(angle)
+        }
 
         const fRep = (repulseStrength / dist2) * REPULSE_MULT
         vx[i] += ux * fRep
@@ -119,12 +139,17 @@ function computeOrganicGroupAnchors(opts: {
         vx[j] -= ux * fRep
         vy[j] -= uy * fRep
 
-        if (dist < minDist) {
-          const push = ((minDist - dist) / minDist) * PUSH_MULT
-          vx[i] += ux * push
-          vy[i] += uy * push
-          vx[j] -= ux * push
-          vy[j] -= uy * push
+        const rawDist = Math.sqrt(rawDist2)
+        if (rawDist < minDist) {
+          // Collision/spacing should be based on the real distance, not the softened one.
+          const invRawDist = rawDist > 0 ? 1 / rawDist : 0
+          const uxPush = rawDist > 0 ? dx * invRawDist : ux
+          const uyPush = rawDist > 0 ? dy * invRawDist : uy
+          const push = ((minDist - rawDist) / minDist) * PUSH_MULT
+          vx[i] += uxPush * push
+          vy[i] += uyPush * push
+          vx[j] -= uxPush * push
+          vy[j] -= uyPush * push
         }
       }
     }
@@ -134,8 +159,8 @@ function computeOrganicGroupAnchors(opts: {
       vy[i] *= damping
       ax[i] += vx[i]
       ay[i] += vy[i]
-      ax[i] = clamp(ax[i], margin, w - margin)
-      ay[i] = clamp(ay[i], margin, h - margin)
+      ax[i] = safeClampToViewport(ax[i], margin, w)
+      ay[i] = safeClampToViewport(ay[i], margin, h)
     }
   }
 
@@ -151,6 +176,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     h,
     seedKey,
     isTestMode,
+    chargeTheta: chargeThetaRaw,
     groupKeyByNodeId,
     groupAnchors,
     groupStrength,
@@ -200,6 +226,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   const LINK_DIST_SAME_DEFAULT = 0.90
   const LINK_DIST_CROSS_DEFAULT = 1.12
   const REPULSE_FAR_K = 2.2
+  const CHARGE_THETA_DEFAULT = 0.9
 
   const margin = MARGIN_PX
 
@@ -300,8 +327,78 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   const collisionStrength = COLLISION_STRENGTH
   const softening2 = SOFTENING2
 
+  // ITEM-6: Barnes–Hut theta (d3-quadtree). Clamp to a sane range to avoid pathological configs.
+  const chargeTheta = clamp(Number.isFinite(chargeThetaRaw) ? (chargeThetaRaw as number) : CHARGE_THETA_DEFAULT, 0.2, 1.4)
+
   const sameK = linkDistanceScaleSameGroup ?? LINK_DIST_SAME_DEFAULT
   const crossK = linkDistanceScaleCrossGroup ?? LINK_DIST_CROSS_DEFAULT
+
+  const indices = new Array<number>(n)
+  for (let i = 0; i < n; i++) indices[i] = i
+
+  type QuadExt = {
+    mass?: number
+    cx?: number
+    cy?: number
+    rMax?: number
+  }
+
+  function buildRepulsionQuadtree() {
+    // Note: use indices rather than node objects to keep the quadtree lean & deterministic.
+    const qt = quadtree<number>()
+      .x((i: number) => x[i] ?? 0)
+      .y((i: number) => y[i] ?? 0)
+      .addAll(indices)
+
+    // Precompute center-of-mass & mass per quad (Barnes–Hut), and max radius for collision pruning.
+    qt.visitAfter((quad: unknown) => {
+      const q = quad as unknown as QuadExt & { data?: number; next?: unknown } & Array<unknown>
+
+      if (!q.length) {
+        // Leaf: may hold a linked list of points with identical coordinates.
+        let m = 0
+        let cxAcc = 0
+        let cyAcc = 0
+        let rMax = 0
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let cur: any = quad
+        while (cur) {
+          const idx = cur.data as number
+          m += 1
+          cxAcc += x[idx] ?? 0
+          cyAcc += y[idx] ?? 0
+          rMax = Math.max(rMax, r[idx] ?? 0)
+          cur = cur.next
+        }
+
+        q.mass = m
+        q.cx = m ? cxAcc / m : 0
+        q.cy = m ? cyAcc / m : 0
+        q.rMax = rMax
+        return
+      }
+
+      // Internal node: aggregate children.
+      let m = 0
+      let cxAcc = 0
+      let cyAcc = 0
+      let rMax = 0
+      for (let kChild = 0; kChild < 4; kChild++) {
+        const child = (quad as unknown as Array<unknown>)[kChild] as (QuadExt & { length?: number }) | undefined
+        if (!child || !child.mass) continue
+        m += child.mass
+        cxAcc += (child.cx ?? 0) * child.mass
+        cyAcc += (child.cy ?? 0) * child.mass
+        rMax = Math.max(rMax, child.rMax ?? 0)
+      }
+      q.mass = m
+      q.cx = m ? cxAcc / m : 0
+      q.cy = m ? cyAcc / m : 0
+      q.rMax = rMax
+    })
+
+    return qt
+  }
 
   for (let it = 0; it < iterations; it++) {
     const alpha = 1 - it / iterations
@@ -324,33 +421,72 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
       }
     }
 
-    // Many-body repulsion + collision.
+    // ITEM-6: Many-body repulsion via Barnes–Hut (d3-quadtree) + leaf-level collision.
+    // We accumulate forces per node (like d3-force): each pair influences both nodes, but through
+    // two symmetric visits (i visits j, then j visits i). This avoids an explicit O(N²) double loop.
+    const qt = buildRepulsionQuadtree()
     for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const dx = x[i] - x[j]
-        const dy = y[i] - y[j]
-        const dist2 = dx * dx + dy * dy + softening2
-        const dist = Math.sqrt(dist2)
+      const xi = x[i] ?? 0
+      const yi = y[i] ?? 0
+      const ri = r[i] ?? 0
 
-        const far = dist / (k * REPULSE_FAR_K)
-        const falloff = 1 / (1 + far * far)
-        const fRep = (chargeStrength / dist2) * falloff
-        const ux = dx / dist
-        const uy = dy / dist
-        vx[i] += ux * fRep
-        vy[i] += uy * fRep
-        vx[j] -= ux * fRep
-        vy[j] -= uy * fRep
+      qt.visit((quad: unknown, x0: number, y0: number, x1: number, y1: number) => {
+        const q = quad as unknown as QuadExt & { data?: number; next?: unknown } & Array<unknown>
+        const m = q.mass ?? 0
+        if (!m) return true
 
-        const minDist = r[i] + r[j] + collidePad
-        if (dist < minDist) {
-          const push = ((minDist - dist) / minDist) * collisionStrength
-          vx[i] += ux * push
-          vy[i] += uy * push
-          vx[j] -= ux * push
-          vy[j] -= uy * push
+        // Internal node: Barnes–Hut approximation.
+        if (q.length) {
+          const dx = xi - (q.cx ?? 0)
+          const dy = yi - (q.cy ?? 0)
+          const dist2 = dx * dx + dy * dy + softening2
+          const dist = Math.sqrt(dist2)
+
+          const s = x1 - x0
+          if (s / dist < chargeTheta) {
+            const far = dist / (k * REPULSE_FAR_K)
+            const falloff = 1 / (1 + far * far)
+            const fRep = ((chargeStrength * m) / dist2) * falloff
+            const ux = dx / dist
+            const uy = dy / dist
+            vx[i] += ux * fRep
+            vy[i] += uy * fRep
+            return true
+          }
+          return false
         }
-      }
+
+        // Leaf node: exact interactions with each point in the leaf's linked list.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let cur: any = quad
+        while (cur) {
+          const j = cur.data as number
+          if (j !== i) {
+            const dx = xi - (x[j] ?? 0)
+            const dy = yi - (y[j] ?? 0)
+            const dist2 = dx * dx + dy * dy + softening2
+            const dist = Math.sqrt(dist2)
+            const ux = dx / dist
+            const uy = dy / dist
+
+            const far = dist / (k * REPULSE_FAR_K)
+            const falloff = 1 / (1 + far * far)
+            const fRep = (chargeStrength / dist2) * falloff
+            vx[i] += ux * fRep
+            vy[i] += uy * fRep
+
+            const minDist = ri + (r[j] ?? 0) + collidePad
+            if (dist < minDist) {
+              const push = ((minDist - dist) / minDist) * collisionStrength
+              vx[i] += ux * push
+              vy[i] += uy * push
+            }
+          }
+          cur = cur.next
+        }
+
+        return false
+      })
     }
 
     // Link springs.
@@ -451,22 +587,30 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     const i = idxById.get(base.id) ?? 0
     return {
       ...base,
-      __x: clamp(x[i] ?? w / 2, margin, w - margin),
-      __y: clamp(y[i] ?? h / 2, margin, h - margin),
+      __x: safeClampToViewport(x[i] ?? w / 2, margin, w),
+      __y: safeClampToViewport(y[i] ?? h / 2, margin, h),
     }
   })
 
-  const links: LayoutLink[] = snapshot.links.map((l) => ({
-    ...l,
-    __key: keyEdge(l.source, l.target),
-  }))
-
-  for (const l of links) {
-    // Avoid per-call Map allocation in hot path: idxById already indexes all nodes.
-    if (!idxById.has(l.source) || !idxById.has(l.target)) {
-      throw new Error(`Dangling link in layout: ${l.source}→${l.target}`)
-    }
-  }
+  // ITEM-17: filter dangling links before returning – links whose source/target is absent from
+  // the current snapshot must not reach the renderer. The simulation loop already soft-skips
+  // them (continue); here we ensure the output array is also clean.
+  const links: LayoutLink[] = snapshot.links
+    .filter((l) => {
+      if (!idxById.has(l.source) || !idxById.has(l.target)) {
+        // Dev-only throttled warn: at most once every 5 s (mirrors ITEM-14 pattern).
+        if (import.meta.env.DEV && Date.now() - danglingWarnTs > 5000) {
+          console.warn(`[forceLayout] dangling link filtered: ${l.source}→${l.target}`)
+          danglingWarnTs = Date.now()
+        }
+        return false
+      }
+      return true
+    })
+    .map((l) => ({
+      ...l,
+      __key: keyEdge(l.source, l.target),
+    }))
 
   return { nodes, links }
 }
