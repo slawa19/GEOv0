@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createApp, defineComponent } from 'vue'
+import { createApp, defineComponent, ref } from 'vue'
 
 import { useAppFxOverlays } from './useAppFxOverlays'
 
@@ -31,6 +31,7 @@ describe('useAppFxOverlays.scheduleTimeout()', () => {
       isWebDriver: () => false,
       getLayoutNodes: () => [],
       worldToScreen: (x, y) => ({ x, y }),
+      layoutVersion: ref(0),
       wakeUp,
     })
 
@@ -63,6 +64,7 @@ describe('useAppFxOverlays.scheduleTimeout()', () => {
       isWebDriver: () => false,
       getLayoutNodes: () => [],
       worldToScreen: (x, y) => ({ x, y }),
+      layoutVersion: ref(0),
       // no wakeUp
     })
 
@@ -99,6 +101,7 @@ describe('useAppFxOverlays.scheduleTimeout()', () => {
             isWebDriver: () => false,
             getLayoutNodes: () => [],
             worldToScreen: (x, y) => ({ x, y }),
+            layoutVersion: ref(0),
           })
 
           fx.scheduleTimeout(() => calls.push('fn'), 100)

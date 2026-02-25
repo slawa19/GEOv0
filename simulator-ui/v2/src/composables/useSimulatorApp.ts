@@ -880,6 +880,7 @@ export function useSimulatorApp() {
     setFlash: (v) => {
       state.flash = v
     },
+    layoutVersion: layoutCoordinator.layoutVersion,
     isWebDriver: () => isWebDriver,
     getLayoutNodes: getLayoutNodesLive,
     worldToScreen,

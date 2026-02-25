@@ -59,6 +59,10 @@ type GlowSpriteOpts = NodeGlowSpriteOpts | FxGlowSpriteOpts
 const MAX_CACHE = 500
 const cache = new LruCache<string, HTMLCanvasElement>({ max: MAX_CACHE })
 
+// Hard cap on offscreen sprite size to prevent pathological memory usage.
+// ITEM-13: sanitize + clamp sprite canvas dimensions.
+const MAX_SPRITE_PX = 4096
+
 /**
  * Runtime cleanup hook for the module-level glow sprite cache.
  *
@@ -68,6 +72,48 @@ const cache = new LruCache<string, HTMLCanvasElement>({ max: MAX_CACHE })
  */
 export function resetGlowSpritesCache(): void {
   cache.clear()
+}
+
+function clampNum(v: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  if (n < min) return min
+  if (n > max) return max
+  return n
+}
+
+function sanitizeGlowOpts(opts: GlowSpriteOpts): GlowSpriteOpts {
+  // Keep it allocation-friendly but safe: only called on cache miss.
+  // We also sanitize BEFORE keying to avoid caching broken sprites.
+  if (opts.kind === 'fx-dot' || opts.kind === 'fx-bloom') {
+    return {
+      ...opts,
+      color: String(opts.color),
+      r: clampNum(opts.r, 0, MAX_SPRITE_PX, 0),
+      blurPx: clampNum(opts.blurPx, 0, MAX_SPRITE_PX, 0),
+    }
+  }
+  if (opts.kind === 'fx-ring') {
+    return {
+      ...opts,
+      color: String(opts.color),
+      r: clampNum(opts.r, 0, MAX_SPRITE_PX, 0),
+      thicknessPx: clampNum(opts.thicknessPx, 0, MAX_SPRITE_PX, 0),
+      blurPx: clampNum(opts.blurPx, 0, MAX_SPRITE_PX, 0),
+    }
+  }
+
+  // Node glow sprites.
+  return {
+    ...opts,
+    color: String(opts.color),
+    w: clampNum(opts.w, 0, MAX_SPRITE_PX, 0),
+    h: clampNum(opts.h, 0, MAX_SPRITE_PX, 0),
+    r: clampNum(opts.r, 0, MAX_SPRITE_PX, 0),
+    rr: clampNum(opts.rr, 0, MAX_SPRITE_PX, 0),
+    blurPx: clampNum(opts.blurPx, 0, MAX_SPRITE_PX, 0),
+    lineWidthPx: clampNum(opts.lineWidthPx, 0, MAX_SPRITE_PX, 0),
+  }
 }
 
 function keyFor(o: GlowSpriteOpts) {
@@ -99,38 +145,31 @@ function createSpriteCanvas(pxW: number, pxH: number): HTMLCanvasElement {
 }
 
 function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
-  const key = keyFor(opts)
+  const o = sanitizeGlowOpts(opts)
+  const key = keyFor(o)
   const cached = cache.get(key)
   if (cached) {
     return cached
   }
 
-  const blur = Math.max(0, opts.blurPx)
+  const blur = Math.max(0, o.blurPx)
   let lw = 0
-  if ('lineWidthPx' in opts) {
-    lw = Math.max(0, opts.lineWidthPx)
-  } else if (opts.kind === 'fx-ring') {
-    lw = Math.max(0, opts.thicknessPx)
+  if ('lineWidthPx' in o) {
+    lw = Math.max(0, o.lineWidthPx)
+  } else if (o.kind === 'fx-ring') {
+    lw = Math.max(0, o.thicknessPx)
   }
 
   // Keep generous padding: shadow blur expands beyond geometry.
   const pad = Math.ceil(blur * 2.2 + lw * 1.5 + 6)
 
   const baseW =
-    'shape' in opts
-      ? opts.shape === 'circle'
-        ? Math.max(1, opts.r * 2)
-        : Math.max(1, opts.w)
-      : Math.max(1, opts.r * 2)
+    'shape' in o ? (o.shape === 'circle' ? Math.max(1, o.r * 2) : Math.max(1, o.w)) : Math.max(1, o.r * 2)
   const baseH =
-    'shape' in opts
-      ? opts.shape === 'circle'
-        ? Math.max(1, opts.r * 2)
-        : Math.max(1, opts.h)
-      : Math.max(1, opts.r * 2)
+    'shape' in o ? (o.shape === 'circle' ? Math.max(1, o.r * 2) : Math.max(1, o.h)) : Math.max(1, o.r * 2)
 
-  const cw = Math.ceil(baseW + pad * 2)
-  const ch = Math.ceil(baseH + pad * 2)
+  const cw = Math.max(1, Math.min(MAX_SPRITE_PX, Math.ceil(baseW + pad * 2)))
+  const ch = Math.max(1, Math.min(MAX_SPRITE_PX, Math.ceil(baseH + pad * 2)))
 
   const c = createSpriteCanvas(cw, ch)
   const ctx = c.getContext('2d')
@@ -142,99 +181,99 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
   ctx.save()
   ctx.clearRect(0, 0, cw, ch)
   ctx.globalCompositeOperation = 'source-over'
-  ctx.shadowColor = opts.color
+  ctx.shadowColor = o.color
   ctx.shadowBlur = blur
 
   // NOTE: Shadow blur is allowed only here (offscreen generation).
   // We intentionally draw geometry (sometimes as black) so the sprite can be composited with `screen`:
   // black pixels become neutral under screen blending, while the colored shadow remains visible.
-  if (opts.kind === 'fx-dot') {
+  if (o.kind === 'fx-dot') {
     // Pass 1: glow halo (shadow-only).
-    ctx.fillStyle = withAlpha(opts.color, 0)
+    ctx.fillStyle = withAlpha(o.color, 0)
     ctx.beginPath()
-    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.9), 0, Math.PI * 2)
+    ctx.arc(cx, cy, Math.max(0.1, o.r * 0.9), 0, Math.PI * 2)
     ctx.fill()
 
     // Pass 2: crisp core (no blur) so the dot doesn't look washed-out.
     ctx.shadowBlur = 0
-    ctx.fillStyle = withAlpha(opts.color, 0.95)
+    ctx.fillStyle = withAlpha(o.color, 0.95)
     ctx.beginPath()
-    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.55), 0, Math.PI * 2)
+    ctx.arc(cx, cy, Math.max(0.1, o.r * 0.55), 0, Math.PI * 2)
     ctx.fill()
   }
 
-  if (opts.kind === 'fx-ring') {
+  if (o.kind === 'fx-ring') {
     // Glow-only ring: draw neutral (black) geometry so only the shadow is visible under `screen`.
     ctx.strokeStyle = '#000000'
     ctx.lineWidth = Math.max(0.1, lw)
     ctx.beginPath()
-    ctx.arc(cx, cy, Math.max(0.1, opts.r), 0, Math.PI * 2)
+    ctx.arc(cx, cy, Math.max(0.1, o.r), 0, Math.PI * 2)
     ctx.stroke()
   }
 
-  if (opts.kind === 'fx-bloom') {
+  if (o.kind === 'fx-bloom') {
     // Shadow-only bloom + faint core fill.
-    ctx.fillStyle = withAlpha(opts.color, 0)
+    ctx.fillStyle = withAlpha(o.color, 0)
     ctx.beginPath()
-    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.8), 0, Math.PI * 2)
+    ctx.arc(cx, cy, Math.max(0.1, o.r * 0.8), 0, Math.PI * 2)
     ctx.fill()
 
     ctx.shadowBlur = 0
-    ctx.fillStyle = withAlpha(opts.color, 0.22)
+    ctx.fillStyle = withAlpha(o.color, 0.22)
     ctx.beginPath()
-    ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.45), 0, Math.PI * 2)
+    ctx.arc(cx, cy, Math.max(0.1, o.r * 0.45), 0, Math.PI * 2)
     ctx.fill()
   }
 
-  if (opts.kind === 'bloom') {
+  if (o.kind === 'bloom') {
     // Only shadow: transparent fill.
-    ctx.fillStyle = withAlpha(opts.color, 0)
+    ctx.fillStyle = withAlpha(o.color, 0)
 
-    if (opts.shape === 'circle') {
+    if (o.shape === 'circle') {
       ctx.beginPath()
-      ctx.arc(cx, cy, Math.max(0.1, opts.r * 0.8), 0, Math.PI * 2)
+      ctx.arc(cx, cy, Math.max(0.1, o.r * 0.8), 0, Math.PI * 2)
       ctx.fill()
     } else {
-      const w = Math.max(0.1, opts.w - 4)
-      const h = Math.max(0.1, opts.h - 4)
-      const rr = Math.max(0, Math.min(opts.rr, Math.min(w, h) * 0.3))
+      const w = Math.max(0.1, o.w - 4)
+      const h = Math.max(0.1, o.h - 4)
+      const rr = Math.max(0, Math.min(o.rr, Math.min(w, h) * 0.3))
       roundedRectPath(ctx, cx - w / 2, cy - h / 2, w, h, rr)
       ctx.fill()
     }
   }
 
-  if (opts.kind === 'rim') {
+  if (o.kind === 'rim') {
     // Rim shadow + faint colored stroke.
-    ctx.strokeStyle = withAlpha(opts.color, 0.6)
+    ctx.strokeStyle = withAlpha(o.color, 0.6)
     ctx.lineWidth = Math.max(0.1, lw)
 
-    if (opts.shape === 'circle') {
+    if (o.shape === 'circle') {
       ctx.beginPath()
-      ctx.arc(cx, cy, Math.max(0.1, opts.r), 0, Math.PI * 2)
+      ctx.arc(cx, cy, Math.max(0.1, o.r), 0, Math.PI * 2)
       ctx.stroke()
     } else {
-      const w = Math.max(0.1, opts.w)
-      const h = Math.max(0.1, opts.h)
-      const rr = Math.max(0, Math.min(opts.rr, Math.min(w, h) * 0.3))
+      const w = Math.max(0.1, o.w)
+      const h = Math.max(0.1, o.h)
+      const rr = Math.max(0, Math.min(o.rr, Math.min(w, h) * 0.3))
       roundedRectPath(ctx, cx - w / 2, cy - h / 2, w, h, rr)
       ctx.stroke()
     }
   }
 
-  if (opts.kind === 'selection') {
+  if (o.kind === 'selection') {
     // BaseGraph historically used a 2-pass blur (outer + core) with black stroke in `screen`.
     // We bake both passes into one sprite for reuse.
     const stroke = () => {
       ctx.strokeStyle = '#000000'
       ctx.lineWidth = Math.max(0.1, lw)
-      if (opts.shape === 'circle') {
+      if (o.shape === 'circle') {
         ctx.beginPath()
-        ctx.arc(cx, cy, Math.max(0.1, opts.r), 0, Math.PI * 2)
+        ctx.arc(cx, cy, Math.max(0.1, o.r), 0, Math.PI * 2)
         ctx.stroke()
       } else {
-        const w = Math.max(0.1, opts.w)
-        const h = Math.max(0.1, opts.h)
-        const rr = Math.max(0, Math.min(opts.rr, Math.min(w, h) * 0.3))
+        const w = Math.max(0.1, o.w)
+        const h = Math.max(0.1, o.h)
+        const rr = Math.max(0, Math.min(o.rr, Math.min(w, h) * 0.3))
         roundedRectPath(ctx, cx - w / 2, cy - h / 2, w, h, rr)
         ctx.stroke()
       }
@@ -248,18 +287,18 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
     stroke()
   }
 
-  if (opts.kind === 'active') {
+  if (o.kind === 'active') {
     // Active node glow: single-pass blur with black stroke in screen blending.
     ctx.strokeStyle = '#000000'
     ctx.lineWidth = Math.max(0.1, lw)
-    if (opts.shape === 'circle') {
+    if (o.shape === 'circle') {
       ctx.beginPath()
-      ctx.arc(cx, cy, Math.max(0.1, opts.r), 0, Math.PI * 2)
+      ctx.arc(cx, cy, Math.max(0.1, o.r), 0, Math.PI * 2)
       ctx.stroke()
     } else {
-      const w = Math.max(0.1, opts.w)
-      const h = Math.max(0.1, opts.h)
-      const rr = Math.max(0, Math.min(opts.rr, Math.min(w, h) * 0.3))
+      const w = Math.max(0.1, o.w)
+      const h = Math.max(0.1, o.h)
+      const rr = Math.max(0, Math.min(o.rr, Math.min(w, h) * 0.3))
       roundedRectPath(ctx, cx - w / 2, cy - h / 2, w, h, rr)
       ctx.stroke()
     }
@@ -293,6 +332,7 @@ export const __testing = {
   q: quantize,
   keyFor,
   MAX_CACHE,
+  MAX_SPRITE_PX,
   _cacheClear: resetGlowSpritesCache,
   _cacheHas: (key: string) => cache.has(key),
   _cacheKeys: () => cache.keys(),

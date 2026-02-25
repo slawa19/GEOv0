@@ -5,9 +5,10 @@ import { sizeForNode } from '../render/nodePainter'
 import { fnv1a } from '../utils/hash'
 import { clamp, safeClampToViewport } from '../utils/math'
 import { keyEdge } from '../utils/edgeKey'
+import { createThrottledWarn } from '../utils/throttledWarn'
 
-/** Module-level timestamp for throttling dangling-link dev warnings (5 s). ITEM-17. */
-let danglingWarnTs = 0
+const warnDanglingLink = createThrottledWarn(5000)
+let danglingLinkFilteredCount = 0
 
 export type LayoutMode = 'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'
 
@@ -598,11 +599,12 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
   const links: LayoutLink[] = snapshot.links
     .filter((l) => {
       if (!idxById.has(l.source) || !idxById.has(l.target)) {
+        danglingLinkFilteredCount++
         // Dev-only throttled warn: at most once every 5 s (mirrors ITEM-14 pattern).
-        if (import.meta.env.DEV && Date.now() - danglingWarnTs > 5000) {
-          console.warn(`[forceLayout] dangling link filtered: ${l.source}→${l.target}`)
-          danglingWarnTs = Date.now()
-        }
+        warnDanglingLink(
+          import.meta.env.DEV && !isTestMode,
+          `[forceLayout] dangling link filtered (total ${danglingLinkFilteredCount}): ${l.source}→${l.target}`,
+        )
         return false
       }
       return true

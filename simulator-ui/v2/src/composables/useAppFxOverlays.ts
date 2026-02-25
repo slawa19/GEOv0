@@ -2,6 +2,7 @@ import { createFxState, resetFxState } from '../render/fxRenderer'
 import { createTimerRegistry } from '../demo/timerRegistry'
 import { useFloatingLabelsViewFx } from './useFloatingLabelsViewFx'
 import { type LayoutNodeLike, useOverlayState } from './useOverlayState'
+import type { Ref } from 'vue'
 import { getCurrentInstance, onUnmounted } from 'vue'
 
 export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
@@ -9,6 +10,10 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
   sizeForNode: (n: N) => { w: number; h: number }
   getCameraZoom: () => number
   setFlash: (v: number) => void
+
+  // Reactive invalidation gate for computed overlay views.
+  // Bumped on relayout/physics/drag so floating labels can resolve nodes without polling.
+  layoutVersion: Ref<number>
 
   // Optional: called before any scheduled FX timer callback.
   // This is used to ensure the render loop is awake even after deep idle.
@@ -63,6 +68,7 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
     getLayoutNodeById: deps.getLayoutNodeById,
     sizeForNode: deps.sizeForNode,
     getCameraZoom: deps.getCameraZoom,
+    layoutVersion: deps.layoutVersion,
     setFlash: deps.setFlash,
     resetFxState: () => resetFxState(fxState),
   })

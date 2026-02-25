@@ -2,6 +2,7 @@ import type { GraphLink, GraphNode } from '../types'
 import type { LayoutLink } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { clamp01 } from '../utils/math'
+import { createThrottledWarn } from '../utils/throttledWarn'
 import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
@@ -10,8 +11,8 @@ import { drawNodeShape, fillForNode, type LayoutNode } from './nodePainter'
 
 export type { LayoutLink } from '../types/layout'
 
-/** Module-level timestamp for throttling orphan-link dev warnings (5 s). */
-let orphanWarnTs = 0
+const warnOrphanLink = createThrottledWarn(5000)
+let orphanLinkSkippedCount = 0
 
 function linkWidthPx(l: GraphLink, mapping: VizMapping): number {
   const k = String(l.viz_width_key ?? 'hairline')
@@ -111,10 +112,14 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     const a = pos.get(link.source)
     const b = pos.get(link.target)
     if (!a || !b) {
-      if (import.meta.env.DEV && Date.now() - orphanWarnTs > 5000) {
-        console.warn('[baseGraph] orphan link skipped:', link.source, '→', link.target)
-        orphanWarnTs = Date.now()
-      }
+      orphanLinkSkippedCount++
+      warnOrphanLink(
+        import.meta.env.DEV,
+        `[baseGraph] orphan link skipped (total ${orphanLinkSkippedCount}):`,
+        link.source,
+        '→',
+        link.target,
+      )
       continue
     }
 
@@ -154,10 +159,14 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
       const a = pos.get(link.source)
       const b = pos.get(link.target)
       if (!a || !b) {
-        if (import.meta.env.DEV && Date.now() - orphanWarnTs > 5000) {
-          console.warn('[baseGraph] orphan link skipped:', link.source, '→', link.target)
-          orphanWarnTs = Date.now()
-        }
+        orphanLinkSkippedCount++
+        warnOrphanLink(
+          import.meta.env.DEV,
+          `[baseGraph] orphan link skipped (total ${orphanLinkSkippedCount}):`,
+          link.source,
+          '→',
+          link.target,
+        )
         continue
       }
       const start = getLinkTermination(a, b, invZ)

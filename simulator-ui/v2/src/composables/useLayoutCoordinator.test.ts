@@ -112,6 +112,26 @@ describe('topologyFingerprint', () => {
     const fp2 = topologyFingerprint({ nodes: [{ id: 'A' }], links: [{ source: 'A', target: 'B' }] })
     expect(fp1).not.toEqual(fp2)
   })
+
+  it('is order-independent for nodes and links arrays (reorder-only patches)', () => {
+    const fp1 = topologyFingerprint({
+      nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+      links: [
+        { source: 'A', target: 'B' },
+        { source: 'B', target: 'C' },
+      ],
+    })
+
+    const fp2 = topologyFingerprint({
+      nodes: [{ id: 'C' }, { id: 'A' }, { id: 'B' }],
+      links: [
+        { source: 'B', target: 'C' },
+        { source: 'A', target: 'B' },
+      ],
+    })
+
+    expect(fp2).toEqual(fp1)
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -69,6 +69,10 @@ export function useAppLayoutWiring(opts: {
       setLayout: (nodes, links) => {
         // Critical: keep layout.nodes/links raw (non-reactive) for physics tick performance.
         layoutCoordinator.setLayout(nodes, links)
+
+        // Reactive gate for consumers relying on computed views over raw layout nodes.
+        // Also used by overlay labels to re-resolve nodes without polling.
+        layoutCoordinator.bumpLayoutVersion()
       },
       onAfterLayout: (result, ctx) => {
         deps.pinning.captureBaseline(result.nodes)

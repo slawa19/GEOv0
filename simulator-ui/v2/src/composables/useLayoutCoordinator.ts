@@ -85,9 +85,11 @@ function removeMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {
  * Exported for unit tests.
  */
 export function topologyFingerprint(snap: { nodes: unknown[]; links: unknown[] }): number {
-  const allNodeIds = (snap.nodes as Array<{ id: unknown }>).map((n) => String(n.id)).join('|')
+  // Canonicalize order to avoid relayout churn from reorder-only patches.
+  const allNodeIds = (snap.nodes as Array<{ id: unknown }>).map((n) => String(n.id)).sort().join('|')
   const allEdges = (snap.links as Array<{ source: unknown; target: unknown }>)
     .map((l) => `${String(l.source)}>${String(l.target)}`)
+    .sort()
     .join('|')
   return fnv1a(allNodeIds + '\0' + allEdges)
 }

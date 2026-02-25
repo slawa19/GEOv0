@@ -1,4 +1,5 @@
-import { computed, reactive, ref } from 'vue'
+import type { Ref } from 'vue'
+import { computed, reactive } from 'vue'
 
 import type { LayoutNodeLike } from '../types/layout'
 
@@ -47,6 +48,10 @@ type UseOverlayStateDeps<N extends LayoutNodeLike> = {
   getLayoutNodeById: (id: string) => N | undefined
   sizeForNode: (n: N) => { w: number; h: number }
   getCameraZoom: () => number
+
+  // Manual reactive gate: bump when layout nodes map changes (relayout/physics/drag).
+  // If provided, floatingLabelsView becomes stable without polling timers.
+  layoutVersion?: Ref<number>
 
   setFlash: (v: number) => void
   resetFxState: () => void
@@ -312,56 +317,17 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     }
   }
 
-  // TD-4: floatingLabelsView computed uses getLayoutNodeById which is a plain
-  // function (non-reactive getter over a mutable Map). Vue cannot track it as a
-  // reactive dependency, so the computed would stay cached after a layout rebuild
-  // even if the node now exists — causing intermittent label dropouts during
-  // physics warmup / topology changes.
-  //
-  // The current workaround is a "retrigger gate" ref:
-  //   - When a label cannot resolve its node, schedulePendingLabelRetrigger() is called.
-  //   - After PENDING_LABEL_RETRIGGER_MS the timer bumps pendingLabelGate.value.
-  //   - The computed reads pendingLabelGate.value unconditionally, so Vue tracks it
-  //     as a dependency; bumping it re-runs the computed.
-  //
-  // This works correctly but is fragile: if the layout update takes longer than
-  // PENDING_LABEL_RETRIGGER_MS the label may still be dropped on that attempt.
-  //
-  // TODO (TD-4): A cleaner fix would be to replace the deps.getLayoutNodeById
-  // plain-function contract with a reactive source — e.g. pass a
-  //   layoutVersion: Ref<number>  (incremented on every layout rebuild)
-  // and read it inside the computed so Vue re-runs whenever the layout changes.
-  // That would eliminate the polling timer entirely. The change is deferred because
-  // it requires updating the API of useOverlayState + all callers (useAppFxOverlays,
-  // useSimulatorApp layout update path), which is a larger refactor.
-  const pendingLabelGate = ref(0)
-  let pendingLabelRetriggerTimer: ReturnType<typeof setTimeout> | null = null
-  const PENDING_LABEL_RETRIGGER_MS = 120
-
-  function schedulePendingLabelRetrigger() {
-    if (pendingLabelRetriggerTimer != null) return
-    pendingLabelRetriggerTimer = setTimeout(() => {
-      pendingLabelRetriggerTimer = null
-      pendingLabelGate.value++
-    }, PENDING_LABEL_RETRIGGER_MS)
-  }
-
   function cancelPendingLabelRetrigger() {
-    if (pendingLabelRetriggerTimer != null) {
-      clearTimeout(pendingLabelRetriggerTimer)
-      pendingLabelRetriggerTimer = null
-    }
+    // No-op: retrigger is driven by deps.layoutVersion (reactive) instead of timers.
   }
 
   const floatingLabelsView = computed((): FloatingLabelView[] => {
-    // Read the gate so Vue tracks it as a reactive dependency.
-    // When it changes, this computed re-evaluates — giving pending labels
-    // another chance to resolve their layout node.
-    pendingLabelGate.value
+    // Read layoutVersion so Vue tracks a reactive dependency.
+    // When it changes (relayout/physics/drag), this computed re-evaluates.
+    deps.layoutVersion?.value
 
     const out: FloatingLabelView[] = []
     const z = Math.max(0.01, deps.getCameraZoom())
-    let hasPending = false
 
     for (const fl of floatingLabels) {
       // Use frozen position if already resolved (prevents jitter from ongoing physics).
@@ -372,7 +338,6 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
       const ln = deps.getLayoutNodeById(fl.nodeId)
       if (!ln) {
-        hasPending = true
         continue
       }
 
@@ -397,13 +362,6 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
         color: fl.color,
         cssClass: fl.cssClass,
       })
-    }
-
-    // If any labels couldn't resolve their node, schedule a deferred re-evaluation.
-    // The timer bumps pendingLabelGate which is a reactive dep of this computed,
-    // giving the labels another chance once the layout has caught up.
-    if (hasPending) {
-      schedulePendingLabelRetrigger()
     }
 
     return out

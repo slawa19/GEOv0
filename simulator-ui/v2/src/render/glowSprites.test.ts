@@ -243,6 +243,38 @@ describe('render/glowSprites — unit', () => {
     })
   })
 
+  describe('getGlowSprite() input hardening (ITEM-13)', () => {
+    it('sanitizes NaN/Infinity inputs into a finite, valid canvas size', () => {
+      const o: any = {
+        kind: 'fx-dot',
+        color: '#aabbcc',
+        r: Number.NaN,
+        blurPx: Number.POSITIVE_INFINITY,
+      }
+
+      const s = __testing._getGlowSprite(o)
+      expect(Number.isFinite(s.width)).toBe(true)
+      expect(Number.isFinite(s.height)).toBe(true)
+      expect(s.width).toBeGreaterThanOrEqual(1)
+      expect(s.height).toBeGreaterThanOrEqual(1)
+      expect(s.width).toBeLessThanOrEqual(__testing.MAX_SPRITE_PX)
+      expect(s.height).toBeLessThanOrEqual(__testing.MAX_SPRITE_PX)
+    })
+
+    it('clamps pathological sprite sizes to MAX_SPRITE_PX', () => {
+      const o: any = {
+        kind: 'fx-bloom',
+        color: '#aabbcc',
+        r: 1e9,
+        blurPx: 1e9,
+      }
+
+      const s = __testing._getGlowSprite(o)
+      expect(s.width).toBe(__testing.MAX_SPRITE_PX)
+      expect(s.height).toBe(__testing.MAX_SPRITE_PX)
+    })
+  })
+
   describe('LRU eviction (MAX_CACHE)', () => {
     function optsFor(i: number): any {
       return {
