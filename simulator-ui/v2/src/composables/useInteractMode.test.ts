@@ -22,8 +22,9 @@ describe('useInteractMode', () => {
       updateTrustline: vi.fn(async () => ({ ok: true } as any)),
       closeTrustline: vi.fn(async () => ({ ok: true } as any)),
       runClearing: vi.fn(async () => ({ ok: true, cycles: [] } as any)),
-      fetchParticipants: vi.fn(async () => []),
-      fetchTrustlines: vi.fn(async () => []),
+      // IMPORTANT: keep array literal from becoming `never[]` (breaks mock typing in tests).
+      fetchParticipants: vi.fn(async () => [] as any[]),
+      fetchTrustlines: vi.fn(async () => [] as any[]),
     }
   }
 
@@ -58,6 +59,7 @@ describe('useInteractMode', () => {
 
     await im.confirmPayment('1.00')
     expect(actions.sendPayment).toHaveBeenCalledWith('alice', 'bob', '1.00', 'UAH')
+    expect(im.successMessage.value).toBe('Payment sent: 1.00 UAH')
     expect(im.phase.value).toBe('idle')
     expect(im.busy.value).toBe(false)
   })
@@ -227,6 +229,29 @@ describe('useInteractMode', () => {
     expect(im.state.toPid).toBe('bob')
   })
 
+  it('MP-6a: startPaymentFlow prefetches trustlines even when cache is warm', async () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
+
+    const d1 = deferred<any[]>()
+    const d2 = deferred<any[]>()
+    actions.fetchTrustlines.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise)
+
+    // Creating useInteractMode triggers an immediate trustlines refresh (watch on equivalent).
+    const im = useInteractMode({ actions: actions as any, equivalent: computed(() => 'UAH'), snapshot })
+    expect(actions.fetchTrustlines).toHaveBeenCalledTimes(1)
+
+    d1.resolve([])
+    await Promise.resolve()
+
+    // With warm cache, only a forced refresh should call fetchTrustlines again.
+    im.startPaymentFlow()
+    expect(actions.fetchTrustlines).toHaveBeenCalledTimes(2)
+
+    d2.resolve([])
+    await Promise.resolve()
+  })
+
   it('availableCapacity computed from snapshot link', () => {
     const snapshot = ref<GraphSnapshot | null>({
       equivalent: 'UAH',
@@ -301,11 +326,72 @@ describe('useInteractMode', () => {
     expect(im.phase.value).toBe('picking-payment-from')
   })
 
-  it('availableTargetIds is empty in idle phase', () => {
+  it('availableTargetIds is undefined in idle phase (no meaningful targets)', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
 
-    expect(im.availableTargetIds.value.size).toBe(0)
+    expect(im.availableTargetIds.value).toBeUndefined()
+  })
+
+  it('availableTargetIds is undefined in picking-payment-to while trustlinesLoading=true (unknown)', async () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+      ],
+      links: [],
+    })
+
+    const actions = mkActions()
+    const d = deferred<any[]>()
+    actions.fetchTrustlines.mockImplementationOnce(() => d.promise)
+
+    const im = useInteractMode({ actions: actions as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    im.setPaymentFromPid('alice')
+    expect(im.phase.value).toBe('picking-payment-to')
+
+    // While trustlines fetch is in-flight, highlight targets are unknown.
+    expect(im.trustlinesLoading.value).toBe(true)
+    expect(im.availableTargetIds.value).toBeUndefined()
+
+    // Cleanup: settle the in-flight promise.
+    d.resolve([])
+    await Promise.resolve()
+  })
+
+  it('availableTargetIds is an empty Set in picking-payment-to when trustlines are known but no direct-hop targets exist', async () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+      ],
+      links: [],
+    })
+
+    const actions = mkActions()
+    // Known-empty trustlines list => known-empty highlight set.
+    actions.fetchTrustlines.mockResolvedValueOnce([])
+
+    const im = useInteractMode({ actions: actions as any, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    im.setPaymentFromPid('alice')
+    expect(im.phase.value).toBe('picking-payment-to')
+
+    // Allow the fetch promise to settle and loading flag to flip.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(im.trustlinesLoading.value).toBe(false)
+    const ids = im.availableTargetIds.value
+    expect(ids).toBeInstanceOf(Set)
+    expect((ids as Set<string>).size).toBe(0)
   })
 
   it('availableTargetIds includes participants (excluding from) in picking-trustline-to', () => {
@@ -326,6 +412,8 @@ describe('useInteractMode', () => {
     expect(im.phase.value).toBe('picking-trustline-to')
 
     const ids = im.availableTargetIds.value
+    expect(ids).toBeInstanceOf(Set)
+    if (!ids) throw new Error('expected availableTargetIds to be a Set in picking-trustline-to')
     expect(ids.has('bob')).toBe(true)
     expect(ids.has('carol')).toBe(true)
     expect(ids.has('alice')).toBe(false) // excludes self

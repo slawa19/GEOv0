@@ -36,6 +36,11 @@ describe('Interact Mode UI (components)', () => {
           state: im.state,
           unit: 'UAH',
           availableCapacity: im.availableCapacity.value,
+
+          trustlinesLoading: false,
+          paymentToTargetIds: undefined,
+          trustlines: [],
+
           busy: im.busy.value,
           canSendPayment: im.canSendPayment.value,
           confirmPayment: im.confirmPayment,
@@ -76,6 +81,11 @@ describe('Interact Mode UI (components)', () => {
           phase: im.phase.value,
           state: im.state,
           unit: 'UAH',
+
+          trustlinesLoading: false,
+          paymentToTargetIds: undefined,
+          trustlines: [],
+
           busy: im.busy.value,
           confirmPayment: im.confirmPayment,
           cancel: im.cancel,
@@ -171,6 +181,12 @@ describe('Interact Mode UI (components)', () => {
           state,
           unit: 'UAH',
           participants,
+
+          // Tri-state contract: `paymentToTargetIds` may be undefined only while loading.
+          trustlinesLoading: true,
+          paymentToTargetIds: undefined,
+          trustlines: [],
+
           busy: false,
           confirmPayment: vi.fn(),
           cancel: vi.fn(),

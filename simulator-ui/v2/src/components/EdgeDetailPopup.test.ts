@@ -1,5 +1,5 @@
 import { createApp, h, nextTick, reactive } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
 
@@ -30,13 +30,15 @@ function mountPopup(overrides: Record<string, unknown> = {}) {
     close: () => undefined,
   }
 
+  const onSendPayment = vi.fn()
+
   const app = createApp({
     render: () =>
-      h(EdgeDetailPopup as any, { ...defaultProps, ...overrides }),
+      h(EdgeDetailPopup as any, { ...defaultProps, ...overrides, onSendPayment }),
   })
 
   app.mount(host)
-  return { app, host }
+  return { app, host, onSendPayment }
 }
 
 describe('EdgeDetailPopup', () => {
@@ -90,6 +92,69 @@ describe('EdgeDetailPopup', () => {
 
     const el = host.querySelector('[data-testid="edge-detail-popup"]')
     expect(el).toBeFalsy()
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('ED-1: used>0 blocks Close line (disabled) and shows warning', async () => {
+    const { app, host } = mountPopup({ used: '0.01' })
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+    expect(btn).toBeTruthy()
+    expect(btn?.disabled).toBe(true)
+
+    const warn = host.querySelector('[data-testid="edge-close-blocked"]') as HTMLElement | null
+    expect(warn).toBeTruthy()
+    expect((warn?.textContent ?? '').trim()).toContain('Debt:')
+    expect((warn?.textContent ?? '').trim()).toContain('0.01')
+    expect((warn?.textContent ?? '').trim()).toContain('UAH')
+
+    // Safety: even if a click is attempted, the text should not switch to confirmation.
+    btn?.click()
+    await nextTick()
+    expect((btn?.textContent || '').includes('Confirm close')).toBe(false)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('ED-4: used=0 does NOT block Close line', async () => {
+    const { app, host } = mountPopup({ used: '0.00' })
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+    expect(btn).toBeTruthy()
+    expect(btn?.disabled).toBe(false)
+
+    expect(host.querySelector('[data-testid="edge-close-blocked"]')).toBeFalsy()
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('ED-2: renders utilization bar label (used=50, limit=100 => 50%)', async () => {
+    const { app, host } = mountPopup({ used: '50', limit: '100' })
+    await nextTick()
+
+    const pct = host.querySelector('[data-testid="edge-utilization-pct"]')
+    expect(pct).toBeTruthy()
+    expect((pct?.textContent || '').trim()).toBe('50%')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('ED-3: clicking Send Payment emits sendPayment', async () => {
+    const { app, host, onSendPayment } = mountPopup()
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
+    expect(btn).toBeTruthy()
+    btn?.click()
+    await nextTick()
+    expect(onSendPayment).toHaveBeenCalledTimes(1)
 
     app.unmount()
     host.remove()

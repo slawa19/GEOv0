@@ -931,6 +931,8 @@ export function useSimulatorApp() {
     // BUG-3 (P3): dim unavailable nodes during picking phases.
     getDimmedNodeIds: () => {
       const avail = interactMode.availableTargetIds.value
+      // Tri-state: `undefined` => unknown, do not dim/highlight.
+      if (!avail) return null
       return avail.size > 0 ? avail : null
     },
   })
@@ -964,7 +966,8 @@ export function useSimulatorApp() {
   watch(
     () => interactMode.availableTargetIds.value,
     (ids) => {
-      if (ids.size === 0) return
+      // Tri-state: `undefined` => unknown, do not dim/highlight.
+      if (!ids || ids.size === 0) return
       const PICKING_HIGHLIGHT_TTL_MS = 800
       for (const id of ids) addActiveNode(id, PICKING_HIGHLIGHT_TTL_MS)
     },

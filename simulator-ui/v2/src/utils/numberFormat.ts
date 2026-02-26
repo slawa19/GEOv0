@@ -10,11 +10,32 @@ export function asFiniteNumber(v: unknown): number {
 }
 
 /**
- * Parses amount-like values from snapshot/API into a finite number.
- * Non-finite/invalid values return 0.
+ * Parses amount-like values from snapshot/API into a number.
+ *
+ * Contract (strict):
+ * - finite number => itself
+ * - numeric string => Number(trimmed)
+ * - anything else / invalid / non-finite => NaN
  */
 export function parseAmountNumber(v: unknown): number {
-  return asFiniteNumber(v)
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN
+  if (typeof v === 'string') {
+    const s = v.trim()
+    if (!s) return NaN
+    const n = Number(s)
+    return Number.isFinite(n) ? n : NaN
+  }
+  return NaN
+}
+
+/**
+ * Parses amount-like values into a finite number, falling back to 0 for invalid values.
+ *
+ * Use this helper for aggregations/summations where invalid/missing values should be treated as 0.
+ */
+export function parseAmountNumberOrZero(v: unknown): number {
+  const n = parseAmountNumber(v)
+  return Number.isFinite(n) ? n : 0
 }
 
 /**

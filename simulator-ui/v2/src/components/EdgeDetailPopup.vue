@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import { normalizeAnchorToHostViewport, placeOverlayNearAnchor } from '../utils/overlayPosition'
+import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { renderOrDash } from '../utils/valueFormat'
 
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
@@ -37,6 +38,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'changeLimit'): void
   (e: 'closeLine'): void
+  (e: 'sendPayment'): void
 }>()
 
 // UX: show the small EDGE popup as a standalone quick-info overlay when
@@ -79,6 +81,43 @@ const title = computed(() => {
   return props.state.selectedEdgeKey ?? 'Edge'
 })
 
+const closeBlocked = computed(() => {
+  const u = parseAmountNumber(props.used)
+  return Number.isFinite(u) && u > 0
+})
+
+function parseStrictAmountOrNull(v: unknown): number | null {
+  const s = parseAmountStringOrNull(v)
+  if (s == null) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+const utilizationPct = computed<number | null>(() => {
+  const u = parseStrictAmountOrNull(props.used)
+  const l = parseStrictAmountOrNull(props.limit)
+  if (u == null || l == null) return null
+  if (l <= 0) return null
+  const raw = Math.round((u / l) * 100)
+  if (!Number.isFinite(raw)) return null
+  return Math.max(0, Math.min(100, raw))
+})
+
+const utilizationColor = computed(() => {
+  const p = utilizationPct.value
+  if (p == null) return 'var(--ds-border)'
+  if (p >= 85) return 'var(--ds-err)'
+  if (p >= 60) return 'var(--ds-warn)'
+  return 'var(--ds-ok)'
+})
+
+const utilizationLabel = computed(() => {
+  const p = utilizationPct.value
+  return p == null ? '—%' : `${p}%`
+})
+
+const utilizationWidth = computed(() => `${utilizationPct.value ?? 0}%`)
+
 const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm } = useDestructiveConfirmation({
   disarmOn: [
     // When popup closes (including forceHidden), cancel the confirmation state.
@@ -87,11 +126,14 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
     // When the UI becomes busy, cancel the confirmation state.
     { source: () => props.busy, when: (b) => !!b },
+    // ED-1: when Close is blocked (used > 0), disarm any destructive confirmation.
+    { source: closeBlocked, when: (b) => !!b },
   ],
 })
 
 function onCloseLine() {
   if (props.busy) return
+  if (closeBlocked.value) return
   void confirmCloseOrArm(() => emit('closeLine'))
 }
 </script>
@@ -107,6 +149,20 @@ function onCloseLine() {
     <div class="popup__title ds-label">Edge</div>
     <div class="popup__subtitle ds-value ds-mono">{{ title }}</div>
 
+    <div class="popup__util" aria-label="Utilization">
+      <div
+        class="popup__util-bar"
+        role="progressbar"
+        aria-label="Utilization bar"
+        :aria-valuenow="utilizationPct ?? 0"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div class="popup__util-fill" :style="{ width: utilizationWidth, background: utilizationColor }" />
+      </div>
+      <div class="popup__util-pct ds-label ds-mono" data-testid="edge-utilization-pct">{{ utilizationLabel }}</div>
+    </div>
+
     <div class="popup__grid">
       <div class="ds-label">Used</div>
       <div class="ds-value ds-mono">{{ renderOrDash(used) }} {{ unit }}</div>
@@ -119,13 +175,26 @@ function onCloseLine() {
     </div>
 
     <div class="popup__actions">
+      <div v-if="closeBlocked" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-blocked">
+        Debt: {{ renderOrDash(used) }} {{ unit }}
+      </div>
+
+      <button
+        class="ds-btn ds-btn--secondary ds-btn--sm"
+        type="button"
+        :disabled="!!busy"
+        data-testid="edge-send-payment"
+        @click="emit('sendPayment')"
+      >
+        💸 Send Payment
+      </button>
       <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="!!busy" @click="emit('changeLimit')">
         Change limit
       </button>
       <button
         class="ds-btn ds-btn--danger ds-btn--sm"
         type="button"
-        :disabled="!!busy"
+        :disabled="!!busy || closeBlocked"
         data-testid="edge-close-line-btn"
         @click="onCloseLine"
       >
@@ -166,6 +235,32 @@ function onCloseLine() {
   opacity: 0.95;
 }
 
+.popup__util {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.popup__util-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ds-border) 45%, transparent);
+  overflow: hidden;
+}
+
+.popup__util-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.popup__util-pct {
+  opacity: 0.9;
+  min-width: 3.5ch;
+  text-align: right;
+}
+
 .popup__grid {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -178,6 +273,15 @@ function onCloseLine() {
   gap: 6px;
   justify-content: flex-end;
   margin-top: 10px;
+}
+
+.popup__inline-warn {
+  flex: 1 0 100%;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ds-warn) 35%, transparent);
+  background: color-mix(in srgb, var(--ds-warn) 14%, transparent);
+  color: color-mix(in srgb, var(--ds-warn) 18%, var(--ds-text-1));
 }
 
 </style>

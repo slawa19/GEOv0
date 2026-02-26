@@ -70,10 +70,16 @@ describe('ActionBar', () => {
     expect(btnClr.disabled).toBe(true)
 
     // UX: explain why locked.
-    expect(btnPay.title).toBe('Cancel current action first')
-    expect(btnTl.title).toBe('Cancel current action first')
-    expect(btnClr.title).toBe('Cancel current action first')
-    expect(host.querySelector('[data-testid="actionbar-locked-hint"]')).toBeTruthy()
+    expect(btnPay.title).toContain('Cancel current action first')
+    expect(btnTl.title).toContain('Cancel current action first')
+    expect(btnClr.title).toContain('Cancel current action first')
+    expect(btnPay.title).toContain('ESC')
+    expect(btnTl.title).toContain('ESC')
+    expect(btnClr.title).toContain('ESC')
+
+    const hint = host.querySelector('[data-testid="actionbar-locked-hint"]')
+    expect(hint).toBeTruthy()
+    expect(hint?.textContent ?? '').toContain('ESC')
 
     // Safety: even if a click somehow happens, handlers must not be invoked.
     btnPay.click()

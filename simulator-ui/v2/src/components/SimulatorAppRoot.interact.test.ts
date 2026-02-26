@@ -27,11 +27,25 @@ vi.mock('../composables/useSimulatorApp', () => {
       })
       ;(globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN = setNodeCardOpen
 
-      const cancel = vi.fn()
-      ;(globalThis as any).__GEO_TEST_INTERACT_CANCEL = cancel
+       const cancel = vi.fn()
+       ;(globalThis as any).__GEO_TEST_INTERACT_CANCEL = cancel
 
-      const confirmTrustlineClose = vi.fn(async () => undefined)
-      ;(globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE = confirmTrustlineClose
+       const startPaymentFlow = vi.fn()
+       ;(globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW = startPaymentFlow
+
+       const startClearingFlow = vi.fn(() => {
+         phase.value = 'confirm-clearing'
+       })
+       ;(globalThis as any).__GEO_TEST_INTERACT_START_CLEARING_FLOW = startClearingFlow
+
+       const setPaymentFromPid = vi.fn()
+       ;(globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID = setPaymentFromPid
+
+       const setPaymentToPid = vi.fn()
+       ;(globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID = setPaymentToPid
+
+       const confirmTrustlineClose = vi.fn(async () => undefined)
+       ;(globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE = confirmTrustlineClose
 
       const isInteractPickingPhase = computed(() => {
         if (!isInteractUi.value) return false
@@ -128,36 +142,36 @@ vi.mock('../composables/useSimulatorApp', () => {
           actions: {
             actionsDisabled: ref(false),
           },
-          mode: {
-            phase,
-            busy: ref(false),
-            state: reactive({
-              fromPid: 'alice',
-              toPid: 'bob',
-              selectedEdgeKey: null,
-              edgeAnchor: { x: 10, y: 10 },
-              error: '',
-              lastClearing: null,
-            }),
+           mode: {
+             phase,
+             busy: ref(false),
+             trustlinesLoading: ref(false),
+             state: reactive({
+               fromPid: 'alice',
+               toPid: 'bob',
+               selectedEdgeKey: null,
+               edgeAnchor: { x: 10, y: 10 },
+               error: '',
+               lastClearing: null,
+             }),
 
-            availableCapacity: ref('0'),
-            participants: ref([] as any[]),
-            trustlines: ref([] as any[]),
-            canSendPayment: ref(true),
+             availableCapacity: ref('0'),
+             paymentToTargetIds: ref<Set<string> | undefined>(undefined),
+             participants: ref([] as any[]),
+             trustlines: ref([] as any[]),
+             canSendPayment: ref(true),
 
-            setPaymentFromPid: vi.fn(),
-            setPaymentToPid: vi.fn(),
-            setTrustlineFromPid: vi.fn(),
-            setTrustlineToPid: vi.fn(),
-            selectTrustline: vi.fn(),
+            setPaymentFromPid,
+            setPaymentToPid,
+             setTrustlineFromPid: vi.fn(),
+             setTrustlineToPid: vi.fn(),
+             selectTrustline: vi.fn(),
 
-            startPaymentFlow: vi.fn(),
-            startTrustlineFlow: vi.fn(() => {
-              phase.value = 'picking-trustline-from'
-            }),
-            startClearingFlow: vi.fn(() => {
-              phase.value = 'confirm-clearing'
-            }),
+             startPaymentFlow: startPaymentFlow,
+             startTrustlineFlow: vi.fn(() => {
+               phase.value = 'picking-trustline-from'
+             }),
+             startClearingFlow: startClearingFlow,
              confirmPayment: vi.fn(async () => undefined),
              confirmTrustlineCreate: vi.fn(async () => undefined),
              confirmTrustlineUpdate: vi.fn(async () => undefined),
@@ -209,8 +223,8 @@ vi.mock('../composables/useSimulatorApp', () => {
         hoveredEdge: reactive({ key: null, fromId: '', toId: '', amountText: '' }),
         clearHoveredEdge: vi.fn(),
         edgeTooltipStyle: () => ({}),
-        selectedNode: computed(() => null),
-        nodeCardStyle: () => ({}),
+        selectedNode: computed(() => (globalThis as any).__GEO_TEST_SELECTED_NODE ?? null),
+        nodeCardStyle: computed(() => (globalThis as any).__GEO_TEST_NODE_CARD_STYLE ?? ({ left: '100px', top: '100px' })),
         selectedNodeEdgeStats: computed(() => null),
 
         // pinning
@@ -470,6 +484,42 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE
   })
 
+  it('EdgeDetailPopup: Send Payment starts payment flow and pre-fills pids (to→from)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    app.mount(host)
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
+    expect(btn).toBeTruthy()
+    btn?.click()
+    await nextTick()
+
+    const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+    const startPaymentFlow = (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW as ReturnType<typeof vi.fn>
+    const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID as ReturnType<typeof vi.fn>
+    const setTo = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID as ReturnType<typeof vi.fn>
+
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(startPaymentFlow).toHaveBeenCalledTimes(1)
+    // trustline alice→bob => payment bob→alice
+    expect(setFrom).toHaveBeenCalledWith('bob')
+    expect(setTo).toHaveBeenCalledWith('alice')
+
+    app.unmount()
+    host.remove()
+    delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+    delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+    delete (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW
+    delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID
+    delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID
+  })
+
   it('Escape disarms Close TL confirmation (does not cancel flow)', async () => {
     // Enter via ActionBar to set useFullTrustlineEditor=true, then advance to editing-trustline.
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
@@ -539,5 +589,45 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
     delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+  })
+
+  it('NodeCardOverlay: clicking "Run Clearing" calls interact.mode.startClearingFlow() (wiring)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    app.mount(host)
+    await nextTick()
+
+    const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Run Clearing')) as
+      | HTMLButtonElement
+      | undefined
+    expect(btn).toBeTruthy()
+
+    btn?.click()
+    await nextTick()
+
+    const startClearing = (globalThis as any).__GEO_TEST_INTERACT_START_CLEARING_FLOW as ReturnType<typeof vi.fn>
+    expect(startClearing).toBeTruthy()
+    expect(startClearing).toHaveBeenCalledTimes(1)
+
+    app.unmount()
+    host.remove()
+    delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+    delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+    delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+    delete (globalThis as any).__GEO_TEST_INTERACT_START_CLEARING_FLOW
   })
 })

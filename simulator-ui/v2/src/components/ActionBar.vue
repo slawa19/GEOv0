@@ -33,7 +33,7 @@ const isFlowActive = computed(() => !isIdle.value)
 const { activeKey } = useActivePanelStateShared(computed(() => props.phase))
 
 function titleFor(_key: ActivePanelKey, idleTitle: string): string {
-  if (isFlowActive.value) return 'Cancel current action first'
+  if (isFlowActive.value) return 'Cancel current action first (press ESC).'
   return idleTitle
 }
 
@@ -93,7 +93,7 @@ function guardedStart(fn: () => void) {
         data-testid="actionbar-locked-hint"
         aria-label="Action Bar locked hint"
       >
-        Cancel current action first
+        Cancel current action first (press ESC).
       </span>
     </div>
   </div>

@@ -5,6 +5,7 @@ import type { InteractPhase, InteractState } from '../composables/useInteractMod
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
 import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
+import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
 import { renderOrDash } from '../utils/valueFormat'
 import { useOverlayPositioning } from '../utils/overlayPosition'
@@ -46,34 +47,6 @@ const props = defineProps<Props>()
 const limit = ref('')
 const newLimit = ref('')
 
-watch(
-  () => props.phase,
-  (p) => {
-    // Pre-fill edit field when entering edit phase.
-    if (p === 'editing-trustline') {
-      const cur = props.currentLimit
-      newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
-    }
-    // Reset create field when entering create phase.
-    if (p === 'confirm-trustline-create') {
-      limit.value = ''
-    }
-  },
-  { immediate: true },
-)
-
-// BUGFIX: phase watcher above only runs on phase transitions.
-// When switching trustlines via dropdown while staying in editing phase,
-// keep the edit field in sync with the newly selected trustline.
-watch(
-  () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}`,
-  () => {
-    if (props.phase !== 'editing-trustline') return
-    const cur = props.currentLimit
-    newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
-  },
-)
-
 const selectedTl = computed(() => {
   const from = (props.state.fromPid ?? '').trim()
   const to = (props.state.toPid ?? '').trim()
@@ -94,44 +67,90 @@ const effectiveUsed = computed(() => effectiveData.value.used)
 const effectiveLimit = computed(() => effectiveData.value.limit)
 const effectiveAvailable = computed(() => effectiveData.value.available)
 
+watch(
+  () => props.phase,
+  (p) => {
+    // Pre-fill edit field when entering edit phase.
+    if (p === 'editing-trustline') {
+      const cur = effectiveLimit.value
+      newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
+    }
+    // Reset create field when entering create phase.
+    if (p === 'confirm-trustline-create') {
+      limit.value = ''
+    }
+  },
+  { immediate: true },
+)
+
+// BUGFIX: phase watcher above only runs on phase transitions.
+// When switching trustlines via dropdown while staying in editing phase,
+// keep the edit field in sync with the newly selected trustline.
+watch(
+  () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}`,
+  () => {
+    if (props.phase !== 'editing-trustline') return
+    const cur = effectiveLimit.value
+    newLimit.value = cur != null && String(cur).trim() ? String(cur) : ''
+  },
+)
+
 const usedNum = computed(() => {
-  const v = Number(effectiveUsed.value ?? 0)
+  const v = parseAmountNumber(effectiveUsed.value)
   return Number.isFinite(v) ? v : 0
 })
 
-const limitNum = computed(() => {
-  const v = Number(limit.value)
-  return Number.isFinite(v) ? v : NaN
+const createLimitNormalized = computed(() => parseAmountStringOrNull(limit.value))
+const createLimitNum = computed(() => parseAmountNumber(createLimitNormalized.value))
+
+const updateLimitNormalized = computed(() => parseAmountStringOrNull(newLimit.value))
+const newLimitNum = computed(() => parseAmountNumber(updateLimitNormalized.value))
+
+const updateLimitTooLow = computed(() => {
+  if (updateLimitNormalized.value == null) return false
+  if (!Number.isFinite(newLimitNum.value)) return false
+  return newLimitNum.value < usedNum.value
 })
 
-const newLimitNum = computed(() => {
-  const v = Number(newLimit.value)
-  return Number.isFinite(v) ? v : NaN
+const closeBlocked = computed(() => {
+  const u = parseAmountNumber(effectiveUsed.value)
+  return Number.isFinite(u) && u > 0
 })
 
-// UX: don't allow creating a 0-limit trustline (no practical capacity).
-const createValid = computed(() => Number.isFinite(limitNum.value) && limitNum.value > 0)
-const updateValid = computed(() =>
-  Number.isFinite(newLimitNum.value) &&
-  newLimit.value.trim().length > 0 &&
-  newLimitNum.value > 0 &&
-  newLimitNum.value >= usedNum.value
-)
+const createValid = computed(() => {
+  // Require From/To selection in create flow.
+  const from = (props.state.fromPid ?? '').trim()
+  const to = (props.state.toPid ?? '').trim()
+  if (!from || !to) return false
+
+  if (createLimitNormalized.value == null) return false
+  if (!Number.isFinite(createLimitNum.value)) return false
+  return createLimitNum.value >= 0
+})
+
+const updateValid = computed(() => {
+  if (updateLimitNormalized.value == null) return false
+  if (!Number.isFinite(newLimitNum.value)) return false
+  return newLimitNum.value >= 0 && newLimitNum.value >= usedNum.value
+})
 
 async function onCreate() {
   if (props.busy) return
   if (!createValid.value) return
-  await props.confirmTrustlineCreate(limit.value)
+  // Submit normalized (backend-compatible) amount string.
+  await props.confirmTrustlineCreate(createLimitNormalized.value!)
 }
 
 async function onUpdate() {
   if (props.busy) return
   if (!updateValid.value) return
-  await props.confirmTrustlineUpdate(newLimit.value)
+  // Submit normalized (backend-compatible) amount string.
+  await props.confirmTrustlineUpdate(updateLimitNormalized.value!)
 }
 
 async function onClose() {
   if (props.busy) return
+  if (closeBlocked.value) return
 
   void confirmCloseOrArm(async () => {
     await props.confirmTrustlineClose()
@@ -144,6 +163,8 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     { source: () => props.phase },
     // When switching selected trustline, cancel the confirmation state.
     { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
+    // If Close becomes blocked (used > 0), cancel the confirmation state.
+    { source: () => closeBlocked.value, when: (b) => !!b },
     // When the UI becomes busy, cancel the confirmation state.
     { source: () => props.busy, when: (b) => !!b },
   ],
@@ -165,6 +186,8 @@ const open = computed(() => isPickFrom.value || isPickTo.value || isCreate.value
 const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
   participants: () => props.participants,
   fromParticipantId: () => props.state.fromPid,
+  // Payment-target filtering is not required in trustline management.
+  availableTargetIds: () => undefined,
 })
 
 const trustlinesSorted = computed(() => {
@@ -217,7 +240,10 @@ defineExpose({
 <template>
   <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" :style="anchorPositionStyle" data-testid="trustline-panel" aria-label="Trustline management panel">
     <div class="ds-panel__header">
-      <div class="ds-h2">{{ title }}</div>
+      <div class="ds-h2">
+        {{ title }}
+        <span class="ds-muted ds-mono"> (ESC to close)</span>
+      </div>
     </div>
 
     <div class="ds-panel__body ds-stack">
@@ -310,8 +336,8 @@ defineExpose({
         </div>
       </div>
 
-      <div v-if="isCreate && !createValid && limit.trim()" class="ds-help tl-pick-help">
-        Limit must be greater than 0.
+      <div v-if="isCreate && limit.trim() && createLimitNormalized === null" class="ds-help tl-pick-help">
+        Invalid amount format. Use digits and '.' for decimals.
       </div>
 
       <div v-if="isEdit" class="ds-controls__row">
@@ -335,7 +361,19 @@ defineExpose({
         </div>
       </div>
 
+      <div v-if="isEdit && newLimit.trim() && updateLimitNormalized === null" class="ds-help tl-pick-help">
+        Invalid amount format. Use digits and '.' for decimals.
+      </div>
+
+      <div v-if="isEdit && updateLimitTooLow" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-limit-too-low">
+        New limit must be ≥ used ({{ renderOrDash(effectiveUsed) }} {{ unit }}).
+      </div>
+
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
+
+      <div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono">
+        Cannot close: trustline has outstanding debt ({{ renderOrDash(effectiveUsed) }} {{ unit }}). Reduce used to 0 first.
+      </div>
 
       <div class="ds-row tl-actions">
         <button v-if="isCreate" class="ds-btn ds-btn--primary" type="button" :disabled="busy || !createValid" @click="onCreate">
@@ -348,7 +386,7 @@ defineExpose({
           <button
             class="ds-btn"
             type="button"
-            :disabled="busy"
+            :disabled="busy || closeBlocked"
             data-testid="trustline-close-btn"
             @click="onClose"
           >

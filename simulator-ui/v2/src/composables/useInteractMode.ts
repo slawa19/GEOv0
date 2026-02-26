@@ -22,6 +22,9 @@ export function useInteractMode(opts: {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
 
+  /** UI-level success toast message (outside FSM). */
+  successMessage: Ref<string | null>
+
   // Phase transitions
   startPaymentFlow: () => void
   startTrustlineFlow: () => void
@@ -47,7 +50,10 @@ export function useInteractMode(opts: {
   trustlinesLoading: ComputedRef<boolean>
   availableCapacity: ComputedRef<string | null>
   /** BUG-4: node IDs that should be highlighted as available targets in the current picking phase. */
-  availableTargetIds: ComputedRef<Set<string>>
+  availableTargetIds: ComputedRef<Set<string> | undefined>
+
+  /** Payment-specific targets for filtering the To dropdown (may be used outside picking phases, e.g. confirm). */
+  paymentToTargetIds: ComputedRef<Set<string> | undefined>
 
   // Flags
   busy: ComputedRef<boolean>
@@ -72,6 +78,9 @@ export function useInteractMode(opts: {
   const CLEARING_RUNNING_DWELL_MS = 200
 
   const busyRef = ref(false)
+
+  // FB-1: UI-level success toast (kept outside FSM so it doesn't affect phase logic).
+  const successMessage = ref<string | null>(null)
 
   // Epoch that invalidates any in-flight async results.
   // Incremented:
@@ -138,23 +147,29 @@ export function useInteractMode(opts: {
   })
 
   /** BUG-4: Node IDs available as picking targets in the current phase (for visual highlight). */
-  const availableTargetIds = computed<Set<string>>(() => {
+  const availableTargetIds = computed<Set<string> | undefined>(() => {
     const phase = state.phase
 
     // picking-payment-to: highlight nodes that have a trustline `to -> fromPid`
     if (phase === 'picking-payment-to' && state.fromPid) {
+      // Phase-1 tri-state contract:
+      //  - `undefined` => unknown (trustlines still loading)
+      //  - `Set` (incl. empty) => known
+      if (trustlinesLoading.value) return undefined
+
       const ids = new Set<string>()
       for (const tl of trustlines.value) {
-        if (tl.to_pid === state.fromPid && isActiveStatus(tl.status)) {
-          ids.add(tl.from_pid)
-        }
+        if (tl.to_pid !== state.fromPid) continue
+        if (!isActiveStatus(tl.status)) continue
+
+        const available = parseAmountNumber(tl.available)
+        if (!Number.isFinite(available) || available <= 0) continue
+
+        // For payment `from -> to`, capacity is defined by trustline `to -> from`.
+        // So, in picking-payment-to we highlight `tl.from_pid` when `tl.to_pid === fromPid`.
+        ids.add(tl.from_pid)
       }
-      // Fallback: if trustlines not loaded, show all participants except from
-      if (ids.size === 0) {
-        for (const p of participants.value) {
-          if (p.pid !== state.fromPid) ids.add(p.pid)
-        }
-      }
+      // IMPORTANT: no fallback here. Empty Set is a valid known-state.
       return ids
     }
 
@@ -174,7 +189,50 @@ export function useInteractMode(opts: {
       return ids
     }
 
-    return new Set<string>()
+    // Outside picking phases: no meaningful targets for highlight.
+    return undefined
+  })
+
+  function computeDirectHopPaymentToTargets(fromPidRaw: string): Set<string> {
+    const fromPid = (fromPidRaw ?? '').trim()
+    const ids = new Set<string>()
+    if (!fromPid) return ids
+
+    for (const tl of trustlines.value) {
+      if ((tl.to_pid ?? '').trim() !== fromPid) continue
+      if (!isActiveStatus(tl.status)) continue
+
+      const available = parseAmountNumber(tl.available)
+      if (!Number.isFinite(available) || available <= 0) continue
+
+      // For payment `from -> to`, capacity is defined by trustline `to -> from`.
+      ids.add((tl.from_pid ?? '').trim())
+    }
+
+    // IMPORTANT: empty Set is a valid known-state.
+    // Consumers interpret it as "known-empty".
+    ids.delete('')
+    return ids
+  }
+
+  /**
+   * Payment targets for dropdown filtering.
+   *
+   * Contract:
+   *  - `undefined` is reserved strictly for "unknown" while trustlines are loading.
+   *  - when loading=false, always return a known Set (possibly empty).
+   *
+   * This keeps dropdown tri-state wiring deterministic and separate from
+   * `availableTargetIds` semantics used for canvas highlighting.
+   */
+  const paymentToTargetIds = computed<Set<string> | undefined>(() => {
+    if (trustlinesLoading.value) return undefined
+
+    const p = state.phase
+    if (p !== 'picking-payment-from' && p !== 'picking-payment-to' && p !== 'confirm-payment') return new Set()
+    if (!state.fromPid) return new Set()
+
+    return computeDirectHopPaymentToTargets(state.fromPid)
   })
 
   function cancel() {
@@ -188,6 +246,9 @@ export function useInteractMode(opts: {
     if (state.phase !== 'idle') return
     fsm.startPaymentFlow()
     void refreshParticipants()
+
+    // MP-6a: best-effort prefetch to make `availableTargetIds` tri-state reliable.
+    void refreshTrustlines({ force: true })
   }
 
   function startTrustlineFlow() {
@@ -260,6 +321,8 @@ export function useInteractMode(opts: {
       await opts.actions.sendPayment(from, to, amount, opts.equivalent.value)
       if (!isCurrent()) return
 
+      successMessage.value = `Payment sent: ${amount} ${opts.equivalent.value}`
+
       // BUG-5: log to history
       pushHistory('💸', `Payment ${amount} ${opts.equivalent.value}: ${from} → ${to}`)
       // Payment changes used/available; refresh trustlines so dropdowns/capacity can update.
@@ -277,6 +340,8 @@ export function useInteractMode(opts: {
       await opts.actions.createTrustline(from, to, limit, opts.equivalent.value)
       if (!isCurrent()) return
 
+      successMessage.value = `Trustline created: ${from} → ${to}`
+
       // BUG-5: log to history
       pushHistory('🔗', `Trustline created: ${from} → ${to} (${limit})`)
       invalidateTrustlinesCache(opts.equivalent.value)
@@ -293,6 +358,8 @@ export function useInteractMode(opts: {
       if (!from || !to) throw new Error('Select trustline first')
       await opts.actions.updateTrustline(from, to, newLimit, opts.equivalent.value)
       if (!isCurrent()) return
+
+      successMessage.value = `Limit updated: ${newLimit} ${opts.equivalent.value}`
 
       // BUG-5: log to history
       pushHistory('✏️', `Trustline updated: ${from} → ${to} → limit ${newLimit}`)
@@ -313,6 +380,8 @@ export function useInteractMode(opts: {
       if (!from || !to) throw new Error('Select trustline first')
       await opts.actions.closeTrustline(from, to, opts.equivalent.value)
       if (!isCurrent()) return
+
+      successMessage.value = `Trustline closed: ${from} → ${to}`
 
       // BUG-5: log to history
       pushHistory('🗑️', `Trustline closed: ${from} → ${to}`)
@@ -399,6 +468,10 @@ export function useInteractMode(opts: {
       await new Promise((r) => setTimeout(r, CLEARING_RUNNING_DWELL_MS))
       if (!isCurrent()) return
 
+      const settled = res?.cleared_cycles ?? 0
+      const total = Array.isArray(res?.cycles) ? res.cycles.length : settled
+      successMessage.value = `Clearing done: ${settled}/${total} cycles`
+
       resetToIdle()
     })
   }
@@ -406,6 +479,8 @@ export function useInteractMode(opts: {
   return {
     state,
     phase,
+
+    successMessage,
 
     startPaymentFlow,
     startTrustlineFlow,
@@ -425,6 +500,7 @@ export function useInteractMode(opts: {
     trustlinesLoading,
     availableCapacity,
     availableTargetIds,
+    paymentToTargetIds,
 
     busy,
     canSendPayment,

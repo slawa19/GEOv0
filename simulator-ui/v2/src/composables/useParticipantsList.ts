@@ -13,6 +13,12 @@ export type UseParticipantsListInput<P extends { pid?: string | null; name?: str
   participants: MaybeRefOrGetter<readonly P[] | null | undefined>
   /** Used for building `toParticipants`: excludes currently selected "from" pid. */
   fromParticipantId?: MaybeRefOrGetter<string | null | undefined>
+  /**
+   * Tri-state filtering for `toParticipants`.
+   *  - `undefined` => unknown (fallback allowed)
+   *  - `Set` (incl. empty) => known (no fallback)
+   */
+  availableTargetIds: MaybeRefOrGetter<Set<string> | undefined>
 }
 
 export function useParticipantsList<P extends { pid?: string | null; name?: string | null }>(
@@ -29,8 +35,17 @@ export function useParticipantsList<P extends { pid?: string | null; name?: stri
 
   const toParticipants = computed<P[]>(() => {
     const from = ((input.fromParticipantId ? toValue(input.fromParticipantId) : '') ?? '').trim()
-    if (!from) return participantsSorted.value
-    return participantsSorted.value.filter((p) => (p?.pid ?? '').trim() !== from)
+    const targets = toValue(input.availableTargetIds)
+
+    // Known-empty: do NOT fallback.
+    if (targets !== undefined && targets.size === 0) return []
+
+    return participantsSorted.value.filter((p) => {
+      const pid = (p?.pid ?? '').trim()
+      if (from && pid === from) return false
+      if (targets === undefined) return true
+      return targets.has(pid)
+    })
   })
 
   return { participantsSorted, toParticipants }

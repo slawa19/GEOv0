@@ -61,6 +61,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
         <span v-if="isConfirm">Run clearing</span>
         <span v-else-if="isPreview">Clearing preview</span>
         <span v-else>Clearing running</span>
+        <span class="ds-muted ds-mono"> (ESC to close)</span>
       </div>
     </div>
 
@@ -73,16 +74,25 @@ const busyUi = computed(() => props.busy || isRunning.value)
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ state.error }}</div>
 
       <template v-if="isConfirm">
-        <div class="ds-help">This will run a clearing cycle in backend.</div>
+        <div class="ds-help" data-testid="clearing-confirm-help">
+          <template v-if="busyUi">
+            Running clearing… <span class="cp-spinner" aria-hidden="true" />
+          </template>
+          <template v-else>This will run a clearing cycle in backend.</template>
+        </div>
 
         <div class="ds-row cp-actions">
-          <button class="ds-btn ds-btn--primary" type="button" :disabled="busyUi" @click="onConfirm">Confirm</button>
+          <button class="ds-btn ds-btn--primary" type="button" :disabled="busyUi" @click="onConfirm">
+            {{ busyUi ? 'Running…' : 'Confirm' }}
+          </button>
           <button class="ds-btn ds-btn--ghost" type="button" :disabled="busyUi" @click="cancel">Cancel</button>
         </div>
       </template>
 
       <template v-else-if="isPreview">
-        <div v-if="!last" class="ds-help">Preparing preview…</div>
+        <div v-if="!last" class="ds-help" data-testid="clearing-preview-loading">
+          Preparing preview… <span class="cp-spinner" aria-hidden="true" />
+        </div>
         <div v-else class="ds-stack cp-preview-stack">
           <div class="ds-label">
             Cycles: <span class="ds-mono">{{ cyclesCount }}</span>
@@ -121,6 +131,28 @@ const busyUi = computed(() => props.busy || isRunning.value)
 
 .cp-preview-stack {
   gap: 6px;
+}
+
+.cp-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-left: 6px;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: cp-spin 0.9s linear infinite;
+  opacity: 0.7;
+  vertical-align: -2px;
+}
+
+@keyframes cp-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .cp-cycles {

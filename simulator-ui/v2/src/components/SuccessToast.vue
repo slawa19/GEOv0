@@ -1,24 +1,22 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, unref, watch, type Ref } from 'vue'
 
-const props = withDefaults(
-  defineProps<{
-    message: string | null
-    /** Auto-dismiss delay in milliseconds (default 4000ms). */
-    dismissMs?: number
-  }>(),
-  { dismissMs: 4000 },
-)
+const props = defineProps<{
+  /**
+   * Can be passed as a raw string (typical) or as a Ref (for direct state wiring).
+   */
+  message?: string | null | Ref<string | null>
+}>()
 
 const emit = defineEmits<{
   dismiss: []
 }>()
 
+const messageText = computed(() => (props.message === undefined ? null : (unref(props.message) as string | null)))
+
 const effectiveDismissMs = computed(() => {
-  const len = (props.message ?? '').length
-  if (len > 150) return 8000
-  if (len > 80) return 6000
-  return props.dismissMs
+  const len = (messageText.value ?? '').length
+  return len > 50 ? 3500 : 2500
 })
 
 const visible = ref(false)
@@ -38,7 +36,7 @@ function dismiss() {
 }
 
 watch(
-  () => props.message,
+  messageText,
   (msg) => {
     clearTimer()
     if (msg) {
@@ -57,69 +55,76 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <Transition name="error-toast">
+  <Transition name="success-toast">
     <div
-      v-if="visible && message"
-      class="error-toast ds-alert ds-alert--err ds-ov-surface"
-      role="alert"
-      aria-live="assertive"
+      v-if="visible && messageText"
+      class="success-toast ds-alert ds-alert--ok ds-ov-surface"
+      role="status"
+      aria-live="polite"
     >
-      <span class="error-toast__icon" aria-hidden="true">⚠</span>
-      <span class="error-toast__text">{{ message }}</span>
+      <span class="success-toast__icon" aria-hidden="true">✓</span>
+      <span class="success-toast__text">{{ messageText }}</span>
       <button
-        class="error-toast__close ds-btn ds-btn--ghost ds-btn--icon"
+        class="success-toast__close"
         type="button"
         aria-label="Dismiss"
         @click="dismiss"
-      >✕</button>
+      >
+        ✕
+      </button>
     </div>
   </Transition>
 </template>
 
 <style scoped>
-.error-toast {
+.success-toast {
   position: absolute;
   bottom: 68px;
   left: 50%;
   transform: translateX(-50%);
   z-index: var(--ds-z-alert, 200);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 240px;
   max-width: 480px;
-  /* visuals are driven by design system primitives + tokens */
   pointer-events: auto;
 }
 
-.error-toast__icon {
+.success-toast__icon {
   flex-shrink: 0;
   opacity: 0.9;
 }
 
-.error-toast__text {
+.success-toast__text {
   flex: 1 1 auto;
   word-break: break-word;
 }
 
-.error-toast__close {
+.success-toast__close {
   flex-shrink: 0;
-  min-width: 24px;
-  min-height: 24px;
-  opacity: 0.85;
-  transition: opacity 0.15s;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  opacity: 0.8;
 }
 
-.error-toast__close:hover {
+.success-toast__close:hover {
   opacity: 1;
 }
 
 /* Vue Transition */
-.error-toast-enter-active,
-.error-toast-leave-active {
+.success-toast-enter-active,
+.success-toast-leave-active {
   transition: opacity 0.2s, transform 0.2s;
 }
 
-.error-toast-enter-from,
-.error-toast-leave-to {
+.success-toast-enter-from,
+.success-toast-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(8px);
 }
 </style>
+

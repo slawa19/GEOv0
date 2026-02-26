@@ -34,6 +34,7 @@ type Props = {
   onInteractSendPayment?: (fromPid: string) => void
   onInteractNewTrustline?: (fromPid: string) => void
   onInteractEditTrustline?: (fromPid: string, toPid: string) => void
+  onInteractRunClearing?: () => void
 }
 
 const emit = defineEmits<{ close: [] }>()
@@ -43,6 +44,15 @@ const props = defineProps<Props>()
 function safeNum(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
+}
+
+function isSaturatedAvailable(v: unknown): boolean {
+  // NC-3: consider saturated only when `available` is a finite number and <= 0.
+  // Unknown/invalid values must NOT be treated as saturated.
+  if (v == null) return false
+  if (typeof v === 'string' && v.trim() === '') return false
+  const n = Number(v)
+  return Number.isFinite(n) && n <= 0
 }
 
 const nodeColor = computed(() => {
@@ -172,6 +182,15 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
             >
               ＋ New Trustline
             </button>
+            <button
+              class="ds-btn ds-btn--secondary ds-btn--sm"
+              type="button"
+              :disabled="!!interactBusy"
+              title="Run clearing (global)"
+              @click="onInteractRunClearing?.()"
+            >
+              🔄 Run Clearing
+            </button>
           </div>
 
           <!-- Trustlines list: grouped OUT / IN -->
@@ -182,11 +201,15 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
             <div
               v-for="tl in outTrustlines"
               :key="`${tl.from_pid}→${tl.to_pid}`"
-              class="nco-trustline-row"
+              :class="[
+                'nco-trustline-row',
+                { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
+              ]"
               :title="`avail: ${fmtAmt(tl.available)}`"
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.to_name }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
+              <span class="nco-trustline-row__avail ds-mono">{{ fmtAmt(tl.available) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
@@ -202,12 +225,23 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
             <div
               v-for="tl in inTrustlines"
               :key="`${tl.from_pid}→${tl.to_pid}`"
-              class="nco-trustline-row"
+              :class="[
+                'nco-trustline-row',
+                { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
+              ]"
               :title="`avail: ${fmtAmt(tl.available)}`"
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.from_name }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
-              <span class="nco-trustline-row__no-edit" aria-hidden="true"></span>
+              <span class="nco-trustline-row__avail ds-mono">{{ fmtAmt(tl.available) }}</span>
+              <button
+                class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
+                type="button"
+                :disabled="!!interactBusy"
+                title="Edit trustline"
+                aria-label="Edit trustline"
+                @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
+              >✏️</button>
             </div>
 
           </div>
@@ -254,11 +288,17 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 /* Grid row: [peer-name] [used/limit] [edit-btn or placeholder] */
 .nco-trustline-row {
   display: grid;
-  grid-template-columns: minmax(60px, 80px) 1fr auto;
+  grid-template-columns: minmax(60px, 80px) 1fr auto auto;
   align-items: center;
   gap: 4px;
   padding: 1px 0;
   font-size: 0.8rem;
+}
+
+/* NC-3: "available <= 0" should be visually emphasized (border only). */
+.nco-trustline-row--saturated {
+  border-left: 2px solid var(--ds-err);
+  padding-left: 2px;
 }
 
 .nco-trustline-row__peer {
@@ -274,9 +314,12 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   font-variant-numeric: tabular-nums;
 }
 
-/* Empty placeholder in the edit column for IN rows keeps alignment */
-.nco-trustline-row__no-edit {
-  width: 1.6em;
+/* NC-2: available column */
+.nco-trustline-row__avail {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .nco-trustline-row__edit {

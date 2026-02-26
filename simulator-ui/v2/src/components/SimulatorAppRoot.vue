@@ -12,6 +12,7 @@ import LabelsOverlayLayers from './LabelsOverlayLayers.vue'
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import DevPerfOverlay from './DevPerfOverlay.vue'
 import ErrorToast from './ErrorToast.vue'
+import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 
  import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -175,6 +176,14 @@ const {
 } = app
 
 const interactPhase = computed<InteractPhase>(() => interact.mode.phase.value as InteractPhase)
+
+// MUST MP-0: canonical tri-state wiring for Manual Payment panel.
+// `paymentToTargetIds` must be `undefined` strictly while trustlines are loading.
+const trustlinesLoading = computed(() => interact.mode.trustlinesLoading.value)
+const paymentToTargetIds = computed<Set<string> | undefined>(() =>
+  trustlinesLoading.value ? undefined : interact.mode.paymentToTargetIds.value,
+)
+const trustlines = computed(() => interact.mode.trustlines.value)
 
 // LOW (L2): avoid calling a function directly from template.
 // This also gives Vue a chance to cache style until hoveredEdge/host changes.
@@ -485,6 +494,18 @@ function onEdgeDetailCloseLine() {
   void interact.mode.confirmTrustlineClose()
 }
 
+function onEdgeDetailSendPayment() {
+  // trustline from→to => payment to→from
+  const fromPid = interact.mode.state.fromPid
+  const toPid = interact.mode.state.toPid
+  if (!fromPid || !toPid) return
+
+  interact.mode.cancel()
+  interact.mode.startPaymentFlow()
+  interact.mode.setPaymentFromPid(toPid)
+  interact.mode.setPaymentToPid(fromPid)
+}
+
 function startFlowFromNodeCard(opts: {
   openEditor?: boolean
   start: () => void
@@ -532,6 +553,14 @@ function onInteractEditTrustline(fromPid: string, toPid: string) {
     openEditor: true,
     start: () => {
       interact.mode.selectTrustline(fromPid, toPid)
+    },
+  })
+}
+
+function onInteractRunClearing() {
+  startFlowFromNodeCard({
+    start: () => {
+      interact.mode.startClearingFlow()
     },
   })
 }
@@ -671,6 +700,9 @@ watch(interactPhase, (phase) => {
         :state="interact.mode.state"
         :unit="effectiveEq"
         :available-capacity="interact.mode.availableCapacity.value"
+        :trustlines-loading="trustlinesLoading"
+        :payment-to-target-ids="paymentToTargetIds"
+        :trustlines="trustlines"
         :participants="interact.mode.participants.value"
         :busy="interact.mode.busy.value"
         :can-send-payment="interact.mode.canSendPayment.value"
@@ -735,6 +767,7 @@ watch(interactPhase, (phase) => {
       :close="interact.mode.cancel"
       @change-limit="onEdgeDetailChangeLimit"
       @close-line="onEdgeDetailCloseLine"
+      @send-payment="onEdgeDetailSendPayment"
     />
 
     <NodeCardOverlay
@@ -754,6 +787,7 @@ watch(interactPhase, (phase) => {
       :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
       :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
       :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
+      :on-interact-run-clearing="isInteractUi ? onInteractRunClearing : undefined"
       @close="setNodeCardOpen(false)"
     />
 
@@ -819,6 +853,12 @@ watch(interactPhase, (phase) => {
     <DevPerfOverlay :enabled="showPerfOverlay" :perf="perf" />
 
     <!-- BUG-6: Error toast for Interact Mode (auto-dismiss 4s). -->
+    <SuccessToast
+      v-if="isInteractUi"
+      :message="interact.mode.successMessage"
+      @dismiss="interact.mode.successMessage.value = null"
+    />
+
     <ErrorToast
       v-if="isInteractUi"
       :message="interact.mode.state.error"

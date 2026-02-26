@@ -1,7 +1,7 @@
 import { computed, type ComputedRef, getCurrentScope, onScopeDispose, type Ref, shallowRef, watch } from 'vue'
 
 import type { GraphSnapshot } from '../types'
-import { parseAmountNumber } from '../utils/numberFormat'
+import { parseAmountNumberOrZero } from '../utils/numberFormat'
 import { isActiveStatus } from '../utils/status'
 
 export type SystemBalance = {
@@ -63,8 +63,8 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
     for (const l of snap.links ?? []) {
       if (!isActiveStatus((l as any)?.status)) continue
       activeTrustlines += 1
-      totalUsed += parseAmountNumber((l as any)?.used)
-      totalAvailable += parseAmountNumber((l as any)?.available)
+      totalUsed += parseAmountNumberOrZero((l as any)?.used)
+      totalAvailable += parseAmountNumberOrZero((l as any)?.available)
     }
 
     let activeParticipants = 0
