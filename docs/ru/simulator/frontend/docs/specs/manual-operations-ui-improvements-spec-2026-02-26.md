@@ -16,7 +16,7 @@
 Вспомогательные модули, затрагиваемые изменениями:
 - `useParticipantsList.ts` — сортировка и фильтрация dropdown-списков
 - `useInteractMode.ts` — state-machine Interact UI, `availableTargetIds`, `availableCapacity`
-- `useInteractDataCache.ts` — кэш participants/trustlines, `findActiveTrustline()`
+- [`simulator-ui/v2/src/composables/interact/useInteractDataCache.ts`](simulator-ui/v2/src/composables/interact/useInteractDataCache.ts:1) — кэш participants/trustlines, `findActiveTrustline()`
 - `interact/useInteractFSM.ts` — фазы FSM (`picking-payment-from`, `picking-payment-to`, `confirm-payment`, …)
 - `useDestructiveConfirmation.ts` — двухфазное подтверждение (arm → confirm) (v2)
 - `interact/useInteractHistory.ts` — лог действий (v2)
@@ -74,7 +74,7 @@ _«мы не вводим отдельный роутинг для экрано�
 Текущие панели (`ManualPaymentPanel`, `TrustlineManagementPanel`, `ClearingPanel`) уже реализуют
 полный жизненный цикл операций: picking → confirm → execute → idle.
 Они используют дизайн-токены (`ds-panel`, `ds-select`, `ds-btn-*`, `ds-alert-*`), единую систему
-позиционирования (`useOverlayPositioning`) и двухступенчатое подтверждение (`useDestructiveConfirmation`).
+позиционирования (см. [`overlayPosition.ts`](simulator-ui/v2/src/utils/overlayPosition.ts:1); в коде может встречаться как `useOverlayPositioning`, но это не отдельный composable-файл) и двухступенчатое подтверждение (`useDestructiveConfirmation`).
 Доработки **точечные**: добавить prop, расширить фильтрацию, вставить inline-help.
 Полная перерисовка (новый layout, другие компоненты форм, перенос в drawer/modal) —
 отдельная инициатива с собственным UX-обзором и выходит за рамки данной задачи.
@@ -142,7 +142,7 @@ Global keydown handler (`simulator-ui/v2/src/components/SimulatorAppRoot.vue`, �
 
 | # | Проблема | Где в коде | Эффект |
 |---|----------|-----------|--------|
-| B1 | **Update disabled при newLimit < used — без сообщения.** `updateValid` проверяет `newLimitNum >= usedNum`, но UI не объясняет ограничение. | `simulator-ui/v2/src/components/TrustlineManagementPanel.vue` (computed `updateValid`) | Кнопка Update серая — пользователь не понимает, что надо ввести >= used. |
+| B1 | **Update disabled при newLimit < used — без сообщения.** As-is `updateValid` включает: `trim()`/non-empty, `Number.isFinite`, порог `> 0`, и проверку `newLimitNum >= usedNum`. UI не объясняет, какое именно условие не выполнено. **Важно:** после продуктового решения TL-1a «limit допускает 0» потребуется пересмотреть валидатор (порог `> 0` → `>= 0`, если 0-limit принят). | `simulator-ui/v2/src/components/TrustlineManagementPanel.vue` (computed `updateValid`) | Кнопка Update серая — пользователь не понимает, что надо ввести >= used (или почему 0 сейчас не принимается). |
 | B2 | **Close TL не предупреждает при used > 0.** Backend вернёт `TRUSTLINE_HAS_DEBT` (409), но UI посылает запрос вслепую. | `simulator-ui/v2/src/components/TrustlineManagementPanel.vue` (action `confirmTrustlineClose` wiring + `useDestructiveConfirmation`), backend `app/api/v1/simulator.py` (`action_trustline_close`) | Пользователь получает неожиданную ошибку. |
 | B3 | **В create-flow To содержит участников, с которыми уже есть trustline.** `toParticipants` не учитывает существующие trustlines. | `simulator-ui/v2/src/components/TrustlineManagementPanel.vue` (create-flow To dropdown; сейчас использует `useParticipantsList`) | Попытка создать дубликат → backend ошибка. |
 | B4 | **newLimit pre-fill использует `props.currentLimit` (snapshot), а не `effectiveLimit` (backend-авторитетный).** Watcher реагирует на фазу, но берёт из props, а не из `effectiveData`. | `simulator-ui/v2/src/components/TrustlineManagementPanel.vue` (watch phase → set `newLimit`; `effectiveLimit` computed) | При stale-snapshot в newLimit pre-fill может быть старое значение. |
@@ -474,7 +474,7 @@ const confirmDisabledReason = computed<string | null>(() => {
 MUST (уточнение as-is для корректности): сейчас `ManualPaymentPanel` делает локальную валидацию через `Number()` и отправляет raw string (см. A6/A7). Требование MP-4/UX-8 заменяет это на модель: parse+normalize → вычисления и отправка только normalized.
 
 ```vue
-<div v-if="isConfirm && confirmDisabledReason" class="ds-help ds-help--warn" data-testid="mp-confirm-reason">
+<div v-if="isConfirm && confirmDisabledReason" class="ds-help" data-testid="mp-confirm-reason">
   {{ confirmDisabledReason }}
 </div>
 ```
@@ -599,7 +599,7 @@ const closeBlocked = computed(() => {
 ```
 
 ```vue
-<div v-if="isEdit && closeBlocked" class="ds-help ds-help--warn" data-testid="tl-close-blocked">
+<div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-blocked">
   Cannot close: outstanding debt {{ renderOrDash(effectiveUsed) }} {{ unit }}.
 </div>
 <button ... :disabled="busy || closeBlocked" @click="onClose">
@@ -670,7 +670,6 @@ watch(
 <template v-if="isConfirm">
   <div v-if="busy" class="ds-help cp-loading">
     Running clearing…
-    <span class="ds-spinner" aria-label="Loading" />
   </div>
   <div v-else class="ds-help">This will run a clearing cycle in backend.</div>
   ...
@@ -723,7 +722,7 @@ const closeBlocked = computed(() => {
 
 ```vue
 <!-- В popup__actions, перед кнопкой Close line: -->
-<div v-if="closeBlocked" class="ds-help ds-help--warn popup__close-warn" data-testid="edge-close-blocked">
+<div v-if="closeBlocked" class="ds-alert ds-alert--warn ds-mono popup__close-warn" data-testid="edge-close-blocked">
   Debt: {{ renderOrDash(used) }} {{ unit }}
 </div>
 <button
@@ -755,9 +754,9 @@ const utilizationPct = computed(() => {
 const utilizationColor = computed(() => {
   const p = utilizationPct.value
   // IMPORTANT: use design-system tokens only (no new hard-coded colors).
-  if (p >= 85) return 'var(--ds-danger)'
-  if (p >= 60) return 'var(--ds-warning)'
-  return 'var(--ds-success)'
+  if (p >= 85) return 'var(--ds-err)'
+  if (p >= 60) return 'var(--ds-warn)'
+  return 'var(--ds-ok)'
 })
 ```
 
@@ -865,7 +864,7 @@ IN trustlines имеют пустой placeholder `<span class="nco-trustline-ro
 **Требуемое поведение (упрощено для кросс-браузерности и минимального риска):**
 - Если `Number.isFinite(avail)` и `avail <= 0`: добавить class `nco-trustline-row--saturated`.
 - Unknown/invalid `available` (неfinite/`NaN`) **не считается saturated** и не должен окрашивать строку.
-- Стиль: левый бордер `2px solid var(--ds-danger)`.
+- Стиль: левый бордер `2px solid var(--ds-err)`.
 
 Примечание:
 - Дополнительный warning-уровень (< 15% available) и фоновая заливка через `color-mix()` не требуются в рамках текущей итерации.
@@ -971,7 +970,7 @@ const effectiveDismissMs = computed(() => {
 Стиль SuccessToast:
 - Использовать только существующие дизайн-токены / примитивы DS (без новых хардкод-цветов).
 - Вариант A (предпочтительно): стилизация через `ds-alert ds-alert--ok` (см. `simulator-ui/v2/src/dev/DesignSystemDemoApp.vue`) + позиционирование как у `ErrorToast`.
-- Вариант B: фон через токен `var(--ds-success)` / аналогичный токен темы, если он определён в DS.
+- Вариант B: фон через токен `var(--ds-ok)` / аналогичный токен темы, если он определён в DS.
 
 DS-consistency:
 - `ErrorToast.vue` (см. `simulator-ui/v2/src/components/ErrorToast.vue`) уже является частичным исключением по стилизации (не полностью DS).
@@ -1038,7 +1037,7 @@ Dropdowns фильтруются на клиенте по уже загруже�
 
 ### UX-3. Минимальные изменения интерфейса
 - Все изменения внутри существующих `<template>` секций.
-- Используются существующие CSS-классы: `ds-help`, `ds-help--warn`, `ds-alert--warn`, `ds-mono`.
+- Используются существующие CSS-классы: `ds-help`, `ds-alert ds-alert--warn`, `ds-mono` (класс `ds-help--warn` не существует).
 - Не создаются новые оверлеи, модальные окна или страницы.
 - Единственный новый компонент: `SuccessToast.vue` (аналог существующего `ErrorToast.vue`).
 
@@ -1400,7 +1399,7 @@ Backend (rationale):
 
 | Req | Файлы | Оценка |
 |-----|-------|--------|
-| **UX-8 helpers**: strict `parseAmountNumber()` + `parseAmountNumberOrZero()` + `parseAmountStringOrNull()`; обновить тесты | `simulator-ui/v2/src/utils/numberFormat.ts`, `simulator-ui/v2/src/utils/numberFormat.test.ts` | XS |
+| **UX-8 helpers**: сделать strict `parseAmountNumber()` + добавить `parseAmountNumberOrZero()` + привести **существующую** `parseAmountStringOrNull()` к контракту (и обновить/добавить тесты) | `simulator-ui/v2/src/utils/numberFormat.ts`, `simulator-ui/v2/src/utils/numberFormat.test.ts` | XS |
 | **MP-0** (обязательный tri-state wiring из root) | `SimulatorAppRoot.vue` | XS |
 | **MP-1** (фильтрация To) | `useParticipantsList.ts`, `ManualPaymentPanel.vue`, `SimulatorAppRoot.vue` | S |
 | **MP-1a** (исправление вычисления `availableTargetIds` + tri-state; адаптация canvas pipeline consumers, т.к. теперь `Set \| undefined`) | `useInteractMode.ts`, `SimulatorAppRoot.vue`, `useSimulatorApp.ts` | S |
