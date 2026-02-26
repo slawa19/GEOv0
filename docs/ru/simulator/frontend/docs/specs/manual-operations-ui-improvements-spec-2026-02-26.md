@@ -44,7 +44,7 @@
 | **available capacity** | Для trustline `from → to`: `limit − used`. Каждая единица capacity = возможность провести 1 ед. платежа **от to к from**. |
 | **reachable To** | Получатель B достижим из отправителя A, если существует хотя бы один активный trustline `B → A` с `available > 0` (direct hop) **или** существует multi-hop path, по которому можно провести платёж (capacity > 0). |
 | **picking phase** | Фаза FSM, в которой пользователь выбирает узел (canvas click или dropdown): `picking-payment-from`, `picking-payment-to`, `picking-trustline-from`, `picking-trustline-to`. |
-| **availableTargetIds** | `Set<string> \| undefined` — tri-state список доступных целей (для canvas-подсветки и фильтрации dropdown). Семантика фиксируется как единая для всего документа: `undefined` = **unknown** (trustlines ещё не загружены или идёт обновление); `Set.size > 0` = **known-nonempty**; `Set.size === 0` = **known-empty** (доступных целей нет). **Важно (MUST):** `availableTargetIds` больше не гарантированно `Set` (может быть `undefined`). В коде это выражается как смена типа computed targets с `ComputedRef<Set<string>>` на `ComputedRef<Set<string> | undefined>` (см. MP-1a). **Важно (as-is баг, MUST-фикс):** текущая реализация имеет fallback «показать всех» при пустом `Set` и не проверяет `available > 0`, что ломает смысл **known-empty**; это считается багом и исправляется требованиями MP-1a + MP-0 wiring tri-state (см. MP-1/MP-6). |
+| **availableTargetIds** | `Set<string> \| undefined` — tri-state список доступных целей (для canvas-подсветки и фильтрации dropdown). Семантика фиксируется как единая для всего документа: `undefined` = **unknown** (trustlines ещё не загружены или идёт обновление); `Set.size > 0` = **known-nonempty**; `Set.size === 0` = **known-empty** (доступных целей нет). **Важно (MUST):** `availableTargetIds` больше не гарантированно `Set` (может быть `undefined`). В коде это выражается как смена типа computed targets с `ComputedRef<Set<string>>` на `ComputedRef<Set<string> | undefined>` (см. MP-1a). Это затрагивает не только панели, но и canvas pipeline: as-is потребители (например, `useSimulatorApp.ts`) ожидают `Set` всегда и делают `.size`/итерации — после смены типа они обязаны обрабатывать `undefined` отдельно. **Важно (as-is баг, MUST-фикс):** текущая реализация имеет fallback «показать всех» при пустом `Set` и не проверяет `available > 0`, что ломает смысл **known-empty**; это считается багом и исправляется требованиями MP-1a + MP-0 wiring tri-state (см. MP-1/MP-6). |
 | **available targets tri-state (wiring)** | Parent-компонент обязан **пробрасывать `availableTargetIds = undefined`, пока `trustlinesLoading === true`**, а когда загрузка завершена — пробрасывать реальный `Set` (включая пустой). Это исключает двусмысленность «пусто потому что не загружено» и синхронизирует dropdown и canvas. |
 
 ## 3. Scope / Non-goals
@@ -277,12 +277,13 @@ const { participantsSorted, toParticipants } = useParticipantsList<ParticipantIn
 })
 ```
 
-Template `ManualPaymentPanel.vue` (UX):
+ Template `ManualPaymentPanel.vue` (UX):
 - Phase 1 использует **direct-hop approximation** при вычислении `availableTargetIds` (см. MP-1a) и может скрывать multi-hop достижимые цели (см. §7.2).
-- Phase 2.5+ (backend-first, §7.2): `availableTargetIds` строится по ответу `payment-targets` и является авторитетным по достижимости (multi-hop).
-- если `state.fromPid` выбран, `availableTargetIds` задан и `availableTargetIds.size === 0` (known-empty), показывать help:
-  - Phase 1 (direct-only): `No direct routes available (direct trustlines only). Multi-hop routes may exist but are not shown.`
-  - Phase 2.5+ (backend-first): `Backend reports no payment routes from selected sender.`
+- Это осознанный продуктовый компромисс: **Phase 1 может скрывать валидные multi-hop действия до Phase 2.5** (backend-first targets, §7.2). Это не означает, что платёж в backend невозможен.
+ - Phase 2.5+ (backend-first, §7.2): `availableTargetIds` строится по ответу `payment-targets` и является авторитетным по достижимости (multi-hop).
+ - если `state.fromPid` выбран, `availableTargetIds` задан и `availableTargetIds.size === 0` (known-empty), показывать help:
+   - Phase 1 (direct-only): `No direct routes available (direct trustlines only). Multi-hop routes may exist but are not shown.`
+   - Phase 2.5+ (backend-first): `Backend reports no payment routes from selected sender.`
 - если `availableTargetIds === undefined` (unknown), показывать `(updating…)` рядом с To и help:
   `Routes are updating; the list may include unreachable recipients.`
 
@@ -302,6 +303,7 @@ Template `ManualPaymentPanel.vue` (UX):
 - Это затрагивает всех consumers на canvas/highlight и в dropdown, которые раньше ожидали `Set` всегда:
   - они обязаны обрабатывать `undefined` отдельно
   - fallback «подсветить всех кроме from» разрешён **только** когда `availableTargetIds === undefined`.
+  - важно: текущий canvas pipeline (например, в `useSimulatorApp.ts`) as-is делает `.size` и итерации по `availableTargetIds`; после смены типа это должно стать `availableTargetIds?.size`/guard + fallback только для unknown.
 
 **Требуемое поведение:**
 - `availableTargetIds` возвращается как tri-state `Set<string> | undefined`:
@@ -1051,6 +1053,7 @@ Dropdowns фильтруются на клиенте по уже загруже�
   Семантика зависит от источника targets:
   - Phase 1 (direct-hop по trustlines): **нет direct targets по текущему snapshot trustlines (best-effort)**.
     Это **не** является гарантией невозможности платежа в backend (multi-hop route может существовать), и не является строгим error-state загрузки.
+    Это осознанный продуктовый компромисс до Phase 2.5 (backend-first targets, §7.2).
   - Phase 2.5+ (backend-first по payment-targets): **backend сообщает, что маршрутов нет**.
     Это является авторитетной оценкой достижимости в рамках заданных guardrails endpoint (см. §7.2).
   Если потребуется различать «реально пусто» vs «не удалось загрузить» — это отдельная доработка кэша (out-of-scope для текущей итерации UX).
@@ -1081,7 +1084,7 @@ Backend требует строгий формат десятичной стро
 Frontend обязан нормализовать и валидировать ввод через helper `parseAmountStringOrNull()` в `simulator-ui/v2/src/utils/numberFormat.ts`, чтобы:
 - **обязательно** делать `trim()` (backend отклоняет leading/trailing whitespace)
 - принимать запятую как пользовательский ввод десятичного разделителя и **нормализовать её в точку** перед отправкой (эквивалентно `raw.trim().replaceAll(',', '.')` перед отправкой)
-- гарантировать, что в запрос уходит строка, совместимая с `parse_amount_decimal()`
+- гарантировать, что в запрос уходит строка, совместимая с `parse_amount_decimal()` (regex: `^\d+(?:\.\d+)?$`)
 
 Продуктовое решение (фиксируем для консистентности с backend):
 - payment `amount` должен быть **строго > 0**
@@ -1099,12 +1102,21 @@ Frontend обязан нормализовать и валидировать в�
 
 #### Контракты helper'ов чисел (обязательное)
 
+As-is (фиксируем, чтобы избежать путаницы при переходе):
+- текущий `parseAmountNumber()` фактически ведёт себя как **finite-or-0** (через `asFiniteNumber`): invalid/empty значения превращаются в `0`.
+
+To-be (требования Phase 1, см. CRIT-1 ниже):
+- `parseAmountNumber()` становится **strict** (invalid/empty → `NaN`), а для агрегаций вводится отдельный helper `parseAmountNumberOrZero()`.
+
 `parseAmountStringOrNull(v)` MUST:
 ```ts
 export function parseAmountStringOrNull(v: unknown): string | null {
   if (typeof v !== 'string') return null
   const s = String(v).trim().replaceAll(',', '.')
-  return s.length > 0 ? s : null
+  // MUST: совместимость с backend regex `^\d+(?:\.\d+)?$`
+  // (digits only, optional fractional part with dot; no whitespace; no exponent)
+  if (!/^\d+(?:\.\d+)?$/.test(s)) return null
+  return s
 }
 ```
 
@@ -1114,12 +1126,18 @@ export function parseAmountStringOrNull(v: unknown): string | null {
 Нормативное правило использования по всему коду/спеке:
 - перед любым сравнением/делением `parseAmountNumber(x)` нужно проверять `Number.isFinite(n)`.
 
+Implementation guardrail (MUST, коротко):
+- сравнения/валидации/UI-guards → strict `parseAmountNumber()` + `Number.isFinite()`
+- суммы/графики/метрики → `parseAmountNumberOrZero()`
+
 CRIT-1 (MUST): миграция агрегаций, чтобы strict `parseAmountNumber()` не порождал `NaN`-регресс
 
 Если `parseAmountNumber()` становится strict (invalid → `NaN`), то callsite'ы, которые **агрегируют/суммируют** значения,
 могут начать накапливать `NaN` (пример: вычисления system balance / агрегированные суммы).
 
-Пример риска (as-is): агрегации в `simulator-ui/v2/src/composables/useSystemBalance.ts` содержат суммирование значений; если хотя бы одно значение станет `NaN`, итоговые вычисления будут `NaN` и UI/графики могут сломаться.
+Пример риска (as-is критичный callsite): агрегации в `simulator-ui/v2/src/composables/useSystemBalance.ts` содержат суммирование значений; если хотя бы одно значение станет `NaN`, итоговые вычисления будут `NaN` и UI/графики могут сломаться.
+
+Почему важно зафиксировать as-is: пока `parseAmountNumber()` ведёт себя как finite-or-0, такие агрегации «случайно безопасны» (invalid превращается в 0). После перехода на strict это перестаёт быть верным и требует явной миграции агрегаций на `parseAmountNumberOrZero()`.
 
 Чтобы исключить скрытые регрессии UI/графиков, MUST ввести и применять отдельный helper finite-or-0:
 
@@ -1160,7 +1178,7 @@ export function parseAmountNumberOrZero(v: unknown): number {
 | Источник | Поля | Где используется |
 |----------|------|------------------|
 | `GET .../participants` → `ParticipantInfo[]` | `pid, name, type, status` | FROM/TO dropdowns |
-| `GET /simulator/runs/{run_id}/actions/trustlines-list` → `TrustlineInfo[]` | `from_pid, to_pid, limit, used, reverse_used, available, status` | Фильтрация To, capacity label, close warning/guard |
+| `GET /simulator/runs/{run_id}/actions/trustlines-list` → `TrustlineInfo[]` | Phase 1: `from_pid, to_pid, limit, used, available, status`<br>Phase 2 (to-be): + `reverse_used` | Фильтрация To, capacity label, close warning/guard |
 | `availableTargetIds` (computed, `useInteractMode.ts`) | `Set<string> \| undefined` | Фильтрация To-dropdown и canvas-подсветка (tri-state: `undefined` = unknown) |
 | `availableCapacity` (computed, `useInteractMode.ts`) | `string \| null` | Confirm-шаг: показ лимита |
 
@@ -1385,7 +1403,7 @@ Backend (rationale):
 | **UX-8 helpers**: strict `parseAmountNumber()` + `parseAmountNumberOrZero()` + `parseAmountStringOrNull()`; обновить тесты | `simulator-ui/v2/src/utils/numberFormat.ts`, `simulator-ui/v2/src/utils/numberFormat.test.ts` | XS |
 | **MP-0** (обязательный tri-state wiring из root) | `SimulatorAppRoot.vue` | XS |
 | **MP-1** (фильтрация To) | `useParticipantsList.ts`, `ManualPaymentPanel.vue`, `SimulatorAppRoot.vue` | S |
-| **MP-1a** (исправление вычисления `availableTargetIds` + tri-state) | `useInteractMode.ts`, `SimulatorAppRoot.vue` | S |
+| **MP-1a** (исправление вычисления `availableTargetIds` + tri-state; адаптация canvas pipeline consumers, т.к. теперь `Set \| undefined`) | `useInteractMode.ts`, `SimulatorAppRoot.vue`, `useSimulatorApp.ts` | S |
 | **MP-1b** (reset выбранного To при refresh) | `ManualPaymentPanel.vue` | XS |
 | **MP-2** (capacity в dropdown) | `ManualPaymentPanel.vue`, `SimulatorAppRoot.vue` | S |
 | **MP-4** (причина disabled) | `ManualPaymentPanel.vue` | XS |
