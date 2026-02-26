@@ -18,19 +18,33 @@ export function parseAmountNumber(v: unknown): number {
 }
 
 /**
- * Parses amount-like values (API/snapshot/UI) into a trimmed non-empty string.
+ * Parses amount-like values (API/snapshot/UI) into a normalized string compatible with backend parsing.
  *
+ * Rules:
  * - null/undefined -> null
- * - finite number -> String(number)
- * - string -> trimmed string if non-empty, else null
+ * - finite number -> String(number), but rejects exponent form (e/E)
+ * - string -> trim, normalize ',' -> '.', then validate `^\d+(?:\.\d+)?$`
  * - other types -> null
+ *
+ * Notes:
+ * - Backend `parse_amount_decimal` does NOT accept commas or exponent.
+ * - This helper is intentionally strict to avoid submitting values the backend will reject.
  */
 export function parseAmountStringOrNull(v: unknown): string | null {
   if (v == null) return null
-  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : null
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return null
+    const s = String(v)
+    if (/[eE]/.test(s)) return null
+    return s
+  }
   if (typeof v === 'string') {
     const s = v.trim()
-    return s ? s : null
+    if (!s) return null
+    const normalized = s.replaceAll(',', '.')
+    if (/[eE\s]/.test(normalized)) return null
+    if (!/^\d+(?:\.\d+)?$/.test(normalized)) return null
+    return normalized
   }
   return null
 }
