@@ -326,11 +326,13 @@ describe('useInteractMode', () => {
     expect(im.phase.value).toBe('picking-payment-from')
   })
 
-  it('availableTargetIds is undefined in idle phase (no meaningful targets)', () => {
+  it('availableTargetIds is an empty Set in idle phase (undefined reserved for loading/unknown only)', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const im = useInteractMode({ actions: mkActions() as any, equivalent: computed(() => 'UAH'), snapshot })
 
-    expect(im.availableTargetIds.value).toBeUndefined()
+    const ids = im.availableTargetIds.value
+    expect(ids).toBeInstanceOf(Set)
+    expect((ids as Set<string>).size).toBe(0)
   })
 
   it('availableTargetIds is undefined in picking-payment-to while trustlinesLoading=true (unknown)', async () => {

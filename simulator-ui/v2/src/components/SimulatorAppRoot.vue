@@ -184,6 +184,7 @@ const paymentToTargetIds = computed<Set<string> | undefined>(() =>
   trustlinesLoading.value ? undefined : interact.mode.paymentToTargetIds.value,
 )
 const trustlines = computed(() => interact.mode.trustlines.value)
+const trustlinesLastError = computed(() => interact.mode.trustlinesLastError?.value ?? null)
 
 // LOW (L2): avoid calling a function directly from template.
 // This also gives Vue a chance to cache style until hoveredEdge/host changes.
@@ -703,6 +704,7 @@ watch(interactPhase, (phase) => {
         :trustlines-loading="trustlinesLoading"
         :payment-to-target-ids="paymentToTargetIds"
         :trustlines="trustlines"
+        :trustlines-last-error="trustlinesLastError"
         :participants="interact.mode.participants.value"
         :busy="interact.mode.busy.value"
         :can-send-payment="interact.mode.canSendPayment.value"

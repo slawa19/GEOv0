@@ -26,6 +26,9 @@ type Props = {
   paymentToTargetIds: Set<string> | undefined
   trustlines?: TrustlineInfo[]
 
+  /** Best-effort error signal: last trustlines refresh failure (if any). */
+  trustlinesLastError?: string | null
+
   /** Optional dropdown data (prefer backend-driven list from Interact Actions API). */
   participants?: ParticipantInfo[]
 
@@ -172,7 +175,13 @@ const toInlineHelpText = computed<string | null>(() => {
   const targets = dropdownToTargetIds.value
   if (targets === undefined) return 'Routes are updating; the list may include unreachable recipients.'
   if (targets.size === 0) {
-    return 'No direct routes available (direct trustlines only). Multi-hop routes may exist but are not shown.'
+    const base = 'No direct routes available (direct trustlines only). Multi-hop routes may exist but are not shown.'
+    if (props.trustlinesLastError) return `${base} (Routes update failed; data may be stale.)`
+    return base
+  }
+
+  if (props.trustlinesLastError) {
+    return 'Routes update failed; showing fallback data. Some recipients may be missing.'
   }
   return null
 })

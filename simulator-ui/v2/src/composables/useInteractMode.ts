@@ -48,6 +48,8 @@ export function useInteractMode(opts: {
   trustlines: ComputedRef<TrustlineInfo[]>
   /** True while a trustlines fetch is in-flight (best-effort). */
   trustlinesLoading: ComputedRef<boolean>
+  /** Best-effort error signal for trustlines refresh failures (UI may show a degraded hint). */
+  trustlinesLastError: ComputedRef<string | null>
   availableCapacity: ComputedRef<string | null>
   /** BUG-4: node IDs that should be highlighted as available targets in the current picking phase. */
   availableTargetIds: ComputedRef<Set<string> | undefined>
@@ -107,6 +109,7 @@ export function useInteractMode(opts: {
   const participants = dataCache.participants
   const trustlines = dataCache.trustlines
   const trustlinesLoading = dataCache.trustlinesLoading
+  const trustlinesLastError = dataCache.trustlinesLastError
   const refreshParticipants = dataCache.refreshParticipants
   const refreshTrustlines = dataCache.refreshTrustlines
   const invalidateTrustlinesCache = dataCache.invalidateTrustlinesCache
@@ -150,27 +153,11 @@ export function useInteractMode(opts: {
   const availableTargetIds = computed<Set<string> | undefined>(() => {
     const phase = state.phase
 
-    // picking-payment-to: highlight nodes that have a trustline `to -> fromPid`
-    if (phase === 'picking-payment-to' && state.fromPid) {
-      // Phase-1 tri-state contract:
-      //  - `undefined` => unknown (trustlines still loading)
-      //  - `Set` (incl. empty) => known
-      if (trustlinesLoading.value) return undefined
-
-      const ids = new Set<string>()
-      for (const tl of trustlines.value) {
-        if (tl.to_pid !== state.fromPid) continue
-        if (!isActiveStatus(tl.status)) continue
-
-        const available = parseAmountNumber(tl.available)
-        if (!Number.isFinite(available) || available <= 0) continue
-
-        // For payment `from -> to`, capacity is defined by trustline `to -> from`.
-        // So, in picking-payment-to we highlight `tl.from_pid` when `tl.to_pid === fromPid`.
-        ids.add(tl.from_pid)
-      }
-      // IMPORTANT: no fallback here. Empty Set is a valid known-state.
-      return ids
+    // picking-payment-to: highlight the same targets as the To dropdown.
+    if (phase === 'picking-payment-to') {
+      // Tri-state contract: `undefined` strictly means unknown/loading.
+      // Known-empty is represented as an empty Set (no fallback).
+      return paymentToTargetIds.value
     }
 
     // picking-trustline-to: highlight all participants except fromPid
@@ -190,7 +177,8 @@ export function useInteractMode(opts: {
     }
 
     // Outside picking phases: no meaningful targets for highlight.
-    return undefined
+    // Keep semantics strict: `undefined` is reserved for unknown/loading only.
+    return new Set<string>()
   })
 
   function computeDirectHopPaymentToTargets(fromPidRaw: string): Set<string> {
@@ -498,6 +486,7 @@ export function useInteractMode(opts: {
     participants,
     trustlines,
     trustlinesLoading,
+    trustlinesLastError,
     availableCapacity,
     availableTargetIds,
     paymentToTargetIds,

@@ -18,6 +18,7 @@ export function useInteractDataCache(opts: {
   participants: ComputedRef<ParticipantInfo[]>
   trustlines: ComputedRef<TrustlineInfo[]>
   trustlinesLoading: ComputedRef<boolean>
+  trustlinesLastError: ComputedRef<string | null>
   refreshParticipants: (o?: { force?: boolean }) => Promise<void>
   refreshTrustlines: (o?: { force?: boolean }) => Promise<void>
   invalidateTrustlinesCache: (eq?: string) => void
@@ -67,6 +68,8 @@ export function useInteractDataCache(opts: {
 
   const trustlinesLoadingRef = ref(false)
   let trustlinesLoadingCount = 0
+
+  const trustlinesLastErrorRef = ref<string | null>(null)
 
   const trustlines = computed(() => {
     const eq = normalizeEq(opts.equivalent.value)
@@ -151,9 +154,12 @@ export function useInteractDataCache(opts: {
         fetchedTrustlines.value = items
         fetchedTrustlinesEq.value = eq
         trustlinesFetchedAtMs = now
+        trustlinesLastErrorRef.value = null
       }
-    } catch {
-      // ignore (fallback on snapshot)
+    } catch (e: any) {
+      // Best-effort: fall back on snapshot-derived trustlines.
+      // Keep a lightweight error signal for UI hints/debugging.
+      trustlinesLastErrorRef.value = String(e?.message ?? e ?? 'Trustlines refresh failed')
     } finally {
       trustlinesLoadingCount = Math.max(0, trustlinesLoadingCount - 1)
       trustlinesLoadingRef.value = trustlinesLoadingCount > 0
@@ -161,6 +167,7 @@ export function useInteractDataCache(opts: {
   }
 
   const trustlinesLoading = computed(() => trustlinesLoadingRef.value)
+  const trustlinesLastError = computed(() => trustlinesLastErrorRef.value)
 
   function findActiveTrustline(from: string | null, to: string | null): TrustlineInfo | null {
     if (!from || !to) return null
@@ -233,6 +240,7 @@ export function useInteractDataCache(opts: {
     participants,
     trustlines,
     trustlinesLoading,
+    trustlinesLastError,
     refreshParticipants,
     refreshTrustlines,
     invalidateTrustlinesCache,

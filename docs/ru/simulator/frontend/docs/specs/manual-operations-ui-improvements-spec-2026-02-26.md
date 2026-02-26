@@ -1467,12 +1467,17 @@ Backend (rationale):
 ## 12. Definition of done
 
 ### Phase 1
-- [ ] Реализованы: MP-0, MP-1, MP-1a, MP-1b, MP-2, MP-4, MP-5, MP-6, MP-6a, TL-1, TL-4, CL-1, ED-1, FB-3, UX-9 (частично: MP aria-describedby).
-- [ ] Пройдены unit-тесты: `useParticipantsList` фильтрация + fallback, capacity map, disabled reason.
-- [ ] Пройдены component-тесты: ManualPaymentPanel, TrustlineManagementPanel, ClearingPanel, EdgeDetailPopup, ActionBar.
-- [ ] `npm run typecheck` проходит без ошибок в `simulator-ui/v2`.
-- [ ] `npm run test:unit` проходит без ошибок в `simulator-ui/v2`.
+- [x] Реализованы: MP-0, MP-1, MP-1a, MP-1b, MP-2, MP-4, MP-5, MP-6, MP-6a, TL-1, TL-4, CL-1, ED-1, FB-3, UX-9 (частично: MP aria-describedby).
+- [x] Пройдены unit-тесты: `useParticipantsList` фильтрация + fallback, capacity map, disabled reason.
+- [x] Пройдены component-тесты: ManualPaymentPanel, TrustlineManagementPanel, ClearingPanel, EdgeDetailPopup, ActionBar.
+- [x] `npm run typecheck` проходит без ошибок в `simulator-ui/v2`.
+- [x] `npm run test:unit` проходит без ошибок в `simulator-ui/v2`.
 - [ ] Визуальная проверка: запустить full stack с greenfield-village-100, выполнить ручной платёж — список To отфильтрован, capacity видна.
+
+Примечание (фактический статус реализации): некоторые пункты из следующих фаз уже реализованы раньше плана (без изменения backend API):
+- ED-2 (utilization bar в EdgeDetailPopup)
+- ED-3 (Send Payment shortcut в EdgeDetailPopup)
+- FB-1 (SuccessToast)
 
 ### Phase 2
 - [ ] Реализованы: MP-3, TL-2, TL-3, NC-1, NC-2, NC-3, NC-4, ED-2, FB-1, FB-2.
