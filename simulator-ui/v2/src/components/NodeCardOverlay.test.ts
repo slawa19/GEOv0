@@ -131,7 +131,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     })
     await nextTick()
 
-    const editBtn = host.querySelector('button[aria-label="Edit trustline"]') as HTMLButtonElement | null
+    const editBtn = host.querySelector('button[aria-label="Edit trustline (set by Bob)"]') as HTMLButtonElement | null
     expect(editBtn).toBeTruthy()
 
     editBtn?.click()
@@ -168,7 +168,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     const avail = host.querySelector('.nco-trustline-row__avail') as HTMLElement | null
     expect(avail).toBeTruthy()
     expect(avail?.classList.contains('ds-mono')).toBe(true)
-    expect((avail?.textContent ?? '').trim()).toBe(fmtAmt('9.00'))
+    expect((avail?.textContent ?? '').trim()).toBe(`avail: ${fmtAmt('9.00')}`)
 
     app.unmount()
     host.remove()

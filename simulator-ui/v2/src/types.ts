@@ -33,6 +33,8 @@ export type GraphLink = {
   target: string
   trust_limit?: string | number
   used?: string | number
+  /** Debt in reverse direction (Phase 2: from trustlines-list API). */
+  reverse_used?: string | number
   available?: string | number
   status?: string
   viz_color_key?: string | null

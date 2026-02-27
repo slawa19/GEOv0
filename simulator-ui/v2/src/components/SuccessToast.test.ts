@@ -123,4 +123,71 @@ describe('SuccessToast', () => {
     app.unmount()
     host.remove()
   })
+
+  it('unmount clears auto-dismiss timer', async () => {
+    vi.useFakeTimers()
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+
+      const msg = ref<string | null>('ok')
+      const onDismiss = vi.fn(() => {
+        msg.value = null
+      })
+
+      const app = createApp({
+        render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+      })
+
+      app.mount(host)
+      await nextTick()
+
+      app.unmount()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(onDismiss).toHaveBeenCalledTimes(0)
+
+      host.remove()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('manual dismiss clears timer (no later auto-dismiss)', async () => {
+    vi.useFakeTimers()
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+
+      const msg = ref<string | null>('ok')
+      const onDismiss = vi.fn(() => {
+        msg.value = null
+      })
+
+      const app = createApp({
+        render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+      })
+      app.mount(host)
+      await nextTick()
+
+      const btn = host.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+
+      // Dismiss early.
+      await vi.advanceTimersByTimeAsync(1000)
+      btn?.click()
+      await nextTick()
+
+      expect(onDismiss).toHaveBeenCalledTimes(1)
+
+      // Even if we advance past the original deadline, no extra dismiss happens.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(onDismiss).toHaveBeenCalledTimes(1)
+
+      app.unmount()
+      host.remove()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

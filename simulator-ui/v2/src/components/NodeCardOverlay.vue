@@ -207,7 +207,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.to_name }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">{{ fmtAmt(tl.available) }}</span>
+              <span class="nco-trustline-row__avail ds-mono">avail: {{ fmtAmt(tl.available) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
@@ -231,13 +231,13 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.from_name }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">{{ fmtAmt(tl.available) }}</span>
+              <span class="nco-trustline-row__avail ds-mono">avail: {{ fmtAmt(tl.available) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
                 :disabled="!!interactBusy"
-                title="Edit trustline"
-                aria-label="Edit trustline"
+                :title="`Edit trustline (set by ${tl.from_name || tl.from_pid})`"
+                :aria-label="`Edit trustline (set by ${tl.from_name || tl.from_pid})`"
                 @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
               >✏️</button>
             </div>

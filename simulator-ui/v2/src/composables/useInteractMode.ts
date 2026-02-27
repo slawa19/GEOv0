@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Reactive, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
@@ -61,11 +61,16 @@ export function useInteractMode(opts: {
   /** True while backend payment-targets query is in-flight for current (run, eq, fromPid, maxHops). */
   paymentTargetsLoading: ComputedRef<boolean>
 
+  /** Current payment-targets max_hops policy used by the UI (drives multi-hop reachability). */
+  paymentTargetsMaxHops: number
+
   /** Best-effort error signal for payment-targets refresh failures (UI may show a degraded hint). */
   paymentTargetsLastError: ComputedRef<string | null>
 
   // Flags
   busy: ComputedRef<boolean>
+  /** True when user cancelled an operation, but the in-flight promise has not settled yet. */
+  cancelling: ComputedRef<boolean>
   canSendPayment: ComputedRef<boolean>
   canCreateTrustline: ComputedRef<boolean>
 
@@ -86,13 +91,64 @@ export function useInteractMode(opts: {
   const CLEARING_PREVIEW_DWELL_MS = 800
   const CLEARING_RUNNING_DWELL_MS = 200
 
-  // Phase 2.5: multi-hop reachability budget for backend payment-targets.
-  const PAYMENT_TARGETS_MAX_HOPS = 6
+  // NOTE: payment targets are backend-first (Phase 2.5) and include multi-hop reachability.
+  // IMPORTANT: capacity shown in the UI is best-effort only (direct-hop hint).
+  // Backend remains the source of truth for amount feasibility.
+  //
+  // Phase 2.5 requirement: support max_hops 6/8.
+  // Policy:
+  // - default: 6 (aligns with routing defaults / guardrails)
+  // - optional: 8 (deeper search; may be more expensive)
+  //
+  // Gating:
+  // - URL param override: ?payMaxHops=6|8 (useful for manual QA)
+  // - Vite env override: VITE_PAYMENT_TARGETS_MAX_HOPS=6|8
+  const PAYMENT_TARGETS_MAX_HOPS_DEFAULT = 6
+  const PAYMENT_TARGETS_MAX_HOPS_DEEP = 8
+
+  function readPaymentTargetsMaxHopsFromUrl(): number | null {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const raw = String(sp.get('payMaxHops') ?? '').trim()
+      const n = Number(raw)
+      if (n === PAYMENT_TARGETS_MAX_HOPS_DEFAULT) return n
+      if (n === PAYMENT_TARGETS_MAX_HOPS_DEEP) return n
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  function readPaymentTargetsMaxHopsFromEnv(): number | null {
+    const raw = String((import.meta as any)?.env?.VITE_PAYMENT_TARGETS_MAX_HOPS ?? '').trim()
+    const n = Number(raw)
+    if (n === PAYMENT_TARGETS_MAX_HOPS_DEFAULT) return n
+    if (n === PAYMENT_TARGETS_MAX_HOPS_DEEP) return n
+    return null
+  }
+
+  const PAYMENT_TARGETS_MAX_HOPS =
+    readPaymentTargetsMaxHopsFromUrl() ?? readPaymentTargetsMaxHopsFromEnv() ?? PAYMENT_TARGETS_MAX_HOPS_DEFAULT
 
   const busyRef = ref(false)
 
   // FB-1: UI-level success toast (kept outside FSM so it doesn't affect phase logic).
   const successMessage = ref<string | null>(null)
+
+  const scheduleMicrotask: (fn: () => void) => void =
+    typeof queueMicrotask === 'function' ? queueMicrotask : (fn) => Promise.resolve().then(fn)
+
+  function setSuccessToastMessage(msg: string) {
+    // Ensure repeated identical messages still retrigger watchers/timers.
+    if (successMessage.value === msg) {
+      successMessage.value = null
+      scheduleMicrotask(() => {
+        successMessage.value = msg
+      })
+      return
+    }
+    successMessage.value = msg
+  }
 
   // Epoch that invalidates any in-flight async results.
   // Incremented:
@@ -105,6 +161,10 @@ export function useInteractMode(opts: {
   let busyOwnerEpoch: number | null = null
 
   const busy = computed(() => busyRef.value)
+
+  // P2.2: explicit UI signal when cancel was requested while an async action is in-flight.
+  const cancellingRef = ref(false)
+  const cancelling = computed(() => cancellingRef.value)
 
   // BUG-5: inline history log (last N actions)
   const { history, pushHistory } = useInteractHistory({ max: 20 })
@@ -173,14 +233,24 @@ export function useInteractMode(opts: {
     return !dataCache.paymentTargetsByKey.value.has(key)
   })
 
-  function prefetchPaymentTargetsForCurrentFrom() {
+  function prefetchPaymentTargetsForCurrentFrom(o?: { force?: boolean }) {
     const p = state.phase
     if (p !== 'picking-payment-to' && p !== 'confirm-payment') return
     const runId = normalizeRunId(opts.runId.value)
     const fromPid = normalizePid(state.fromPid)
     if (!runId || !fromPid) return
-    void refreshPaymentTargets({ fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
+    void refreshPaymentTargets({ fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS, ...(o?.force ? { force: true } : {}) })
   }
+
+  // Refresh policy: when the underlying graph snapshot changes (tick / new graph),
+  // revalidate payment targets for the current From (if the payment flow is active).
+  watch(
+    () => String(opts.snapshot.value?.generated_at ?? ''),
+    () => {
+      prefetchPaymentTargetsForCurrentFrom({ force: true })
+    },
+    { immediate: false },
+  )
 
   const availableCapacity = computed(() => {
     // Prefer backend trustlines list when present (can be more authoritative than snapshot).
@@ -192,8 +262,16 @@ export function useInteractMode(opts: {
   const canSendPayment = computed(() => {
     if (state.phase !== 'confirm-payment') return false
     if (!state.fromPid || !state.toPid || state.fromPid === state.toPid) return false
-    const cap = parseAmountNumber(availableCapacity.value)
-    return cap > 0
+
+    // In multi-hop mode, direct trustline capacity is NOT a hard gate.
+    // Gate only by backend-first reachability targets when known.
+    const targets = paymentToTargetIds.value
+    // Tri-state gating (Phase 2.5): allow confirm when reachability is unknown/degraded.
+    // NOTE: refreshPaymentTargets() stores an empty Set on error for deterministic UI;
+    // therefore we must also treat `paymentTargetsLastError` as degraded/unknown here.
+    if (targets === undefined) return true
+    if (paymentTargetsLastError.value) return true
+    return targets.has(state.toPid)
   })
 
   const canCreateTrustline = computed(() => {
@@ -212,6 +290,12 @@ export function useInteractMode(opts: {
 
     // picking-payment-to: highlight the same targets as the To dropdown.
     if (phase === 'picking-payment-to') {
+      // Keep canvas highlight consistent with dropdown tri-state wiring.
+      // - while trustlines are loading => unknown (dropdown shows degraded fallback)
+      // - when payment-targets refresh failed => unknown (dropdown shows degraded fallback)
+      // - otherwise: use backend-first targets (Set, incl. empty)
+      if (trustlinesLoading.value) return undefined
+      if (paymentTargetsLastError.value) return undefined
       // Tri-state contract: `undefined` strictly means unknown/loading.
       // Known-empty is represented as an empty Set (no fallback).
       return paymentToTargetIds.value
@@ -273,6 +357,12 @@ export function useInteractMode(opts: {
     // Invalidate any in-flight result (success/error) so it can't update state after cancel.
     epoch += 1
     fsm.resetToIdle()
+
+    // If an operation is still in-flight, expose a user-facing hint that cancellation is pending.
+    // This does NOT clear busy; busy is cleared only when the owning promise settles.
+    if (busyRef.value) {
+      cancellingRef.value = true
+    }
   }
 
   function startPaymentFlow() {
@@ -327,6 +417,9 @@ export function useInteractMode(opts: {
     if (busyRef.value) return undefined
     busyRef.value = true
 
+    // New operation: clear any stale cancelling flag.
+    cancellingRef.value = false
+
     epoch += 1
     const myEpoch = epoch
     busyOwnerEpoch = myEpoch
@@ -341,13 +434,25 @@ export function useInteractMode(opts: {
       return await fn({ isCurrent, resetToIdle })
     } catch (e: any) {
       // Don't leak errors into already-cancelled state.
-      if (isCurrent()) state.error = String(e?.message ?? e)
+      if (isCurrent()) {
+        const msg = String(e?.message ?? e)
+        // Ensure repeated identical errors still retrigger the ErrorToast timer.
+        if (state.error === msg) {
+          state.error = null
+          scheduleMicrotask(() => {
+            if (isCurrent()) state.error = msg
+          })
+        } else {
+          state.error = msg
+        }
+      }
       return undefined
     } finally {
       // Always clear `busy` when the owning promise settles, even if cancelled.
       if (busyOwnerEpoch === myEpoch) {
         busyRef.value = false
         busyOwnerEpoch = null
+        cancellingRef.value = false
       }
     }
   }
@@ -361,7 +466,7 @@ export function useInteractMode(opts: {
       await opts.actions.sendPayment(from, to, amount, opts.equivalent.value)
       if (!isCurrent()) return
 
-      successMessage.value = `Payment sent: ${amount} ${opts.equivalent.value}`
+      setSuccessToastMessage(`Payment sent: ${amount} ${opts.equivalent.value}`)
 
       // BUG-5: log to history
       pushHistory('💸', `Payment ${amount} ${opts.equivalent.value}: ${from} → ${to}`)
@@ -380,7 +485,7 @@ export function useInteractMode(opts: {
       await opts.actions.createTrustline(from, to, limit, opts.equivalent.value)
       if (!isCurrent()) return
 
-      successMessage.value = `Trustline created: ${from} → ${to}`
+      setSuccessToastMessage(`Trustline created: ${from} → ${to}`)
 
       // BUG-5: log to history
       pushHistory('🔗', `Trustline created: ${from} → ${to} (${limit})`)
@@ -399,7 +504,7 @@ export function useInteractMode(opts: {
       await opts.actions.updateTrustline(from, to, newLimit, opts.equivalent.value)
       if (!isCurrent()) return
 
-      successMessage.value = `Limit updated: ${newLimit} ${opts.equivalent.value}`
+      setSuccessToastMessage(`Limit updated: ${newLimit} ${opts.equivalent.value}`)
 
       // BUG-5: log to history
       pushHistory('✏️', `Trustline updated: ${from} → ${to} → limit ${newLimit}`)
@@ -421,7 +526,7 @@ export function useInteractMode(opts: {
       await opts.actions.closeTrustline(from, to, opts.equivalent.value)
       if (!isCurrent()) return
 
-      successMessage.value = `Trustline closed: ${from} → ${to}`
+      setSuccessToastMessage(`Trustline closed: ${from} → ${to}`)
 
       // BUG-5: log to history
       pushHistory('🗑️', `Trustline closed: ${from} → ${to}`)
@@ -548,7 +653,10 @@ export function useInteractMode(opts: {
     paymentTargetsLoading,
     paymentTargetsLastError,
 
+    paymentTargetsMaxHops: PAYMENT_TARGETS_MAX_HOPS,
+
     busy,
+    cancelling,
     canSendPayment,
     canCreateTrustline,
     isPickingPhase,
@@ -562,4 +670,6 @@ export function useInteractMode(opts: {
     history,
   }
 }
+
+
 

@@ -23,6 +23,9 @@ type Props = {
   /** Phase 2.5: tri-state wiring for backend payment-targets fetch. */
   paymentTargetsLoading: boolean
 
+  /** Phase 2.5: current max_hops policy used for backend payment-targets (6 default, 8 deep). */
+  paymentTargetsMaxHops?: number
+
   /** Best-effort error signal: last payment-targets refresh failure (if any). */
   paymentTargetsLastError?: string | null
   /**
@@ -100,6 +103,13 @@ const exceedsCapacity = computed(() => {
   return amountNum.value > availableNum.value
 })
 
+const confirmInlineWarning = computed<string | null>(() => {
+  if (props.busy) return null
+  if (!exceedsCapacity.value) return null
+  // Non-blocking warning: allow confirm, but set expectations.
+  return `Amount may exceed direct trustline capacity (${props.availableCapacity ?? '—'} ${props.unit}). Multi-hop may still succeed; backend will validate.`
+})
+
 const confirmDisabledReason = computed<string | null>(() => {
   // Spec: do not show reason while busy.
   if (props.busy) return null
@@ -112,15 +122,13 @@ const confirmDisabledReason = computed<string | null>(() => {
   const n = parseAmountNumber(amountNormalized.value)
   if (!(n > 0)) return 'Enter a positive amount.'
 
-  if (exceedsCapacity.value) {
-    // `availableCapacity` is a backend-sourced string; keep original formatting in UI message.
-    return `Amount exceeds available capacity (max: ${props.availableCapacity ?? '—'} ${props.unit}).`
-  }
+  // Phase 2.5 multi-hop: exceeding direct capacity must NOT block confirm.
+  // It is expressed as a non-blocking warning (see confirmInlineWarning).
 
   const from = (props.state.fromPid ?? '').trim()
   const to = (props.state.toPid ?? '').trim()
   if (from && to && props.canSendPayment === false) {
-    return 'No direct routes available between selected participants (direct trustlines only).'
+    return 'Backend reports no payment routes between selected participants.'
   }
 
   return null
@@ -137,6 +145,12 @@ const isConfirm = computed(() => props.phase === 'confirm-payment')
 const open = computed(() => isPickFrom.value || isPickTo.value || isConfirm.value)
 
 const routesLoading = computed(() => props.trustlinesLoading || props.paymentTargetsLoading)
+
+const paymentTargetsMaxHopsLabel = computed(() => {
+  const n = Number(props.paymentTargetsMaxHops)
+  if (!Number.isFinite(n) || !(n > 0)) return '—'
+  return String(Math.round(n))
+})
 
 /**
  * Dropdown-specific tri-state normalization.
@@ -225,13 +239,19 @@ const toInlineHelpText = computed<string | null>(() => {
     return null
   }
   if (targets.size === 0) {
-    return 'Backend reports no payment routes from selected sender.'
+    return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).`
   }
 
   if (props.trustlinesLastError) {
     return 'Routes update failed; showing fallback data. Some recipients may be missing.'
   }
   return null
+})
+
+// UX-10 (Phase 2): disable To-select when known-empty.
+const toKnownEmpty = computed(() => {
+  const targets = dropdownToTargetIds.value
+  return targets !== undefined && targets.size === 0
 })
 
 // UX-9: stable aria-describedby target for To select.
@@ -264,7 +284,7 @@ const capacityByToPid = computed<Map<string, string>>(() => {
 function toOptionLabel(p: ParticipantInfo): string {
   const pid = (p?.pid ?? '').trim()
   const cap = pid ? capacityByToPid.value.get(pid) : undefined
-  if (!cap) return `${participantLabel(p)} — …`
+  if (cap == null) return `${participantLabel(p)} — …`
   return `${participantLabel(p)} — ${cap} ${props.unit}`
 }
 
@@ -332,7 +352,7 @@ function onToChange(v: string) {
           id="mp-to"
           class="ds-select"
           :value="state.toPid ?? ''"
-          :disabled="busy || !state.fromPid"
+          :disabled="busy || !state.fromPid || toKnownEmpty"
           aria-label="To participant"
           aria-describedby="mp-to-help"
           @change="onToChange(($event.target as HTMLSelectElement).value)"
@@ -366,8 +386,12 @@ function onToChange(v: string) {
 
       <template v-if="isConfirm">
         <div class="ds-row ds-row--space">
-          <div class="ds-label">Available</div>
+          <div class="ds-label">Direct capacity</div>
           <div class="ds-value ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</div>
+        </div>
+
+        <div class="ds-help ds-muted" data-testid="mp-direct-capacity-help">
+          Direct capacity is a 1-hop hint. Recipients list is backend-routed (multi-hop, max hops: {{ paymentTargetsMaxHopsLabel }}).
         </div>
 
         <div class="ds-controls__row">
@@ -397,6 +421,9 @@ function onToChange(v: string) {
       <div v-if="isConfirm" id="mp-amount-help" class="mp-confirm-help">
         <div v-if="confirmDisabledReason" class="ds-help" data-testid="mp-confirm-reason">
           {{ confirmDisabledReason }}
+        </div>
+        <div v-else-if="confirmInlineWarning" class="ds-help" data-testid="mp-confirm-warning">
+          {{ confirmInlineWarning }}
         </div>
       </div>
 
@@ -452,5 +479,9 @@ function onToChange(v: string) {
   margin: 2px 0 0;
 }
 </style>
+
+
+
+
 
 

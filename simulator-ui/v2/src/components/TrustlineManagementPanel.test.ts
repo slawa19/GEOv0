@@ -147,7 +147,7 @@ describe('TrustlineManagementPanel', () => {
 
     const warn = host.querySelector('[data-testid="tl-close-blocked"]') as HTMLElement | null
     expect(warn).toBeTruthy()
-    expect((warn!.textContent ?? '').trim()).toContain('(1 EQ)')
+    expect((warn!.textContent ?? '').trim()).toContain('used: 1 EQ')
 
     app.unmount()
     host.remove()
@@ -201,6 +201,8 @@ describe('TrustlineManagementPanel', () => {
 
     const warn = host.querySelector('[data-testid="tl-close-blocked"]') as HTMLElement | null
     expect(warn).toBeTruthy()
+    expect((warn!.textContent ?? '').toLowerCase()).toContain('reverse')
+    expect(warn!.textContent ?? '').toContain('0.01')
 
     app.unmount()
     host.remove()
@@ -335,6 +337,60 @@ describe('TrustlineManagementPanel', () => {
 
     const optionsText = Array.from(toSelect!.querySelectorAll('option')).map((o) => (o.textContent ?? '').trim())
     expect(optionsText.some((t) => t.includes('(exists)'))).toBe(true)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('AC-TL-7: newLimit="0" with used="0" enables Update and sends "0"', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
+    const confirmTrustlineUpdate = vi.fn()
+
+    const app = createApp({
+      render: () =>
+        h(TrustlineManagementPanel as any, {
+          phase: 'editing-trustline',
+          state,
+          unit: 'EQ',
+          used: '0',
+          currentLimit: '10',
+          available: '10',
+          participants: [],
+          trustlines: [],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate,
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const input = host.querySelector('#tl-new-limit') as HTMLInputElement | null
+    expect(input).toBeTruthy()
+
+    input!.value = '0'
+    input!.dispatchEvent(new Event('input'))
+    await nextTick()
+
+    // Update button should be enabled (0 >= 0 used).
+    const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Update') as HTMLButtonElement | undefined
+    expect(btn).toBeTruthy()
+    expect(btn!.disabled).toBe(false)
+
+    // No limit-too-low warning.
+    const warn = host.querySelector('[data-testid="tl-limit-too-low"]') as HTMLElement | null
+    expect(warn).toBeNull()
+
+    // Click sends normalized "0".
+    btn!.click()
+    expect(confirmTrustlineUpdate).toHaveBeenCalledTimes(1)
+    expect(confirmTrustlineUpdate).toHaveBeenCalledWith('0')
 
     app.unmount()
     host.remove()

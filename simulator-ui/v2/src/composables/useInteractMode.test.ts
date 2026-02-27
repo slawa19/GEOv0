@@ -133,11 +133,13 @@ describe('useInteractMode', () => {
     expect(im.state.error).toBe(null)
     // chosen model: cancel doesn't clear busy while promise is in-flight
     expect(im.busy.value).toBe(true)
+    expect(im.cancelling.value).toBe(true)
 
     d.reject(new Error('boom'))
     await p
 
     expect(im.busy.value).toBe(false)
+    expect(im.cancelling.value).toBe(false)
     expect(im.phase.value).toBe('idle')
     expect(im.state.error).toBe(null)
   })
@@ -238,6 +240,50 @@ describe('useInteractMode', () => {
     expect(im.state.toPid).toBe('bob')
   })
 
+  it('successMessage is retriggered when the same toast text repeats (microtask reset)', async () => {
+    const origQueueMicrotask = (globalThis as any).queueMicrotask as ((fn: () => void) => void) | undefined
+    const scheduled: Array<() => void> = []
+    ;(globalThis as any).queueMicrotask = (fn: () => void) => {
+      scheduled.push(fn)
+    }
+
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+      ],
+      links: [{ source: 'alice', target: 'bob', used: '0.00', available: '10.00', status: 'active' }],
+    })
+
+    const actions = mkActions()
+    const runId = computed(() => 'run_test')
+    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+
+    try {
+      im.selectEdge('alice→bob')
+      await im.confirmTrustlineClose()
+
+      const msg = 'Trustline closed: alice → bob'
+      expect(im.successMessage.value).toBe(msg)
+
+      // Repeat the exact same success message.
+      im.selectEdge('alice→bob')
+      await im.confirmTrustlineClose()
+
+      // The repeated-message path clears to null, and schedules a microtask to set it back.
+      expect(im.successMessage.value).toBe(null)
+      expect(scheduled.length).toBeGreaterThanOrEqual(1)
+
+      // Flush scheduled microtasks manually.
+      while (scheduled.length) scheduled.shift()?.()
+      expect(im.successMessage.value).toBe(msg)
+    } finally {
+      ;(globalThis as any).queueMicrotask = origQueueMicrotask
+    }
+  })
+
   it('MP-6a: startPaymentFlow prefetches trustlines even when cache is warm', async () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()
@@ -260,6 +306,42 @@ describe('useInteractMode', () => {
 
     d2.resolve([])
     await Promise.resolve()
+  })
+
+  it('payment-targets: snapshot change forces refresh for current From (prevents forever-stale targets)', async () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+      ],
+      links: [],
+    })
+
+    const actions = mkActions()
+    actions.fetchPaymentTargets.mockResolvedValue([{ to_pid: 'bob', hops: 1 }] as any)
+
+    const runId = computed(() => 'run_test')
+    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    im.setPaymentFromPid('alice')
+
+    // allow async refreshPaymentTargets() to settle
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(actions.fetchPaymentTargets).toHaveBeenCalledTimes(1)
+
+    // New snapshot tick => must revalidate targets even if TTL would otherwise allow reuse.
+    snapshot.value = {
+      ...snapshot.value!,
+      generated_at: '2026-01-01T00:00:01Z',
+    }
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(actions.fetchPaymentTargets).toHaveBeenCalledTimes(2)
   })
 
   it('availableCapacity computed from snapshot link', () => {
@@ -454,4 +536,5 @@ describe('useInteractMode', () => {
     expect(im.phase.value).toBe('picking-payment-from')
   })
 })
+
 

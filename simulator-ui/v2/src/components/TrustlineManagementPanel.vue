@@ -123,6 +123,22 @@ const closeBlocked = computed(() => {
   return usedDebt || reverseDebt
 })
 
+const closeDebtText = computed(() => {
+  const used = parseAmountStringOrNull(effectiveUsed.value)
+  const reverse = parseAmountStringOrNull(effectiveReverseUsed.value)
+
+  const usedNum = parseAmountNumber(used)
+  const reverseNum = parseAmountNumber(reverse)
+
+  const usedDebt = Number.isFinite(usedNum) && usedNum > 0
+  const reverseDebt = Number.isFinite(reverseNum) && reverseNum > 0
+
+  if (usedDebt && reverseDebt) return `used: ${used ?? '—'} ${props.unit}, reverse: ${reverse ?? '—'} ${props.unit}`
+  if (usedDebt) return `used: ${used ?? '—'} ${props.unit}`
+  if (reverseDebt) return `reverse: ${reverse ?? '—'} ${props.unit}`
+  return `used: ${used ?? '—'} ${props.unit}`
+})
+
 const createValid = computed(() => {
   // Require From/To selection in create flow.
   const from = (props.state.fromPid ?? '').trim()
@@ -397,7 +413,7 @@ defineExpose({
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
 
       <div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-blocked">
-        Cannot close: trustline has outstanding debt ({{ renderOrDash(effectiveUsed) }} {{ unit }}). Reduce used to 0 first.
+        Cannot close: trustline has outstanding debt ({{ closeDebtText }}). Reduce debt to 0 first.
       </div>
 
       <div class="ds-row tl-actions">

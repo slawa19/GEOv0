@@ -1,4 +1,4 @@
-import { computed, createApp, h, nextTick, reactive, ref } from 'vue'
+import { computed, createApp, h, nextTick, reactive, ref, type Ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 // IMPORTANT: This test verifies conditional rendering in SimulatorAppRoot when the URL contains `ui=interact`.
@@ -49,6 +49,31 @@ vi.mock('../composables/useSimulatorApp', () => {
 
        const successMessage = ref<string | null>(null)
        ;(globalThis as any).__GEO_TEST_INTERACT_SUCCESS_MESSAGE = successMessage
+
+      const interactBusy = ref(false)
+      ;(globalThis as any).__GEO_TEST_INTERACT_BUSY_REF = interactBusy
+
+      const trustlinesLoading = ref(false)
+      ;(globalThis as any).__GEO_TEST_TRUSTLINES_LOADING_REF = trustlinesLoading
+
+      const paymentTargetsLoading = ref(false)
+      ;(globalThis as any).__GEO_TEST_PAYMENT_TARGETS_LOADING_REF = paymentTargetsLoading
+
+      const paymentTargetsLastError = ref<string | null>(null)
+      ;(globalThis as any).__GEO_TEST_PAYMENT_TARGETS_LAST_ERROR_REF = paymentTargetsLastError
+
+      const paymentToTargetIds = ref<Set<string> | undefined>(undefined)
+      ;(globalThis as any).__GEO_TEST_PAYMENT_TO_TARGET_IDS_REF = paymentToTargetIds
+
+      const interactState = reactive({
+        fromPid: 'alice',
+        toPid: 'bob',
+        selectedEdgeKey: null as string | null,
+        edgeAnchor: { x: 10, y: 10 },
+        error: '',
+        lastClearing: null as any,
+      })
+      ;(globalThis as any).__GEO_TEST_INTERACT_STATE = interactState
 
       const isInteractPickingPhase = computed(() => {
         if (!isInteractUi.value) return false
@@ -147,23 +172,16 @@ vi.mock('../composables/useSimulatorApp', () => {
           },
            mode: {
                phase,
-               busy: ref(false),
-               trustlinesLoading: ref(false),
-               paymentTargetsLoading: ref(false),
-               paymentTargetsLastError: ref<string | null>(null),
-               state: reactive({
-                  fromPid: 'alice',
-                  toPid: 'bob',
-                  selectedEdgeKey: null,
-                  edgeAnchor: { x: 10, y: 10 },
-                  error: '',
-                  lastClearing: null,
-                }),
+               busy: interactBusy,
+               trustlinesLoading,
+               paymentTargetsLoading,
+               paymentTargetsLastError,
+               state: interactState,
 
               successMessage,
 
              availableCapacity: ref('0'),
-              paymentToTargetIds: ref<Set<string> | undefined>(undefined),
+              paymentToTargetIds,
               participants: ref([] as any[]),
               trustlines: ref([] as any[]),
               canSendPayment: ref(true),
@@ -302,6 +320,67 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     host.remove()
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+  })
+
+  it('MP-0: routesLoading in root yields tri-state unknown in ManualPaymentPanel (shows updating help)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+
+      const trustlinesLoading = (globalThis as any).__GEO_TEST_TRUSTLINES_LOADING_REF as Ref<boolean>
+      const paymentTargetsLoading = (globalThis as any).__GEO_TEST_PAYMENT_TARGETS_LOADING_REF as Ref<boolean>
+      const paymentTargetsLastError = (globalThis as any).__GEO_TEST_PAYMENT_TARGETS_LAST_ERROR_REF as Ref<string | null>
+      const paymentToTargetIds = (globalThis as any).__GEO_TEST_PAYMENT_TO_TARGET_IDS_REF as Ref<Set<string> | undefined>
+
+      trustlinesLoading.value = true
+      paymentTargetsLoading.value = false
+      paymentTargetsLastError.value = null
+      paymentToTargetIds.value = new Set(['bob'])
+      await nextTick()
+      await nextTick()
+
+      const help = host.querySelector('[data-testid="manual-payment-to-help"]') as HTMLElement | null
+      expect(help).toBeTruthy()
+      expect(help?.textContent ?? '').toContain('Routes are updating')
+
+      // Now become known-empty: root should pass a Set (not undefined) and panel should show the empty-state help.
+      trustlinesLoading.value = false
+      paymentTargetsLoading.value = false
+      paymentTargetsLastError.value = null
+      paymentToTargetIds.value = new Set()
+      await nextTick()
+      await nextTick()
+
+      // In the mocked interact state, toPid starts as 'bob'. When known-empty targets arrive,
+      // MP-1b behavior in ManualPaymentPanel resets To and surfaces an inline warning.
+      const warn = host.querySelector('[data-testid="manual-payment-to-invalid-warn"]') as HTMLElement | null
+      expect(warn).toBeTruthy()
+      expect((warn?.textContent ?? '').trim()).toContain('Selected recipient is no longer available')
+
+      // UX-10 (Phase 2): known-empty => To select disabled.
+      // The To selector only renders when participantsSorted.length > 0.
+      // In this test the participants list is empty, so the select may not be present.
+      // UX-10 is verified separately in ManualPaymentPanel.test.ts with actual participants.
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      // Clean up refs created during mock setup to avoid cross-test leakage.
+      delete (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF
+      delete (globalThis as any).__GEO_TEST_TRUSTLINES_LOADING_REF
+      delete (globalThis as any).__GEO_TEST_PAYMENT_TARGETS_LOADING_REF
+      delete (globalThis as any).__GEO_TEST_PAYMENT_TARGETS_LAST_ERROR_REF
+      delete (globalThis as any).__GEO_TEST_PAYMENT_TO_TARGET_IDS_REF
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+    }
   })
 
   it('ui=interact renders trustline/clearing panels depending on phase', async () => {

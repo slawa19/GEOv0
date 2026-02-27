@@ -9,6 +9,9 @@ type Props = {
   phase: InteractPhase
   busy: boolean
 
+  /** Optional: shows a more specific hint when cancel was requested while busy is still true. */
+  cancelling?: boolean
+
   /** Set when backend rejects actions due to feature flags (HTTP 403 ACTIONS_DISABLED). */
   actionsDisabled?: boolean
 
@@ -34,6 +37,10 @@ const { activeKey } = useActivePanelStateShared(computed(() => props.phase))
 
 function titleFor(_key: ActivePanelKey, idleTitle: string): string {
   if (isFlowActive.value) return 'Cancel current action first (press ESC).'
+  if (props.busy && props.cancelling) return 'Cancelling… please wait for the operation to finish.'
+  if (props.busy) return 'Operation in progress… please wait.'
+  if (props.actionsDisabled) return 'Actions are disabled by backend feature flags.'
+  if (props.runTerminal) return 'Run is stopped or in error state. Start a run first.'
   return idleTitle
 }
 
@@ -95,6 +102,15 @@ function guardedStart(fn: () => void) {
       >
         Cancel current action first (press ESC).
       </span>
+
+      <span
+        v-else-if="busy"
+        class="action-bar__hint"
+        data-testid="actionbar-busy-hint"
+        aria-label="Action Bar busy hint"
+      >
+        {{ cancelling ? 'Cancelling… please wait.' : 'Operation in progress… please wait.' }}
+      </span>
     </div>
   </div>
 </template>
@@ -116,4 +132,6 @@ function guardedStart(fn: () => void) {
   white-space: nowrap;
 }
 </style>
+
+
 

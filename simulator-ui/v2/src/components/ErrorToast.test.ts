@@ -85,5 +85,63 @@ describe('ErrorToast', () => {
       vi.useRealTimers()
     }
   })
+
+  it('unmount clears auto-dismiss timer', async () => {
+    vi.useFakeTimers()
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+
+      const onDismiss = vi.fn()
+      const app = createApp({
+        render: () => h(ErrorToast as any, { message: 'err', dismissMs: 4000, onDismiss }),
+      })
+
+      app.mount(host)
+      await nextTick()
+
+      app.unmount()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(onDismiss).toHaveBeenCalledTimes(0)
+
+      host.remove()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('manual dismiss clears timer (no later auto-dismiss)', async () => {
+    vi.useFakeTimers()
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+
+      const onDismiss = vi.fn()
+      const app = createApp({
+        render: () => h(ErrorToast as any, { message: 'err', dismissMs: 4000, onDismiss }),
+      })
+
+      app.mount(host)
+      await nextTick()
+
+      const btn = host.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+
+      await vi.advanceTimersByTimeAsync(1000)
+      btn?.click()
+      await nextTick()
+
+      expect(onDismiss).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(onDismiss).toHaveBeenCalledTimes(1)
+
+      app.unmount()
+      host.remove()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 

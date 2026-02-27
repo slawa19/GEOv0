@@ -204,6 +204,11 @@ export function useInteractDataCache(opts: {
   const paymentTargetsLastErrorRef = ref<string | null>(null)
   const paymentTargetsLastError = computed(() => paymentTargetsLastErrorRef.value)
   const paymentTargetsFetchEpochByKey = new Map<string, number>()
+  const paymentTargetsFetchedAtMsByKey = new Map<string, number>()
+
+  // Prevent “forever stale” targets when the underlying graph changes over time.
+  // Must be aligned with other dropdown caches in this file (participants=30s, trustlines=15s).
+  const PAYMENT_TARGETS_TTL_MS = 10_000
 
   function setPaymentTargetsLoading(key: string, loading: boolean) {
     const next = new Map(paymentTargetsLoadingByKey.value)
@@ -220,8 +225,14 @@ export function useInteractDataCache(opts: {
     if (!runId || !eq || !fromPid || !Number.isFinite(maxHops) || !(maxHops >= 1)) return
 
     const key = paymentTargetsKey({ runId, eq, fromPid, maxHops })
+    const now = Date.now()
     const cached = paymentTargetsByKey.value.get(key)
-    if (!o.force && cached) return
+
+    // TTL: allow reuse for a short time, but revalidate periodically.
+    if (!o.force && cached) {
+      const fetchedAt = paymentTargetsFetchedAtMsByKey.get(key) ?? 0
+      if (fetchedAt > 0 && now - fetchedAt < PAYMENT_TARGETS_TTL_MS) return
+    }
 
     setPaymentTargetsLoading(key, true)
     const myEpoch = (paymentTargetsFetchEpochByKey.get(key) ?? 0) + 1
@@ -243,6 +254,7 @@ export function useInteractDataCache(opts: {
       next.set(key, ids)
       paymentTargetsByKey.value = next
       paymentTargetsLastErrorRef.value = null
+      paymentTargetsFetchedAtMsByKey.set(key, now)
     } catch (e: any) {
       // Ignore stale error for the same key.
       if (paymentTargetsFetchEpochByKey.get(key) !== myEpoch) return
@@ -252,6 +264,8 @@ export function useInteractDataCache(opts: {
       next.set(key, new Set())
       paymentTargetsByKey.value = next
       paymentTargetsLastErrorRef.value = String(e?.message ?? e ?? 'Payment targets refresh failed')
+      // Treat error response as “known” for UI determinism, but still revalidate after TTL.
+      paymentTargetsFetchedAtMsByKey.set(key, now)
     } finally {
       // Only clear if this fetch is still the latest for the key.
       if (paymentTargetsFetchEpochByKey.get(key) === myEpoch) {
@@ -267,8 +281,24 @@ export function useInteractDataCache(opts: {
       paymentTargetsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
       paymentTargetsLastErrorRef.value = null
+      paymentTargetsFetchEpochByKey.clear()
+      paymentTargetsFetchedAtMsByKey.clear()
     },
     { immediate: true },
+  )
+
+  // Snapshot change implies the underlying graph semantics may have changed.
+  // Keep behavior deterministic: clear payment-targets cache so consumers can re-fetch.
+  watch(
+    () => String(opts.snapshot.value?.generated_at ?? ''),
+    () => {
+      paymentTargetsByKey.value = new Map()
+      paymentTargetsLoadingByKey.value = new Map()
+      paymentTargetsLastErrorRef.value = null
+      paymentTargetsFetchEpochByKey.clear()
+      paymentTargetsFetchedAtMsByKey.clear()
+    },
+    { immediate: false },
   )
 
   function findActiveTrustline(from: string | null, to: string | null): TrustlineInfo | null {

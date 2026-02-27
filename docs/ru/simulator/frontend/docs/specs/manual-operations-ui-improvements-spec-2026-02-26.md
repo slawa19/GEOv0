@@ -2,6 +2,72 @@
 
 Статус: draft v2 (частично реализовано; Phase 1 выполнена, Phase 2/2.5 — в очереди)
 
+## Implementation status (as of 2026-02-27)
+
+Этот раздел фиксирует текущее состояние реализации требований этой спеки в кодовой базе.
+
+### Manual Payment
+
+- DONE: MP-1 To filtering по tri-state targets (unknown/known-empty/known-nonempty) через [`useParticipantsList.ts`](simulator-ui/v2/src/composables/useParticipantsList.ts:1)
+- DONE: MP-1b auto-reset выбранного To при изменении known targets в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
+- DONE: MP-2 отображение direct-hop capacity в To options в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
+- DONE: MP-4 inline reason для disabled Confirm + обязательная нормализация amount через [`parseAmountStringOrNull()`](simulator-ui/v2/src/utils/numberFormat.ts:54)
+- DONE: MP-6 `(updating…)` индикатор для unknown targets в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
+- DONE: MP-6a prefetch trustlines на старте payment flow в [`startPaymentFlow()`](simulator-ui/v2/src/composables/useInteractMode.ts:1)
+- PARTIAL: MP-0 wiring tri-state targets из root отличается от канонического сниппета (см. “Known divergences” ниже): [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1)
+- DONE: MP-3 фильтрация списка From по `available > 0` — реализовано в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:180)
+- DONE: UX-10 disable To-select при known-empty — реализовано в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
+
+### Manage Trustline
+
+- DONE: TL-1 inline warning при `newLimit < used` + нормализация ввода в [`TrustlineManagementPanel.vue`](simulator-ui/v2/src/components/TrustlineManagementPanel.vue:1)
+- DONE: TL-1a create-flow допускает `limit = 0` в [`TrustlineManagementPanel.vue`](simulator-ui/v2/src/components/TrustlineManagementPanel.vue:1)
+- DONE: TL-2 debt-guard (учитывает `used` и, при наличии данных, `reverse_used`) в [`TrustlineManagementPanel.vue`](simulator-ui/v2/src/components/TrustlineManagementPanel.vue:1)
+- DONE: TL-3 маркировка `(exists)` в create-flow To в [`TrustlineManagementPanel.vue`](simulator-ui/v2/src/components/TrustlineManagementPanel.vue:1)
+- DONE: TL-4 prefill newLimit из effectiveLimit в [`TrustlineManagementPanel.vue`](simulator-ui/v2/src/components/TrustlineManagementPanel.vue:1)
+
+### Run Clearing
+
+- DONE: CL-1 loading-state (текст + спиннер) между Confirm и Preview в [`ClearingPanel.vue`](simulator-ui/v2/src/components/ClearingPanel.vue:1)
+- DONE: CL-2 статус-индикация заголовка (пункт закрыт уже в тексте спеки)
+
+### EdgeDetailPopup (v2)
+
+- DONE: ED-1 close guard по долгу (использует `used` и `reverse_used`) в [`EdgeDetailPopup.vue`](simulator-ui/v2/src/components/EdgeDetailPopup.vue:1)
+- DONE: ED-2 utilization bar (pct + DS tokens) в [`EdgeDetailPopup.vue`](simulator-ui/v2/src/components/EdgeDetailPopup.vue:1)
+- DONE: ED-3 quick action Send Payment + wiring в root: [`EdgeDetailPopup.vue`](simulator-ui/v2/src/components/EdgeDetailPopup.vue:1), [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1)
+
+### NodeCardOverlay (v2)
+
+- DONE: NC-1 edit для IN trustlines в [`NodeCardOverlay.vue`](simulator-ui/v2/src/components/NodeCardOverlay.vue:1)
+- DONE: NC-2 available column + формат `avail: …` в [`NodeCardOverlay.vue`](simulator-ui/v2/src/components/NodeCardOverlay.vue:1)
+- DONE: NC-3 saturated visual (finite `available <= 0`) в [`NodeCardOverlay.vue`](simulator-ui/v2/src/components/NodeCardOverlay.vue:1)
+- DONE: NC-4 quick action Run Clearing + wiring в root: [`NodeCardOverlay.vue`](simulator-ui/v2/src/components/NodeCardOverlay.vue:1), [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1)
+
+### Feedback & Discoverability (v2)
+
+- DONE: FB-1 Success toast: [`SuccessToast.vue`](simulator-ui/v2/src/components/SuccessToast.vue:1), state `successMessage` в [`useInteractMode.ts`](simulator-ui/v2/src/composables/useInteractMode.ts:1), wiring в [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1)
+- DONE: FB-2 adaptive dismiss для длинных ошибок: [`ErrorToast.vue`](simulator-ui/v2/src/components/ErrorToast.vue:1)
+- DONE: FB-3 ESC hint в ActionBar: [`ActionBar.vue`](simulator-ui/v2/src/components/ActionBar.vue:1)
+
+### Remaining TODO (from this spec)
+
+#### Phase 2
+
+- ~~TODO~~ DONE: MP-3 фильтрация From по `available > 0` — реализовано в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:180)
+- ~~TODO~~ DONE: UX-10 disable To-select при known-empty — реализовано в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
+
+#### Phase 2.5
+
+- ~~TODO~~ DONE: Включить multi-hop достижимость через backend-first targets (см. [`§7.2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1208))
+- ~~TODO~~ DONE: TTL/refresh-policy для кэша payment-targets (см. [`payment-targets cache`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1253))
+- TODO: покрыть AC-MP-15..18 тестами (см. [`AC-MP-15..18`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1280))
+
+### Known divergences (as implemented)
+
+- Tri-state targets wiring в root реализован не как канонический MP-0 сниппет: вместо прямого `availableTargetIds` от `trustlinesLoading` используется агрегированный “routes loading” и отдельный канал targets; текущая реализация находится в [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1).
+- Backend-first payment targets endpoint используется как основной источник достижимости и сейчас включён в multi-hop режиме (`max_hops = 6`) в [`useInteractMode.ts`](simulator-ui/v2/src/composables/useInteractMode.ts:1).
+
 Дата: 2026-02-26 (v2: 2026-02-26)
 
 Область: Interact UI (real mode), панели ручных операций:
@@ -278,12 +344,9 @@ const { participantsSorted, toParticipants } = useParticipantsList<ParticipantIn
 ```
 
  Template `ManualPaymentPanel.vue` (UX):
-- Phase 1 использует **direct-hop approximation** при вычислении `availableTargetIds` (см. MP-1a) и может скрывать multi-hop достижимые цели (см. §7.2).
-- Это осознанный продуктовый компромисс: **Phase 1 может скрывать валидные multi-hop действия до Phase 2.5** (backend-first targets, §7.2). Это не означает, что платёж в backend невозможен.
- - Phase 2.5+ (backend-first, §7.2): `availableTargetIds` строится по ответу `payment-targets` и является авторитетным по достижимости (multi-hop).
- - если `state.fromPid` выбран, `availableTargetIds` задан и `availableTargetIds.size === 0` (known-empty), показывать help:
-   - Phase 1 (direct-only): `No direct routes available (direct trustlines only). Multi-hop routes may exist but are not shown.`
-   - Phase 2.5+ (backend-first): `Backend reports no payment routes from selected sender.`
+- Phase 2.5+ (backend-first, §7.2): `availableTargetIds` строится по ответу `payment-targets` и является авторитетным по достижимости (multi-hop).
+- если `state.fromPid` выбран, `availableTargetIds` задан и `availableTargetIds.size === 0` (known-empty), показывать help:
+  - `Backend reports no payment routes from selected sender.`
 - если `availableTargetIds === undefined` (unknown), показывать `(updating…)` рядом с To и help:
   `Routes are updating; the list may include unreachable recipients.`
 
@@ -445,8 +508,8 @@ const fromParticipants = computed<ParticipantInfo[]>(() => {
 |---------|-----------|
 | `amount` пусто или <= 0 | `Enter a positive amount.` |
 | `amount` не соответствует формату (см. UX-8) | `Invalid amount format. Use digits and '.' for decimals.` |
-| `exceedsCapacity` = true | `Amount exceeds available capacity (max: {available} {EQ}).` |
-| `canSendPayment` = false при заполненных from/to | `No direct routes available between selected participants (direct trustlines only).` |
+| `exceedsCapacity` = true | **Не блокирует** Confirm. Показывается warning: `Amount may exceed direct trustline capacity (...)... backend will validate.` |
+| `canSendPayment` = false при заполненных from/to | `Backend reports no payment routes between selected participants.` |
 
 **Конкретные изменения:**
 
@@ -461,8 +524,10 @@ const confirmDisabledReason = computed<string | null>(() => {
   // Важно: сравнения по decimal-like строкам делаем через parseAmountNumber(), а не через Number().
   const amountNum = parseAmountNumber(normalized)
   if (!Number.isFinite(amountNum) || amountNum <= 0) return 'Enter a positive amount.'
-  if (exceedsCapacity.value) return `Amount exceeds available capacity (max: ${props.availableCapacity} ${props.unit}).`
-  if (props.canSendPayment === false) return 'No direct routes available between selected participants (direct trustlines only).'
+  // Phase 2.5 multi-hop: exceeding direct capacity should show a non-blocking warning, not disable confirm.
+  // Therefore it MUST NOT produce a disabled reason.
+  if (exceedsCapacity.value) return null
+  if (props.canSendPayment === false) return 'Backend reports no payment routes between selected participants.'
   return null
 })
 ```
@@ -1044,8 +1109,7 @@ Dropdowns фильтруются на клиенте по уже загруже�
 ### UX-4. Graceful degradation
 - Если `availableTargetIds === undefined` (**unknown**) — To dropdown может показывать fallback (все минус fromPid), но обязан показывать `(updating…)` + help-текст о деградации.
 - Если `availableTargetIds` задан и `availableTargetIds.size === 0` (**known-empty**) — To dropdown не показывает вариантов (кроме `—`) и показывает явную причину (без fallback «все»):
-  - Phase 1 (direct-only): `No direct routes available (direct trustlines only). Multi-hop routes may exist but are not shown.`
-  - Phase 2.5+ (backend-first, §7.2): `Backend reports no payment routes from selected sender.`
+  - `Backend reports no payment routes from selected sender.`
 - Важно: текущий trustlines-кэш best-effort и **проглатывает** ошибки загрузки без явного error-state.
   Поэтому UI может гарантированно показывать состояние «updating» только пока `trustlinesLoading === true`.
   После завершения загрузки/обновления, если targets пусты — UI трактует это как `known-empty`.
@@ -1166,7 +1230,7 @@ export function parseAmountNumberOrZero(v: unknown): number {
   - нельзя надёжно показывать «причину disabled» для каждой option (tooltips/rich layout не работают кросс-браузерно)
   - нельзя рассчитывать на кастомную разметку внутри `<option>`
 - Поэтому объяснения и причины блокировки делаем **inline под контролом**:
-  - общий help-текст под select (например, `No direct routes available (direct trustlines only)...` или `Routes are updating...`)
+  - общий help-текст под select (например, `Backend reports no payment routes...` или `Routes are updating...`)
   - для отдельных «особых» пунктов разрешены суффиксы в label (напр. `(exists)`, `— {cap} {EQ}`), но без попытки делать сложный UI в option
 - Когда список To пуст (known-empty) — показываем только placeholder option `—` и делаем select disabled.
 
@@ -1273,14 +1337,16 @@ Backend (rationale):
 | AC-MP-2 | При FROM = shop, список TO не содержит участников без trustline `to_pid = shop`. | Unit: подать `availableTargetIds = new Set(['alice','bob'])`, убедиться что в TO только alice и bob. |
 | AC-MP-3 | Каждый TO-пункт показывает available capacity. | Component: snapshot содержит `[tl(bob→shop, avail=500)]`, TO-dropdown для from=shop содержит `Боб (bob) — 500 UAH`. |
 | AC-MP-4 | Canvas-подсветка совпадает с TO-dropdown списком. | Component: `availableTargetIds` и `toParticipants.map(p=>p.pid)` содержат одинаковые pid. |
-| AC-MP-5 | При amount > capacity — inline-предупреждение + Confirm disabled. | Component: ввести 999 при capacity=500, увидеть текст + disabled. |
+| AC-MP-5 | (DEPRECATED) Phase 1 direct-only: при amount > capacity — inline-предупреждение + Confirm disabled. | Исторический критерий; с включённым multi-hop больше не применяется. |
+| AC-MP-5b | Phase 2.5+ multi-hop: при amount > direct capacity показывается warning, но Confirm **не disabled**. | Component: ввести 999 при capacity=500, увидеть `mp-confirm-warning`, Confirm enabled. |
 | AC-MP-6 | При пустом amount — inline-подсказка «Enter a positive amount.» | Component. |
 | AC-MP-7 | Unknown (updating): при `availableTargetIds=undefined` UI показывает fallback To-list (все кроме from) + индикатор `(updating…)`. | Component: `trustlinesLoading=true`, `availableTargetIds=undefined`. |
-| AC-MP-8 | Phase 1 (direct-only): при `availableTargetIds=new Set()` (known-empty) → TO dropdown пуст (кроме placeholder) + виден help про direct-only (без fallback). | Component: `trustlinesLoading=false`, `availableTargetIds=new Set()`. |
+| AC-MP-8 | Phase 2.5+ (backend-first): при `availableTargetIds=new Set()` (known-empty) → TO dropdown пуст (кроме placeholder) + виден help `Backend reports no payment routes from selected sender.` | Component: `trustlinesLoading=false`, `availableTargetIds=new Set()`. |
 | AC-MP-15 | Phase 2.5+ (backend-first): To-dropdown содержит ровно `payment-targets.items[].to_pid` (и только их). | Integration/component: смоделировать включённый backend-first режим и ответ `payment-targets`, сравнить options. |
-| AC-MP-16 | Phase 2.5+ (backend-first): `availableTargetIds` для canvas и dropdown совпадает с `payment-targets.items[].to_pid`. | Integration/component: сравнить canvas-highlight targets и To options. |
-| AC-MP-17 | Phase 2.5+ (backend-first): known-empty показывает текст `Backend reports no payment routes from selected sender.` | Component: `availableTargetIds=new Set()` в backend-first режиме. |
-| AC-MP-18 | Phase 2.5+ (backend-first): запрос `payment-targets` выполняется один раз при выборе From и не повторяется при изменении amount/рендере. | Integration/unit: spy на fetch, изменить amount несколько раз, убедиться что fetch не повторился. |
+| AC-MP-16 | Phase 2.5+ (backend-first, multi-hop): `availableTargetIds` для canvas и dropdown совпадает с `payment-targets.items[].to_pid` (источник истины — backend с параметром `max_hops`, default 6, max 8). | Integration/component: сравнить canvas-highlight targets и To options. |
+| AC-MP-17 | Phase 2.5+ (backend-first): known-empty показывает текст `Backend reports no payment routes from selected sender` с опциональным суффиксом ` (max hops: N)` и финальной точкой. | Component: `availableTargetIds=new Set()` в backend-first режиме. |
+| AC-MP-18 | Phase 2.5+ (backend-first, multi-hop): запрос `payment-targets` (с параметром `max_hops`) выполняется один раз при выборе From и не повторяется при изменении amount/рендере. | Integration/unit: spy на fetch, изменить amount несколько раз, убедиться что fetch не повторился. |
+| AC-MP-19 | Confirm step: при `canSendPayment=false` и заполненных from/to показывается inline reason `Backend reports no payment routes between selected participants.` и Confirm disabled. | Component: phase=confirm-payment, canSendPayment=false, amount>0. |
 | AC-MP-9 | При amount=`" 10.5 "` в confirm → `confirmPayment()` вызывается с `"10.5"` (нормализация через `parseAmountStringOrNull()`). | Component: spy confirmPayment args. |
 | AC-MP-10 | При amount=`"1,23"` → Confirm разрешён и `confirmPayment()` вызывается с `"1.23"` (нормализация запятой). | Component: spy confirmPayment args. |
 | AC-MP-11 | MP-3: FROM dropdown показывает только участников, для которых существует хотя бы один активный trustline `tl.to_pid === pid` с `available > 0`. При пустых trustlines (или если не найдено ни одного pid) — fallback на полный список. | Component/unit: trustlines empty → полный список; trustlines non-empty → отфильтровано. |
@@ -1453,11 +1519,36 @@ Backend (rationale):
 | Риск | Вероятность | Митигация |
 |------|------------|-----------|
 | CRIT-1: strict `parseAmountNumber()` (invalid → NaN) может вызвать `NaN` в агрегациях (напр. system balance), что приведёт к регрессу UI/графиков. | Средняя | Ввести и применять helper finite-or-0 для агрегаций: `parseAmountNumberOrZero()` (см. UX-8, контракты helper'ов чисел). |
-| Локальная фильтрация To по direct-trustlines пропускает multi-hop получателей. | Средняя | Phase 1: честный direct-only текст для known-empty; Phase 2.5: backend endpoint `payment-targets` как источник истины по достижимости. |
+| Локальная фильтрация To по direct-trustlines пропускает multi-hop получателей. | Средняя | (Исторически) Phase 1: честный direct-only текст для known-empty; Phase 2.5 (текущая модель): backend endpoint `payment-targets` как источник истины по достижимости. |
 | Stale trustlines cache (до 15 сек TTL) → dropdown показывает неактуальные capacity. | Низкая (cache invalidated after mutations) | `refreshTrustlines({ force: true })` после каждой мутации уже реализовано. |
 | TL-2/ED-1 close guard на фронте — best-effort: backend может учитывать `reverse_used`, который не доступен на фронте (по текущему типу `TrustlineInfo` в `simulator-ui/v2/src/api/simulatorTypes.ts`). | Средняя | Phase 1: UI блокирует close при `used > 0`, при `used == 0` корректно показывает backend-ошибку через ErrorToast (см. AC-TL-9). Phase 2: добавить `reverse_used` в `TrustlineInfo` и сделать guard строгим (см. AC-TL-10). |
 | Silent cache error: ошибки загрузки trustlines могут быть «проглочены» кэшем, и UI после завершения загрузки может выглядеть как known-empty (особенно при direct-only фильтрации Phase 1). | Средняя | Known limitation Phase 1: UI показывает честный direct-only текст для known-empty; полноценный error-state для trustlines-cache — отдельная доработка (вне текущей итерации). |
 | Perf/DoS риск: расчёт `payment-targets` на больших графах (особенно при включении `max_available`). | Средняя | Guardrails в контракте (`max_hops`, `limit`, timeout/time budget) + кэш (frontend TTL/epoch; backend реюз `_graph_cache`); `max_available` только при `include_max_available=true`. |
+
+## 13. Дополнение требований (2026-02-27)
+
+### Phase 2.5 — Multi-hop targets включены по умолчанию
+
+**Новые требования (уточнение продукта):**
+- UI использует backend-first `payment-targets` как источник достижимости с `max_hops = 6` (multi-hop).
+- `canSendPayment` в confirm-step больше не должен hard-gate по direct-hop `availableCapacity`.
+  - При unknown targets (endpoint не успел/ошибка) допускается degraded режим: allow confirm и полагаться на backend validation.
+
+**Влияние на UX/copy:**
+- Все тексты вида `direct trustlines only` для payment-targets должны быть заменены на backend-first формулировки:
+  - known-empty From→To list: `Backend reports no payment routes from selected sender.`
+  - confirm disabled due to reachability: `Backend reports no payment routes between selected participants.`
+
+### P2.2 — Busy после cancel должен быть объяснён
+
+**Проблема:** после ESC/Cancel UI может быть `busy=true` (операция in-flight), но phase уже `idle` → выглядит как “UI завис”.
+
+**Требование:**
+- Ввести флаг `cancelling=true` когда пользователь вызвал cancel во время `busy=true`.
+- ActionBar обязан показывать более точный hint/tooltip:
+  - hint: `Cancelling… please wait.`
+  - title: `Cancelling… please wait for the operation to finish.`
+- `cancelling` сбрасывается в `false` при settle исходного промиса (вместе с `busy=false`).
 | Performance: вычисление capacity-map для каждого участника в reactive computed. | Низкая (обычно 5-20 участников и 10-50 trustlines) | Computed мемоизирован Vue; пересчёт только при изменении trustlines/fromPid. |
 | `isActiveStatus()` filter может не включать все валидные статусы. | Низкая | Следовать текущей реализации `isActiveStatus()` (сейчас: только `'active'`). Если backend/данные добавят новые «активные» статусы — обновить helper и пересмотреть фильтрацию. |
 | NC-1 (IN edit): пользователь может не понимать что он edit'ит trustline другого участника (creditor). | Средняя | Tooltip: «Edit trustline (set by {from_name})» — чётко указать кто creditor. |
@@ -1490,7 +1581,7 @@ Backend (rationale):
   - [`simulator-ui/v2/src/composables/useInteractMode.ts`](simulator-ui/v2/src/composables/useInteractMode.ts:1)
   - [`simulator-ui/v2/src/components/SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1)
   - [`simulator-ui/v2/src/components/ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
-- [ ] Backend: API 7.2 (payment-targets endpoint) как источник истины по достижимости (multi-hop) + contract/guardrails.
+- [x] Backend: API 7.2 (payment-targets endpoint) как источник истины по достижимости (multi-hop) + contract/guardrails.
 - [ ] Пройдены component/integration тесты для backend-first режима (AC-MP-15..18).
 
 ### Phase 3

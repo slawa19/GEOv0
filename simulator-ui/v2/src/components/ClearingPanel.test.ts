@@ -112,5 +112,45 @@ describe('ClearingPanel', () => {
     app.unmount()
     host.remove()
   })
+
+  it('CL-2: in preview step shows loading state when lastClearing is not ready yet', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'clearing-preview',
+      fromPid: null as string | null,
+      toPid: null as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null as any,
+    })
+
+    const app = createApp({
+      render: () =>
+        h(ClearingPanel as any, {
+          phase: 'clearing-preview',
+          state,
+          busy: false,
+          equivalent: 'EQ',
+          confirmClearing: vi.fn(),
+          cancel: vi.fn(),
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const loading = host.querySelector('[data-testid="clearing-preview-loading"]') as HTMLElement | null
+    expect(loading).toBeTruthy()
+    expect(loading?.textContent ?? '').toContain('Preparing preview')
+    expect(loading?.querySelector('.cp-spinner')).toBeTruthy()
+
+    app.unmount()
+    host.remove()
+  })
 })
 

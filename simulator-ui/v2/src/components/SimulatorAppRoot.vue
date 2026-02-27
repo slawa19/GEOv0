@@ -190,6 +190,7 @@ const paymentToTargetIds = computed<Set<string> | undefined>(() =>
 const trustlines = computed(() => interact.mode.trustlines.value)
 const trustlinesLastError = computed(() => interact.mode.trustlinesLastError?.value ?? null)
 const paymentTargetsLastError = computed(() => interact.mode.paymentTargetsLastError?.value ?? null)
+const paymentTargetsMaxHops = computed(() => interact.mode.paymentTargetsMaxHops)
 
 // LOW (L2): avoid calling a function directly from template.
 // This also gives Vue a chance to cache style until hoveredEdge/host changes.
@@ -301,6 +302,7 @@ const interactSelectedLink = computed<GraphLink | null>(() => {
         target: to,
         trust_limit: tl.limit,
         used: tl.used,
+        reverse_used: tl.reverse_used,
         available: tl.available,
         status: tl.status ?? undefined,
       }
@@ -731,6 +733,7 @@ watch(interactPhase, (phase) => {
           v-if="apiMode === 'real' && isInteractUi"
           :phase="interactPhase"
           :busy="interact.mode.busy.value"
+          :cancelling="interact.mode.cancelling?.value ?? false"
           :actions-disabled="interact.actions.actionsDisabled.value"
           :run-terminal="interactRunTerminal"
           :start-payment-flow="onActionStartPaymentFlow"
@@ -750,6 +753,7 @@ watch(interactPhase, (phase) => {
         :available-capacity="interact.mode.availableCapacity.value"
         :trustlines-loading="trustlinesLoading"
         :payment-targets-loading="paymentTargetsLoading"
+        :payment-targets-max-hops="paymentTargetsMaxHops"
         :payment-to-target-ids="paymentToTargetIds"
         :trustlines="trustlines"
         :trustlines-last-error="trustlinesLastError"
@@ -810,6 +814,7 @@ watch(interactPhase, (phase) => {
       :host-el="hostEl"
       :unit="effectiveEq"
       :used="emptyToNull(interactSelectedLink?.used)"
+      :reverse-used="emptyToNull(interactSelectedLink?.reverse_used)"
       :limit="emptyToNull(interactSelectedLink?.trust_limit)"
       :available="emptyToNull(interactSelectedLink?.available)"
       :status="emptyToNullString(interactSelectedLink?.status)"

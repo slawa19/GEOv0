@@ -93,10 +93,14 @@ const closeBlocked = computed(() => {
 
 const closeDebtDisplay = computed(() => {
   const u = parseAmountNumber(props.used)
-  if (Number.isFinite(u) && u > 0) return props.used
   const ru = parseAmountNumber(props.reverseUsed)
-  if (Number.isFinite(ru) && ru > 0) return props.reverseUsed
-  return props.used
+  const usedDebt = Number.isFinite(u) && u > 0
+  const reverseDebt = Number.isFinite(ru) && ru > 0
+
+  if (usedDebt && reverseDebt) return `used: ${renderOrDash(props.used)} ${props.unit}, reverse: ${renderOrDash(props.reverseUsed)} ${props.unit}`
+  if (usedDebt) return `used: ${renderOrDash(props.used)} ${props.unit}`
+  if (reverseDebt) return `reverse: ${renderOrDash(props.reverseUsed)} ${props.unit}`
+  return `used: ${renderOrDash(props.used)} ${props.unit}`
 })
 
 const utilizationPct = computed<number | null>(() => {
@@ -120,6 +124,12 @@ const utilizationColor = computed(() => {
 const utilizationLabel = computed(() => {
   const p = utilizationPct.value
   return p == null ? '—%' : `${p}%`
+})
+
+const utilizationAriaValueText = computed(() => {
+  // A11y: distinguish unknown utilization from 0%.
+  if (utilizationPct.value == null) return 'unknown'
+  return utilizationLabel.value
 })
 
 const utilizationWidth = computed(() => `${utilizationPct.value ?? 0}%`)
@@ -172,7 +182,8 @@ function onCloseLine() {
         class="popup__util-bar"
         role="progressbar"
         aria-label="Utilization bar"
-        :aria-valuenow="utilizationPct ?? 0"
+        :aria-valuenow="utilizationPct == null ? undefined : utilizationPct"
+        :aria-valuetext="utilizationAriaValueText"
         aria-valuemin="0"
         aria-valuemax="100"
       >
@@ -183,7 +194,7 @@ function onCloseLine() {
 
     <div class="popup__actions">
       <div v-if="closeBlocked" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-blocked">
-        Cannot close: trustline has outstanding debt ({{ renderOrDash(closeDebtDisplay) }} {{ unit }}). Reduce debt to 0 first.
+        Cannot close: trustline has outstanding debt ({{ closeDebtDisplay }}). Reduce debt to 0 first.
       </div>
 
       <button
