@@ -179,13 +179,17 @@ const {
 const interactPhase = computed<InteractPhase>(() => interact.mode.phase.value as InteractPhase)
 
 // MUST MP-0: canonical tri-state wiring for Manual Payment panel.
-// `paymentToTargetIds` must be `undefined` strictly while trustlines are loading.
+// `paymentToTargetIds` must be `undefined` strictly while routes are loading
+// (trustlines fetch OR payment-targets fetch).
 const trustlinesLoading = computed(() => interact.mode.trustlinesLoading.value)
+const paymentTargetsLoading = computed(() => interact.mode.paymentTargetsLoading.value)
+const routesLoading = computed(() => trustlinesLoading.value || paymentTargetsLoading.value)
 const paymentToTargetIds = computed<Set<string> | undefined>(() =>
-  trustlinesLoading.value ? undefined : interact.mode.paymentToTargetIds.value,
+  routesLoading.value ? undefined : interact.mode.paymentToTargetIds.value,
 )
 const trustlines = computed(() => interact.mode.trustlines.value)
 const trustlinesLastError = computed(() => interact.mode.trustlinesLastError?.value ?? null)
+const paymentTargetsLastError = computed(() => interact.mode.paymentTargetsLastError?.value ?? null)
 
 // LOW (L2): avoid calling a function directly from template.
 // This also gives Vue a chance to cache style until hoveredEdge/host changes.
@@ -745,9 +749,11 @@ watch(interactPhase, (phase) => {
         :unit="effectiveEq"
         :available-capacity="interact.mode.availableCapacity.value"
         :trustlines-loading="trustlinesLoading"
+        :payment-targets-loading="paymentTargetsLoading"
         :payment-to-target-ids="paymentToTargetIds"
         :trustlines="trustlines"
         :trustlines-last-error="trustlinesLastError"
+        :payment-targets-last-error="paymentTargetsLastError"
         :participants="interact.mode.participants.value"
         :busy="interact.mode.busy.value"
         :can-send-payment="interact.mode.canSendPayment.value"

@@ -1,6 +1,6 @@
 # Simulator UI v2 — Спецификация доработок ручных операций
 
-Статус: draft v2 (к реализации)
+Статус: draft v2 (частично реализовано; Phase 1 выполнена, Phase 2/2.5 — в очереди)
 
 Дата: 2026-02-26 (v2: 2026-02-26)
 
@@ -1485,7 +1485,12 @@ Backend (rationale):
 - [ ] Визуальная проверка: NodeCard с IN trustlines показывает ✏️, saturated rows окрашены, success toast появляется.
 
 ### Phase 2.5
-- [ ] Реализованы: API 7.2 (payment-targets) + backend-first targets wiring (fetch 1x per From + кэш).
+- [x] Frontend: кэш + tri-state wiring для payment-targets (loading/error) и честный degraded UX.
+  - [`simulator-ui/v2/src/composables/interact/useInteractDataCache.ts`](simulator-ui/v2/src/composables/interact/useInteractDataCache.ts:1)
+  - [`simulator-ui/v2/src/composables/useInteractMode.ts`](simulator-ui/v2/src/composables/useInteractMode.ts:1)
+  - [`simulator-ui/v2/src/components/SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1)
+  - [`simulator-ui/v2/src/components/ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
+- [ ] Backend: API 7.2 (payment-targets endpoint) как источник истины по достижимости (multi-hop) + contract/guardrails.
 - [ ] Пройдены component/integration тесты для backend-first режима (AC-MP-15..18).
 
 ### Phase 3

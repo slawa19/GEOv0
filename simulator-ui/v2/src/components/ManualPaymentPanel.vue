@@ -19,9 +19,16 @@ type Props = {
   // MUST MP-0: tri-state trustlines wiring from parent.
   // NOTE: logic/UI will be implemented in follow-up tasks (MP-1/MP-2/MP-6).
   trustlinesLoading: boolean
+
+  /** Phase 2.5: tri-state wiring for backend payment-targets fetch. */
+  paymentTargetsLoading: boolean
+
+  /** Best-effort error signal: last payment-targets refresh failure (if any). */
+  paymentTargetsLastError?: string | null
   /**
    * Payment targets for filtering the To dropdown (tri-state).
-   * Invariant: `undefined` should be used only while `trustlinesLoading=true`.
+   * Invariant: `undefined` should be used only while routes are loading
+   * (`trustlinesLoading=true` OR `paymentTargetsLoading=true`).
    */
   paymentToTargetIds: Set<string> | undefined
   trustlines?: TrustlineInfo[]
@@ -129,13 +136,20 @@ const isPickTo = computed(() => props.phase === 'picking-payment-to')
 const isConfirm = computed(() => props.phase === 'confirm-payment')
 const open = computed(() => isPickFrom.value || isPickTo.value || isConfirm.value)
 
+const routesLoading = computed(() => props.trustlinesLoading || props.paymentTargetsLoading)
+
 /**
  * Dropdown-specific tri-state normalization.
  * - unknown only while trustlines are loading
  * - loading=false always yields known Set (possibly empty)
  */
 const dropdownToTargetIds = computed<Set<string> | undefined>(() => {
-  if (props.trustlinesLoading) return undefined
+  if (routesLoading.value) return undefined
+
+  // Degraded mode: if backend payment-targets endpoint failed,
+  // avoid filtering the list to a known-empty Set.
+  if (props.paymentTargetsLastError) return undefined
+
   return props.paymentToTargetIds ?? new Set<string>()
 })
 
@@ -195,7 +209,7 @@ const toSelectionInvalidWarning = ref<string | null>(null)
 const toListUpdating = computed(() => {
   if (!props.state.fromPid) return false
   if (props.phase !== 'picking-payment-to' && props.phase !== 'confirm-payment') return false
-  return props.trustlinesLoading
+  return routesLoading.value
 })
 
 const toInlineHelpText = computed<string | null>(() => {
@@ -203,11 +217,15 @@ const toInlineHelpText = computed<string | null>(() => {
   if (!props.state.fromPid) return null
 
   const targets = dropdownToTargetIds.value
-  if (targets === undefined) return 'Routes are updating; the list may include unreachable recipients.'
+  if (targets === undefined) {
+    if (routesLoading.value) return 'Routes are updating; the list may include unreachable recipients.'
+    if (props.paymentTargetsLastError || props.trustlinesLastError) {
+      return 'Routes update failed; showing fallback data. Some recipients may be unreachable.'
+    }
+    return null
+  }
   if (targets.size === 0) {
-    const base = 'No direct routes available (direct trustlines only). Multi-hop routes may exist but are not shown.'
-    if (props.trustlinesLastError) return `${base} (Routes update failed; data may be stale.)`
-    return base
+    return 'Backend reports no payment routes from selected sender.'
   }
 
   if (props.trustlinesLastError) {

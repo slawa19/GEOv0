@@ -2,7 +2,6 @@ import { computed, ref, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
-import { isActiveStatus } from '../utils/status'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
 import { useInteractDataCache } from './interact/useInteractDataCache'
@@ -61,6 +60,9 @@ export function useInteractMode(opts: {
 
   /** True while backend payment-targets query is in-flight for current (run, eq, fromPid, maxHops). */
   paymentTargetsLoading: ComputedRef<boolean>
+
+  /** Best-effort error signal for payment-targets refresh failures (UI may show a degraded hint). */
+  paymentTargetsLastError: ComputedRef<string | null>
 
   // Flags
   busy: ComputedRef<boolean>
@@ -125,6 +127,8 @@ export function useInteractMode(opts: {
   const invalidateTrustlinesCache = dataCache.invalidateTrustlinesCache
   const findActiveTrustline = dataCache.findActiveTrustline
 
+  const paymentTargetsLastError = dataCache.paymentTargetsLastError
+
   function normalizeEq(v: unknown): string {
     return String(v ?? '').trim().toUpperCase()
   }
@@ -137,6 +141,16 @@ export function useInteractMode(opts: {
     return String(v ?? '').trim()
   }
 
+  const fsm = useInteractFSM({
+    snapshot: opts.snapshot,
+    findActiveTrustline,
+    onNodeClick: opts.onNodeClick,
+  })
+
+  const state = fsm.state
+  const phase = fsm.phase
+  const isPickingPhase = fsm.isPickingPhase
+
   const paymentTargetsActiveKey = computed(() => {
     const runId = normalizeRunId(opts.runId.value)
     const eq = normalizeEq(opts.equivalent.value)
@@ -146,9 +160,17 @@ export function useInteractMode(opts: {
   })
 
   const paymentTargetsLoading = computed(() => {
+    const p = state.phase
+    if (p !== 'picking-payment-to' && p !== 'confirm-payment') return false
+
     const key = paymentTargetsActiveKey.value
     if (!key) return false
-    return dataCache.paymentTargetsLoadingByKey.value.get(key) === true
+
+    // In-flight request.
+    if (dataCache.paymentTargetsLoadingByKey.value.get(key) === true) return true
+
+    // Not fetched yet => still unknown.
+    return !dataCache.paymentTargetsByKey.value.has(key)
   })
 
   function prefetchPaymentTargetsForCurrentFrom() {
@@ -159,16 +181,6 @@ export function useInteractMode(opts: {
     if (!runId || !fromPid) return
     void refreshPaymentTargets({ fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
   }
-
-  const fsm = useInteractFSM({
-    snapshot: opts.snapshot,
-    findActiveTrustline,
-    onNodeClick: opts.onNodeClick,
-  })
-
-  const state = fsm.state
-  const phase = fsm.phase
-  const isPickingPhase = fsm.isPickingPhase
 
   const availableCapacity = computed(() => {
     // Prefer backend trustlines list when present (can be more authoritative than snapshot).
@@ -226,34 +238,12 @@ export function useInteractMode(opts: {
     return new Set<string>()
   })
 
-  function computeDirectHopPaymentToTargets(fromPidRaw: string): Set<string> {
-    const fromPid = (fromPidRaw ?? '').trim()
-    const ids = new Set<string>()
-    if (!fromPid) return ids
-
-    for (const tl of trustlines.value) {
-      if ((tl.to_pid ?? '').trim() !== fromPid) continue
-      if (!isActiveStatus(tl.status)) continue
-
-      const available = parseAmountNumber(tl.available)
-      if (!Number.isFinite(available) || available <= 0) continue
-
-      // For payment `from -> to`, capacity is defined by trustline `to -> from`.
-      ids.add((tl.from_pid ?? '').trim())
-    }
-
-    // IMPORTANT: empty Set is a valid known-state.
-    // Consumers interpret it as "known-empty".
-    ids.delete('')
-    return ids
-  }
-
   /**
    * Payment targets for dropdown filtering.
    *
    * Contract:
-   *  - `undefined` is reserved strictly for "unknown" while trustlines are loading.
-   *  - when loading=false, always return a known Set (possibly empty).
+   *  - `undefined` => unknown (backend request in-flight OR not yet fetched)
+   *  - `Set` (incl. empty) => known
    *
    * This keeps dropdown tri-state wiring deterministic and separate from
    * `availableTargetIds` semantics used for canvas highlighting.
@@ -556,6 +546,7 @@ export function useInteractMode(opts: {
     availableTargetIds,
     paymentToTargetIds,
     paymentTargetsLoading,
+    paymentTargetsLastError,
 
     busy,
     canSendPayment,

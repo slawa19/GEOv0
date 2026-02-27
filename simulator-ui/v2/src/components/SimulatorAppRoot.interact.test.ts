@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 // We mock `useSimulatorApp()` to keep the test fast + deterministic while still deriving flags from the query string.
 
 vi.mock('../composables/useSimulatorApp', () => {
-  return {
+       return {
     useSimulatorApp: () => {
       const qs = () => {
         try {
@@ -146,25 +146,27 @@ vi.mock('../composables/useSimulatorApp', () => {
             actionsDisabled: ref(false),
           },
            mode: {
-             phase,
-             busy: ref(false),
-             trustlinesLoading: ref(false),
-             state: reactive({
-                fromPid: 'alice',
-                toPid: 'bob',
-                selectedEdgeKey: null,
-                edgeAnchor: { x: 10, y: 10 },
-                error: '',
-                lastClearing: null,
-              }),
+               phase,
+               busy: ref(false),
+               trustlinesLoading: ref(false),
+               paymentTargetsLoading: ref(false),
+               paymentTargetsLastError: ref<string | null>(null),
+               state: reactive({
+                  fromPid: 'alice',
+                  toPid: 'bob',
+                  selectedEdgeKey: null,
+                  edgeAnchor: { x: 10, y: 10 },
+                  error: '',
+                  lastClearing: null,
+                }),
 
               successMessage,
 
              availableCapacity: ref('0'),
-             paymentToTargetIds: ref<Set<string> | undefined>(undefined),
-             participants: ref([] as any[]),
-             trustlines: ref([] as any[]),
-             canSendPayment: ref(true),
+              paymentToTargetIds: ref<Set<string> | undefined>(undefined),
+              participants: ref([] as any[]),
+              trustlines: ref([] as any[]),
+              canSendPayment: ref(true),
 
             setPaymentFromPid,
             setPaymentToPid,

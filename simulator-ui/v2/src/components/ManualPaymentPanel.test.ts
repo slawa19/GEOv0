@@ -28,6 +28,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: '10',
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(['bob']),
           trustlines: [],
 
@@ -104,6 +106,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: null,
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: ui.paymentToTargetIds,
           trustlines: [],
 
@@ -180,6 +184,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: '10',
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: ui.paymentToTargetIds,
           trustlines: [],
 
@@ -244,6 +250,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: '10',
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(['bob']),
           trustlines: [],
 
@@ -308,6 +316,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: '10',
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(['bob']),
           trustlines: [],
 
@@ -368,6 +378,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: null,
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(['bob']),
           trustlines: [
             // For payment alice -> bob, capacity is defined by trustline bob -> alice.
@@ -427,6 +439,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: '10',
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(['bob']),
           trustlines: [],
 
@@ -490,6 +504,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: '10',
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(['bob']),
           trustlines: [],
 
@@ -550,6 +566,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: null,
 
           trustlinesLoading: true,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: undefined,
           trustlines: [],
 
@@ -608,6 +626,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: null,
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(),
           trustlines: [],
 
@@ -636,7 +656,7 @@ describe('ManualPaymentPanel', () => {
     expect(toOptionValues).toEqual([''])
 
     const help = host.querySelector('[data-testid="manual-payment-to-help"]') as HTMLElement
-    expect((help.textContent ?? '').trim()).toContain('No direct routes available')
+    expect((help.textContent ?? '').trim()).toContain('Backend reports no payment routes from selected sender.')
 
     app.unmount()
     host.remove()
@@ -666,6 +686,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: null,
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(),
           trustlines: [
             // For payment A -> B, capacity is consumed on TL B -> A, so sender candidates are tl.to_pid.
@@ -734,6 +756,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: null,
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(),
           trustlines,
 
@@ -791,6 +815,8 @@ describe('ManualPaymentPanel', () => {
           availableCapacity: null,
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: new Set(),
           trustlines: [
             { from_pid: 'alice', to_pid: 'bob', available: '0', status: 'active' },

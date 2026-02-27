@@ -18,9 +18,15 @@ describe('Interact Mode UI (components)', () => {
       runClearing: vi.fn(async () => ({})),
       fetchParticipants: vi.fn(async () => []),
       fetchTrustlines: vi.fn(async () => []),
+      fetchPaymentTargets: vi.fn(async () => []),
     }
 
-    const im = useInteractMode({ actions: actions as any, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({
+      actions: actions as any,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
 
     // Force confirm-payment phase via state machine
     im.startPaymentFlow()
@@ -38,6 +44,8 @@ describe('Interact Mode UI (components)', () => {
           availableCapacity: im.availableCapacity.value,
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: undefined,
           trustlines: [],
 
@@ -66,8 +74,14 @@ describe('Interact Mode UI (components)', () => {
       runClearing: vi.fn(async () => ({})),
       fetchParticipants: vi.fn(async () => []),
       fetchTrustlines: vi.fn(async () => []),
+      fetchPaymentTargets: vi.fn(async () => []),
     }
-    const im = useInteractMode({ actions: actions as any, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({
+      actions: actions as any,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
     im.startPaymentFlow()
     im.selectNode('alice')
     im.selectNode('bob')
@@ -83,6 +97,8 @@ describe('Interact Mode UI (components)', () => {
           unit: 'UAH',
 
           trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: undefined,
           trustlines: [],
 
@@ -184,6 +200,8 @@ describe('Interact Mode UI (components)', () => {
 
           // Tri-state contract: `paymentToTargetIds` may be undefined only while loading.
           trustlinesLoading: true,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
           paymentToTargetIds: undefined,
           trustlines: [],
 
