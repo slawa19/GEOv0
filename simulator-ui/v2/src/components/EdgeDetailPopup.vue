@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 
 import { normalizeAnchorToHostViewport, placeOverlayNearAnchor } from '../utils/overlayPosition'
-import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
+import { parseAmountNumber } from '../utils/numberFormat'
 import { renderOrDash } from '../utils/valueFormat'
 
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
@@ -20,6 +20,8 @@ type Props = {
 
   unit: string
   used?: string | number | null
+  /** Debt in reverse direction (debtor=from_pid, creditor=to_pid). */
+  reverseUsed?: string | number | null
   limit?: string | number | null
   available?: string | number | null
   status?: string | null
@@ -83,20 +85,24 @@ const title = computed(() => {
 
 const closeBlocked = computed(() => {
   const u = parseAmountNumber(props.used)
-  return Number.isFinite(u) && u > 0
+  const ru = parseAmountNumber(props.reverseUsed)
+  const usedDebt = Number.isFinite(u) && u > 0
+  const reverseDebt = Number.isFinite(ru) && ru > 0
+  return usedDebt || reverseDebt
 })
 
-function parseStrictAmountOrNull(v: unknown): number | null {
-  const s = parseAmountStringOrNull(v)
-  if (s == null) return null
-  const n = Number(s)
-  return Number.isFinite(n) ? n : null
-}
+const closeDebtDisplay = computed(() => {
+  const u = parseAmountNumber(props.used)
+  if (Number.isFinite(u) && u > 0) return props.used
+  const ru = parseAmountNumber(props.reverseUsed)
+  if (Number.isFinite(ru) && ru > 0) return props.reverseUsed
+  return props.used
+})
 
 const utilizationPct = computed<number | null>(() => {
-  const u = parseStrictAmountOrNull(props.used)
-  const l = parseStrictAmountOrNull(props.limit)
-  if (u == null || l == null) return null
+  const u = parseAmountNumber(props.used)
+  const l = parseAmountNumber(props.limit)
+  if (!Number.isFinite(u) || !Number.isFinite(l)) return null
   if (l <= 0) return null
   const raw = Math.round((u / l) * 100)
   if (!Number.isFinite(raw)) return null
@@ -149,6 +155,18 @@ function onCloseLine() {
     <div class="popup__title ds-label">Edge</div>
     <div class="popup__subtitle ds-value ds-mono">{{ title }}</div>
 
+    <div class="popup__grid">
+      <div class="ds-label">Used</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(used) }} {{ unit }}</div>
+      <div class="ds-label">Limit</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(limit) }} {{ unit }}</div>
+      <div class="ds-label">Available</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(available) }} {{ unit }}</div>
+      <div class="ds-label">Status</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(status) }}</div>
+    </div>
+
+    <!-- ED-2: capacity utilization bar (used/limit), shown under the stats grid. -->
     <div class="popup__util" aria-label="Utilization">
       <div
         class="popup__util-bar"
@@ -163,20 +181,9 @@ function onCloseLine() {
       <div class="popup__util-pct ds-label ds-mono" data-testid="edge-utilization-pct">{{ utilizationLabel }}</div>
     </div>
 
-    <div class="popup__grid">
-      <div class="ds-label">Used</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(used) }} {{ unit }}</div>
-      <div class="ds-label">Limit</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(limit) }} {{ unit }}</div>
-      <div class="ds-label">Available</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(available) }} {{ unit }}</div>
-      <div class="ds-label">Status</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(status) }}</div>
-    </div>
-
     <div class="popup__actions">
       <div v-if="closeBlocked" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-blocked">
-        Debt: {{ renderOrDash(used) }} {{ unit }}
+        Cannot close: trustline has outstanding debt ({{ renderOrDash(closeDebtDisplay) }} {{ unit }}). Reduce debt to 0 first.
       </div>
 
       <button

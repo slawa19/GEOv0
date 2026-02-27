@@ -149,6 +149,7 @@ const {
   edgeTooltipStyle: calcEdgeTooltipStyle,
   selectedNode,
   nodeCardStyle,
+  selectedNodeScreenCenter,
   selectedNodeEdgeStats,
 
   // pinning
@@ -379,22 +380,59 @@ const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
  * | Сценарий                         | source          | anchor              | Позиция                 |
  * |----------------------------------|-----------------|---------------------|-------------------------|
  * | "Change Limit" в EdgeDetailPopup | 'change-limit'  | state.edgeAnchor    | рядом с ребром          |
- * | ✏️ из NodeCard                   | 'node-card'     | nodeCardStyle pos   | рядом с нодой           |
- * | ActionBar → Manage Trustline     | 'action-bar'    | null                | CSS default right/top   |
- * | ActionBar → Send Payment         | 'action-bar'    | null                | CSS default right/top   |
- * | ActionBar → Run Clearing         | 'action-bar'    | null                | CSS default right/top   |
+ * | ✏️ из NodeCard                   | 'node-card'     | node screen center  | рядом с нодой           |
+ * | ActionBar → Manage Trustline     | 'action-bar'    | getActionBarAnchor()| top-right (под кнопкой) |
+ * | ActionBar → Send Payment         | 'action-bar'    | getActionBarAnchor()| top-right (под кнопкой) |
+ * | ActionBar → Run Clearing         | 'action-bar'    | getActionBarAnchor()| top-right (под кнопкой) |
  *
- * ActionBar-сценарии используют CSS default намеренно: кнопки físicamente
- * находятся в правом верхнем углу, CSS default открывает панели прямо под ними.
+ * ActionBar-сценарии используют якорь правого верхнего угла: явный anchor вместо
+ * CSS-дефолта надёжнее — не зависит от порядка применения стилей.
  */
 const { panelAnchor, openFrom: openPanelFrom } = useInteractPanelPosition(interactPhase)
 
-/** Парсит nodeCardStyle в Point; вызывать ДО закрытия карточки (snapshot). */
-function parseNodeCardAnchor(style: Record<string, unknown>): Point | null {
-  if (!style.left || !style.top) return null
-  const x = parseInt(style.left as string, 10)
-  const y = parseInt(style.top as string, 10)
-  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+/**
+ * Snapshot the selected node's screen-space center.
+ * Must be called BEFORE closing the NodeCard (selectedNode is still valid at that point).
+ * Falls back to parsing nodeCardStyle position if selectedNodeScreenCenter is unavailable.
+ */
+function snapshotNodeCenter(): Point | null {
+  const center = selectedNodeScreenCenter.value
+  if (center) return center
+  // Fallback: parse card CSS position (top-left corner ≈ near node)
+  const style = nodeCardStyle.value
+  if (style.left && style.top) {
+    const x = parseInt(style.left as string, 10)
+    const y = parseInt(style.top as string, 10)
+    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y }
+  }
+  return null
+}
+
+/**
+ * Returns an anchor for ActionBar-opened panels.
+ *
+ * Design goals:
+ * - Panel appears in the top-right corner, directly under the ActionBar buttons.
+ * - Stays within screen bounds regardless of viewport width.
+ * - Does NOT rely on CSS `right: 12px` default — explicit inline style wins every time.
+ *
+ * Math (see placeOverlayNearAnchor in overlayPosition.ts):
+ *   left = clamp(anchor.x + offX, pad, vw - panelW - pad)
+ *   with anchor.x = rect.width, offX = 12, pad = 12, panelW = 560:
+ *   → left = clamp(rect.width + 12, 12, rect.width - 572)
+ *   → left = rect.width - 572  (right-edge of panel = rect.width - 12 ✓)
+ *
+ *   top = clamp(anchor.y + offY, pad, vh - panelH - pad)
+ *   with anchor.y = 98, offY = 12:
+ *   → top = 110px  (matches .ds-ov-panel CSS default, just below ActionBar)
+ *
+ * If hostEl is unavailable (SSR / tests), returns null → CSS default applies.
+ */
+function getActionBarAnchor(): Point | null {
+  const host = hostEl.value
+  if (!host) return null
+  const rect = host.getBoundingClientRect()
+  return { x: rect.width, y: 98 }
 }
 
 /**
@@ -511,23 +549,28 @@ function startFlowFromNodeCard(opts: {
   openEditor?: boolean
   start: () => void
 }) {
-  // Snapshot NodeCard anchor BEFORE closing it (after close, nodeCardStyle is lost).
-  const snapshot = parseNodeCardAnchor(nodeCardStyle.value)
+  // Snapshot node screen center BEFORE closing the card (selectedNode cleared after close).
+  const snapshot = snapshotNodeCenter()
 
   if (opts.openEditor) useFullTrustlineEditor.value = true
   setNodeCardOpen(false)
   opts.start()
 
-  // nextTick: wait until the interactPhase watcher in useInteractPanelPosition
-  // clears the anchor, then set the new anchor (otherwise it can be overwritten).
-  void nextTick(() => openPanelFrom('node-card', snapshot))
+  // Safe to set synchronously: flush:'sync' watcher in useInteractPanelPosition
+  // already fired during opts.start() and cleared anchor for the group change.
+  openPanelFrom('node-card', snapshot)
 }
 
 function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void }) {
+  // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
+  const snapshot = getActionBarAnchor()
   setNodeCardOpen(false)
-  // anchor resets automatically on phase change in useInteractPanelPosition
   if (opts.openEditor) useFullTrustlineEditor.value = true
   opts.start()
+
+  // Set top-right anchor explicitly — avoids relying on CSS `right: 12px` default
+  // which could be overridden by a stale inline style from a previous node-card session.
+  openPanelFrom('action-bar', snapshot)
 }
 
 // BUG-1: NodeCardOverlay interact mode handlers

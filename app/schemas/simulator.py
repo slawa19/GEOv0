@@ -687,6 +687,9 @@ class SimulatorActionTrustlineListItem(BaseModel):
     equivalent: str
     limit: str
     used: str
+    # Debt in reverse direction (debtor = from_pid, creditor = to_pid).
+    # Used by UI to avoid offering impossible Close when reverse debt exists.
+    reverse_used: str
     available: str
     status: str
 
@@ -695,6 +698,28 @@ class SimulatorActionTrustlineListItem(BaseModel):
 
 class SimulatorActionTrustlinesListResponse(BaseModel):
     items: List[SimulatorActionTrustlineListItem]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# =====================================
+# Phase 2.5: backend-first payment targets (reachability)
+# =====================================
+
+
+class SimulatorPaymentTargetsItem(BaseModel):
+    # Receiver PID.
+    to_pid: str
+    # Shortest path hop count (edges) for any route with capacity > 0.
+    hops: int = Field(ge=1)
+    # Optional heavy field (enabled via include_max_available=true).
+    max_available: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorPaymentTargetsResponse(BaseModel):
+    items: List[SimulatorPaymentTargetsItem]
 
     model_config = ConfigDict(extra="forbid")
 

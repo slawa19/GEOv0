@@ -47,6 +47,9 @@ vi.mock('../composables/useSimulatorApp', () => {
        const confirmTrustlineClose = vi.fn(async () => undefined)
        ;(globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE = confirmTrustlineClose
 
+       const successMessage = ref<string | null>(null)
+       ;(globalThis as any).__GEO_TEST_INTERACT_SUCCESS_MESSAGE = successMessage
+
       const isInteractPickingPhase = computed(() => {
         if (!isInteractUi.value) return false
         const p = phase.value
@@ -147,13 +150,15 @@ vi.mock('../composables/useSimulatorApp', () => {
              busy: ref(false),
              trustlinesLoading: ref(false),
              state: reactive({
-               fromPid: 'alice',
-               toPid: 'bob',
-               selectedEdgeKey: null,
-               edgeAnchor: { x: 10, y: 10 },
-               error: '',
-               lastClearing: null,
-             }),
+                fromPid: 'alice',
+                toPid: 'bob',
+                selectedEdgeKey: null,
+                edgeAnchor: { x: 10, y: 10 },
+                error: '',
+                lastClearing: null,
+              }),
+
+              successMessage,
 
              availableCapacity: ref('0'),
              paymentToTargetIds: ref<Set<string> | undefined>(undefined),
@@ -176,10 +181,12 @@ vi.mock('../composables/useSimulatorApp', () => {
              confirmTrustlineCreate: vi.fn(async () => undefined),
              confirmTrustlineUpdate: vi.fn(async () => undefined),
              confirmTrustlineClose,
-             confirmClearing: vi.fn(async () => undefined),
-             cancel,
-             history: reactive([] as any[]),
-           },
+              confirmClearing: vi.fn(async () => {
+                successMessage.value = 'Clearing done: 1/1 cycles'
+              }),
+              cancel,
+              history: reactive([] as any[]),
+            },
           systemBalance: computed(() => ({
             isClean: true,
             totalUsed: 0,
@@ -225,6 +232,7 @@ vi.mock('../composables/useSimulatorApp', () => {
         edgeTooltipStyle: () => ({}),
         selectedNode: computed(() => (globalThis as any).__GEO_TEST_SELECTED_NODE ?? null),
         nodeCardStyle: computed(() => (globalThis as any).__GEO_TEST_NODE_CARD_STYLE ?? ({ left: '100px', top: '100px' })),
+        selectedNodeScreenCenter: computed(() => (globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER ?? null),
         selectedNodeEdgeStats: computed(() => null),
 
         // pinning
@@ -629,5 +637,56 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
     delete (globalThis as any).__GEO_TEST_SELECTED_NODE
     delete (globalThis as any).__GEO_TEST_INTERACT_START_CLEARING_FLOW
+  })
+
+  it('success toast: successful clearing confirm renders SuccessToast and allows dismiss', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    app.mount(host)
+    await nextTick()
+
+    // Start flow (idle -> confirm-clearing)
+    const btnStart = host.querySelector('[data-testid="actionbar-clearing"]') as HTMLButtonElement | null
+    expect(btnStart).toBeTruthy()
+    btnStart?.click()
+    await nextTick()
+
+    // Confirm clearing
+    const btnConfirm = host.querySelector('[data-testid="clearing-panel"] button.ds-btn--primary') as HTMLButtonElement | null
+    expect(btnConfirm).toBeTruthy()
+    btnConfirm?.click()
+    await Promise.resolve()
+    await nextTick()
+
+    const toast = host.querySelector('.success-toast') as HTMLElement | null
+    expect(toast).toBeTruthy()
+    expect(toast?.textContent ?? '').toContain('Clearing done: 1/1 cycles')
+
+    // Dismiss via close button (should clear interact.mode.successMessage in parent handler)
+    const successMessage = (globalThis as any).__GEO_TEST_INTERACT_SUCCESS_MESSAGE as ReturnType<typeof ref<string | null>>
+    expect(successMessage).toBeTruthy()
+    expect(successMessage.value).toContain('Clearing done')
+
+    const btnDismiss = toast?.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+    expect(btnDismiss).toBeTruthy()
+    btnDismiss?.click()
+    await nextTick()
+
+    expect(successMessage.value).toBeNull()
+    // Vue Transition keeps the leaving element in DOM briefly.
+    const toastAfter = host.querySelector('.success-toast') as HTMLElement | null
+    expect(toastAfter).toBeTruthy()
+    expect(toastAfter?.className ?? '').toContain('success-toast-leave')
+
+    app.unmount()
+    host.remove()
+    delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+    delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+    delete (globalThis as any).__GEO_TEST_INTERACT_SUCCESS_MESSAGE
   })
 })

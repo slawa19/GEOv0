@@ -474,6 +474,18 @@ async def test_action_trustlines_list_is_run_scoped_and_filters_by_participant_p
     # Arrange
     alice, bob, uah = await _seed_alice_bob_uah(db_session)
 
+    # Arrange reverse debt: debtor = from_pid, creditor = to_pid.
+    # This must surface as `reverse_used` for trustline alice -> bob.
+    db_session.add(
+        Debt(
+            debtor_id=alice.id,
+            creditor_id=bob.id,
+            equivalent_id=uah.id,
+            amount=Decimal("2"),
+        )
+    )
+    await db_session.commit()
+
     # Add a "foreign" trustline in DB that must NOT leak into the list (snapshot-scoped).
     mallory = Participant(
         pid="mallory",
@@ -553,6 +565,12 @@ async def test_action_trustlines_list_is_run_scoped_and_filters_by_participant_p
         ("bob", "alice"),
     ]
 
+    # Assert: schema includes reverse_used and it matches close-guard reverse debt.
+    assert all("reverse_used" in x for x in items_all)
+    by_key = {(x["from_pid"], x["to_pid"]): x for x in items_all}
+    assert Decimal(str(by_key[("alice", "bob")]["reverse_used"])) == Decimal("2")
+    assert Decimal(str(by_key[("bob", "alice")]["reverse_used"])) == Decimal("0")
+
     # Act 2: filter by participant_pid should include incoming+outgoing
     r_f = await client.get(
         "/api/v1/simulator/runs/test-run/actions/trustlines-list?equivalent=UAH&participant_pid=alice",
@@ -564,6 +582,8 @@ async def test_action_trustlines_list_is_run_scoped_and_filters_by_participant_p
         ("alice", "bob"),
         ("bob", "alice"),
     }
+
+    assert all("reverse_used" in x for x in items_f)
 
 
 @pytest.mark.asyncio
@@ -832,6 +852,119 @@ async def test_action_payment_real_amount_manual_validation_stays_invalid_amount
     assert r.status_code == 400
     payload = r.json()
     assert payload.get("code") == "INVALID_AMOUNT"
+
+
+@pytest.mark.asyncio
+async def test_payment_targets_multihop_returns_backend_reachable_to_pid_list(
+    client, db_session, interact_actions_enabled
+):
+    """Phase 2.5: payment-targets must include multi-hop reachable targets.
+
+    Graph:
+      alice -> xavier -> bob is reachable for amount>0
+      but alice -> bob has no direct trustline.
+    """
+
+    # Arrange
+    alice = Participant(
+        pid="alice",
+        display_name="Alice",
+        public_key="A" * 64,
+        type="person",
+        status="active",
+        profile={},
+    )
+    xavier = Participant(
+        pid="xavier",
+        display_name="Xavier",
+        public_key="X" * 64,
+        type="person",
+        status="active",
+        profile={},
+    )
+    bob = Participant(
+        pid="bob",
+        display_name="Bob",
+        public_key="B" * 64,
+        type="person",
+        status="active",
+        profile={},
+    )
+    uah = Equivalent(code="UAH", precision=2, is_active=True)
+    db_session.add_all([alice, xavier, bob, uah])
+    await db_session.commit()
+
+    # PaymentRouter edge semantics:
+    # to enable alice -> xavier, trustline must be xavier -> alice.
+    # to enable xavier -> bob, trustline must be bob -> xavier.
+    db_session.add_all(
+        [
+            TrustLine(
+                from_participant_id=xavier.id,
+                to_participant_id=alice.id,
+                equivalent_id=uah.id,
+                limit=Decimal("10"),
+                status="active",
+            ),
+            TrustLine(
+                from_participant_id=bob.id,
+                to_participant_id=xavier.id,
+                equivalent_id=uah.id,
+                limit=Decimal("10"),
+                status="active",
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    # Avoid stale cached routing graph across tests.
+    from app.core.payments.router import PaymentRouter
+
+    PaymentRouter.invalidate_cache("UAH")
+
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    # Act
+    r = await client.get(
+        "/api/v1/simulator/runs/test-run/payment-targets",
+        headers=headers,
+        params={"equivalent": "UAH", "from_pid": "alice"},
+    )
+
+    # Assert
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert isinstance(payload.get("items"), list)
+
+    by_pid = {x.get("to_pid"): x for x in payload["items"]}
+    assert "bob" in by_pid
+    assert int(by_pid["bob"]["hops"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_payment_targets_no_route_returns_empty_items(
+    client, db_session, interact_actions_enabled
+):
+    # Arrange
+    await _seed_alice_bob_uah(db_session)
+
+    from app.core.payments.router import PaymentRouter
+
+    PaymentRouter.invalidate_cache("UAH")
+
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    # Act
+    r = await client.get(
+        "/api/v1/simulator/runs/test-run/payment-targets",
+        headers=headers,
+        params={"equivalent": "UAH", "from_pid": "alice"},
+    )
+
+    # Assert
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload == {"items": []}
 
 
 @pytest.mark.asyncio

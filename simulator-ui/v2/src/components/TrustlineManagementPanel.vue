@@ -7,6 +7,7 @@ import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
+import { isActiveStatus } from '../utils/status'
 import { renderOrDash } from '../utils/valueFormat'
 import { useOverlayPositioning } from '../utils/overlayPosition'
 
@@ -58,12 +59,14 @@ const selectedTl = computed(() => {
 const effectiveData = computed(() => {
   return {
     used: selectedTl.value?.used ?? props.used,
+    reverseUsed: selectedTl.value?.reverse_used,
     limit: selectedTl.value?.limit ?? props.currentLimit,
     available: selectedTl.value?.available ?? props.available,
   }
 })
 
 const effectiveUsed = computed(() => effectiveData.value.used)
+const effectiveReverseUsed = computed(() => effectiveData.value.reverseUsed)
 const effectiveLimit = computed(() => effectiveData.value.limit)
 const effectiveAvailable = computed(() => effectiveData.value.available)
 
@@ -114,7 +117,10 @@ const updateLimitTooLow = computed(() => {
 
 const closeBlocked = computed(() => {
   const u = parseAmountNumber(effectiveUsed.value)
-  return Number.isFinite(u) && u > 0
+  const ru = parseAmountNumber(effectiveReverseUsed.value)
+  const usedDebt = Number.isFinite(u) && u > 0
+  const reverseDebt = Number.isFinite(ru) && ru > 0
+  return usedDebt || reverseDebt
 })
 
 const createValid = computed(() => {
@@ -205,6 +211,20 @@ const trustlinesForFrom = computed(() => {
   return trustlinesSorted.value.filter((tl) => (tl.from_pid ?? '').trim() === from)
 })
 
+const existingActiveToPidsForFrom = computed(() => {
+  const from = (props.state.fromPid ?? '').trim()
+  const out = new Set<string>()
+  if (!from) return out
+
+  for (const tl of trustlinesSorted.value) {
+    if ((tl.from_pid ?? '').trim() !== from) continue
+    if (!isActiveStatus(tl.status)) continue
+    const to = (tl.to_pid ?? '').trim()
+    if (to) out.add(to)
+  }
+  return out
+})
+
 function encodeTlKey(tl: { from_pid?: string | null; to_pid?: string | null }): string {
   return `${encodeURIComponent(tl.from_pid ?? '')}|${encodeURIComponent(tl.to_pid ?? '')}`
 }
@@ -221,10 +241,13 @@ function onTrustlinePick(key: string) {
 /** Dynamic positioning: when anchor is provided (opened from NodeCard or edge click),
  *  place the panel near the anchor instead of the fixed CSS top-right position.
  *  When no anchor, returns {} to let CSS `.ds-ov-panel` defaults apply. */
+// IMPORTANT: panelSize.w must match CSS max-width of .ds-ov-panel (560px).
+// Using the smaller min-width (320px) causes clamping to underestimate the right edge
+// → panel overflows the screen by up to 240px when rendered at max-width.
 const anchorPositionStyle = useOverlayPositioning(
   () => props.anchor,
   () => props.hostEl,
-  { w: 340, h: 340 },
+  { w: 560, h: 340 },
 )
 
 const newLimitInput = ref<HTMLInputElement | null>(null)
@@ -274,7 +297,9 @@ defineExpose({
           @change="props.setToPid?.(($event.target as HTMLSelectElement).value || null)"
         >
           <option value="">—</option>
-          <option v-for="p in toParticipants" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
+          <option v-for="p in toParticipants" :key="p.pid" :value="p.pid">
+            {{ participantLabel(p) + (isCreate && existingActiveToPidsForFrom.has((p.pid ?? '').trim()) ? ' (exists)' : '') }}
+          </option>
         </select>
       </div>
 
@@ -371,7 +396,7 @@ defineExpose({
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
 
-      <div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono">
+      <div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-blocked">
         Cannot close: trustline has outstanding debt ({{ renderOrDash(effectiveUsed) }} {{ unit }}). Reduce used to 0 first.
       </div>
 

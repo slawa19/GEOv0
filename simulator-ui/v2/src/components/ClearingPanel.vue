@@ -23,10 +23,13 @@ type Props = {
 
 const props = defineProps<Props>()
 
+// IMPORTANT: panelSize.w must match CSS max-width of .ds-ov-panel (560px).
+// Using the smaller min-width (320px) causes clamping to underestimate the right edge
+// → panel overflows the screen by up to 240px when rendered at max-width.
 const anchorPositionStyle = useOverlayPositioning(
   () => props.anchor,
   () => props.hostEl,
-  { w: 360, h: 280 },
+  { w: 560, h: 280 },
 )
 
 const last = computed(() => props.state.lastClearing)

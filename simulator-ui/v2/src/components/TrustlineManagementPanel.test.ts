@@ -3,16 +3,26 @@ import { describe, expect, it, vi } from 'vitest'
 
 import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
 
+function baseState(partial?: Partial<any>) {
+  // Minimal InteractState shape used by the panel.
+  return reactive({
+    phase: 'idle',
+    fromPid: null as string | null,
+    toPid: null as string | null,
+    selectedEdgeKey: null as string | null,
+    edgeAnchor: null as { x: number; y: number } | null,
+    error: null as string | null,
+    lastClearing: null as any,
+    ...(partial ?? {}),
+  })
+}
+
 describe('TrustlineManagementPanel', () => {
   it('TL-1a: createValid accepts 0 (Create enabled for valid from/to + limit=0)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
-    const state = reactive({
-      fromPid: 'alice' as string | null,
-      toPid: 'bob' as string | null,
-      error: null as string | null,
-    })
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
 
     const app = createApp({
       render: () =>
@@ -60,11 +70,7 @@ describe('TrustlineManagementPanel', () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
-    const state = reactive({
-      fromPid: 'alice' as string | null,
-      toPid: 'bob' as string | null,
-      error: null as string | null,
-    })
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
 
     const app = createApp({
       render: () =>
@@ -111,11 +117,7 @@ describe('TrustlineManagementPanel', () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
-    const state = reactive({
-      fromPid: 'alice' as string | null,
-      toPid: 'bob' as string | null,
-      error: null as string | null,
-    })
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
 
     const app = createApp({
       render: () =>
@@ -143,11 +145,62 @@ describe('TrustlineManagementPanel', () => {
     expect(btn).toBeTruthy()
     expect(btn!.disabled).toBe(true)
 
-    const warn = Array.from(host.querySelectorAll('.ds-alert--warn')).find((el) => (el.textContent ?? '').includes('Cannot close: trustline has outstanding debt')) as
-      | HTMLElement
-      | undefined
+    const warn = host.querySelector('[data-testid="tl-close-blocked"]') as HTMLElement | null
     expect(warn).toBeTruthy()
     expect((warn!.textContent ?? '').trim()).toContain('(1 EQ)')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('TL-2 (Phase 2): when reverse_used > 0, disables Close and shows warning', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
+
+    const app = createApp({
+      render: () =>
+        h(TrustlineManagementPanel as any, {
+          phase: 'editing-trustline',
+          state,
+          unit: 'EQ',
+          // used must be 0, but reverse debt exists
+          used: '0',
+          currentLimit: '10',
+          available: '10',
+          participants: [],
+          trustlines: [
+            {
+              from_pid: 'alice',
+              from_name: 'Alice',
+              to_pid: 'bob',
+              to_name: 'Bob',
+              equivalent: 'EQ',
+              limit: '10.00',
+              used: '0.00',
+              reverse_used: '0.01',
+              available: '10.00',
+              status: 'active',
+            },
+          ],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="trustline-close-btn"]') as HTMLButtonElement | null
+    expect(btn).toBeTruthy()
+    expect(btn!.disabled).toBe(true)
+
+    const warn = host.querySelector('[data-testid="tl-close-blocked"]') as HTMLElement | null
+    expect(warn).toBeTruthy()
 
     app.unmount()
     host.remove()
@@ -157,11 +210,7 @@ describe('TrustlineManagementPanel', () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
-    const state = reactive({
-      fromPid: 'alice' as string | null,
-      toPid: 'bob' as string | null,
-      error: null as string | null,
-    })
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
 
     const confirmTrustlineCreate = vi.fn()
     const confirmTrustlineUpdate = vi.fn()
@@ -228,6 +277,116 @@ describe('TrustlineManagementPanel', () => {
       expect(confirmTrustlineUpdate).toHaveBeenCalledTimes(1)
       expect(confirmTrustlineUpdate).toHaveBeenCalledWith('1.5')
     }
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('TL-3: marks existing trustlines as (exists) in create-flow To dropdown', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = baseState({ fromPid: 'alice', toPid: null })
+
+    const app = createApp({
+      render: () =>
+        h(TrustlineManagementPanel as any, {
+          phase: 'confirm-trustline-create',
+          state,
+          unit: 'EQ',
+          used: '0',
+          currentLimit: null,
+          available: null,
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+            { pid: 'carol', name: 'Carol' },
+          ],
+          trustlines: [
+            {
+              from_pid: 'alice',
+              from_name: 'Alice',
+              to_pid: 'bob',
+              to_name: 'Bob',
+              equivalent: 'EQ',
+              limit: '10.00',
+              used: '0.00',
+              available: '10.00',
+              status: 'active',
+            },
+          ],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+          selectTrustline: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const toSelect = host.querySelector('#tl-to') as HTMLSelectElement | null
+    expect(toSelect).toBeTruthy()
+    expect(toSelect!.disabled).toBe(false)
+
+    const optionsText = Array.from(toSelect!.querySelectorAll('option')).map((o) => (o.textContent ?? '').trim())
+    expect(optionsText.some((t) => t.includes('(exists)'))).toBe(true)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('TL-4: pre-fills newLimit from effectiveLimit (trustlines list) rather than props.currentLimit', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
+
+    const app = createApp({
+      render: () =>
+        h(TrustlineManagementPanel as any, {
+          phase: 'editing-trustline',
+          state,
+          unit: 'EQ',
+          // Intentionally conflicting snapshot-like prop.
+          currentLimit: '111.00',
+          used: '0.00',
+          available: '111.00',
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+          ],
+          trustlines: [
+            {
+              from_pid: 'alice',
+              from_name: 'Alice',
+              to_pid: 'bob',
+              to_name: 'Bob',
+              equivalent: 'EQ',
+              limit: '10.00',
+              used: '0.00',
+              available: '10.00',
+              status: 'active',
+            },
+          ],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const input = host.querySelector('#tl-new-limit') as HTMLInputElement | null
+    expect(input).toBeTruthy()
+    expect(input!.value).toBe('10.00')
 
     app.unmount()
     host.remove()

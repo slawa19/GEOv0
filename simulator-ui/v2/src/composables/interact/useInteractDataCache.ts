@@ -11,6 +11,7 @@ function normalizeEq(v: unknown): string {
 
 export function useInteractDataCache(opts: {
   actions: ReturnType<typeof useInteractActions>
+  runId: Ref<string>
   equivalent: Ref<string>
   snapshot: Ref<GraphSnapshot | null>
   parseAmountStringOrNull: (v: unknown) => string | null
@@ -21,6 +22,14 @@ export function useInteractDataCache(opts: {
   trustlinesLastError: ComputedRef<string | null>
   refreshParticipants: (o?: { force?: boolean }) => Promise<void>
   refreshTrustlines: (o?: { force?: boolean }) => Promise<void>
+  /** Phase 2.5: backend-first reachable payment targets (multi-hop). */
+  refreshPaymentTargets: (o: { fromPid: string; maxHops: number; force?: boolean }) => Promise<void>
+  /** Cache (by run+eq+from+maxHops) for To dropdown filtering. */
+  paymentTargetsByKey: Ref<Map<string, Set<string>>>
+  /** Loading flags per key. Key must match paymentTargetsByKey key. */
+  paymentTargetsLoadingByKey: Ref<Map<string, boolean>>
+  paymentTargetsLastError: ComputedRef<string | null>
+  paymentTargetsKey: (o: { runId: string; eq: string; fromPid: string; maxHops: number }) => string
   invalidateTrustlinesCache: (eq?: string) => void
   patchTrustlineLimitLocal: (from: string, to: string, newLimit: string, eq?: string) => void
   findActiveTrustline: (from: string | null, to: string | null) => TrustlineInfo | null
@@ -169,6 +178,99 @@ export function useInteractDataCache(opts: {
   const trustlinesLoading = computed(() => trustlinesLoadingRef.value)
   const trustlinesLastError = computed(() => trustlinesLastErrorRef.value)
 
+  // -------------------------
+  // Payment targets (To dropdown filtering)
+  // -------------------------
+
+  function normalizeRunId(v: unknown): string {
+    return String(v ?? '').trim()
+  }
+
+  function normalizePid(v: unknown): string {
+    return String(v ?? '').trim()
+  }
+
+  function paymentTargetsKey(o: { runId: string; eq: string; fromPid: string; maxHops: number }): string {
+    const runId = normalizeRunId(o.runId)
+    const eq = normalizeEq(o.eq)
+    const fromPid = normalizePid(o.fromPid)
+    const maxHops = Number(o.maxHops)
+    return `${runId}::${eq}::${fromPid}::${Number.isFinite(maxHops) ? String(maxHops) : 'NaN'}`
+  }
+
+  // NOTE: keep Maps in refs and replace on update so consumers can depend on ref identity.
+  const paymentTargetsByKey = ref(new Map<string, Set<string>>())
+  const paymentTargetsLoadingByKey = ref(new Map<string, boolean>())
+  const paymentTargetsLastErrorRef = ref<string | null>(null)
+  const paymentTargetsLastError = computed(() => paymentTargetsLastErrorRef.value)
+  const paymentTargetsFetchEpochByKey = new Map<string, number>()
+
+  function setPaymentTargetsLoading(key: string, loading: boolean) {
+    const next = new Map(paymentTargetsLoadingByKey.value)
+    if (loading) next.set(key, true)
+    else next.delete(key)
+    paymentTargetsLoadingByKey.value = next
+  }
+
+  async function refreshPaymentTargets(o: { fromPid: string; maxHops: number; force?: boolean }) {
+    const runId = normalizeRunId(opts.runId.value)
+    const eq = normalizeEq(opts.equivalent.value)
+    const fromPid = normalizePid(o.fromPid)
+    const maxHops = Number(o.maxHops)
+    if (!runId || !eq || !fromPid || !Number.isFinite(maxHops) || !(maxHops >= 1)) return
+
+    const key = paymentTargetsKey({ runId, eq, fromPid, maxHops })
+    const cached = paymentTargetsByKey.value.get(key)
+    if (!o.force && cached) return
+
+    setPaymentTargetsLoading(key, true)
+    const myEpoch = (paymentTargetsFetchEpochByKey.get(key) ?? 0) + 1
+    paymentTargetsFetchEpochByKey.set(key, myEpoch)
+
+    try {
+      const items = await opts.actions.fetchPaymentTargets(eq, fromPid, maxHops)
+      // Ignore stale result for the same key.
+      if (paymentTargetsFetchEpochByKey.get(key) !== myEpoch) return
+
+      const ids = new Set<string>()
+      for (const it of items ?? []) {
+        const pid = normalizePid((it as any)?.to_pid)
+        if (!pid) continue
+        ids.add(pid)
+      }
+
+      const next = new Map(paymentTargetsByKey.value)
+      next.set(key, ids)
+      paymentTargetsByKey.value = next
+      paymentTargetsLastErrorRef.value = null
+    } catch (e: any) {
+      // Ignore stale error for the same key.
+      if (paymentTargetsFetchEpochByKey.get(key) !== myEpoch) return
+
+      // Best-effort: treat as known-empty (so UI does not crash / is deterministic).
+      const next = new Map(paymentTargetsByKey.value)
+      next.set(key, new Set())
+      paymentTargetsByKey.value = next
+      paymentTargetsLastErrorRef.value = String(e?.message ?? e ?? 'Payment targets refresh failed')
+    } finally {
+      // Only clear if this fetch is still the latest for the key.
+      if (paymentTargetsFetchEpochByKey.get(key) === myEpoch) {
+        setPaymentTargetsLoading(key, false)
+      }
+    }
+  }
+
+  // Run/EQ change invalidates payment targets semantics.
+  watch(
+    () => `${normalizeRunId(opts.runId.value)}::${normalizeEq(opts.equivalent.value)}`,
+    () => {
+      paymentTargetsByKey.value = new Map()
+      paymentTargetsLoadingByKey.value = new Map()
+      paymentTargetsLastErrorRef.value = null
+    },
+    { immediate: true },
+  )
+
   function findActiveTrustline(from: string | null, to: string | null): TrustlineInfo | null {
     if (!from || !to) return null
     const items = trustlines.value
@@ -243,6 +345,11 @@ export function useInteractDataCache(opts: {
     trustlinesLastError,
     refreshParticipants,
     refreshTrustlines,
+    refreshPaymentTargets,
+    paymentTargetsByKey,
+    paymentTargetsLoadingByKey,
+    paymentTargetsLastError,
+    paymentTargetsKey,
     invalidateTrustlinesCache,
     patchTrustlineLimitLocal,
     findActiveTrustline,

@@ -91,5 +91,36 @@ describe('SuccessToast', () => {
       vi.useRealTimers()
     }
   })
-})
 
+  it('manual dismiss emits dismiss (owner clears message)', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const msg = ref<string | null>('ok')
+    const onDismiss = vi.fn(() => {
+      msg.value = null
+    })
+
+    const app = createApp({
+      render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+    })
+    app.mount(host)
+    await nextTick()
+
+    const btn = host.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null
+    expect(btn).toBeTruthy()
+    btn?.click()
+    await nextTick()
+
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+    expect(msg.value).toBeNull()
+    // Vue Transition keeps the leaving element in DOM briefly.
+    // We assert it started leaving (instead of asserting immediate DOM removal).
+    const toast = host.querySelector('.success-toast') as HTMLElement | null
+    expect(toast).toBeTruthy()
+    expect(toast?.className ?? '').toContain('success-toast-leave')
+
+    app.unmount()
+    host.remove()
+  })
+})

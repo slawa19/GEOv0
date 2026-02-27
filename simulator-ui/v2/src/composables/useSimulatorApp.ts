@@ -601,6 +601,7 @@ export function useSimulatorApp() {
 
   const interactMode = useInteractMode({
     actions: interactActions,
+    runId: interactRunId,
     equivalent: effectiveEq,
     snapshot: snapshotRef,
     // Keep node selection highlight in sync with picking-driven flows.
@@ -867,6 +868,7 @@ export function useSimulatorApp() {
 
   const selectedNode = viewWiring.selectedNode
   const nodeCardStyle = viewWiring.nodeCardStyle
+  const selectedNodeScreenCenter = viewWiring.selectedNodeScreenCenter
 
   const selectedNodeEdgeStats = useSelectedNodeEdgeStats({
     getSnapshot: () => state.snapshot,
@@ -2038,6 +2040,7 @@ export function useSimulatorApp() {
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
     selectedNode: viewWiring.selectedNode,
     nodeCardStyle: viewWiring.nodeCardStyle,
+    selectedNodeScreenCenter,
     selectedNodeEdgeStats,
 
     // pinning

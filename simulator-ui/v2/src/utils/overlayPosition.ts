@@ -66,15 +66,33 @@ export function normalizeAnchorToHostViewport(anchor: Point, hostRect: DOMRect |
  *
  * @param getAnchor  getter для anchor-точки; вызывается реактивно внутри computed
  * @param getHostEl  getter для host-элемента (viewport для clamping); может вернуть null
- * @param panelSize  ожидаемые размеры панели в px (w, h) для корректного clamping
+ * @param panelSize  ожидаемые МАКСИМАЛЬНЫЕ размеры панели в px (w, h) для корректного clamping.
+ *
+ * ⚠️  ВАЖНО: panelSize.w должен соответствовать CSS max-width панели, а НЕ min-width!
+ *    Для .ds-ov-panel: max-width = min(560px, 100vw - 24px) → передавай { w: 560, ... }.
+ *    Если использовать меньшее значение (напр. 360), clamping будет считать правый край
+ *    слишком близко → панель вылезет за правый край экрана на (560 - 360) = 200px.
+ *
+ * PositionING math (placeOverlayNearAnchor):
+ *   left = clamp(anchor.x + offX,  pad,  vw - panelSize.w - pad)
+ *   top  = clamp(anchor.y + offY,  pad,  vh - panelSize.h - pad)
+ *   where offX = offY = 12, pad = 12 (defaults).
+ *
+ * Типичные источники anchor и их семантика:
+ *   • NodeCard → selectedNodeScreenCenter = worldToScreen(node.__x, node.__y)
+ *     (центр ноды в host-relative координатах)
+ *   • ActionBar → getActionBarAnchor() = { x: hostRect.width, y: 98 }
+ *     (x > vw → зажимается до right: 12px; y+12 = 110px = топ под ActionBar)
+ *   • EdgeDetailPopup → state.edgeAnchor (midpoint ребра, host-relative)
+ *   • null → CSS default (.ds-ov-panel: right: 12px; top: 110px)
  *
  * @example
  * ```ts
- * // В компоненте панели:
+ * // В компоненте панели — ВСЕГДА используй CSS max-width как panelSize.w:
  * const positionStyle = useOverlayPositioning(
  *   () => props.anchor,
  *   () => props.hostEl,
- *   { w: 360, h: 340 },
+ *   { w: 560, h: 340 },  // 560 = max-width .ds-ov-panel
  * )
  * // В template: <div class="ds-ov-panel" :style="positionStyle">
  * ```
@@ -86,8 +104,8 @@ export function useOverlayPositioning(
 ): ComputedRef<Record<string, string>> {
   return computed(() => {
     let anchor = getAnchor()
-    if (!anchor) return {}
-    if (!Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) return {}
+    if (!anchor) { console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor is null => CSS default'); return {} }
+    if (!Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) { console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor not finite => CSS default'); return {} }
 
     const rect = getHostEl()?.getBoundingClientRect()
 
@@ -101,6 +119,7 @@ export function useOverlayPositioning(
       viewport: rect ? { w: rect.width, h: rect.height } : undefined,
     })
 
+    console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor =>', JSON.stringify(anchor), '=> style', JSON.stringify(pos))
     return { ...pos, right: 'auto' } // override CSS `right: 12px`
   })
 }

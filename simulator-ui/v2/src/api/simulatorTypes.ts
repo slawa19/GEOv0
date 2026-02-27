@@ -186,12 +186,31 @@ export type TrustlineInfo = {
   equivalent: string
   limit: string
   used: string
+  /** Debt in reverse direction (debtor=from_pid, creditor=to_pid). */
+  reverse_used?: string
   available: string
   status: string
 }
 
 export type SimulatorActionTrustlinesListResponse = {
   items: TrustlineInfo[]
+}
+
+// ============================
+// Phase 2.5: backend-first payment targets (reachability)
+// ============================
+
+export type SimulatorPaymentTargetsItem = {
+  /** Receiver PID. */
+  to_pid: string
+  /** Shortest path hop count (edges) for any route with capacity > 0. */
+  hops: number
+  /** Optional heavy field (enabled via include_max_available=true). */
+  max_available?: string | null
+}
+
+export type SimulatorPaymentTargetsResponse = {
+  items: SimulatorPaymentTargetsItem[]
 }
 
 export type RunState = 'created' | 'running' | 'paused' | 'stopped' | 'error'

@@ -72,6 +72,10 @@ from app.schemas.simulator import (
     SimulatorActionParticipantItem,
     SimulatorActionTrustlinesListResponse,
     SimulatorActionTrustlineListItem,
+
+    # Phase 2.5 payment targets
+    SimulatorPaymentTargetsResponse,
+    SimulatorPaymentTargetsItem,
 )
 from app.utils.exceptions import (
     BadRequestException,
@@ -1706,6 +1710,11 @@ async def action_trustlines_list(
             continue
         pid_to_name[pid] = str(getattr(n, "name", None) or pid)
 
+    # NOTE: `reverse_used` must match the same reverse-debt check used by trustline close.
+    # That check is based on `Debt` table: debtor = from_pid, creditor = to_pid.
+    # For this read-only list we can compute it from DB using the participants referenced
+    # in the snapshot links.
+
     def _fmt_num_or_str(v: object) -> str:
         if v is None:
             return "0"
@@ -1719,7 +1728,8 @@ async def action_trustlines_list(
                 return str(v)
         return str(v)
 
-    items: list[SimulatorActionTrustlineListItem] = []
+    active_links: list[tuple[str, str, object]] = []
+    pids_needed: set[str] = set()
     for link in (getattr(snap, "links", None) or []):
         from_pid = _norm_pid(getattr(link, "source", ""))
         to_pid = _norm_pid(getattr(link, "target", ""))
@@ -1735,9 +1745,51 @@ async def action_trustlines_list(
         if status != "active":
             continue
 
+        active_links.append((from_pid, to_pid, link))
+        pids_needed.add(from_pid)
+        pids_needed.add(to_pid)
+
+    pid_to_id: dict[str, uuid.UUID] = {}
+    if pids_needed:
+        rows = (
+            await db.execute(select(Participant.pid, Participant.id).where(Participant.pid.in_(sorted(pids_needed))))
+        ).all()
+        pid_to_id = {str(pid): pid_id for pid, pid_id in rows if pid and pid_id}
+
+    # Bulk fetch reverse debts for all participant pairs that appear in the list.
+    reverse_debt_map: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+    if pid_to_id:
+        ids = sorted(set(pid_to_id.values()))
+        debt_rows = (
+            await db.execute(
+                select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+                    and_(
+                        Debt.equivalent_id == eq.id,
+                        Debt.debtor_id.in_(ids),
+                        Debt.creditor_id.in_(ids),
+                    )
+                )
+            )
+        ).all()
+        for debtor_id, creditor_id, amount in debt_rows:
+            if debtor_id is None or creditor_id is None:
+                continue
+            if amount is None:
+                continue
+            reverse_debt_map[(debtor_id, creditor_id)] = amount
+
+    items: list[SimulatorActionTrustlineListItem] = []
+    for from_pid, to_pid, link in active_links:
         limit_s = _fmt_num_or_str(getattr(link, "trust_limit", None))
         used_s = _fmt_num_or_str(getattr(link, "used", None))
         avail_s = _fmt_num_or_str(getattr(link, "available", None))
+
+        from_id = pid_to_id.get(from_pid)
+        to_id = pid_to_id.get(to_pid)
+        reverse_used = Decimal("0")
+        if from_id is not None and to_id is not None:
+            reverse_used = reverse_debt_map.get((from_id, to_id), Decimal("0"))
+        reverse_used_s = _fmt_num_or_str(reverse_used)
 
         items.append(
             SimulatorActionTrustlineListItem(
@@ -1748,13 +1800,110 @@ async def action_trustlines_list(
                 equivalent=eq.code,
                 limit=limit_s,
                 used=used_s,
+                reverse_used=reverse_used_s,
                 available=avail_s,
-                status=status,
+                status="active",
             )
         )
 
     items.sort(key=lambda x: (x.from_pid, x.to_pid, x.equivalent))
     return SimulatorActionTrustlinesListResponse(items=items)
+
+
+@router.get(
+    "/runs/{run_id}/payment-targets",
+    response_model=SimulatorPaymentTargetsResponse,
+    include_in_schema=_actions_enabled(),
+)
+async def payment_targets(
+    run_id: str,
+    equivalent: str = Query(...),
+    from_pid: str = Query(...),
+    max_hops: int = Query(6, ge=1, le=8),
+    limit: int = Query(200, ge=1, le=1000),
+    include_max_available: bool = Query(False),
+    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
+    db=Depends(deps.get_db),
+):
+    """Phase 2.5: backend-first reachable payment targets.
+
+    Returns receivers that are reachable via multi-hop routes where every edge has capacity > 0.
+    Uses existing PaymentRouter to keep routing semantics consistent.
+    """
+
+    if (err := _require_actions_enabled_or_error()) is not None:
+        return err
+    # Read-only: do not require run accepts actions.
+
+    # AuthZ: ownership check
+    _run, run_err = _get_run_for_readonly_actions_or_error(run_id, actor)
+    if run_err is not None:
+        return run_err
+
+    # Ensure scenario is seeded into DB so equivalent/participant resolution works.
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return seed_err
+
+    eq, err = await _resolve_equivalent_or_error(session=db, code=str(equivalent or ""))
+    if err is not None:
+        return err
+    assert eq is not None
+
+    from_p, err = await _resolve_participant_or_error(session=db, pid=from_pid, field="from_pid")
+    if err is not None:
+        return err
+    assert from_p is not None
+
+    # Build the capacity graph (edges included only if capacity > 0).
+    router = PaymentRouter(db)
+    await router.build_graph(eq.code)
+
+    src = str(from_p.pid)
+    if src not in (router.graph or {}):
+        return SimulatorPaymentTargetsResponse(items=[])
+
+    # Evaluate reachability per target using router's BFS (policy-aware), then sort by hops.
+    results: list[tuple[int, str, list[str]]] = []  # (hops, to_pid, path)
+    for to_pid in (router.graph or {}).keys():
+        dst = str(to_pid)
+        if not dst or dst == src:
+            continue
+
+        path = router._bfs_single_path(src, dst, Decimal("0"), max_hops=int(max_hops))
+        if not path:
+            continue
+
+        hops = max(0, len(path) - 1)
+        if hops <= 0:
+            continue
+
+        results.append((hops, dst, path))
+
+    results.sort(key=lambda x: (x[0], x[1]))
+    if limit and len(results) > int(limit):
+        results = results[: int(limit)]
+
+    items: list[SimulatorPaymentTargetsItem] = []
+    for hops, dst, path in results:
+        max_avail: str | None = None
+        if include_max_available:
+            # Best-effort: use existing max-flow implementation.
+            # NOTE: may be expensive; guarded by include_max_available + limit.
+            try:
+                mf = router.calculate_max_flow(src, dst)
+                max_avail = str(getattr(mf, "max_amount", None) or "0")
+            except Exception:
+                max_avail = None
+
+        items.append(
+            SimulatorPaymentTargetsItem(
+                to_pid=dst,
+                hops=int(hops),
+                max_available=max_avail,
+            )
+        )
+
+    return SimulatorPaymentTargetsResponse(items=items)
 
 
 def _utc_now() -> datetime:

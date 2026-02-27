@@ -77,5 +77,6 @@ export function useAppViewWiring(opts: {
     nodeCard,
     selectedNode: nodeCard.selectedNode,
     nodeCardStyle: nodeCard.nodeCardStyle,
+    selectedNodeScreenCenter: nodeCard.selectedNodeScreenCenter,
   }
 }

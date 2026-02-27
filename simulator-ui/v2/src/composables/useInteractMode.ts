@@ -13,6 +13,8 @@ export type { InteractPhase, InteractState }
 
 export function useInteractMode(opts: {
   actions: ReturnType<typeof useInteractActions>
+  /** Needed for payment-target cache keying (run-scoped endpoint). */
+  runId: Ref<string>
   equivalent: Ref<string>
   snapshot: Ref<GraphSnapshot | null>
   onNodeClick?: (nodeId: string) => void
@@ -57,6 +59,9 @@ export function useInteractMode(opts: {
   /** Payment-specific targets for filtering the To dropdown (may be used outside picking phases, e.g. confirm). */
   paymentToTargetIds: ComputedRef<Set<string> | undefined>
 
+  /** True while backend payment-targets query is in-flight for current (run, eq, fromPid, maxHops). */
+  paymentTargetsLoading: ComputedRef<boolean>
+
   // Flags
   busy: ComputedRef<boolean>
   canSendPayment: ComputedRef<boolean>
@@ -78,6 +83,9 @@ export function useInteractMode(opts: {
   // UX: keep the clearing preview visible long enough to be noticed/read.
   const CLEARING_PREVIEW_DWELL_MS = 800
   const CLEARING_RUNNING_DWELL_MS = 200
+
+  // Phase 2.5: multi-hop reachability budget for backend payment-targets.
+  const PAYMENT_TARGETS_MAX_HOPS = 6
 
   const busyRef = ref(false)
 
@@ -101,6 +109,7 @@ export function useInteractMode(opts: {
 
   const dataCache = useInteractDataCache({
     actions: opts.actions,
+    runId: opts.runId,
     equivalent: opts.equivalent,
     snapshot: opts.snapshot,
     parseAmountStringOrNull,
@@ -112,8 +121,44 @@ export function useInteractMode(opts: {
   const trustlinesLastError = dataCache.trustlinesLastError
   const refreshParticipants = dataCache.refreshParticipants
   const refreshTrustlines = dataCache.refreshTrustlines
+  const refreshPaymentTargets = dataCache.refreshPaymentTargets
   const invalidateTrustlinesCache = dataCache.invalidateTrustlinesCache
   const findActiveTrustline = dataCache.findActiveTrustline
+
+  function normalizeEq(v: unknown): string {
+    return String(v ?? '').trim().toUpperCase()
+  }
+
+  function normalizePid(v: unknown): string {
+    return String(v ?? '').trim()
+  }
+
+  function normalizeRunId(v: unknown): string {
+    return String(v ?? '').trim()
+  }
+
+  const paymentTargetsActiveKey = computed(() => {
+    const runId = normalizeRunId(opts.runId.value)
+    const eq = normalizeEq(opts.equivalent.value)
+    const fromPid = normalizePid(state.fromPid)
+    if (!runId || !eq || !fromPid) return null
+    return dataCache.paymentTargetsKey({ runId, eq, fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
+  })
+
+  const paymentTargetsLoading = computed(() => {
+    const key = paymentTargetsActiveKey.value
+    if (!key) return false
+    return dataCache.paymentTargetsLoadingByKey.value.get(key) === true
+  })
+
+  function prefetchPaymentTargetsForCurrentFrom() {
+    const p = state.phase
+    if (p !== 'picking-payment-to' && p !== 'confirm-payment') return
+    const runId = normalizeRunId(opts.runId.value)
+    const fromPid = normalizePid(state.fromPid)
+    if (!runId || !fromPid) return
+    void refreshPaymentTargets({ fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
+  }
 
   const fsm = useInteractFSM({
     snapshot: opts.snapshot,
@@ -214,13 +259,24 @@ export function useInteractMode(opts: {
    * `availableTargetIds` semantics used for canvas highlighting.
    */
   const paymentToTargetIds = computed<Set<string> | undefined>(() => {
-    if (trustlinesLoading.value) return undefined
-
     const p = state.phase
-    if (p !== 'picking-payment-from' && p !== 'picking-payment-to' && p !== 'confirm-payment') return new Set()
-    if (!state.fromPid) return new Set()
+    if (p !== 'picking-payment-to' && p !== 'confirm-payment') return new Set()
 
-    return computeDirectHopPaymentToTargets(state.fromPid)
+    const runId = normalizeRunId(opts.runId.value)
+    const eq = normalizeEq(opts.equivalent.value)
+    const fromPid = normalizePid(state.fromPid)
+    if (!runId || !eq || !fromPid) return new Set()
+
+    const key = dataCache.paymentTargetsKey({ runId, eq, fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
+
+    // While in-flight OR not yet fetched, keep tri-state as unknown.
+    if (dataCache.paymentTargetsLoadingByKey.value.get(key) === true) return undefined
+
+    const cached = dataCache.paymentTargetsByKey.value.get(key)
+    if (cached) return cached
+
+    // Not fetched yet.
+    return undefined
   })
 
   function cancel() {
@@ -237,6 +293,9 @@ export function useInteractMode(opts: {
 
     // MP-6a: best-effort prefetch to make `availableTargetIds` tri-state reliable.
     void refreshTrustlines({ force: true })
+
+    // Phase 2.5: payment-targets prefetch (runs only once From is chosen).
+    prefetchPaymentTargetsForCurrentFrom()
   }
 
   function startTrustlineFlow() {
@@ -258,6 +317,9 @@ export function useInteractMode(opts: {
   function selectNode(nodeId: string) {
     if (busyRef.value) return
     fsm.selectNode(nodeId)
+
+    // If selecting From moved us into picking-payment-to, start payment-targets fetch.
+    prefetchPaymentTargetsForCurrentFrom()
   }
 
   function selectEdge(edgeKey: string, anchor?: { x: number; y: number } | null) {
@@ -386,6 +448,9 @@ export function useInteractMode(opts: {
   function setPaymentFromPid(pid: string | null) {
     if (busyRef.value) return
     fsm.setPaymentFromPid(pid)
+
+    // From change affects To target set.
+    prefetchPaymentTargetsForCurrentFrom()
   }
 
   function setPaymentToPid(pid: string | null) {
@@ -490,6 +555,7 @@ export function useInteractMode(opts: {
     availableCapacity,
     availableTargetIds,
     paymentToTargetIds,
+    paymentTargetsLoading,
 
     busy,
     canSendPayment,

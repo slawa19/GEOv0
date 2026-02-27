@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import type { InteractPhase } from './useInteractMode'
@@ -96,5 +96,58 @@ describe('useInteractPanelPosition', () => {
     // payment → idle = group change → resets anchor
     phase.value = 'idle'
     expect(h.panelAnchor.value).toBeNull()
+  })
+
+  it('startFlowFromNodeCard pattern: snapshot set synchronously after phase transition', () => {
+    // Simulates the exact sequence from startFlowFromNodeCard:
+    // 1. snapshot = snapshotNodeCenter()   → {x:500, y:300}
+    // 2. phase idle → picking-payment-from (sync watcher clears anchor)
+    // 3. phase picking-payment-from → picking-payment-to (same group, anchor preserved)
+    // 4. openPanelFrom('node-card', snapshot)  — synchronous, no nextTick needed
+    //    (flush:'sync' watcher already fired during steps 2-3)
+
+    const phase = ref<InteractPhase>('idle')
+    const h = useInteractPanelPosition(phase)
+
+    const snapshot = { x: 500, y: 300 }
+
+    // step 2: startPaymentFlow()
+    phase.value = 'picking-payment-from'   // idle→payment: group changes, watcher clears anchor
+    expect(h.panelAnchor.value).toBeNull()
+
+    // step 3: setPaymentFromPid(pid)  
+    phase.value = 'picking-payment-to'     // payment→payment: same group, no clear
+    expect(h.panelAnchor.value).toBeNull() // still null (never set yet)
+
+    // step 4: synchronous open (no nextTick needed — sync watcher already done)
+    h.openFrom('node-card', snapshot)
+
+    expect(h.panelAnchor.value).toStrictEqual({ x: 500, y: 300 })
+
+    // Further sub-phase transitions should NOT clear it
+    phase.value = 'confirm-payment'
+    expect(h.panelAnchor.value).toStrictEqual({ x: 500, y: 300 })
+  })
+
+  it('startFlowFromNodeCard pattern: anchor persists after multiple nextTicks', async () => {
+    const phase = ref<InteractPhase>('idle')
+    const h = useInteractPanelPosition(phase)
+
+    const snapshot = { x: 800, y: 400 }
+
+    // Simulate flow
+    phase.value = 'picking-payment-from'
+    phase.value = 'picking-payment-to'
+
+    // Set synchronously
+    h.openFrom('node-card', snapshot)
+    expect(h.panelAnchor.value).toStrictEqual({ x: 800, y: 400 })
+
+    // Wait ticks — anchor should still be there
+    await nextTick()
+    expect(h.panelAnchor.value).toStrictEqual({ x: 800, y: 400 })
+
+    await nextTick()
+    expect(h.panelAnchor.value).toStrictEqual({ x: 800, y: 400 })
   })
 })

@@ -4,7 +4,7 @@ import type { CSSProperties } from 'vue'
 import type { GraphNode } from '../types'
 import type { TrustlineInfo } from '../api/simulatorTypes'
 import { VIZ_MAPPING } from '../vizMapping'
-import { fmtAmt } from '../utils/numberFormat'
+import { fmtAmt, parseAmountNumber } from '../utils/numberFormat'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -49,9 +49,7 @@ function safeNum(v: unknown): number {
 function isSaturatedAvailable(v: unknown): boolean {
   // NC-3: consider saturated only when `available` is a finite number and <= 0.
   // Unknown/invalid values must NOT be treated as saturated.
-  if (v == null) return false
-  if (typeof v === 'string' && v.trim() === '') return false
-  const n = Number(v)
+  const n = parseAmountNumber(v)
   return Number.isFinite(n) && n <= 0
 }
 

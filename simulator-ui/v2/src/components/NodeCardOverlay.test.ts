@@ -203,6 +203,39 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     host.remove()
   })
 
+  it('NC-3: trustline is NOT saturated when available is unknown/NaN (non-finite)', async () => {
+    const cases = [null, undefined, '', '   ', 'abc', 'NaN']
+
+    for (const available of cases) {
+      const trustlines = [
+        {
+          from_pid: 'alice',
+          from_name: 'Alice',
+          to_pid: 'bob',
+          to_name: 'Bob',
+          equivalent: 'UAH',
+          limit: '10.00',
+          used: '1.00',
+          available,
+          status: 'active',
+        },
+      ]
+
+      const { app, host } = mountNodeCard({
+        node: { id: 'alice', name: 'Alice', status: 'active', type: 'person' },
+        interactTrustlines: trustlines,
+      })
+      await nextTick()
+
+      const row = host.querySelector('.nco-trustline-row') as HTMLElement | null
+      expect(row).toBeTruthy()
+      expect(row?.classList.contains('nco-trustline-row--saturated')).toBe(false)
+
+      app.unmount()
+      host.remove()
+    }
+  })
+
   it('NC-4: clicking quick action "Run Clearing" calls onInteractRunClearing()', async () => {
     const onInteractRunClearing = vi.fn()
 

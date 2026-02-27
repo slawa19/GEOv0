@@ -1,7 +1,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { computed } from 'vue'
 import type { GraphNode } from '../types'
-import type { LayoutLinkLike, LayoutNodeWithId } from '../types/layout'
+import type { Point, LayoutLinkLike, LayoutNodeWithId } from '../types/layout'
 import { clamp } from '../utils/math'
 
 type UseNodeCardDeps = {
@@ -19,6 +19,8 @@ type UseNodeCardDeps = {
 type UseNodeCardReturn = {
   selectedNode: ComputedRef<GraphNode | null>
   nodeCardStyle: ComputedRef<{ left?: string; top?: string; display?: string }>
+  /** Screen-space center of the selected node (host-relative). null when no node selected. */
+  selectedNodeScreenCenter: ComputedRef<Point | null>
 }
 
 export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
@@ -196,5 +198,14 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     return { left: `${best.t.x}px`, top: `${best.t.y}px` }
   })
 
-  return { selectedNode, nodeCardStyle }
+  /** Host-relative screen center of the selected node. */
+  const selectedNodeScreenCenter = computed<Point | null>(() => {
+    if (!deps.hostEl.value || !selectedNode.value) return null
+    const node = deps.getLayoutNodeById(selectedNode.value.id)
+    if (!node) return null
+    const p = deps.worldToScreen(node.__x, node.__y)
+    return { x: p.x, y: p.y }
+  })
+
+  return { selectedNode, nodeCardStyle, selectedNodeScreenCenter }
 }

@@ -65,7 +65,7 @@ onUnmounted(() => {
       <span class="success-toast__icon" aria-hidden="true">✓</span>
       <span class="success-toast__text">{{ messageText }}</span>
       <button
-        class="success-toast__close"
+        class="success-toast__close ds-btn ds-btn--ghost ds-btn--icon"
         type="button"
         aria-label="Dismiss"
         @click="dismiss"
@@ -103,12 +103,10 @@ onUnmounted(() => {
 
 .success-toast__close {
   flex-shrink: 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 4px;
-  line-height: 1;
-  opacity: 0.8;
+  min-width: 24px;
+  min-height: 24px;
+  opacity: 0.85;
+  transition: opacity 0.15s;
 }
 
 .success-toast__close:hover {

@@ -269,11 +269,11 @@ describe('ManualPaymentPanel', () => {
     await nextTick()
 
     const input = host.querySelector('#mp-amount') as HTMLInputElement
-    input.value = '1.2.3'
+    input.value = '1,2,3'
     input.dispatchEvent(new Event('input'))
     await nextTick()
 
-    const reason = host.querySelector('[data-testid="mp-amount-help"]') as HTMLElement
+    const reason = host.querySelector('[data-testid="mp-confirm-reason"]') as HTMLElement
     expect(reason).toBeTruthy()
     expect((reason.textContent ?? '').trim()).toBe("Invalid amount format. Use digits and '.' for decimals.")
 
@@ -337,7 +337,7 @@ describe('ManualPaymentPanel', () => {
     input.dispatchEvent(new Event('input'))
     await nextTick()
 
-    const reason = host.querySelector('[data-testid="mp-amount-help"]') as HTMLElement
+    const reason = host.querySelector('[data-testid="mp-confirm-reason"]') as HTMLElement
     expect((reason.textContent ?? '').trim()).toBe('Enter a positive amount.')
 
     app.unmount()
@@ -455,12 +455,72 @@ describe('ManualPaymentPanel', () => {
     input.dispatchEvent(new Event('input'))
     await nextTick()
 
-    const reason = host.querySelector('[data-testid="mp-amount-help"]') as HTMLElement
+    const reason = host.querySelector('[data-testid="mp-confirm-reason"]') as HTMLElement
     expect((reason.textContent ?? '').trim()).toContain('Amount exceeds available capacity')
     expect((reason.textContent ?? '').trim()).toContain('max: 10 UAH')
 
     const btn = host.querySelector('[data-testid="manual-payment-confirm"]') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('MP-4: busy=true does not show confirm disabled reason', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'confirm-payment',
+      fromPid: 'alice',
+      toPid: 'bob',
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null as any,
+    })
+
+    const app = createApp({
+      render: () =>
+        h(ManualPaymentPanel as any, {
+          phase: 'confirm-payment',
+          state,
+
+          unit: 'UAH',
+          availableCapacity: '10',
+
+          trustlinesLoading: false,
+          paymentToTargetIds: new Set(['bob']),
+          trustlines: [],
+
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+          ],
+
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+
+          busy: true,
+          canSendPayment: true,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const input = host.querySelector('#mp-amount') as HTMLInputElement
+    input.value = 'abc'
+    input.dispatchEvent(new Event('input'))
+    await nextTick()
+
+    const reason = host.querySelector('[data-testid="mp-confirm-reason"]') as HTMLElement | null
+    expect(reason).toBeFalsy()
 
     app.unmount()
     host.remove()
@@ -577,6 +637,192 @@ describe('ManualPaymentPanel', () => {
 
     const help = host.querySelector('[data-testid="manual-payment-to-help"]') as HTMLElement
     expect((help.textContent ?? '').trim()).toContain('No direct routes available')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('MP-3: filters From dropdown by outgoing availability (direct-hop trustlines)', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'picking-payment-from',
+      fromPid: null as string | null,
+      toPid: null as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null as any,
+    })
+
+    const app = createApp({
+      render: () =>
+        h(ManualPaymentPanel as any, {
+          phase: 'picking-payment-from',
+          state,
+
+          unit: 'UAH',
+          availableCapacity: null,
+
+          trustlinesLoading: false,
+          paymentToTargetIds: new Set(),
+          trustlines: [
+            // For payment A -> B, capacity is consumed on TL B -> A, so sender candidates are tl.to_pid.
+            { from_pid: 'alice', to_pid: 'bob', available: '1', status: 'active' },
+            { from_pid: 'alice', to_pid: 'carol', available: '0.01', status: 'active' },
+            // No capacity: should not add.
+            { from_pid: 'carol', to_pid: 'alice', available: '0', status: 'active' },
+            // Inactive: should not add.
+            { from_pid: 'alice', to_pid: 'dave', available: '10', status: 'inactive' },
+          ],
+
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+            { pid: 'carol', name: 'Carol' },
+          ],
+
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+
+          busy: false,
+          canSendPayment: true,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const fromSel = host.querySelector('#mp-from') as HTMLSelectElement
+    const optionValues = Array.from(fromSel.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value)
+    expect(optionValues).toEqual(['', 'bob', 'carol'])
+
+    app.unmount()
+    host.remove()
+  })
+
+  it.each([
+    { name: 'undefined', trustlines: undefined as any },
+    { name: '[]', trustlines: [] as any },
+  ])('MP-3 fallback A: no trustlines ($name) => From dropdown shows full list', async ({ trustlines }) => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'picking-payment-from',
+      fromPid: null as string | null,
+      toPid: null as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null as any,
+    })
+
+    const app = createApp({
+      render: () =>
+        h(ManualPaymentPanel as any, {
+          phase: 'picking-payment-from',
+          state,
+
+          unit: 'UAH',
+          availableCapacity: null,
+
+          trustlinesLoading: false,
+          paymentToTargetIds: new Set(),
+          trustlines,
+
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+            { pid: 'carol', name: 'Carol' },
+          ],
+
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+
+          busy: false,
+          canSendPayment: true,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const fromSel = host.querySelector('#mp-from') as HTMLSelectElement
+    const optionValues = Array.from(fromSel.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value)
+    expect(optionValues).toEqual(['', 'alice', 'bob', 'carol'])
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('MP-3 fallback B: trustlines present but no outgoing capacity => From dropdown shows full list', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'picking-payment-from',
+      fromPid: null as string | null,
+      toPid: null as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null as any,
+    })
+
+    const app = createApp({
+      render: () =>
+        h(ManualPaymentPanel as any, {
+          phase: 'picking-payment-from',
+          state,
+
+          unit: 'UAH',
+          availableCapacity: null,
+
+          trustlinesLoading: false,
+          paymentToTargetIds: new Set(),
+          trustlines: [
+            { from_pid: 'alice', to_pid: 'bob', available: '0', status: 'active' },
+            { from_pid: 'alice', to_pid: 'carol', available: 'NaN', status: 'active' },
+            { from_pid: 'alice', to_pid: 'dave', available: '', status: 'active' },
+          ],
+
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+            { pid: 'carol', name: 'Carol' },
+          ],
+
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+
+          busy: false,
+          canSendPayment: true,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const fromSel = host.querySelector('#mp-from') as HTMLSelectElement
+    const optionValues = Array.from(fromSel.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value)
+    expect(optionValues).toEqual(['', 'alice', 'bob', 'carol'])
 
     app.unmount()
     host.remove()

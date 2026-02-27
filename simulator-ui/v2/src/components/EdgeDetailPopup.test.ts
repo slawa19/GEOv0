@@ -107,11 +107,32 @@ describe('EdgeDetailPopup', () => {
 
     const warn = host.querySelector('[data-testid="edge-close-blocked"]') as HTMLElement | null
     expect(warn).toBeTruthy()
-    expect((warn?.textContent ?? '').trim()).toContain('Debt:')
+    expect((warn?.textContent ?? '').trim()).toContain('Cannot close: trustline has outstanding debt')
     expect((warn?.textContent ?? '').trim()).toContain('0.01')
     expect((warn?.textContent ?? '').trim()).toContain('UAH')
 
     // Safety: even if a click is attempted, the text should not switch to confirmation.
+    btn?.click()
+    await nextTick()
+    expect((btn?.textContent || '').includes('Confirm close')).toBe(false)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('ED-1 (Phase 2): reverseUsed>0 blocks Close line (disabled) and shows warning', async () => {
+    const { app, host } = mountPopup({ used: '0.00', reverseUsed: '0.01' })
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+    expect(btn).toBeTruthy()
+    expect(btn?.disabled).toBe(true)
+
+    const warn = host.querySelector('[data-testid="edge-close-blocked"]') as HTMLElement | null
+    expect(warn).toBeTruthy()
+    expect((warn?.textContent ?? '').trim()).toContain('Cannot close: trustline has outstanding debt')
+    expect((warn?.textContent ?? '').trim()).toContain('0.01')
+
     btn?.click()
     await nextTick()
     expect((btn?.textContent || '').includes('Confirm close')).toBe(false)
@@ -141,6 +162,14 @@ describe('EdgeDetailPopup', () => {
     const pct = host.querySelector('[data-testid="edge-utilization-pct"]')
     expect(pct).toBeTruthy()
     expect((pct?.textContent || '').trim()).toBe('50%')
+
+    // Bar should exist and have fill element.
+    const bar = host.querySelector('[aria-label="Utilization bar"]') as HTMLElement | null
+    expect(bar).toBeTruthy()
+    expect(bar?.getAttribute('role')).toBe('progressbar')
+
+    const fill = host.querySelector('.popup__util-fill') as HTMLElement | null
+    expect(fill).toBeTruthy()
 
     app.unmount()
     host.remove()

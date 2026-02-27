@@ -51,13 +51,18 @@ type Props = {
 
 const props = defineProps<Props>()
 
+// IMPORTANT: panelSize.w must match CSS max-width of .ds-ov-panel (560px).
+// Using the smaller min-width (320px) causes clamping to underestimate the right edge
+// → panel overflows the screen by up to 240px when rendered at max-width.
 const anchorPositionStyle = useOverlayPositioning(
   () => props.anchor,
   () => props.hostEl,
-  { w: 360, h: 420 },
+  { w: 560, h: 420 },
 )
 
 const amount = ref('')
+
+const amountNormalized = computed(() => parseAmountStringOrNull(amount.value))
 
 watch(
   () => props.phase,
@@ -69,9 +74,8 @@ watch(
 )
 
 const amountNum = computed(() => {
-  const normalized = parseAmountStringOrNull(amount.value)
-  if (normalized == null) return NaN
-  return parseAmountNumber(normalized)
+  if (amountNormalized.value == null) return NaN
+  return parseAmountNumber(amountNormalized.value)
 })
 
 const amountValid = computed(() => amountNum.value > 0)
@@ -96,10 +100,9 @@ const confirmDisabledReason = computed<string | null>(() => {
   const rawTrimmed = amount.value.trim()
   if (!rawTrimmed) return 'Enter a positive amount.'
 
-  const normalized = parseAmountStringOrNull(amount.value)
-  if (normalized == null) return "Invalid amount format. Use digits and '.' for decimals."
+  if (amountNormalized.value == null) return "Invalid amount format. Use digits and '.' for decimals."
 
-  const n = parseAmountNumber(normalized)
+  const n = parseAmountNumber(amountNormalized.value)
   if (!(n > 0)) return 'Enter a positive amount.'
 
   if (exceedsCapacity.value) {
@@ -139,10 +142,9 @@ const dropdownToTargetIds = computed<Set<string> | undefined>(() => {
 async function onConfirm() {
   if (!canConfirm.value) return
 
-  const normalized = parseAmountStringOrNull(amount.value)
-  if (normalized == null) return
+  if (amountNormalized.value == null) return
 
-  await props.confirmPayment(normalized)
+  await props.confirmPayment(amountNormalized.value)
 }
 
 function titleText() {
@@ -156,6 +158,34 @@ const { participantsSorted, toParticipants } = useParticipantsList<ParticipantIn
   participants: () => props.participants,
   fromParticipantId: () => props.state.fromPid,
   availableTargetIds: () => dropdownToTargetIds.value,
+})
+
+// MP-3 (Phase 2): filter From list by availability of outgoing direct-hop payments.
+// For payment A -> B, capacity is consumed on TL B -> A, therefore sender candidates are collected
+// from `tl.to_pid` where TL is active and has `available > 0`.
+const fromParticipants = computed<ParticipantInfo[]>(() => {
+  const items = Array.isArray(props.trustlines) ? props.trustlines : []
+
+  // Spec fallback: trustlines are empty/not loaded => no filtering.
+  if (items.length === 0) return participantsSorted.value
+
+  const pidsWithOutgoing = new Set<string>()
+  for (const tl of items) {
+    if (!isActiveStatus(tl.status)) continue
+
+    const available = parseAmountNumber(tl.available)
+    if (!Number.isFinite(available)) continue
+    if (!(available > 0)) continue
+
+    const pid = (tl.to_pid ?? '').trim()
+    if (!pid) continue
+    pidsWithOutgoing.add(pid)
+  }
+
+  // Spec fallback: no outgoing candidates found => no filtering.
+  if (pidsWithOutgoing.size === 0) return participantsSorted.value
+
+  return participantsSorted.value.filter((p) => pidsWithOutgoing.has((p?.pid ?? '').trim()))
 })
 
 // MP-1b: reset recipient if it becomes unavailable in known-state.
@@ -271,7 +301,7 @@ function onToChange(v: string) {
           @change="onFromChange(($event.target as HTMLSelectElement).value)"
         >
           <option value="">—</option>
-          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
+          <option v-for="p in fromParticipants" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
         </select>
       </div>
 
@@ -345,15 +375,12 @@ function onToChange(v: string) {
         </div>
       </template>
 
-        <div
-          v-if="isConfirm"
-          id="mp-amount-help"
-          class="ds-help mp-confirm-help"
-          data-testid="mp-amount-help"
-          :style="{ display: confirmDisabledReason ? 'block' : 'none' }"
-        >
-          {{ confirmDisabledReason ?? '' }}
+      <!-- Keep stable aria-describedby target (UX-9), but show content only when disabled. -->
+      <div v-if="isConfirm" id="mp-amount-help" class="mp-confirm-help">
+        <div v-if="confirmDisabledReason" class="ds-help" data-testid="mp-confirm-reason">
+          {{ confirmDisabledReason }}
         </div>
+      </div>
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
 

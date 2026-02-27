@@ -7,6 +7,7 @@ import {
   actionTrustlineClose,
   actionTrustlineCreate,
   actionTrustlineUpdate,
+  getPaymentTargets,
   getParticipantsList,
   getTrustlinesList,
 } from '../api/simulatorApi'
@@ -18,6 +19,7 @@ import type {
   SimulatorActionTrustlineCloseResponse,
   SimulatorActionTrustlineCreateResponse,
   SimulatorActionTrustlineUpdateResponse,
+  SimulatorPaymentTargetsItem,
   TrustlineInfo,
 } from '../api/simulatorTypes'
 
@@ -133,6 +135,8 @@ export function useInteractActions(opts: {
   runClearing: (eq: string, maxDepth?: number, opts?: { clientActionId?: string }) => Promise<SimulatorActionClearingRealResponse>
   fetchParticipants: () => Promise<ParticipantInfo[]>
   fetchTrustlines: (eq: string, pid?: string) => Promise<TrustlineInfo[]>
+  /** Phase 2.5: backend-first payment targets (multi-hop reachability). */
+  fetchPaymentTargets: (eq: string, fromPid: string, maxHops?: number) => Promise<SimulatorPaymentTargetsItem[]>
 } {
   const actionsDisabled = ref(false)
 
@@ -235,6 +239,20 @@ export function useInteractActions(opts: {
     fetchTrustlines: async (eq, pid) => {
       try {
         const res = await wrap(() => getTrustlinesList(opts.httpConfig.value, requireRunId(), eq, pid))
+        return res.items
+      } catch (e) {
+        if (isInteractActionError(e) && e.status === 404) return []
+        throw e
+      }
+    },
+
+    fetchPaymentTargets: async (eq, fromPid, maxHops) => {
+      try {
+        const res = await wrap(() =>
+          getPaymentTargets(opts.httpConfig.value, requireRunId(), eq, fromPid, {
+            ...(maxHops != null ? { maxHops } : {}),
+          }),
+        )
         return res.items
       } catch (e) {
         if (isInteractActionError(e) && e.status === 404) return []

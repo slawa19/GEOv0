@@ -18,6 +18,7 @@ import type {
   SimulatorActionTrustlineUpdateRequest,
   SimulatorActionTrustlineUpdateResponse,
   SimulatorActionTrustlinesListResponse,
+  SimulatorPaymentTargetsResponse,
   RunCreateRequest,
   RunCreateResponse,
   RunStatus,
@@ -236,6 +237,25 @@ export function getTrustlinesList(
     ...(participantPid ? { participant_pid: participantPid } : {}),
   }).toString()
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustlines-list?${q}`)
+}
+
+// ============================
+// Phase 2.5: backend-first payment targets (reachability)
+// ============================
+
+export function getPaymentTargets(
+  cfg: HttpConfig,
+  runId: string,
+  equivalent: string,
+  fromPid: string,
+  opts?: { maxHops?: number },
+): Promise<SimulatorPaymentTargetsResponse> {
+  const q = new URLSearchParams({
+    equivalent,
+    from_pid: fromPid,
+    ...(opts?.maxHops != null ? { max_hops: String(opts.maxHops) } : {}),
+  }).toString()
+  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/payment-targets?${q}`)
 }
 
 // ============================

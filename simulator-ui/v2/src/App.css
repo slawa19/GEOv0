@@ -32,11 +32,14 @@
 }
 
 /* Interact HUD: SystemBalanceBar + ActionBar — stacks inside TopBar's ds-ov-top-stack */
+/* justify-content: space-between — SystemBalanceBar left, ActionBar right.
+   ActionBar right-aligns with .ds-ov-panel { right: 12px } so buttons and
+   opening panels appear on the same side of the screen. */
 .interact-hud-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 8px;
   pointer-events: auto;
 }

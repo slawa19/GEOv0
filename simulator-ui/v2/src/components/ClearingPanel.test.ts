@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import ClearingPanel from './ClearingPanel.vue'
 
 describe('ClearingPanel', () => {
-  it('CL-1: in confirm step shows Running clearing… help when busy', async () => {
+  it('CL-1: in confirm step shows running feedback + disables buttons when busy (not stuck)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -18,6 +18,8 @@ describe('ClearingPanel', () => {
       lastClearing: null as any,
     })
 
+    const confirmClearing = vi.fn()
+
     const app = createApp({
       render: () =>
         h(ClearingPanel as any, {
@@ -25,7 +27,7 @@ describe('ClearingPanel', () => {
           state,
           busy: true,
           equivalent: 'EQ',
-          confirmClearing: vi.fn(),
+          confirmClearing,
           cancel: vi.fn(),
           anchor: null,
           hostEl: null,
@@ -40,6 +42,22 @@ describe('ClearingPanel', () => {
     const help = host.querySelector('[data-testid="clearing-confirm-help"]') as HTMLElement | null
     expect(help).toBeTruthy()
     expect(help?.textContent ?? '').toContain('Running clearing…')
+    expect(help?.querySelector('.cp-spinner')).toBeTruthy()
+
+    const btnConfirm = host.querySelector('button.ds-btn--primary') as HTMLButtonElement | null
+    expect(btnConfirm).toBeTruthy()
+    expect((btnConfirm!.textContent ?? '').trim()).toBe('Running…')
+    expect(btnConfirm!.disabled).toBe(true)
+
+    // guard against accidental submit while busy
+    btnConfirm!.click()
+    expect(confirmClearing).toHaveBeenCalledTimes(0)
+
+    const btnCancel = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Cancel') as
+      | HTMLButtonElement
+      | undefined
+    expect(btnCancel).toBeTruthy()
+    expect(btnCancel!.disabled).toBe(true)
 
     app.unmount()
     host.remove()
@@ -79,6 +97,17 @@ describe('ClearingPanel', () => {
     const help = host.querySelector('[data-testid="clearing-confirm-help"]') as HTMLElement | null
     expect(help).toBeTruthy()
     expect(help?.textContent ?? '').toContain('This will run a clearing cycle in backend.')
+
+    const btnConfirm = host.querySelector('button.ds-btn--primary') as HTMLButtonElement | null
+    expect(btnConfirm).toBeTruthy()
+    expect((btnConfirm!.textContent ?? '').trim()).toBe('Confirm')
+    expect(btnConfirm!.disabled).toBe(false)
+
+    const btnCancel = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Cancel') as
+      | HTMLButtonElement
+      | undefined
+    expect(btnCancel).toBeTruthy()
+    expect(btnCancel!.disabled).toBe(false)
 
     app.unmount()
     host.remove()
