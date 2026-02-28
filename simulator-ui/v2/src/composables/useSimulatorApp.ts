@@ -64,6 +64,78 @@ import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
 import { useSystemBalance } from './useSystemBalance'
 
+export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
+
+/**
+ * Pure policy: decides which overlay is topmost and closeable on outside click.
+ *
+ * Order is important and matches Step 0 spec:
+ *  1) edge-detail
+ *  2) node-card
+ */
+export function __closeTopmostOverlayOnOutsideClickPolicy(opts: {
+  edgeDetail: {
+    open: boolean
+    closeOnOutsideClick: boolean
+    close: () => void
+  }
+  nodeCard: {
+    open: boolean
+    closeOnOutsideClick: boolean
+    close: () => void
+  }
+}): OutsideClickOverlayKey | null {
+  if (opts.edgeDetail.open && opts.edgeDetail.closeOnOutsideClick) {
+    opts.edgeDetail.close()
+    return 'edge-detail'
+  }
+
+  if (opts.nodeCard.open && opts.nodeCard.closeOnOutsideClick) {
+    opts.nodeCard.close()
+    return 'node-card'
+  }
+
+  return null
+}
+
+/**
+ * Step 0: empty click must NOT cancel interact flows.
+ * Instead it closes the topmost closeable overlay (policy-driven).
+ */
+export function __selectNodeFromCanvasStep0(opts: {
+  id: string | null
+
+  isInteractPickingPhase: boolean
+  interactSelectNode: (nodeId: string) => void
+
+  closeTopmostOverlayOnOutsideClick: () => void
+
+  // Explicitly present for regression-guard tests: Step 0 MUST NOT cancel flows on empty click.
+  cancelInteract: () => void
+
+  selectNode: (id: string | null) => void
+}): void {
+  // Step 0 contract: this helper must NOT call `cancelInteract()` on empty clicks.
+  // Keep the reference to avoid unused-param lint in TS/ESLint configs.
+  void opts.cancelInteract
+
+  // In Interact UI picking phases: treat node click as a flow input.
+  if (opts.id && opts.isInteractPickingPhase) {
+    opts.interactSelectNode(opts.id)
+    return
+  }
+
+  // Outside click: close topmost overlay (policy-driven), but never cancel interact flows in MVP.
+  if (!opts.id) {
+    opts.closeTopmostOverlayOnOutsideClick()
+    opts.selectNode(null)
+    return
+  }
+
+  // Default: regular selection for NodeCard/hover.
+  opts.selectNode(opts.id)
+}
+
 export function __autoBootstrapMaybeFillUiError(opts: {
   real: { lastError?: string | null }
   state: { error?: string | null }
@@ -76,7 +148,21 @@ export function __autoBootstrapMaybeFillUiError(opts: {
   opts.state.error = `Auto-start failed: ${String((opts.err as any)?.message ?? opts.err)}`
 }
 
-export function useSimulatorApp() {
+export function useSimulatorApp(opts?: {
+  /**
+   * Step 5 (WM): close topmost inspector window (edge-detail → node-card) on outside click.
+   *
+   * When provided, `closeTopmostOverlayOnOutsideClick()` delegates to this callback
+   * and MUST NOT mutate legacy overlay state (edgeAnchor / nodeCardOpen).
+   */
+  uiCloseTopmostInspectorWindow?: () => OutsideClickOverlayKey | null
+
+  /** Step 5 (WM): open/update edge-detail inspector window from edge click. */
+  uiOpenOrUpdateEdgeDetail?: (o: { fromPid: string; toPid: string; anchor: { x: number; y: number } }) => void
+
+  /** Step 5 (WM): open/update node-card inspector window from node click/dblclick. */
+  uiOpenOrUpdateNodeCard?: (o: { nodeId: string; anchor: { x: number; y: number } | null }) => void
+}) {
   const eq = ref('UAH')
   const scene = ref<SceneId>('A')
 
@@ -459,6 +545,19 @@ export function useSimulatorApp() {
   const isNodeCardOpen = selectionAndCard.isNodeCardOpen
   const selectNode = selectionAndCard.selectNode
   const setNodeCardOpen = selectionAndCard.setNodeCardOpen
+
+  // Step 5 (WM): empty click closes topmost inspector window via injected callback.
+  // When that happens we MUST NOT also close NodeCard via legacy `setNodeCardOpen(false)`
+  // in `useCanvasInteractions`.
+  let suppressNextCanvasNodeCardClose = false
+
+  function setNodeCardOpenFromCanvas(open: boolean) {
+    if (!open && suppressNextCanvasNodeCardClose) {
+      suppressNextCanvasNodeCardClose = false
+      return
+    }
+    setNodeCardOpen(open)
+  }
 
   const canvasEl = ref<HTMLCanvasElement | null>(null)
   const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
@@ -1394,25 +1493,80 @@ export function useSimulatorApp() {
     return !!interactMode.isPickingPhase.value
   })
 
+  /**
+   * Window management MVP (Step 0): close the topmost outside-click-closable overlay.
+   *
+   * Priority:
+   *  1) EdgeDetailPopup (if open)
+   *  2) NodeCardOverlay (if open)
+   *
+   * NOTE: interact panels (trustline/payment/clearing) are NOT closed on outside click in MVP.
+   */
+  function closeTopmostOverlayOnOutsideClick(): OutsideClickOverlayKey | null {
+    // Step 5 (WM): delegate outside-click closure to the root (WindowManager-driven).
+    if (typeof opts?.uiCloseTopmostInspectorWindow === 'function') {
+      const r = opts.uiCloseTopmostInspectorWindow()
+      if (r) return r
+    }
+
+    const isEdgeDetailOpen =
+      isInteractUi.value &&
+      toLower(interactMode.phase.value) === 'editing-trustline' &&
+      !!interactMode.state.edgeAnchor
+
+    return __closeTopmostOverlayOnOutsideClickPolicy({
+      edgeDetail: {
+        open: isEdgeDetailOpen,
+        // MVP policy: EdgeDetailPopup is closeable on outside click.
+        closeOnOutsideClick: true,
+        close: () => {
+          interactMode.state.edgeAnchor = null
+        },
+      },
+      nodeCard: {
+        open: isNodeCardOpen.value,
+        // MVP policy: NodeCard is closeable on outside click.
+        closeOnOutsideClick: true,
+        close: () => setNodeCardOpen(false),
+      },
+    })
+  }
+
   function selectNodeFromCanvas(id: string | null) {
-    // In Interact UI picking phases: treat node click as a flow input.
-    if (id && isInteractPickingPhase.value) {
-      interactMode.selectNode(id)
+    // Step 5 (WM): on empty click, close WM topmost inspector window and do NOT
+    // mutate legacy inspector state (edgeAnchor / nodeCardOpen).
+    if (!id && typeof opts?.uiCloseTopmostInspectorWindow === 'function') {
+      const closed = opts.uiCloseTopmostInspectorWindow()
+      if (closed) {
+        // Prevent `useCanvasInteractions` from additionally calling `setNodeCardOpen(false)`.
+        suppressNextCanvasNodeCardClose = true
+        return
+      }
+
+      // No WM inspector windows closed: fall back to legacy behavior (clear selection).
+      selectNode(null)
       return
     }
 
-    // Clicking empty space while an interact panel is active → cancel the flow.
-    // This ensures trustline/payment/clearing panels close on background click.
-    if (!id && isInteractUi.value) {
-      const p = toLower(interactMode.phase.value)
-      if (p !== 'idle') {
-        interactMode.cancel()
-        // Fall through to also clear node selection below.
-      }
+    // Step 5 (WM): node click/dblclick opens/updates the WM node-card window.
+    // NOTE: edge clicks do NOT go through this path (they call `selectNode()` directly),
+    // so this only applies to node hits from `useCanvasInteractions`.
+    if (id && typeof opts?.uiOpenOrUpdateNodeCard === 'function' && !isInteractPickingPhase.value) {
+      selectNode(id)
+      opts.uiOpenOrUpdateNodeCard({ nodeId: id, anchor: selectedNodeScreenCenter.value })
+      return
     }
 
-    // Default: regular selection for NodeCard/hover.
-    selectNode(id)
+    __selectNodeFromCanvasStep0({
+      id,
+      isInteractPickingPhase: isInteractPickingPhase.value,
+      interactSelectNode: (nodeId) => interactMode.selectNode(nodeId),
+      closeTopmostOverlayOnOutsideClick: () => {
+        void closeTopmostOverlayOnOutsideClick()
+      },
+      cancelInteract: () => interactMode.cancel(),
+      selectNode,
+    })
   }
 
   const { dragToPin, hideDragPreview } = useAppDragToPinAndPreview({
@@ -1446,7 +1600,7 @@ export function useSimulatorApp() {
     pickNodeAt,
     pickEdgeAt,
     selectNode: selectNodeFromCanvas,
-    setNodeCardOpen,
+    setNodeCardOpen: setNodeCardOpenFromCanvas,
     clearHoveredEdge,
     onEdgeClick: (edge, ptr) => {
       if (!isInteractUi.value) return false
@@ -1457,6 +1611,11 @@ export function useSimulatorApp() {
       // Use host-relative screen coordinates (clientToScreen).
       const anchor = hostEl.value ? clientToScreen(ptr.clientX, ptr.clientY) : { x: ptr.clientX, y: ptr.clientY }
       interactMode.selectEdge(edge.key, anchor)
+
+      // Step 5 (WM): open/update edge-detail window.
+      // `edge.*Id` values are participant ids in this UI; treat them as pids.
+      opts?.uiOpenOrUpdateEdgeDetail?.({ fromPid: edge.fromId, toPid: edge.toId, anchor })
+
       selectNode(edge.fromId)
       return true
     },
@@ -1468,20 +1627,10 @@ export function useSimulatorApp() {
 
   // Interact UX: in picking phases, dblclick should not open NodeCard.
   // Treat it as a regular click (select node for the current step).
-  // When an interact panel IS active (editing-trustline, confirm-payment, etc.),
-  // cancel it first so NodeCard opens cleanly without two overlapping windows.
   function onCanvasDblClickGuarded(ev: MouseEvent) {
     if (isInteractPickingPhase.value) {
       canvasInteractionsWiring.onCanvasClick(ev)
       return
-    }
-
-    // Cancel any active interact panel before opening NodeCard (mutual exclusion).
-    if (isInteractUi.value) {
-      const p = toLower(interactMode.phase.value)
-      if (p !== 'idle') {
-        interactMode.cancel()
-      }
     }
 
     canvasInteractionsWiring.onCanvasDblClick(ev)

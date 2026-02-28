@@ -26,6 +26,16 @@ type UseNodeCardReturn = {
 export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
   const selectedNode = computed(() => deps.getNodeById(deps.selectedNodeId.value))
 
+  // Step 5 (WM): when window manager is enabled (`?wm=1`), NodeCard positioning is owned by WM.
+  // This composable must not treat fixed cardW/cardH as truth for clamping/placement.
+  const __USE_WINDOW_MANAGER: boolean = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get('wm') === '1'
+    } catch {
+      return false
+    }
+  })()
+
   /**
    * Determine edge direction quadrant relative to node center.
    * Returns: 'right' | 'left' | 'top' | 'bottom'
@@ -76,6 +86,11 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
   }
 
   const nodeCardStyle = computed(() => {
+    if (__USE_WINDOW_MANAGER) {
+      // WM drives geometry. Keep a minimal style so callers can still bind `:style` safely.
+      return { display: 'block' }
+    }
+
     const host = deps.hostEl.value
     if (!host || !selectedNode.value) return { display: 'none' }
 

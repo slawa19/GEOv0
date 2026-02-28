@@ -9,6 +9,8 @@ import { useDestructiveConfirmation } from '../composables/useDestructiveConfirm
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 
+type RenderMode = 'legacy' | 'wm'
+
 type Props = {
   phase: InteractPhase
   state: InteractState
@@ -32,10 +34,20 @@ type Props = {
   /** When true, the popup is forced hidden (parent shows TrustlineManagementPanel instead). */
   forceHidden?: boolean
 
+  /**
+   * Step 5 (WM): when rendered inside WindowShell, EdgeDetailPopup must NOT
+   * self-position in host coordinates (left/top absolute).
+   */
+  renderMode?: RenderMode
+
   close: () => void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  hostEl: undefined,
+  forceHidden: false,
+  renderMode: 'legacy',
+})
 
 const emit = defineEmits<{
   (e: 'changeLimit'): void
@@ -50,6 +62,7 @@ const emit = defineEmits<{
 // (i.e. when the user came from NodeCard ✏️ or ActionBar or clicked "Change Limit").
 // This is controlled by the parent via the `forceHidden` prop.
 const open = computed(() => {
+  if (props.renderMode === 'wm') return true
   if (props.forceHidden) return false
   if (props.phase !== 'editing-trustline') return false
   if (!props.state.edgeAnchor) return false
@@ -57,6 +70,20 @@ const open = computed(() => {
 })
 
 const popupStyle = computed(() => {
+  if (props.renderMode === 'wm') {
+    // WM owns geometry. Keep EdgeDetailPopup as a simple content block.
+    return {
+      position: 'static',
+      left: 'auto',
+      top: 'auto',
+      right: 'auto',
+      zIndex: 'auto',
+      width: '100%',
+      maxWidth: 'none',
+      minWidth: 'auto',
+    }
+  }
+
   let anchor = props.state.edgeAnchor
   // Safety: if anchor is missing, fall back to CSS defaults.
   if (!anchor) return {}

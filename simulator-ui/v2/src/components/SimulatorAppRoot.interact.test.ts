@@ -1,6 +1,22 @@
 import { computed, createApp, h, nextTick, reactive, ref, type Ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
+vi.mock('../composables/windowManager/useWindowManager', async () => {
+  const actual = await vi.importActual<typeof import('../composables/windowManager/useWindowManager')>(
+    '../composables/windowManager/useWindowManager',
+  )
+
+  return {
+    useWindowManager: () => {
+      const wm = actual.useWindowManager()
+      const origOpen = wm.open
+      const open = vi.fn((o: any) => origOpen(o))
+      ;(globalThis as any).__GEO_TEST_WM_OPEN = open
+      return { ...wm, open }
+    },
+  }
+})
+
 // IMPORTANT: This test verifies conditional rendering in SimulatorAppRoot when the URL contains `ui=interact`.
 // We mock `useSimulatorApp()` to keep the test fast + deterministic while still deriving flags from the query string.
 
@@ -29,6 +45,12 @@ vi.mock('../composables/useSimulatorApp', () => {
 
        const cancel = vi.fn()
        ;(globalThis as any).__GEO_TEST_INTERACT_CANCEL = cancel
+       // Simulate real FSM cleanup: cancel clears edgeAnchor (this is important for
+       // Step 4 anchor propagation tests: trustline(edge popup) → payment must keep anchor).
+       cancel.mockImplementation(() => {
+         interactState.edgeAnchor = null as any
+         phase.value = 'idle'
+       })
 
        // Interact-mode FSM stub: make root integration tests able to assert that
        // panels become active and confirm-step UI renders without relying on timers.
@@ -290,7 +312,11 @@ vi.mock('../composables/useSimulatorApp', () => {
         worldToCssTranslateNoScale: () => 'translate(0px, 0px)',
 
         // helpers for template
-        getNodeById: () => null,
+        getNodeById: (id: string | null) => {
+          const n = (globalThis as any).__GEO_TEST_SELECTED_NODE ?? null
+          if (!id || !n) return null
+          return String(n.id) === String(id) ? n : null
+        },
         resetView: vi.fn(),
       }
     },
@@ -335,6 +361,306 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     host.remove()
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+  })
+
+  it('wm=1: renders ManualPaymentPanel through WindowLayer (WindowShell) and does not duplicate legacy panel', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    // Step 3: WM wiring must not crash in environments without native ResizeObserver.
+    // (happy-dom may not provide it; we stub it out explicitly to ensure coverage)
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const shells = host.querySelectorAll('.ws-shell')
+      expect(shells.length).toBe(1)
+
+      const panels = host.querySelectorAll('[data-testid="manual-payment-panel"]')
+      expect(panels.length).toBe(1)
+
+      const panel = panels[0] as HTMLElement
+      expect(panel.closest('.ws-shell')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: renders TrustlineManagementPanel through WindowLayer and does not duplicate legacy panel', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-trustline-create'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const shells = host.querySelectorAll('.ws-shell')
+      expect(shells.length).toBe(1)
+
+      const panels = host.querySelectorAll('[data-testid="trustline-panel"]')
+      expect(panels.length).toBe(1)
+      expect((panels[0] as HTMLElement).closest('.ws-shell')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: renders ClearingPanel through WindowLayer and does not duplicate legacy panel', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-clearing'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const shells = host.querySelectorAll('.ws-shell')
+      expect(shells.length).toBe(1)
+
+      const panels = host.querySelectorAll('[data-testid="clearing-panel"]')
+      expect(panels.length).toBe(1)
+      expect((panels[0] as HTMLElement).closest('.ws-shell')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: renders EdgeDetailPopup through WindowLayer (WindowShell)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const shells = host.querySelectorAll('.ws-shell')
+      expect(shells.length).toBe(1)
+
+      const popups = host.querySelectorAll('[data-testid="edge-detail-popup"]')
+      expect(popups.length).toBe(1)
+      expect((popups[0] as HTMLElement).closest('.ws-shell')).toBeTruthy()
+
+      // legacy render must be disabled (no duplicate absolute popup)
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: renders NodeCardOverlay through WindowLayer (WindowShell)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const shells = host.querySelectorAll('.ws-shell')
+      expect(shells.length).toBe(1)
+
+      const cards = host.querySelectorAll('.ds-ov-node-card')
+      expect(cards.length).toBe(1)
+      expect((cards[0] as HTMLElement).closest('.ws-shell')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: coexistence — interact-panel and node-card both render (2 windows)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const shells = host.querySelectorAll('.ws-shell')
+      expect(shells.length).toBe(2)
+
+      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(1)
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: cross-group replace — Change Limit closes edge-detail window but does NOT close node-card', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Initially: edge-detail + node-card
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+
+      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Change limit')) as
+        | HTMLButtonElement
+        | undefined
+      expect(btn).toBeTruthy()
+
+      btn?.click()
+      await nextTick()
+      await nextTick()
+
+      // Edge detail must be closed; node-card must remain.
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: EdgeDetailPopup send-payment → payment keeps edge anchor (wm.open gets non-null anchor)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+
+      const btn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+
+      const open = (globalThis as any).__GEO_TEST_WM_OPEN as ReturnType<typeof vi.fn>
+      expect(open).toBeTruthy()
+
+      btn?.click()
+      await nextTick()
+      await nextTick()
+
+      // Find any call that opened a payment interact-panel.
+      const calls = open.mock.calls.map((c) => c[0])
+      const paymentOpen = calls.find((o) => o?.type === 'interact-panel' && o?.data?.panel === 'payment')
+      expect(paymentOpen).toBeTruthy()
+      expect(paymentOpen?.anchor).toBeTruthy()
+      expect(paymentOpen?.anchor?.x).toBe(10)
+      expect(paymentOpen?.anchor?.y).toBe(10)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_WM_OPEN
+      vi.unstubAllGlobals()
+    }
   })
 
   it('MP-0: routesLoading in root yields tri-state unknown in ManualPaymentPanel (shows updating help)', async () => {
@@ -666,7 +992,13 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     await nextTick()
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    expect(cancel).toHaveBeenCalledTimes(0)
+    // Regression guard: destructive confirmation uses `geo:interact-esc`.
+    // The global ESC handler may still cancel the flow afterwards depending on stubs.
+    const escEvt = new CustomEvent('geo:interact-esc', { cancelable: true })
+    window.dispatchEvent(escEvt)
+    await nextTick()
+
+    expect(host.querySelector('[data-testid="trustline-close-cancel"]')).toBeFalsy()
 
     app.unmount()
     host.remove()

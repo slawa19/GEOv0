@@ -4,6 +4,7 @@ import BottomBar from './BottomBar.vue'
 import ActionBar from './ActionBar.vue'
 import SystemBalanceBar from './SystemBalanceBar.vue'
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
+import WindowShell from './WindowShell.vue'
 import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
 import ClearingPanel from './ClearingPanel.vue'
@@ -15,7 +16,7 @@ import ErrorToast from './ErrorToast.vue'
 import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 
- import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 
  import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
@@ -88,7 +89,103 @@ import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
 import { handleEscOverlayStack } from '../utils/escOverlayStack'
 
-const app = useSimulatorApp()
+  import { useWindowManager } from '../composables/windowManager/useWindowManager'
+  import type { WindowInstance } from '../composables/windowManager/types'
+import type { WindowAnchor } from '../composables/windowManager/types'
+import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
+
+// Step 2 runtime flag (default false): enable via query string `?wm=1`.
+const __USE_WINDOW_MANAGER: boolean = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get('wm') === '1'
+  } catch {
+    return false
+  }
+})()
+
+function readWindowViewportFallback(): { width: number; height: number } {
+  try {
+    const w = (globalThis as any).window as any
+    const width = Number(w?.innerWidth)
+    const height = Number(w?.innerHeight)
+    return {
+      width: Number.isFinite(width) && width > 0 ? width : 1280,
+      height: Number.isFinite(height) && height > 0 ? height : 720,
+    }
+  } catch {
+    return { width: 1280, height: 720 }
+  }
+}
+
+const wm = useWindowManager()
+
+// Step 5: inspector window ids (singleton=reuse → stable across updates).
+const wmEdgeDetailId = ref<number | null>(null)
+const wmNodeCardId = ref<number | null>(null)
+
+function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
+  if (!__USE_WINDOW_MANAGER) return null
+
+  // Policy priority: edge-detail → node-card.
+  const edge = wm.windows.value.find((w) => w.type === 'edge-detail')
+  if (edge && edge.policy.closeOnOutsideClick) {
+    wm.close(edge.id, 'programmatic')
+    if (wmEdgeDetailId.value === edge.id) wmEdgeDetailId.value = null
+    return 'edge-detail'
+  }
+
+  const node = wm.windows.value.find((w) => w.type === 'node-card')
+  if (node && node.policy.closeOnOutsideClick) {
+    wm.close(node.id, 'programmatic')
+    if (wmNodeCardId.value === node.id) wmNodeCardId.value = null
+    return 'node-card'
+  }
+
+  return null
+}
+
+function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: Point }) {
+  if (!__USE_WINDOW_MANAGER) return
+  const id = wm.open({
+    type: 'edge-detail',
+    anchor: toWmAnchor(o.anchor, 'edge-click'),
+    data: { fromPid: o.fromPid, toPid: o.toPid },
+  })
+  wmEdgeDetailId.value = id
+}
+
+function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
+  if (!__USE_WINDOW_MANAGER) return
+  const id = wm.open({
+    type: 'node-card',
+    anchor: toWmAnchor(o.anchor, 'node'),
+    data: { nodeId: o.nodeId },
+  })
+  wmNodeCardId.value = id
+}
+
+const app = useSimulatorApp({
+  uiCloseTopmostInspectorWindow: __USE_WINDOW_MANAGER ? uiCloseTopmostInspectorWindow : undefined,
+  uiOpenOrUpdateEdgeDetail: __USE_WINDOW_MANAGER ? uiOpenOrUpdateEdgeDetail : undefined,
+  uiOpenOrUpdateNodeCard: __USE_WINDOW_MANAGER ? uiOpenOrUpdateNodeCard : undefined,
+})
+
+// MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
+wm.setViewport(readWindowViewportFallback())
+
+let viewportRo: ResizeObserver | null = null
+
+function readHostViewport(host: HTMLElement | null): { width: number; height: number } {
+  try {
+    const rect = host?.getBoundingClientRect?.()
+    const w = rect?.width ?? 0
+    const h = rect?.height ?? 0
+    if (w > 0 && h > 0) return { width: w, height: h }
+    return readWindowViewportFallback()
+  } catch {
+    return readWindowViewportFallback()
+  }
+}
 
 const {
   apiMode,
@@ -198,6 +295,184 @@ const edgeTooltipStyle = computed(() => calcEdgeTooltipStyle())
 
 const { activePanelType } = provideActivePanelState(interactPhase)
 
+/**
+ * Controls which UI to show in `editing-trustline` phase:
+ * - `true`  → TrustlineManagementPanel (full editor)
+ * - `false` → EdgeDetailPopup (quick info)
+ */
+const useFullTrustlineEditor = ref(false)
+
+/**
+ * Централизованное управление anchor-позицией Interact-панелей.
+ * (Legacy panels still use `panelAnchor`; WM uses it as a fallback when
+ * there is no edge-popup initiated anchor.)
+ */
+const { panelAnchor, openFrom: openPanelFrom } = useInteractPanelPosition(interactPhase)
+
+const legacyShowManualPaymentPanel = computed(
+  () => apiMode.value === 'real' && isInteractUi.value && activePanelType.value === 'payment',
+)
+
+/**
+ * Step 4: Interact → WindowManager bridging.
+ *
+ * - interactPhase changes → WM opens/updates interact-panel window for {payment|trustline|clearing}
+ * - Otherwise → closes interact group.
+ *
+ * Anchor propagation rule (MUST):
+ * If action initiated from EdgeDetailPopup (edge popup) opens an interact-panel,
+ * the window MUST receive anchor = state.edgeAnchor.
+ */
+const wmEdgePopupAnchor = ref<Point | null>(null)
+
+function toWmAnchor(p: Point | null, source: string): WindowAnchor | null {
+  if (!p) return null
+  return { x: p.x, y: p.y, space: 'host', source }
+}
+
+const wmInteractAnchor = computed<WindowAnchor | null>(() => {
+  // Edge popup anchor has priority (normative requirement).
+  if (wmEdgePopupAnchor.value) return toWmAnchor(wmEdgePopupAnchor.value, 'edge-popup')
+  // Fallback: generic panel anchor (ActionBar / NodeCard positioning).
+  return toWmAnchor(panelAnchor.value ?? null, 'panel')
+})
+
+watchEffect(() => {
+  if (!__USE_WINDOW_MANAGER) return
+
+  // Safety: only drive Interact windows in real interact UI.
+  if (apiMode.value !== 'real' || !isInteractUi.value) {
+    wm.closeGroup('interact', 'programmatic')
+    return
+  }
+
+  const m = interactWindowOfPhase(String(interactPhase.value), useFullTrustlineEditor.value)
+  if (m?.type === 'interact-panel') {
+    wm.open({
+      type: 'interact-panel',
+      anchor: wmInteractAnchor.value,
+      data: { panel: m.panel, phase: String(interactPhase.value) },
+    })
+    return
+  }
+
+  // idle / inspector-only phases: ensure interact window is closed.
+  wm.closeGroup('interact', 'programmatic')
+
+  // Avoid stale edge-popup anchors after closing the group.
+  wmEdgePopupAnchor.value = null
+})
+
+/**
+ * Step 5: Inspector → WindowManager bridging.
+ *
+ * - `editing-trustline` quick-info → open/update edge-detail inspector.
+ * - Node card open signal (legacy selection state) → open/update node-card inspector.
+ */
+// IMPORTANT (Vue reactivity): do NOT use watchEffect here.
+// `wm.open()` reads WM reactive state internally; if called inside a watchEffect,
+// Vue can track WM state as a dependency, causing recursive update loops.
+watch(
+  () => ({
+    enabled: __USE_WINDOW_MANAGER,
+    apiMode: apiMode.value,
+    isInteractUi: isInteractUi.value,
+    phase: String(interactPhase.value),
+    isFullEditor: useFullTrustlineEditor.value,
+    anchor: interact.mode.state.edgeAnchor,
+    fromPid: interact.mode.state.fromPid,
+    toPid: interact.mode.state.toPid,
+  }),
+  (s) => {
+    if (!s.enabled) return
+
+    const shouldShow =
+      s.apiMode === 'real' &&
+      s.isInteractUi &&
+      s.phase === 'editing-trustline' &&
+      !s.isFullEditor &&
+      !!s.anchor &&
+      !!s.fromPid &&
+      !!s.toPid
+
+    if (shouldShow) {
+      wmEdgeDetailId.value = wm.open({
+        type: 'edge-detail',
+        anchor: toWmAnchor(s.anchor ?? null, 'interact-state'),
+        data: { fromPid: String(s.fromPid), toPid: String(s.toPid) },
+      })
+      return
+    }
+
+    if (wmEdgeDetailId.value != null) {
+      wm.close(wmEdgeDetailId.value, 'programmatic')
+      wmEdgeDetailId.value = null
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => ({
+    enabled: __USE_WINDOW_MANAGER,
+    open: isNodeCardOpen.value,
+    nodeId: selectedNode.value?.id ?? null,
+    anchor: selectedNodeScreenCenter.value,
+    dragging: !!dragToPin.dragState.active,
+  }),
+  (s) => {
+    if (!s.enabled) return
+
+    const shouldShow = !!s.nodeId && s.open && !s.dragging
+    if (shouldShow) {
+      wmNodeCardId.value = wm.open({
+        type: 'node-card',
+        anchor: toWmAnchor(s.anchor ?? null, 'node'),
+        data: { nodeId: String(s.nodeId) },
+      })
+      return
+    }
+
+    if (wmNodeCardId.value != null) {
+      wm.close(wmNodeCardId.value, 'programmatic')
+      wmNodeCardId.value = null
+    }
+  },
+  { immediate: true },
+)
+
+function wmTitleFor(win: WindowInstance): string {
+  if (win.type === 'interact-panel') {
+    const data = win.data as any
+    if (data?.panel === 'payment') return 'Manual payment'
+    if (data?.panel === 'trustline') return 'Trustline'
+    if (data?.panel === 'clearing') return 'Clearing'
+  }
+  return ''
+}
+
+function isWmInteractPanelWindow(win: WindowInstance, panel: 'payment' | 'trustline' | 'clearing'): boolean {
+  if (win.type !== 'interact-panel') return false
+  const data = win.data as any
+  return data?.panel === panel
+}
+
+function wmInteractPanelPhase(win: WindowInstance): InteractPhase {
+  const data = win.data as any
+  return String(data?.phase ?? 'idle') as InteractPhase
+}
+
+const wmInteractPanelStyle = {
+  position: 'static',
+  left: 'auto',
+  top: 'auto',
+  right: 'auto',
+  maxWidth: 'none',
+  width: '100%',
+  height: '100%',
+  borderRadius: '0',
+} as const
+
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false
   return toLower(interactPhase.value) !== 'idle'
@@ -275,10 +550,33 @@ function onGlobalKeydown(ev: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
+
+  // Step 3: Viewport ResizeObserver wiring (WM only).
+  // Keep an initial snapshot as a fallback, but use RO as the main source of viewport updates.
+  if (__USE_WINDOW_MANAGER) {
+    void nextTick(() => {
+      const vp = readHostViewport(hostEl.value)
+      wm.setViewport(vp)
+    })
+
+    if (typeof ResizeObserver !== 'undefined') {
+      viewportRo = new ResizeObserver(() => {
+        const vp = readHostViewport(hostEl.value)
+        wm.setViewport(vp)
+        wm.reclampAll()
+      })
+
+      const host = hostEl.value
+      if (host) viewportRo.observe(host)
+    }
+  }
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+
+  viewportRo?.disconnect()
+  viewportRo = null
 })
 
 const interactRunTerminal = computed(() => {
@@ -379,24 +677,6 @@ const isExiting = ref(false)
 const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
 
 /**
- * Централизованное управление anchor-позицией Interact-панелей.
- * Заменяет ручной trustlinePanelAnchor ref + разрозненные watches.
- *
- * Таблица позиционирования:
- * | Сценарий                         | source          | anchor              | Позиция                 |
- * |----------------------------------|-----------------|---------------------|-------------------------|
- * | "Change Limit" в EdgeDetailPopup | 'change-limit'  | state.edgeAnchor    | рядом с ребром          |
- * | ✏️ из NodeCard                   | 'node-card'     | node screen center  | рядом с нодой           |
- * | ActionBar → Manage Trustline     | 'action-bar'    | getActionBarAnchor()| top-right (под кнопкой) |
- * | ActionBar → Send Payment         | 'action-bar'    | getActionBarAnchor()| top-right (под кнопкой) |
- * | ActionBar → Run Clearing         | 'action-bar'    | getActionBarAnchor()| top-right (под кнопкой) |
- *
- * ActionBar-сценарии используют якорь правого верхнего угла: явный anchor вместо
- * CSS-дефолта надёжнее — не зависит от порядка применения стилей.
- */
-const { panelAnchor, openFrom: openPanelFrom } = useInteractPanelPosition(interactPhase)
-
-/**
  * Snapshot the selected node's screen-space center.
  * Must be called BEFORE closing the NodeCard (selectedNode is still valid at that point).
  * Falls back to parsing nodeCardStyle position if selectedNodeScreenCenter is unavailable.
@@ -440,16 +720,6 @@ function getActionBarAnchor(): Point | null {
   const rect = host.getBoundingClientRect()
   return { x: rect.width, y: 98 }
 }
-
-/**
- * Controls which UI to show in `editing-trustline` phase:
- * - `true`  → TrustlineManagementPanel (full editing — from NodeCard ✏️, ActionBar, or "Change Limit")
- * - `false` → EdgeDetailPopup (quick info — from edge click on canvas)
- *
- * For non-editing-trustline phases (picking, confirm-create, etc.),
- * TrustlineManagementPanel is always shown regardless of this flag.
- */
-const useFullTrustlineEditor = ref(false)
 
 /** Computed: should TrustlineManagementPanel be shown? */
 const showTrustlinePanel = computed(() => {
@@ -524,13 +794,42 @@ function goInteract() {
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
 function onEdgeDetailChangeLimit() {
+  if (__USE_WINDOW_MANAGER) {
+    // MUST: anchor propagation from edge popup to interact-panel.
+    wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
+
+    // Audit fix L-4 / Step 5: close ONLY the edge-detail inspector window, then open trustline.
+    if (wmEdgeDetailId.value != null) {
+      wm.close(wmEdgeDetailId.value, 'programmatic')
+      wmEdgeDetailId.value = null
+    }
+
+    // Step 5 normative: open the trustline interact-panel anchored to the same edge.
+    // (Interact→WM watchEffect will update it further; singleton=reuse ensures stability.)
+    wm.open({
+      type: 'interact-panel',
+      anchor: toWmAnchor(interact.mode.state.edgeAnchor ?? null, 'edge-popup'),
+      data: { panel: 'trustline', phase: String(interactPhase.value) },
+    })
+  }
+
   // Позиционируем TrustlineManagementPanel рядом с тем же ребром.
   openPanelFrom('change-limit', interact.mode.state.edgeAnchor ?? null)
 
   // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
   useFullTrustlineEditor.value = true
   // Focus the limit editor in TrustlineManagementPanel via template ref.
-  void nextTick(() => tlPanel.value?.focusNewLimit())
+  void nextTick(() => {
+    const v = tlPanel.value as any
+    if (typeof v?.focusNewLimit === 'function') {
+      v.focusNewLimit()
+      return
+    }
+    if (Array.isArray(v)) {
+      const inst = v.find((x) => typeof x?.focusNewLimit === 'function')
+      inst?.focusNewLimit?.()
+    }
+  })
 }
 
 function onEdgeDetailCloseLine() {
@@ -545,6 +844,17 @@ function onEdgeDetailSendPayment() {
   const toPid = interact.mode.state.toPid
   if (!fromPid || !toPid) return
 
+  // MUST: if initiated from edge popup, propagate edge anchor to interact-panel.
+  if (__USE_WINDOW_MANAGER) {
+    wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
+
+    // Close ONLY the edge-detail inspector window (avoid inspector group close).
+    if (wmEdgeDetailId.value != null) {
+      wm.close(wmEdgeDetailId.value, 'programmatic')
+      wmEdgeDetailId.value = null
+    }
+  }
+
   interact.mode.cancel()
   interact.mode.startPaymentFlow()
   interact.mode.setPaymentFromPid(toPid)
@@ -555,6 +865,10 @@ function startFlowFromNodeCard(opts: {
   openEditor?: boolean
   start: () => void
 }) {
+  if (__USE_WINDOW_MANAGER) {
+    // Not an edge-popup initiated action.
+    wmEdgePopupAnchor.value = null
+  }
   // Snapshot node screen center BEFORE closing the card (selectedNode cleared after close).
   const snapshot = snapshotNodeCenter()
 
@@ -568,6 +882,10 @@ function startFlowFromNodeCard(opts: {
 }
 
 function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void }) {
+  if (__USE_WINDOW_MANAGER) {
+    // Not an edge-popup initiated action.
+    wmEdgePopupAnchor.value = null
+  }
   // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
   const snapshot = getActionBarAnchor()
   setNodeCardOpen(false)
@@ -639,15 +957,6 @@ function onActionStartClearingFlow() {
     },
   })
 }
-
-// Mutual exclusion: when an interact panel activates, close NodeCard.
-// Anchor clearing delegated to useInteractPanelPosition (watches interactPhase).
-watch(activePanelType, (t, prev) => {
-  // Any interact panel opens → close NodeCard to avoid overlapping windows.
-  if (t !== null && t !== prev) {
-    setNodeCardOpen(false)
-  }
-})
 
 // When phase changes, reset local UI flags.
 // Anchor clearing delegated to useInteractPanelPosition.
@@ -743,9 +1052,9 @@ watch(interactPhase, (phase) => {
       </div>
     </TopBar>
 
-    <Transition name="panel-slide" mode="out-in">
+  <Transition name="panel-slide" mode="out-in">
       <ManualPaymentPanel
-        v-if="apiMode === 'real' && isInteractUi && activePanelType === 'payment'"
+        v-if="legacyShowManualPaymentPanel && !__USE_WINDOW_MANAGER"
         key="payment"
         :phase="interactPhase"
         :state="interact.mode.state"
@@ -770,7 +1079,7 @@ watch(interactPhase, (phase) => {
       />
 
       <TrustlineManagementPanel
-        v-else-if="apiMode === 'real' && isInteractUi && showTrustlinePanel"
+        v-else-if="apiMode === 'real' && isInteractUi && showTrustlinePanel && !__USE_WINDOW_MANAGER"
         key="trustline"
         ref="tlPanel"
         :phase="interactPhase"
@@ -794,7 +1103,7 @@ watch(interactPhase, (phase) => {
       />
 
       <ClearingPanel
-        v-else-if="apiMode === 'real' && isInteractUi && activePanelType === 'clearing'"
+        v-else-if="apiMode === 'real' && isInteractUi && activePanelType === 'clearing' && !__USE_WINDOW_MANAGER"
         key="clearing"
         :phase="interactPhase"
         :state="interact.mode.state"
@@ -807,8 +1116,132 @@ watch(interactPhase, (phase) => {
       />
     </Transition>
 
+    <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->
+    <div v-if="__USE_WINDOW_MANAGER" class="wm-layer" aria-label="Window layer">
+      <WindowShell
+        v-for="win in wm.windows.value"
+        :key="win.id"
+        :instance="win"
+        :title="wmTitleFor(win)"
+        :show-header="false"
+        @close="wm.close(win.id, 'action')"
+        @focus="wm.focus(win.id)"
+        @measured="(s) => {
+          wm.updateMeasuredSize(win.id, s)
+          wm.reclamp(win.id)
+        }"
+      >
+        <EdgeDetailPopup
+          v-if="win.type === 'edge-detail'"
+          :phase="interactPhase"
+          :state="interact.mode.state"
+          :host-el="null"
+          :unit="effectiveEq"
+          :used="emptyToNull(interactSelectedLink?.used)"
+          :reverse-used="emptyToNull(interactSelectedLink?.reverse_used)"
+          :limit="emptyToNull(interactSelectedLink?.trust_limit)"
+          :available="emptyToNull(interactSelectedLink?.available)"
+          :status="emptyToNullString(interactSelectedLink?.status)"
+          :busy="interact.mode.busy.value"
+          :force-hidden="false"
+          render-mode="wm"
+          :close="interact.mode.cancel"
+          @change-limit="onEdgeDetailChangeLimit"
+          @close-line="onEdgeDetailCloseLine"
+          @send-payment="onEdgeDetailSendPayment"
+        />
+
+        <NodeCardOverlay
+          v-else-if="win.type === 'node-card' && getNodeById(String((win.data as any)?.nodeId))"
+          :node="getNodeById(String((win.data as any)?.nodeId))!"
+          :style="{}"
+          :edge-stats="selectedNodeEdgeStats"
+          :equivalent-text="state.snapshot?.equivalent ?? ''"
+          :show-pin-actions="!isTestMode && !isWebDriver"
+          :is-pinned="isSelectedPinned"
+          :pin="pinSelectedNode"
+          :unpin="unpinSelectedNode"
+          :interact-mode="isInteractUi"
+          :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
+          :trustlines-loading="isInteractUi ? interact.mode.trustlinesLoading.value : undefined"
+          :interact-busy="isInteractUi ? interact.mode.busy.value : undefined"
+          :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
+          :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
+          :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
+          :on-interact-run-clearing="isInteractUi ? onInteractRunClearing : undefined"
+          render-mode="wm"
+          @close="() => {
+            wm.close(win.id, 'action')
+            setNodeCardOpen(false)
+          }"
+        />
+
+        <ManualPaymentPanel
+          v-else-if="isWmInteractPanelWindow(win, 'payment')"
+          :phase="wmInteractPanelPhase(win)"
+          :state="interact.mode.state"
+          :unit="effectiveEq"
+          :available-capacity="interact.mode.availableCapacity.value"
+          :trustlines-loading="trustlinesLoading"
+          :payment-targets-loading="paymentTargetsLoading"
+          :payment-targets-max-hops="paymentTargetsMaxHops"
+          :payment-to-target-ids="paymentToTargetIds"
+          :trustlines="trustlines"
+          :trustlines-last-error="trustlinesLastError"
+          :payment-targets-last-error="paymentTargetsLastError"
+          :participants="interact.mode.participants.value"
+          :busy="interact.mode.busy.value"
+          :can-send-payment="interact.mode.canSendPayment.value"
+          :confirm-payment="interact.mode.confirmPayment"
+          :set-from-pid="interact.mode.setPaymentFromPid"
+          :set-to-pid="interact.mode.setPaymentToPid"
+          :cancel="interact.mode.cancel"
+          :anchor="null"
+          :host-el="null"
+          :style="wmInteractPanelStyle"
+        />
+
+        <TrustlineManagementPanel
+          v-else-if="isWmInteractPanelWindow(win, 'trustline')"
+          ref="tlPanel"
+          :phase="wmInteractPanelPhase(win)"
+          :state="interact.mode.state"
+          :unit="effectiveEq"
+          :used="emptyToNull(interactSelectedLink?.used)"
+          :current-limit="emptyToNull(interactSelectedLink?.trust_limit)"
+          :available="emptyToNull(interactSelectedLink?.available)"
+          :participants="interact.mode.participants.value"
+          :trustlines="interact.mode.trustlines.value"
+          :busy="interact.mode.busy.value"
+          :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
+          :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
+          :confirm-trustline-close="interact.mode.confirmTrustlineClose"
+          :set-from-pid="interact.mode.setTrustlineFromPid"
+          :set-to-pid="interact.mode.setTrustlineToPid"
+          :select-trustline="interact.mode.selectTrustline"
+          :cancel="interact.mode.cancel"
+          :anchor="null"
+          :host-el="null"
+          :style="wmInteractPanelStyle"
+        />
+
+        <ClearingPanel
+          v-else-if="isWmInteractPanelWindow(win, 'clearing')"
+          :phase="wmInteractPanelPhase(win)"
+          :state="interact.mode.state"
+          :busy="interact.mode.busy.value"
+          :equivalent="effectiveEq"
+          :confirm-clearing="interact.mode.confirmClearing"
+          :cancel="interact.mode.cancel"
+          :anchor="null"
+          :host-el="null"
+          :style="wmInteractPanelStyle"
+        />
+      </WindowShell>
+    </div>
+
     <EdgeDetailPopup
-      v-if="apiMode === 'real' && isInteractUi"
+      v-if="apiMode === 'real' && isInteractUi && !__USE_WINDOW_MANAGER"
       :phase="interactPhase"
       :state="interact.mode.state"
       :host-el="hostEl"
@@ -827,7 +1260,7 @@ watch(interactPhase, (phase) => {
     />
 
     <NodeCardOverlay
-      v-if="isNodeCardOpen && selectedNode && !dragToPin.dragState.active"
+      v-if="isNodeCardOpen && selectedNode && !dragToPin.dragState.active && !__USE_WINDOW_MANAGER"
       :node="selectedNode"
       :style="nodeCardStyle"
       :edge-stats="selectedNodeEdgeStats"
@@ -932,6 +1365,16 @@ watch(interactPhase, (phase) => {
 </template>
 
 <style scoped>
+.wm-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wm-layer :deep(.ws-shell) {
+  pointer-events: auto;
+}
+
 .sar-interact-history-overlay {
   right: 12px;
   left: auto;

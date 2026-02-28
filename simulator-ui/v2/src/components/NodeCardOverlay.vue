@@ -15,6 +15,12 @@ type NodeEdgeStats = {
 type Props = {
   node: GraphNode
   style: CSSProperties
+
+  /**
+   * Step 5 (WM): when rendered inside WindowShell, NodeCardOverlay must NOT
+   * self-position in host coordinates (left/top absolute).
+   */
+  renderMode?: 'legacy' | 'wm'
   edgeStats: NodeEdgeStats | null
   equivalentText: string
 
@@ -39,7 +45,25 @@ type Props = {
 
 const emit = defineEmits<{ close: [] }>()
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  renderMode: 'legacy',
+})
+
+const wrapperStyle = computed<CSSProperties>(() => {
+  if (props.renderMode === 'wm') {
+    // WM owns geometry. Keep NodeCardOverlay as a simple content block.
+    return {
+      position: 'static',
+      left: 'auto',
+      top: 'auto',
+      right: 'auto',
+      zIndex: 'auto',
+      width: '100%',
+      maxWidth: 'none',
+    }
+  }
+  return props.style
+})
 
 function safeNum(v: unknown): number {
   // UX-8: use parseAmountNumber() for decimal-like strings (e.g. "1,234.5" must not
@@ -103,7 +127,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 </script>
 
 <template>
-  <div class="ds-ov-node-card" :style="style">
+  <div class="ds-ov-node-card" :style="wrapperStyle">
     <div class="ds-panel ds-panel--elevated" role="dialog" aria-label="Node details">
       <div class="ds-panel__body ds-ov-node-card__body">
 
