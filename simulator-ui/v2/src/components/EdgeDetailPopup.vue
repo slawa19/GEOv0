@@ -83,6 +83,14 @@ const title = computed(() => {
   return props.state.selectedEdgeKey ?? 'Edge'
 })
 
+// ED-3 polish: make the payment button label contextual to reduce direction confusion.
+// Spec: prefer display name when available; fallback is pid.
+// In this component we only have access to InteractState.{fromPid}, so use it as best-effort.
+const sendPaymentFromLabel = computed(() => {
+  const pid = (props.state.fromPid ?? '').trim()
+  return pid || 'sender'
+})
+
 const closeBlocked = computed(() => {
   const u = parseAmountNumber(props.used)
   const ru = parseAmountNumber(props.reverseUsed)
@@ -204,7 +212,7 @@ function onCloseLine() {
         data-testid="edge-send-payment"
         @click="emit('sendPayment')"
       >
-        💸 Send Payment
+        💸 Pay {{ sendPaymentFromLabel }}
       </button>
       <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="!!busy" @click="emit('changeLimit')">
         Change limit

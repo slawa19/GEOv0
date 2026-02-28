@@ -30,7 +30,11 @@ vi.mock('../composables/useSimulatorApp', () => {
        const cancel = vi.fn()
        ;(globalThis as any).__GEO_TEST_INTERACT_CANCEL = cancel
 
-       const startPaymentFlow = vi.fn()
+       // Interact-mode FSM stub: make root integration tests able to assert that
+       // panels become active and confirm-step UI renders without relying on timers.
+       const startPaymentFlow = vi.fn(() => {
+         phase.value = 'picking-payment-from'
+       })
        ;(globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW = startPaymentFlow
 
        const startClearingFlow = vi.fn(() => {
@@ -38,10 +42,21 @@ vi.mock('../composables/useSimulatorApp', () => {
        })
        ;(globalThis as any).__GEO_TEST_INTERACT_START_CLEARING_FLOW = startClearingFlow
 
-       const setPaymentFromPid = vi.fn()
+       const setPaymentFromPid = vi.fn((pid: string | null) => {
+         const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+         if (st) st.fromPid = pid
+         // Real FSM: after picking From, user goes to picking To.
+         // When From is cleared (e.g. cancel / invalidation), go back to picking From.
+         phase.value = pid ? 'picking-payment-to' : 'picking-payment-from'
+       })
        ;(globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID = setPaymentFromPid
 
-       const setPaymentToPid = vi.fn()
+       const setPaymentToPid = vi.fn((pid: string | null) => {
+         const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+         if (st) st.toPid = pid
+         // Real FSM: selecting a To advances to confirm step; clearing To keeps user in picking To.
+         phase.value = pid ? 'confirm-payment' : 'picking-payment-to'
+       })
        ;(globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID = setPaymentToPid
 
        const confirmTrustlineClose = vi.fn(async () => undefined)
@@ -573,7 +588,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE
   })
 
-  it('EdgeDetailPopup: Send Payment starts payment flow and pre-fills pids (to→from)', async () => {
+  it('AC-ED-3: EdgeDetailPopup "Send Payment" activates Manual Payment and pre-fills pids (trustline to→from)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
     setUrl('/?mode=real&ui=interact')
 
@@ -588,6 +603,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     expect(btn).toBeTruthy()
     btn?.click()
     await nextTick()
+    await nextTick()
 
     const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
     const startPaymentFlow = (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW as ReturnType<typeof vi.fn>
@@ -599,6 +615,15 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     // trustline alice→bob => payment bob→alice
     expect(setFrom).toHaveBeenCalledWith('bob')
     expect(setTo).toHaveBeenCalledWith('alice')
+
+    // Manual Payment panel should be active (root-level E2E wiring), and confirm flow should be reached.
+    expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+    expect(host.querySelector('[data-testid="manual-payment-confirm"]')).toBeTruthy()
+
+    // Pre-filled values should be persisted into interact state (as the real mode setters do).
+    const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as { fromPid: string | null; toPid: string | null }
+    expect(st.fromPid).toBe('bob')
+    expect(st.toPid).toBe('alice')
 
     app.unmount()
     host.remove()

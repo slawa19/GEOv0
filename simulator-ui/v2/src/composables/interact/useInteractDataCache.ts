@@ -352,6 +352,13 @@ export function useInteractDataCache(opts: {
       snapshotTrustlines.value = (snap.links ?? []).map((l) => {
         const from = l.source
         const to = l.target
+
+        // NOTE(14.7): Snapshot fallback for trustlines is best-effort.
+        // - Backend `/graph/snapshot` (and demo fixtures) currently don't provide `reverse_used`,
+        //   so close-guard (used/reverse_used > 0) may be a false-negative until the trustlines-list API fetch.
+        // - If `reverse_used` is ever added to snapshot.links, we map it through here.
+        // - Backend 409 remains the last barrier for closing a trustline with outstanding debt.
+        const reverseUsed = opts.parseAmountStringOrNull(l.reverse_used)
         return {
           from_pid: from,
           from_name: nameByPid.get(from) ?? from,
@@ -360,6 +367,7 @@ export function useInteractDataCache(opts: {
           equivalent: eq,
           limit: opts.parseAmountStringOrNull(l.trust_limit) ?? '',
           used: opts.parseAmountStringOrNull(l.used) ?? '',
+          ...(reverseUsed != null ? { reverse_used: reverseUsed } : {}),
           available: opts.parseAmountStringOrNull(l.available) ?? '',
           status: l.status ?? 'active',
         }

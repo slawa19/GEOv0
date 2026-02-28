@@ -153,7 +153,7 @@ describe('TrustlineManagementPanel', () => {
     host.remove()
   })
 
-  it('TL-2 (Phase 2): when reverse_used > 0, disables Close and shows warning', async () => {
+  it('AC-TL-10: reverse_used > 0, used = 0 => Close TL disabled + inline warning', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 

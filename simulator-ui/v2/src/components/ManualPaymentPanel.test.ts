@@ -35,7 +35,7 @@ function setEq(a: Set<string> | undefined, b: Set<string>) {
 }
 
 describe('ManualPaymentPanel', () => {
-  it('FB-3/UX-9: shows ESC hint in title and wires aria-describedby for To and Amount help', async () => {
+  it('AC-A11Y-1/AC-A11Y-2: Amount aria-describedby=mp-amount-help + To aria-describedby=mp-to-help (help elements exist)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -101,7 +101,7 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
-  it('MP-1b: resets To selection and shows warning when availableTargetIds becomes known and excludes current toPid', async () => {
+  it('AC-MP-12: refresh removes toPid from availableTargetIds => resets selection + inline warning', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -840,7 +840,7 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
-  it('MP-3: filters From dropdown by outgoing availability (direct-hop trustlines)', async () => {
+  it('AC-MP-11: FROM filtered when trustlines have outgoing (available > 0) (direct-hop)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -910,7 +910,7 @@ describe('ManualPaymentPanel', () => {
   it.each([
     { name: 'undefined', trustlines: undefined as any },
     { name: '[]', trustlines: [] as any },
-  ])('MP-3 fallback A: no trustlines ($name) => From dropdown shows full list', async ({ trustlines }) => {
+  ])('AC-MP-11: fallback full FROM list when trustlines are empty ($name)', async ({ trustlines }) => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -1040,7 +1040,7 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
-  it('MP-3 fallback B: trustlines present but no outgoing capacity => From dropdown shows full list', async () => {
+  it('AC-MP-11: fallback full FROM list when trustlines exist but have no outgoing capacity', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 

@@ -304,6 +304,15 @@ watch(
   },
 )
 
+// UX-14.5: reset inline "To" invalid-selection warning when From changes outside of the dropdown
+// (e.g. canvas-driven selection calling setFromPid directly, bypassing onFromChange()).
+watch(
+  () => props.state.fromPid,
+  () => {
+    toSelectionInvalidWarning.value = null
+  },
+)
+
 function onFromChange(v: string) {
   const pid = v ? v : null
   props.setFromPid?.(pid)

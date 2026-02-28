@@ -120,7 +120,7 @@ describe('EdgeDetailPopup', () => {
     host.remove()
   })
 
-  it('ED-1 (Phase 2): reverseUsed>0 blocks Close line (disabled) and shows warning', async () => {
+  it('AC-ED-5: reverse_used > 0, used = 0 => Close line disabled + inline warning', async () => {
     const { app, host } = mountPopup({ used: '0.00', reverseUsed: '0.01' })
     await nextTick()
 
@@ -181,6 +181,8 @@ describe('EdgeDetailPopup', () => {
 
     const btn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
     expect(btn).toBeTruthy()
+    // ED-3 polish: label must be contextual so direction is clear.
+    expect((btn?.textContent ?? '').trim()).toContain('Pay alice')
     btn?.click()
     await nextTick()
     expect(onSendPayment).toHaveBeenCalledTimes(1)

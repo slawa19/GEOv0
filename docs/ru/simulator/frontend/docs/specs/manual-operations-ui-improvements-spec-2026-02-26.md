@@ -1,6 +1,6 @@
 # Simulator UI v2 — Спецификация доработок ручных операций
 
-Статус: draft v2 (частично реализовано; Phase 1 выполнена, Phase 2/2.5 — в очереди)
+Статус: draft v2 (частично реализовано; Phase 1 выполнена, Phase 2 — реализована (DoD не закрыт: тесты + визуальная проверка), Phase 2.5 — выполнена, Phase 3 — реализована (DoD не закрыт))
 
 ## Implementation status (as of 2026-02-27)
 
@@ -56,12 +56,17 @@
 
 - ~~TODO~~ DONE: MP-3 фильтрация From по `available > 0` — реализовано в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:180)
 - ~~TODO~~ DONE: UX-10 disable To-select при known-empty — реализовано в [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
+- TODO: Phase 2 DoD — закрыть чекбоксы (тесты + визуальная проверка); см. §14
 
 #### Phase 2.5
 
 - ~~TODO~~ DONE: Включить multi-hop достижимость через backend-first targets (см. [`§7.2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1208))
 - ~~TODO~~ DONE: TTL/refresh-policy для кэша payment-targets (см. [`payment-targets cache`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1253))
-- TODO: покрыть AC-MP-15..18 тестами (см. [`AC-MP-15..18`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1280))
+- ~~TODO~~ DONE: покрыть AC-MP-15..18 тестами (см. [`AC-MP-15..18`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1280))
+
+#### Consolidated remaining work
+
+Подробный разбор всех оставшихся задач вынесен в §14.
 
 ### Known divergences (as implemented)
 
@@ -261,15 +266,20 @@ Global keydown handler (`simulator-ui/v2/src/components/SimulatorAppRoot.vue`, �
 - Без проброса `trustlines` нельзя показывать capacity в option label (MP-2).
 - Без проброса `trustlinesLoading` UI не может честно показывать `(updating…)` в unknown.
 
-**Канонический сниппет wiring** (использовать/ссылаться на него вместо дублирования в документе):
+**Канонический сниппет wiring** (Phase 2.5+; source of truth — реализация в [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:186)):
 
 ```vue
 <script setup lang="ts">
 const trustlinesLoading = computed(() => interact.mode.trustlinesLoading.value)
+const paymentTargetsLoading = computed(() => interact.mode.paymentTargetsLoading.value)
+
+// Принятое UX-решение: держим unknown, пока обновляется любой источник маршрутов,
+// чтобы не показать stale targets (см. §14.1).
+const routesLoading = computed(() => trustlinesLoading.value || paymentTargetsLoading.value)
 
 // MUST: tri-state проброс кодируется строго через `undefined` в unknown.
 const availableTargetIds = computed(() =>
-  trustlinesLoading.value ? undefined : interact.mode.availableTargetIds.value,
+  routesLoading.value ? undefined : interact.mode.paymentToTargetIds.value,
 )
 
 const trustlines = computed(() => interact.mode.trustlines.value)
@@ -277,7 +287,7 @@ const trustlines = computed(() => interact.mode.trustlines.value)
 
 <ManualPaymentPanel
   ...
-  :trustlines-loading="trustlinesLoading"
+  :trustlines-loading="routesLoading"
   :available-target-ids="availableTargetIds"
   :trustlines="trustlines"
 />
@@ -1504,8 +1514,8 @@ Backend (rationale):
 
 | Req | Файлы | Оценка |
 |-----|-------|--------|
-| **API 7.2** (payment-targets endpoint как источник истины для targets; fetch 1x per From + frontend cache; guardrails) | backend: `app/api/v1/simulator.py`, `PaymentRouter`; frontend: `useInteractMode.ts`, `useInteractDataCache.ts` | M |
-| Тесты Phase 2.5 | Integration/component tests для backend-first targets (AC-MP-15..18) | M |
+| DONE: **API 7.2** (payment-targets endpoint как источник истины для targets; fetch 1x per From + frontend cache; guardrails) | backend: `app/api/v1/simulator.py`, `PaymentRouter`; frontend: `useInteractMode.ts`, `useInteractDataCache.ts` | M |
+| DONE: Тесты Phase 2.5 | Integration/component tests для backend-first targets (AC-MP-15..18) | M |
 
 ### Phase 3 (дополнительные улучшения)
 
@@ -1555,6 +1565,210 @@ Backend (rationale):
 | FB-1 (SuccessToast): визуальный шум при быстрых последовательных действиях. | Низкая | Короткий auto-dismiss (2500ms) + queue: новый toast заменяет предыдущий. |
 | ED-3 (Send Payment из popup): direction confusion — trustline from→to vs payment direction. | Средняя | Кнопка label: «💸 Pay {from_name}» (показать конкретного получателя). |
 
+## 14. Consolidated TODO (as of 2026-02-27)
+
+Этот раздел консолидирует **все** оставшиеся задачи и partial-пункты со всех фаз,
+выявленные по результатам code-ревизии фактической реализации.
+Каждый пункт привязан к AC/требованию спецификации и содержит: описание, файлы, приоритет, оценку.
+
+---
+
+### 14.1 DONE: MP-0 — Canon wiring divergence (accepted UX decision)
+
+**Статус:** DONE (спека приведена к фактической реализации; strict wiring — осознанное UX-решение)
+
+**Контекст (историческое расхождение):**
+Ранее спека §5.1 MP-0 фиксировала упрощённый canonical wiring:
+```
+availableTargetIds = trustlinesLoading ? undefined : interact.mode.availableTargetIds
+```
+Реализация в [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:186) использует:
+```
+routesLoading = trustlinesLoading || paymentTargetsLoading
+paymentToTargetIds = routesLoading ? undefined : interact.mode.paymentToTargetIds
+```
+
+Это **строже**, чем исходный canonical: known-state задерживается до загрузки обоих источников.
+Решение принято намеренно (UX trade-off): пользователь видит `(updating…)` чуть дольше, зато UI не показывает stale targets.
+
+**Выполнено:** canonical snippet в §5.1 MP-0 обновлён и теперь отражает строгий wiring через `routesLoading` и `paymentToTargetIds`.
+
+| Параметр | Значение |
+|----------|----------|
+| Приоритет | Low |
+| Оценка | XS (doc-only) |
+| Файлы | спека §5.1 MP-0 |
+| AC | — |
+
+---
+
+### 14.2 TODO: Недостающие тесты по AC-идентификаторам
+
+По результатам ревизии, следующие acceptance criteria **фактически покрыты** по логике,
+но не привязаны к AC-идентификаторам в именах тестов. Требуется добавить явные тест-кейсы
+(или переименовать существующие) для трассируемости.
+
+| # | AC | Компонент | Что нужно | Файл теста | Оценка |
+|---|-----|-----------|-----------|------------|--------|
+| T-1 | **AC-ED-5** | EdgeDetailPopup | Тест: `reverse_used > 0, used = 0` → Close line disabled. Логика покрыта в `ED-1 (Phase 2)`, но нет alias к AC-ED-5. | [`EdgeDetailPopup.test.ts`](simulator-ui/v2/src/components/EdgeDetailPopup.test.ts) | XS |
+| T-2 | **AC-MP-11** | ManualPaymentPanel | Тест: FROM filtered when trustlines have outgoing; fallback на полный список при пустых trustlines. Частично покрыт `MP-3` тестом, но нет привязки к AC-MP-11. | [`ManualPaymentPanel.test.ts`](simulator-ui/v2/src/components/ManualPaymentPanel.test.ts) | XS |
+| T-3 | **AC-MP-12** | ManualPaymentPanel | Тест: при refresh `toPid` исчезает из `availableTargetIds` → reset + inline warning `"Selected recipient is no longer available. Please re-select."`. Покрыт MP-1b, но нет явного AC-MP-12. | [`ManualPaymentPanel.test.ts`](simulator-ui/v2/src/components/ManualPaymentPanel.test.ts) | XS |
+| T-4 | **AC-TL-10** | TrustlineManagementPanel | Тест: `reverse_used > 0, used = 0` → Close TL disabled + inline warning. Покрыт `TL-2 (Phase 2)`, но нет alias к AC-TL-10. | [`TrustlineManagementPanel.test.ts`](simulator-ui/v2/src/components/TrustlineManagementPanel.test.ts) | XS |
+| T-5 | **AC-A11Y-1** | ManualPaymentPanel | Тест: amount input `aria-describedby="mp-amount-help"` + help-элемент с `id="mp-amount-help"`. | [`ManualPaymentPanel.test.ts`](simulator-ui/v2/src/components/ManualPaymentPanel.test.ts) | XS |
+| T-6 | **AC-A11Y-2** | ManualPaymentPanel | Тест: To select `aria-describedby="mp-to-help"` + help-элемент с `id="mp-to-help"`. | [`ManualPaymentPanel.test.ts`](simulator-ui/v2/src/components/ManualPaymentPanel.test.ts) | XS |
+
+**Общая оценка:** XS–S (6 тест-кейсов, каждый — 5-15 строк; можно сгруппировать в один PR).
+
+---
+
+### 14.3 TODO: Визуальная проверка (Phase 1 + Phase 2 DoD)
+
+Не пройдены визуальные проверки из DoD §12:
+
+| Phase | Чекбокс | Что проверить |
+|-------|---------|---------------|
+| Phase 1 | `[ ] Визуальная проверка: full stack + greenfield-village-100 — ручной платёж, To отфильтрован, capacity видна` | Запустить `run_full_stack.ps1 -Action start -ResetDb -FixturesCommunity greenfield-village-100`, открыть Simulator UI, выполнить Manual Payment. |
+| Phase 2 | `[ ] Визуальная проверка: NodeCard с IN trustlines показывает ✏️, saturated rows окрашены, success toast появляется` | В том же окружении: кликнуть на ноду, проверить IN trustlines с edit-кнопкой; найти saturated edge (avail=0) → проверить красный бордер; выполнить операцию → проверить SuccessToast. |
+
+**Оценка:** XS (ручная проверка, ~10 мин).
+
+---
+
+### 14.4 TODO: Integration / E2E тесты (§9.3)
+
+В §9.3 спеки описаны integration-сценарии, которые не автоматизированы:
+
+| # | Сценарий | Ожидаемый результат | Оценка |
+|---|----------|---------------------|--------|
+| E-1 | Greenfield-village-100, FROM=shop, dropdown TO | Содержит только участников с trustline `to_pid=shop`. | M |
+| E-2 | FROM=alice → TO → отправить | Список To отфильтрован; платёж проходит без NO_ROUTE. | M |
+| E-3 | Trustline panel: newLimit < used → Update | Кнопка disabled, сообщение видимо. | S |
+| E-4 | Send Payment из EdgeDetailPopup | Кнопка → pre-fill From/To, confirm step. | S |
+| E-5 | TL close с `reverse_used > 0` → 409 → ErrorToast | Backend отклоняет, UI показывает ошибку. | S |
+
+Инструмент: Playwright (инфраструктура в `admin-ui/e2e/`, но для simulator-ui пока нет).
+
+**Приоритет:** Medium (покрытие гарантирует отсутствие регрессий при будущих изменениях).
+**Оценка:** M–L (создание playwright-инфраструктуры для simulator-ui + 5 тестов).
+
+---
+
+### 14.5 TODO: `toSelectionInvalidWarning` не сбрасывается при canvas-driven From change
+
+**Проблема:** inline warning `"Selected recipient is no longer available. Please re-select."`
+сбрасывается в `onFromChange()` и `onToChange()`, но **не** при canvas-click смене From,
+которая вызывает `setFromPid` напрямую, минуя UI-хендлеры.
+
+**Файл:** [`ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:297)
+
+**Исправление:**
+```typescript
+// Добавить watcher:
+watch(() => props.state.fromPid, () => {
+  toSelectionInvalidWarning.value = null
+})
+```
+
+| Параметр | Значение |
+|----------|----------|
+| Приоритет | Medium |
+| Оценка | XS (2 строки) |
+| AC | AC-MP-12 (косвенно) |
+
+---
+
+### 14.6 TODO: ED-3 — contextual button label
+
+**Текущее:** кнопка Send Payment в EdgeDetailPopup использует generic label `💸 Send Payment`.
+
+**Спека (§11, Risk ED-3):** рекомендует `💸 Pay {from_name}` для устранения direction confusion
+(trustline `from→to` vs payment `to→from`).
+
+**Файл:** [`EdgeDetailPopup.vue`](simulator-ui/v2/src/components/EdgeDetailPopup.vue:230)
+
+**Исправление:**
+```vue
+<button ... @click="emit('sendPayment')">
+  💸 Pay {{ state.fromPid ?? 'sender' }}
+</button>
+```
+Или с `from_name` (если доступно через props).
+
+| Параметр | Значение |
+|----------|----------|
+| Приоритет | Low |
+| Оценка | XS |
+| AC | AC-ED-3 (полировка) |
+
+---
+
+### 14.7 TODO: `reverse_used` в snapshot fallback
+
+**Проблема:** в [`useInteractDataCache.ts`](simulator-ui/v2/src/composables/interact/useInteractDataCache.ts)
+маппинг snapshot→trustlines **не включает** `reverse_used`.
+Поле доступно **только** при API-fetch. В degraded-режиме (snapshot fallback до загрузки)
+close-guard не учитывает reverse debt → false-negative (Close разрешён, backend вернёт 409).
+
+**Риск:** Low — snapshot fallback кратковременен, и backend catch предотвращает некорректное закрытие.
+
+**Исправление:**
+- Если backend snapshot (`links[]`) содержит `reverse_used` → добавить маппинг в `_snapshotToTrustlines()`.
+- Если не содержит → оставить как known limitation (backend guard достаточен).
+
+| Параметр | Значение |
+|----------|----------|
+| Приоритет | Low |
+| Оценка | XS–S (зависит от наличия поля в snapshot) |
+| AC | AC-TL-10 (косвенно) |
+
+---
+
+### 14.8 PARTIAL: Phase 2 DoD — обновить чекбоксы в §12
+
+Все функциональные требования Phase 2 реализованы (MP-3, TL-2, TL-3, NC-1..4, ED-2, FB-1, FB-2).
+
+Обновлено (doc hygiene): в §12 отмечены выполненными чекбоксы, которые уже закрыты автоматизацией/тестами.
+Визуальные проверки (Phase 1/2) намеренно остаются `[ ]` до ручной проверки (§14.3).
+
+| Параметр | Значение |
+|----------|----------|
+| Приоритет | Low (doc hygiene) |
+| Оценка | XS |
+
+---
+
+### 14.9 TODO: Phase 3 DoD — integration-тесты для ED-3
+
+ED-3 (Send Payment из popup) реализован: кнопка + emit + wiring в root с direction reversal.
+Не хватает integration-теста (Send Payment → pre-fill → confirm flow end-to-end).
+
+**Файлы:**
+- Тест: добавить в [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)
+  или новый `EdgeDetailPopup.integration.test.ts`.
+- Проверить: `onEdgeDetailSendPayment()` в [`SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue).
+
+| Параметр | Значение |
+|----------|----------|
+| Приоритет | Medium |
+| Оценка | S |
+| AC | AC-ED-3 |
+
+---
+
+### 14.10 Сводная таблица приоритетов
+
+| # | Задача | Приоритет | Оценка | Блокирует DoD |
+|---|--------|-----------|--------|---------------|
+| 14.5 | `toSelectionInvalidWarning` reset при canvas-click | **Medium** | XS | Нет (edge case) |
+| 14.2 | Недостающие тесты по AC (6 шт.) | **Medium** | S | Phase 2 DoD ✅ |
+| 14.9 | Integration-тест ED-3 | **Medium** | S | Phase 3 DoD ✅ |
+| 14.3 | Визуальная проверка Phase 1 + 2 | **Medium** | XS (manual) | Phase 1+2 DoD ✅ |
+| 14.4 | E2E тесты (Playwright) | **Medium** | M–L | Нет (nice-to-have) |
+| 14.1 | MP-0 canon divergence (doc) | Low | XS | Нет |
+| 14.6 | ED-3 contextual label | Low | XS | Нет |
+| 14.7 | `reverse_used` snapshot fallback | Low | XS–S | Нет |
+| 14.8 | Phase 2 DoD чекбоксы | Low | XS | Нет (meta) |
+
 ## 12. Definition of done
 
 ### Phase 1
@@ -1571,8 +1785,9 @@ Backend (rationale):
 - FB-1 (SuccessToast)
 
 ### Phase 2
-- [ ] Реализованы: MP-3, TL-2, TL-3, NC-1, NC-2, NC-3, NC-4, ED-2, FB-1, FB-2.
-- [ ] Пройдены component-тесты для NodeCardOverlay, SuccessToast, ErrorToast (adaptive dismiss).
+- [x] Реализованы: MP-3, TL-2, TL-3, NC-1, NC-2, NC-3, NC-4, ED-2, FB-1, FB-2.
+- [x] Пройдены component-тесты для NodeCardOverlay, SuccessToast, ErrorToast (adaptive dismiss).
+- [x] Дополнить тесты по AC-идентификаторам: AC-ED-5, AC-MP-11, AC-MP-12, AC-TL-10 (см. §14).
 - [ ] Визуальная проверка: NodeCard с IN trustlines показывает ✏️, saturated rows окрашены, success toast появляется.
 
 ### Phase 2.5
@@ -1582,8 +1797,9 @@ Backend (rationale):
   - [`simulator-ui/v2/src/components/SimulatorAppRoot.vue`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:1)
   - [`simulator-ui/v2/src/components/ManualPaymentPanel.vue`](simulator-ui/v2/src/components/ManualPaymentPanel.vue:1)
 - [x] Backend: API 7.2 (payment-targets endpoint) как источник истины по достижимости (multi-hop) + contract/guardrails.
-- [ ] Пройдены component/integration тесты для backend-first режима (AC-MP-15..18).
+- [x] Пройдены component/integration тесты для backend-first режима (AC-MP-15..18).
 
 ### Phase 3
-- [ ] Реализованы: ED-3.
-- [ ] Integration-тесты: Send Payment из edge popup.
+- [x] Реализованы: ED-3.
+- [x] Integration-тесты: Send Payment из edge popup.
+- [x] UX-полировка: ED-3 button label → contextual `💸 Pay {from_name}` (см. §14).
