@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import SuccessToast from './SuccessToast.vue'
 
 describe('SuccessToast', () => {
-  it('A11Y: uses role="status" when visible', async () => {
+  it('AC-A11Y-3: SuccessToast uses role="status" + aria-live="polite" when visible', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -18,6 +18,7 @@ describe('SuccessToast', () => {
     const el = host.querySelector('.success-toast') as HTMLElement | null
     expect(el).toBeTruthy()
     expect(el?.getAttribute('role')).toBe('status')
+    expect(el?.getAttribute('aria-live')).toBe('polite')
 
     app.unmount()
     host.remove()

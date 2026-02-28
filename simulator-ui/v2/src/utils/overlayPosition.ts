@@ -5,6 +5,18 @@ import { clamp } from './math'
 
 export type { Point } from '../types/layout'
 
+function isPanelDebugEnabled(): boolean {
+  try {
+    const w = (globalThis as any).window as any
+    if (!w?.location?.search) return false
+    return new URLSearchParams(String(w.location.search)).get('panelDebug') === '1'
+  } catch {
+    return false
+  }
+}
+
+const PANEL_DEBUG = !!(import.meta as any)?.env?.DEV && isPanelDebugEnabled()
+
 /**
  * Clamp an overlay with known (or fallback) size to the viewport.
  * Coordinates must be in the same coordinate system as the viewport.
@@ -104,8 +116,14 @@ export function useOverlayPositioning(
 ): ComputedRef<Record<string, string>> {
   return computed(() => {
     let anchor = getAnchor()
-    if (!anchor) { console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor is null => CSS default'); return {} }
-    if (!Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) { console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor not finite => CSS default'); return {} }
+    if (!anchor) {
+      if (PANEL_DEBUG) console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor is null => CSS default')
+      return {}
+    }
+    if (!Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) {
+      if (PANEL_DEBUG) console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor not finite => CSS default')
+      return {}
+    }
 
     const rect = getHostEl()?.getBoundingClientRect()
 
@@ -119,7 +137,9 @@ export function useOverlayPositioning(
       viewport: rect ? { w: rect.width, h: rect.height } : undefined,
     })
 
-    console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor =>', JSON.stringify(anchor), '=> style', JSON.stringify(pos))
+    if (PANEL_DEBUG) {
+      console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor =>', JSON.stringify(anchor), '=> style', JSON.stringify(pos))
+    }
     return { ...pos, right: 'auto' } // override CSS `right: 12px`
   })
 }

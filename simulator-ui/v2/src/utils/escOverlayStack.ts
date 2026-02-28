@@ -37,19 +37,18 @@ export function handleEscOverlayStack(ev: KeyboardEvent, deps: EscOverlayStackDe
   // Step 2: Interact-only beyond this point.
   if (!deps.isInteractActive()) return false
 
-  // Minimal guard: keep default ESC behavior for form controls.
-  if (!deps.isFormLikeTarget(ev.target)) {
-    ev.preventDefault()
-  }
+  // Step 3: if focus is inside a form-like element (input, select, textarea…),
+  // yield to native ESC behavior — do NOT cancel the Interact flow.
+  if (deps.isFormLikeTarget(ev.target)) return true
 
-  // Step 3: allow nested overlays to consume ESC.
+  // Step 4: prevent default navigation/browser ESC for non-form targets.
+  ev.preventDefault()
+
+  // Step 5: allow nested overlays to consume ESC.
   const notCanceled = deps.dispatchInteractEsc()
   if (!notCanceled) return true
 
-  // Step 4: don't cancel flows if the user is interacting with form controls.
-  if (deps.isFormLikeTarget(ev.target)) return true
-
-  // Step 5: cancel active flow.
+  // Step 6: cancel active flow.
   deps.cancelInteract()
   return true
 }

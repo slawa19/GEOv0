@@ -154,15 +154,21 @@ const paymentTargetsMaxHopsLabel = computed(() => {
 
 /**
  * Dropdown-specific tri-state normalization.
- * - unknown only while trustlines are loading
- * - loading=false always yields known Set (possibly empty)
+ * - unknown (undefined)  → while routes are loading  OR  payment-targets errored
+ * - known-empty (size=0) → backend returned 0 reachable targets, no error
+ * - known-nonempty       → backend returned ≥1 reachable targets
+ *
+ * NOTE (P1-1): on payment-targets error we conservatively return `undefined`
+ * (degraded-unknown) rather than a known-empty Set, to prevent incorrectly
+ * disabling the To-select.  The toInlineHelpText computed separately surfaces
+ * the "Routes update failed; showing fallback data" copy in this case.
  */
 const dropdownToTargetIds = computed<Set<string> | undefined>(() => {
   if (routesLoading.value) return undefined
 
-  // Degraded mode: if backend payment-targets endpoint failed,
-  // avoid filtering the list to a known-empty Set.
-  if (props.paymentTargetsLastError) return undefined
+  // Conservative degraded: treat error as unknown so the dropdown stays
+  // enabled and falls back to full participant list (see toInlineHelpText).
+  if (props.paymentTargetsLastError) return undefined // degraded → unknown
 
   return props.paymentToTargetIds ?? new Set<string>()
 })

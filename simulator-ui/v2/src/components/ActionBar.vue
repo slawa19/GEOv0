@@ -36,9 +36,10 @@ const isFlowActive = computed(() => !isIdle.value)
 const { activeKey } = useActivePanelStateShared(computed(() => props.phase))
 
 function titleFor(_key: ActivePanelKey, idleTitle: string): string {
-  if (isFlowActive.value) return 'Cancel current action first (press ESC).'
+  // Prioritize in-flight operation hints over the generic "flow active" message.
   if (props.busy && props.cancelling) return 'Cancelling… please wait for the operation to finish.'
   if (props.busy) return 'Operation in progress… please wait.'
+  if (isFlowActive.value) return 'Cancel current action first (press ESC).'
   if (props.actionsDisabled) return 'Actions are disabled by backend feature flags.'
   if (props.runTerminal) return 'Run is stopped or in error state. Start a run first.'
   return idleTitle
@@ -95,21 +96,21 @@ function guardedStart(fn: () => void) {
       </button>
 
       <span
-        v-if="isFlowActive"
-        class="action-bar__hint"
-        data-testid="actionbar-locked-hint"
-        aria-label="Action Bar locked hint"
-      >
-        Cancel current action first (press ESC).
-      </span>
-
-      <span
-        v-else-if="busy"
+        v-if="busy"
         class="action-bar__hint"
         data-testid="actionbar-busy-hint"
         aria-label="Action Bar busy hint"
       >
         {{ cancelling ? 'Cancelling… please wait.' : 'Operation in progress… please wait.' }}
+      </span>
+
+      <span
+        v-else-if="isFlowActive"
+        class="action-bar__hint"
+        data-testid="actionbar-locked-hint"
+        aria-label="Action Bar locked hint"
+      >
+        Cancel current action first (press ESC).
       </span>
     </div>
   </div>

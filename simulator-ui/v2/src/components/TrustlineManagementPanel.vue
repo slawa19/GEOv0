@@ -257,13 +257,15 @@ function onTrustlinePick(key: string) {
 /** Dynamic positioning: when anchor is provided (opened from NodeCard or edge click),
  *  place the panel near the anchor instead of the fixed CSS top-right position.
  *  When no anchor, returns {} to let CSS `.ds-ov-panel` defaults apply. */
-// IMPORTANT: panelSize.w must match CSS max-width of .ds-ov-panel (560px).
-// Using the smaller min-width (320px) causes clamping to underestimate the right edge
-// → panel overflows the screen by up to 240px when rendered at max-width.
+// IMPORTANT: panelSize.w must match this panel's CSS max-width.
+// This component intentionally overrides `.ds-ov-panel` to be compact:
+// `max-width: min(380px, calc(100vw - 24px))`.
+// If we pass a larger width (e.g. 560), clamping becomes too conservative and
+// the panel is pushed left more than necessary.
 const anchorPositionStyle = useOverlayPositioning(
   () => props.anchor,
   () => props.hostEl,
-  { w: 560, h: 340 },
+  { w: 380, h: 340 },
 )
 
 const newLimitInput = ref<HTMLInputElement | null>(null)

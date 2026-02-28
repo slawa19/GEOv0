@@ -5,6 +5,18 @@ export type { Point } from '../types/layout'
 import type { InteractPhase } from './useInteractMode'
 import { toLower } from '../utils/stringHelpers'
 
+function isPanelDebugEnabled(): boolean {
+  try {
+    const w = (globalThis as any).window as any
+    if (!w?.location?.search) return false
+    return new URLSearchParams(String(w.location.search)).get('panelDebug') === '1'
+  } catch {
+    return false
+  }
+}
+
+const PANEL_DEBUG = !!(import.meta as any)?.env?.DEV && isPanelDebugEnabled()
+
 /**
  * Derives the panel group from an interact phase string.
  * Same convention as `useActivePanelState`: phase name contains 'payment', 'trustline', or 'clearing'.
@@ -79,7 +91,15 @@ export function useInteractPanelPosition(phase: Ref<InteractPhase>) {
    */
   watch(phase, (cur, prev) => {
     if (panelGroupOf(cur) !== panelGroupOf(prev ?? '')) {
-      console.warn('[PANEL-DEBUG] watcher: group changed', panelGroupOf(prev ?? ''), '->', panelGroupOf(cur), '=> clearing anchor')
+      if (PANEL_DEBUG) {
+        console.warn(
+          '[PANEL-DEBUG] watcher: group changed',
+          panelGroupOf(prev ?? ''),
+          '->',
+          panelGroupOf(cur),
+          '=> clearing anchor',
+        )
+      }
       _anchor.value = null
     }
   }, { flush: 'sync' })
@@ -91,7 +111,7 @@ export function useInteractPanelPosition(phase: Ref<InteractPhase>) {
    * @param snapshot — координаты { x, y } или null/undefined (→ CSS default)
    */
   function openFrom(_source: PanelOpenSource, snapshot: Point | null = null): void {
-    console.warn('[PANEL-DEBUG] openFrom:', _source, '=>', JSON.stringify(snapshot))
+    if (PANEL_DEBUG) console.warn('[PANEL-DEBUG] openFrom:', _source, '=>', JSON.stringify(snapshot))
     _anchor.value = snapshot
   }
 

@@ -29,7 +29,7 @@
     {
       "id": "h1",
       "name": "Магазин у дома",
-      "type": "hub",
+      "type": "business",
       "groupId": "center",
       "behaviorProfileId": "merchant"
     }

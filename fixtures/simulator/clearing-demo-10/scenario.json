@@ -5,7 +5,7 @@
   "description": "Минимальный сценарий для интерактивной демонстрации клиринга. Запускать с intensity_percent=0.",
   "equivalents": ["UAH"],
   "participants": [
-    { "id": "shop", "name": "Магазин", "type": "hub", "status": "active", "groupId": "business" },
+    { "id": "shop", "name": "Магазин", "type": "business", "status": "active", "groupId": "business" },
     { "id": "bakery", "name": "Пекарня", "type": "business", "status": "active", "groupId": "business" },
     { "id": "farmer", "name": "Фермер", "type": "business", "status": "active", "groupId": "business" },
     { "id": "workshop", "name": "Майстерня", "type": "business", "status": "active", "groupId": "business" },

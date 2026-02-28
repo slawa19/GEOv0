@@ -42,7 +42,10 @@ const emit = defineEmits<{ close: [] }>()
 const props = defineProps<Props>()
 
 function safeNum(v: unknown): number {
-  const n = Number(v)
+  // UX-8: use parseAmountNumber() for decimal-like strings (e.g. "1,234.5" must not
+  // parse as NaN). This is sort-only, not a guard, but inconsistent parsing would
+  // break trustline row ordering when `used` values contain locale separators.
+  const n = parseAmountNumber(v)
   return Number.isFinite(n) ? n : 0
 }
 

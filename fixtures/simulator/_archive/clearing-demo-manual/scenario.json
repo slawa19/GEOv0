@@ -38,7 +38,7 @@
     {
       "id": "shop",
       "name": "Магазин",
-      "type": "hub",
+      "type": "business",
       "status": "active",
       "groupId": "business"
     }

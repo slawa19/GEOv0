@@ -79,7 +79,9 @@ onUnmounted(() => {
 <style scoped>
 .success-toast {
   position: absolute;
-  bottom: 68px;
+  /* P1-3: offset above ErrorToast (bottom: 68px) to prevent visual overlap when
+   * both toasts are briefly visible (rare but possible in degraded flows). */
+  bottom: 128px;
   left: 50%;
   transform: translateX(-50%);
   z-index: var(--ds-z-alert, 200);
