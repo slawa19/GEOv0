@@ -12,7 +12,12 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       const origOpen = wm.open
       const open = vi.fn((o: any) => origOpen(o))
       ;(globalThis as any).__GEO_TEST_WM_OPEN = open
-      return { ...wm, open }
+
+      const origHandleEsc = wm.handleEsc
+      const handleEsc = vi.fn((ev: any, o: any) => origHandleEsc(ev, o))
+      ;(globalThis as any).__GEO_TEST_WM_HANDLE_ESC = handleEsc
+
+      return { ...wm, open, handleEsc }
     },
   }
 })
@@ -809,6 +814,41 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     host.remove()
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+  })
+
+  it('wm=1: Escape delegates to wm.handleEsc() and does NOT cancel interact flow', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
+      expect(handleEsc).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+
+      expect(handleEsc).toHaveBeenCalledTimes(1)
+      expect(cancel).toHaveBeenCalledTimes(0)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
+      vi.unstubAllGlobals()
+    }
   })
 
   it('canvas shows crosshair cursor in interact picking phases', async () => {

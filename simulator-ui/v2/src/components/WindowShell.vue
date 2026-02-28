@@ -123,6 +123,37 @@ function onCloseClick(ev: MouseEvent) {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
 }
 
+/* R21 / N-1: WM window open/close animation.
+ * These classes are applied by Vue <TransitionGroup name="ws">.
+ * Keep the transition on the shell itself so scoped styles always match.
+ */
+.ws-enter-active,
+.ws-leave-active {
+  transition:
+    transform 180ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 180ms cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform, opacity;
+}
+
+.ws-enter-from,
+.ws-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.ws-enter-to,
+.ws-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-enter-active,
+  .ws-leave-active {
+    transition-duration: 0ms;
+  }
+}
+
 .ws-header {
   display: flex;
   align-items: center;

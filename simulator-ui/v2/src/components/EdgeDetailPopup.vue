@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { CSSProperties } from 'vue'
 
 import { normalizeAnchorToHostViewport, placeOverlayNearAnchor } from '../utils/overlayPosition'
 import { parseAmountNumber } from '../utils/numberFormat'
@@ -69,7 +70,7 @@ const open = computed(() => {
   return true
 })
 
-const popupStyle = computed(() => {
+const popupStyle = computed<CSSProperties | undefined>(() => {
   if (props.renderMode === 'wm') {
     // WM owns geometry. Keep EdgeDetailPopup as a simple content block.
     return {
@@ -86,7 +87,7 @@ const popupStyle = computed(() => {
 
   let anchor = props.state.edgeAnchor
   // Safety: if anchor is missing, fall back to CSS defaults.
-  if (!anchor) return {}
+  if (!anchor) return undefined
 
   const MIN_POPUP_W = 260
   const MIN_POPUP_H = 140
@@ -100,7 +101,7 @@ const popupStyle = computed(() => {
     anchor,
     overlaySize: { w: MIN_POPUP_W, h: MIN_POPUP_H },
     viewport: rect ? { w: rect.width, h: rect.height } : undefined,
-  })
+  }) as CSSProperties
 })
 
 const title = computed(() => {

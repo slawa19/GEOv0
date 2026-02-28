@@ -52,6 +52,39 @@ describe('useWindowManager (MVP)', () => {
     expect(last(wm.windows.value).active).toBe(true)
   })
 
+  it("singleton='reuse': после user-drag повторный open() без смены anchor не сбрасывает rect.left/top", () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id1 = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'x' },
+      anchor: { x: 10, y: 20, space: 'host', source: 'test' },
+    })
+
+    // emulate: window exists in DOM and was measured
+    wm.updateMeasuredSize(id1, { width: 420, height: 260 })
+    wm.reclamp(id1)
+
+    // emulate: user dragged window to a new place (within viewport)
+    // NOTE: wm.reclamp() snaps to 8px grid, so keep test values snap-aligned.
+    const w1 = wm.windows.value.find((w) => w.id === id1)!
+    w1.rect.left = 120
+    w1.rect.top = 232
+
+    const id2 = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'trustline', phase: 'x' },
+      // Same anchor value => must NOT reset left/top
+      anchor: { x: 10, y: 20, space: 'host', source: 'test' },
+    })
+
+    expect(id2).toBe(id1)
+    const w2 = wm.windows.value.find((w) => w.id === id2)!
+    expect(w2.rect.left).toBe(120)
+    expect(w2.rect.top).toBe(232)
+  })
+
   it("closeGroup('interact') закрывает только interact и не трогает inspector", () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
@@ -189,6 +222,89 @@ describe('useWindowManager (MVP)', () => {
     const e = wm.windows.value.find((w) => w.id === eid) as WindowInstance
     expect(i.policy.closeOnOutsideClick).toBe(false)
     expect(e.policy.closeOnOutsideClick).toBe(true)
+  })
+
+  it('Acceptance A1 / R6: 2 окна (interact + inspector) → ESC закрывает interact, затем inspector', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const inspectorId = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+    const interactId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+
+    // ESC #1: topmost = interact-panel
+    const r1 = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => false,
+    })
+    expect(r1).toBe(true)
+    expect(wm.windows.value.some((w) => w.id === interactId)).toBe(false)
+    expect(wm.windows.value.some((w) => w.id === inspectorId)).toBe(true)
+
+    // ESC #2: now topmost = inspector
+    const r2 = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => false,
+    })
+    expect(r2).toBe(true)
+    expect(wm.windows.value.some((w) => w.id === inspectorId)).toBe(false)
+    expect(wm.windows.value.length).toBe(0)
+  })
+
+  it('handleEsc() при 0 окнах: возвращает false и не бросает', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const consumed = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => false,
+    })
+
+    expect(consumed).toBe(false)
+    expect(wm.windows.value.length).toBe(0)
+  })
+
+  it('close()/focus() с несуществующим id: no-op', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+    const before = wm.windows.value.find((w) => w.id === id)!
+
+    wm.close(999, 'action')
+    wm.focus(999)
+
+    const after = wm.windows.value.find((w) => w.id === id)!
+    expect(wm.windows.value.length).toBe(1)
+    expect(after.id).toBe(before.id)
+    expect(after.z).toBe(before.z)
+  })
+
+  it('setViewport() + reclampAll(): держит все окна внутри новых границ', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 500, height: 400 })
+
+    const edgeId = wm.open({
+      type: 'edge-detail',
+      anchor: { x: 480, y: 380, space: 'host', source: 'test' },
+      data: { fromPid: 'a', toPid: 'b' },
+    })
+    const interactId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+
+    // Ensure sizes are known and exceed the next viewport.
+    wm.updateMeasuredSize(edgeId, { width: 420, height: 320 })
+    wm.updateMeasuredSize(interactId, { width: 480, height: 420 })
+
+    wm.setViewport({ width: 300, height: 200 })
+    wm.reclampAll()
+
+    const edge = wm.windows.value.find((w) => w.id === edgeId)!
+    const interact = wm.windows.value.find((w) => w.id === interactId)!
+
+    // viewport меньше окна → прижимаем к pad (12)
+    expect(edge.rect.left).toBe(12)
+    expect(edge.rect.top).toBe(12)
+    expect(interact.rect.left).toBe(12)
+    expect(interact.rect.top).toBe(12)
   })
 })
 

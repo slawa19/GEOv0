@@ -16,7 +16,7 @@ import ErrorToast from './ErrorToast.vue'
 import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 
-import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
  import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
@@ -92,16 +92,18 @@ import { handleEscOverlayStack } from '../utils/escOverlayStack'
   import { useWindowManager } from '../composables/windowManager/useWindowManager'
   import type { WindowInstance } from '../composables/windowManager/types'
 import type { WindowAnchor } from '../composables/windowManager/types'
+import { isInteractPanelWindow, isNodeCardWindow } from '../composables/windowManager/types'
 import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
+import {
+  provideWindowManagerEnabled,
+  readWindowManagerEnabledFromUrl,
+} from '../composables/windowManager/featureFlag'
 
 // Step 2 runtime flag (default false): enable via query string `?wm=1`.
-const __USE_WINDOW_MANAGER: boolean = (() => {
-  try {
-    return new URLSearchParams(window.location.search).get('wm') === '1'
-  } catch {
-    return false
-  }
-})()
+const __USE_WINDOW_MANAGER: boolean = readWindowManagerEnabledFromUrl()
+
+// Expose WM enabled state to composables (avoid direct window.location reads).
+provideWindowManagerEnabled(__USE_WINDOW_MANAGER)
 
 function readWindowViewportFallback(): { width: number; height: number } {
   try {
@@ -337,31 +339,47 @@ const wmInteractAnchor = computed<WindowAnchor | null>(() => {
   return toWmAnchor(panelAnchor.value ?? null, 'panel')
 })
 
-watchEffect(() => {
-  if (!__USE_WINDOW_MANAGER) return
+// IMPORTANT (Vue reactivity): use `watch` instead of `watchEffect` here.
+// `wm.open()` reads WM reactive state internally (windowsMap, viewport, idCounter).
+// If called inside a watchEffect, Vue tracks those reads as dependencies and can trigger
+// a recursive update loop when a window is opened. Explicit watch avoids this.
+// Same pattern as the inspector watcher below (line ~375).
+watch(
+  () => ({
+    enabled: __USE_WINDOW_MANAGER,
+    apiMode: apiMode.value,
+    isInteractUi: isInteractUi.value,
+    phase: String(interactPhase.value),
+    isFullEditor: useFullTrustlineEditor.value,
+    anchor: wmInteractAnchor.value,
+  }),
+  (s) => {
+    if (!s.enabled) return
 
-  // Safety: only drive Interact windows in real interact UI.
-  if (apiMode.value !== 'real' || !isInteractUi.value) {
+    // Safety: only drive Interact windows in real interact UI.
+    if (s.apiMode !== 'real' || !s.isInteractUi) {
+      wm.closeGroup('interact', 'programmatic')
+      return
+    }
+
+    const m = interactWindowOfPhase(s.phase, s.isFullEditor)
+    if (m?.type === 'interact-panel') {
+      wm.open({
+        type: 'interact-panel',
+        anchor: s.anchor,
+        data: { panel: m.panel, phase: s.phase },
+      })
+      return
+    }
+
+    // idle / inspector-only phases: ensure interact window is closed.
     wm.closeGroup('interact', 'programmatic')
-    return
-  }
 
-  const m = interactWindowOfPhase(String(interactPhase.value), useFullTrustlineEditor.value)
-  if (m?.type === 'interact-panel') {
-    wm.open({
-      type: 'interact-panel',
-      anchor: wmInteractAnchor.value,
-      data: { panel: m.panel, phase: String(interactPhase.value) },
-    })
-    return
-  }
-
-  // idle / inspector-only phases: ensure interact window is closed.
-  wm.closeGroup('interact', 'programmatic')
-
-  // Avoid stale edge-popup anchors after closing the group.
-  wmEdgePopupAnchor.value = null
-})
+    // Avoid stale edge-popup anchors after closing the group.
+    wmEdgePopupAnchor.value = null
+  },
+  { immediate: true },
+)
 
 /**
  * Step 5: Inspector → WindowManager bridging.
@@ -442,24 +460,21 @@ watch(
 )
 
 function wmTitleFor(win: WindowInstance): string {
-  if (win.type === 'interact-panel') {
-    const data = win.data as any
-    if (data?.panel === 'payment') return 'Manual payment'
-    if (data?.panel === 'trustline') return 'Trustline'
-    if (data?.panel === 'clearing') return 'Clearing'
+  if (isInteractPanelWindow(win)) {
+    if (win.data.panel === 'payment') return 'Manual payment'
+    if (win.data.panel === 'trustline') return 'Trustline'
+    if (win.data.panel === 'clearing') return 'Clearing'
   }
   return ''
 }
 
 function isWmInteractPanelWindow(win: WindowInstance, panel: 'payment' | 'trustline' | 'clearing'): boolean {
-  if (win.type !== 'interact-panel') return false
-  const data = win.data as any
-  return data?.panel === panel
+  return isInteractPanelWindow(win) && win.data.panel === panel
 }
 
 function wmInteractPanelPhase(win: WindowInstance): InteractPhase {
-  const data = win.data as any
-  return String(data?.phase ?? 'idle') as InteractPhase
+  if (!isInteractPanelWindow(win)) return 'idle'
+  return String(win.data.phase ?? 'idle') as InteractPhase
 }
 
 const wmInteractPanelStyle = {
@@ -528,7 +543,27 @@ function isFormLikeTarget(t: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
+function dispatchInteractEsc(): boolean {
+  try {
+    const escEvt = new CustomEvent('geo:interact-esc', { cancelable: true })
+    return window.dispatchEvent(escEvt)
+  } catch {
+    return true
+  }
+}
+
 function onGlobalKeydown(ev: KeyboardEvent) {
+  // Step WM-ESC: when WM is active, delegate ESC handling to wm.handleEsc() first.
+  // wm.handleEsc() respects per-window escBehavior (close / back-then-close / ignore)
+  // and gives nested content a chance to consume ESC via dispatchInteractEsc.
+  if (__USE_WINDOW_MANAGER && ev.key === 'Escape') {
+    const consumed = wm.handleEsc(ev, {
+      isFormLikeTarget,
+      dispatchWindowEsc: dispatchInteractEsc,
+    })
+    if (consumed) return
+  }
+
   handleEscOverlayStack(ev, {
     isNodeCardOpen: () => isNodeCardOpen.value,
     closeNodeCard: () => setNodeCardOpen(false),
@@ -537,14 +572,7 @@ function onGlobalKeydown(ev: KeyboardEvent) {
     cancelInteract: () => interact.mode.cancel(),
 
     isFormLikeTarget,
-    dispatchInteractEsc: () => {
-      try {
-        const escEvt = new CustomEvent('geo:interact-esc', { cancelable: true })
-        return window.dispatchEvent(escEvt)
-      } catch {
-        return true
-      }
-    },
+    dispatchInteractEsc,
   })
 }
 
@@ -1117,7 +1145,15 @@ watch(interactPhase, (phase) => {
     </Transition>
 
     <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->
-    <div v-if="__USE_WINDOW_MANAGER" class="wm-layer" aria-label="Window layer">
+    <!-- R21: unified open/close transition for all windows. -->
+    <TransitionGroup
+      v-if="__USE_WINDOW_MANAGER"
+      name="ws"
+      tag="div"
+      class="wm-layer"
+      aria-label="Window layer"
+      :css="!isTestMode"
+    >
       <WindowShell
         v-for="win in wm.windows.value"
         :key="win.id"
@@ -1152,8 +1188,8 @@ watch(interactPhase, (phase) => {
         />
 
         <NodeCardOverlay
-          v-else-if="win.type === 'node-card' && getNodeById(String((win.data as any)?.nodeId))"
-          :node="getNodeById(String((win.data as any)?.nodeId))!"
+          v-else-if="isNodeCardWindow(win) && getNodeById(String(win.data.nodeId))"
+          :node="getNodeById(String(win.data.nodeId))!"
           :style="{}"
           :edge-stats="selectedNodeEdgeStats"
           :equivalent-text="state.snapshot?.equivalent ?? ''"
@@ -1238,7 +1274,7 @@ watch(interactPhase, (phase) => {
           :style="wmInteractPanelStyle"
         />
       </WindowShell>
-    </div>
+    </TransitionGroup>
 
     <EdgeDetailPopup
       v-if="apiMode === 'real' && isInteractUi && !__USE_WINDOW_MANAGER"

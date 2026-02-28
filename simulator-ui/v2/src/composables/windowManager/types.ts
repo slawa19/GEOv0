@@ -57,12 +57,26 @@ export type WindowInstance = {
   data: WindowData
 }
 
+// --- Type guards (Audit tech debt T-9): allow safe narrowing by `win.type` without `as any`.
+
+export function isInteractPanelWindow(
+  win: WindowInstance,
+): win is WindowInstance & { type: 'interact-panel'; data: WindowDataByType['interact-panel'] } {
+  return win.type === 'interact-panel'
+}
+
+export function isNodeCardWindow(
+  win: WindowInstance,
+): win is WindowInstance & { type: 'node-card'; data: WindowDataByType['node-card'] } {
+  return win.type === 'node-card'
+}
+
 export type WindowManagerApi = {
   windows: ComputedRef<WindowInstance[]>
   open: <T extends WindowType>(o: {
     type: T
     anchor?: WindowAnchor | null
-    data?: WindowData<T>
+    data: WindowData<T>
   }) => number
   close: (id: number, reason: 'esc' | 'action' | 'programmatic') => void
   /** Закрыть все окна группы. */

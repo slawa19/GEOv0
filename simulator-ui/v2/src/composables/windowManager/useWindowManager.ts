@@ -15,15 +15,6 @@ import type {
 
 const MAX = 100000
 
-function assertHasData<T extends WindowType>(
-  type: T,
-  data: WindowData<T> | undefined,
-): asserts data is WindowData<T> {
-  if (!data) {
-    throw new Error(`WindowManager.open({ type: '${type}' }) requires data in MVP`)
-  }
-}
-
 function snap8(v: number): number {
   return Math.round(v / 8) * 8
 }
@@ -162,7 +153,10 @@ export function useWindowManager(): WindowManagerApi {
     const h = win.measured?.height ?? win.rect.height
 
     // If pinned to anchor, recalculate position from anchor first.
-    if (win.anchor && win.placement === 'anchored') {
+    // IMPORTANT: once the window has been measured (exists in DOM), do NOT overwrite
+    // the current rect on reclamp() — this would undo user drags and also breaks
+    // singleton='reuse' expectations.
+    if (win.anchor && win.placement === 'anchored' && !win.measured) {
       const dx = 16,
         dy = 16
       win.rect.left = win.anchor.x + dx
@@ -217,9 +211,8 @@ export function useWindowManager(): WindowManagerApi {
   function open<T extends WindowType>(o: {
     type: T
     anchor?: WindowAnchor | null
-    data?: WindowData<T>
+    data: WindowData<T>
   }): number {
-    assertHasData(o.type, o.data)
     const type = o.type
     const data = o.data
     const anchor = o.anchor ?? null
@@ -230,6 +223,16 @@ export function useWindowManager(): WindowManagerApi {
     if (policy.singleton === 'reuse') {
       for (const [id, win] of windowsMap) {
         if (win.type !== type) continue
+
+        const prevAnchor = win.anchor
+        const prevRect = { ...win.rect }
+        const anchorChanged =
+          // If one of them is missing -> changed.
+          (!!prevAnchor !== !!anchor) ||
+          // If both exist -> compare by value.
+          (prevAnchor != null && anchor != null
+            ? prevAnchor.x !== anchor.x || prevAnchor.y !== anchor.y || prevAnchor.space !== anchor.space || prevAnchor.source !== anchor.source
+            : false)
 
         win.data = data as unknown as WindowData
         win.anchor = anchor
@@ -244,13 +247,21 @@ export function useWindowManager(): WindowManagerApi {
           win.rect.height = est.height
         }
 
-        // Re-position baseline.
-        if (win.placement === 'anchored' && win.anchor) {
-          win.rect.left = win.anchor.x + 16
-          win.rect.top = win.anchor.y + 16
+        // Re-position baseline only when necessary.
+        // Feedback: for singleton='reuse', do not override user's dragged position
+        // if the window already exists (measured) and anchor did not change.
+        if (anchorChanged || !win.measured) {
+          if (win.placement === 'anchored' && win.anchor) {
+            win.rect.left = win.anchor.x + 16
+            win.rect.top = win.anchor.y + 16
+          } else {
+            win.rect.left = viewport.value.width - win.rect.width - 12
+            win.rect.top = 110
+          }
         } else {
-          win.rect.left = viewport.value.width - win.rect.width - 12
-          win.rect.top = 110
+          // Keep current user position, but allow width/height updates above.
+          win.rect.left = prevRect.left
+          win.rect.top = prevRect.top
         }
 
         focus(id)

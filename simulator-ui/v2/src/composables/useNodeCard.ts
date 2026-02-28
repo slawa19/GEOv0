@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { GraphNode } from '../types'
 import type { Point, LayoutLinkLike, LayoutNodeWithId } from '../types/layout'
 import { clamp } from '../utils/math'
+import { useWindowManagerEnabled } from './windowManager/featureFlag'
 
 type UseNodeCardDeps = {
   hostEl: Ref<HTMLElement | null>
@@ -26,15 +27,9 @@ type UseNodeCardReturn = {
 export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
   const selectedNode = computed(() => deps.getNodeById(deps.selectedNodeId.value))
 
-  // Step 5 (WM): when window manager is enabled (`?wm=1`), NodeCard positioning is owned by WM.
-  // This composable must not treat fixed cardW/cardH as truth for clamping/placement.
-  const __USE_WINDOW_MANAGER: boolean = (() => {
-    try {
-      return new URLSearchParams(window.location.search).get('wm') === '1'
-    } catch {
-      return false
-    }
-  })()
+  // Step 5 (WM): when WM is enabled, NodeCard positioning is owned by WM.
+  // IMPORTANT: do not read window.location here (tests should not need to stub it).
+  const __USE_WINDOW_MANAGER = useWindowManagerEnabled()
 
   /**
    * Determine edge direction quadrant relative to node center.
