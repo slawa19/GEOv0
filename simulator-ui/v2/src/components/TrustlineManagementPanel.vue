@@ -12,6 +12,13 @@ import { renderOrDash } from '../utils/valueFormat'
 import { useOverlayPositioning } from '../utils/overlayPosition'
 
 type Props = {
+  /**
+   * WindowManager integration:
+   * - legacy: panel is a standalone overlay and self-positions via anchor+hostEl
+   * - wm: panel is rendered inside WindowShell; WM owns geometry and header
+   */
+  renderMode?: 'legacy' | 'wm'
+
   phase: InteractPhase
   state: InteractState
 
@@ -43,7 +50,9 @@ type Props = {
   hostEl?: HTMLElement | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  renderMode: 'legacy',
+})
 
 const limit = ref('')
 const newLimit = ref('')
@@ -203,7 +212,10 @@ const isPickFrom = computed(() => props.phase === 'picking-trustline-from')
 const isPickTo = computed(() => props.phase === 'picking-trustline-to')
 const isCreate = computed(() => props.phase === 'confirm-trustline-create')
 const isEdit = computed(() => props.phase === 'editing-trustline')
-const open = computed(() => isPickFrom.value || isPickTo.value || isCreate.value || isEdit.value)
+const open = computed(() => {
+  if (props.renderMode === 'wm') return true
+  return isPickFrom.value || isPickTo.value || isCreate.value || isEdit.value
+})
 
 const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
   participants: () => props.participants,
@@ -269,6 +281,28 @@ const anchorPositionStyle = useOverlayPositioning(
   { enabled: () => !!props.anchor && !!props.hostEl },
 )
 
+const rootStyle = computed(() => {
+  if (props.renderMode === 'wm') {
+    return {
+      position: 'static',
+      left: 'auto',
+      top: 'auto',
+      right: 'auto',
+      zIndex: 'auto',
+      width: '100%',
+      height: '100%',
+      maxWidth: 'none',
+      borderRadius: '0',
+    } as const
+  }
+  return anchorPositionStyle.value
+})
+
+const rootClass = computed(() => {
+  if (props.renderMode === 'wm') return 'tl-wm'
+  return 'ds-ov-panel ds-panel ds-panel--elevated'
+})
+
 const newLimitInput = ref<HTMLInputElement | null>(null)
 
 defineExpose({
@@ -280,8 +314,8 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" :style="anchorPositionStyle" data-testid="trustline-panel" aria-label="Trustline management panel">
-    <div class="ds-panel__header">
+  <div v-if="open" :class="rootClass" :style="rootStyle" data-testid="trustline-panel" aria-label="Trustline management panel">
+    <div v-if="renderMode !== 'wm'" class="ds-panel__header">
       <div class="ds-h2">
         {{ title }}
         <span class="ds-muted ds-mono"> (ESC to close)</span>
@@ -456,6 +490,13 @@ defineExpose({
 </template>
 
 <style scoped>
+.tl-wm {
+  /* In WM mode WindowShell owns the surface; keep panel as pure content. */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
 /* Compact: shrink panel to content width, cap at viewport */
 .ds-ov-panel {
   width: fit-content;

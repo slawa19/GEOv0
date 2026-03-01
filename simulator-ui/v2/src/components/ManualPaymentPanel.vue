@@ -10,6 +10,13 @@ import { useOverlayPositioning } from '../utils/overlayPosition'
 import { isActiveStatus } from '../utils/status'
 
 type Props = {
+  /**
+   * WindowManager integration:
+   * - legacy: panel is a standalone overlay and self-positions via anchor+hostEl
+   * - wm: panel is rendered inside WindowShell; WM owns geometry and header
+   */
+  renderMode?: 'legacy' | 'wm'
+
   phase: InteractPhase
   state: InteractState
 
@@ -59,7 +66,9 @@ type Props = {
   hostEl?: HTMLElement | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  renderMode: 'legacy',
+})
 
 // IMPORTANT: panelSize.w must match CSS max-width of .ds-ov-panel (560px).
 // Using the smaller min-width (320px) causes clamping to underestimate the right edge
@@ -70,6 +79,28 @@ const anchorPositionStyle = useOverlayPositioning(
   { w: 560, h: 420 },
   { enabled: () => !!props.anchor && !!props.hostEl },
 )
+
+const rootStyle = computed(() => {
+  if (props.renderMode === 'wm') {
+    return {
+      position: 'static',
+      left: 'auto',
+      top: 'auto',
+      right: 'auto',
+      zIndex: 'auto',
+      width: '100%',
+      height: '100%',
+      maxWidth: 'none',
+      borderRadius: '0',
+    } as const
+  }
+  return anchorPositionStyle.value
+})
+
+const rootClass = computed(() => {
+  if (props.renderMode === 'wm') return 'mp-wm'
+  return 'ds-ov-panel ds-panel ds-panel--elevated'
+})
 
 const amount = ref('')
 
@@ -143,7 +174,10 @@ const canConfirm = computed(() => {
 const isPickFrom = computed(() => props.phase === 'picking-payment-from')
 const isPickTo = computed(() => props.phase === 'picking-payment-to')
 const isConfirm = computed(() => props.phase === 'confirm-payment')
-const open = computed(() => isPickFrom.value || isPickTo.value || isConfirm.value)
+const open = computed(() => {
+  if (props.renderMode === 'wm') return true
+  return isPickFrom.value || isPickTo.value || isConfirm.value
+})
 
 const routesLoading = computed(() => props.trustlinesLoading || props.paymentTargetsLoading)
 
@@ -335,8 +369,8 @@ function onToChange(v: string) {
 </script>
 
 <template>
-  <div v-if="open" class="ds-ov-panel ds-panel ds-panel--elevated" :style="anchorPositionStyle" data-testid="manual-payment-panel" aria-label="Manual payment panel">
-    <div class="ds-panel__header">
+  <div v-if="open" :class="rootClass" :style="rootStyle" data-testid="manual-payment-panel" aria-label="Manual payment panel">
+    <div v-if="renderMode !== 'wm'" class="ds-panel__header">
       <div class="ds-h2">
         {{ titleText() }}
         <span class="ds-muted ds-mono"> (ESC to close)</span>
@@ -471,6 +505,14 @@ function onToChange(v: string) {
 </template>
 
 <style scoped>
+.mp-wm {
+  /* In WM mode WindowShell owns the surface; keep panel as pure content. */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+
 .mp-pick-help {
   margin: 6px 0 2px;
 }

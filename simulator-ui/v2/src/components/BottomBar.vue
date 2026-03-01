@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
 import { EQUIVALENT_CODES } from '../config/equivalents'
@@ -28,6 +28,7 @@ type Props = {
   isE2eScreenshots: boolean
 
   isDemoUi: boolean
+  autoOpenDevtools: boolean
   isExiting: boolean
   toggleDemoUi: () => void
 
@@ -48,6 +49,21 @@ const scene = defineModel<SceneId>('scene', { required: true })
 const isDevToolsVisible = computed(
   () => import.meta.env.DEV && !props.isWebDriver && !props.isTestMode && !props.isE2eScreenshots
 )
+
+const devToolsOpen = ref(false)
+const devToolsRef = ref<HTMLDetailsElement | null>(null)
+
+onMounted(() => {
+  if (props.autoOpenDevtools) {
+    devToolsOpen.value = true
+  }
+})
+
+watch(devToolsOpen, (val) => {
+  if (devToolsRef.value) {
+    devToolsRef.value.open = val
+  }
+})
 
 const allowDemoUi = import.meta.env.VITE_ALLOW_DEMO_UI === 'true'
 
@@ -173,6 +189,8 @@ async function onRunClearingOnce() {
 
         <details
           v-if="isDevToolsVisible || allowDemoUi"
+          ref="devToolsRef"
+          :open="autoOpenDevtools || undefined"
           class="ds-panel ds-ov-metric ds-ov-details bb-details"
           aria-label="Dev tools"
         >

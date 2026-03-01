@@ -35,14 +35,14 @@ export type WindowPolicy = {
 }
 
 export type InteractPanelData =
-  | { panel: 'payment'; phase: string; onBack?: () => boolean }
-  | { panel: 'trustline'; phase: string; onBack?: () => boolean }
-  | { panel: 'clearing'; phase: string; onBack?: () => boolean }
+  | { panel: 'payment'; phase: string; onBack?: () => boolean; onClose?: () => void }
+  | { panel: 'trustline'; phase: string; onBack?: () => boolean; onClose?: () => void }
+  | { panel: 'clearing'; phase: string; onBack?: () => boolean; onClose?: () => void }
 
 export type WindowDataByType = {
   'interact-panel': InteractPanelData
   'node-card': { nodeId: string; onClose?: (reason: 'esc' | 'action' | 'programmatic') => void }
-  'edge-detail': { fromPid: string; toPid: string }
+  'edge-detail': { fromPid: string; toPid: string; onClose?: (reason: 'esc' | 'action' | 'programmatic') => void }
 }
 
 export type WindowData<T extends WindowType = WindowType> = WindowDataByType[T]

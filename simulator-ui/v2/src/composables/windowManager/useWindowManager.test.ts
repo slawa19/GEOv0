@@ -396,5 +396,103 @@ describe('useWindowManager (MVP)', () => {
     expect(interact.rect.left).toBe(12)
     expect(interact.rect.top).toBe(12)
   })
+
+  it('close() вызывает policy.onClose с корректным reason', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const onClose = vi.fn()
+    wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b', onClose } })
+
+    const id = wm.windows.value[0]!.id
+    wm.close(id, 'esc')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledWith('esc')
+  })
+
+  it('interact-panel onClose вызывается при ESC-close (back-then-close → pass)', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const onClose = vi.fn()
+    const onBack = vi.fn(() => false) // no step-back → close
+
+    wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'picking-payment-from', onBack, onClose },
+    })
+
+    const consumed = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => true,
+    })
+
+    expect(consumed).toBe(true)
+    expect(onBack).toHaveBeenCalledTimes(1)
+    // onClose called because the window was ESC-closed (InteractPanelData.onClose is () => void)
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(wm.windows.value.length).toBe(0)
+  })
+
+  it('interact-panel onClose НЕ вызывается при programmatic close', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const onClose = vi.fn()
+    const id = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'x', onClose },
+    })
+
+    wm.close(id, 'programmatic')
+
+    // onClose should NOT be called for programmatic close
+    // (avoids double-cancel when flow completes and watcher does closeGroup)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("handleEsc(): escBehavior='ignore' не закрывает окно", () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    // No window type has 'ignore' by default, so we test indirectly:
+    // open edge-detail, then manually override its policy for testing.
+    const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+    const win = wm.windows.value.find((w) => w.id === id)!
+    ;(win.policy as any).escBehavior = 'ignore'
+
+    const consumed = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => true,
+    })
+
+    expect(consumed).toBe(false)
+    expect(wm.windows.value.some((w) => w.id === id)).toBe(true)
+  })
+
+  it('getTopmostInGroup: возвращает active окно группы, или max-z fallback', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const edgeId = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+    const interactId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+
+    // interact-panel is active (opened last)
+    const topInteract = wm.getTopmostInGroup('interact')
+    expect(topInteract).toBeTruthy()
+    expect(topInteract!.id).toBe(interactId)
+
+    // edge-detail is in inspector group
+    const topInspector = wm.getTopmostInGroup('inspector')
+    expect(topInspector).toBeTruthy()
+    expect(topInspector!.id).toBe(edgeId)
+
+    // non-existent group (no windows)
+    wm.closeGroup('interact', 'programmatic')
+    wm.closeGroup('inspector', 'programmatic')
+    expect(wm.getTopmostInGroup('interact')).toBeNull()
+    expect(wm.getTopmostInGroup('inspector')).toBeNull()
+  })
 })
 

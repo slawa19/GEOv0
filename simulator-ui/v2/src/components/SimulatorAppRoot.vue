@@ -132,9 +132,21 @@ const wmNodeCardId = ref<number | null>(null)
 const wmEdgeDetailSuppressed = ref(false)
 const wmEdgeDetailSelectionKey = ref<string>('')
 
+// KeepAlive: when Send Payment is initiated from edge-detail, the edge-detail window
+// persists as context (inspector coexists with interact-panel). The watcher must NOT
+// auto-close it, and the component receives frozen link data instead of live interact state.
+const wmEdgeDetailKeepAlive = ref(false)
+const wmEdgeDetailFrozenLink = ref<GraphLink | null>(null)
+
+function wmResetEdgeDetailKeepAlive() {
+  wmEdgeDetailKeepAlive.value = false
+  wmEdgeDetailFrozenLink.value = null
+}
+
 function uiCloseEdgeDetailWindow(winId: number, reason: 'action' | 'programmatic') {
   if (!__USE_WINDOW_MANAGER) return
   wmEdgeDetailSuppressed.value = true
+  wmResetEdgeDetailKeepAlive()
   wm.close(winId, reason)
   if (wmEdgeDetailId.value === winId) wmEdgeDetailId.value = null
 }
@@ -149,6 +161,7 @@ function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
   if (top.type === 'edge-detail') {
     // Outside click is UI-close, must NOT cancel flow.
     wmEdgeDetailSuppressed.value = true
+    wmResetEdgeDetailKeepAlive()
     wm.close(top.id, 'programmatic')
     if (wmEdgeDetailId.value === top.id) wmEdgeDetailId.value = null
     return 'edge-detail'
@@ -373,7 +386,7 @@ const legacyShowManualPaymentPanel = computed(
      return false
    }
 
-   return { panel, phase, onBack }
+   return { panel, phase, onBack, onClose: () => interact.mode.cancel() }
  }
 
 function toWmAnchor(p: Point | null, source: string): WindowAnchor | null {
@@ -484,8 +497,18 @@ watch(
       wmEdgeDetailId.value = wm.open({
         type: 'edge-detail',
         anchor: toWmAnchor(s.anchor ?? null, 'interact-state'),
-        data: { fromPid: String(s.fromPid), toPid: String(s.toPid) },
+        data: {
+          fromPid: String(s.fromPid),
+          toPid: String(s.toPid),
+          onClose: () => wmResetEdgeDetailKeepAlive(),
+        },
       })
+      return
+    }
+
+    // KeepAlive: when a flow was initiated from edge-detail (e.g. Send Payment),
+    // the edge-detail window persists as context. Don't auto-close it.
+    if (wmEdgeDetailKeepAlive.value && wmEdgeDetailId.value != null) {
       return
     }
 
@@ -539,6 +562,22 @@ function wmTitleFor(win: WindowInstance): string {
   return ''
 }
 
+// KeepAlive edge-detail: effective props (frozen when keepAlive, live otherwise).
+const wmEdgeDetailEffectiveLink = computed(() => {
+  if (wmEdgeDetailKeepAlive.value && wmEdgeDetailFrozenLink.value != null) {
+    return wmEdgeDetailFrozenLink.value
+  }
+  return interactSelectedLink.value
+})
+const wmEdgeDetailEffectivePhase = computed<InteractPhase>(() => {
+  if (wmEdgeDetailKeepAlive.value) return 'editing-trustline' as InteractPhase
+  return interactPhase.value
+})
+const wmEdgeDetailEffectiveBusy = computed(() => {
+  if (wmEdgeDetailKeepAlive.value) return true // disable action buttons while parent flow is active
+  return interact.mode.busy.value
+})
+
 function isWmInteractPanelWindow(win: WindowInstance, panel: 'payment' | 'trustline' | 'clearing'): boolean {
   return isInteractPanelWindow(win) && win.data.panel === panel
 }
@@ -547,17 +586,6 @@ function wmInteractPanelPhase(win: WindowInstance): InteractPhase {
   if (!isInteractPanelWindow(win)) return 'idle'
   return String(win.data.phase ?? 'idle') as InteractPhase
 }
-
-const wmInteractPanelStyle = {
-  position: 'static',
-  left: 'auto',
-  top: 'auto',
-  right: 'auto',
-  maxWidth: 'none',
-  width: '100%',
-  height: '100%',
-  borderRadius: '0',
-} as const
 
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false
@@ -773,6 +801,7 @@ function enterDemoUi() {
     sp.set('mode', 'real')
     sp.set('ui', 'demo')
     sp.set('debug', '1')
+    sp.set('devtools', '1')
   })
 }
 
@@ -860,6 +889,7 @@ async function exitDemoUi() {
     sp.set('mode', 'real')
     sp.delete('ui')
     sp.delete('debug')
+    sp.delete('devtools')
   })
 }
 
@@ -874,6 +904,7 @@ function goSandbox() {
     sp.set('mode', 'fixtures')
     sp.delete('ui')
     sp.delete('debug')
+    sp.delete('devtools')
   })
 }
 
@@ -883,6 +914,7 @@ function goAutoRun() {
     sp.set('mode', 'real')
     sp.delete('ui')
     sp.delete('debug')
+    sp.delete('devtools')
   })
 }
 
@@ -944,11 +976,13 @@ function onEdgeDetailSendPayment() {
   if (__USE_WINDOW_MANAGER) {
     wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
 
-    // Close ONLY the edge-detail inspector window (avoid inspector group close).
-    if (wmEdgeDetailId.value != null) {
-      wm.close(wmEdgeDetailId.value, 'programmatic')
-      wmEdgeDetailId.value = null
-    }
+    // KeepAlive: edge-detail stays open as context for the payment flow.
+    // Spec: "инспектор остаётся открыт как «база контекста», а Interact-панель
+    // открывается поверх для выполнения действия (Send Payment)."
+    // Freeze the current link data before cancel() clears interact state.
+    wmEdgeDetailKeepAlive.value = true
+    wmEdgeDetailFrozenLink.value = interactSelectedLink.value
+    // Do NOT close edge-detail — it persists as context.
   }
 
   interact.mode.cancel()
@@ -1239,16 +1273,16 @@ watch(interactPhase, (phase) => {
       >
         <EdgeDetailPopup
           v-if="win.type === 'edge-detail'"
-          :phase="interactPhase"
+          :phase="wmEdgeDetailEffectivePhase"
           :state="interact.mode.state"
           :host-el="null"
           :unit="effectiveEq"
-          :used="emptyToNull(interactSelectedLink?.used)"
-          :reverse-used="emptyToNull(interactSelectedLink?.reverse_used)"
-          :limit="emptyToNull(interactSelectedLink?.trust_limit)"
-          :available="emptyToNull(interactSelectedLink?.available)"
-          :status="emptyToNullString(interactSelectedLink?.status)"
-          :busy="interact.mode.busy.value"
+          :used="emptyToNull(wmEdgeDetailEffectiveLink?.used)"
+          :reverse-used="emptyToNull(wmEdgeDetailEffectiveLink?.reverse_used)"
+          :limit="emptyToNull(wmEdgeDetailEffectiveLink?.trust_limit)"
+          :available="emptyToNull(wmEdgeDetailEffectiveLink?.available)"
+          :status="emptyToNullString(wmEdgeDetailEffectiveLink?.status)"
+          :busy="wmEdgeDetailEffectiveBusy"
           :force-hidden="false"
           render-mode="wm"
           :close="() => uiCloseEdgeDetailWindow(win.id, 'action')"
@@ -1284,6 +1318,7 @@ watch(interactPhase, (phase) => {
 
         <ManualPaymentPanel
           v-else-if="isWmInteractPanelWindow(win, 'payment')"
+          render-mode="wm"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
           :unit="effectiveEq"
@@ -1304,12 +1339,12 @@ watch(interactPhase, (phase) => {
           :cancel="interact.mode.cancel"
           :anchor="null"
           :host-el="null"
-          :style="wmInteractPanelStyle"
         />
 
         <TrustlineManagementPanel
           v-else-if="isWmInteractPanelWindow(win, 'trustline')"
           ref="tlPanel"
+          render-mode="wm"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
           :unit="effectiveEq"
@@ -1328,11 +1363,11 @@ watch(interactPhase, (phase) => {
           :cancel="interact.mode.cancel"
           :anchor="null"
           :host-el="null"
-          :style="wmInteractPanelStyle"
         />
 
         <ClearingPanel
           v-else-if="isWmInteractPanelWindow(win, 'clearing')"
+          render-mode="wm"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
           :busy="interact.mode.busy.value"
@@ -1341,7 +1376,6 @@ watch(interactPhase, (phase) => {
           :cancel="interact.mode.cancel"
           :anchor="null"
           :host-el="null"
-          :style="wmInteractPanelStyle"
         />
       </WindowShell>
     </TransitionGroup>
@@ -1416,6 +1450,7 @@ watch(interactPhase, (phase) => {
       :is-test-mode="isTestMode"
       :is-e2e-screenshots="isE2eScreenshots"
       :is-demo-ui="isDemoUi"
+      :auto-open-devtools="isDemoUi"
       :is-exiting="isExiting"
       :toggle-demo-ui="toggleDemoUi"
       :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"

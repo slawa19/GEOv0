@@ -566,10 +566,6 @@ export function useSimulatorApp(opts?: {
 
   // Demo UI: keep render loop awake around sporadic SSE/debug actions.
   const demoHold = createDemoActivityHold({ holdMs: 1200 })
-  function markDemoActivity() {
-    if (!isDemoUi.value) return
-    demoHold.markDemoEvent()
-  }
 
   async function e2eTxOnce(): Promise<void> {
     if (!isE2eScreenshots.value) return
@@ -707,55 +703,21 @@ export function useSimulatorApp(opts?: {
     onNodeClick: (id) => {
       selectNode(id)
     },
-    // BUG-3: spawn gold edge pulses on clearing cycle edges after successful clearing.
+    // BUG-3: spawn all clearing FX on clearing cycle edges after successful clearing.
     onClearingDone: (res) => {
-      if (!_interactFxState) return
-
-      const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const clearingColor = VIZ_MAPPING.fx.clearing_debt
-
-      const edgesAll: Array<{ from: string; to: string }> = []
-      const nodeIdSet = new Set<string>()
+      const edges: Array<{ from: string; to: string }> = []
       for (const cycle of res.cycles ?? []) {
         for (const e of cycle.edges ?? []) {
-          if (e.from && e.to) {
-            edgesAll.push({ from: e.from, to: e.to })
-            nodeIdSet.add(e.from)
-            nodeIdSet.add(e.to)
-          }
+          if (e.from && e.to) edges.push({ from: e.from, to: e.to })
         }
       }
+      if (edges.length === 0) return
 
-      const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
-      if (edgesFx.length > 0) {
-        spawnEdgePulses(_interactFxState, {
-          edges: edgesFx,
-          nowMs,
-          durationMs: 4200,
-          color: clearingColor,
-          thickness: 3.2,
-          seedPrefix: `interact-clearing:${nowMs.toFixed(0)}`,
-          countPerEdge: 1,
-          keyEdge,
-          seedFn: fnv1a,
-          isTestMode: isTestMode.value,
-        })
-      }
-
-      // BUG-3 (P3): spawn clearing node bursts on cycle-participant nodes.
-      const nodeIds = Array.from(nodeIdSet).slice(0, 40)
-      if (nodeIds.length > 0) {
-        spawnNodeBursts(_interactFxState, {
-          nodeIds,
-          nowMs,
-          durationMs: 2800,
-          color: clearingColor,
-          kind: 'clearing',
-          seedPrefix: `interact-clearing-burst:${nowMs.toFixed(0)}`,
-          seedFn: fnv1a,
-          isTestMode: isTestMode.value,
-        })
-      }
+      runClearingFx({
+        edges,
+        totalAmount: res.total_cleared_amount ?? '0',
+        equivalent: res.equivalent ?? effectiveEq.value,
+      })
     },
   })
   const systemBalance = useSystemBalance(snapshotRef).balance
@@ -766,6 +728,14 @@ export function useSimulatorApp(opts?: {
   // later would not update the captured reference.
   let wakeUpImpl: () => void = () => undefined
   const wakeUp = () => wakeUpImpl()
+
+  function markDemoActivity() {
+    if (!isDemoUi.value) return
+    // Demo UI: a short-lived hold window keeps the render loop alive *after* wakeUp.
+    // IMPORTANT: hold alone does not restart deep-idle; we must explicitly wake the loop.
+    demoHold.markDemoEvent()
+    wakeUp()
+  }
 
   const layoutWiring = useAppLayoutWiring({
     canvasEl,
@@ -1351,28 +1321,70 @@ export function useSimulatorApp(opts?: {
     return out
   }
 
-  function runRealClearingDoneFx(done: ClearingDoneEvent) {
+  /** Normalised clearing FX parameters (shared between Interact HTTP response and SSE paths). */
+  type ClearingFxParams = {
+    edges: Array<{ from: string; to: string }>
+    totalAmount: string  // e.g. "10.00"
+    equivalent: string   // e.g. "UAH"
+    planId?: string      // для throttle key — опционально
+  }
+
+  /** Edge-signature dedup: prevents double FX spawn when both HTTP and SSE paths fire. */
+  // IMPORTANT: dedup policy must NOT suppress distinct clearing.done events that happen to
+  // share the same edge set (common in small graphs / debug "clearing-once" loops).
+  //
+  // - HTTP path (Interact clearing-real) has no plan_id -> dedup by edge signature
+  // - SSE path (clearing.done) has plan_id -> dedup by plan_id, but also suppress if
+  //   a matching edge signature was just processed by the HTTP path (double-fire)
+  const _clearingFxDedupByEdgeSig = new Map<string, number>() // edgeSig → timestamp (HTTP)
+  const _clearingFxDedupByPlanId = new Map<string, number>() // planId → timestamp (SSE)
+  const CLEARING_FX_DEDUP_WINDOW_MS = 3000
+
+  function gcClearingFxDedup(map: Map<string, number>, now: number) {
+    // Trim old entries (simple GC)
+    if (map.size <= 50) return
+    for (const [k, t] of map) {
+      if (now - t > CLEARING_FX_DEDUP_WINDOW_MS * 2) map.delete(k)
+    }
+  }
+
+  function runClearingFx(params: ClearingFxParams) {
+    const { edges: edgesAll, totalAmount, equivalent, planId } = params
+
+    const edgeSig = edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')
+    const now = Date.now()
+
+    if (planId) {
+      // 1) Never double-run the same plan_id (extra safety; SSE loop also dedups by event_id).
+      const prevPlan = _clearingFxDedupByPlanId.get(planId)
+      if (prevPlan && now - prevPlan < CLEARING_FX_DEDUP_WINDOW_MS) return
+
+      // 2) Suppress SSE FX if HTTP path already spawned FX for the same edges recently.
+      const prevHttp = _clearingFxDedupByEdgeSig.get(edgeSig)
+      if (prevHttp && now - prevHttp < CLEARING_FX_DEDUP_WINDOW_MS) return
+
+      _clearingFxDedupByPlanId.set(planId, now)
+      gcClearingFxDedup(_clearingFxDedupByPlanId, now)
+      // NOTE: do NOT write edgeSig here — otherwise distinct plan_ids with same edges would be suppressed.
+    } else {
+      // HTTP path (no planId): dedup by edge signature to prevent double-fire with SSE.
+      const prev = _clearingFxDedupByEdgeSig.get(edgeSig)
+      if (prev && now - prev < CLEARING_FX_DEDUP_WINDOW_MS) return
+      _clearingFxDedupByEdgeSig.set(edgeSig, now)
+      gcClearingFxDedup(_clearingFxDedupByEdgeSig, now)
+    }
+
     const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const clearingColor = VIZ_MAPPING.fx.clearing_debt
-
-    // Single subtle flash at clearing completion (warm orange tint, once per event).
-    state.flash = 0.55
-
-    const edgesAll: Array<{ from: string; to: string }> = []
-    const doneCycleEdges = (done as any)?.cycle_edges
-    if (Array.isArray(doneCycleEdges) && doneCycleEdges.length > 0) {
-      for (const e of doneCycleEdges) edgesAll.push({ from: e.from, to: e.to })
-    }
-
     const nodeIds = nodesFromEdges(edgesAll)
 
-    // Keep cycle nodes visible during completion.
-    if (nodeIds.length > 0) {
-      for (const id of nodeIds) addActiveNode(id, 5200)
-    }
+    // 1. Flash
+    state.flash = 0.55
 
-    // Highlight all touched edges (authoritative from clearing.done.cycle_edges).
-    // Keep the expensive pulse spawning bounded to avoid O(N) particle cost on large clearings.
+    // 2. Active nodes
+    for (const id of nodeIds) addActiveNode(id, 5200)
+
+    // 3. Edge pulses (capped at 30)
     const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
     if (edgesFx.length > 0) {
       spawnEdgePulses(fxState, {
@@ -1381,7 +1393,7 @@ export function useSimulatorApp(opts?: {
         durationMs: 4200,
         color: clearingColor,
         thickness: 3.2,
-        seedPrefix: `real-clearing:done:${done.plan_id}`,
+        seedPrefix: `clearing:${planId ?? nowMs.toFixed(0)}`,
         countPerEdge: 1,
         keyEdge,
         seedFn: fnv1a,
@@ -1389,67 +1401,102 @@ export function useSimulatorApp(opts?: {
       })
     }
 
-    if (edgesAll.length > 0) {
-      for (const e of edgesAll) addActiveEdge(keyEdge(e.from, e.to), 5200)
+    // 4. Active edges
+    for (const e of edgesAll) addActiveEdge(keyEdge(e.from, e.to), 5200)
+
+    // 5. Node bursts (capped at 40)
+    const burstNodeIds = nodeIds.slice(0, 40)
+    if (burstNodeIds.length > 0) {
+      spawnNodeBursts(fxState, {
+        nodeIds: burstNodeIds,
+        nowMs,
+        durationMs: 2800,
+        color: clearingColor,
+        kind: 'clearing',
+        seedPrefix: `clearing-burst:${planId ?? nowMs.toFixed(0)}`,
+        seedFn: fnv1a,
+        isTestMode: isTestMode.value && isWebDriver,
+      })
     }
 
-    // Show total cleared amount as a premium floating label near the CENTER of the clearing figure.
+    // 6. Floating label with centroid (deferred)
     if (nodeIds.length > 0) {
-      // Pick an origin node that is closest to the centroid of the cycle.
-      // This makes the label appear to originate from the clearing cluster itself,
-      // rather than from the visually topmost participant.
-      const coords: Array<{ id: string; x: number; y: number }> = []
-      for (const id of nodeIds) {
-        const ln = getLayoutNodeById(id)
-        if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
-          coords.push({ id, x: ln.__x, y: ln.__y })
-        }
-      }
-
-      // Fallback to the first id if layout coords are missing (should be rare; guarded by retry).
-      let originNodeId = nodeIds[0]!
-      if (coords.length > 0) {
-        let sumX = 0
-        let sumY = 0
-        for (const c of coords) {
-          sumX += c.x
-          sumY += c.y
-        }
-        const cx = sumX / coords.length
-        const cy = sumY / coords.length
-
-        let bestId = coords[0]!.id
-        let bestD2 = Infinity
-        for (const c of coords) {
-          const dx = c.x - cx
-          const dy = c.y - cy
-          const d2 = dx * dx + dy * dy
-          if (d2 < bestD2) {
-            bestD2 = d2
-            bestId = c.id
-          }
-        }
-        originNodeId = bestId
-      }
-
-      // Slight negative offset so the label doesn't fully overlap the origin node.
-      // It still drifts upward into the dark background.
-      const extraUpPx = -12
-
-      const clearedAmount = String(done.cleared_amount ?? '').trim()
+      const clearedAmount = totalAmount.trim()
       if (clearedAmount && clearedAmount !== '0' && clearedAmount !== '0.0' && clearedAmount !== '0.00') {
-        pushFloatingLabelWhenReady({
-          nodeId: originNodeId,
-          text: `−${clearedAmount.replace(/^-/, '')} ${done.equivalent}`,
-          color: CLEARING_LABEL_COLOR,
-          ttlMs: 3800,
-          offsetYPx: extraUpPx,
-          throttleKey: `clearing-total:${done.plan_id}`,
-          throttleMs: 500,
-          cssClass: 'clearing-premium',
+        pushClearingLabelDeferred({
+          nodeIds,
+          text: `−${clearedAmount.replace(/^-/, '')} ${equivalent}`,
+          planId,
         })
       }
     }
+  }
+
+  function pushClearingLabelDeferred(
+    opts: { nodeIds: string[]; text: string; planId?: string },
+    retryLeft = 6,
+    retryDelayMs = 80,
+  ) {
+    const coords: Array<{ id: string; x: number; y: number }> = []
+    for (const id of opts.nodeIds) {
+      const ln = getLayoutNodeById(id)
+      if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
+        coords.push({ id, x: ln.__x, y: ln.__y })
+      }
+    }
+
+    // If no coords available and we have retries left, schedule a retry
+    if (coords.length === 0 && retryLeft > 0) {
+      scheduleTimeout(() => pushClearingLabelDeferred(opts, retryLeft - 1, retryDelayMs), retryDelayMs)
+      return
+    }
+
+    // Compute centroid origin (or fallback to first node)
+    let originNodeId = opts.nodeIds[0]!
+    if (coords.length > 0) {
+      let sumX = 0
+      let sumY = 0
+      for (const c of coords) { sumX += c.x; sumY += c.y }
+      const cx = sumX / coords.length
+      const cy = sumY / coords.length
+
+      let bestId = coords[0]!.id
+      let bestD2 = Infinity
+      for (const c of coords) {
+        const dx = c.x - cx
+        const dy = c.y - cy
+        const d2 = dx * dx + dy * dy
+        if (d2 < bestD2) { bestD2 = d2; bestId = c.id }
+      }
+      originNodeId = bestId
+    }
+
+    pushFloatingLabelWhenReady({
+      nodeId: originNodeId,
+      text: opts.text,
+      color: CLEARING_LABEL_COLOR,
+      ttlMs: 3800,
+      offsetYPx: -12,
+      throttleKey: `clearing-total:${opts.planId ?? Date.now()}`,
+      throttleMs: 500,
+      cssClass: 'clearing-premium',
+    })
+  }
+
+  function runRealClearingDoneFx(done: ClearingDoneEvent) {
+    const doneCycleEdges = (done as any)?.cycle_edges
+    const edges: Array<{ from: string; to: string }> = []
+    if (Array.isArray(doneCycleEdges) && doneCycleEdges.length > 0) {
+      for (const e of doneCycleEdges) edges.push({ from: e.from, to: e.to })
+    }
+    if (edges.length === 0) return  // no edges — no FX
+
+    runClearingFx({
+      edges,
+      totalAmount: String(done.cleared_amount ?? '0'),
+      equivalent: done.equivalent,
+      planId: done.plan_id,
+    })
   }
 
   const labelNodes = useLabelNodes({
@@ -1904,6 +1951,11 @@ export function useSimulatorApp(opts?: {
     fxDebugBusy.value = true
     try {
       const runId = await ensureRunForFxDebugSerialized()
+
+      // Demo FX debug relies on SSE as the single source of truth.
+      // Best-effort: wait until the SSE connection is open so the emitted tx.updated is not missed.
+      await waitForRealSseOpen({ timeoutMs: 1200 })
+
       await actionTxOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
         equivalent: effectiveEq.value,
         seed: `ui-fx-debug-tx:${Date.now()}`,
@@ -1921,6 +1973,11 @@ export function useSimulatorApp(opts?: {
     fxDebugBusy.value = true
     try {
       const runId = await ensureRunForFxDebugSerialized()
+
+      // Demo FX debug relies on SSE as the single source of truth.
+      // Best-effort: wait until the SSE connection is open so the emitted clearing.done is not missed.
+      await waitForRealSseOpen({ timeoutMs: 1200 })
+
       await actionClearingOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
         equivalent: effectiveEq.value,
         seed: `ui-fx-debug-clearing:${Date.now()}`,
@@ -1929,6 +1986,18 @@ export function useSimulatorApp(opts?: {
     } finally {
       fxDebugBusy.value = false
     }
+  }
+
+  async function waitForRealSseOpen(opts?: { timeoutMs?: number }): Promise<boolean> {
+    const timeoutMs = Math.max(0, Number(opts?.timeoutMs ?? 0))
+    if (timeoutMs <= 0) return real.sseState === 'open'
+
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < timeoutMs) {
+      if (real.sseState === 'open') return true
+      await new Promise<void>((r) => setTimeout(r, 40))
+    }
+    return real.sseState === 'open'
   }
 
   // ── Demo UI: eager auto-bootstrap ────────────────────────────────────

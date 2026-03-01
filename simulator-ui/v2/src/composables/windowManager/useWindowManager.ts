@@ -93,6 +93,13 @@ export function useWindowManager(): WindowManagerApi {
           escBehavior: 'back-then-close',
           closeOnOutsideClick: false,
           onEsc,
+          onClose: (reason) => {
+            // UI-close (ESC at first step / [×]) must cancel the interact flow
+            // to avoid "busy without window" state.
+            if (reason === 'esc' || reason === 'action') {
+              try { d.onClose?.() } catch { /* best-effort */ }
+            }
+          },
         }
       }
       case 'edge-detail':
@@ -103,6 +110,13 @@ export function useWindowManager(): WindowManagerApi {
           singleton: 'reuse',
           escBehavior: 'close',
           closeOnOutsideClick: true,
+          onClose: (reason) => {
+            try {
+              ;(data as WindowDataByType['edge-detail'])?.onClose?.(reason)
+            } catch {
+              // no-op
+            }
+          },
         }
       case 'node-card':
         return {

@@ -76,6 +76,17 @@
 
 ## Guardrails
 
+## Workflow guardrail: spec-first, then implement (CRITICAL)
+
+- If the user explicitly asks to first **investigate**, **describe the problem**, and **write a refactoring spec / acceptance criteria / solution options**, Copilot MUST NOT start implementing fixes immediately.
+- Required order in that case:
+  1) Reproduce / investigate and write a short problem statement.
+  2) Document acceptance criteria + constraints.
+  3) Propose 2–3 implementation options with tradeoffs + risks.
+  4) Ask for confirmation / review feedback.
+  5) Only after explicit confirmation: implement changes and validate.
+- Rationale: premature fixes without shared understanding create endless tweak loops and make review harder.
+
 - TrustLine direction is `from → to` = creditor → debtor (risk limit), *not* the reverse.
 - Keep changes deterministic and validate fixtures (`npm run validate:fixtures`) after regeneration.
 - Canonical decisions and data contracts must be recorded in stable docs under `docs/ru/*` (e.g. `docs/ru/09-decisions-and-defaults.md` and the relevant domain docs like `docs/ru/simulator/backend/*`). Do not leave “single source of truth” rules only in `plans/*` or code-review notes.

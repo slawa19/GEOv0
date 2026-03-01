@@ -5,6 +5,13 @@ import type { InteractPhase, InteractState } from '../composables/useInteractMod
 import { useOverlayPositioning } from '../utils/overlayPosition'
 
 type Props = {
+  /**
+   * WindowManager integration:
+   * - legacy: panel is a standalone overlay and self-positions via anchor+hostEl
+   * - wm: panel is rendered inside WindowShell; WM owns geometry and header
+   */
+  renderMode?: 'legacy' | 'wm'
+
   phase: InteractPhase
   state: InteractState
   busy: boolean
@@ -21,7 +28,9 @@ type Props = {
   hostEl?: HTMLElement | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  renderMode: 'legacy',
+})
 
 // IMPORTANT: panelSize.w must match CSS max-width of .ds-ov-panel (560px).
 // Using the smaller min-width (320px) causes clamping to underestimate the right edge
@@ -32,6 +41,28 @@ const anchorPositionStyle = useOverlayPositioning(
   { w: 560, h: 280 },
   { enabled: () => !!props.anchor && !!props.hostEl },
 )
+
+const rootStyle = computed(() => {
+  if (props.renderMode === 'wm') {
+    return {
+      position: 'static',
+      left: 'auto',
+      top: 'auto',
+      right: 'auto',
+      zIndex: 'auto',
+      width: '100%',
+      height: '100%',
+      maxWidth: 'none',
+      borderRadius: '0',
+    } as const
+  }
+  return anchorPositionStyle.value
+})
+
+const rootClass = computed(() => {
+  if (props.renderMode === 'wm') return 'cp-wm'
+  return 'ds-ov-panel ds-panel ds-panel--elevated'
+})
 
 const last = computed(() => props.state.lastClearing)
 const cycles = computed(() => last.value?.cycles ?? [])
@@ -55,12 +86,12 @@ const busyUi = computed(() => props.busy || isRunning.value)
 <template>
   <div
     v-if="phase === 'confirm-clearing' || phase === 'clearing-preview' || phase === 'clearing-running'"
-    class="ds-ov-panel ds-panel ds-panel--elevated"
-    :style="anchorPositionStyle"
+    :class="rootClass"
+    :style="rootStyle"
     data-testid="clearing-panel"
     aria-label="Clearing panel"
   >
-    <div class="ds-panel__header">
+    <div v-if="renderMode !== 'wm'" class="ds-panel__header">
       <div class="ds-h2">
         <span v-if="isConfirm">Run clearing</span>
         <span v-else-if="isPreview">Clearing preview</span>
@@ -125,6 +156,13 @@ const busyUi = computed(() => props.busy || isRunning.value)
 </template>
 
 <style scoped>
+.cp-wm {
+  /* In WM mode WindowShell owns the surface; keep panel as pure content. */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
 .cp-equivalent-row {
   margin-bottom: 2px;
 }

@@ -736,6 +736,54 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('wm=1: Send Payment from edge-detail keeps edge-detail window open (keepAlive)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Initially: edge-detail window is visible.
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+      expect(host.querySelectorAll('.ws-shell').length).toBe(1)
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      // Click "Send Payment" button inside edge-detail (uses data-testid).
+      const sendBtn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
+      expect(sendBtn).toBeTruthy()
+
+      sendBtn?.click()
+      await nextTick()
+      await nextTick()
+
+      // Edge-detail must STILL be visible (keepAlive).
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+
+      // Payment interact-panel must also appear (coexistence).
+      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(1)
+
+      // Two windows: edge-detail + interact-panel.
+      expect(host.querySelectorAll('.ws-shell').length).toBe(2)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('wm=1: outside-click closes topmost/active inspector via WM (edge-detail)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
     setUrl('/?mode=real&ui=interact&wm=1')
