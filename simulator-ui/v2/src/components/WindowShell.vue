@@ -116,11 +116,24 @@ function onCloseClick(ev: MouseEvent) {
   position: absolute;
   display: flex;
   flex-direction: column;
-  border-radius: 10px;
+  border-radius: var(--ds-radius-md, 10px);
+  box-sizing: border-box;
+  /*
+   * Max-size safety: keep window within the WM layer so `.ws-body { overflow:auto }` works
+   * when content grows beyond viewport.
+   *
+   * NOTE: inline `width/height` (from rect) stays the source of truth; `max-*` only clamps.
+   */
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
   overflow: hidden;
-  background: rgba(20, 22, 26, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+
+  /* DS tokens only (no raw colors/shadows): see designSystem.tokens.css + designSystem.overlays.css */
+  background: var(--ds-surface-1);
+  border: 1px solid var(--ds-border);
+  box-shadow: var(--ds-shadow-soft);
+  backdrop-filter: var(--ds-blur);
+  -webkit-backdrop-filter: var(--ds-blur);
 }
 
 /* R21 / N-1: WM window open/close animation.
@@ -160,7 +173,8 @@ function onCloseClick(ev: MouseEvent) {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--ds-surface-0);
+  border-bottom: 1px solid var(--ds-border-subtle);
   user-select: none;
 }
 
@@ -169,7 +183,7 @@ function onCloseClick(ev: MouseEvent) {
   min-width: 0;
   font-size: 12px;
   line-height: 16px;
-  opacity: 0.9;
+  color: var(--ds-text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -181,14 +195,20 @@ function onCloseClick(ev: MouseEvent) {
   display: grid;
   place-items: center;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.18);
-  color: inherit;
+  border: 1px solid var(--ds-border-subtle);
+  background: var(--ds-surface-0);
+  color: var(--ds-text-2);
   cursor: pointer;
 }
 
 .ws-close:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-1);
+}
+
+.ws-close:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring-btn);
 }
 
 .ws-body {

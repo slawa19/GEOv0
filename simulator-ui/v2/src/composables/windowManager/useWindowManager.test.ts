@@ -85,18 +85,22 @@ describe('useWindowManager (MVP)', () => {
     expect(w2.rect.top).toBe(232)
   })
 
-  it("closeGroup('interact') закрывает только interact и не трогает inspector", () => {
+  it("inspector XOR: open(edge-detail) replaces node-card; closeGroup('interact') не трогает inspector", () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
 
     const nodeId = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
     const edgeId = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+
+    // Spec: `inspector` is exclusive (NodeCard XOR EdgeDetail).
+    expect(wm.windows.value.some((w) => w.id === nodeId)).toBe(false)
+    expect(wm.windows.value.some((w) => w.id === edgeId)).toBe(true)
+
     wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
 
     wm.closeGroup('interact', 'programmatic')
 
     const ids = new Set(wm.windows.value.map((w) => w.id))
-    expect(ids.has(nodeId)).toBe(true)
     expect(ids.has(edgeId)).toBe(true)
     expect(wm.windows.value.some((w) => w.policy.group === 'interact')).toBe(false)
   })
@@ -130,6 +134,59 @@ describe('useWindowManager (MVP)', () => {
     expect(w.rect.height).toBe(260)
   })
 
+  it("reclamp(): anchored окно без measured — позиция пересчитывается от anchor (+dx/dy) и clamp'ится", () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id = wm.open({
+      type: 'edge-detail',
+      anchor: { x: 8, y: 24, space: 'host', source: 'test' },
+      data: { fromPid: 'a', toPid: 'b' },
+    })
+
+    const w = wm.windows.value.find((x) => x.id === id)!
+
+    // emulate: something moved rect before first measure
+    w.rect.left = 400
+    w.rect.top = 500
+
+    wm.reclamp(id)
+
+    // dx/dy = 16; also note: reclamp() snaps to 8px grid.
+    expect(w.rect.left).toBe(24)
+    expect(w.rect.top).toBe(40)
+  })
+
+  it('open(): collision avoidance — окна с одним anchor не получают идентичные x/y', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const anchor = { x: 80, y: 96, space: 'host' as const, source: 'test' }
+
+    const id1 = wm.open({ type: 'edge-detail', anchor, data: { fromPid: 'a', toPid: 'b' } })
+    const id2 = wm.open({ type: 'interact-panel', anchor, data: { panel: 'payment', phase: 'x' } })
+
+    const w1 = wm.windows.value.find((w) => w.id === id1)!
+    const w2 = wm.windows.value.find((w) => w.id === id2)!
+
+    expect(w1.rect.left === w2.rect.left && w1.rect.top === w2.rect.top).toBe(false)
+  })
+
+  it('closeByType(): closes all windows of the given type and returns count', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+    wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+
+    const closed = wm.closeByType('edge-detail', 'programmatic')
+    expect(closed).toBe(1)
+
+    // interact window must remain.
+    expect(wm.windows.value.some((w) => w.type === 'interact-panel')).toBe(true)
+    expect(wm.windows.value.some((w) => w.type === 'edge-detail')).toBe(false)
+  })
+
   it('handleEsc(): form guard → не закрывает', () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
@@ -149,7 +206,7 @@ describe('useWindowManager (MVP)', () => {
     wm.setViewport({ width: 1200, height: 800 })
     const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
 
-    const dispatchWindowEsc = vi.fn(() => true)
+    const dispatchWindowEsc = vi.fn(() => false)
     const consumed = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
       dispatchWindowEsc,
@@ -167,14 +224,14 @@ describe('useWindowManager (MVP)', () => {
 
     const consumed = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
-      dispatchWindowEsc: () => false,
+      dispatchWindowEsc: () => true,
     })
 
     expect(consumed).toBe(true)
     expect(wm.windows.value.some((w) => w.id === id)).toBe(false)
   })
 
-  it("handleEsc(): escBehavior='ignore' → возвращает false и не закрывает", () => {
+  it("handleEsc(): node-card escBehavior='close' → close(id,'esc')", () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
     const id = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
@@ -182,33 +239,40 @@ describe('useWindowManager (MVP)', () => {
 
     const consumed = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
-      dispatchWindowEsc: () => false,
+      dispatchWindowEsc: () => true,
     })
 
-    expect(consumed).toBe(false)
-    expect(wm.windows.value.some((w) => w.id === id)).toBe(true)
+    expect(consumed).toBe(true)
+    expect(wm.windows.value.some((w) => w.id === id)).toBe(false)
   })
 
-  it("handleEsc(): escBehavior='back-then-close' → onEsc='consumed' не закрывает; onEsc='pass' закрывает", () => {
+  it("handleEsc(): escBehavior='back-then-close' → onBack=true не закрывает; onBack=false закрывает", () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
 
-    const idConsumed = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'back' } })
+    const onBackConsumed = vi.fn(() => true)
+    const idConsumed = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'picking-payment-to', onBack: onBackConsumed },
+    })
     const r1 = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
-      dispatchWindowEsc: () => false,
+      dispatchWindowEsc: () => true,
     })
     expect(r1).toBe(true)
+    expect(onBackConsumed).toHaveBeenCalledTimes(1)
     expect(wm.windows.value.some((w) => w.id === idConsumed)).toBe(true)
 
-    // смена фазы → onEsc='pass' → close
-    const idPass = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+    // смена onBack → false → close
+    const onBackPass = vi.fn(() => false)
+    const idPass = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment', onBack: onBackPass } })
     expect(idPass).toBe(idConsumed)
     const r2 = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
-      dispatchWindowEsc: () => false,
+      dispatchWindowEsc: () => true,
     })
     expect(r2).toBe(true)
+    expect(onBackPass).toHaveBeenCalledTimes(1)
     expect(wm.windows.value.some((w) => w.id === idConsumed)).toBe(false)
   })
 
@@ -234,7 +298,7 @@ describe('useWindowManager (MVP)', () => {
     // ESC #1: topmost = interact-panel
     const r1 = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
-      dispatchWindowEsc: () => false,
+      dispatchWindowEsc: () => true,
     })
     expect(r1).toBe(true)
     expect(wm.windows.value.some((w) => w.id === interactId)).toBe(false)
@@ -243,10 +307,36 @@ describe('useWindowManager (MVP)', () => {
     // ESC #2: now topmost = inspector
     const r2 = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
-      dispatchWindowEsc: () => false,
+      dispatchWindowEsc: () => true,
     })
     expect(r2).toBe(true)
     expect(wm.windows.value.some((w) => w.id === inspectorId)).toBe(false)
+    expect(wm.windows.value.length).toBe(0)
+  })
+
+  it('Acceptance A1-variant: 2 окна (interact + node-card) → 2×ESC закрывают оба окна', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const nodeCardId = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
+    const interactId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment', onBack: () => false } })
+
+    // ESC #1: topmost = interact-panel
+    const r1 = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => true,
+    })
+    expect(r1).toBe(true)
+    expect(wm.windows.value.some((w) => w.id === interactId)).toBe(false)
+    expect(wm.windows.value.some((w) => w.id === nodeCardId)).toBe(true)
+
+    // ESC #2: now topmost = node-card
+    const r2 = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => true,
+    })
+    expect(r2).toBe(true)
+    expect(wm.windows.value.some((w) => w.id === nodeCardId)).toBe(false)
     expect(wm.windows.value.length).toBe(0)
   })
 
@@ -256,7 +346,7 @@ describe('useWindowManager (MVP)', () => {
 
     const consumed = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,
-      dispatchWindowEsc: () => false,
+      dispatchWindowEsc: () => true,
     })
 
     expect(consumed).toBe(false)

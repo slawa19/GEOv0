@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 
-import { clamp, estimateSizeFromConstraints } from './geometry'
+import { clamp, estimateSizeFromConstraints, overlaps } from './geometry'
 import type {
   WindowAnchor,
   WindowData,
@@ -19,6 +19,29 @@ function snap8(v: number): number {
   return Math.round(v / 8) * 8
 }
 
+function cascadeShiftAvoidOverlaps(o: {
+  rect: { left: number; top: number; width: number; height: number }
+  others: Array<{ left: number; top: number; width: number; height: number }>
+  maxAttempts?: number
+  step?: number
+}): { left: number; top: number } {
+  const maxAttempts = o.maxAttempts ?? 24
+  const step = o.step ?? 32
+
+  let left = o.rect.left
+  let top = o.rect.top
+
+  for (let i = 0; i < maxAttempts; i += 1) {
+    const candidate = { left, top, width: o.rect.width, height: o.rect.height }
+    const hit = o.others.some((r) => overlaps(candidate, r))
+    if (!hit) break
+    left += step
+    top += step
+  }
+
+  return { left, top }
+}
+
 function pickNextActiveId(windowsMap: Map<number, WindowInstance>): number | null {
   let best: { id: number; z: number } | null = null
   for (const [id, win] of windowsMap) {
@@ -35,6 +58,15 @@ export function useWindowManager(): WindowManagerApi {
   const viewport = ref({ width: 0, height: 0 })
   const idCounter = ref(0)
 
+  function closeGroupExcept(g: WindowGroup, exceptId: number, reason: 'esc' | 'action' | 'programmatic'): void {
+    const ids: number[] = []
+    for (const [id, win] of windowsMap) {
+      if (id === exceptId) continue
+      if (win.policy.group === g) ids.push(id)
+    }
+    for (const id of ids) close(id, reason)
+  }
+
   // NOTE: keep `type` and `data` decoupled at the signature level.
   // `WindowData<T>` doesn't always narrow reliably through generic inference at call sites,
   // so we cast inside each switch branch for stability.
@@ -42,8 +74,19 @@ export function useWindowManager(): WindowManagerApi {
     switch (type) {
       case 'interact-panel': {
         const d = data as WindowDataByType['interact-panel']
-        // MVP placeholder: onEsc может быть замещён на реальную логику flow на следующих шагах.
-        const onEsc = () => (d.phase === 'back' ? 'consumed' : 'pass')
+        // Step-back for Interact windows: try to move Interact FSM back first, otherwise allow UI-close.
+        const onEsc = () => {
+          try {
+            if (typeof d.onBack === 'function') {
+              return d.onBack() ? 'consumed' : 'pass'
+            }
+          } catch {
+            // Best-effort: never block UI-close on errors.
+          }
+
+          // Legacy fallback (pre-step-back wiring): keep previous placeholder semantics.
+          return d.phase === 'back' ? 'consumed' : 'pass'
+        }
         return {
           group: 'interact',
           singleton: 'reuse',
@@ -65,8 +108,16 @@ export function useWindowManager(): WindowManagerApi {
         return {
           group: 'inspector',
           singleton: 'reuse',
-          escBehavior: 'ignore',
+          // ESC/back-stack: node-card participates in window stack.
+          escBehavior: 'close',
           closeOnOutsideClick: true,
+          onClose: (reason) => {
+            try {
+              ;(data as WindowDataByType['node-card'])?.onClose?.(reason)
+            } catch {
+              // no-op
+            }
+          },
         }
       default: {
         const _exhaustive: never = type
@@ -157,8 +208,8 @@ export function useWindowManager(): WindowManagerApi {
     // the current rect on reclamp() — this would undo user drags and also breaks
     // singleton='reuse' expectations.
     if (win.anchor && win.placement === 'anchored' && !win.measured) {
-      const dx = 16,
-        dy = 16
+      const dx = win.anchorOffset?.x ?? 16
+      const dy = win.anchorOffset?.y ?? 16
       win.rect.left = win.anchor.x + dx
       win.rect.top = win.anchor.y + dy
     }
@@ -191,8 +242,15 @@ export function useWindowManager(): WindowManagerApi {
 
   function close(id: number, _reason: 'esc' | 'action' | 'programmatic'): void {
     const wasActive = activeId.value === id
+    const win = windowsMap.get(id)
     const existed = windowsMap.delete(id)
     if (!existed) return
+
+    try {
+      win?.policy?.onClose?.(_reason)
+    } catch {
+      // Best-effort: closing a window must not throw.
+    }
 
     if (wasActive) {
       const next = pickNextActiveId(windowsMap)
@@ -206,6 +264,15 @@ export function useWindowManager(): WindowManagerApi {
       if (win.policy.group === g) ids.push(id)
     }
     for (const id of ids) close(id, reason)
+  }
+
+  function closeByType(type: WindowType, reason: 'esc' | 'action' | 'programmatic'): number {
+    const ids: number[] = []
+    for (const [id, win] of windowsMap) {
+      if (win.type === type) ids.push(id)
+    }
+    for (const id of ids) close(id, reason)
+    return ids.length
   }
 
   function open<T extends WindowType>(o: {
@@ -252,9 +319,11 @@ export function useWindowManager(): WindowManagerApi {
         // if the window already exists (measured) and anchor did not change.
         if (anchorChanged || !win.measured) {
           if (win.placement === 'anchored' && win.anchor) {
-            win.rect.left = win.anchor.x + 16
-            win.rect.top = win.anchor.y + 16
+            win.anchorOffset = { x: 16, y: 16 }
+            win.rect.left = win.anchor.x + win.anchorOffset.x
+            win.rect.top = win.anchor.y + win.anchorOffset.y
           } else {
+            win.anchorOffset = null
             win.rect.left = viewport.value.width - win.rect.width - 12
             win.rect.top = 110
           }
@@ -264,22 +333,39 @@ export function useWindowManager(): WindowManagerApi {
           win.rect.top = prevRect.top
         }
 
+        // policy.group mutual exclusion (MVP): any group is exclusive.
+        // Spec: `interact` is singleton; `inspector` is NodeCard XOR EdgeDetail.
+        closeGroupExcept(policy.group, id, 'programmatic')
+
+        // Collision avoidance for the initial rect (before the window is measured/user-dragged).
+        if (!win.measured) {
+          const others = Array.from(windowsMap.values())
+            .filter((w) => w.id !== id)
+            .map((w) => w.rect)
+          const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others })
+          win.rect.left = next.left
+          win.rect.top = next.top
+          if (win.anchor && win.placement === 'anchored') {
+            win.anchorOffset = { x: win.rect.left - win.anchor.x, y: win.rect.top - win.anchor.y }
+          }
+        }
+
         focus(id)
         reclamp(id)
         return id
       }
     }
 
-    // policy.group mutual exclusion (MVP: only interact windows are exclusive).
-    if (policy.group === 'interact') {
-      closeGroup(policy.group, 'programmatic')
-    }
+    // policy.group mutual exclusion (MVP): any group is exclusive.
+    // Spec: `interact` is singleton; `inspector` is NodeCard XOR EdgeDetail.
+    closeGroup(policy.group, 'programmatic')
 
     const { width, height } = estimateSizeFromConstraints(constraints)
     const placement: WindowInstance['placement'] = anchor ? 'anchored' : 'docked-right'
+    const anchorOffset = placement === 'anchored' && anchor ? { x: 16, y: 16 } : null
     const rect =
       placement === 'anchored' && anchor
-        ? { left: anchor.x + 16, top: anchor.y + 16, width, height }
+        ? { left: anchor.x + anchorOffset!.x, top: anchor.y + anchorOffset!.y, width, height }
         : { left: viewport.value.width - width - 12, top: 110, width, height }
 
     const id = (idCounter.value += 1)
@@ -288,6 +374,7 @@ export function useWindowManager(): WindowManagerApi {
       type,
       policy,
       anchor,
+      anchorOffset,
       active: false,
       z: 0,
       placement,
@@ -297,6 +384,20 @@ export function useWindowManager(): WindowManagerApi {
       data: data as unknown as WindowData,
     }
     windowsMap.set(id, win)
+
+    // Collision avoidance for the first-frame estimate rect.
+    {
+      const others = Array.from(windowsMap.values())
+        .filter((w) => w.id !== id)
+        .map((w) => w.rect)
+      const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others })
+      win.rect.left = next.left
+      win.rect.top = next.top
+      if (win.anchor && win.placement === 'anchored') {
+        win.anchorOffset = { x: win.rect.left - win.anchor.x, y: win.rect.top - win.anchor.y }
+      }
+    }
+
     focus(id)
     reclamp(id)
     return id
@@ -319,7 +420,10 @@ export function useWindowManager(): WindowManagerApi {
     if (!top) return false
 
     // Give nested content a chance to consume ESC.
-    if (o.dispatchWindowEsc()) return true
+    // Convention: `dispatchWindowEsc()` follows DOM `dispatchEvent` semantics:
+    // it returns `false` when a cancelable event was prevented (meaning: consumed).
+    const notCanceled = o.dispatchWindowEsc()
+    if (!notCanceled) return true
 
     const policy = top.policy
     if (policy.escBehavior === 'ignore') return false
@@ -339,10 +443,27 @@ export function useWindowManager(): WindowManagerApi {
     return Array.from(windowsMap.values()).sort((a, b) => a.z - b.z)
   })
 
+  function getTopmostInGroup(g: WindowGroup): WindowInstance | null {
+    // Prefer WM active window when it's in the requested group.
+    for (const [, win] of windowsMap) {
+      if (win.policy.group === g && win.active) return win
+    }
+
+    // Fallback: max-z within the group.
+    let top: WindowInstance | null = null
+    for (const [, win] of windowsMap) {
+      if (win.policy.group !== g) continue
+      if (!top || win.z > top.z) top = win
+    }
+    return top
+  }
+
   return {
     windows,
+    getTopmostInGroup,
     open,
     close,
+    closeByType,
     closeGroup,
     focus,
     setViewport,

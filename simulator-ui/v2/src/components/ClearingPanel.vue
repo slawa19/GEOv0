@@ -30,6 +30,7 @@ const anchorPositionStyle = useOverlayPositioning(
   () => props.anchor,
   () => props.hostEl,
   { w: 560, h: 280 },
+  { enabled: () => !!props.anchor && !!props.hostEl },
 )
 
 const last = computed(() => props.state.lastClearing)

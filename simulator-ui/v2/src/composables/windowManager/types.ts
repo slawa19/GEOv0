@@ -27,16 +27,21 @@ export type WindowPolicy = {
   /** Callback для 'back-then-close': окно пытается «съесть» ESC (шаг назад).
    *  Возвращает 'consumed' если ESC обработан, 'pass' если нужно закрыть. */
   onEsc?: () => 'consumed' | 'pass'
+
+  /** Notify owner about UI-close vs programmatic close.
+   * Useful for bridging WM window state with legacy open flags (e.g. node-card).
+   */
+  onClose?: (reason: 'esc' | 'action' | 'programmatic') => void
 }
 
 export type InteractPanelData =
-  | { panel: 'payment'; phase: string }
-  | { panel: 'trustline'; phase: string }
-  | { panel: 'clearing'; phase: string }
+  | { panel: 'payment'; phase: string; onBack?: () => boolean }
+  | { panel: 'trustline'; phase: string; onBack?: () => boolean }
+  | { panel: 'clearing'; phase: string; onBack?: () => boolean }
 
 export type WindowDataByType = {
   'interact-panel': InteractPanelData
-  'node-card': { nodeId: string }
+  'node-card': { nodeId: string; onClose?: (reason: 'esc' | 'action' | 'programmatic') => void }
   'edge-detail': { fromPid: string; toPid: string }
 }
 
@@ -47,6 +52,11 @@ export type WindowInstance = {
   type: WindowType
   policy: WindowPolicy
   anchor: WindowAnchor | null
+  /**
+   * Offset from anchor for initial auto-positioning.
+   * Used only while `measured` is null (before window exists in DOM).
+   */
+  anchorOffset: { x: number; y: number } | null
   active: boolean
   z: number
   placement: 'docked-right' | 'anchored'
@@ -73,12 +83,23 @@ export function isNodeCardWindow(
 
 export type WindowManagerApi = {
   windows: ComputedRef<WindowInstance[]>
+
+  /**
+   * Return the current topmost window in a group using WM z-order / active.
+   *
+   * IMPORTANT: `active` is first-class in the WM spec; however, for robustness
+   * we fall back to max-z selection inside the group.
+   */
+  getTopmostInGroup: (g: WindowGroup) => WindowInstance | null
+
   open: <T extends WindowType>(o: {
     type: T
     anchor?: WindowAnchor | null
     data: WindowData<T>
   }) => number
   close: (id: number, reason: 'esc' | 'action' | 'programmatic') => void
+  /** Закрыть все окна данного типа (convenience helper). */
+  closeByType: (type: WindowType, reason: 'esc' | 'action' | 'programmatic') => number
   /** Закрыть все окна группы. */
   closeGroup: (g: WindowGroup, reason: 'esc' | 'action' | 'programmatic') => void
   focus: (id: number) => void

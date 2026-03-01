@@ -125,21 +125,38 @@ const wm = useWindowManager()
 const wmEdgeDetailId = ref<number | null>(null)
 const wmNodeCardId = ref<number | null>(null)
 
+// H-3: UI-close vs Flow-cancel for edge-detail.
+// EdgeDetailPopup is derived from Interact FSM state (editing-trustline + edgeAnchor).
+// In WM mode, UI-close must hide the *window* without cancelling the flow.
+// We implement a UI-only suppression flag that blocks auto-open until selection changes.
+const wmEdgeDetailSuppressed = ref(false)
+const wmEdgeDetailSelectionKey = ref<string>('')
+
+function uiCloseEdgeDetailWindow(winId: number, reason: 'action' | 'programmatic') {
+  if (!__USE_WINDOW_MANAGER) return
+  wmEdgeDetailSuppressed.value = true
+  wm.close(winId, reason)
+  if (wmEdgeDetailId.value === winId) wmEdgeDetailId.value = null
+}
+
 function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
   if (!__USE_WINDOW_MANAGER) return null
 
-  // Policy priority: edge-detail → node-card.
-  const edge = wm.windows.value.find((w) => w.type === 'edge-detail')
-  if (edge && edge.policy.closeOnOutsideClick) {
-    wm.close(edge.id, 'programmatic')
-    if (wmEdgeDetailId.value === edge.id) wmEdgeDetailId.value = null
+  // WM source of truth: close *topmost/active* inspector window by WM z-order.
+  const top = wm.getTopmostInGroup('inspector')
+  if (!top || !top.policy.closeOnOutsideClick) return null
+
+  if (top.type === 'edge-detail') {
+    // Outside click is UI-close, must NOT cancel flow.
+    wmEdgeDetailSuppressed.value = true
+    wm.close(top.id, 'programmatic')
+    if (wmEdgeDetailId.value === top.id) wmEdgeDetailId.value = null
     return 'edge-detail'
   }
 
-  const node = wm.windows.value.find((w) => w.type === 'node-card')
-  if (node && node.policy.closeOnOutsideClick) {
-    wm.close(node.id, 'programmatic')
-    if (wmNodeCardId.value === node.id) wmNodeCardId.value = null
+  if (top.type === 'node-card') {
+    wm.close(top.id, 'programmatic')
+    if (wmNodeCardId.value === top.id) wmNodeCardId.value = null
     return 'node-card'
   }
 
@@ -309,7 +326,7 @@ const useFullTrustlineEditor = ref(false)
  * (Legacy panels still use `panelAnchor`; WM uses it as a fallback when
  * there is no edge-popup initiated anchor.)
  */
-const { panelAnchor, openFrom: openPanelFrom } = useInteractPanelPosition(interactPhase)
+ const { panelAnchor, openFrom: openPanelFrom } = useInteractPanelPosition(interactPhase)
 
 const legacyShowManualPaymentPanel = computed(
   () => apiMode.value === 'real' && isInteractUi.value && activePanelType.value === 'payment',
@@ -325,7 +342,39 @@ const legacyShowManualPaymentPanel = computed(
  * If action initiated from EdgeDetailPopup (edge popup) opens an interact-panel,
  * the window MUST receive anchor = state.edgeAnchor.
  */
-const wmEdgePopupAnchor = ref<Point | null>(null)
+ const wmEdgePopupAnchor = ref<Point | null>(null)
+
+ function makeInteractPanelWindowData(panel: 'payment' | 'trustline' | 'clearing', phase: string) {
+   const onBack = (): boolean => {
+     // Step-back inside Interact FSM (only when it has a meaningful previous step).
+     // MUST: do not perform Flow-cancel here; fallback to UI-close when no step-back exists.
+     const p = String(interactPhase.value) as InteractPhase
+
+     // Payment: confirm → picking-to → picking-from
+     if (p === 'confirm-payment') {
+       interact.mode.setPaymentToPid(null)
+       return true
+     }
+     if (p === 'picking-payment-to') {
+       interact.mode.setPaymentFromPid(null)
+       return true
+     }
+
+     // Trustline: confirm/edit → picking-to → picking-from
+     if (p === 'editing-trustline' || p === 'confirm-trustline-create') {
+       interact.mode.setTrustlineToPid(null)
+       return true
+     }
+     if (p === 'picking-trustline-to') {
+       interact.mode.setTrustlineFromPid(null)
+       return true
+     }
+
+     return false
+   }
+
+   return { panel, phase, onBack }
+ }
 
 function toWmAnchor(p: Point | null, source: string): WindowAnchor | null {
   if (!p) return null
@@ -344,7 +393,7 @@ const wmInteractAnchor = computed<WindowAnchor | null>(() => {
 // If called inside a watchEffect, Vue tracks those reads as dependencies and can trigger
 // a recursive update loop when a window is opened. Explicit watch avoids this.
 // Same pattern as the inspector watcher below (line ~375).
-watch(
+  watch(
   () => ({
     enabled: __USE_WINDOW_MANAGER,
     apiMode: apiMode.value,
@@ -367,7 +416,7 @@ watch(
       wm.open({
         type: 'interact-panel',
         anchor: s.anchor,
-        data: { panel: m.panel, phase: s.phase },
+        data: makeInteractPanelWindowData(m.panel, s.phase),
       })
       return
     }
@@ -400,15 +449,33 @@ watch(
     anchor: interact.mode.state.edgeAnchor,
     fromPid: interact.mode.state.fromPid,
     toPid: interact.mode.state.toPid,
+    suppressed: wmEdgeDetailSuppressed.value,
   }),
   (s) => {
     if (!s.enabled) return
+
+    // Reset UI-close suppression on selection changes.
+    // (When the same edge is re-selected, anchor typically changes; include anchor in the key.)
+    const key = s.anchor
+      ? `${String(s.fromPid ?? '')}→${String(s.toPid ?? '')}@${String((s.anchor as any)?.x ?? '')},${String((s.anchor as any)?.y ?? '')}`
+      : ''
+    if (key && key !== wmEdgeDetailSelectionKey.value) {
+      wmEdgeDetailSelectionKey.value = key
+      if (wmEdgeDetailSuppressed.value) wmEdgeDetailSuppressed.value = false
+    }
+
+    if (s.phase !== 'editing-trustline') {
+      // Outside of edge-detail phase, the suppression is irrelevant.
+      if (wmEdgeDetailSuppressed.value) wmEdgeDetailSuppressed.value = false
+      wmEdgeDetailSelectionKey.value = ''
+    }
 
     const shouldShow =
       s.apiMode === 'real' &&
       s.isInteractUi &&
       s.phase === 'editing-trustline' &&
       !s.isFullEditor &&
+      !s.suppressed &&
       !!s.anchor &&
       !!s.fromPid &&
       !!s.toPid
@@ -446,7 +513,11 @@ watch(
       wmNodeCardId.value = wm.open({
         type: 'node-card',
         anchor: toWmAnchor(s.anchor ?? null, 'node'),
-        data: { nodeId: String(s.nodeId) },
+        data: {
+          nodeId: String(s.nodeId),
+          // Bridge WM-driven UI-close back into legacy open flag.
+          onClose: () => setNodeCardOpen(false),
+        },
       })
       return
     }
@@ -556,12 +627,17 @@ function onGlobalKeydown(ev: KeyboardEvent) {
   // Step WM-ESC: when WM is active, delegate ESC handling to wm.handleEsc() first.
   // wm.handleEsc() respects per-window escBehavior (close / back-then-close / ignore)
   // and gives nested content a chance to consume ESC via dispatchInteractEsc.
-  if (__USE_WINDOW_MANAGER && ev.key === 'Escape') {
+  if (__USE_WINDOW_MANAGER && (ev.key === 'Escape' || ev.key === 'Esc')) {
     const consumed = wm.handleEsc(ev, {
       isFormLikeTarget,
       dispatchWindowEsc: dispatchInteractEsc,
     })
     if (consumed) return
+
+    // WM mode: do NOT fall back to legacy ESC overlay stack.
+    // Legacy stack would "magically" close WM-owned windows (NodeCard/EdgeDetail/etc)
+    // by calling setNodeCardOpen(false) and other non-WM closures.
+    return
   }
 
   handleEscOverlayStack(ev, {
@@ -831,14 +907,6 @@ function onEdgeDetailChangeLimit() {
       wm.close(wmEdgeDetailId.value, 'programmatic')
       wmEdgeDetailId.value = null
     }
-
-    // Step 5 normative: open the trustline interact-panel anchored to the same edge.
-    // (Interact→WM watchEffect will update it further; singleton=reuse ensures stability.)
-    wm.open({
-      type: 'interact-panel',
-      anchor: toWmAnchor(interact.mode.state.edgeAnchor ?? null, 'edge-popup'),
-      data: { panel: 'trustline', phase: String(interactPhase.value) },
-    })
   }
 
   // Позиционируем TrustlineManagementPanel рядом с тем же ребром.
@@ -901,7 +969,8 @@ function startFlowFromNodeCard(opts: {
   const snapshot = snapshotNodeCenter()
 
   if (opts.openEditor) useFullTrustlineEditor.value = true
-  setNodeCardOpen(false)
+  // H-1 coexistence: in WM mode NodeCard is an inspector window and must coexist with interact.
+  if (!__USE_WINDOW_MANAGER) setNodeCardOpen(false)
   opts.start()
 
   // Safe to set synchronously: flush:'sync' watcher in useInteractPanelPosition
@@ -916,7 +985,8 @@ function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void 
   }
   // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
   const snapshot = getActionBarAnchor()
-  setNodeCardOpen(false)
+  // H-1 coexistence: do not auto-close inspector under WM.
+  if (!__USE_WINDOW_MANAGER) setNodeCardOpen(false)
   if (opts.openEditor) useFullTrustlineEditor.value = true
   opts.start()
 
@@ -1159,8 +1229,8 @@ watch(interactPhase, (phase) => {
         :key="win.id"
         :instance="win"
         :title="wmTitleFor(win)"
-        :show-header="false"
-        @close="wm.close(win.id, 'action')"
+        :show-header="true"
+        @close="win.type === 'edge-detail' ? uiCloseEdgeDetailWindow(win.id, 'action') : wm.close(win.id, 'action')"
         @focus="wm.focus(win.id)"
         @measured="(s) => {
           wm.updateMeasuredSize(win.id, s)
@@ -1181,7 +1251,7 @@ watch(interactPhase, (phase) => {
           :busy="interact.mode.busy.value"
           :force-hidden="false"
           render-mode="wm"
-          :close="interact.mode.cancel"
+          :close="() => uiCloseEdgeDetailWindow(win.id, 'action')"
           @change-limit="onEdgeDetailChangeLimit"
           @close-line="onEdgeDetailCloseLine"
           @send-payment="onEdgeDetailSendPayment"

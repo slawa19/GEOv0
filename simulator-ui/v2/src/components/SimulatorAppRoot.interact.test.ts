@@ -17,7 +17,11 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       const handleEsc = vi.fn((ev: any, o: any) => origHandleEsc(ev, o))
       ;(globalThis as any).__GEO_TEST_WM_HANDLE_ESC = handleEsc
 
-      return { ...wm, open, handleEsc }
+      const origGetTopmostInGroup = wm.getTopmostInGroup
+      const getTopmostInGroup = vi.fn((g: any) => origGetTopmostInGroup(g))
+      ;(globalThis as any).__GEO_TEST_WM_GET_TOPMOST_IN_GROUP = getTopmostInGroup
+
+      return { ...wm, open, handleEsc, getTopmostInGroup }
     },
   }
 })
@@ -26,8 +30,8 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 // We mock `useSimulatorApp()` to keep the test fast + deterministic while still deriving flags from the query string.
 
 vi.mock('../composables/useSimulatorApp', () => {
-       return {
-    useSimulatorApp: () => {
+        return {
+    useSimulatorApp: (opts?: any) => {
       const qs = () => {
         try {
           return new URLSearchParams(window.location.search)
@@ -304,7 +308,15 @@ vi.mock('../composables/useSimulatorApp', () => {
         unpinSelectedNode: vi.fn(),
 
         // handlers
-        onCanvasClick: vi.fn(),
+        onCanvasClick: vi.fn(() => {
+          // Minimal integration wiring for root interaction tests:
+          // emulate empty-canvas click behavior (outside click) by delegating
+          // to WM-aware callback when in WM mode.
+          const wmEnabled = (qs().get('wm') || '') === '1'
+          if (wmEnabled && typeof opts?.uiCloseTopmostInspectorWindow === 'function') {
+            opts.uiCloseTopmostInspectorWindow()
+          }
+        }),
         onCanvasDblClick: vi.fn(),
         onCanvasPointerDown: vi.fn(),
         onCanvasPointerMove: vi.fn(),
@@ -576,8 +588,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: cross-group replace — Change Limit closes edge-detail window but does NOT close node-card', async () => {
-    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+  it('wm=1: NodeCard action → opens interact-panel and keeps NodeCard open (H-1 coexistence)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
       id: 'bob',
@@ -600,9 +612,55 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      // Initially: edge-detail + node-card
-      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Run Clearing')) as
+        | HTMLButtonElement
+        | undefined
+      expect(btn).toBeTruthy()
+
+      const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
+      expect(setOpen).toBeTruthy()
+
+      btn?.click()
+      await nextTick()
+      await nextTick()
+
+      // Interact panel is visible, NodeCard stays rendered.
+      expect(host.querySelectorAll('[data-testid="clearing-panel"]').length).toBe(1)
       expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+      expect(host.querySelectorAll('.ws-shell').length).toBe(2)
+
+      // Critical: NodeCard MUST NOT be closed by legacy `setNodeCardOpen(false)`.
+      expect(setOpen).not.toHaveBeenCalledWith(false)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: cross-group replace — Change Limit closes edge-detail window and opens trustline panel', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Initially: edge-detail only.
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
 
       const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Change limit')) as
         | HTMLButtonElement
@@ -613,16 +671,233 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      // Edge detail must be closed; node-card must remain.
+      // Edge detail must be closed; trustline panel must be visible.
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+      expect(host.querySelectorAll('[data-testid="trustline-panel"]').length).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: edge-detail UI-close closes the window and does NOT cancel interact flow (H-3)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Initially: edge-detail window is visible.
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      // UI-close inside edge-detail window.
+      const closeBtn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Close') as
+        | HTMLButtonElement
+        | undefined
+      expect(closeBtn).toBeTruthy()
+
+      closeBtn?.click()
+      await nextTick()
+      await nextTick()
+
+      // Window must be closed...
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+      // ...but flow MUST NOT be cancelled.
+      expect(cancel).not.toHaveBeenCalled()
+
+      // Suppression is UI-only: selecting a new edge (anchor change) should reopen the window.
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.edgeAnchor = { x: 20, y: 20 }
+      await nextTick()
+      await nextTick()
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: outside-click closes topmost/active inspector via WM (edge-detail)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Initially: edge-detail window is visible.
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      const getTopmost = (globalThis as any).__GEO_TEST_WM_GET_TOPMOST_IN_GROUP as ReturnType<typeof vi.fn>
+      expect(getTopmost).toBeTruthy()
+
+      // Outside click (empty canvas click)
+      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
+      expect(canvas).toBeTruthy()
+      canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      expect(getTopmost).toHaveBeenCalledWith('inspector')
+
+      // Window must be closed...
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+      // ...but flow MUST NOT be cancelled and anchor must remain.
+      expect(cancel).not.toHaveBeenCalled()
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st?.edgeAnchor).toBeTruthy()
+
+      // Suppression must prevent immediate re-open while anchor stays the same.
+      await nextTick()
+      await nextTick()
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      delete (globalThis as any).__GEO_TEST_WM_GET_TOPMOST_IN_GROUP
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: outside-click closes topmost/active inspector via WM (node-card) and does not close interact-panel', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Coexistence: interact + inspector.
+      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(1)
       expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+
+      const getTopmost = (globalThis as any).__GEO_TEST_WM_GET_TOPMOST_IN_GROUP as ReturnType<typeof vi.fn>
+      expect(getTopmost).toBeTruthy()
+
+      const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
+      expect(setOpen).toBeTruthy()
+
+      // Outside click (empty canvas click)
+      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
+      expect(canvas).toBeTruthy()
+      canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      expect(getTopmost).toHaveBeenCalledWith('inspector')
+      // NodeCard must be closed via WM → onClose bridge to legacy open flag.
+      expect(setOpen).toHaveBeenCalledWith(false)
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(0)
+
+      // Interact panel must stay.
+      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(1)
     } finally {
       app.unmount()
       host.remove()
       delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
       delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_WM_GET_TOPMOST_IN_GROUP
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: WindowShell header [×] closes edge-detail window (UI-close) and does NOT cancel interact flow', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Initially: edge-detail window is visible.
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      const headerClose = host.querySelector('button.ws-close[aria-label="Close window"]') as HTMLButtonElement | null
+      expect(headerClose).toBeTruthy()
+
+      headerClose?.click()
+      await nextTick()
+      await nextTick()
+
+      // Window must be closed...
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+      // ...but flow MUST NOT be cancelled.
+      expect(cancel).not.toHaveBeenCalled()
+
+      // Suppression is UI-only: selecting a new edge (anchor change) should reopen the window.
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.edgeAnchor = { x: 20, y: 20 }
+      await nextTick()
+      await nextTick()
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
       vi.unstubAllGlobals()
     }
   })
@@ -834,6 +1109,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
       expect(cancel).toBeTruthy()
 
+      const setTo = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID as ReturnType<typeof vi.fn>
+      expect(setTo).toBeTruthy()
+
       const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
       expect(handleEsc).toBeTruthy()
 
@@ -841,11 +1119,14 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       expect(handleEsc).toHaveBeenCalledTimes(1)
       expect(cancel).toHaveBeenCalledTimes(0)
+      // In WM mode, ESC should attempt Interact step-back first.
+      expect(setTo).toHaveBeenCalledWith(null)
     } finally {
       app.unmount()
       host.remove()
       delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
       delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID
       delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
       vi.unstubAllGlobals()
     }
@@ -1075,6 +1356,61 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
     delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+  })
+
+  it('wm=1: Escape is routed to WM and closes NodeCard via back-stack (H-2 ESC policy)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+
+      const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
+      expect(setOpen).toBeTruthy()
+
+      const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
+      expect(handleEsc).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+
+      // Must go through WM.
+      expect(handleEsc).toHaveBeenCalledTimes(1)
+      // In WM mode, NodeCard participates in window back-stack and is closed by ESC.
+      expect(setOpen).toHaveBeenCalledWith(false)
+
+      // Not visible.
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(0)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
+      vi.unstubAllGlobals()
+    }
   })
 
   it('NodeCardOverlay: clicking "Run Clearing" calls interact.mode.startClearingFlow() (wiring)', async () => {

@@ -68,6 +68,7 @@ const anchorPositionStyle = useOverlayPositioning(
   () => props.anchor,
   () => props.hostEl,
   { w: 560, h: 420 },
+  { enabled: () => !!props.anchor && !!props.hostEl },
 )
 
 const amount = ref('')

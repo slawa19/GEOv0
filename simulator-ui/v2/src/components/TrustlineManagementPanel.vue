@@ -266,6 +266,7 @@ const anchorPositionStyle = useOverlayPositioning(
   () => props.anchor,
   () => props.hostEl,
   { w: 380, h: 340 },
+  { enabled: () => !!props.anchor && !!props.hostEl },
 )
 
 const newLimitInput = ref<HTMLInputElement | null>(null)

@@ -113,8 +113,11 @@ export function useOverlayPositioning(
   getAnchor: () => Point | null | undefined,
   getHostEl: () => HTMLElement | null | undefined,
   panelSize: { w: number; h: number },
+  opts?: { enabled?: () => boolean },
 ): ComputedRef<Record<string, string>> {
   return computed(() => {
+    if (typeof opts?.enabled === 'function' && !opts.enabled()) return {}
+
     let anchor = getAnchor()
     if (!anchor) {
       if (PANEL_DEBUG) console.warn('[PANEL-DEBUG] useOverlayPositioning: anchor is null => CSS default')
