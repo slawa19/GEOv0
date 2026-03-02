@@ -5279,12 +5279,88 @@
     "tx_id": "bcf318a7-f2e7-5c35-ac7c-8ea67a747c36",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0004_78dde6c4",
+    "initiator_pid": "PID_U0001_9e3779b1",
     "payload": {
       "cycle": [
         "debt_0002_00",
         "debt_0002_01",
         "debt_0002_02"
+      ],
+      "amount": "1595.59",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0001_9e3779b1",
+          "creditor": "PID_U0046_6df7ddce",
+          "amount": "1595.59"
+        },
+        {
+          "debtor": "PID_U0046_6df7ddce",
+          "creditor": "PID_U0045_cfc0641d",
+          "amount": "202.26"
+        },
+        {
+          "debtor": "PID_U0045_cfc0641d",
+          "creditor": "PID_U0001_9e3779b1",
+          "amount": "5112.67"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-08T21:22:00Z",
+    "updated_at": "2026-01-08T21:25:00Z"
+  },
+  {
+    "id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
+    "tx_id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0003_daa66d13",
+    "payload": {
+      "cycle": [
+        "debt_0003_00",
+        "debt_0003_01",
+        "debt_0003_02"
+      ],
+      "amount": "1284.45",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0003_daa66d13",
+          "creditor": "PID_U0022_98c47536",
+          "amount": "1284.45"
+        },
+        {
+          "debtor": "PID_U0022_98c47536",
+          "creditor": "PID_U0036_3fcd1ce4",
+          "amount": "159.17"
+        },
+        {
+          "debtor": "PID_U0036_3fcd1ce4",
+          "creditor": "PID_U0003_daa66d13",
+          "amount": "3291.17"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-07T20:03:00Z",
+    "updated_at": "2026-01-07T20:06:00Z"
+  },
+  {
+    "id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
+    "tx_id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0004_78dde6c4",
+    "payload": {
+      "cycle": [
+        "debt_0004_00",
+        "debt_0004_01",
+        "debt_0004_02"
       ],
       "amount": "37.79",
       "equivalent": "UAH",
@@ -5309,20 +5385,20 @@
     "signatures": [],
     "state": "COMMITTED",
     "error": null,
-    "created_at": "2026-01-08T21:22:00Z",
-    "updated_at": "2026-01-08T21:25:00Z"
+    "created_at": "2026-01-06T19:44:00Z",
+    "updated_at": "2026-01-06T19:47:00Z"
   },
   {
-    "id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
-    "tx_id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
+    "id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
+    "tx_id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
     "idempotency_key": null,
     "type": "CLEARING",
     "initiator_pid": "PID_U0004_78dde6c4",
     "payload": {
       "cycle": [
-        "debt_0003_00",
-        "debt_0003_01",
-        "debt_0003_02"
+        "debt_0005_00",
+        "debt_0005_01",
+        "debt_0005_02"
       ],
       "amount": "778.36",
       "equivalent": "UAH",
@@ -5347,20 +5423,20 @@
     "signatures": [],
     "state": "COMMITTED",
     "error": null,
-    "created_at": "2026-01-07T20:03:00Z",
-    "updated_at": "2026-01-07T20:06:00Z"
+    "created_at": "2026-01-05T18:25:00Z",
+    "updated_at": "2026-01-05T18:28:00Z"
   },
   {
-    "id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
-    "tx_id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
+    "id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
+    "tx_id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
     "idempotency_key": null,
     "type": "CLEARING",
     "initiator_pid": "PID_U0004_78dde6c4",
     "payload": {
       "cycle": [
-        "debt_0004_00",
-        "debt_0004_01",
-        "debt_0004_02"
+        "debt_0006_00",
+        "debt_0006_01",
+        "debt_0006_02"
       ],
       "amount": "1743.38",
       "equivalent": "UAH",
@@ -5385,20 +5461,20 @@
     "signatures": [],
     "state": "COMMITTED",
     "error": null,
-    "created_at": "2026-01-06T19:44:00Z",
-    "updated_at": "2026-01-06T19:47:00Z"
+    "created_at": "2026-01-04T17:06:00Z",
+    "updated_at": "2026-01-04T17:09:00Z"
   },
   {
-    "id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
-    "tx_id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
+    "id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
+    "tx_id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
     "idempotency_key": null,
     "type": "CLEARING",
     "initiator_pid": "PID_U0004_78dde6c4",
     "payload": {
       "cycle": [
-        "debt_0005_00",
-        "debt_0005_01",
-        "debt_0005_02"
+        "debt_0007_00",
+        "debt_0007_01",
+        "debt_0007_02"
       ],
       "amount": "110.40",
       "equivalent": "UAH",
@@ -5417,82 +5493,6 @@
           "debtor": "PID_U0087_c4da5b27",
           "creditor": "PID_U0004_78dde6c4",
           "amount": "83.90"
-        }
-      ]
-    },
-    "signatures": [],
-    "state": "COMMITTED",
-    "error": null,
-    "created_at": "2026-01-05T18:25:00Z",
-    "updated_at": "2026-01-05T18:28:00Z"
-  },
-  {
-    "id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
-    "tx_id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
-    "idempotency_key": null,
-    "type": "CLEARING",
-    "initiator_pid": "PID_U0004_78dde6c4",
-    "payload": {
-      "cycle": [
-        "debt_0006_00",
-        "debt_0006_01",
-        "debt_0006_02"
-      ],
-      "amount": "83.77",
-      "equivalent": "UAH",
-      "edges": [
-        {
-          "debtor": "PID_U0004_78dde6c4",
-          "creditor": "PID_U0023_36fbeee7",
-          "amount": "83.77"
-        },
-        {
-          "debtor": "PID_U0023_36fbeee7",
-          "creditor": "PID_U0081_0f8d8101",
-          "amount": "49.22"
-        },
-        {
-          "debtor": "PID_U0081_0f8d8101",
-          "creditor": "PID_U0004_78dde6c4",
-          "amount": "10.97"
-        }
-      ]
-    },
-    "signatures": [],
-    "state": "COMMITTED",
-    "error": null,
-    "created_at": "2026-01-04T17:06:00Z",
-    "updated_at": "2026-01-04T17:09:00Z"
-  },
-  {
-    "id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
-    "tx_id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
-    "idempotency_key": null,
-    "type": "CLEARING",
-    "initiator_pid": "PID_U0004_78dde6c4",
-    "payload": {
-      "cycle": [
-        "debt_0007_00",
-        "debt_0007_01",
-        "debt_0007_02"
-      ],
-      "amount": "83.77",
-      "equivalent": "UAH",
-      "edges": [
-        {
-          "debtor": "PID_U0004_78dde6c4",
-          "creditor": "PID_U0023_36fbeee7",
-          "amount": "83.77"
-        },
-        {
-          "debtor": "PID_U0023_36fbeee7",
-          "creditor": "PID_U0089_01494e89",
-          "amount": "13.58"
-        },
-        {
-          "debtor": "PID_U0089_01494e89",
-          "creditor": "PID_U0004_78dde6c4",
-          "amount": "36.94"
         }
       ]
     },

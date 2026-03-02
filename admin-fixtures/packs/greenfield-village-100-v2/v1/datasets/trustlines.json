@@ -7886,5 +7886,485 @@
       "auto_clearing": true,
       "can_be_intermediate": false
     }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0032_c6ef3620",
+    "from_display_name": "GreenField Warehouse",
+    "to_display_name": "Tetiana Kovalchuk (Bread Supplies)",
+    "limit": "1405.98",
+    "used": "213.21",
+    "available": "1192.77",
+    "status": "active",
+    "created_at": "2026-02-01T18:59:18Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0041_56e27d59",
+    "to": "PID_U0028_4e114f5c",
+    "from_display_name": "HomeGoods Mini-Mart",
+    "to_display_name": "Roman Zadorozhnyi (Firewood & Timber)",
+    "limit": "4550.86",
+    "used": "57.68",
+    "available": "4493.18",
+    "status": "active",
+    "created_at": "2026-02-01T23:37:01Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "Ella Morgan (Nurse)",
+    "limit": "1718.08",
+    "used": "82.60",
+    "available": "1635.48",
+    "status": "active",
+    "created_at": "2026-02-01T09:13:51Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0029_ec48c90d",
+    "from_display_name": "MeadowDairy Collective",
+    "to_display_name": "Pavlo Rudenko (Farm Equipment Rental)",
+    "limit": "3720.07",
+    "used": "110.78",
+    "available": "3609.29",
+    "status": "active",
+    "created_at": "2026-02-01T05:40:33Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0003_daa66d13",
+    "to": "PID_U0021_fa8cfb85",
+    "from_display_name": "GreenField Procurement Desk",
+    "to_display_name": "Nina Romanenko (Canning & Pickles)",
+    "limit": "5019.93",
+    "used": "115.56",
+    "available": "4904.37",
+    "status": "active",
+    "created_at": "2026-02-01T10:37:29Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0044_3188ea6c",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "Weekend Street Food Stall",
+    "to_display_name": "Alina Moroz (Sewing & Alterations)",
+    "limit": "3225.25",
+    "used": "153.68",
+    "available": "3071.57",
+    "status": "active",
+    "created_at": "2026-02-01T08:50:32Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0039_1a7389f7",
+    "to": "PID_U0021_fa8cfb85",
+    "from_display_name": "Family Canteen",
+    "to_display_name": "Nina Romanenko (Canning & Pickles)",
+    "limit": "1756.57",
+    "used": "179.98",
+    "available": "1576.59",
+    "status": "active",
+    "created_at": "2026-02-01T04:58:19Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0041_56e27d59",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "HomeGoods Mini-Mart",
+    "to_display_name": "Anton Petrenko (Grain Farmer)",
+    "limit": "2017.51",
+    "used": "202.32",
+    "available": "1815.19",
+    "status": "active",
+    "created_at": "2026-02-01T02:00:30Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0009_8ff34739",
+    "to": "PID_U0016_e3779b10",
+    "from_display_name": "Oak & Iron Workshop",
+    "to_display_name": "Serhii Melnyk (Goat Cheese)",
+    "limit": "1083.48",
+    "used": "198.14",
+    "available": "885.34",
+    "status": "active",
+    "created_at": "2026-02-01T18:42:59Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0036_3fcd1ce4",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "Riverside Grocery",
+    "to_display_name": "Taras Klymenko (Carpentry)",
+    "limit": "2219.31",
+    "used": "159.17",
+    "available": "2060.14",
+    "status": "active",
+    "created_at": "2026-02-01T11:45:04Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0005_17156075",
+    "to": "PID_U0031_28b7bc6f",
+    "from_display_name": "Village Transport Co-op",
+    "to_display_name": "Maksym Horbach (Compost & Soil)",
+    "limit": "4857.55",
+    "used": "86.29",
+    "available": "4771.26",
+    "status": "active",
+    "created_at": "2026-02-01T17:11:28Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0002_3c6ef362",
+    "to": "PID_U0056_9c229eb8",
+    "from_display_name": "GreenField Warehouse",
+    "to_display_name": "Mia Foster (Childcare)",
+    "limit": "1272.88",
+    "used": "111.47",
+    "available": "1161.41",
+    "status": "active",
+    "created_at": "2026-02-01T10:09:26Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0004_78dde6c4",
+    "to": "PID_U0054_5fb3ab56",
+    "from_display_name": "Riverside Market Hall",
+    "to_display_name": "Ella Morgan (Nurse)",
+    "limit": "3393.48",
+    "used": "78.40",
+    "available": "3315.08",
+    "status": "active",
+    "created_at": "2026-02-01T02:52:29Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0009_8ff34739",
+    "to": "PID_U0097_f3051c11",
+    "from_display_name": "Oak & Iron Workshop",
+    "to_display_name": "Daniel Stone (Trustline Officer)",
+    "limit": "1702.43",
+    "used": "25.22",
+    "available": "1677.21",
+    "status": "active",
+    "created_at": "2026-02-01T17:19:34Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0010_2e2ac0ea",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "Community Energy & Water Team",
+    "to_display_name": "Liam Carter (Plumber)",
+    "limit": "4694.46",
+    "used": "148.72",
+    "available": "4545.74",
+    "status": "active",
+    "created_at": "2026-02-01T01:56:26Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0007_538453d7",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "MeadowDairy Collective",
+    "to_display_name": "Chloe Evans (Bicycle Repair)",
+    "limit": "3976.24",
+    "used": "89.74",
+    "available": "3886.50",
+    "status": "active",
+    "created_at": "2026-02-01T15:10:54Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0037_de049695",
+    "to": "PID_U0018_1fe68e72",
+    "from_display_name": "Village Butcher Shop",
+    "to_display_name": "Viktor Koval (Sunflower Oil Press)",
+    "limit": "4207.69",
+    "used": "158.72",
+    "available": "4048.97",
+    "status": "active",
+    "created_at": "2026-02-01T02:30:25Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0044_3188ea6c",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "Weekend Street Food Stall",
+    "to_display_name": "Noah Bennett (Mechanic)",
+    "limit": "3169.11",
+    "used": "207.53",
+    "available": "2961.58",
+    "status": "active",
+    "created_at": "2026-02-01T01:23:36Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0040_b8ab03a8",
+    "to": "PID_U0019_be1e0823",
+    "from_display_name": "Farmers’ Corner Shop",
+    "to_display_name": "Kateryna Marchenko (Flour Milling)",
+    "limit": "969.79",
+    "used": "149.72",
+    "available": "820.07",
+    "status": "active",
+    "created_at": "2026-02-01T03:23:12Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0001_9e3779b1",
+    "to": "PID_U0020_5c5581d4",
+    "from_display_name": "GreenField Cooperative (Co-op)",
+    "to_display_name": "Oleh Savchenko (Meat Processing)",
+    "limit": "3349.66",
+    "used": "227.47",
+    "available": "3122.19",
+    "status": "active",
+    "created_at": "2026-02-01T02:43:17Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0042_f519f70a",
+    "to": "PID_U0058_d891921a",
+    "from_display_name": "Pharmacy & Health Kiosk",
+    "to_display_name": "Amelia Scott (Hairdresser)",
+    "limit": "4793.49",
+    "used": "178.46",
+    "available": "4615.03",
+    "status": "active",
+    "created_at": "2026-02-01T02:40:24Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0045_cfc0641d",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "Cooperative Storefront",
+    "to_display_name": "Alex Turner (General Builder)",
+    "limit": "3590.05",
+    "used": "202.26",
+    "available": "3387.79",
+    "status": "active",
+    "created_at": "2026-02-01T13:34:18Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0038_7c3c1046",
+    "to": "PID_U0011_cc623a9b",
+    "from_display_name": "Morning Coffee Corner",
+    "to_display_name": "Anton Petrenko (Grain Farmer)",
+    "limit": "4322.73",
+    "used": "53.83",
+    "available": "4268.90",
+    "status": "active",
+    "created_at": "2026-02-01T19:03:42Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0010_2e2ac0ea",
+    "to": "PID_U0027_afd9d5ab",
+    "from_display_name": "Community Energy & Water Team",
+    "to_display_name": "Hanna Sydorenko (Tailor Workshop)",
+    "limit": "2460.54",
+    "used": "243.07",
+    "available": "2217.47",
+    "status": "active",
+    "created_at": "2026-02-01T04:48:22Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0042_f519f70a",
+    "to": "PID_U0050_e6d5c492",
+    "from_display_name": "Pharmacy & Health Kiosk",
+    "to_display_name": "Chloe Evans (Bicycle Repair)",
+    "limit": "931.58",
+    "used": "37.98",
+    "available": "893.60",
+    "status": "active",
+    "created_at": "2026-02-01T21:32:47Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0043_935170bb",
+    "to": "PID_U0049_489e4ae1",
+    "from_display_name": "School Cafeteria",
+    "to_display_name": "Noah Bennett (Mechanic)",
+    "limit": "1047.60",
+    "used": "22.65",
+    "available": "1024.95",
+    "status": "active",
+    "created_at": "2026-02-01T12:15:30Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0040_b8ab03a8",
+    "to": "PID_U0025_736ae249",
+    "from_display_name": "Farmers’ Corner Shop",
+    "to_display_name": "Svitlana Poliakova (Pottery)",
+    "limit": "5031.65",
+    "used": "96.88",
+    "available": "4934.77",
+    "status": "active",
+    "created_at": "2026-02-01T02:55:39Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0039_1a7389f7",
+    "to": "PID_U0029_ec48c90d",
+    "from_display_name": "Family Canteen",
+    "to_display_name": "Pavlo Rudenko (Farm Equipment Rental)",
+    "limit": "2618.14",
+    "used": "177.32",
+    "available": "2440.82",
+    "status": "active",
+    "created_at": "2026-02-01T04:07:35Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0004_78dde6c4",
+    "to": "PID_U0052_2344b7f4",
+    "from_display_name": "Riverside Market Hall",
+    "to_display_name": "Ava Reed (Legal Advisor)",
+    "limit": "3973.31",
+    "used": "95.99",
+    "available": "3877.32",
+    "status": "active",
+    "created_at": "2026-02-01T10:35:30Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0008_f1bbcd88",
+    "to": "PID_U0100_cdab8924",
+    "from_display_name": "Hilltop Greenhouses",
+    "to_display_name": "Sophia Turner (Tech Steward)",
+    "limit": "2449.51",
+    "used": "160.67",
+    "available": "2288.84",
+    "status": "active",
+    "created_at": "2026-02-01T14:34:59Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": true
+    }
   }
 ]

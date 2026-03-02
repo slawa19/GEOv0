@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
+
+from sqlalchemy.exc import OperationalError
 
 from sqlalchemy import delete, select, update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -21,6 +24,29 @@ from app.db.models.simulator_storage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _retry_on_locked(
+    coro_factory: Callable,
+    max_retries: int = 3,
+    base_delay: float = 0.5,
+):
+    """Retry async DB operation on SQLite 'database is locked' errors."""
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro_factory()
+        except OperationalError as e:
+            if "database is locked" in str(e) and attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "simulator.storage db_locked attempt=%d/%d, retrying in %.1fs",
+                    attempt + 1,
+                    max_retries,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise
 
 
 def db_enabled() -> bool:
@@ -47,43 +73,47 @@ async def upsert_run(run: RunRecord) -> None:
         return
     try:
         _validate_run_for_storage(run)
-        async with db.AsyncSessionLocal() as session:
-            row = SimulatorRun(
-                run_id=run.run_id,
-                scenario_id=run.scenario_id,
-                mode=str(run.mode),
-                state=str(run.state),
-                started_at=run.started_at,
-                stopped_at=run.stopped_at,
-                sim_time_ms=(
-                    int(run.sim_time_ms) if run.sim_time_ms is not None else None
-                ),
-                tick_index=int(run.tick_index) if run.tick_index is not None else None,
-                seed=int(run.seed) if run.seed is not None else None,
-                intensity_percent=(
-                    int(run.intensity_percent)
-                    if run.intensity_percent is not None
-                    else None
-                ),
-                ops_sec=float(run.ops_sec) if run.ops_sec is not None else None,
-                queue_depth=(
-                    int(run.queue_depth) if run.queue_depth is not None else None
-                ),
-                errors_total=(
-                    int(run.errors_total) if run.errors_total is not None else None
-                ),
-                last_event_type=run.last_event_type,
-                current_phase=run.current_phase,
-                last_error=run.last_error,
-                owner_id=run.owner_id if run.owner_id else None,  # empty string → NULL intentionally
-                owner_kind=run.owner_kind if run.owner_kind else None,  # empty string → NULL intentionally
-            )
-            try:
-                await session.merge(row)
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+
+        async def _do():
+            async with db.AsyncSessionLocal() as session:
+                row = SimulatorRun(
+                    run_id=run.run_id,
+                    scenario_id=run.scenario_id,
+                    mode=str(run.mode),
+                    state=str(run.state),
+                    started_at=run.started_at,
+                    stopped_at=run.stopped_at,
+                    sim_time_ms=(
+                        int(run.sim_time_ms) if run.sim_time_ms is not None else None
+                    ),
+                    tick_index=int(run.tick_index) if run.tick_index is not None else None,
+                    seed=int(run.seed) if run.seed is not None else None,
+                    intensity_percent=(
+                        int(run.intensity_percent)
+                        if run.intensity_percent is not None
+                        else None
+                    ),
+                    ops_sec=float(run.ops_sec) if run.ops_sec is not None else None,
+                    queue_depth=(
+                        int(run.queue_depth) if run.queue_depth is not None else None
+                    ),
+                    errors_total=(
+                        int(run.errors_total) if run.errors_total is not None else None
+                    ),
+                    last_event_type=run.last_event_type,
+                    current_phase=run.current_phase,
+                    last_error=run.last_error,
+                    owner_id=run.owner_id if run.owner_id else None,
+                    owner_kind=run.owner_kind if run.owner_kind else None,
+                )
+                try:
+                    await session.merge(row)
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+
+        await _retry_on_locked(_do)
     except Exception:
         logger.exception(
             "simulator.storage.upsert_run_failed run_id=%s", getattr(run, "run_id", "")
@@ -131,86 +161,89 @@ async def sync_artifacts(run: RunRecord) -> None:
                 }
             )
 
-        async with db.AsyncSessionLocal() as session:
-            # Diff-based sync: delete missing + upsert changed/new.
-            existing_rows = (
-                await session.execute(
-                    select(
-                        SimulatorRunArtifact.name,
-                        SimulatorRunArtifact.content_type,
-                        SimulatorRunArtifact.size_bytes,
-                        SimulatorRunArtifact.sha256,
-                        SimulatorRunArtifact.storage_url,
-                    ).where(SimulatorRunArtifact.run_id == run.run_id)
-                )
-            ).all()
-
-            existing: dict[str, tuple[object, object, object, object]] = {
-                str(name): (content_type, size_bytes, sha256, storage_url)
-                for (name, content_type, size_bytes, sha256, storage_url) in existing_rows
-            }
-
-            names_now: set[str] = set()
-            rows_to_upsert: list[dict[str, object]] = []
-            for row in items:
-                name = str(row.get("name") or "")
-                names_now.add(name)
-                prev = existing.get(name)
-                cur = (
-                    row.get("content_type"),
-                    row.get("size_bytes"),
-                    row.get("sha256"),
-                    row.get("storage_url"),
-                )
-                if prev == cur:
-                    continue
-                rows_to_upsert.append(row)
-
-            names_to_delete = [n for n in existing.keys() if n not in names_now]
-            if names_to_delete:
-                await session.execute(
-                    delete(SimulatorRunArtifact).where(
-                        SimulatorRunArtifact.run_id == run.run_id,
-                        SimulatorRunArtifact.name.in_(names_to_delete),
+        async def _do_sync():
+            async with db.AsyncSessionLocal() as session:
+                # Diff-based sync: delete missing + upsert changed/new.
+                existing_rows = (
+                    await session.execute(
+                        select(
+                            SimulatorRunArtifact.name,
+                            SimulatorRunArtifact.content_type,
+                            SimulatorRunArtifact.size_bytes,
+                            SimulatorRunArtifact.sha256,
+                            SimulatorRunArtifact.storage_url,
+                        ).where(SimulatorRunArtifact.run_id == run.run_id)
                     )
-                )
+                ).all()
 
-            if rows_to_upsert:
-                bind = None
-                try:
-                    bind = session.get_bind()
-                except Exception:
-                    bind = getattr(session, "bind", None)
+                existing: dict[str, tuple[object, object, object, object]] = {
+                    str(name): (content_type, size_bytes, sha256, storage_url)
+                    for (name, content_type, size_bytes, sha256, storage_url) in existing_rows
+                }
 
-                dialect_name = None
-                try:
-                    dialect_name = bind.dialect.name if bind is not None else None
-                except Exception:
+                names_now: set[str] = set()
+                rows_to_upsert: list[dict[str, object]] = []
+                for row in items:
+                    name = str(row.get("name") or "")
+                    names_now.add(name)
+                    prev = existing.get(name)
+                    cur = (
+                        row.get("content_type"),
+                        row.get("size_bytes"),
+                        row.get("sha256"),
+                        row.get("storage_url"),
+                    )
+                    if prev == cur:
+                        continue
+                    rows_to_upsert.append(row)
+
+                names_to_delete = [n for n in existing.keys() if n not in names_now]
+                if names_to_delete:
+                    await session.execute(
+                        delete(SimulatorRunArtifact).where(
+                            SimulatorRunArtifact.run_id == run.run_id,
+                            SimulatorRunArtifact.name.in_(names_to_delete),
+                        )
+                    )
+
+                if rows_to_upsert:
+                    bind = None
+                    try:
+                        bind = session.get_bind()
+                    except Exception:
+                        bind = getattr(session, "bind", None)
+
                     dialect_name = None
+                    try:
+                        dialect_name = bind.dialect.name if bind is not None else None
+                    except Exception:
+                        dialect_name = None
 
-                if dialect_name == "sqlite":
-                    insert_fn = sqlite_insert
-                elif dialect_name in {"postgresql", "postgres"}:
-                    insert_fn = pg_insert
-                else:
-                    raise RuntimeError(
-                        f"Unsupported SQL dialect for simulator_run_artifacts upsert: {dialect_name!r}"
+                    if dialect_name == "sqlite":
+                        insert_fn = sqlite_insert
+                    elif dialect_name in {"postgresql", "postgres"}:
+                        insert_fn = pg_insert
+                    else:
+                        raise RuntimeError(
+                            f"Unsupported SQL dialect for simulator_run_artifacts upsert: {dialect_name!r}"
+                        )
+
+                    table = SimulatorRunArtifact.__table__
+                    stmt = insert_fn(table)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[table.c.run_id, table.c.name],
+                        set_={
+                            table.c.content_type: stmt.excluded.content_type,
+                            table.c.size_bytes: stmt.excluded.size_bytes,
+                            table.c.sha256: stmt.excluded.sha256,
+                            table.c.storage_url: stmt.excluded.storage_url,
+                        },
                     )
+                    await session.execute(stmt, rows_to_upsert)
 
-                table = SimulatorRunArtifact.__table__
-                stmt = insert_fn(table)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[table.c.run_id, table.c.name],
-                    set_={
-                        table.c.content_type: stmt.excluded.content_type,
-                        table.c.size_bytes: stmt.excluded.size_bytes,
-                        table.c.sha256: stmt.excluded.sha256,
-                        table.c.storage_url: stmt.excluded.storage_url,
-                    },
-                )
-                await session.execute(stmt, rows_to_upsert)
+                await session.commit()
 
-            await session.commit()
+        await _retry_on_locked(_do_sync)
     except Exception:
         logger.exception(
             "simulator.storage.sync_artifacts_failed run_id=%s",
@@ -353,15 +386,17 @@ async def write_tick_metrics(
                 await s.flush()
 
         if session is None:
-            async with db.AsyncSessionLocal() as s:
-                try:
-                    await _write(s)
-                except Exception:
+            async def _do_write():
+                async with db.AsyncSessionLocal() as s:
                     try:
-                        await s.rollback()
+                        await _write(s)
                     except Exception:
-                        pass
-                    raise
+                        try:
+                            await s.rollback()
+                        except Exception:
+                            pass
+                        raise
+            await _retry_on_locked(_do_write)
         else:
             try:
                 await _write(session)
@@ -484,19 +519,25 @@ async def reconcile_stale_runs() -> int:
     stale_states = ("running", "paused", "stopping")
     try:
         now = datetime.now(timezone.utc)
-        async with db.AsyncSessionLocal() as session:
-            result = await session.execute(
-                sql_update(SimulatorRun)
-                .where(SimulatorRun.state.in_(stale_states))
-                .values(
-                    state="error",
-                    last_error={"reason": "server_restart"},
-                    stopped_at=now,
+        count_holder: list[int] = [0]
+
+        async def _do_reconcile():
+            async with db.AsyncSessionLocal() as session:
+                result = await session.execute(
+                    sql_update(SimulatorRun)
+                    .where(SimulatorRun.state.in_(stale_states))
+                    .values(
+                        state="error",
+                        last_error={"reason": "server_restart"},
+                        stopped_at=now,
+                    )
+                    .execution_options(synchronize_session=False)
                 )
-                .execution_options(synchronize_session=False)
-            )
-            count: int = result.rowcount if result.rowcount is not None else 0
-            await session.commit()
+                count_holder[0] = result.rowcount if result.rowcount is not None else 0
+                await session.commit()
+
+        await _retry_on_locked(_do_reconcile)
+        count = count_holder[0]
 
         if count:
             logger.warning(

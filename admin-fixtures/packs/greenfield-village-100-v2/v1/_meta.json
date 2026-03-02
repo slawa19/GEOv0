@@ -6,9 +6,9 @@
   "counts": {
     "participants": 100,
     "equivalents": 3,
-    "trustlines": 493,
+    "trustlines": 523,
     "incidents": 3,
-    "debts": 428
+    "debts": 456
   },
   "notes": [
     "TrustLine direction is creditor -> debtor (from -> to).",

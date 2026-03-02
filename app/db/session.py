@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy import event
 from sqlalchemy.pool import NullPool
 from sqlalchemy.engine.url import make_url
 
@@ -14,15 +15,32 @@ def _create_engine():
 
     # SQLite (especially aiosqlite) is not well-served by connection pooling.
     if url.startswith("sqlite"):
-        return create_async_engine(
+        engine = create_async_engine(
             url,
             poolclass=NullPool,
             # timeout=10: SQLite write-lock wait time before raising "database is locked".
             # Default is 5s which is too short for simulator clearing (two concurrent
             # sessions: parent tick + clearing).
-            connect_args={"timeout": 10},
+            connect_args={"timeout": 30},
             **common_kwargs,
         )
+
+        sqlite_db = make_url(url).database
+        enable_wal = sqlite_db not in {None, "", ":memory:"}
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _sqlite_set_pragmas(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA busy_timeout=30000")
+                if enable_wal:
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+            finally:
+                cursor.close()
+
+        return engine
 
     # Postgres/MySQL/etc: use pool settings to improve stability under load.
     backend = make_url(url).get_backend_name()

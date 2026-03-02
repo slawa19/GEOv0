@@ -95,6 +95,22 @@ TrustLine direction фиксирована:
   - либо исключить `status != active`
   - либо проставить `policy.status` и оставить на runner
 
+#### 2.3.1 Примечание для realistic-v2 (UAH-only): как не потерять клиринг
+Генератор seed-сценариев (`scripts/generate_simulator_seed_scenarios.py`) для профиля `*-realistic-v2` отбрасывает non-UAH trustlines, чтобы сценарий был **UAH-only**.
+
+Практический риск:
+- если в исходных fixtures UAH-граф недостаточно связный (или почти весь routing запрещён), то большинство попыток платежей будет падать как `ROUTING_NO_CAPACITY`, а клиринг будет слабым.
+
+Стратегия усиления UAH-only realistic-v2, используемая в v2 seed-генераторах (детерминированно и без влияния на HOUR/EUR):
+- добавлять UAH trustlines, ориентируясь на те же PID-диапазоны групп, что используются для `participants[].groupId` (разделы 3.2–3.3);
+- сохранить “земные” связи `services → households` и `services → retail` (в creditor→debtor семантике);
+- добавить “business-intermediate backbone”: UAH trustlines `anchors/retail (business) → services/producers/agents (person)`.
+  - такие ребра дают маршрутам intermediates, потому что у business-кредитора обычно `policy.can_be_intermediate=true`.
+
+Реализация находится в seed v2 генераторах:
+- `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py`
+- `admin-fixtures/tools/generate_seed_riverside_town_50_v2.py`
+
 ---
 
 ## 3) Группы (groups) и поведение (behaviorProfiles)

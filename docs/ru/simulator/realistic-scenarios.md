@@ -64,6 +64,39 @@
 - Есть «замыкание»: **household (creditor) → producer (debtor)** хотя бы для подмножества участников.
 - Лимиты на ребрах, замыкающих цикл, должны быть порядка сотен UAH (ориентир: 300..500), чтобы клиринг был заметен.
 
+#### 2.3.1 UAH-only realistic-v2: стратегия увеличения клиринга (routing capacity)
+В realistic-v2 мы обычно делаем `equivalents=["UAH"]`, а генератор seed-сценариев отбрасывает non-UAH trustlines.
+Это означает: если UAH-граф недостаточно связный или маршруты не могут использовать intermediates, то почти все попытки платежей будут падать как `tx.failed: ROUTING_NO_CAPACITY`, а клиринг будет редким.
+
+Практическая стратегия, которая показала рост клиринга в realistic-v2:
+
+1) **Не трогать HOUR/EUR и не “клонировать” их в UAH.**
+  - Все улучшения делаются только через UAH trustlines (добавление/трансформация), остальные equivalents остаются как есть.
+
+2) **Выравнивать добавляемые UAH trustlines по тем же группам, что и behavior groups.**
+  - Для seed-сценариев группы задаются детерминированно по PID-диапазонам (см. `docs/ru/simulator/backend/fixtures-mapping.md`).
+  - Если добавлять trustlines “куда попало”, можно не усилить нужные поведенческие группы (например, services→households).
+
+3) **Сделать “backbone” из intermediates: добавлять UAH trustlines с кредитором-business → должником-person.**
+  - В движке realistic-v2 routing intermediates логично разрешать на business-кредиторах (`policy.can_be_intermediate=true`).
+  - Поэтому добавляем ограниченное количество UAH trustlines вида:
+    - `anchors/retail (business) → services/producers/agents (person)`
+  - Это повышает шанс multi-hop маршрутов, даже если person→person связи ограничены.
+
+4) **Сохранить “земные” связи спроса: services → households и services → retail.**
+  - Добавлять ограниченно и детерминированно:
+    - `services (person) → households (person)`
+    - `services (person) → retail (business)`
+  - Эти связи помогают закрывать циклы долгов и давать клирингу материал.
+
+Реализация в репо (детерминированные v2 seeds):
+- `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` (функция `_add_extra_uah_service_links`)
+- `admin-fixtures/tools/generate_seed_riverside_town_50_v2.py` (функция `_add_extra_uah_service_links`)
+
+Минимальный sanity-check результата:
+- `tx_failed_by_code.ROUTING_NO_CAPACITY` должен падать (а не расти) после усиления UAH-графа.
+- `cleared_amount_total` и/или `cleared_cycles_total` должны расти при сравнимых параметрах прогона.
+
 ### 2.4 Суммы в real mode
 - По умолчанию в real mode действует backward‑compatible cap: `SIMULATOR_REAL_AMOUNT_CAP=3.00`.
 - Для realistic‑v2 запускать с `SIMULATOR_REAL_AMOUNT_CAP>=500`.

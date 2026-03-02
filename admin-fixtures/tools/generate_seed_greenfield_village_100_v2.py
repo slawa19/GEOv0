@@ -265,7 +265,16 @@ def _add_extra_uah_service_links(
     retail_business_pids = sorted(
         [pid for pid in business_pids_all if (idx := _pid_index(pid)) is not None and 36 <= idx <= 45]
     )
+    anchor_business_pids = sorted(
+        [pid for pid in business_pids_all if (idx := _pid_index(pid)) is not None and 1 <= idx <= 10]
+    )
+    producer_pids = sorted([pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 11 <= idx <= 35])
+    agent_pids = sorted([pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 96 <= idx <= 100])
     business_targets = retail_business_pids or business_pids_all
+    business_sources = [*retail_business_pids, *anchor_business_pids] or business_pids_all
+
+    # Business->person links create a backbone of intermediates (business creditors can route).
+    person_targets = [*service_pids, *producer_pids, *agent_pids]
 
     if not household_pids or not service_pids:
         return out
@@ -313,6 +322,7 @@ def _add_extra_uah_service_links(
     # Build deterministic candidate edges; then cap to avoid exploding the graph.
     svc_hh_candidates: list[tuple[float, str, str]] = []
     svc_biz_candidates: list[tuple[float, str, str]] = []
+    biz_person_candidates: list[tuple[float, str, str]] = []
 
     for src in service_pids:
         # 2-3 household connections per service.
@@ -331,6 +341,18 @@ def _add_extra_uah_service_links(
             score_b = _u01(f"uah_svc_score|biz|{src}|{dst_b}")
             svc_biz_candidates.append((score_b, src, dst_b))
 
+    if business_sources and person_targets:
+        for src in business_sources:
+            n_p = 1 + int(_u01(f"uah_biz_n_person|{src}") * 2)
+            picked_p: set[str] = set()
+            for j in range(n_p):
+                dst = _pick_from(person_targets, key=f"uah_biz_pick_person|{src}|{j}")
+                if dst in picked_p:
+                    continue
+                picked_p.add(dst)
+                score = _u01(f"uah_biz_score|person|{src}|{dst}")
+                biz_person_candidates.append((score, src, dst))
+
     for _, src, dst in sorted(svc_hh_candidates, key=lambda x: (x[0], x[1], x[2]))[:max_service_to_household]:
         k = _u01(f"uah_svc_lim|hh|{src}|{dst}")
         limit = (Decimal("800") + Decimal("2200") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
@@ -343,6 +365,14 @@ def _add_extra_uah_service_links(
         k = _u01(f"uah_svc_lim|biz|{src}|{dst}")
         limit = (Decimal("1200") + Decimal("4800") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         used = (Decimal("0") + Decimal("350") * Decimal(str(_u01(f"uah_svc_used|biz|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
+
+    for _, src, dst in sorted(biz_person_candidates, key=lambda x: (x[0], x[1], x[2]))[:120]:
+        k = _u01(f"uah_biz_lim|person|{src}|{dst}")
+        limit = (Decimal("900") + Decimal("4200") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("250") * Decimal(str(_u01(f"uah_biz_used|person|{src}|{dst}")))).quantize(
             Decimal("0.01"), rounding=ROUND_DOWN
         )
         _add_uah(src, dst, limit=limit, used=used)
