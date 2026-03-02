@@ -1049,6 +1049,10 @@ export function useSimulatorRealMode(opts: {
         real.intensityPercent,
       )
     } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) {
+        resetStaleRun({ clearError: true })
+        return
+      }
       real.lastError = String((e as any)?.message ?? e)
     }
   }

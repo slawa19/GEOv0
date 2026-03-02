@@ -714,8 +714,25 @@ export function useSimulatorApp(opts?: {
   // Interact Mode core (state machine + actions + balance).
   // NOTE: this is intentionally lightweight wiring; UI panels/picking integration is done in later phases.
   const interactHttpConfig = computed(() => ({ apiBase: real.apiBase, accessToken: real.accessToken }))
-  const interactRunId = computed(() => String(real.runId ?? ''))
-  const interactActions = useInteractActions({ httpConfig: interactHttpConfig, runId: interactRunId })
+  const interactRunId = computed({
+    get: () => String(real.runId ?? ''),
+    set: (v: string) => {
+      const next = String(v ?? '').trim()
+      real.runId = next ? next : null
+    },
+  })
+  const interactActions = useInteractActions({
+    httpConfig: interactHttpConfig,
+    runId: interactRunId,
+    onStaleRunId: () => {
+      real.runId = null
+      real.runStatus = null
+      real.lastEventId = null
+      real.artifacts = []
+      real.lastError = ''
+      state.error = ''
+    },
+  })
 
   // BUG-3: Late-binding holder for FxState (initialized after FX wiring below).
   // onClearingDone is only called at runtime, never during init, so this pattern is safe.
@@ -1848,15 +1865,17 @@ export function useSimulatorApp(opts?: {
 
   let interactIntensityAppliedForRunId: string | null = null
   watch(
-    () => [isInteractUi.value, isRealMode.value, real.runId] as const,
-    ([isInteract, isReal, runId]) => {
+    () => [isInteractUi.value, isRealMode.value, real.runId, real.runStatus?.run_id ?? null] as const,
+    ([isInteract, isReal, runId, statusRunId]) => {
       if (!isInteract || !isReal) return
 
       // Ensure local state (and persisted pref) is always 0.
       if (real.intensityPercent !== 0) real.intensityPercent = 0
 
       // If a run is active, also enforce backend intensity (idempotent).
-      if (runId && runId !== interactIntensityAppliedForRunId) {
+      // Guard: only apply after we have validated/loaded run_status for this runId.
+      // This avoids spamming /intensity with a stale persisted runId after DB reset/restart.
+      if (runId && runId === statusRunId && runId !== interactIntensityAppliedForRunId) {
         interactIntensityAppliedForRunId = runId
         void realMode.applyIntensity()
       }

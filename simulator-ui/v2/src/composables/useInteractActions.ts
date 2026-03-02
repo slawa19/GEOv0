@@ -113,6 +113,8 @@ function mapToInteractActionError(e: unknown): InteractActionError {
 export function useInteractActions(opts: {
   httpConfig: Ref<HttpConfig>
   runId: Ref<string>
+  /** Optional hook to clear the active run context if a stale runId is detected (HTTP 404). */
+  onStaleRunId?: () => void
 }): {
   /** True when backend rejects actions due to feature flag (HTTP 403 ACTIONS_DISABLED). */
   actionsDisabled: Ref<boolean>
@@ -140,6 +142,31 @@ export function useInteractActions(opts: {
 } {
   const actionsDisabled = ref(false)
 
+  function hasWritableValueSetter(r: any): boolean {
+    // Refs/computed refs typically implement `value` as an accessor on the prototype.
+    // Vue warns when writing to a readonly computed (no setter). Detect that case and avoid the write.
+    let cur: any = r
+    for (let i = 0; i < 5 && cur; i++) {
+      const d = Object.getOwnPropertyDescriptor(cur, 'value')
+      if (d) return typeof d.set === 'function'
+      cur = Object.getPrototypeOf(cur)
+    }
+    return false
+  }
+
+  function clearRunIdBestEffort() {
+    try {
+      opts.onStaleRunId?.()
+    } catch {
+      // ignore
+    }
+
+    // Only attempt a ref write if it is actually writable (prevents Vue readonly-computed warning).
+    if (hasWritableValueSetter(opts.runId)) {
+      opts.runId.value = ''
+    }
+  }
+
   function requireRunId(): string {
     const id = opts.runId.value.trim()
     if (!id) throw mapToInteractActionError(new Error('No active run_id'))
@@ -158,7 +185,7 @@ export function useInteractActions(opts: {
       // If the run no longer exists, stop issuing run-scoped calls.
       // This can happen if a previously stored runId becomes stale (backend restart, TTL, cleanup).
       if (mapped.status === 404) {
-        opts.runId.value = ''
+        clearRunIdBestEffort()
       }
 
       throw mapped
