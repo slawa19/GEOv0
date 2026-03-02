@@ -78,10 +78,11 @@ def _transform_trustlines(
     pid_to_type: dict[str, str],
     pid_to_name: dict[str, str],
 ) -> list[dict[str, Any]]:
-    # We want person balances to look realistic:
+    # We want person balances to look realistic (UAH-only):
     # - each person has a single primary UAH "balance" (credit or debt) in ~500..3000
     # - other person-involved links have small used values (so totals don't explode)
     # - trustline limits are sized to comfortably contain that used
+    # - do NOT modify non-UAH trustlines
     out: list[dict[str, Any]] = []
 
     person_pids = {pid for pid, t in pid_to_type.items() if str(t).lower() == "person"}
@@ -142,16 +143,17 @@ def _transform_trustlines(
 
     for i, t in enumerate(trustlines):
         eq = str(t.get("equivalent") or "").strip().upper() or "UAH"
+        if eq != "UAH":
+            out.append(t)
+            continue
+
         fp = str(t.get("from"))
         tp = str(t.get("to"))
 
         from_is_business = _is_business_pid(fp, pid_to_type=pid_to_type)
-        to_is_business = _is_business_pid(tp, pid_to_type=pid_to_type)
 
-        # v2 rule: only business↔business links can be routing intermediates.
-        can_be_intermediate = bool(from_is_business and to_is_business)
-
-        # v2 rule: prefer fast clearing.
+        # Routing intermediates: allow business creditors to be intermediates.
+        can_be_intermediate = bool(from_is_business)
         auto_clearing = True
 
         policy = dict((t.get("policy") or {}) if isinstance(t.get("policy"), dict) else {})
@@ -161,54 +163,47 @@ def _transform_trustlines(
         limit = Decimal(str(t.get("limit") or "0"))
         used = Decimal(str(t.get("used") or "0"))
 
-        if eq == "UAH":
-            k = _u01(f"v2|{eq}|{fp}|{tp}")
+        k = _u01(f"v2|{eq}|{fp}|{tp}")
 
-            # Primary per-person balance enforcement.
-            person_primary_pid: str | None = None
-            if fp in person_pids and primary_tl_index_by_person.get(fp) == i:
-                person_primary_pid = fp
-            elif tp in person_pids and primary_tl_index_by_person.get(tp) == i:
-                person_primary_pid = tp
+        # Primary per-person balance enforcement.
+        person_primary_pid: str | None = None
+        if fp in person_pids and primary_tl_index_by_person.get(fp) == i:
+            person_primary_pid = fp
+        elif tp in person_pids and primary_tl_index_by_person.get(tp) == i:
+            person_primary_pid = tp
 
-            if person_primary_pid is not None:
-                used = target_balance_by_person[person_primary_pid]
-                limit = max(target_limit_by_person[person_primary_pid], used + Decimal("50"))
-            elif (fp in person_pids) and (tp in person_pids):
-                # Person-to-person: small microcredit.
-                lim_min = Decimal("150")
-                lim_max = Decimal("900")
-                limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-                used = (Decimal("10") + Decimal("90") * Decimal(str(_u01(f"used|p2p|{fp}|{tp}")))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-            elif (fp in person_pids) or (tp in person_pids):
-                # Person involved but not the primary balance edge: keep small so total stays ~500..3000.
-                lim_min = Decimal("400")
-                lim_max = Decimal("3000")
-                limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-                used = (Decimal("0") + Decimal("120") * Decimal(str(_u01(f"used|small|{fp}|{tp}")))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-            else:
-                # Business↔business: allow higher limits / used.
-                lim_min = Decimal("1500")
-                lim_max = Decimal("12000")
-                limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-                used_ratio = Decimal("0.25") + Decimal("0.45") * Decimal(str(_u01(f"used|b2b|{fp}|{tp}")))
-                used = (limit * used_ratio).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        if person_primary_pid is not None:
+            used = target_balance_by_person[person_primary_pid]
+            limit = max(target_limit_by_person[person_primary_pid], used + Decimal("50"))
+        elif (fp in person_pids) and (tp in person_pids):
+            # Person-to-person: small microcredit.
+            lim_min = Decimal("150")
+            lim_max = Decimal("900")
+            limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            used = (Decimal("10") + Decimal("90") * Decimal(str(_u01(f"used|p2p|{fp}|{tp}")))).quantize(
+                Decimal("0.01"), rounding=ROUND_DOWN
+            )
+        elif (fp in person_pids) or (tp in person_pids):
+            # Person involved but not the primary balance edge: keep small so total stays ~500..3000.
+            lim_min = Decimal("400")
+            lim_max = Decimal("3000")
+            limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            used = (Decimal("0") + Decimal("120") * Decimal(str(_u01(f"used|small|{fp}|{tp}")))).quantize(
+                Decimal("0.01"), rounding=ROUND_DOWN
+            )
+        else:
+            # Business↔business: allow higher limits / used.
+            lim_min = Decimal("1500")
+            lim_max = Decimal("12000")
+            limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            used_ratio = Decimal("0.25") + Decimal("0.45") * Decimal(str(_u01(f"used|b2b|{fp}|{tp}")))
+            used = (limit * used_ratio).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
-            # Always keep used within [0, limit].
-            if used < 0:
-                used = Decimal("0")
-            if used > limit:
-                used = limit
+        # Always keep used within [0, limit].
+        if used < 0:
+            used = Decimal("0")
+        if used > limit:
+            used = limit
 
         available = (limit - used).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
@@ -218,6 +213,133 @@ def _transform_trustlines(
         tt["available"] = _quantize_money(available)
         tt["policy"] = policy
         out.append(tt)
+
+    return out
+
+def _add_extra_uah_service_links(
+    trustlines: list[dict[str, Any]],
+    *,
+    pid_to_type: dict[str, str],
+    pid_to_name: dict[str, str],
+    max_service_to_household: int = 60,
+    max_service_to_business: int = 30,
+) -> list[dict[str, Any]]:
+    """Add extra UAH-only service links for realistic-v2 connectivity.
+
+    Realistic-v2 scenarios are UAH-only. To keep enough household/service connectivity
+    (and thus clearing potential), we add a limited number of small UAH trustlines:
+      - service(person, non-household) -> household(person)
+      - service(person, non-household) -> business
+
+    Intentionally does NOT look at or modify HOUR/EUR trustlines.
+    """
+
+    out = list(trustlines)
+    seen: set[tuple[str, str, str]] = set()
+    for t in out:
+        eq = str(t.get("equivalent") or "").strip().upper() or "UAH"
+        seen.add((eq, str(t.get("from")), str(t.get("to"))))
+
+    import re
+
+    def _pid_index(pid: str) -> int | None:
+        m = re.match(r"^PID_U(\d{4})_", str(pid))
+        if not m:
+            return None
+        return int(m.group(1))
+
+    person_pids = {pid for pid, t in pid_to_type.items() if str(t).lower() == "person"}
+    business_pids_all = sorted([pid for pid, t in pid_to_type.items() if str(t).lower() == "business"])
+
+    # Align with realistic-v2 grouping (scripts/generate_simulator_seed_scenarios.py)
+    service_pids = sorted(
+        [pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 24 <= idx <= 33]
+    )
+    household_pids = sorted(
+        [pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 34 <= idx <= 48]
+    )
+    retail_business_pids = sorted(
+        [pid for pid in business_pids_all if (idx := _pid_index(pid)) is not None and 16 <= idx <= 23]
+    )
+    business_targets = retail_business_pids or business_pids_all
+
+    if not household_pids or not service_pids:
+        return out
+
+    def _pick_from(lst: list[str], *, key: str) -> str:
+        idx = int(_u01(key) * len(lst))
+        if idx >= len(lst):
+            idx = len(lst) - 1
+        return lst[idx]
+
+    dt = __import__("datetime")
+
+    def _add_uah(src: str, dst: str, *, limit: Decimal, used: Decimal) -> None:
+        key = ("UAH", src, dst)
+        if key in seen:
+            return
+        seen.add(key)
+
+        lim = max(Decimal("0"), limit).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        u = max(Decimal("0"), min(lim, used)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        avail = (lim - u).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+
+        created_at = (BASE_TS - dt.timedelta(seconds=int(_u01(f"uah_svc_created|{src}|{dst}") * 86400))).isoformat()
+        created_at = created_at.replace("+00:00", "Z")
+
+        out.append(
+            {
+                "equivalent": "UAH",
+                "from": src,
+                "to": dst,
+                "from_display_name": str(pid_to_name.get(src, "")),
+                "to_display_name": str(pid_to_name.get(dst, "")),
+                "limit": _quantize_money(lim),
+                "used": _quantize_money(u),
+                "available": _quantize_money(avail),
+                "status": "active",
+                "created_at": created_at,
+                "policy": {
+                    "auto_clearing": True,
+                    "can_be_intermediate": bool(_is_business_pid(src, pid_to_type=pid_to_type)),
+                },
+            }
+        )
+
+    svc_hh_candidates: list[tuple[float, str, str]] = []
+    svc_biz_candidates: list[tuple[float, str, str]] = []
+
+    for src in service_pids:
+        n_hh = 2 + int(_u01(f"uah_svc_n_hh|{src}") * 2)
+        picked_hh: set[str] = set()
+        for j in range(n_hh):
+            dst = _pick_from(household_pids, key=f"uah_svc_pick_hh|{src}|{j}")
+            if dst in picked_hh:
+                continue
+            picked_hh.add(dst)
+            score = _u01(f"uah_svc_score|hh|{src}|{dst}")
+            svc_hh_candidates.append((score, src, dst))
+
+        if business_targets:
+            dst_b = _pick_from(business_targets, key=f"uah_svc_pick_biz|{src}")
+            score_b = _u01(f"uah_svc_score|biz|{src}|{dst_b}")
+            svc_biz_candidates.append((score_b, src, dst_b))
+
+    for _, src, dst in sorted(svc_hh_candidates, key=lambda x: (x[0], x[1], x[2]))[:max_service_to_household]:
+        k = _u01(f"uah_svc_lim|hh|{src}|{dst}")
+        limit = (Decimal("700") + Decimal("1800") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("200") * Decimal(str(_u01(f"uah_svc_used|hh|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
+
+    for _, src, dst in sorted(svc_biz_candidates, key=lambda x: (x[0], x[1], x[2]))[:max_service_to_business]:
+        k = _u01(f"uah_svc_lim|biz|{src}|{dst}")
+        limit = (Decimal("1000") + Decimal("3500") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("300") * Decimal(str(_u01(f"uah_svc_used|biz|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
 
     return out
 
@@ -286,7 +408,9 @@ def build_trustlines(participants) -> list[dict[str, Any]]:
     pid_to_type = {p.pid: p.type for p in participants}
     pid_to_name = {p.pid: p.display_name for p in participants}
     trustlines_v1 = base.build_trustlines(participants)
-    return _transform_trustlines(trustlines_v1, pid_to_type=pid_to_type, pid_to_name=pid_to_name)
+    trustlines_v2 = _transform_trustlines(trustlines_v1, pid_to_type=pid_to_type, pid_to_name=pid_to_name)
+    trustlines_v2 = _add_extra_uah_service_links(trustlines_v2, pid_to_type=pid_to_type, pid_to_name=pid_to_name)
+    return trustlines_v2
 
 
 def build_incidents(participants):

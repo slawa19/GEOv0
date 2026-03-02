@@ -339,6 +339,16 @@ def _start_run(
     return run_id
 
 
+def _resume_run(*, base_url: str, headers: dict[str, str], run_id: str, timeout_sec: int) -> None:
+    _http_json(
+        base_url=base_url,
+        method="POST",
+        path=f"/simulator/runs/{run_id}/resume",
+        headers=headers,
+        timeout_sec=timeout_sec,
+    )
+
+
 def _stop_run(*, base_url: str, headers: dict[str, str], run_id: str, reason: str, timeout_sec: int) -> None:
     _http_json(
         base_url=base_url,
@@ -461,8 +471,13 @@ def main() -> int:
     )
     print(f"run_id={run_id}")
 
+    # The backend may create runs in paused state (e.g. after restarts).
+    # Explicitly resume so the reference run makes forward progress.
+    _resume_run(base_url=args.base_url, headers=headers, run_id=run_id, timeout_sec=args.timeout_sec)
+
     started = time.time()
     last_tick = None
+    last_resume_attempt = 0.0
 
     while True:
         st = _http_json(
@@ -483,6 +498,16 @@ def main() -> int:
         print(
             f"state={st.get('state')} sim_time_ms={st.get('sim_time_ms')} tick={tick_s} ops_sec={st.get('ops_sec')}"
         )
+
+        if st.get("state") == "paused":
+            now = time.time()
+            if now - last_resume_attempt >= 5.0:
+                last_resume_attempt = now
+                try:
+                    _resume_run(base_url=args.base_url, headers=headers, run_id=run_id, timeout_sec=args.timeout_sec)
+                except Exception:
+                    # Best-effort; next poll will retry.
+                    pass
 
         if isinstance(tick, int) and tick >= int(args.target_ticks):
             break

@@ -77,6 +77,18 @@ function setUiTheme(next: UiThemeId) {
 onMounted(() => {
   // Allow browser back/forward to update theme without reload.
   window.addEventListener('popstate', syncThemeFromUrl)
+
+  // URL cleanup (legacy): remove dead param `devtools=1` (do not reload).
+  // This param is not a source of truth; state is persisted in localStorage.
+  try {
+    const u = new URL(window.location.href)
+    if (u.searchParams.has('devtools')) {
+      u.searchParams.delete('devtools')
+      window.history.replaceState({}, '', u.toString())
+    }
+  } catch {
+    // ignore
+  }
 })
 
 onUnmounted(() => {
@@ -88,6 +100,7 @@ import type { GraphLink } from '../types'
 import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
 import { handleEscOverlayStack } from '../utils/escOverlayStack'
+import { buildReloadUrlPreservingWmOptOut } from '../utils/navigationUrl'
 
   import { useWindowManager } from '../composables/windowManager/useWindowManager'
   import type { WindowInstance } from '../composables/windowManager/types'
@@ -773,10 +786,14 @@ async function runDemoFxOnce(action: () => Promise<void>): Promise<void> {
 }
 
 function setQueryAndReload(mut: (sp: URLSearchParams) => void) {
-  const url = new URL(window.location.href)
-  mut(url.searchParams)
+  const nextHref = buildReloadUrlPreservingWmOptOut(window.location.href, (sp) => {
+    // URL cleanup (legacy): never propagate dead `devtools` param across navigations.
+    sp.delete('devtools')
+    mut(sp)
+    sp.delete('devtools')
+  })
   // Setting href ensures full re-init (important when switching between pipelines).
-  window.location.href = url.toString()
+  window.location.href = nextHref
 }
 
 function forceDbEnrichedPreviewOnNextLoad() {
@@ -797,11 +814,15 @@ function clearFxDebugRunOnNextLoad() {
 
 function enterDemoUi() {
   forceDbEnrichedPreviewOnNextLoad()
+
+  // Demo enter: snapshot real-state so it can be restored after a reload-based exit.
+  // Persisted snapshot must survive reload.
+  simulatorStorage.writeDevtoolsOpenRealSnapshot(simulatorStorage.readDevtoolsOpenReal() ?? false)
+
   setQueryAndReload((sp) => {
     sp.set('mode', 'real')
     sp.set('ui', 'demo')
     sp.set('debug', '1')
-    sp.set('devtools', '1')
   })
 }
 
@@ -884,12 +905,20 @@ async function exitDemoUi() {
   }
 
   clearFxDebugRunOnNextLoad()
+
+  // Demo exit: restore real-state from snapshot and clear snapshot.
+  try {
+    const snap = simulatorStorage.readDevtoolsOpenRealSnapshot()
+    if (snap != null) simulatorStorage.writeDevtoolsOpenReal(snap)
+  } finally {
+    simulatorStorage.clearDevtoolsOpenRealSnapshot()
+  }
+
   setQueryAndReload((sp) => {
     // Always exit into real full UI.
     sp.set('mode', 'real')
     sp.delete('ui')
     sp.delete('debug')
-    sp.delete('devtools')
   })
 }
 
@@ -904,7 +933,6 @@ function goSandbox() {
     sp.set('mode', 'fixtures')
     sp.delete('ui')
     sp.delete('debug')
-    sp.delete('devtools')
   })
 }
 
@@ -914,7 +942,6 @@ function goAutoRun() {
     sp.set('mode', 'real')
     sp.delete('ui')
     sp.delete('debug')
-    sp.delete('devtools')
   })
 }
 
@@ -1258,12 +1285,15 @@ watch(interactPhase, (phase) => {
       aria-label="Window layer"
       :css="!isTestMode"
     >
+      <!-- NB: @close is dead in frameless mode (no ws-close button rendered).
+           Close is handled by child components (legacy ×, Cancel, Close).
+           Keeping the handler for forward-compatibility if framed mode is re-enabled. -->
       <WindowShell
         v-for="win in wm.windows.value"
         :key="win.id"
         :instance="win"
         :title="wmTitleFor(win)"
-        :show-header="true"
+        :frameless="true"
         @close="win.type === 'edge-detail' ? uiCloseEdgeDetailWindow(win.id, 'action') : wm.close(win.id, 'action')"
         @focus="wm.focus(win.id)"
         @measured="(s) => {
@@ -1450,7 +1480,6 @@ watch(interactPhase, (phase) => {
       :is-test-mode="isTestMode"
       :is-e2e-screenshots="isE2eScreenshots"
       :is-demo-ui="isDemoUi"
-      :auto-open-devtools="isDemoUi"
       :is-exiting="isExiting"
       :toggle-demo-ui="toggleDemoUi"
       :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"

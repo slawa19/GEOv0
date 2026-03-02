@@ -79,9 +79,6 @@ const popupStyle = computed<CSSProperties | undefined>(() => {
       top: 'auto',
       right: 'auto',
       zIndex: 'auto',
-      width: '100%',
-      maxWidth: 'none',
-      minWidth: 'auto',
     }
   }
 

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
 import { EQUIVALENT_CODES } from '../config/equivalents'
+import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
 
 type Props = {
   apiMode: 'fixtures' | 'real'
@@ -28,7 +29,6 @@ type Props = {
   isE2eScreenshots: boolean
 
   isDemoUi: boolean
-  autoOpenDevtools: boolean
   isExiting: boolean
   toggleDemoUi: () => void
 
@@ -50,20 +50,50 @@ const isDevToolsVisible = computed(
   () => import.meta.env.DEV && !props.isWebDriver && !props.isTestMode && !props.isE2eScreenshots
 )
 
-const devToolsOpen = ref(false)
-const devToolsRef = ref<HTMLDetailsElement | null>(null)
+const simulatorStorage = useSimulatorStorage()
 
-onMounted(() => {
-  if (props.autoOpenDevtools) {
-    devToolsOpen.value = true
-  }
-})
+function readDevToolsOpenForCurrentMode(): boolean {
+  if (props.isDemoUi) {
+    const persisted = simulatorStorage.readDevtoolsOpenDemo()
+    if (persisted != null) return persisted
 
-watch(devToolsOpen, (val) => {
-  if (devToolsRef.value) {
-    devToolsRef.value.open = val
+    // Enter demo → open by default.
+    // Persist immediately so it survives reloads until the user toggles manually.
+    simulatorStorage.writeDevtoolsOpenDemo(true)
+    return true
   }
-})
+
+  const persisted = simulatorStorage.readDevtoolsOpenReal()
+  if (persisted != null) return persisted
+
+  return false
+}
+
+const devToolsOpen = ref(readDevToolsOpenForCurrentMode())
+
+watch(
+  () => props.isDemoUi,
+  () => {
+    // Defensive: if demo flag ever changes without full reload, re-initialize from persisted prefs.
+    devToolsOpen.value = readDevToolsOpenForCurrentMode()
+  },
+)
+
+watch(
+  devToolsOpen,
+  (val) => {
+    // Persist separately for real vs demo.
+    if (props.isDemoUi) simulatorStorage.writeDevtoolsOpenDemo(val)
+    else simulatorStorage.writeDevtoolsOpenReal(val)
+  },
+  { flush: 'sync' },
+)
+
+function onDevToolsToggle(ev: Event) {
+  const el = ev.target as HTMLDetailsElement | null
+  if (!el) return
+  devToolsOpen.value = !!el.open
+}
 
 const allowDemoUi = import.meta.env.VITE_ALLOW_DEMO_UI === 'true'
 
@@ -189,8 +219,8 @@ async function onRunClearingOnce() {
 
         <details
           v-if="isDevToolsVisible || allowDemoUi"
-          ref="devToolsRef"
-          :open="autoOpenDevtools || undefined"
+          :open="devToolsOpen"
+          @toggle="onDevToolsToggle"
           class="ds-panel ds-ov-metric ds-ov-details bb-details"
           aria-label="Dev tools"
         >

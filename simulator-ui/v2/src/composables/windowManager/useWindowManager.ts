@@ -206,6 +206,11 @@ export function useWindowManager(): WindowManagerApi {
   function updateMeasuredSize(id: number, size: { width: number; height: number }): void {
     const win = windowsMap.get(id)
     if (!win) return
+
+    // Safety: ignore invalid measurements (e.g. 0x0 in tests or during initial mount)
+    // to avoid collapsing `rect` in reclamp().
+    if (!(size.width > 0) || !(size.height > 0)) return
+
     win.measured = { width: size.width, height: size.height }
   }
 

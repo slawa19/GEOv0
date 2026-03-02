@@ -58,8 +58,6 @@ const wrapperStyle = computed<CSSProperties>(() => {
       top: 'auto',
       right: 'auto',
       zIndex: 'auto',
-      width: '100%',
-      maxWidth: 'none',
     }
   }
   return props.style

@@ -23,7 +23,13 @@ export type HoveredEdgeState = {
 
 export type FloatingLabel = {
   id: number
-  nodeId: string
+  // Node-anchored labels use nodeId.
+  // World-anchored labels (e.g. clearing amount overlay) can omit nodeId and provide worldX/worldY.
+  nodeId?: string
+
+  // Optional world anchor (in world coordinates). If present, this label does not depend on layout readiness.
+  worldX?: number
+  worldY?: number
   offsetXPx?: number
   offsetYPx?: number
   text: string
@@ -43,6 +49,17 @@ export type FloatingLabel = {
 }
 
 export type FloatingLabelView = { id: number; x: number; y: number; text: string; color: string; cssClass?: string }
+
+// Spec: world-anchored clearing amount overlay model.
+export type ClearingAmountOverlay = {
+  id: string
+  text: string
+  worldX: number
+  worldY: number
+  ttlMs: number
+  styleKey: string
+  planId?: string
+}
 
 type UseOverlayStateDeps<N extends LayoutNodeLike> = {
   getLayoutNodeById: (id: string) => N | undefined
@@ -211,7 +228,9 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
   }
 
   function pushFloatingLabel(opts: {
-    nodeId: string
+    nodeId?: string
+    worldX?: number
+    worldY?: number
     id?: number
     text: string
     color: string
@@ -239,6 +258,8 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
         const fl = floatingLabels[i]!
         if (fl.throttleKey !== key) continue
         fl.nodeId = opts.nodeId
+        fl.worldX = opts.worldX
+        fl.worldY = opts.worldY
         fl.text = opts.text
         fl.color = opts.color
         fl.offsetXPx = opts.offsetXPx ?? 0
@@ -278,8 +299,8 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
     // Bound memory/DOM work: keep only the most recent labels.
     // Real-mode can burst during SSE reconnects/replays; higher cap reduces UX dropouts.
-      if (floatingLabels.length >= MAX_FLOATING_LABELS) {
-        floatingLabels.splice(0, floatingLabels.length - MAX_FLOATING_LABELS + 1)
+    if (floatingLabels.length >= MAX_FLOATING_LABELS) {
+      floatingLabels.splice(0, floatingLabels.length - MAX_FLOATING_LABELS + 1)
     }
 
     const id = opts.id ?? nextFloatingLabelId++
@@ -288,6 +309,8 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     floatingLabels.push({
       id,
       nodeId: opts.nodeId,
+      worldX: opts.worldX,
+      worldY: opts.worldY,
       offsetXPx: opts.offsetXPx ?? 0,
       offsetYPx: opts.offsetYPx ?? 0,
       text: opts.text,
@@ -295,6 +318,24 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       expiresAtMs: nowMs + ttlMs,
       throttleKey: opts.throttleKey,
       cssClass: opts.cssClass,
+    })
+  }
+
+  function pushClearingAmountOverlay(overlay: ClearingAmountOverlay, opts?: { color?: string; throttleMs?: number }) {
+    // Adapt world-anchored clearing overlay into the existing floating-label pipeline.
+    // This keeps rendering changes minimal while allowing world anchors.
+    pushFloatingLabel({
+      nodeId: undefined,
+      worldX: overlay.worldX,
+      worldY: overlay.worldY,
+      text: overlay.text,
+      // Color is still supported for legacy styling; clearing-premium CSS also forces color.
+      color: opts?.color ?? 'var(--ds-warn)',
+      ttlMs: overlay.ttlMs,
+      // Throttle/coalesce by overlay id (plan-aware at the caller).
+      throttleKey: overlay.id,
+      throttleMs: opts?.throttleMs ?? 0,
+      cssClass: overlay.styleKey,
     })
   }
 
@@ -310,9 +351,9 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
       floatingLabels.length = write
 
       // Must match the cap in pushFloatingLabel (120) to avoid killing fresh labels on every frame.
-        if (floatingLabels.length > MAX_FLOATING_LABELS) {
-          // Drop oldest labels first.
-          floatingLabels.splice(0, floatingLabels.length - MAX_FLOATING_LABELS)
+      if (floatingLabels.length > MAX_FLOATING_LABELS) {
+        // Drop oldest labels first.
+        floatingLabels.splice(0, floatingLabels.length - MAX_FLOATING_LABELS)
       }
     }
   }
@@ -330,13 +371,33 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     const z = Math.max(0.01, deps.getCameraZoom())
 
     for (const fl of floatingLabels) {
+      // World-anchored labels: the anchor is in world space, but the *offset* is in screen px.
+      // Do NOT freeze the resolved position, otherwise the px offset would be converted into world
+      // units at a single zoom value and then “stuck” when zoom changes.
+      if (typeof fl.worldX === 'number' && typeof fl.worldY === 'number') {
+        const dxW = (fl.offsetXPx ?? 0) / z
+        const dyW = (fl.offsetYPx ?? 0) / z
+        out.push({
+          id: fl.id,
+          x: fl.worldX + dxW,
+          y: fl.worldY + dyW,
+          text: fl.text,
+          color: fl.color,
+          cssClass: fl.cssClass,
+        })
+        continue
+      }
+
       // Use frozen position if already resolved (prevents jitter from ongoing physics).
       if (fl._frozenX != null && fl._frozenY != null) {
         out.push({ id: fl.id, x: fl._frozenX, y: fl._frozenY, text: fl.text, color: fl.color, cssClass: fl.cssClass })
         continue
       }
 
-      const ln = deps.getLayoutNodeById(fl.nodeId)
+      const nodeId = fl.nodeId
+      if (!nodeId) continue
+
+      const ln = deps.getLayoutNodeById(nodeId)
       if (!ln) {
         continue
       }
@@ -394,6 +455,8 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
     pushFloatingLabel,
     pruneFloatingLabels,
     floatingLabelsView,
+
+    pushClearingAmountOverlay,
 
     resetOverlays,
   }

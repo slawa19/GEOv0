@@ -1168,7 +1168,7 @@ describe('ManualPaymentPanel', () => {
     }
 
     it('AC-MP-15: To dropdown contains exactly payment-targets.items[].to_pid (known-nonempty)', async () => {
-      setUrl('/?mode=real&ui=interact')
+      setUrl('/?mode=real&ui=interact&wm=0')
 
       const participants = [
         { pid: 'alice', name: 'Alice' },
@@ -1208,7 +1208,7 @@ describe('ManualPaymentPanel', () => {
     })
 
     it('AC-MP-16: availableTargetIds for canvas equals payment-targets.items[].to_pid (known-nonempty)', async () => {
-      setUrl('/?mode=real&ui=interact')
+      setUrl('/?mode=real&ui=interact&wm=0')
 
       const participants = [
         { pid: 'alice', name: 'Alice' },
@@ -1240,7 +1240,7 @@ describe('ManualPaymentPanel', () => {
 
     it('AC-MP-17: backend-first known-empty shows "Backend reports no payment routes from selected sender" (and includes max_hops in copy)', async () => {
       // Explicitly test max_hops gating copy branch (8 deep).
-      setUrl('/?mode=real&ui=interact&payMaxHops=8')
+      setUrl('/?mode=real&ui=interact&wm=0&payMaxHops=8')
 
       const participants = [
         { pid: 'alice', name: 'Alice' },
@@ -1281,7 +1281,7 @@ describe('ManualPaymentPanel', () => {
     })
 
     it('AC-MP-18: payment-targets request runs once on From selection; not repeated on amount changes / rerender', async () => {
-      setUrl('/?mode=real&ui=interact')
+      setUrl('/?mode=real&ui=interact&wm=0')
 
       const participants = [
         { pid: 'alice', name: 'Alice' },
@@ -1331,7 +1331,7 @@ describe('ManualPaymentPanel', () => {
     })
 
     it('backend-first: paymentTargetsLoading=true (unknown) shows updating help + fallback To list until resolved', async () => {
-      setUrl('/?mode=real&ui=interact')
+      setUrl('/?mode=real&ui=interact&wm=0')
 
       const participants = [
         { pid: 'alice', name: 'Alice' },
@@ -1383,7 +1383,7 @@ describe('ManualPaymentPanel', () => {
     })
 
     it('backend-first degraded: payment-targets error shows fallback To list + degraded help; highlight targets become unknown', async () => {
-      setUrl('/?mode=real&ui=interact')
+      setUrl('/?mode=real&ui=interact&wm=0')
 
       const participants = [
         { pid: 'alice', name: 'Alice' },

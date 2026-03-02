@@ -25,9 +25,36 @@ import { incCounter } from '../utils/counters'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { normalizeTxAmountLabelInput } from '../utils/txAmountLabel'
+import { computeClearingAmountAnchorFromEdgeMidpoints } from '../utils/clearingAmountAnchor'
+import { isZeroDecimalString } from '../utils/isZeroDecimalString'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks, type FxState } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
+
+export function __retryUntilTruthyOrDeadline<T>(opts: {
+  startedAtMs: number
+  maxWaitMs: number
+  retryDelayMs: number
+  nowMs: () => number
+  scheduleTimeout: (fn: () => void, ms: number) => void
+  get: () => T | null
+  onSuccess: (v: T) => void
+  onTimeout?: () => void
+}) {
+  const v = opts.get()
+  if (v) {
+    opts.onSuccess(v)
+    return
+  }
+
+  const now = opts.nowMs()
+  if (now - opts.startedAtMs < opts.maxWaitMs) {
+    opts.scheduleTimeout(() => __retryUntilTruthyOrDeadline(opts), opts.retryDelayMs)
+    return
+  }
+
+  opts.onTimeout?.()
+}
 
 import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
@@ -1023,6 +1050,7 @@ export function useSimulatorApp(opts?: {
   const addActiveNode = fxOverlays.addActiveNode
   const pruneActiveNodes = fxOverlays.pruneActiveNodes
   const pushFloatingLabel = fxOverlays.pushFloatingLabel
+  const pushClearingAmountOverlay = fxOverlays.pushClearingAmountOverlay
   const resetOverlays = fxOverlays.resetOverlays
   const floatingLabelsViewFx = fxOverlays.floatingLabelsViewFx
   const scheduleTimeout = fxOverlays.scheduleTimeout
@@ -1261,12 +1289,14 @@ export function useSimulatorApp(opts?: {
   const REAL_CLEARING_FX = FX_CONFIG.clearing
 
   function pushFloatingLabelWhenReady(
-    opts: Parameters<typeof pushFloatingLabel>[0],
+    // This helper is node-anchored only: nodeId is required.
+    // World-anchored clearing amount overlays must use pushClearingAmountOverlay instead.
+    opts: Parameters<typeof pushFloatingLabel>[0] & { nodeId: string },
     retryLeft = 6,
     retryDelayMs = 90,
   ) {
     // Overlay state is now tolerant to nodes missing from layout (it won't drop labels).
-    // Keep the retry mechanism to avoid “label appears later but immediately expires” in edge cases,
+    // Keep the retry mechanism to avoid "label appears later but immediately expires" in edge cases,
     // but if we run out of retries, still push once so it can render when the node shows up.
     if (getLayoutNodeById(opts.nodeId) || retryLeft <= 0) {
       pushFloatingLabel(opts)
@@ -1419,67 +1449,58 @@ export function useSimulatorApp(opts?: {
       })
     }
 
-    // 6. Floating label with centroid (deferred)
-    if (nodeIds.length > 0) {
-      const clearedAmount = totalAmount.trim()
-      if (clearedAmount && clearedAmount !== '0' && clearedAmount !== '0.0' && clearedAmount !== '0.00') {
-        pushClearingLabelDeferred({
-          nodeIds,
-          text: `−${clearedAmount.replace(/^-/, '')} ${equivalent}`,
-          planId,
-        })
-      }
+    // 6. Clearing amount overlay (world-anchored centroid of edge midpoints; deferred until layout coords exist).
+    const clearedAmount = totalAmount.trim()
+    if (edgesAll.length > 0 && clearedAmount && !isZeroDecimalString(clearedAmount)) {
+      pushClearingLabelDeferred({
+        edges: edgesAll,
+        text: `−${clearedAmount.replace(/^-/, '')} ${equivalent}`,
+        planId,
+      })
     }
   }
 
   function pushClearingLabelDeferred(
-    opts: { nodeIds: string[]; text: string; planId?: string },
-    retryLeft = 6,
+    opts: { edges: Array<{ from: string; to: string }>; text: string; planId?: string },
+    startedAtMs = (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()),
     retryDelayMs = 80,
   ) {
-    const coords: Array<{ id: string; x: number; y: number }> = []
-    for (const id of opts.nodeIds) {
+    const getNodeWorldPos = (id: string) => {
       const ln = getLayoutNodeById(id)
-      if (ln && typeof ln.__x === 'number' && typeof ln.__y === 'number') {
-        coords.push({ id, x: ln.__x, y: ln.__y })
-      }
+      if (!ln || typeof ln.__x !== 'number' || typeof ln.__y !== 'number') return null
+      return { x: ln.__x, y: ln.__y }
     }
 
-    // If no coords available and we have retries left, schedule a retry
-    if (coords.length === 0 && retryLeft > 0) {
-      scheduleTimeout(() => pushClearingLabelDeferred(opts, retryLeft - 1, retryDelayMs), retryDelayMs)
-      return
-    }
+    const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now())
+    const maxWaitMs = 800
+    const overlayId = `clearing-total:${opts.planId ?? Math.round(startedAtMs)}`
 
-    // Compute centroid origin (or fallback to first node)
-    let originNodeId = opts.nodeIds[0]!
-    if (coords.length > 0) {
-      let sumX = 0
-      let sumY = 0
-      for (const c of coords) { sumX += c.x; sumY += c.y }
-      const cx = sumX / coords.length
-      const cy = sumY / coords.length
+    __retryUntilTruthyOrDeadline({
+      startedAtMs,
+      maxWaitMs,
+      retryDelayMs,
+      nowMs,
+      scheduleTimeout,
+      get: () => computeClearingAmountAnchorFromEdgeMidpoints(opts.edges, getNodeWorldPos),
+      onSuccess: (anchor) => {
+        const overlay = {
+          id: overlayId,
+          text: opts.text,
+          worldX: anchor.x,
+          worldY: anchor.y,
+          ttlMs: 3800,
+          styleKey: 'clearing-premium',
+          planId: opts.planId,
+        } satisfies import('./useOverlayState').ClearingAmountOverlay
 
-      let bestId = coords[0]!.id
-      let bestD2 = Infinity
-      for (const c of coords) {
-        const dx = c.x - cx
-        const dy = c.y - cy
-        const d2 = dx * dx + dy * dy
-        if (d2 < bestD2) { bestD2 = d2; bestId = c.id }
-      }
-      originNodeId = bestId
-    }
-
-    pushFloatingLabelWhenReady({
-      nodeId: originNodeId,
-      text: opts.text,
-      color: CLEARING_LABEL_COLOR,
-      ttlMs: 3800,
-      offsetYPx: -12,
-      throttleKey: `clearing-total:${opts.planId ?? Date.now()}`,
-      throttleMs: 500,
-      cssClass: 'clearing-premium',
+        if (pushClearingAmountOverlay) {
+          pushClearingAmountOverlay(overlay, { color: CLEARING_LABEL_COLOR, throttleMs: 500 })
+        }
+        // Back-compat (should not happen in normal app runtime): keep behavior safe.
+        // If overlay infrastructure isn't available, do NOT fall back to node-based anchoring.
+      },
+      // Time exceeded: SKIP (do not show a label in a wrong fallback position).
+      onTimeout: () => undefined,
     })
   }
 

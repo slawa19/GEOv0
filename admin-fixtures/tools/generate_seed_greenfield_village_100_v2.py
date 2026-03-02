@@ -150,13 +150,25 @@ def _transform_trustlines(
 
     for i, t in enumerate(trustlines):
         eq = str(t.get("equivalent") or "").strip().upper() or "UAH"
+        # UAH-only focus: do not modify other equivalents.
+        if eq != "UAH":
+            out.append(t)
+            continue
+
         fp = str(t.get("from"))
         tp = str(t.get("to"))
 
         from_is_business = _is_business_pid(fp, pid_to_type=pid_to_type)
-        to_is_business = _is_business_pid(tp, pid_to_type=pid_to_type)
 
-        can_be_intermediate = bool(from_is_business and to_is_business)
+        # Realistic routing rule (v2, adjusted):
+        # - We still do NOT want persons to become routing intermediates.
+        # - But we DO want businesses to act as intermediates even on business->person trustlines,
+        #   because PaymentRouter applies the policy of the *creditor* trustline (receiver->sender)
+        #   to the payment-flow edge (sender->receiver).
+        #
+        # In other words: if the creditor is a business, allowing intermediate usage makes
+        # person->business payments routable through that business.
+        can_be_intermediate = bool(from_is_business)
         auto_clearing = True
 
         policy = dict((t.get("policy") or {}) if isinstance(t.get("policy"), dict) else {})
@@ -166,49 +178,42 @@ def _transform_trustlines(
         limit = Decimal(str(t.get("limit") or "0"))
         used = Decimal(str(t.get("used") or "0"))
 
-        if eq == "UAH":
-            k = _u01(f"v2|{eq}|{fp}|{tp}")
+        k = _u01(f"v2|{eq}|{fp}|{tp}")
 
-            person_primary_pid: str | None = None
-            if fp in person_pids and primary_tl_index_by_person.get(fp) == i:
-                person_primary_pid = fp
-            elif tp in person_pids and primary_tl_index_by_person.get(tp) == i:
-                person_primary_pid = tp
+        person_primary_pid: str | None = None
+        if fp in person_pids and primary_tl_index_by_person.get(fp) == i:
+            person_primary_pid = fp
+        elif tp in person_pids and primary_tl_index_by_person.get(tp) == i:
+            person_primary_pid = tp
 
-            if person_primary_pid is not None:
-                used = target_balance_by_person[person_primary_pid]
-                limit = max(target_limit_by_person[person_primary_pid], used + Decimal("50"))
-            elif (fp in person_pids) and (tp in person_pids):
-                lim_min = Decimal("150")
-                lim_max = Decimal("900")
-                limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-                used = (Decimal("10") + Decimal("90") * Decimal(str(_u01(f"used|p2p|{fp}|{tp}")))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-            elif (fp in person_pids) or (tp in person_pids):
-                lim_min = Decimal("400")
-                lim_max = Decimal("3000")
-                limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-                used = (Decimal("0") + Decimal("120") * Decimal(str(_u01(f"used|small|{fp}|{tp}")))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-            else:
-                lim_min = Decimal("1500")
-                lim_max = Decimal("12000")
-                limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
-                used_ratio = Decimal("0.25") + Decimal("0.45") * Decimal(str(_u01(f"used|b2b|{fp}|{tp}")))
-                used = (limit * used_ratio).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        if person_primary_pid is not None:
+            used = target_balance_by_person[person_primary_pid]
+            limit = max(target_limit_by_person[person_primary_pid], used + Decimal("50"))
+        elif (fp in person_pids) and (tp in person_pids):
+            lim_min = Decimal("150")
+            lim_max = Decimal("900")
+            limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            used = (Decimal("10") + Decimal("90") * Decimal(str(_u01(f"used|p2p|{fp}|{tp}")))).quantize(
+                Decimal("0.01"), rounding=ROUND_DOWN
+            )
+        elif (fp in person_pids) or (tp in person_pids):
+            lim_min = Decimal("400")
+            lim_max = Decimal("3000")
+            limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            used = (Decimal("0") + Decimal("120") * Decimal(str(_u01(f"used|small|{fp}|{tp}")))).quantize(
+                Decimal("0.01"), rounding=ROUND_DOWN
+            )
+        else:
+            lim_min = Decimal("1500")
+            lim_max = Decimal("12000")
+            limit = (lim_min + (lim_max - lim_min) * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            used_ratio = Decimal("0.25") + Decimal("0.45") * Decimal(str(_u01(f"used|b2b|{fp}|{tp}")))
+            used = (limit * used_ratio).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
-            if used < 0:
-                used = Decimal("0")
-            if used > limit:
-                used = limit
+        if used < 0:
+            used = Decimal("0")
+        if used > limit:
+            used = limit
 
         available = (limit - used).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
@@ -218,6 +223,129 @@ def _transform_trustlines(
         tt["available"] = _quantize_money(available)
         tt["policy"] = policy
         out.append(tt)
+
+    return out
+
+def _add_extra_uah_service_links(
+    trustlines: list[dict[str, Any]],
+    *,
+    pid_to_type: dict[str, str],
+    pid_to_name: dict[str, str],
+    max_service_to_household: int = 120,
+    max_service_to_business: int = 60,
+) -> list[dict[str, Any]]:
+    """Add extra UAH-only service links for realistic-v2 connectivity.
+
+    Realistic-v2 simulator scenarios drop all non-UAH trustlines.
+    To keep enough household/service connectivity (and thus clearing potential),
+    we deterministically add a limited number of small UAH trustlines:
+      - service(person, non-household) -> household(person)
+      - service(person, non-household) -> business
+
+    This function intentionally does NOT look at or modify HOUR/EUR trustlines.
+    """
+
+    out = list(trustlines)
+    seen: set[tuple[str, str, str]] = set()
+    for t in out:
+        eq = str(t.get("equivalent") or "").strip().upper() or "UAH"
+        seen.add((eq, str(t.get("from")), str(t.get("to"))))
+
+    person_pids = {pid for pid, t in pid_to_type.items() if str(t).lower() == "person"}
+    business_pids_all = sorted([pid for pid, t in pid_to_type.items() if str(t).lower() == "business"])
+
+    # IMPORTANT: mirror realistic-v2 grouping (see scripts/generate_simulator_seed_scenarios.py)
+    # so that added links actually benefit the "services" behavior group.
+    service_pids = sorted(
+        [pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 46 <= idx <= 60]
+    )
+    household_pids = sorted(
+        [pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 61 <= idx <= 95]
+    )
+    retail_business_pids = sorted(
+        [pid for pid in business_pids_all if (idx := _pid_index(pid)) is not None and 36 <= idx <= 45]
+    )
+    business_targets = retail_business_pids or business_pids_all
+
+    if not household_pids or not service_pids:
+        return out
+
+    def _pick_from(lst: list[str], *, key: str) -> str:
+        idx = int(_u01(key) * len(lst))
+        if idx >= len(lst):
+            idx = len(lst) - 1
+        return lst[idx]
+
+    dt = __import__("datetime")
+
+    def _add_uah(src: str, dst: str, *, limit: Decimal, used: Decimal) -> None:
+        key = ("UAH", src, dst)
+        if key in seen:
+            return
+        seen.add(key)
+
+        lim = max(Decimal("0"), limit).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        u = max(Decimal("0"), min(lim, used)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        avail = (lim - u).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+
+        created_at = (BASE_TS - dt.timedelta(seconds=int(_u01(f"uah_svc_created|{src}|{dst}") * 86400))).isoformat()
+        created_at = created_at.replace("+00:00", "Z")
+
+        out.append(
+            {
+                "equivalent": "UAH",
+                "from": src,
+                "to": dst,
+                "from_display_name": str(pid_to_name.get(src, "")),
+                "to_display_name": str(pid_to_name.get(dst, "")),
+                "limit": _quantize_money(lim),
+                "used": _quantize_money(u),
+                "available": _quantize_money(avail),
+                "status": "active",
+                "created_at": created_at,
+                "policy": {
+                    "auto_clearing": True,
+                    "can_be_intermediate": bool(_is_business_pid(src, pid_to_type=pid_to_type)),
+                },
+            }
+        )
+
+    # Build deterministic candidate edges; then cap to avoid exploding the graph.
+    svc_hh_candidates: list[tuple[float, str, str]] = []
+    svc_biz_candidates: list[tuple[float, str, str]] = []
+
+    for src in service_pids:
+        # 2-3 household connections per service.
+        n_hh = 2 + int(_u01(f"uah_svc_n_hh|{src}") * 2)
+        picked_hh: set[str] = set()
+        for j in range(n_hh):
+            dst = _pick_from(household_pids, key=f"uah_svc_pick_hh|{src}|{j}")
+            if dst in picked_hh:
+                continue
+            picked_hh.add(dst)
+            score = _u01(f"uah_svc_score|hh|{src}|{dst}")
+            svc_hh_candidates.append((score, src, dst))
+
+        if business_targets:
+            dst_b = _pick_from(business_targets, key=f"uah_svc_pick_biz|{src}")
+            score_b = _u01(f"uah_svc_score|biz|{src}|{dst_b}")
+            svc_biz_candidates.append((score_b, src, dst_b))
+
+    for _, src, dst in sorted(svc_hh_candidates, key=lambda x: (x[0], x[1], x[2]))[:max_service_to_household]:
+        k = _u01(f"uah_svc_lim|hh|{src}|{dst}")
+        limit = (Decimal("800") + Decimal("2200") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("250") * Decimal(str(_u01(f"uah_svc_used|hh|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
+
+    for _, src, dst in sorted(svc_biz_candidates, key=lambda x: (x[0], x[1], x[2]))[:max_service_to_business]:
+        k = _u01(f"uah_svc_lim|biz|{src}|{dst}")
+        limit = (Decimal("1200") + Decimal("4800") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("350") * Decimal(str(_u01(f"uah_svc_used|biz|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
 
     return out
 
@@ -286,7 +414,10 @@ def build_trustlines(participants) -> list[dict[str, Any]]:
     pid_to_type = {p.pid: p.type for p in participants}
     pid_to_name = {p.pid: p.display_name for p in participants}
     trustlines_v1 = base.build_trustlines(participants)
-    return _transform_trustlines(trustlines_v1, pid_to_type=pid_to_type, pid_to_name=pid_to_name)
+    trustlines_v2 = _transform_trustlines(trustlines_v1, pid_to_type=pid_to_type, pid_to_name=pid_to_name)
+    # Add extra UAH-only service links so UAH-only realistic scenarios retain connectivity.
+    trustlines_v2 = _add_extra_uah_service_links(trustlines_v2, pid_to_type=pid_to_type, pid_to_name=pid_to_name)
+    return trustlines_v2
 
 
 def build_incidents(participants):

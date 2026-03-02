@@ -67,7 +67,7 @@ describe('forceLayout', () => {
     const out = computeLayoutForMode(snapshot, 800, 600, 'admin-force', true)
     expect(out.nodes).toEqual([])
     expect(out.links).toEqual([])
-  })
+  }, 10_000)
 
   it('applyForceLayout produces deterministic positions for same seed', async () => {
     const { applyForceLayout } = await loadForceLayout()

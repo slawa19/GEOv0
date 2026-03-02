@@ -1267,7 +1267,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1277,7 +1277,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1287,7 +1287,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1357,7 +1357,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1367,7 +1367,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1377,7 +1377,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1397,7 +1397,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1407,7 +1407,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1417,7 +1417,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1427,7 +1427,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1437,7 +1437,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1447,7 +1447,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1457,7 +1457,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1467,7 +1467,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1477,7 +1477,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1507,7 +1507,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1517,7 +1517,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1527,7 +1527,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1537,7 +1537,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1547,7 +1547,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1557,7 +1557,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1567,7 +1567,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1577,7 +1577,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1587,7 +1587,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1597,7 +1597,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1607,7 +1607,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1617,7 +1617,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1627,7 +1627,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1637,7 +1637,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1647,7 +1647,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1657,7 +1657,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1667,7 +1667,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1677,7 +1677,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1717,7 +1717,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1727,7 +1727,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1737,7 +1737,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1787,7 +1787,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1797,7 +1797,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1807,7 +1807,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1817,7 +1817,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1827,7 +1827,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1837,7 +1837,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1847,7 +1847,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1857,7 +1857,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1867,7 +1867,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1917,7 +1917,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1927,7 +1927,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1937,7 +1937,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1947,7 +1947,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1957,7 +1957,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1967,7 +1967,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1977,7 +1977,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -1987,7 +1987,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2687,7 +2687,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2717,7 +2717,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2727,7 +2727,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2737,7 +2737,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2747,7 +2747,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2757,7 +2757,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2767,7 +2767,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2777,7 +2777,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2787,7 +2787,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2797,7 +2797,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2807,7 +2807,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2817,7 +2817,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2827,7 +2827,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2837,7 +2837,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2847,7 +2847,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2857,7 +2857,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2867,7 +2867,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2877,7 +2877,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2887,7 +2887,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2897,7 +2897,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2907,7 +2907,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2917,7 +2917,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2927,7 +2927,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2937,7 +2937,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2947,7 +2947,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2957,7 +2957,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2967,7 +2967,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2977,7 +2977,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2987,7 +2987,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -2997,7 +2997,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3007,7 +3007,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3017,7 +3017,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3027,7 +3027,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3037,7 +3037,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3047,7 +3047,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3057,7 +3057,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3077,7 +3077,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3087,7 +3087,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3097,7 +3097,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3107,7 +3107,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3117,7 +3117,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3137,7 +3137,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3147,7 +3147,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3157,7 +3157,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3167,7 +3167,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3187,7 +3187,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3197,7 +3197,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3207,7 +3207,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3217,7 +3217,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3227,7 +3227,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3247,7 +3247,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3277,7 +3277,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3287,7 +3287,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3297,7 +3297,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3307,7 +3307,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3327,7 +3327,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3337,7 +3337,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3347,7 +3347,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3357,7 +3357,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3377,7 +3377,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3397,7 +3397,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3407,7 +3407,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3417,7 +3417,7 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
@@ -3427,13 +3427,43 @@
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
-        "can_be_intermediate": false
+        "can_be_intermediate": true
       }
     },
     {
       "from": "PID_U0046_6df7ddce",
       "to": "PID_U0001_9e3779b1",
       "limit": "2065.46",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0037_de049695",
+      "limit": "2065.07",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0070_432b4666",
+      "limit": "2062.18",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0046_6df7ddce",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "1771.60",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3451,9 +3481,69 @@
       }
     },
     {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0042_f519f70a",
+      "limit": "2599.58",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0069_a4f3ccb5",
+      "limit": "2495.98",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0047_0c2f577f",
+      "to": "PID_U0079_d31e8d9f",
+      "limit": "2051.98",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
       "from": "PID_U0048_aa66d130",
       "to": "PID_U0006_b54cda26",
       "limit": "2436.11",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0038_7c3c1046",
+      "limit": "3754.52",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0078_34e713ee",
+      "limit": "2176.79",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0048_aa66d130",
+      "to": "PID_U0093_7a27354d",
+      "limit": "2918.83",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3471,9 +3561,79 @@
       }
     },
     {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0044_3188ea6c",
+      "limit": "5115.87",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0089_01494e89",
+      "limit": "1975.45",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0049_489e4ae1",
+      "to": "PID_U0095_b69628af",
+      "limit": "2987.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
       "from": "PID_U0050_e6d5c492",
       "to": "PID_U0005_17156075",
       "limit": "800.00",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0045_cfc0641d",
+      "limit": "2965.07",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "1213.69",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0093_7a27354d",
+      "limit": "1582.89",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0050_e6d5c492",
+      "to": "PID_U0095_b69628af",
+      "limit": "2658.27",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3491,9 +3651,89 @@
       }
     },
     {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0041_56e27d59",
+      "limit": "3886.62",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "2934.53",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0075_5a40a6db",
+      "limit": "1959.92",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0051_850d3e43",
+      "to": "PID_U0078_34e713ee",
+      "limit": "1025.43",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
       "from": "PID_U0052_2344b7f4",
       "to": "PID_U0002_3c6ef362",
       "limit": "2111.97",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0036_3fcd1ce4",
+      "limit": "3103.79",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0084_ea33ee14",
+      "limit": "2884.33",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "1395.23",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0052_2344b7f4",
+      "to": "PID_U0092_dbefbb9c",
+      "limit": "2686.82",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3511,9 +3751,89 @@
       }
     },
     {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0042_f519f70a",
+      "limit": "4092.83",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "874.60",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0071_e162c017",
+      "limit": "2325.44",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0053_c17c31a5",
+      "to": "PID_U0076_f878208c",
+      "limit": "1877.89",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
       "from": "PID_U0054_5fb3ab56",
       "to": "PID_U0007_538453d7",
       "limit": "3121.70",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "2948.41",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0066_ca4d5fa2",
+      "limit": "2202.91",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0076_f878208c",
+      "limit": "1076.97",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0054_5fb3ab56",
+      "to": "PID_U0095_b69628af",
+      "limit": "1346.70",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3531,9 +3851,69 @@
       }
     },
     {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0045_cfc0641d",
+      "limit": "3693.89",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0077_96af9a3d",
+      "limit": "2846.45",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0055_fdeb2507",
+      "to": "PID_U0094_185eaefe",
+      "limit": "1550.15",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
       "from": "PID_U0056_9c229eb8",
       "to": "PID_U0001_9e3779b1",
       "limit": "2557.01",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0045_cfc0641d",
+      "limit": "2758.05",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0065_2c15e5f1",
+      "limit": "2424.74",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0056_9c229eb8",
+      "to": "PID_U0085_886b67c5",
+      "limit": "1239.78",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3571,9 +3951,89 @@
       }
     },
     {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0039_1a7389f7",
+      "limit": "2816.39",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0061_b337ff2d",
+      "limit": "1697.23",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0063_efa6f28f",
+      "limit": "1606.62",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0057_3a5a1869",
+      "to": "PID_U0082_adc4fab2",
+      "limit": "2699.39",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
       "from": "PID_U0058_d891921a",
       "to": "PID_U0006_b54cda26",
       "limit": "1864.93",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0040_b8ab03a8",
+      "limit": "1402.11",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0072_7f9a39c8",
+      "limit": "1330.21",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0073_1dd1b379",
+      "limit": "1202.60",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0058_d891921a",
+      "to": "PID_U0093_7a27354d",
+      "limit": "1416.38",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -3591,9 +4051,89 @@
       }
     },
     {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0040_b8ab03a8",
+      "limit": "4666.72",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0067_6884d953",
+      "limit": "2491.07",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0070_432b4666",
+      "limit": "1220.34",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0059_76c90bcb",
+      "to": "PID_U0080_71560750",
+      "limit": "1668.77",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
       "from": "PID_U0060_1500857c",
       "to": "PID_U0005_17156075",
       "limit": "2545.21",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0043_935170bb",
+      "limit": "3319.21",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0090_9f80c83a",
+      "limit": "920.22",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0091_3db841eb",
+      "limit": "2924.38",
+      "equivalent": "UAH",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "from": "PID_U0060_1500857c",
+      "to": "PID_U0094_185eaefe",
+      "limit": "1852.77",
       "equivalent": "UAH",
       "policy": {
         "auto_clearing": true,
@@ -4697,10 +5237,10 @@
     "trust_drift": {
       "enabled": true,
       "growth_rate": 0.05,
-      "decay_rate": 0.005,
+      "decay_rate": 0.02,
       "max_growth": 2.0,
-      "min_limit_ratio": 0.5,
-      "overload_threshold": 0.95
+      "min_limit_ratio": 0.3,
+      "overload_threshold": 0.8
     },
     "flow": {
       "enabled": true,

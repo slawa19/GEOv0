@@ -9,6 +9,12 @@ type StorageLike = {
   removeItem?: (key: string) => void
 }
 
+type Storage01 = {
+  read01: (key: string) => boolean | null
+  write01: (key: string, v: boolean) => void
+  removeKey: (key: string) => void
+}
+
 type TimersLike = {
   setTimeout: (fn: () => void, ms: number) => number
   clearTimeout: (id: number) => void
@@ -170,6 +176,28 @@ export function useSimulatorStorage(storage?: StorageLike) {
           }
         : { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
 
+  function parse01(v: string | null): boolean | null {
+    if (v === '1') return true
+    if (v === '0') return false
+    return null
+  }
+
+  const storage01: Storage01 = {
+    read01: (key: string) => {
+      return parse01(_storage.getItem(key))
+    },
+    write01: (key: string, v: boolean) => {
+      _storage.setItem(key, v ? '1' : '0')
+    },
+    removeKey: (key: string) => {
+      _storage.removeItem(key)
+    },
+  }
+
+  const DEVTOOLS_OPEN_REAL_KEY = 'geo.sim.v2.devtools.open.real'
+  const DEVTOOLS_OPEN_DEMO_KEY = 'geo.sim.v2.devtools.open.demo'
+  const DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY = 'geo.sim.v2.devtools.open.realSnapshot'
+
   /** Read persisted UI theme (null if absent). */
   function readUiTheme(): UiThemeId | null {
     const v = _storage.getItem('geo.uiTheme')
@@ -205,11 +233,44 @@ export function useSimulatorStorage(storage?: StorageLike) {
     _storage.removeItem('geo.sim.v2.runId')
   }
 
+  function readDevtoolsOpenReal(): boolean | null {
+    return storage01.read01(DEVTOOLS_OPEN_REAL_KEY)
+  }
+  function writeDevtoolsOpenReal(v: boolean) {
+    storage01.write01(DEVTOOLS_OPEN_REAL_KEY, v)
+  }
+
+  function readDevtoolsOpenDemo(): boolean | null {
+    return storage01.read01(DEVTOOLS_OPEN_DEMO_KEY)
+  }
+  function writeDevtoolsOpenDemo(v: boolean) {
+    storage01.write01(DEVTOOLS_OPEN_DEMO_KEY, v)
+  }
+
+  function readDevtoolsOpenRealSnapshot(): boolean | null {
+    return storage01.read01(DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY)
+  }
+  function writeDevtoolsOpenRealSnapshot(v: boolean) {
+    storage01.write01(DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY, v)
+  }
+  function clearDevtoolsOpenRealSnapshot() {
+    storage01.removeKey(DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY)
+  }
+
   return {
     readUiTheme,
     writeUiTheme,
     forceDesiredModeReal,
     isFxDebugRun,
     clearFxDebugRunState,
+
+    // DevTools panel prefs (Demo vs Real) + snapshot for reload-based demo enter/exit.
+    readDevtoolsOpenReal,
+    writeDevtoolsOpenReal,
+    readDevtoolsOpenDemo,
+    writeDevtoolsOpenDemo,
+    readDevtoolsOpenRealSnapshot,
+    writeDevtoolsOpenRealSnapshot,
+    clearDevtoolsOpenRealSnapshot,
   }
 }

@@ -470,7 +470,7 @@ function onApplyIntensity() {
               </summary>
 
               <div
-                class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right ds-ov-dropdown--narrow"
+                class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right tb-admin-dropdown"
                 aria-label="Admin dropdown"
               >
                 <div class="ds-stack tb-admin-stack">
@@ -515,12 +515,12 @@ function onApplyIntensity() {
                     <div
                       v-for="run in ctx.adminRuns.value"
                       :key="run.run_id"
-                      class="ds-panel ds-ov-metric tb-run-item"
+                      class="tb-run-item"
                     >
                         <span class="ds-label ds-mono tb-run-id" :title="run.run_id">{{ run.run_id.slice(0, 8) }}</span>
-                        <span :class="['ds-badge', toLower(run.state) === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
-                        <span class="ds-label tb-run-scenario" :title="String((run as any).scenario_id ?? '')">{{ short(String((run as any).scenario_id ?? ''), 18) }}</span>
-                        <span class="ds-label ds-mono tb-run-owner" :title="String((run as any).owner_id ?? '')">{{ short(String((run as any).owner_id ?? ''), 18) }}</span>
+                        <span :class="['ds-badge', 'tb-run-state', toLower(run.state) === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
+                        <span class="ds-label tb-run-scenario" :title="String((run as any).scenario_id ?? '')">{{ short(String((run as any).scenario_id ?? ''), 22) }}</span>
+                        <span class="ds-label ds-mono tb-run-owner" :title="String((run as any).owner_id ?? '')">{{ short(String((run as any).owner_id ?? ''), 12) }}</span>
 
                         <div class="ds-row tb-run-actions">
                           <button
@@ -651,40 +651,68 @@ function onApplyIntensity() {
   white-space: nowrap;
 }
 
+.tb-admin-dropdown {
+  min-width: 480px;
+  max-width: min(620px, calc(100vw - 24px));
+}
+
 .tb-runs-list {
-  gap: 4px;
-  max-height: 200px;
+  gap: 3px;
+  max-height: 320px;
   overflow-y: auto;
 }
 
 .tb-run-item {
-  padding: 4px 8px;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 64px 68px 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--ds-surface-1);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  min-width: 0;
 }
 
 .tb-run-id {
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.tb-run-state {
+  font-size: 10px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .tb-run-scenario {
-  opacity: 0.7;
+  opacity: 0.75;
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .tb-run-owner {
   opacity: 0.65;
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tb-run-actions {
-  margin-left: auto;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .tb-run-btn {
-  height: 24px;
-  padding: 0 8px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .tb-fade-75 {

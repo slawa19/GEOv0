@@ -12,9 +12,15 @@ const WM_ENABLED_KEY = Symbol('geo:wm-enabled')
  */
 export function readWindowManagerEnabledFromUrl(): boolean {
   try {
-    return new URLSearchParams(window.location.search).get('wm') === '1'
+    const v = new URLSearchParams(window.location.search).get('wm')
+    // Default: WM enabled.
+    // Explicit opt-out: `?wm=0`.
+    if (v === '0') return false
+    if (v === '1') return true
+    return true
   } catch {
-    return false
+    // Default to WM enabled in non-browser or URL-unavailable environments.
+    return true
   }
 }
 
@@ -27,7 +33,7 @@ export function provideWindowManagerEnabled(enabled: boolean): void {
 export function useWindowManagerEnabled(): boolean {
   // Some pure unit tests call composables outside of a Vue setup/injection context.
   // In that case we must NOT call `inject()` (Vue would warn on stderr).
-  if (!getCurrentInstance()) return false
-  return inject<boolean>(WM_ENABLED_KEY, false)
+  if (!getCurrentInstance()) return true
+  return inject<boolean>(WM_ENABLED_KEY, true)
 }
 

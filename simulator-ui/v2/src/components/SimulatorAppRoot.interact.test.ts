@@ -1,6 +1,38 @@
 import { computed, createApp, h, nextTick, reactive, ref, type Ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
+// ---------------------------------------------------------------------------
+// Shared simulatorStorage stub (used by SimulatorAppRoot for demo enter/exit).
+// ---------------------------------------------------------------------------
+const __GEO_TEST_SIM_STORAGE = {
+  forceDesiredModeReal: vi.fn(),
+  isFxDebugRun: vi.fn(() => false),
+  clearFxDebugRunState: vi.fn(),
+
+  readUiTheme: vi.fn(() => null),
+  writeUiTheme: vi.fn(),
+
+  readDevtoolsOpenReal: vi.fn(() => null),
+  writeDevtoolsOpenReal: vi.fn(),
+  readDevtoolsOpenDemo: vi.fn(() => null),
+  writeDevtoolsOpenDemo: vi.fn(),
+  readDevtoolsOpenRealSnapshot: vi.fn(() => null),
+  writeDevtoolsOpenRealSnapshot: vi.fn(),
+  clearDevtoolsOpenRealSnapshot: vi.fn(),
+} as const
+
+;(globalThis as any).__GEO_TEST_SIM_STORAGE = __GEO_TEST_SIM_STORAGE
+
+vi.mock('../composables/usePersistedSimulatorPrefs', async () => {
+  const actual = await vi.importActual<typeof import('../composables/usePersistedSimulatorPrefs')>(
+    '../composables/usePersistedSimulatorPrefs',
+  )
+  return {
+    ...actual,
+    useSimulatorStorage: () => __GEO_TEST_SIM_STORAGE,
+  }
+})
+
 vi.mock('../composables/windowManager/useWindowManager', async () => {
   const actual = await vi.importActual<typeof import('../composables/windowManager/useWindowManager')>(
     '../composables/windowManager/useWindowManager',
@@ -42,6 +74,13 @@ vi.mock('../composables/useSimulatorApp', () => {
 
       const apiMode = computed<'fixtures' | 'real'>(() => (qs().get('mode') || '').toLowerCase() === 'real' ? 'real' : 'fixtures')
       const isInteractUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'interact')
+      const isDemoUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'demo')
+      const isTestMode = computed(() => {
+        // Default to true for most interaction tests, but allow overriding for
+        // DevTools/Demo UI wiring tests (DevTools are hidden in test mode).
+        const v = (qs().get('testMode') || '').toLowerCase().trim()
+        return !(v === '0' || v === 'false')
+      })
 
       const phase = ref(String((globalThis as any).__GEO_TEST_INTERACT_PHASE ?? 'idle'))
       ;(globalThis as any).__GEO_TEST_PHASE_REF = phase
@@ -137,9 +176,9 @@ vi.mock('../composables/useSimulatorApp', () => {
 
         // flags
         isDemoFixtures: computed(() => false),
-        isDemoUi: computed(() => false),
+        isDemoUi,
         isInteractUi,
-        isTestMode: computed(() => true),
+        isTestMode,
         isWebDriver: computed(() => false),
         isE2eScreenshots: computed(() => false),
 
@@ -347,10 +386,41 @@ function setUrl(search: string) {
   window.history.replaceState({}, '', search)
 }
 
+function stubLocationHrefSetter() {
+  const hrefSet = vi.fn()
+  const prevLocation = window.location
+  const currentHref = String(prevLocation.href)
+  const currentSearch = String(prevLocation.search ?? '')
+  const currentOrigin = String((prevLocation as any).origin ?? 'http://localhost')
+
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: {
+      get href() {
+        return currentHref
+      },
+      set href(v: string) {
+        hrefSet(v)
+      },
+      get search() {
+        return currentSearch
+      },
+      get origin() {
+        return currentOrigin
+      },
+    },
+  })
+
+  return {
+    hrefSet,
+    restore: () => Object.defineProperty(window, 'location', { configurable: true, value: prevLocation }),
+  }
+}
+
 describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('ui=interact renders interact HUD + ActionBar + ManualPaymentPanel and does not render intensity slider', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -405,6 +475,18 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       const panel = panels[0] as HTMLElement
       expect(panel.closest('.ws-shell')).toBeTruthy()
+
+      // AC-0 / AC-3: WM-rendered panel must carry legacy DS classes for visual parity
+      expect(panel.classList.contains('ds-ov-panel')).toBe(true)
+      expect(panel.classList.contains('ds-panel')).toBe(true)
+      expect(panel.classList.contains('ds-panel--elevated')).toBe(true)
+      expect(panel.querySelector('.ds-panel__header')).toBeTruthy()
+
+      // AC-1 / AC-2: frameless shell must NOT render its own header/chrome
+      const shell = shells[0] as HTMLElement
+      expect(shell.classList.contains('ws-shell--framed')).toBe(false)
+      expect(shell.querySelector('.ws-header')).toBeFalsy()
+      expect(shell.querySelector('button.ws-close')).toBeFalsy()
     } finally {
       app.unmount()
       host.remove()
@@ -900,7 +982,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: WindowShell header [×] closes edge-detail window (UI-close) and does NOT cancel interact flow', async () => {
+  it('wm=1: EdgeDetailPopup Close closes edge-detail window (UI-close) and does NOT cancel interact flow', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
     setUrl('/?mode=real&ui=interact&wm=1')
 
@@ -921,10 +1003,12 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
       expect(cancel).toBeTruthy()
 
-      const headerClose = host.querySelector('button.ws-close[aria-label="Close window"]') as HTMLButtonElement | null
-      expect(headerClose).toBeTruthy()
+      const closeBtn = Array.from(host.querySelectorAll('[data-testid="edge-detail-popup"] button')).find((b) =>
+        (b.textContent ?? '').trim() === 'Close',
+      ) as HTMLButtonElement | undefined
+      expect(closeBtn).toBeTruthy()
 
-      headerClose?.click()
+      closeBtn?.click()
       await nextTick()
       await nextTick()
 
@@ -993,7 +1077,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('MP-0: routesLoading in root yields tri-state unknown in ManualPaymentPanel (shows updating help)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1053,7 +1137,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   })
 
   it('ui=interact renders trustline/clearing panels depending on phase', async () => {
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     // Trustline create phase
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-trustline-create'
@@ -1092,7 +1176,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('clicking ActionBar "Run Clearing" changes phase and shows ClearingPanel (behavioral)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1118,7 +1202,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('Escape calls interact.mode.cancel() when phase is not idle', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1182,7 +1266,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('canvas shows crosshair cursor in interact picking phases', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-from'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1204,7 +1288,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('TrustlineManagementPanel: Close TL requires 2 clicks (armed confirmation)', async () => {
     // Enter via ActionBar to set useFullTrustlineEditor=true, then advance to editing-trustline.
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1249,7 +1333,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     // Enter via ActionBar so useFullTrustlineEditor=true → TrustlineManagementPanel shown,
     // EdgeDetailPopup hidden via forceHidden prop.
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1285,7 +1369,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('AC-ED-3: EdgeDetailPopup "Send Payment" activates Manual Payment and pre-fills pids (trustline to→from)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1332,7 +1416,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('Escape disarms Close TL confirmation (does not cancel flow)', async () => {
     // Enter via ActionBar to set useFullTrustlineEditor=true, then advance to editing-trustline.
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1379,7 +1463,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('Escape closes NodeCardOverlay first (does not cancel idle interact)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1472,7 +1556,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       viz_color_key: 'unknown',
       net_balance: '0',
     }
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1503,7 +1587,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('success toast: successful clearing confirm renders SuccessToast and allows dismiss', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact')
+    setUrl('/?mode=real&ui=interact&wm=0')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1550,5 +1634,111 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
     delete (globalThis as any).__GEO_TEST_INTERACT_SUCCESS_MESSAGE
+  })
+})
+
+describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
+  it('enter demo: snapshots real devtools open state; URL reload does not keep devtools param', async () => {
+    const simStorage = (globalThis as any).__GEO_TEST_SIM_STORAGE as any
+    expect(simStorage).toBeTruthy()
+
+    // reset
+    simStorage.writeDevtoolsOpenRealSnapshot.mockClear()
+    simStorage.writeDevtoolsOpenReal.mockClear()
+    simStorage.clearDevtoolsOpenRealSnapshot.mockClear()
+
+    // Pretend real devtools was open.
+    simStorage.readDevtoolsOpenReal.mockReturnValue(true)
+
+    // Add a legacy param that must be scrubbed.
+    setUrl('/?mode=real&ui=interact&devtools=1&wm=0&testMode=0')
+
+    // Prevent real navigation in happy-dom.
+    // Prevent real navigation in happy-dom by intercepting href setter.
+    const nav = stubLocationHrefSetter()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+
+      const devDetails = host.querySelector('details[aria-label="Dev tools"]') as HTMLDetailsElement | null
+      expect(devDetails).toBeTruthy()
+      devDetails!.open = true
+
+      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Enter Demo UI')) as
+        | HTMLButtonElement
+        | undefined
+      expect(btn).toBeTruthy()
+      btn!.click()
+      await nextTick()
+
+      // Snapshot saved.
+      expect(simStorage.writeDevtoolsOpenRealSnapshot).toHaveBeenCalledWith(true)
+
+      // And navigation URL must not keep devtools param.
+      const nextHref = String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')
+      const u = new URL(nextHref)
+      expect(u.searchParams.get('devtools')).toBe(null)
+    } finally {
+      app.unmount()
+      host.remove()
+
+      nav.restore()
+    }
+  })
+
+  it('exit demo: restores real state from snapshot and clears snapshot; URL reload does not keep devtools param', async () => {
+    const simStorage = (globalThis as any).__GEO_TEST_SIM_STORAGE as any
+    expect(simStorage).toBeTruthy()
+
+    simStorage.writeDevtoolsOpenRealSnapshot.mockClear()
+    simStorage.writeDevtoolsOpenReal.mockClear()
+    simStorage.clearDevtoolsOpenRealSnapshot.mockClear()
+
+    // Setup: in demo UI, with snapshot present.
+    simStorage.readDevtoolsOpenRealSnapshot.mockReturnValue(false)
+
+    setUrl('/?mode=real&ui=demo&debug=1&devtools=1&wm=0&testMode=0')
+
+    const nav = stubLocationHrefSetter()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+
+      const devDetails = host.querySelector('details[aria-label="Dev tools"]') as HTMLDetailsElement | null
+      expect(devDetails).toBeTruthy()
+      devDetails!.open = true
+
+      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Exit Demo UI')) as
+        | HTMLButtonElement
+        | undefined
+      expect(btn).toBeTruthy()
+      btn!.click()
+      await nextTick()
+
+      // Restore + clear.
+      expect(simStorage.writeDevtoolsOpenReal).toHaveBeenCalledWith(false)
+      expect(simStorage.clearDevtoolsOpenRealSnapshot).toHaveBeenCalledTimes(1)
+
+      const nextHref = String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')
+      const u = new URL(nextHref)
+      expect(u.searchParams.get('ui')).toBe(null)
+      expect(u.searchParams.get('debug')).toBe(null)
+      expect(u.searchParams.get('devtools')).toBe(null)
+    } finally {
+      app.unmount()
+      host.remove()
+
+      nav.restore()
+    }
   })
 })

@@ -572,7 +572,7 @@
     "created_at": "2026-01-11T21:00:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -588,7 +588,7 @@
     "created_at": "2026-01-11T20:55:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -604,7 +604,7 @@
     "created_at": "2026-01-11T20:50:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -620,7 +620,7 @@
     "created_at": "2026-01-11T20:45:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -636,7 +636,7 @@
     "created_at": "2026-01-11T20:40:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -652,7 +652,7 @@
     "created_at": "2026-01-11T20:35:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -668,7 +668,7 @@
     "created_at": "2026-01-11T20:30:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -684,7 +684,7 @@
     "created_at": "2026-01-11T20:25:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -700,7 +700,7 @@
     "created_at": "2026-01-11T20:20:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -716,7 +716,7 @@
     "created_at": "2026-01-11T20:15:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -732,7 +732,7 @@
     "created_at": "2026-01-11T20:10:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -748,7 +748,7 @@
     "created_at": "2026-01-11T20:05:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -764,7 +764,7 @@
     "created_at": "2026-01-11T20:00:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -780,7 +780,7 @@
     "created_at": "2026-01-11T19:55:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -796,7 +796,7 @@
     "created_at": "2026-01-11T19:50:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -812,7 +812,7 @@
     "created_at": "2026-01-11T19:45:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -828,7 +828,7 @@
     "created_at": "2026-01-11T19:40:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -844,7 +844,7 @@
     "created_at": "2026-01-11T19:35:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -860,7 +860,7 @@
     "created_at": "2026-01-11T19:30:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -876,7 +876,7 @@
     "created_at": "2026-01-11T19:25:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -892,7 +892,7 @@
     "created_at": "2026-01-11T19:20:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -908,7 +908,7 @@
     "created_at": "2026-01-11T19:15:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -924,7 +924,7 @@
     "created_at": "2026-01-11T19:10:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -940,7 +940,7 @@
     "created_at": "2026-01-11T19:05:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -956,7 +956,7 @@
     "created_at": "2026-01-11T19:00:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -972,7 +972,7 @@
     "created_at": "2026-01-11T18:55:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -988,7 +988,7 @@
     "created_at": "2026-01-11T18:50:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1004,7 +1004,7 @@
     "created_at": "2026-01-11T18:45:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1020,7 +1020,7 @@
     "created_at": "2026-01-11T18:40:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1036,7 +1036,7 @@
     "created_at": "2026-01-11T18:35:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1052,7 +1052,7 @@
     "created_at": "2026-01-11T18:30:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1068,7 +1068,7 @@
     "created_at": "2026-01-11T18:25:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1084,7 +1084,7 @@
     "created_at": "2026-01-11T17:55:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1100,7 +1100,7 @@
     "created_at": "2026-01-11T17:50:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1116,7 +1116,7 @@
     "created_at": "2026-01-11T17:45:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1132,7 +1132,7 @@
     "created_at": "2026-01-11T17:40:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1148,7 +1148,7 @@
     "created_at": "2026-01-11T17:35:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1164,7 +1164,7 @@
     "created_at": "2026-01-11T17:30:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1180,7 +1180,7 @@
     "created_at": "2026-01-11T17:25:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1196,7 +1196,7 @@
     "created_at": "2026-01-11T17:20:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1212,7 +1212,7 @@
     "created_at": "2026-01-11T17:15:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1228,7 +1228,7 @@
     "created_at": "2026-01-11T17:10:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1244,7 +1244,7 @@
     "created_at": "2026-01-11T17:05:00Z",
     "policy": {
       "auto_clearing": true,
-      "can_be_intermediate": false
+      "can_be_intermediate": true
     }
   },
   {
@@ -1259,8 +1259,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:50:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1275,8 +1275,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:45:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1291,8 +1291,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:40:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1307,8 +1307,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:35:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1323,8 +1323,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:30:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1339,8 +1339,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:25:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1355,8 +1355,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:20:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1371,8 +1371,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:15:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1387,8 +1387,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:10:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1403,8 +1403,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:05:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1419,8 +1419,8 @@
     "status": "active",
     "created_at": "2026-01-11T16:00:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1435,8 +1435,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:55:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1451,8 +1451,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:50:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1467,8 +1467,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:45:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1483,8 +1483,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:40:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1499,8 +1499,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:35:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1515,8 +1515,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:30:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1531,8 +1531,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:25:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1547,8 +1547,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:20:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1563,8 +1563,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:15:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1579,8 +1579,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:10:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1595,8 +1595,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:05:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1611,8 +1611,8 @@
     "status": "active",
     "created_at": "2026-01-11T15:00:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1627,8 +1627,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:55:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1643,8 +1643,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:50:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1659,8 +1659,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:45:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1675,8 +1675,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:40:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1691,8 +1691,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:35:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1707,8 +1707,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:30:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1723,8 +1723,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:25:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1739,8 +1739,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:20:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1755,8 +1755,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:15:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1771,8 +1771,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:10:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1787,8 +1787,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:05:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1803,8 +1803,8 @@
     "status": "active",
     "created_at": "2026-01-11T14:00:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1819,8 +1819,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:55:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1835,8 +1835,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:50:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1851,8 +1851,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:45:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1867,8 +1867,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:40:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1883,8 +1883,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:35:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1899,8 +1899,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:30:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1915,8 +1915,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:25:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1931,8 +1931,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:20:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1947,8 +1947,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:15:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1963,8 +1963,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:10:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1979,8 +1979,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:05:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -1995,8 +1995,8 @@
     "status": "active",
     "created_at": "2026-01-11T13:00:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -2011,8 +2011,8 @@
     "status": "active",
     "created_at": "2026-01-11T12:55:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -2027,8 +2027,8 @@
     "status": "active",
     "created_at": "2026-01-11T12:50:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -2075,7 +2075,7 @@
     "status": "active",
     "created_at": "2026-01-11T12:35:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2123,7 +2123,7 @@
     "status": "active",
     "created_at": "2026-01-11T12:20:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2171,7 +2171,7 @@
     "status": "active",
     "created_at": "2026-01-11T12:05:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2219,7 +2219,7 @@
     "status": "active",
     "created_at": "2026-01-11T11:50:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2267,7 +2267,7 @@
     "status": "active",
     "created_at": "2026-01-11T11:35:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2315,7 +2315,7 @@
     "status": "active",
     "created_at": "2026-01-11T11:20:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2363,7 +2363,7 @@
     "status": "active",
     "created_at": "2026-01-11T11:05:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2411,7 +2411,7 @@
     "status": "active",
     "created_at": "2026-01-11T10:50:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2459,7 +2459,7 @@
     "status": "active",
     "created_at": "2026-01-11T10:35:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2507,7 +2507,7 @@
     "status": "active",
     "created_at": "2026-01-11T10:20:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2555,7 +2555,7 @@
     "status": "active",
     "created_at": "2026-01-11T10:05:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2603,7 +2603,7 @@
     "status": "active",
     "created_at": "2026-01-11T09:50:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2651,7 +2651,7 @@
     "status": "active",
     "created_at": "2026-01-11T09:35:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2699,7 +2699,7 @@
     "status": "active",
     "created_at": "2026-01-11T09:20:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -2747,7 +2747,7 @@
     "status": "active",
     "created_at": "2026-01-11T09:05:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3019,8 +3019,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:40:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3035,8 +3035,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:35:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3051,8 +3051,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:30:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3067,8 +3067,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:25:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3083,8 +3083,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:20:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3099,8 +3099,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:15:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3115,8 +3115,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:10:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3131,8 +3131,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:05:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3147,8 +3147,8 @@
     "status": "active",
     "created_at": "2026-01-11T07:00:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3163,8 +3163,8 @@
     "status": "active",
     "created_at": "2026-01-11T06:55:00Z",
     "policy": {
-      "auto_clearing": true,
-      "can_be_intermediate": false
+      "auto_clearing": false,
+      "can_be_intermediate": true
     }
   },
   {
@@ -3179,7 +3179,7 @@
     "status": "active",
     "created_at": "2026-01-11T06:50:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3195,7 +3195,7 @@
     "status": "active",
     "created_at": "2026-01-11T06:45:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3211,7 +3211,7 @@
     "status": "active",
     "created_at": "2026-01-11T06:40:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3227,7 +3227,7 @@
     "status": "active",
     "created_at": "2026-01-11T06:15:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3243,7 +3243,7 @@
     "status": "active",
     "created_at": "2026-01-11T06:10:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3259,7 +3259,7 @@
     "status": "active",
     "created_at": "2026-01-11T06:05:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3275,7 +3275,7 @@
     "status": "active",
     "created_at": "2026-01-11T06:00:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3291,7 +3291,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:55:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3307,7 +3307,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:50:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3323,7 +3323,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:45:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3339,7 +3339,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:40:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3355,7 +3355,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:35:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3371,7 +3371,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:30:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3387,7 +3387,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:25:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3403,7 +3403,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:20:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3419,7 +3419,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:15:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3435,7 +3435,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:10:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3451,7 +3451,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:05:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3467,7 +3467,7 @@
     "status": "active",
     "created_at": "2026-01-11T05:00:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3483,7 +3483,7 @@
     "status": "active",
     "created_at": "2026-01-11T04:55:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3499,7 +3499,7 @@
     "status": "active",
     "created_at": "2026-01-11T04:50:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3515,7 +3515,7 @@
     "status": "active",
     "created_at": "2026-01-11T04:45:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3531,7 +3531,7 @@
     "status": "active",
     "created_at": "2026-01-11T04:40:00Z",
     "policy": {
-      "auto_clearing": true,
+      "auto_clearing": false,
       "can_be_intermediate": false
     }
   },
@@ -3546,6 +3546,550 @@
     "available": "49.00",
     "status": "active",
     "created_at": "2026-01-11T04:35:00Z",
+    "policy": {
+      "auto_clearing": false,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0045_cfc0641d",
+    "from_display_name": "Roman Motornyi (Engine Service)",
+    "to_display_name": "The Plyazh Family (Household)",
+    "limit": "1081.57",
+    "used": "25.21",
+    "available": "1056.36",
+    "status": "active",
+    "created_at": "2026-02-01T08:25:22Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0038_7c3c1046",
+    "from_display_name": "Svitlana Medyk (Nurse)",
+    "to_display_name": "The Vodiani Family (Household)",
+    "limit": "2367.00",
+    "used": "156.24",
+    "available": "2210.76",
+    "status": "active",
+    "created_at": "2026-02-01T06:51:25Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0042_f519f70a",
+    "from_display_name": "Roman Motornyi (Engine Service)",
+    "to_display_name": "The Dnipro Family (Household)",
+    "limit": "2046.02",
+    "used": "140.36",
+    "available": "1905.66",
+    "status": "active",
+    "created_at": "2026-02-01T22:22:32Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0037_de049695",
+    "from_display_name": "Anna Turystka (Tourism Guide)",
+    "to_display_name": "The Stavkovi Family (Household)",
+    "limit": "769.72",
+    "used": "12.27",
+    "available": "757.45",
+    "status": "active",
+    "created_at": "2026-02-01T20:57:24Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0027_afd9d5ab",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Olena Kuhnia (Catering)",
+    "to_display_name": "The Richkovi Family (Household)",
+    "limit": "1337.03",
+    "used": "109.91",
+    "available": "1227.12",
+    "status": "active",
+    "created_at": "2026-02-01T04:12:06Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0030_8a8042be",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "Ihor Pravo (Legal Advisor)",
+    "to_display_name": "The Zatoka Family (Household)",
+    "limit": "1169.99",
+    "used": "21.33",
+    "available": "1148.66",
+    "status": "active",
+    "created_at": "2026-02-01T21:58:17Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0040_b8ab03a8",
+    "from_display_name": "Viktor Veslo (Boat Mechanic)",
+    "to_display_name": "The Ozerni Family (Household)",
+    "limit": "1189.54",
+    "used": "64.92",
+    "available": "1124.62",
+    "status": "active",
+    "created_at": "2026-02-01T08:59:12Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0038_7c3c1046",
+    "from_display_name": "Natalia Seti (Net Repair)",
+    "to_display_name": "The Vodiani Family (Household)",
+    "limit": "1686.48",
+    "used": "65.31",
+    "available": "1621.17",
+    "status": "active",
+    "created_at": "2026-02-01T13:17:06Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Anna Turystka (Tourism Guide)",
+    "to_display_name": "The Richkovi Family (Household)",
+    "limit": "2142.98",
+    "used": "21.05",
+    "available": "2121.93",
+    "status": "active",
+    "created_at": "2026-02-01T13:10:59Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0028_4e114f5c",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "Dmytro Kholodny (Ice Supply)",
+    "to_display_name": "The Zatoka Family (Household)",
+    "limit": "957.91",
+    "used": "118.31",
+    "available": "839.60",
+    "status": "active",
+    "created_at": "2026-02-01T00:26:18Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0042_f519f70a",
+    "from_display_name": "Viktor Veslo (Boat Mechanic)",
+    "to_display_name": "The Dnipro Family (Household)",
+    "limit": "1965.36",
+    "used": "124.04",
+    "available": "1841.32",
+    "status": "active",
+    "created_at": "2026-02-01T16:03:45Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0045_cfc0641d",
+    "from_display_name": "Yana Rakhivna (Accountant)",
+    "to_display_name": "The Plyazh Family (Household)",
+    "limit": "2333.29",
+    "used": "83.61",
+    "available": "2249.68",
+    "status": "active",
+    "created_at": "2026-02-01T09:14:48Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0039_1a7389f7",
+    "from_display_name": "Svitlana Medyk (Nurse)",
+    "to_display_name": "The Richkovi Family (Household)",
+    "limit": "2301.40",
+    "used": "145.99",
+    "available": "2155.41",
+    "status": "active",
+    "created_at": "2026-02-01T19:51:18Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "Maksym Electro (Electrician)",
+    "to_display_name": "The Ruslo Family (Household)",
+    "limit": "1895.51",
+    "used": "184.65",
+    "available": "1710.86",
+    "status": "active",
+    "created_at": "2026-02-01T12:17:25Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0040_b8ab03a8",
+    "from_display_name": "Roman Motornyi (Engine Service)",
+    "to_display_name": "The Ozerni Family (Household)",
+    "limit": "2025.72",
+    "used": "172.72",
+    "available": "1853.00",
+    "status": "active",
+    "created_at": "2026-02-01T13:35:34Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0041_56e27d59",
+    "from_display_name": "Maksym Electro (Electrician)",
+    "to_display_name": "The Limany Family (Household)",
+    "limit": "1244.66",
+    "used": "114.34",
+    "available": "1130.32",
+    "status": "active",
+    "created_at": "2026-02-01T10:48:23Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0030_8a8042be",
+    "to": "PID_U0046_6df7ddce",
+    "from_display_name": "Ihor Pravo (Legal Advisor)",
+    "to_display_name": "The Khvylia Family (Household)",
+    "limit": "2438.04",
+    "used": "24.31",
+    "available": "2413.73",
+    "status": "active",
+    "created_at": "2026-02-01T03:58:45Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0042_f519f70a",
+    "from_display_name": "Svitlana Medyk (Nurse)",
+    "to_display_name": "The Dnipro Family (Household)",
+    "limit": "743.65",
+    "used": "55.82",
+    "available": "687.83",
+    "status": "active",
+    "created_at": "2026-02-01T02:44:32Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0036_3fcd1ce4",
+    "from_display_name": "Yana Rakhivna (Accountant)",
+    "to_display_name": "The Berehovy Family (Household)",
+    "limit": "1331.74",
+    "used": "105.19",
+    "available": "1226.55",
+    "status": "active",
+    "created_at": "2026-02-01T23:19:48Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0045_cfc0641d",
+    "from_display_name": "Anna Turystka (Tourism Guide)",
+    "to_display_name": "The Plyazh Family (Household)",
+    "limit": "928.36",
+    "used": "1.18",
+    "available": "927.18",
+    "status": "active",
+    "created_at": "2026-02-01T21:30:54Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0044_3188ea6c",
+    "from_display_name": "Maksym Electro (Electrician)",
+    "to_display_name": "The Zatoka Family (Household)",
+    "limit": "1827.64",
+    "used": "7.31",
+    "available": "1820.33",
+    "status": "active",
+    "created_at": "2026-02-01T15:58:08Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0041_56e27d59",
+    "from_display_name": "Natalia Seti (Net Repair)",
+    "to_display_name": "The Limany Family (Household)",
+    "limit": "1964.67",
+    "used": "30.27",
+    "available": "1934.40",
+    "status": "active",
+    "created_at": "2026-02-01T13:37:13Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0028_4e114f5c",
+    "to": "PID_U0047_0c2f577f",
+    "from_display_name": "Dmytro Kholodny (Ice Supply)",
+    "to_display_name": "The Pryliv Family (Household)",
+    "limit": "1365.30",
+    "used": "154.52",
+    "available": "1210.78",
+    "status": "active",
+    "created_at": "2026-02-01T12:48:26Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0048_aa66d130",
+    "from_display_name": "Yana Rakhivna (Accountant)",
+    "to_display_name": "The Ruslo Family (Household)",
+    "limit": "2405.36",
+    "used": "117.91",
+    "available": "2287.45",
+    "status": "active",
+    "created_at": "2026-02-01T11:18:46Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0026_11a25bfa",
+    "to": "PID_U0017_81af14c1",
+    "from_display_name": "Roman Motornyi (Engine Service)",
+    "to_display_name": "River View Restaurant",
+    "limit": "3648.12",
+    "used": "140.30",
+    "available": "3507.82",
+    "status": "active",
+    "created_at": "2026-02-01T22:46:54Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0030_8a8042be",
+    "to": "PID_U0018_1fe68e72",
+    "from_display_name": "Ihor Pravo (Legal Advisor)",
+    "to_display_name": "Marina Café",
+    "limit": "2734.82",
+    "used": "37.98",
+    "available": "2696.84",
+    "status": "active",
+    "created_at": "2026-02-01T14:17:58Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0032_c6ef3620",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "Maksym Electro (Electrician)",
+    "to_display_name": "Weekend Fish Market Stall",
+    "limit": "2546.93",
+    "used": "228.21",
+    "available": "2318.72",
+    "status": "active",
+    "created_at": "2026-02-01T07:17:26Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0025_736ae249",
+    "to": "PID_U0020_5c5581d4",
+    "from_display_name": "Natalia Seti (Net Repair)",
+    "to_display_name": "Fisherman's Supply Store",
+    "limit": "3302.07",
+    "used": "9.34",
+    "available": "3292.73",
+    "status": "active",
+    "created_at": "2026-02-01T15:07:26Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0027_afd9d5ab",
+    "to": "PID_U0019_be1e0823",
+    "from_display_name": "Olena Kuhnia (Catering)",
+    "to_display_name": "Town Grocery",
+    "limit": "3866.30",
+    "used": "65.52",
+    "available": "3800.78",
+    "status": "active",
+    "created_at": "2026-02-01T10:40:50Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0024_d5336898",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "Viktor Veslo (Boat Mechanic)",
+    "to_display_name": "Weekend Fish Market Stall",
+    "limit": "2030.32",
+    "used": "251.22",
+    "available": "1779.10",
+    "status": "active",
+    "created_at": "2026-02-01T04:05:49Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0033_6526afd1",
+    "to": "PID_U0022_98c47536",
+    "from_display_name": "Anna Turystka (Tourism Guide)",
+    "to_display_name": "Weekend Fish Market Stall",
+    "limit": "1906.70",
+    "used": "170.75",
+    "available": "1735.95",
+    "status": "active",
+    "created_at": "2026-02-01T22:14:27Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0028_4e114f5c",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "Dmytro Kholodny (Ice Supply)",
+    "to_display_name": "Cooperative Fish Counter",
+    "limit": "2645.63",
+    "used": "93.26",
+    "available": "2552.37",
+    "status": "active",
+    "created_at": "2026-02-01T14:35:41Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0029_ec48c90d",
+    "to": "PID_U0019_be1e0823",
+    "from_display_name": "Yana Rakhivna (Accountant)",
+    "to_display_name": "Town Grocery",
+    "limit": "3976.05",
+    "used": "254.38",
+    "available": "3721.67",
+    "status": "active",
+    "created_at": "2026-02-01T12:46:32Z",
+    "policy": {
+      "auto_clearing": true,
+      "can_be_intermediate": false
+    }
+  },
+  {
+    "equivalent": "UAH",
+    "from": "PID_U0031_28b7bc6f",
+    "to": "PID_U0023_36fbeee7",
+    "from_display_name": "Svitlana Medyk (Nurse)",
+    "to_display_name": "Cooperative Fish Counter",
+    "limit": "3275.30",
+    "used": "156.86",
+    "available": "3118.44",
+    "status": "active",
+    "created_at": "2026-02-01T12:48:38Z",
     "policy": {
       "auto_clearing": true,
       "can_be_intermediate": false

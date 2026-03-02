@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import type { WindowInstance } from '../composables/windowManager/types'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 type Props = {
   instance: WindowInstance
   title?: string
   /** MVP: allow migrated windows to disable the generic header to avoid double-headers. */
   showHeader?: boolean
+  /** Option B: WM owns geometry only; visuals stay in legacy components. */
+  frameless?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: undefined,
   showHeader: true,
+  frameless: false,
 })
 
 defineOptions({ inheritAttrs: false })
@@ -23,6 +26,24 @@ const emit = defineEmits<{
 }>()
 
 const shellRef = ref<HTMLElement | null>(null)
+
+const shellStyle = computed(() => {
+  const base = {
+    left: props.instance.rect.left + 'px',
+    top: props.instance.rect.top + 'px',
+    zIndex: String(props.instance.z),
+  } as Record<string, string>
+
+  if (props.frameless) return base
+
+  return {
+    ...base,
+    width: props.instance.rect.width + 'px',
+    height: props.instance.rect.height + 'px',
+  }
+})
+
+const effectiveShowHeader = computed(() => props.showHeader && !props.frameless)
 
 let ro: ResizeObserver | null = null
 
@@ -87,20 +108,14 @@ function onCloseClick(ev: MouseEvent) {
 <template>
   <div
     ref="shellRef"
-    class="ws-shell"
+    :class="['ws-shell', { 'ws-shell--framed': !props.frameless }]"
     :data-win-id="String(props.instance.id)"
     :data-win-type="props.instance.type"
     :data-win-active="props.instance.active ? '1' : '0'"
-    :style="{
-      left: props.instance.rect.left + 'px',
-      top: props.instance.rect.top + 'px',
-      width: props.instance.rect.width + 'px',
-      height: props.instance.rect.height + 'px',
-      zIndex: String(props.instance.z),
-    }"
+    :style="shellStyle"
     @pointerdown="onPointerDown"
   >
-    <div v-if="props.showHeader" class="ws-header" :data-title="props.title ? '1' : '0'">
+    <div v-if="effectiveShowHeader" class="ws-header" :data-title="props.title ? '1' : '0'">
       <div class="ws-title">{{ props.title ?? '' }}</div>
       <button class="ws-close" type="button" aria-label="Close window" @click="onCloseClick">×</button>
     </div>
@@ -114,18 +129,19 @@ function onCloseClick(ev: MouseEvent) {
 <style scoped>
 .ws-shell {
   position: absolute;
-  display: flex;
-  flex-direction: column;
-  border-radius: var(--ds-radius-md, 10px);
   box-sizing: border-box;
   /*
-   * Max-size safety: keep window within the WM layer so `.ws-body { overflow:auto }` works
-   * when content grows beyond viewport.
-   *
-   * NOTE: inline `width/height` (from rect) stays the source of truth; `max-*` only clamps.
+   * Max-size safety: keep window within the WM layer.
+   * NOTE: in frameless mode we rely on intrinsic content sizing.
    */
   max-width: calc(100% - 24px);
   max-height: calc(100% - 24px);
+}
+
+.ws-shell--framed {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ds-radius-md, 10px);
   overflow: hidden;
 
   /* DS tokens only (no raw colors/shadows): see designSystem.tokens.css + designSystem.overlays.css */
@@ -212,6 +228,10 @@ function onCloseClick(ev: MouseEvent) {
 }
 
 .ws-body {
+  /* Frameless mode: do not impose scrolling/clipping; legacy panels handle it. */
+}
+
+.ws-shell--framed .ws-body {
   flex: 1;
   min-height: 0;
   overflow: auto;

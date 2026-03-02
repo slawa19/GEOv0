@@ -8,7 +8,7 @@ type Props = {
   /**
    * WindowManager integration:
    * - legacy: panel is a standalone overlay and self-positions via anchor+hostEl
-   * - wm: panel is rendered inside WindowShell; WM owns geometry and header
+   * - wm: panel is rendered inside WindowShell; WM owns geometry
    */
   renderMode?: 'legacy' | 'wm'
 
@@ -50,17 +50,12 @@ const rootStyle = computed(() => {
       top: 'auto',
       right: 'auto',
       zIndex: 'auto',
-      width: '100%',
-      height: '100%',
-      maxWidth: 'none',
-      borderRadius: '0',
     } as const
   }
   return anchorPositionStyle.value
 })
 
 const rootClass = computed(() => {
-  if (props.renderMode === 'wm') return 'cp-wm'
   return 'ds-ov-panel ds-panel ds-panel--elevated'
 })
 
@@ -80,18 +75,23 @@ const isRunning = computed(() => props.phase === 'clearing-running')
 const isPreview = computed(() => props.phase === 'clearing-preview')
 const isConfirm = computed(() => props.phase === 'confirm-clearing')
 
+const open = computed(() => {
+  if (props.renderMode === 'wm') return true
+  return isRunning.value || isPreview.value || isConfirm.value
+})
+
 const busyUi = computed(() => props.busy || isRunning.value)
 </script>
 
 <template>
   <div
-    v-if="phase === 'confirm-clearing' || phase === 'clearing-preview' || phase === 'clearing-running'"
+    v-if="open"
     :class="rootClass"
     :style="rootStyle"
     data-testid="clearing-panel"
     aria-label="Clearing panel"
   >
-    <div v-if="renderMode !== 'wm'" class="ds-panel__header">
+    <div class="ds-panel__header">
       <div class="ds-h2">
         <span v-if="isConfirm">Run clearing</span>
         <span v-else-if="isPreview">Clearing preview</span>
@@ -156,13 +156,6 @@ const busyUi = computed(() => props.busy || isRunning.value)
 </template>
 
 <style scoped>
-.cp-wm {
-  /* In WM mode WindowShell owns the surface; keep panel as pure content. */
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-}
-
 .cp-equivalent-row {
   margin-bottom: 2px;
 }

@@ -108,6 +108,7 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
     pruneActiveNodes: overlayState.pruneActiveNodes,
 
     pushFloatingLabel: overlayState.pushFloatingLabel,
+    pushClearingAmountOverlay: overlayState.pushClearingAmountOverlay,
     pruneFloatingLabels: overlayState.pruneFloatingLabels,
 
     resetOverlays: overlayState.resetOverlays,
