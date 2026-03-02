@@ -35,6 +35,86 @@ function setEq(a: Set<string> | undefined, b: Set<string>) {
 }
 
 describe('ManualPaymentPanel', () => {
+  it('MP-3: fromParticipants always includes selected fromPid even if filtered out by outgoing capacity', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'picking-payment-to',
+      fromPid: 'alice' as string | null,
+      toPid: null as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null as any,
+    })
+
+    // Outgoing candidates are derived from tl.to_pid for active TLs with available > 0.
+    // Provide a TL that makes only 'carol' eligible, so 'alice' would be filtered out
+    // without the "always include selected" rule.
+    const trustlines = [
+      {
+        status: 'active',
+        available: '10',
+        to_pid: 'carol',
+      },
+    ]
+
+    const app = createApp({
+      render: () =>
+        h(ManualPaymentPanel as any, {
+          phase: 'picking-payment-to',
+          state,
+
+          unit: 'UAH',
+          availableCapacity: null,
+
+          trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
+          paymentToTargetIds: undefined,
+          trustlines,
+
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'carol', name: 'Carol' },
+          ],
+
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+
+          busy: false,
+          canSendPayment: false,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+    await nextTick()
+
+    const fromSel = host.querySelector('#mp-from') as HTMLSelectElement | null
+    expect(fromSel).toBeTruthy()
+
+    const vals = valuesSet(fromSel as HTMLSelectElement)
+    expect(vals.has('alice')).toBe(true)
+    expect(vals.has('carol')).toBe(true)
+
+    // Ensure the selected participant is near the top (after the placeholder option).
+    const opts = Array.from((fromSel as HTMLSelectElement).querySelectorAll('option')).map((o) =>
+      (o as HTMLOptionElement).value,
+    )
+    const firstReal = opts.find((v) => v !== '')
+    expect(firstReal).toBe('alice')
+
+    app.unmount()
+    host.remove()
+  })
+
   it('AC-A11Y-1/AC-A11Y-2: Amount aria-describedby=mp-amount-help + To aria-describedby=mp-to-help (help elements exist)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

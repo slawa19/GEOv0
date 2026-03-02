@@ -34,7 +34,19 @@ const shellStyle = computed(() => {
     zIndex: String(props.instance.z),
   } as Record<string, string>
 
-  if (props.frameless) return base
+  if (props.frameless) {
+    // In frameless mode only position is WM-controlled (no explicit width/height).
+    // Apply constraint minimums to prevent the shell from rendering as a tiny loading stub
+    // before content populates (e.g. interact-panel before participants arrive).
+    // This reduces the visual size delta between loading-stub and loaded states,
+    // making the transition less jarring without hardcoding panel-specific values.
+    const c = props.instance.constraints
+    return {
+      ...base,
+      minWidth: c.minWidth + 'px',
+      minHeight: c.minHeight + 'px',
+    }
+  }
 
   return {
     ...base,

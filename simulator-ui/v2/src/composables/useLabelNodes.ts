@@ -18,6 +18,9 @@ type UseLabelNodesDeps = {
   getCameraZoom: () => number
   sizeForNode: (n: LayoutNode) => { w: number; h: number }
   fxColorForNode: (nodeId: string, fallback: string) => string
+
+  /** When provided and returns true, the label of the selected node is hidden (NodeCardOverlay is open). */
+  isNodeCardOpen?: () => boolean
 }
 
 type UseLabelNodesReturn = {
@@ -48,8 +51,12 @@ export function useLabelNodes(deps: UseLabelNodesDeps): UseLabelNodesReturn {
     const max = 28
     const out: LabelNode[] = []
 
+    const cardOpen = deps.isNodeCardOpen?.() ?? false
+
     for (const id of Array.from(ids)) {
       if (out.length >= max) break
+      // Hide the label of the selected node when its card overlay is open.
+      if (cardOpen && id === selectedId) continue
 
       const ln = deps.getLayoutNodeById(id)
       if (!ln) continue

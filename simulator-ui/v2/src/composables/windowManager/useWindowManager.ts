@@ -145,12 +145,15 @@ export function useWindowManager(): WindowManagerApi {
       case 'interact-panel': {
         const d = data as WindowDataByType['interact-panel']
         // Audit fix C-1: trustline preferredWidth MUST be 380.
+        // IMPORTANT: payment/clearing preferredWidth MUST match `.ds-ov-panel` max-width (560px),
+        // otherwise WindowShell will render with an incorrect first-frame estimate and then visibly
+        // jump after the first ResizeObserver measurement + reclamp.
         const preferredWidth =
           d.panel === 'trustline'
             ? 380
             : d.panel === 'payment'
-              ? 420
-              : 480
+              ? 560
+              : 560
 
         return {
           minWidth: 320,
@@ -236,17 +239,38 @@ export function useWindowManager(): WindowManagerApi {
     const maxLeft = Math.max(pad, vp.width - w - pad)
     const maxTop = Math.max(pad, vp.height - h - pad)
 
-    // Clamp into viewport bounds.
-    win.rect.left = clamp(win.rect.left, pad, maxLeft)
-    win.rect.top = clamp(win.rect.top, pad, maxTop)
+    if (!win.measured) {
+      // Initial placement (estimated size): establish a clean snap-aligned position.
+      win.rect.left = clamp(win.rect.left, pad, maxLeft)
+      win.rect.top = clamp(win.rect.top, pad, maxTop)
 
-    // Snap to 8px grid.
-    win.rect.left = snap8(win.rect.left)
-    win.rect.top = snap8(win.rect.top)
+      // Snap to 8px grid.
+      win.rect.left = snap8(win.rect.left)
+      win.rect.top = snap8(win.rect.top)
 
-    // Re-clamp after snapping (important when viewport < window size).
-    win.rect.left = clamp(win.rect.left, pad, maxLeft)
-    win.rect.top = clamp(win.rect.top, pad, maxTop)
+      // Re-clamp after snapping (important when viewport < window size).
+      win.rect.left = clamp(win.rect.left, pad, maxLeft)
+      win.rect.top = clamp(win.rect.top, pad, maxTop)
+    } else {
+      // Post-measurement reclamp: preserve position unless the window has drifted out of
+      // viewport bounds (e.g. due to viewport resize or content growth pushing it out-of-bounds).
+      //
+      // IMPORTANT: do NOT unconditionally re-apply snap8 here.
+      // When measured size changes (e.g. interact-panel UPDATING→loaded: participants list
+      // appears, panel grows from ~100px to ~280px), maxLeft/maxTop shift, and snap8 would
+      // produce a DIFFERENT clamped value → visible position jump ("second window" artefact).
+      // Fix: only re-clamp (+ snap) when window already overflows viewport bounds.
+      const clampedLeft = clamp(win.rect.left, pad, maxLeft)
+      if (clampedLeft !== win.rect.left) {
+        win.rect.left = snap8(clampedLeft)
+        win.rect.left = clamp(win.rect.left, pad, maxLeft)
+      }
+      const clampedTop = clamp(win.rect.top, pad, maxTop)
+      if (clampedTop !== win.rect.top) {
+        win.rect.top = snap8(clampedTop)
+        win.rect.top = clamp(win.rect.top, pad, maxTop)
+      }
+    }
 
     // Update rect dimensions from measured.
     if (win.measured) {

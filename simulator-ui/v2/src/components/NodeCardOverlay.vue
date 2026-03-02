@@ -40,7 +40,6 @@ type Props = {
   onInteractSendPayment?: (fromPid: string) => void
   onInteractNewTrustline?: (fromPid: string) => void
   onInteractEditTrustline?: (fromPid: string, toPid: string) => void
-  onInteractRunClearing?: () => void
 }
 
 const emit = defineEmits<{ close: [] }>()
@@ -193,6 +192,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               class="ds-btn ds-btn--primary ds-btn--sm"
               type="button"
               :disabled="!!interactBusy"
+              data-testid="node-card-send-payment"
               @click="onInteractSendPayment?.(node.id)"
             >
               💸 Send Payment
@@ -201,18 +201,10 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               class="ds-btn ds-btn--secondary ds-btn--sm"
               type="button"
               :disabled="!!interactBusy"
+              data-testid="node-card-new-trustline"
               @click="onInteractNewTrustline?.(node.id)"
             >
               ＋ New Trustline
-            </button>
-            <button
-              class="ds-btn ds-btn--secondary ds-btn--sm"
-              type="button"
-              :disabled="!!interactBusy"
-              title="Run clearing (global)"
-              @click="onInteractRunClearing?.()"
-            >
-              🔄 Run Clearing
             </button>
           </div>
 
@@ -293,6 +285,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 /* Trustlines list */
 .nco-trustlines {
   margin-top: 1px;
+  max-height: max(140px, calc(50vh - 120px));
+  overflow-y: auto;
 }
 
 /* Group heading: OUT → N / IN ← N */

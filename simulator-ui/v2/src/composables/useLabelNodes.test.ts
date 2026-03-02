@@ -58,4 +58,45 @@ describe('useLabelNodes', () => {
     const ids = labelNodes.value.map((n) => n.id).sort()
     expect(ids).toEqual(['A', 'B', 'C'])
   })
+
+  it('hides selected node label when isNodeCardOpen returns true', () => {
+    const { labelNodes } = useLabelNodes({
+      isTestMode: () => false,
+      getLabelsLod: () => 'neighbors' as any,
+      getSnapshot: () => snapshot,
+      getSelectedNodeId: () => 'A',
+      getLayoutLinks: () => layoutLinks,
+      getLayoutNodeById: (id) => layoutNodes.find((n: any) => n.id === id) ?? null,
+      getNodeById: (id) => snapshot.nodes.find((n: any) => n.id === id) ?? null,
+      getCameraZoom: () => 1,
+      sizeForNode: () => ({ w: 20, h: 20 }),
+      fxColorForNode: () => '#fff',
+      isNodeCardOpen: () => true,
+    })
+
+    const ids = labelNodes.value.map((n) => n.id)
+    expect(ids).not.toContain('A')
+    // соседи B и C должны присутствовать
+    expect(ids).toContain('B')
+    expect(ids).toContain('C')
+  })
+
+  it('shows selected node label when isNodeCardOpen returns false', () => {
+    const { labelNodes } = useLabelNodes({
+      isTestMode: () => false,
+      getLabelsLod: () => 'neighbors' as any,
+      getSnapshot: () => snapshot,
+      getSelectedNodeId: () => 'A',
+      getLayoutLinks: () => layoutLinks,
+      getLayoutNodeById: (id) => layoutNodes.find((n: any) => n.id === id) ?? null,
+      getNodeById: (id) => snapshot.nodes.find((n: any) => n.id === id) ?? null,
+      getCameraZoom: () => 1,
+      sizeForNode: () => ({ w: 20, h: 20 }),
+      fxColorForNode: () => '#fff',
+      isNodeCardOpen: () => false,
+    })
+
+    const ids = labelNodes.value.map((n) => n.id)
+    expect(ids).toContain('A')
+  })
 })

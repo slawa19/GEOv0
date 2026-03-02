@@ -28,7 +28,11 @@ export function useInteractMode(opts: {
 
   // Phase transitions
   startPaymentFlow: () => void
+  /** Atomically start payment flow with pre-filled FROM (skips picking-payment-from phase). */
+  startPaymentFlowWithFrom: (fromPid: string) => void
   startTrustlineFlow: () => void
+  /** Atomically start trustline flow with pre-filled FROM (skips picking-trustline-from phase). */
+  startTrustlineFlowWithFrom: (fromPid: string) => void
   startClearingFlow: () => void
   selectNode: (nodeId: string) => void
   selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => void
@@ -378,10 +382,33 @@ export function useInteractMode(opts: {
     prefetchPaymentTargetsForCurrentFrom()
   }
 
+  function startPaymentFlowWithFrom(fromPid: string) {
+    if (busyRef.value) return
+    if (state.phase !== 'idle') return
+    fsm.startPaymentFlowWithFrom(fromPid)
+    void refreshParticipants()
+
+    // MP-6a: best-effort prefetch to make `availableTargetIds` tri-state reliable.
+    void refreshTrustlines({ force: true })
+
+    // Phase 2.5: payment-targets prefetch — From is already known.
+    prefetchPaymentTargetsForCurrentFrom()
+  }
+
   function startTrustlineFlow() {
     if (busyRef.value) return
     if (state.phase !== 'idle') return
     fsm.startTrustlineFlow()
+    void refreshParticipants()
+
+    // Best-effort prefetch for trustline dropdowns / more up-to-date limits.
+    void refreshTrustlines()
+  }
+
+  function startTrustlineFlowWithFrom(fromPid: string) {
+    if (busyRef.value) return
+    if (state.phase !== 'idle') return
+    fsm.startTrustlineFlowWithFrom(fromPid)
     void refreshParticipants()
 
     // Best-effort prefetch for trustline dropdowns / more up-to-date limits.
@@ -631,7 +658,9 @@ export function useInteractMode(opts: {
     successMessage,
 
     startPaymentFlow,
+    startPaymentFlowWithFrom,
     startTrustlineFlow,
+    startTrustlineFlowWithFrom,
     startClearingFlow,
     selectNode,
     selectEdge,

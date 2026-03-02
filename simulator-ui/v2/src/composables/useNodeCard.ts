@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import type { GraphNode } from '../types'
 import type { Point, LayoutLinkLike, LayoutNodeWithId } from '../types/layout'
 import { clamp } from '../utils/math'
@@ -22,6 +22,11 @@ type UseNodeCardReturn = {
   nodeCardStyle: ComputedRef<{ left?: string; top?: string; display?: string }>
   /** Screen-space center of the selected node (host-relative). null when no node selected. */
   selectedNodeScreenCenter: ComputedRef<Point | null>
+  /**
+   * Ref to the card DOM element. Bind via `:ref="(el) => { cardRef.value = el?.$el ?? el }"` on
+   * the legacy NodeCardOverlay component. Used for post-render reclamp in legacy (non-WM) mode.
+   */
+  cardRef: Ref<HTMLElement | null>
 }
 
 export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
@@ -80,7 +85,13 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     return counts
   }
 
-  const nodeCardStyle = computed(() => {
+  /** DOM ref for the legacy card element — used by the nextTick reclamp pass. */
+  const cardRef = ref<HTMLElement | null>(null)
+
+  /** Offset applied after the real DOM dimensions are read (second pass). */
+  const _reclamp = ref({ dx: 0, dy: 0 })
+
+  const _baseNodeCardStyle = computed(() => {
     if (__USE_WINDOW_MANAGER) {
       // WM drives geometry. Keep a minimal style so callers can still bind `:style` safely.
       return { display: 'block' }
@@ -208,6 +219,50 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     return { left: `${best.t.x}px`, top: `${best.t.y}px` }
   })
 
+  /**
+   * Final nodeCardStyle: base position + post-render reclamp correction.
+   * The reclamp correction is reset to zero each time the base position changes,
+   * then re-computed via nextTick after the DOM is updated.
+   */
+  const nodeCardStyle = computed(() => {
+    const base = _baseNodeCardStyle.value
+    const { dx, dy } = _reclamp.value
+    if (!('left' in base) || !base.left || !base.top || (dx === 0 && dy === 0)) return base
+    return {
+      ...base,
+      left: `${parseFloat(base.left) + dx}px`,
+      top: `${parseFloat(base.top) + dy}px`,
+    }
+  })
+
+  /**
+   * Watch the base position. On each change:
+   * 1. Reset reclamp so the card renders at the computed position first.
+   * 2. On nextTick read actual getBoundingClientRect() and apply correction if needed.
+   */
+  watch(_baseNodeCardStyle, () => {
+    // Reset reclamp offset for the new position.
+    _reclamp.value = { dx: 0, dy: 0 }
+    if (__USE_WINDOW_MANAGER) return
+    nextTick(() => {
+      const el = cardRef.value
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const pad = 12
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      let dx = 0
+      let dy = 0
+      if (r.right > vw - pad) dx = vw - pad - r.right
+      if (r.bottom > vh - pad) dy = vh - pad - r.bottom
+      if (r.left < pad) dx = pad - r.left
+      if (r.top < pad) dy = pad - r.top
+      if (dx !== 0 || dy !== 0) {
+        _reclamp.value = { dx, dy }
+      }
+    })
+  })
+
   /** Host-relative screen center of the selected node. */
   const selectedNodeScreenCenter = computed<Point | null>(() => {
     if (!deps.hostEl.value || !selectedNode.value) return null
@@ -217,5 +272,5 @@ export function useNodeCard(deps: UseNodeCardDeps): UseNodeCardReturn {
     return { x: p.x, y: p.y }
   })
 
-  return { selectedNode, nodeCardStyle, selectedNodeScreenCenter }
+  return { selectedNode, nodeCardStyle, selectedNodeScreenCenter, cardRef }
 }

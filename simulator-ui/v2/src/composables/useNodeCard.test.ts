@@ -72,4 +72,40 @@ describe('useNodeCard', () => {
     expect(typeof s.left).toBe('string')
     expect(typeof s.top).toBe('string')
   })
+
+  it('cardRef is exported and initially null', () => {
+    const api = withSetup(() => {
+      const selectedNodeId = ref<string | null>(null)
+
+      return useNodeCard({
+        hostEl: ref(null),
+        selectedNodeId,
+        getNodeById: () => null,
+        getLayoutNodeById: () => null,
+        getNodeScreenSize: () => ({ w: 10, h: 10 }),
+        worldToScreen: (x, y) => ({ x, y }),
+      })
+    }, { wmEnabled: false })
+
+    // cardRef должен быть Ref и изначально равен null
+    expect('cardRef' in api).toBe(true)
+    expect(api.cardRef.value).toBeNull()
+  })
+
+  it('nodeCardStyle returns { display: block } in WM mode (reclamp не применяется)', () => {
+    const api = withSetup(() => {
+      const selectedNodeId = ref<string | null>('A')
+
+      return useNodeCard({
+        hostEl: ref(null),
+        selectedNodeId,
+        getNodeById: (id) => (id ? ({ id } as any) : null),
+        getLayoutNodeById: (id) => ({ id, __x: 10, __y: 20 }),
+        getNodeScreenSize: () => ({ w: 10, h: 10 }),
+        worldToScreen: (x, y) => ({ x, y }),
+      })
+    }, { wmEnabled: true })
+
+    expect(api.nodeCardStyle.value).toEqual({ display: 'block' })
+  })
 })

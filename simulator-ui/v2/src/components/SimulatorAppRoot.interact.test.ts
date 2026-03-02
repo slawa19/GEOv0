@@ -93,19 +93,36 @@ vi.mock('../composables/useSimulatorApp', () => {
 
        const cancel = vi.fn()
        ;(globalThis as any).__GEO_TEST_INTERACT_CANCEL = cancel
-       // Simulate real FSM cleanup: cancel clears edgeAnchor (this is important for
-       // Step 4 anchor propagation tests: trustline(edge popup) → payment must keep anchor).
+       // Simulate real FSM cleanup: cancel clears interact state.
+       // IMPORTANT: edgeAnchor reset is important for Step 4 anchor propagation tests:
+       // trustline(edge popup) → payment must keep anchor.
        cancel.mockImplementation(() => {
          interactState.edgeAnchor = null as any
+         interactState.fromPid = null as any
+         interactState.toPid = null as any
+         interactState.initiatedWithPrefilledFrom = false as any
+         interactState.selectedEdgeKey = null as any
          phase.value = 'idle'
        })
 
        // Interact-mode FSM stub: make root integration tests able to assert that
        // panels become active and confirm-step UI renders without relying on timers.
        const startPaymentFlow = vi.fn(() => {
+         const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+         if (st) st.initiatedWithPrefilledFrom = false
          phase.value = 'picking-payment-from'
        })
        ;(globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW = startPaymentFlow
+
+       const startPaymentFlowWithFrom = vi.fn((fromPid: string) => {
+         const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+         if (st) {
+           st.fromPid = fromPid
+           st.initiatedWithPrefilledFrom = true
+         }
+         phase.value = 'picking-payment-to'
+       })
+       ;(globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM = startPaymentFlowWithFrom
 
        const startClearingFlow = vi.fn(() => {
          phase.value = 'confirm-clearing'
@@ -128,6 +145,25 @@ vi.mock('../composables/useSimulatorApp', () => {
          phase.value = pid ? 'confirm-payment' : 'picking-payment-to'
        })
        ;(globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID = setPaymentToPid
+
+       const setTrustlineFromPid = vi.fn((pid: string | null) => {
+         const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+         if (st) st.fromPid = pid
+         phase.value = pid ? 'picking-trustline-to' : 'picking-trustline-from'
+       })
+       ;(globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID = setTrustlineFromPid
+
+       const setTrustlineToPid = vi.fn((pid: string | null) => {
+         const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+         if (st) st.toPid = pid
+         // Minimal FSM-like behavior for back-step tests.
+         if (!pid) {
+           phase.value = 'picking-trustline-to'
+           return
+         }
+         phase.value = 'editing-trustline'
+       })
+       ;(globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID = setTrustlineToPid
 
        const confirmTrustlineClose = vi.fn(async () => undefined)
        ;(globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE = confirmTrustlineClose
@@ -153,6 +189,7 @@ vi.mock('../composables/useSimulatorApp', () => {
       const interactState = reactive({
         fromPid: 'alice',
         toPid: 'bob',
+         initiatedWithPrefilledFrom: false,
         selectedEdgeKey: null as string | null,
         edgeAnchor: { x: 10, y: 10 },
         error: '',
@@ -273,15 +310,26 @@ vi.mock('../composables/useSimulatorApp', () => {
 
             setPaymentFromPid,
             setPaymentToPid,
-             setTrustlineFromPid: vi.fn(),
-             setTrustlineToPid: vi.fn(),
+              setTrustlineFromPid,
+              setTrustlineToPid,
              selectTrustline: vi.fn(),
 
              startPaymentFlow: startPaymentFlow,
-             startTrustlineFlow: vi.fn(() => {
-               phase.value = 'picking-trustline-from'
-             }),
-             startClearingFlow: startClearingFlow,
+             startPaymentFlowWithFrom,
+              startTrustlineFlow: vi.fn(() => {
+                 const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+                 if (st) st.initiatedWithPrefilledFrom = false
+                phase.value = 'picking-trustline-from'
+              }),
+              startTrustlineFlowWithFrom: vi.fn((fromPid: string) => {
+                const st = (globalThis as any).__GEO_TEST_INTERACT_STATE
+                 if (st) {
+                   st.fromPid = fromPid
+                   st.initiatedWithPrefilledFrom = true
+                 }
+                phase.value = 'picking-trustline-to'
+              }),
+              startClearingFlow: startClearingFlow,
              confirmPayment: vi.fn(async () => undefined),
              confirmTrustlineCreate: vi.fn(async () => undefined),
              confirmTrustlineUpdate: vi.fn(async () => undefined),
@@ -901,15 +949,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       // Window must be closed...
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
-      // ...but flow MUST NOT be cancelled and anchor must remain.
-      expect(cancel).not.toHaveBeenCalled()
+      // Option C: outside click MUST cancel the flow too.
+      expect(cancel).toHaveBeenCalledTimes(1)
       const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
-      expect(st?.edgeAnchor).toBeTruthy()
-
-      // Suppression must prevent immediate re-open while anchor stays the same.
-      await nextTick()
-      await nextTick()
-      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+      expect(st?.edgeAnchor).toBeFalsy()
     } finally {
       app.unmount()
       host.remove()
@@ -921,7 +964,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: outside-click closes topmost/active inspector via WM (node-card) and does not close interact-panel', async () => {
+  it('wm=1: outside-click closes both inspector (node-card) and interact-panel (Option C)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -968,7 +1011,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(0)
 
       // Interact panel must stay.
-      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(1)
+      // Option C: outside click closes everything (interact + inspector).
+      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(0)
     } finally {
       app.unmount()
       host.remove()
@@ -1264,6 +1308,308 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('wm=1: ESC on picking-payment-to closes when initiatedWithPrefilledFrom=true (NodeCard)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.initiatedWithPrefilledFrom = true
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+      expect(setFrom).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      // Window closes via WM, which calls onClose → cancel().
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(setFrom).not.toHaveBeenCalledWith(null)
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: ESC on picking-payment-to steps back when initiatedWithPrefilledFrom=false (ActionBar)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.initiatedWithPrefilledFrom = false
+      await nextTick()
+      await nextTick()
+
+      const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF as Ref<string>
+      expect(phaseRef).toBeTruthy()
+      phaseRef.value = 'picking-payment-to'
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+      expect(setFrom).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      // Step-back consumes ESC; window stays open.
+      expect(cancel).toHaveBeenCalledTimes(0)
+      expect(setFrom).toHaveBeenCalledWith(null)
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+      expect(phaseRef.value).toBe('picking-payment-from')
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      delete (globalThis as any).__GEO_TEST_PHASE_REF
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: EdgeDetail payment confirm ESC clears TO, then closes on 2nd ESC (prefilled)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.toPid = 'bob'
+      st.initiatedWithPrefilledFrom = true
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setTo = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+      expect(setTo).toBeTruthy()
+      expect(setFrom).toBeTruthy()
+
+      // ESC #1: confirm → picking-to
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(setTo).toHaveBeenCalledWith(null)
+      expect(cancel).toHaveBeenCalledTimes(0)
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+
+      // ESC #2: picking-to + prefilled => close
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(setFrom).not.toHaveBeenCalledWith(null)
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: Trustline picking-to closes when initiatedWithPrefilledFrom=true (NodeCard)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-trustline-to'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.initiatedWithPrefilledFrom = true
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+      expect(setFrom).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(setFrom).not.toHaveBeenCalledWith(null)
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: Trustline picking-to steps back when initiatedWithPrefilledFrom=false (ActionBar)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-trustline-to'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.initiatedWithPrefilledFrom = false
+      await nextTick()
+      await nextTick()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+      expect(setFrom).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(cancel).toHaveBeenCalledTimes(0)
+      expect(setFrom).toHaveBeenCalledWith(null)
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('wm=1: Trustline edit ESC clears TO and stays open, then closes on 2nd ESC (prefilled)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.toPid = 'bob'
+      st.initiatedWithPrefilledFrom = true
+      await nextTick()
+      await nextTick()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setTo = (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+      expect(setTo).toBeTruthy()
+
+      // ESC #1: editing → picking-to (clear TO)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+      expect(setTo).toHaveBeenCalledWith(null)
+      expect(cancel).toHaveBeenCalledTimes(0)
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
+
+      // ESC #2: picking-to + prefilled => close
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('canvas shows crosshair cursor in interact picking phases', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-from'
     setUrl('/?mode=real&ui=interact&wm=0')
@@ -1385,14 +1731,14 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     await nextTick()
 
     const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
-    const startPaymentFlow = (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW as ReturnType<typeof vi.fn>
-    const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID as ReturnType<typeof vi.fn>
     const setTo = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID as ReturnType<typeof vi.fn>
+    const startPaymentFlowWithFrom = (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM as ReturnType<typeof vi.fn>
 
     expect(cancel).toHaveBeenCalledTimes(1)
-    expect(startPaymentFlow).toHaveBeenCalledTimes(1)
-    // trustline alice→bob => payment bob→alice
-    expect(setFrom).toHaveBeenCalledWith('bob')
+    // EdgeDetailPopup Send Payment: must start payment atomically with pre-filled FROM.
+    // trustline alice→bob => payment FROM=bob, TO=alice
+    expect(startPaymentFlowWithFrom).toHaveBeenCalledTimes(1)
+    expect(startPaymentFlowWithFrom).toHaveBeenCalledWith('bob')
     expect(setTo).toHaveBeenCalledWith('alice')
 
     // Manual Payment panel should be active (root-level E2E wiring), and confirm flow should be reached.
@@ -1408,8 +1754,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     host.remove()
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
-    delete (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW
-    delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID
+    delete (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM
     delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID
   })
 
@@ -1545,7 +1890,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('NodeCardOverlay: clicking "Run Clearing" calls interact.mode.startClearingFlow() (wiring)', async () => {
+  it('NodeCardOverlay: clicking "Send Payment" starts payment flow and shows ManualPaymentPanel (wiring)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -1565,24 +1910,82 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     app.mount(host)
     await nextTick()
 
-    const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Run Clearing')) as
-      | HTMLButtonElement
-      | undefined
+    const card = host.querySelector('.ds-ov-node-card') as HTMLElement | null
+    expect(card).toBeTruthy()
+
+    const btn = card!.querySelector('[data-testid="node-card-send-payment"]') as HTMLButtonElement | null
     expect(btn).toBeTruthy()
 
     btn?.click()
     await nextTick()
 
-    const startClearing = (globalThis as any).__GEO_TEST_INTERACT_START_CLEARING_FLOW as ReturnType<typeof vi.fn>
-    expect(startClearing).toBeTruthy()
-    expect(startClearing).toHaveBeenCalledTimes(1)
+    const startPaymentFlowWithFrom = (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM as ReturnType<typeof vi.fn>
+    expect(startPaymentFlowWithFrom).toBeTruthy()
+    expect(startPaymentFlowWithFrom).toHaveBeenCalledTimes(1)
+    expect(startPaymentFlowWithFrom).toHaveBeenCalledWith('bob')
+
+    expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
 
     app.unmount()
     host.remove()
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
     delete (globalThis as any).__GEO_TEST_SELECTED_NODE
-    delete (globalThis as any).__GEO_TEST_INTERACT_START_CLEARING_FLOW
+    delete (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM
+  })
+
+  it('wm=1: NodeCardOverlay "Send Payment" opens interact-panel once with node anchor (no intermediate window)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    ;(globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER = { x: 111, y: 222 }
+    setUrl('/?mode=real&ui=interact&wm=1')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const card = host.querySelector('.ds-ov-node-card') as HTMLElement | null
+      expect(card).toBeTruthy()
+
+      const btn = card!.querySelector('[data-testid="node-card-send-payment"]') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+
+      const wmOpen = (globalThis as any).__GEO_TEST_WM_OPEN as ReturnType<typeof vi.fn>
+      expect(wmOpen).toBeTruthy()
+
+      btn?.click()
+      await nextTick()
+      await nextTick()
+
+      const calls = wmOpen.mock.calls.map((c: any[]) => c?.[0]).filter(Boolean)
+      const interactPanelOpens = calls.filter((o: any) => o.type === 'interact-panel')
+      expect(interactPanelOpens.length).toBe(1)
+      expect(interactPanelOpens[0].anchor).toEqual({ x: 111, y: 222, space: 'host', source: 'panel' })
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER
+      delete (globalThis as any).__GEO_TEST_WM_OPEN
+      vi.unstubAllGlobals()
+    }
   })
 
   it('success toast: successful clearing confirm renders SuccessToast and allows dismiss', async () => {

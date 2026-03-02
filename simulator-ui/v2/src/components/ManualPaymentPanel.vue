@@ -249,7 +249,16 @@ const fromParticipants = computed<ParticipantInfo[]>(() => {
   // Spec fallback: no outgoing candidates found => no filtering.
   if (pidsWithOutgoing.size === 0) return participantsSorted.value
 
-  return participantsSorted.value.filter((p) => pidsWithOutgoing.has((p?.pid ?? '').trim()))
+  const result = participantsSorted.value.filter((p) => pidsWithOutgoing.has((p?.pid ?? '').trim()))
+
+  // Guarantee that the currently selected fromPid is always present in the list (AC-3).
+  // This handles the case where the pre-filled sender has no outgoing TL with available > 0.
+  if (props.state.fromPid && !result.find((p) => p.pid === props.state.fromPid)) {
+    const current = participantsSorted.value.find((p) => p.pid === props.state.fromPid)
+    if (current) result.unshift(current)
+  }
+
+  return result
 })
 
 // MP-1b: reset recipient if it becomes unavailable in known-state.

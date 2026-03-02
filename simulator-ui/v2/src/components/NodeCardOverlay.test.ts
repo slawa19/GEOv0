@@ -40,10 +40,9 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     await nextTick()
 
     const btns = host.querySelectorAll('.nco-interact-actions button')
-    expect(btns.length).toBe(3)
+    expect(btns.length).toBe(2)
     expect((btns[0] as HTMLButtonElement).disabled).toBe(true)
     expect((btns[1] as HTMLButtonElement).disabled).toBe(true)
-    expect((btns[2] as HTMLButtonElement).disabled).toBe(true)
 
     app.unmount()
     host.remove()
@@ -54,10 +53,9 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     await nextTick()
 
     const btns = host.querySelectorAll('.nco-interact-actions button')
-    expect(btns.length).toBe(3)
+    expect(btns.length).toBe(2)
     expect((btns[0] as HTMLButtonElement).disabled).toBe(false)
     expect((btns[1] as HTMLButtonElement).disabled).toBe(false)
-    expect((btns[2] as HTMLButtonElement).disabled).toBe(false)
 
     app.unmount()
     host.remove()
@@ -236,21 +234,5 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     }
   })
 
-  it('NC-4: clicking quick action "Run Clearing" calls onInteractRunClearing()', async () => {
-    const onInteractRunClearing = vi.fn()
-
-    const { app, host } = mountNodeCard({ onInteractRunClearing })
-    await nextTick()
-
-    const btn = host.querySelector('button[title="Run clearing (global)"]') as HTMLButtonElement | null
-    expect(btn).toBeTruthy()
-    btn?.click()
-    await nextTick()
-
-    expect(onInteractRunClearing).toHaveBeenCalledTimes(1)
-
-    app.unmount()
-    host.remove()
-  })
 })
 

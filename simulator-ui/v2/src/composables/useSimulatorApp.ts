@@ -1548,6 +1548,7 @@ export function useSimulatorApp(opts?: {
     getCameraZoom: () => camera.zoom,
     sizeForNode: (n) => sizeForNode(n),
     fxColorForNode,
+    isNodeCardOpen: () => isNodeCardOpen.value,
   }).labelNodes
 
   const pickingAndHover = useAppPickingAndHover({
@@ -1618,18 +1619,29 @@ export function useSimulatorApp(opts?: {
   }
 
   function selectNodeFromCanvas(id: string | null) {
-    // Step 5 (WM): on empty click, close WM topmost inspector window and do NOT
-    // mutate legacy inspector state (edgeAnchor / nodeCardOpen).
-    if (!id && typeof opts?.uiCloseTopmostInspectorWindow === 'function') {
-      const closed = opts.uiCloseTopmostInspectorWindow()
-      if (closed) {
-        // Prevent `useCanvasInteractions` from additionally calling `setNodeCardOpen(false)`.
-        suppressNextCanvasNodeCardClose = true
-        return
+    // Empty click policy (Option C): close EVERYTHING.
+    // - Cancel Interact flow (closes interact-panel)
+    // - Close inspector overlay/window (node-card / edge-detail)
+    // - Clear selection
+    if (!id) {
+      try {
+        if (isInteractUi.value && toLower(interactMode.phase.value) !== 'idle') {
+          interactMode.cancel()
+        }
+      } catch {
+        // Best-effort: empty click must remain safe.
       }
 
-      // No WM inspector windows closed: fall back to legacy behavior (clear selection).
+      // Step 5 (WM): close the topmost inspector window via injected callback.
+      // Legacy: closes edge-detail/node-card via policy.
+      void closeTopmostOverlayOnOutsideClick()
+
+      // Clear selection (also closes legacy node-card open flag).
       selectNode(null)
+
+      // In WM mode, suppress redundant legacy node-card close for this click.
+      // (The selection clear + WM close already closed it.)
+      suppressNextCanvasNodeCardClose = true
       return
     }
 
@@ -2298,6 +2310,7 @@ export function useSimulatorApp(opts?: {
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
     selectedNode: viewWiring.selectedNode,
     nodeCardStyle: viewWiring.nodeCardStyle,
+    nodeCardCardRef: viewWiring.nodeCardCardRef,
     selectedNodeScreenCenter,
     selectedNodeEdgeStats,
 

@@ -67,7 +67,7 @@ describe('useWindowManager (MVP)', () => {
     wm.reclamp(id1)
 
     // emulate: user dragged window to a new place (within viewport)
-    // NOTE: wm.reclamp() snaps to 8px grid, so keep test values snap-aligned.
+    // NOTE: reclamp() no longer re-snaps post-measurement; any value within bounds is preserved.
     const w1 = wm.windows.value.find((w) => w.id === id1)!
     w1.rect.left = 120
     w1.rect.top = 232
@@ -116,6 +116,21 @@ describe('useWindowManager (MVP)', () => {
     expect(w.rect.width).toBe(380)
   })
 
+  it('Interact panels: payment/clearing preferredWidth=560 (matches .ds-ov-panel max-width) and estimate uses 560', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const paymentId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+    const payment = wm.windows.value.find((x) => x.id === paymentId)!
+    expect(payment.constraints.preferredWidth).toBe(560)
+    expect(payment.rect.width).toBe(560)
+
+    const clearingId = wm.open({ type: 'interact-panel', data: { panel: 'clearing', phase: 'x' } })
+    const clearing = wm.windows.value.find((x) => x.id === clearingId)!
+    expect(clearing.constraints.preferredWidth).toBe(560)
+    expect(clearing.rect.width).toBe(560)
+  })
+
   it('updateMeasuredSize() + reclamp() держат окно в viewport и синхронизируют rect из measured', () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 300, height: 200 })
@@ -155,6 +170,95 @@ describe('useWindowManager (MVP)', () => {
     // dx/dy = 16; also note: reclamp() snaps to 8px grid.
     expect(w.rect.left).toBe(24)
     expect(w.rect.top).toBe(40)
+  })
+
+  // Regression: RC-1/RC-2 — "second-frame jump" when interact-panel content grows
+  // after participants load (UPDATING→loaded transition).
+  it('reclamp(): рост measured size (stub→full, docked-right) не меняет top/left если окно в bounds', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1280, height: 768 })
+
+    const id = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'picking-payment-to' },
+      anchor: null, // docked-right
+    })
+
+    const win = wm.windows.value.find((w) => w.id === id)!
+
+    // First measurement: loading stub — no participants yet, only header + cancel button.
+    wm.updateMeasuredSize(id, { width: 360, height: 110 })
+    wm.reclamp(id)
+    const leftAfterFirstMeasure = win.rect.left
+    const topAfterFirstMeasure = win.rect.top
+
+    // Second measurement: full panel — participants loaded, From/To selects appeared.
+    // Simulate the UPDATING→loaded height growth that was previously triggering a jump.
+    wm.updateMeasuredSize(id, { width: 540, height: 280 })
+    wm.reclamp(id)
+
+    // Position MUST NOT change; only rect dimensions should update from measured.
+    expect(win.rect.left).toBe(leftAfterFirstMeasure)
+    expect(win.rect.top).toBe(topAfterFirstMeasure)
+
+    // Dimensions must track measured.
+    expect(win.rect.width).toBe(540)
+    expect(win.rect.height).toBe(280)
+  })
+
+  it('reclamp(): рост measured size (stub→full, anchored) не меняет top/left если окно в bounds', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1280, height: 768 })
+
+    const id = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'picking-payment-to' },
+      anchor: { x: 400, y: 300, space: 'host', source: 'node-card' },
+    })
+
+    const win = wm.windows.value.find((w) => w.id === id)!
+
+    // First measurement: stub.
+    wm.updateMeasuredSize(id, { width: 360, height: 110 })
+    wm.reclamp(id)
+    const leftSnapshot = win.rect.left
+    const topSnapshot = win.rect.top
+
+    // Second measurement: full panel.
+    wm.updateMeasuredSize(id, { width: 540, height: 280 })
+    wm.reclamp(id)
+
+    // Position must not change (anchor position was already established on first measurement).
+    expect(win.rect.left).toBe(leftSnapshot)
+    expect(win.rect.top).toBe(topSnapshot)
+  })
+
+  it('reclamp(): viewport shrink после измерения — окно всё равно прижимается к pad', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1280, height: 768 })
+
+    const id = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'x' },
+      anchor: null,
+    })
+
+    // Establish measured state at full size.
+    wm.updateMeasuredSize(id, { width: 540, height: 280 })
+    wm.reclamp(id)
+
+    const win = wm.windows.value.find((w) => w.id === id)!
+
+    // Move to a position well within the original viewport.
+    win.rect.left = 600
+    win.rect.top = 400
+
+    // Shrink viewport so window overflows — reclamp must still push it to pad.
+    wm.setViewport({ width: 300, height: 200 })
+    wm.reclamp(id)
+
+    expect(win.rect.left).toBe(12)
+    expect(win.rect.top).toBe(12)
   })
 
   it('open(): collision avoidance — окна с одним anchor не получают идентичные x/y', () => {

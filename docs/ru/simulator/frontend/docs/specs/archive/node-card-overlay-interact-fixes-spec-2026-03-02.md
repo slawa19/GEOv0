@@ -13,17 +13,26 @@
 Ниже — конкретные текущие факты из кода, подтверждающие причины из разделов P0–P2:
 
 - `simulator-ui/v2/src/App.css`: `--ds-z-world-labels: 20;`, `--ds-z-panel: 42;`, `.labels-layer { z-index: var(--ds-z-world-labels); }`
-- `simulator-ui/v2/src/components/SimulatorAppRoot.vue`: `.wm-layer` сейчас **без** `z-index` (и, соответственно, без явного локального stacking context)
+- `simulator-ui/v2/src/components/SimulatorAppRoot.vue`: `.wm-layer` имеет `z-index: var(--ds-z-panel)` (локальный stacking context для WM-окон)
 - `simulator-ui/v2/src/components/WindowShell.vue`: z-index окна берётся из `instance.z` (`zIndex: String(props.instance.z)`)
 - `simulator-ui/v2/src/composables/windowManager/useWindowManager.ts`: `focusCounter` инкрементится и присваивается в `win.z`, начиная с 1
 
-Это означает: в WM-режиме окна получают z-index `1..N`, а слой лейблов имеет `z-index: 20`, поэтому лейблы оказываются выше окон.
+Это означает: в WM-режиме окна получают z-index `1..N`, а слой лейблов имеет `z-index: 20`. Если `.wm-layer` НЕ имеет собственного `z-index` (историческое состояние до фикса), лейблы оказываются выше окон. При наличии `z-index` на `.wm-layer` (текущее состояние) проблема перекрытия должна быть снята.
+
+## Статус реализации (факт по коду)
+
+- Fix 1 (z-index `.wm-layer`): уже реализован в коде
+- Fix 2 (max-height + scroll в trustlines): реализован
+- Fix 3 (двухпроходный reclamp по реальному DOM-rect): уже реализован в коде
+- Fix 4 (скрытие лейбла выбранного узла при открытой карточке): уже реализован в коде
 
 ### P0 — Лейблы узлов рендерятся ПОВЕРХ попапа (WM mode)
 
 **Симптом:** Имена узлов графа (Дмитро, Наталя, Олена) отрисовываются поверх содержимого попапа NodeCardOverlay, делая его нечитаемым.
 
-**Причина:** В WM mode `focusCounter` в `useWindowManager.ts:398` присваивает окнам z-index начиная с 1 и инкрементируя на 1 при фокусе. Слой лейблов `.labels-layer` имеет `z-index: var(--ds-z-world-labels)` = 20 (определён в `App.css:22`). Все WM-окна с z < 20 оказываются НИЖЕ лейблов. Контейнер `.wm-layer` в `SimulatorAppRoot.vue:1537` не задаёт z-index, поэтому окна конкурируют в общем stacking context.
+**Причина (исторически):** в WM mode `focusCounter` присваивает окнам z-index начиная с 1 и инкрементируя на 1 при фокусе. Слой лейблов `.labels-layer` имеет `z-index: var(--ds-z-world-labels)` = 20. Если `.wm-layer` не имеет собственного `z-index` (нет локального stacking context), все WM-окна с z < 20 оказываются ниже лейблов, и лейблы будут перекрывать попап.
+
+**Текущий статус:** `.wm-layer` должен иметь `z-index: var(--ds-z-panel)` (локальный stacking context), поэтому симптом не должен воспроизводиться. Если воспроизводится — проверить, что это правило применилось и нет другого stacking context поверх WM-слоя.
 
 В legacy режиме (wm=0) проблемы нет — попап получает `z-index: 42` через `designSystem.overlays.css:350`.
 
@@ -54,7 +63,9 @@
 
 **Симптом:** Попап размещается так, что нижняя часть гарантированно выходит за viewport.
 
-**Причина:** В `useNodeCard.ts:102` используется `const cardH = 240` — жёстко закодированная оценка высоты карточки. Фактическая высота с trustlines в Interact mode составляет 500–800px. Алгоритм clamp по Y: `clamp(y, pad, rect.height - pad - cardH)` использует заниженную cardH.
+**Причина (первый проход / fallback):** в базовом расчёте позиции (первый проход) используется `cardW=340` / `cardH=240` как оценка для выбора стороны и initial clamp. Это может дать неверный initial Y при больших trustlines.
+
+**Текущий статус:** после первичной отрисовки реализован второй проход: на `nextTick()` читаются реальные размеры DOM через `getBoundingClientRect()` и применяются корректировки `dx/dy`, чтобы карточка не выходила за viewport (см. Fix 3).
 
 **Затронутые файлы:**
 - `useNodeCard.ts`
@@ -71,7 +82,9 @@
 
 **Симптом:** Связано с P0 — окна внутри `.wm-layer` не изолированы в собственном stacking context.
 
-**Причина:** `.wm-layer` в `SimulatorAppRoot.vue:1537` имеет `position: absolute`, но не задаёт `z-index`, поэтому дочерние `WindowShell` конкурируют в общем контексте наложения с другими элементами (лейблами, панелями).
+**Причина (исторически):** `.wm-layer` в `SimulatorAppRoot.vue` имел `position: absolute`, но без `z-index`, поэтому дочерние `WindowShell` конкурировали в общем контексте наложения с другими элементами (лейблами, панелями).
+
+**Текущий статус:** в коде уже присутствует `z-index: var(--ds-z-panel)` на `.wm-layer`, что создаёт отдельный stacking context.
 
 **Затронутые файлы:**
 - `SimulatorAppRoot.vue`
@@ -99,7 +112,8 @@
 
 - **Вариант A:** В `useNodeCard.ts` вычислять `cardH` динамически на основе количества trustlines: `cardH = 240 + trustlinesCount * 36`
 - **Вариант B:** Если Fix 2 реализован (max-height на scroll), то cardH можно заменить на фиксированное значение, соответствующее max-height контейнера (например, `cardH = Math.min(realHeight, maxScrollHeight)`)
-- **Вариант C (preferred):** После рендеринга карточки использовать `getBoundingClientRect()` для получения реальной высоты и скорректировать позицию, если карточка выходит за viewport
+
+**Реализовано (вариант C):** после рендеринга используется `getBoundingClientRect()` и коррекция `left/top` через `dx/dy` на втором проходе (`nextTick()`). Для этого добавлен `cardRef` и проброшен до `NodeCardOverlay` через wiring.
 
 **Дополнение:** в legacy-режиме этот же подход (измерение DOM) решает сразу две проблемы: (1) реальную высоту (`cardH`) и (2) реальную ширину (`cardW`), включая `max-width` на узких экранах.
 
@@ -108,7 +122,9 @@
 - При открытии попапа для узла — скрывать лейбл этого узла и соседних узлов, которые перекрываются карточкой
 - Реализация: в `useLabelNodes.ts` добавить фильтрацию по `selectedNodeId` и optional — по boundingRect карточки
 
-**Замечание:** после Fix 1 (z-index `.wm-layer`) лейблы физически уйдут под окна, поэтому Fix 4 становится purely-UX (уменьшение визуального шума), а не «исправлением читаемости».
+**Реализовано:** при открытой карточке скрывается лейбл выбранного узла (соседи остаются).
+
+**Замечание:** после Fix 1 (z-index `.wm-layer`) лейблы физически уйдут под окна, поэтому Fix 4 — purely-UX (уменьшение визуального шума), а не «исправление читаемости».
 
 ---
 
@@ -140,5 +156,6 @@
 
 ## Связанные документы
 
-- [`wm-post-refactor-ux-issues-spec-2026-03-01.md`](wm-post-refactor-ux-issues-spec-2026-03-01.md) — описывает WM-UX-1 (сплющенное окно) и WM-UX-2 (закрытие parent), z-index проблема НЕ описана
-- [`wm-window-design-parity-with-legacy-spec-2026-03-01.md`](wm-window-design-parity-with-legacy-spec-2026-03-01.md) — описывает P0 «окно в окне» и клиппинг/overflow, z-index НЕ описан
+- [`wm-post-refactor-ux-issues-spec-2026-03-01.md`](wm-post-refactor-ux-issues-spec-2026-03-01.md) — включает WM-UX-0/1/2 (визуальный паритет: «окно в окне», дубль `×`, клиппинг/overflow; а также сплющенное окно и закрытие parent). Z-index проблема НЕ описана.
+- [`archive/wm-window-design-parity-with-legacy-spec-2026-03-01.md`](archive/wm-window-design-parity-with-legacy-spec-2026-03-01.md) — (архив) подробный список проблем и rationale для решения «WM = geometry-only».
+

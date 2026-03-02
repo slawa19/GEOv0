@@ -22,6 +22,8 @@ export type InteractState = {
   phase: InteractPhase
   fromPid: string | null
   toPid: string | null
+  /** Latched: true when the current flow was initiated with pre-filled FROM (NodeCard/EdgeDetail/etc). */
+  initiatedWithPrefilledFrom: boolean
   selectedEdgeKey: string | null
   /** Screen-space anchor for edge detail popup (host-relative coordinates). */
   edgeAnchor: { x: number; y: number } | null
@@ -58,7 +60,11 @@ export function useInteractFSM(opts: {
   resetToIdle: () => void
 
   startPaymentFlow: () => void
+  /** Atomically start payment flow with pre-filled FROM (skips picking-payment-from phase). */
+  startPaymentFlowWithFrom: (fromPid: string) => void
   startTrustlineFlow: () => void
+  /** Atomically start trustline flow with pre-filled FROM (skips picking-trustline-from phase). */
+  startTrustlineFlowWithFrom: (fromPid: string) => void
   startClearingFlow: () => void
 
   selectNode: (nodeId: string) => void
@@ -80,6 +86,7 @@ export function useInteractFSM(opts: {
     phase: 'idle',
     fromPid: null,
     toPid: null,
+    initiatedWithPrefilledFrom: false,
     selectedEdgeKey: null,
     edgeAnchor: null,
     error: null,
@@ -98,6 +105,7 @@ export function useInteractFSM(opts: {
     state.phase = 'idle'
     state.fromPid = null
     state.toPid = null
+    state.initiatedWithPrefilledFrom = false
     state.selectedEdgeKey = null
     state.edgeAnchor = null
     state.error = null
@@ -109,16 +117,39 @@ export function useInteractFSM(opts: {
     state.phase = p
     state.fromPid = null
     state.toPid = null
+    state.initiatedWithPrefilledFrom = false
     state.selectedEdgeKey = null
     state.edgeAnchor = null
   }
 
   function startPaymentFlow() {
+    state.initiatedWithPrefilledFrom = false
     startNewFlow('picking-payment-from')
   }
 
+  function startPaymentFlowWithFrom(fromPid: string) {
+    clearError()
+    state.phase = 'picking-payment-to'
+    state.fromPid = fromPid
+    state.toPid = null
+    state.initiatedWithPrefilledFrom = true
+    state.selectedEdgeKey = null
+    state.edgeAnchor = null
+  }
+
   function startTrustlineFlow() {
+    state.initiatedWithPrefilledFrom = false
     startNewFlow('picking-trustline-from')
+  }
+
+  function startTrustlineFlowWithFrom(fromPid: string) {
+    clearError()
+    state.phase = 'picking-trustline-to'
+    state.fromPid = fromPid
+    state.toPid = null
+    state.initiatedWithPrefilledFrom = true
+    state.selectedEdgeKey = null
+    state.edgeAnchor = null
   }
 
   function startClearingFlow() {
@@ -126,6 +157,7 @@ export function useInteractFSM(opts: {
     state.phase = 'confirm-clearing'
     state.fromPid = null
     state.toPid = null
+    state.initiatedWithPrefilledFrom = false
     state.selectedEdgeKey = null
     state.edgeAnchor = null
 
@@ -195,6 +227,7 @@ export function useInteractFSM(opts: {
     clearError()
     state.fromPid = parsed.from
     state.toPid = parsed.to
+    state.initiatedWithPrefilledFrom = true
     state.selectedEdgeKey = keyEdge(parsed.from, parsed.to)
     state.edgeAnchor = anchor
     state.phase = 'editing-trustline'
@@ -300,6 +333,7 @@ export function useInteractFSM(opts: {
     state.fromPid = fromPid.trim() || null
     state.toPid = toPid.trim() || null
     if (!state.fromPid || !state.toPid) return
+    state.initiatedWithPrefilledFrom = true
     state.selectedEdgeKey = keyEdge(state.fromPid, state.toPid)
     state.edgeAnchor = null
     state.phase = 'editing-trustline'
@@ -329,7 +363,9 @@ export function useInteractFSM(opts: {
     resetToIdle,
 
     startPaymentFlow,
+    startPaymentFlowWithFrom,
     startTrustlineFlow,
+    startTrustlineFlowWithFrom,
     startClearingFlow,
 
     selectNode,

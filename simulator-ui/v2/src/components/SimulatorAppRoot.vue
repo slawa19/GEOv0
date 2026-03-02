@@ -167,26 +167,37 @@ function uiCloseEdgeDetailWindow(winId: number, reason: 'action' | 'programmatic
 function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
   if (!__USE_WINDOW_MANAGER) return null
 
-  // WM source of truth: close *topmost/active* inspector window by WM z-order.
+  // WM source of truth: still query the topmost/active inspector window by WM z-order.
+  // (Useful for tests and for any future "close-only-topmost" variants.)
   const top = wm.getTopmostInGroup('inspector')
-  if (!top || !top.policy.closeOnOutsideClick) return null
+  const topType: 'edge-detail' | 'node-card' | null =
+    top && top.policy.closeOnOutsideClick && (top.type === 'edge-detail' || top.type === 'node-card')
+      ? top.type
+      : null
 
-  if (top.type === 'edge-detail') {
-    // Outside click is UI-close, must NOT cancel flow.
-    wmEdgeDetailSuppressed.value = true
-    wmResetEdgeDetailKeepAlive()
-    wm.close(top.id, 'programmatic')
-    if (wmEdgeDetailId.value === top.id) wmEdgeDetailId.value = null
-    return 'edge-detail'
+  // AC-4 / Option C: outside-click is a "hard" dismiss.
+  // Close all windows and cancel any active Interact flow to avoid orphaned state.
+
+  // Clear keepAlive so frozen inspectors can't persist after an outside-click.
+  wmResetEdgeDetailKeepAlive()
+  // Outside-click is not a UI-close suppression; the flow is cancelled anyway.
+  if (wmEdgeDetailSuppressed.value) wmEdgeDetailSuppressed.value = false
+  if (wmEdgeDetailSelectionKey.value) wmEdgeDetailSelectionKey.value = ''
+
+  // Best-effort: close both groups. Programmatic close must NOT trigger interact.onClose.
+  wm.closeGroup('inspector', 'programmatic')
+  wm.closeGroup('interact', 'programmatic')
+  wmEdgeDetailId.value = null
+  wmNodeCardId.value = null
+
+  // Cancel the flow explicitly (WM programmatic close does not call interact-panel onClose).
+  try {
+    interact.mode.cancel()
+  } catch {
+    // best-effort
   }
 
-  if (top.type === 'node-card') {
-    wm.close(top.id, 'programmatic')
-    if (wmNodeCardId.value === top.id) wmNodeCardId.value = null
-    return 'node-card'
-  }
-
-  return null
+  return topType
 }
 
 function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: Point }) {
@@ -291,6 +302,7 @@ const {
   edgeTooltipStyle: calcEdgeTooltipStyle,
   selectedNode,
   nodeCardStyle,
+  nodeCardCardRef,
   selectedNodeScreenCenter,
   selectedNodeEdgeStats,
 
@@ -370,28 +382,45 @@ const legacyShowManualPaymentPanel = computed(
  */
  const wmEdgePopupAnchor = ref<Point | null>(null)
 
+/**
+ * WM-only anchor for opening an interact-panel from NodeCard / ActionBar.
+ *
+ * Why: legacy `panelAnchor` is cleared synchronously on panel-group changes.
+ * In WM mode, that can cause a 2-step `wm.open()` sequence (first with null anchor,
+ * then re-open/reposition with the intended anchor), which is visible as a
+ * “transient intermediate window”.
+ */
+const wmPanelOpenAnchor = ref<Point | null>(null)
+
  function makeInteractPanelWindowData(panel: 'payment' | 'trustline' | 'clearing', phase: string) {
    const onBack = (): boolean => {
      // Step-back inside Interact FSM (only when it has a meaningful previous step).
      // MUST: do not perform Flow-cancel here; fallback to UI-close when no step-back exists.
      const p = String(interactPhase.value) as InteractPhase
 
-     // Payment: confirm → picking-to → picking-from
+     // Payment: confirm → picking-to → (picking-from only if FROM was not pre-filled)
      if (p === 'confirm-payment') {
        interact.mode.setPaymentToPid(null)
        return true
      }
      if (p === 'picking-payment-to') {
+       // If the flow was initiated with pre-filled FROM (NodeCard/EdgeDetail/etc),
+       // there is no meaningful "previous step" — close the window instead.
+       if (interact.mode.state.initiatedWithPrefilledFrom) return false
        interact.mode.setPaymentFromPid(null)
        return true
      }
 
-     // Trustline: confirm/edit → picking-to → picking-from
+     // Trustline: confirm/edit → picking-to → (picking-from only if FROM was not pre-filled)
      if (p === 'editing-trustline' || p === 'confirm-trustline-create') {
+       // Always step back to picking-to by clearing TO.
        interact.mode.setTrustlineToPid(null)
        return true
      }
      if (p === 'picking-trustline-to') {
+       // If the flow was initiated with pre-filled FROM (NodeCard/EdgeDetail/etc),
+       // there is no meaningful "previous step" — close the window instead.
+       if (interact.mode.state.initiatedWithPrefilledFrom) return false
        interact.mode.setTrustlineFromPid(null)
        return true
      }
@@ -410,8 +439,22 @@ function toWmAnchor(p: Point | null, source: string): WindowAnchor | null {
 const wmInteractAnchor = computed<WindowAnchor | null>(() => {
   // Edge popup anchor has priority (normative requirement).
   if (wmEdgePopupAnchor.value) return toWmAnchor(wmEdgePopupAnchor.value, 'edge-popup')
+
+  // NodeCard / ActionBar initiated anchors should apply to the first WM open.
+  if (wmPanelOpenAnchor.value) return toWmAnchor(wmPanelOpenAnchor.value, 'panel')
+
   // Fallback: generic panel anchor (ActionBar / NodeCard positioning).
   return toWmAnchor(panelAnchor.value ?? null, 'panel')
+})
+
+// IMPORTANT: avoid watching the anchor object by identity.
+// `toWmAnchor()` creates a new object, so a `watch(() => ({ anchor }))` would retrigger
+// even when x/y didn't change, causing duplicate `wm.open()` calls while the window
+// is still unmeasured (visible as a position jump).
+const wmInteractAnchorKey = computed(() => {
+  const a = wmInteractAnchor.value
+  if (!a) return ''
+  return `${a.x}|${a.y}|${a.space}|${a.source}`
 })
 
 // IMPORTANT (Vue reactivity): use `watch` instead of `watchEffect` here.
@@ -419,30 +462,31 @@ const wmInteractAnchor = computed<WindowAnchor | null>(() => {
 // If called inside a watchEffect, Vue tracks those reads as dependencies and can trigger
 // a recursive update loop when a window is opened. Explicit watch avoids this.
 // Same pattern as the inspector watcher below (line ~375).
-  watch(
-  () => ({
-    enabled: __USE_WINDOW_MANAGER,
-    apiMode: apiMode.value,
-    isInteractUi: isInteractUi.value,
-    phase: String(interactPhase.value),
-    isFullEditor: useFullTrustlineEditor.value,
-    anchor: wmInteractAnchor.value,
-  }),
-  (s) => {
-    if (!s.enabled) return
+watch(
+  [
+    () => __USE_WINDOW_MANAGER,
+    () => apiMode.value,
+    () => isInteractUi.value,
+    () => String(interactPhase.value),
+    () => useFullTrustlineEditor.value,
+    () => wmInteractAnchorKey.value,
+  ],
+  ([enabled, curApiMode, curIsInteractUi, phase, isFullEditor]) => {
+    if (!enabled) return
 
     // Safety: only drive Interact windows in real interact UI.
-    if (s.apiMode !== 'real' || !s.isInteractUi) {
+    if (curApiMode !== 'real' || !curIsInteractUi) {
       wm.closeGroup('interact', 'programmatic')
+      wmPanelOpenAnchor.value = null
       return
     }
 
-    const m = interactWindowOfPhase(s.phase, s.isFullEditor)
+    const m = interactWindowOfPhase(phase, isFullEditor)
     if (m?.type === 'interact-panel') {
       wm.open({
         type: 'interact-panel',
-        anchor: s.anchor,
-        data: makeInteractPanelWindowData(m.panel, s.phase),
+        anchor: wmInteractAnchor.value,
+        data: makeInteractPanelWindowData(m.panel, phase),
       })
       return
     }
@@ -450,8 +494,9 @@ const wmInteractAnchor = computed<WindowAnchor | null>(() => {
     // idle / inspector-only phases: ensure interact window is closed.
     wm.closeGroup('interact', 'programmatic')
 
-    // Avoid stale edge-popup anchors after closing the group.
+    // Avoid stale anchors after closing the group.
     wmEdgePopupAnchor.value = null
+    wmPanelOpenAnchor.value = null
   },
   { immediate: true },
 )
@@ -1011,9 +1056,10 @@ function onEdgeDetailSendPayment() {
     // Do NOT close edge-detail — it persists as context.
   }
 
+  // Atomically start payment with pre-filled FROM to avoid an intermediate
+  // picking-payment-from phase (which can flash a useless empty window in WM mode).
   interact.mode.cancel()
-  interact.mode.startPaymentFlow()
-  interact.mode.setPaymentFromPid(toPid)
+  interact.mode.startPaymentFlowWithFrom(toPid)
   interact.mode.setPaymentToPid(fromPid)
 }
 
@@ -1031,11 +1077,18 @@ function startFlowFromNodeCard(opts: {
   if (opts.openEditor) useFullTrustlineEditor.value = true
   // H-1 coexistence: in WM mode NodeCard is an inspector window and must coexist with interact.
   if (!__USE_WINDOW_MANAGER) setNodeCardOpen(false)
+
+  // WM: set anchor BEFORE phase change so the first `wm.open()` uses it.
+  if (__USE_WINDOW_MANAGER) {
+    wmPanelOpenAnchor.value = snapshot
+  }
   opts.start()
 
-  // Safe to set synchronously: flush:'sync' watcher in useInteractPanelPosition
+  // Legacy panels: safe to set synchronously — flush:'sync' watcher in useInteractPanelPosition
   // already fired during opts.start() and cleared anchor for the group change.
-  openPanelFrom('node-card', snapshot)
+  if (!__USE_WINDOW_MANAGER) {
+    openPanelFrom('node-card', snapshot)
+  }
 }
 
 function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void }) {
@@ -1048,19 +1101,25 @@ function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void 
   // H-1 coexistence: do not auto-close inspector under WM.
   if (!__USE_WINDOW_MANAGER) setNodeCardOpen(false)
   if (opts.openEditor) useFullTrustlineEditor.value = true
+
+  // WM: set anchor BEFORE phase change so the first `wm.open()` uses it.
+  if (__USE_WINDOW_MANAGER) {
+    wmPanelOpenAnchor.value = snapshot
+  }
   opts.start()
 
-  // Set top-right anchor explicitly — avoids relying on CSS `right: 12px` default
+  // Legacy panels: set top-right anchor explicitly — avoids relying on CSS `right: 12px` default
   // which could be overridden by a stale inline style from a previous node-card session.
-  openPanelFrom('action-bar', snapshot)
+  if (!__USE_WINDOW_MANAGER) {
+    openPanelFrom('action-bar', snapshot)
+  }
 }
 
 // BUG-1: NodeCardOverlay interact mode handlers
 function onInteractSendPayment(fromPid: string) {
   startFlowFromNodeCard({
     start: () => {
-      interact.mode.startPaymentFlow()
-      interact.mode.setPaymentFromPid(fromPid)
+      interact.mode.startPaymentFlowWithFrom(fromPid)
     },
   })
 }
@@ -1068,8 +1127,7 @@ function onInteractSendPayment(fromPid: string) {
 function onInteractNewTrustline(fromPid: string) {
   startFlowFromNodeCard({
     start: () => {
-      interact.mode.startTrustlineFlow()
-      interact.mode.setTrustlineFromPid(fromPid)
+      interact.mode.startTrustlineFlowWithFrom(fromPid)
     },
   })
 }
@@ -1079,14 +1137,6 @@ function onInteractEditTrustline(fromPid: string, toPid: string) {
     openEditor: true,
     start: () => {
       interact.mode.selectTrustline(fromPid, toPid)
-    },
-  })
-}
-
-function onInteractRunClearing() {
-  startFlowFromNodeCard({
-    start: () => {
-      interact.mode.startClearingFlow()
     },
   })
 }
@@ -1337,7 +1387,6 @@ watch(interactPhase, (phase) => {
           :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
           :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
           :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
-          :on-interact-run-clearing="isInteractUi ? onInteractRunClearing : undefined"
           render-mode="wm"
           @close="() => {
             wm.close(win.id, 'action')
@@ -1430,6 +1479,7 @@ watch(interactPhase, (phase) => {
 
     <NodeCardOverlay
       v-if="isNodeCardOpen && selectedNode && !dragToPin.dragState.active && !__USE_WINDOW_MANAGER"
+      :ref="(el: any) => { if (nodeCardCardRef) nodeCardCardRef.value = el?.$el ?? el ?? null }"
       :node="selectedNode"
       :style="nodeCardStyle"
       :edge-stats="selectedNodeEdgeStats"
@@ -1445,7 +1495,6 @@ watch(interactPhase, (phase) => {
       :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
       :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
       :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
-      :on-interact-run-clearing="isInteractUi ? onInteractRunClearing : undefined"
       @close="setNodeCardOpen(false)"
     />
 
@@ -1538,6 +1587,7 @@ watch(interactPhase, (phase) => {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: var(--ds-z-panel);
 }
 
 .wm-layer :deep(.ws-shell) {

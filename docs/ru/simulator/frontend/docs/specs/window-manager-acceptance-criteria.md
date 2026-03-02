@@ -3,7 +3,7 @@
 Дата: 2026-03-01
 
 Источник требований:
-- `plans/simulator-window-management-audit.md` (нормативный документ рефакторинга)
+- `plans/archive/simulator-window-management-audit.md` (нормативный документ рефакторинга)
 
 Цель этого файла:
 - Перевести MUST/SHOULD требования в **проверяемые** критерии приёмки.
@@ -52,13 +52,14 @@
 
 
 ### AC-4. Pointer UX (клик “в пустоту”)
-- MUST: клик по canvas background не делает Flow-cancel по умолчанию.
-- MUST: клик “вне окна” закрывает только активное окно и только если у него `closeOnOutsideClick=true`.
-- MVP: `interact-panel.closeOnOutsideClick=false`.
+- MUST: клик по canvas background закрывает все открытые окна и отменяет активный flow (interact).
+- MUST: если открыты `interact` + `inspector`, один outside-click закрывает оба.
+- NOTE: это намеренно “жёсткое” поведение (Option C), чтобы не оставлять «осиротевшие» окна.
 
 Проверка:
-- Открыть interact-панель → клик по canvas не должен закрыть её.
-- Открыть edge-detail → клик по canvas может закрыть edge-detail (если разрешено policy).
+- Открыть interact-панель → клик по canvas закрывает панель.
+- Открыть edge-detail или node-card → клик по canvas закрывает их.
+- Открыть interact + inspector → клик по canvas закрывает оба.
 
 
 ### AC-5. Геометрия: измерение DOM и reclamp
@@ -72,13 +73,18 @@
 - Resize окна браузера не оставляет окно “снаружи”.
 
 
-### AC-6. WindowShell: единый заголовок и [×] везде
-- MUST: у каждого окна есть единый header + кнопка [×].
-- MUST: семантика [×] == семантика ESC для этого окна (UI-close/back).
-- MUST: cancel для бизнес-процесса остаётся отдельным действием.
+### AC-6. Визуальный контракт WM: geometry-only (frameless) + без «окно в окне»
+- MUST: в режиме WM `WindowShell` по умолчанию используется как **geometry-only контейнер** (`frameless=true`):
+  - не рисует собственный header,
+  - не рисует собственную surface (background/border/shadow/backdrop),
+  - не навязывает `width/height` (используется intrinsic sizing контента),
+  - не клипает legacy-эффекты внешним `overflow:hidden`.
+- MUST: визуальный “frame” (surface/header/кнопки закрытия) остаётся внутри legacy-компонентов.
+- MUST: не должно быть дублей: второй surface или второй `×` не появляется.
 
 Проверка:
-- У NodeCard/EdgeDetail/Interact panel всегда есть [×] в заголовке WindowShell.
+- При `wm=1` shell НЕ содержит `.ws-header` и `button.ws-close`.
+- NodeCardOverlay/EdgeDetailPopup/Interact-панели в WM выглядят 1:1 как в legacy и без вложенных поверхностей.
 
 
 ### AC-7. Единый transition для всех окон
@@ -95,7 +101,7 @@
 - MUST: отступы контента определяются DS примитивами (например `.ds-panel__body`) и выглядят одинаково.
 
 Проверка:
-- В WM-режиме interact-панель не показывает внутри себя заголовок вида “(ESC to close)”.
+- В WM-режиме **не появляется дополнительный header** от `WindowShell` (т.е. нет дублирующегося “WS header”).
 - Визуально нет двойной рамки/двойного паддинга.
 
 ---
@@ -109,8 +115,11 @@
   - ✅ `simulator-ui/v2/src/components/SimulatorAppRoot.vue` (WM layer wiring)
 
 - AC-6/7:
-  - ✅ `simulator-ui/v2/src/components/WindowShell.vue` (header + [×], RO measurement, transition classes)
-  - ⚠️ header padding отличается от текста спеки (спека: 4px 8px; в коде: 6px 8px) — визуально допустимо, но если нужно “пиксель-в-пиксель”, это точка правки.
+  - ✅ `simulator-ui/v2/src/components/WindowShell.vue` (frameless mode + RO measurement + transition)
+  - ✅ `simulator-ui/v2/src/components/SimulatorAppRoot.vue` (WM layer uses `:frameless="true"`)
+  - ✅ tests:
+    - `simulator-ui/v2/src/components/WindowShell.test.ts`
+    - `simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts`
 
 - AC-8 (двойной header/surface):
   - ✅ Исправлено добавлением `renderMode="wm"` для interact панелей:
@@ -197,7 +206,10 @@
   - Дальше: либо выделить `LegacyOverlayWrapper` (только для legacy режима), либо вынести legacy позиционирование на уровень root, чтобы внутри панелей не было overlay-логики.
 
 2) Единый контракт padding/scroll
-  - Зафиксировать, что padding даёт `.ds-panel__body`, а scroll делает `WindowShell .ws-body`.
+  - Зафиксировать, что padding даёт `.ds-panel__body`.
+  - Скролл/клиппинг:
+    - в framed-mode (если он вернётся) — через `WindowShell .ws-body`
+    - в frameless WM — внутри legacy компонентов (WM контейнер не должен навязывать overflow)
   - Запретить вложенные “panel surfaces” внутри `WindowShell` (кроме случаев, где это осознанный sub-panel).
 
 3) A11y/Focus (если будет требование на MVP)
