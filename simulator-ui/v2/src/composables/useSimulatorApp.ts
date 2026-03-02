@@ -42,7 +42,7 @@ export function __retryUntilTruthyOrDeadline<T>(opts: {
   onTimeout?: () => void
 }) {
   const v = opts.get()
-  if (v) {
+  if (v !== null) {
     opts.onSuccess(v)
     return
   }

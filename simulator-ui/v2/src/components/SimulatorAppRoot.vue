@@ -787,9 +787,8 @@ async function runDemoFxOnce(action: () => Promise<void>): Promise<void> {
 
 function setQueryAndReload(mut: (sp: URLSearchParams) => void) {
   const nextHref = buildReloadUrlPreservingWmOptOut(window.location.href, (sp) => {
-    // URL cleanup (legacy): never propagate dead `devtools` param across navigations.
-    sp.delete('devtools')
     mut(sp)
+    // Always strip legacy `devtools` param — it must never propagate across reloads.
     sp.delete('devtools')
   })
   // Setting href ensures full re-init (important when switching between pipelines).

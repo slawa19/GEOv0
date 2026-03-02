@@ -258,10 +258,20 @@ def _add_extra_uah_service_links(
     household_pids = sorted(
         [pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 34 <= idx <= 48]
     )
+    producer_pids = sorted(
+        [pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 6 <= idx <= 15]
+    )
+    agent_pids = sorted([pid for pid in person_pids if (idx := _pid_index(pid)) is not None and 49 <= idx <= 50])
     retail_business_pids = sorted(
         [pid for pid in business_pids_all if (idx := _pid_index(pid)) is not None and 16 <= idx <= 23]
     )
+    anchor_business_pids = sorted([pid for pid in business_pids_all if (idx := _pid_index(pid)) is not None and 1 <= idx <= 5])
     business_targets = retail_business_pids or business_pids_all
+    business_sources = [*retail_business_pids, *anchor_business_pids] or business_pids_all
+
+    # Give the routing graph a business-intermediate backbone:
+    # business -> (service/producer/agent) links have can_be_intermediate=True.
+    person_targets = [*service_pids, *producer_pids, *agent_pids]
 
     if not household_pids or not service_pids:
         return out
@@ -308,6 +318,10 @@ def _add_extra_uah_service_links(
 
     svc_hh_candidates: list[tuple[float, str, str]] = []
     svc_biz_candidates: list[tuple[float, str, str]] = []
+    aux_hh_candidates: list[tuple[float, str, str]] = []
+    aux_svc_candidates: list[tuple[float, str, str]] = []
+    aux_biz_candidates: list[tuple[float, str, str]] = []
+    biz_person_candidates: list[tuple[float, str, str]] = []
 
     for src in service_pids:
         n_hh = 2 + int(_u01(f"uah_svc_n_hh|{src}") * 2)
@@ -325,6 +339,45 @@ def _add_extra_uah_service_links(
             score_b = _u01(f"uah_svc_score|biz|{src}|{dst_b}")
             svc_biz_candidates.append((score_b, src, dst_b))
 
+    # Producers/agents (persons) can be key intermediates in UAH-only routing.
+    # Add a small number of extra links from them to households/services/retail,
+    # without changing HOUR/EUR equivalents.
+    aux_sources = [*producer_pids, *agent_pids]
+    for src in aux_sources:
+        # 1-2 household links per aux source
+        n_hh = 1 + int(_u01(f"uah_aux_n_hh|{src}") * 2)
+        picked_hh: set[str] = set()
+        for j in range(n_hh):
+            dst = _pick_from(household_pids, key=f"uah_aux_pick_hh|{src}|{j}")
+            if dst in picked_hh:
+                continue
+            picked_hh.add(dst)
+            score = _u01(f"uah_aux_score|hh|{src}|{dst}")
+            aux_hh_candidates.append((score, src, dst))
+
+        # One service link per aux source
+        dst_s = _pick_from(service_pids, key=f"uah_aux_pick_svc|{src}")
+        score_s = _u01(f"uah_aux_score|svc|{src}|{dst_s}")
+        aux_svc_candidates.append((score_s, src, dst_s))
+
+        # Optional retail link
+        if business_targets:
+            dst_b = _pick_from(business_targets, key=f"uah_aux_pick_biz|{src}")
+            score_b = _u01(f"uah_aux_score|biz|{src}|{dst_b}")
+            aux_biz_candidates.append((score_b, src, dst_b))
+
+    if business_sources and person_targets:
+        for src in business_sources:
+            n_p = 1 + int(_u01(f"uah_biz_n_person|{src}") * 2)
+            picked_p: set[str] = set()
+            for j in range(n_p):
+                dst = _pick_from(person_targets, key=f"uah_biz_pick_person|{src}|{j}")
+                if dst in picked_p:
+                    continue
+                picked_p.add(dst)
+                score = _u01(f"uah_biz_score|person|{src}|{dst}")
+                biz_person_candidates.append((score, src, dst))
+
     for _, src, dst in sorted(svc_hh_candidates, key=lambda x: (x[0], x[1], x[2]))[:max_service_to_household]:
         k = _u01(f"uah_svc_lim|hh|{src}|{dst}")
         limit = (Decimal("700") + Decimal("1800") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
@@ -337,6 +390,38 @@ def _add_extra_uah_service_links(
         k = _u01(f"uah_svc_lim|biz|{src}|{dst}")
         limit = (Decimal("1000") + Decimal("3500") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         used = (Decimal("0") + Decimal("300") * Decimal(str(_u01(f"uah_svc_used|biz|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
+
+    for _, src, dst in sorted(aux_hh_candidates, key=lambda x: (x[0], x[1], x[2]))[:40]:
+        k = _u01(f"uah_aux_lim|hh|{src}|{dst}")
+        limit = (Decimal("250") + Decimal("900") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("80") * Decimal(str(_u01(f"uah_aux_used|hh|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
+
+    for _, src, dst in sorted(aux_svc_candidates, key=lambda x: (x[0], x[1], x[2]))[:25]:
+        k = _u01(f"uah_aux_lim|svc|{src}|{dst}")
+        limit = (Decimal("300") + Decimal("1200") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("120") * Decimal(str(_u01(f"uah_aux_used|svc|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
+
+    for _, src, dst in sorted(aux_biz_candidates, key=lambda x: (x[0], x[1], x[2]))[:25]:
+        k = _u01(f"uah_aux_lim|biz|{src}|{dst}")
+        limit = (Decimal("400") + Decimal("1600") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("150") * Decimal(str(_u01(f"uah_aux_used|biz|{src}|{dst}")))).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
+        _add_uah(src, dst, limit=limit, used=used)
+
+    for _, src, dst in sorted(biz_person_candidates, key=lambda x: (x[0], x[1], x[2]))[:60]:
+        k = _u01(f"uah_biz_lim|person|{src}|{dst}")
+        limit = (Decimal("900") + Decimal("4200") * Decimal(str(k))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        used = (Decimal("0") + Decimal("250") * Decimal(str(_u01(f"uah_biz_used|person|{src}|{dst}")))).quantize(
             Decimal("0.01"), rounding=ROUND_DOWN
         )
         _add_uah(src, dst, limit=limit, used=used)

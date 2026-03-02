@@ -3507,30 +3507,30 @@
     "tx_id": "45ee6705-3dcb-5659-a853-34cbf56e07a2",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0009_8ff34739",
+    "initiator_pid": "PID_U0001_9e3779b1",
     "payload": {
       "cycle": [
         "debt_0001_00",
         "debt_0001_01",
         "debt_0001_02"
       ],
-      "amount": "55.54",
+      "amount": "2281.67",
       "equivalent": "UAH",
       "edges": [
         {
-          "debtor": "PID_U0009_8ff34739",
-          "creditor": "PID_U0040_b8ab03a8",
-          "amount": "55.54"
+          "debtor": "PID_U0001_9e3779b1",
+          "creditor": "PID_U0002_3c6ef362",
+          "amount": "2281.67"
         },
         {
-          "debtor": "PID_U0040_b8ab03a8",
-          "creditor": "PID_U0036_3fcd1ce4",
-          "amount": "61.44"
+          "debtor": "PID_U0002_3c6ef362",
+          "creditor": "PID_U0007_538453d7",
+          "amount": "1029.32"
         },
         {
-          "debtor": "PID_U0036_3fcd1ce4",
-          "creditor": "PID_U0009_8ff34739",
-          "amount": "93.13"
+          "debtor": "PID_U0007_538453d7",
+          "creditor": "PID_U0001_9e3779b1",
+          "amount": "75.92"
         }
       ]
     },
@@ -3545,30 +3545,30 @@
     "tx_id": "bcf318a7-f2e7-5c35-ac7c-8ea67a747c36",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0009_8ff34739",
+    "initiator_pid": "PID_U0001_9e3779b1",
     "payload": {
       "cycle": [
         "debt_0002_00",
         "debt_0002_01",
         "debt_0002_02"
       ],
-      "amount": "55.54",
+      "amount": "68.80",
       "equivalent": "UAH",
       "edges": [
         {
-          "debtor": "PID_U0009_8ff34739",
-          "creditor": "PID_U0040_b8ab03a8",
-          "amount": "55.54"
+          "debtor": "PID_U0001_9e3779b1",
+          "creditor": "PID_U0008_f1bbcd88",
+          "amount": "68.80"
         },
         {
-          "debtor": "PID_U0040_b8ab03a8",
-          "creditor": "PID_U0039_1a7389f7",
-          "amount": "58.05"
+          "debtor": "PID_U0008_f1bbcd88",
+          "creditor": "PID_U0003_daa66d13",
+          "amount": "169.97"
         },
         {
-          "debtor": "PID_U0039_1a7389f7",
-          "creditor": "PID_U0009_8ff34739",
-          "amount": "10.20"
+          "debtor": "PID_U0003_daa66d13",
+          "creditor": "PID_U0001_9e3779b1",
+          "amount": "805.42"
         }
       ]
     },
@@ -3577,6 +3577,234 @@
     "error": null,
     "created_at": "2026-01-09T21:22:00Z",
     "updated_at": "2026-01-09T21:25:00Z"
+  },
+  {
+    "id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
+    "tx_id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0001_9e3779b1",
+    "payload": {
+      "cycle": [
+        "debt_0003_00",
+        "debt_0003_01",
+        "debt_0003_02"
+      ],
+      "amount": "68.80",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0001_9e3779b1",
+          "creditor": "PID_U0008_f1bbcd88",
+          "amount": "68.80"
+        },
+        {
+          "debtor": "PID_U0008_f1bbcd88",
+          "creditor": "PID_U0007_538453d7",
+          "amount": "35.52"
+        },
+        {
+          "debtor": "PID_U0007_538453d7",
+          "creditor": "PID_U0001_9e3779b1",
+          "amount": "75.92"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-08T20:03:00Z",
+    "updated_at": "2026-01-08T20:06:00Z"
+  },
+  {
+    "id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
+    "tx_id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0002_3c6ef362",
+    "payload": {
+      "cycle": [
+        "debt_0004_00",
+        "debt_0004_01",
+        "debt_0004_02"
+      ],
+      "amount": "1029.32",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0002_3c6ef362",
+          "creditor": "PID_U0007_538453d7",
+          "amount": "1029.32"
+        },
+        {
+          "debtor": "PID_U0007_538453d7",
+          "creditor": "PID_U0022_98c47536",
+          "amount": "142.25"
+        },
+        {
+          "debtor": "PID_U0022_98c47536",
+          "creditor": "PID_U0002_3c6ef362",
+          "amount": "1641.76"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-07T19:44:00Z",
+    "updated_at": "2026-01-07T19:47:00Z"
+  },
+  {
+    "id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
+    "tx_id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0002_3c6ef362",
+    "payload": {
+      "cycle": [
+        "debt_0005_00",
+        "debt_0005_01",
+        "debt_0005_02"
+      ],
+      "amount": "3.26",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0002_3c6ef362",
+          "creditor": "PID_U0008_f1bbcd88",
+          "amount": "3.26"
+        },
+        {
+          "debtor": "PID_U0008_f1bbcd88",
+          "creditor": "PID_U0003_daa66d13",
+          "amount": "169.97"
+        },
+        {
+          "debtor": "PID_U0003_daa66d13",
+          "creditor": "PID_U0002_3c6ef362",
+          "amount": "3283.39"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-06T18:25:00Z",
+    "updated_at": "2026-01-06T18:28:00Z"
+  },
+  {
+    "id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
+    "tx_id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0006_b54cda26",
+    "payload": {
+      "cycle": [
+        "debt_0006_00",
+        "debt_0006_01",
+        "debt_0006_02"
+      ],
+      "amount": "46.10",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0006_b54cda26",
+          "creditor": "PID_U0011_cc623a9b",
+          "amount": "46.10"
+        },
+        {
+          "debtor": "PID_U0011_cc623a9b",
+          "creditor": "PID_U0022_98c47536",
+          "amount": "27.13"
+        },
+        {
+          "debtor": "PID_U0022_98c47536",
+          "creditor": "PID_U0006_b54cda26",
+          "amount": "58.21"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-05T17:06:00Z",
+    "updated_at": "2026-01-05T17:09:00Z"
+  },
+  {
+    "id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
+    "tx_id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0006_b54cda26",
+    "payload": {
+      "cycle": [
+        "debt_0007_00",
+        "debt_0007_01",
+        "debt_0007_02"
+      ],
+      "amount": "6.43",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0006_b54cda26",
+          "creditor": "PID_U0019_be1e0823",
+          "amount": "6.43"
+        },
+        {
+          "debtor": "PID_U0019_be1e0823",
+          "creditor": "PID_U0027_afd9d5ab",
+          "amount": "65.52"
+        },
+        {
+          "debtor": "PID_U0027_afd9d5ab",
+          "creditor": "PID_U0006_b54cda26",
+          "amount": "106.42"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-04T16:47:00Z",
+    "updated_at": "2026-01-04T16:50:00Z"
+  },
+  {
+    "id": "550b4883-38f4-510e-bc97-13d65ec803ad",
+    "tx_id": "550b4883-38f4-510e-bc97-13d65ec803ad",
+    "idempotency_key": null,
+    "type": "CLEARING",
+    "initiator_pid": "PID_U0006_b54cda26",
+    "payload": {
+      "cycle": [
+        "debt_0008_00",
+        "debt_0008_01",
+        "debt_0008_02"
+      ],
+      "amount": "66.43",
+      "equivalent": "UAH",
+      "edges": [
+        {
+          "debtor": "PID_U0006_b54cda26",
+          "creditor": "PID_U0043_935170bb",
+          "amount": "66.43"
+        },
+        {
+          "debtor": "PID_U0043_935170bb",
+          "creditor": "PID_U0039_1a7389f7",
+          "amount": "96.45"
+        },
+        {
+          "debtor": "PID_U0039_1a7389f7",
+          "creditor": "PID_U0006_b54cda26",
+          "amount": "57.24"
+        }
+      ]
+    },
+    "signatures": [],
+    "state": "COMMITTED",
+    "error": null,
+    "created_at": "2026-01-03T15:28:00Z",
+    "updated_at": "2026-01-03T15:31:00Z"
   },
   {
     "id": "ddddb8eb-c828-5e64-aa0f-1fc29015d201",
