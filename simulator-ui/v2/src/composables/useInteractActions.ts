@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { isReadonly, ref, type Ref } from 'vue'
 
 import { ApiError, type HttpConfig } from '../api/http'
 import {
@@ -142,16 +142,14 @@ export function useInteractActions(opts: {
 } {
   const actionsDisabled = ref(false)
 
-  function hasWritableValueSetter(r: any): boolean {
-    // Refs/computed refs typically implement `value` as an accessor on the prototype.
-    // Vue warns when writing to a readonly computed (no setter). Detect that case and avoid the write.
-    let cur: any = r
-    for (let i = 0; i < 5 && cur; i++) {
-      const d = Object.getOwnPropertyDescriptor(cur, 'value')
-      if (d) return typeof d.set === 'function'
-      cur = Object.getPrototypeOf(cur)
+  function isRunIdWritable(): boolean {
+    // Vue's computed-without-setter still exposes a setter that only warns.
+    // Use isReadonly() to avoid triggering the warning.
+    try {
+      return !isReadonly(opts.runId)
+    } catch {
+      return false
     }
-    return false
   }
 
   function clearRunIdBestEffort() {
@@ -162,7 +160,7 @@ export function useInteractActions(opts: {
     }
 
     // Only attempt a ref write if it is actually writable (prevents Vue readonly-computed warning).
-    if (hasWritableValueSetter(opts.runId)) {
+    if (isRunIdWritable()) {
       opts.runId.value = ''
     }
   }

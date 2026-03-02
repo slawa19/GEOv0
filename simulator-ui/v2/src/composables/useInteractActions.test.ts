@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 
 import { ApiError } from '../api/http'
 
@@ -214,6 +214,54 @@ describe('useInteractActions', () => {
 
     await expect(ia.fetchParticipants()).resolves.toEqual([])
     expect(runId.value).toBe('')
+  })
+
+  it('readonly computed runId: 404 clears persisted runId via onStaleRunId without Vue warn', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      // Simulate a persisted runId.
+      const storage = { setItem: vi.fn() }
+
+      const real = reactive({
+        runId: 'run_stale' as string | null,
+      })
+
+      // Minimal persistence wiring: mirrors useSimulatorApp's watch(runId → localStorage).
+      watch(
+        () => real.runId,
+        (v) => storage.setItem('geo.sim.v2.runId', v ?? ''),
+        { immediate: true },
+      )
+
+      const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
+
+      // Readonly computed (no setter) reproduces the original Vue warning scenario.
+      const runId = computed(() => String(real.runId ?? ''))
+
+      const onStaleRunId = vi.fn(() => {
+        real.runId = null
+      })
+
+      const ia = useInteractActions({ httpConfig, runId: runId as any, onStaleRunId })
+
+      m.getTrustlinesList.mockRejectedValueOnce(new ApiError('HTTP 404 Not Found for /x', { status: 404 }))
+
+      await expect(ia.fetchTrustlines('UAH')).resolves.toEqual([])
+      expect(onStaleRunId).toHaveBeenCalledTimes(1)
+
+      await nextTick()
+      expect(real.runId).toBe(null)
+
+      // Last persisted value should be cleared.
+      const last = storage.setItem.mock.calls.at(-1)
+      expect(last).toEqual(['geo.sim.v2.runId', ''])
+
+      // No "computed value is readonly" warning should be emitted.
+      const warnedReadonlyComputed = warnSpy.mock.calls.some((c) => String(c[0] ?? '').includes('computed value is readonly'))
+      expect(warnedReadonlyComputed).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 
