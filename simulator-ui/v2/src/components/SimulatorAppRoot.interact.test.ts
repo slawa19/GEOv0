@@ -85,11 +85,20 @@ vi.mock('../composables/useSimulatorApp', () => {
       const phase = ref(String((globalThis as any).__GEO_TEST_INTERACT_PHASE ?? 'idle'))
       ;(globalThis as any).__GEO_TEST_PHASE_REF = phase
 
-      const nodeCardOpen = ref(Boolean((globalThis as any).__GEO_TEST_NODE_CARD_OPEN ?? false))
-      const setNodeCardOpen = vi.fn((open: boolean) => {
-        nodeCardOpen.value = !!open
-      })
-      ;(globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN = setNodeCardOpen
+      const selectedNode = ref<any>((globalThis as any).__GEO_TEST_SELECTED_NODE ?? null)
+      const selectedNodeScreenCenter = ref<any>((globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER ?? null)
+
+      // Test helper: allow tests to request an initial NodeCard window by setting globals.
+      // WM-only runtime: NodeCard is opened via uiOpenOrUpdateNodeCard(), not via boolean flags.
+      const initialNodeCardOpen = Boolean((globalThis as any).__GEO_TEST_NODE_CARD_OPEN ?? false)
+      if (initialNodeCardOpen && selectedNode.value && typeof opts?.uiOpenOrUpdateNodeCard === 'function') {
+        queueMicrotask(() => {
+          opts.uiOpenOrUpdateNodeCard({
+            nodeId: String(selectedNode.value.id),
+            anchor: selectedNodeScreenCenter.value ?? null,
+          })
+        })
+      }
 
        const cancel = vi.fn()
        ;(globalThis as any).__GEO_TEST_INTERACT_CANCEL = cancel
@@ -378,14 +387,11 @@ vi.mock('../composables/useSimulatorApp', () => {
         },
 
         // selection + overlays
-        isNodeCardOpen: computed(() => nodeCardOpen.value),
-        setNodeCardOpen,
         hoveredEdge: reactive({ key: null, fromId: '', toId: '', amountText: '' }),
         clearHoveredEdge: vi.fn(),
         edgeTooltipStyle: () => ({}),
-        selectedNode: computed(() => (globalThis as any).__GEO_TEST_SELECTED_NODE ?? null),
-        nodeCardStyle: computed(() => (globalThis as any).__GEO_TEST_NODE_CARD_STYLE ?? ({ left: '100px', top: '100px' })),
-        selectedNodeScreenCenter: computed(() => (globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER ?? null),
+        selectedNode: computed(() => selectedNode.value),
+        selectedNodeScreenCenter: computed(() => selectedNodeScreenCenter.value),
         selectedNodeEdgeStats: computed(() => null),
 
         // pinning
@@ -398,9 +404,17 @@ vi.mock('../composables/useSimulatorApp', () => {
         onCanvasClick: vi.fn(() => {
           // Minimal integration wiring for root interaction tests:
           // emulate empty-canvas click behavior (outside click) by delegating
-          // to WM-aware callback when in WM mode.
-          const wmEnabled = (qs().get('wm') || '') === '1'
-          if (wmEnabled && typeof opts?.uiCloseTopmostInspectorWindow === 'function') {
+          // to WM-aware callback (WM-only runtime).
+          try {
+            const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+            if (typeof cancel === 'function') cancel()
+          } catch {
+            // best-effort
+          }
+
+          if (typeof opts?.uiCloseTopmostInspectorWindow === 'function') {
+            // Close twice to mirror Step0 policy (edge-detail then node-card).
+            opts.uiCloseTopmostInspectorWindow()
             opts.uiCloseTopmostInspectorWindow()
           }
         }),
@@ -468,7 +482,7 @@ function stubLocationHrefSetter() {
 describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('ui=interact renders interact HUD + ActionBar + ManualPaymentPanel and does not render intensity slider', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -498,9 +512,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
   })
 
-  it('wm=1: renders ManualPaymentPanel through WindowLayer (WindowShell) and does not duplicate legacy panel', async () => {
+  it('renders ManualPaymentPanel through WindowLayer (WindowShell) and does not duplicate legacy panel', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     // Step 3: WM wiring must not crash in environments without native ResizeObserver.
     // (happy-dom may not provide it; we stub it out explicitly to ensure coverage)
@@ -544,9 +558,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: renders TrustlineManagementPanel through WindowLayer and does not duplicate legacy panel', async () => {
+  it('renders TrustlineManagementPanel through WindowLayer and does not duplicate legacy panel', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-trustline-create'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -574,9 +588,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: renders ClearingPanel through WindowLayer and does not duplicate legacy panel', async () => {
+  it('renders ClearingPanel through WindowLayer and does not duplicate legacy panel', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-clearing'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -604,9 +618,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: renders EdgeDetailPopup through WindowLayer (WindowShell)', async () => {
+  it('renders EdgeDetailPopup through WindowLayer (WindowShell)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -637,7 +651,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: renders NodeCardOverlay through WindowLayer (WindowShell)', async () => {
+  it('renders NodeCardOverlay through WindowLayer (WindowShell)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -648,7 +662,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       viz_color_key: 'unknown',
       net_balance: '0',
     }
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -678,7 +692,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: coexistence — interact-panel and node-card both render (2 windows)', async () => {
+  it('coexistence — interact-panel and node-card both render (2 windows)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -689,7 +703,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       viz_color_key: 'unknown',
       net_balance: '0',
     }
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -718,7 +732,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: NodeCard action → opens interact-panel and keeps NodeCard open (H-1 coexistence)', async () => {
+  it('NodeCard action → opens interact-panel and keeps NodeCard open (H-1 coexistence)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -729,7 +743,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       viz_color_key: 'unknown',
       net_balance: '0',
     }
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -747,9 +761,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
         | undefined
       expect(btn).toBeTruthy()
 
-      const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
-      expect(setOpen).toBeTruthy()
-
       btn?.click()
       await nextTick()
       await nextTick()
@@ -758,25 +769,21 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(host.querySelectorAll('[data-testid="clearing-panel"]').length).toBe(1)
       expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
       expect(host.querySelectorAll('.ws-shell').length).toBe(2)
-
-      // Critical: NodeCard MUST NOT be closed by legacy `setNodeCardOpen(false)`.
-      expect(setOpen).not.toHaveBeenCalledWith(false)
     } finally {
       app.unmount()
       host.remove()
       delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
       delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_SELECTED_NODE
-      delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
       delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
       vi.unstubAllGlobals()
     }
   })
 
-  it('wm=1: cross-group replace — Change Limit closes edge-detail window and opens trustline panel', async () => {
+  it('cross-group replace — Change Limit closes edge-detail window and opens trustline panel', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -813,9 +820,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: edge-detail UI-close closes the window and does NOT cancel interact flow (H-3)', async () => {
+  it('edge-detail UI-close closes the window and does NOT cancel interact flow (H-3)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -866,9 +873,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: Send Payment from edge-detail keeps edge-detail window open (keepAlive)', async () => {
+  it('Send Payment from edge-detail keeps edge-detail window open (keepAlive)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -914,9 +921,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: outside-click closes topmost/active inspector via WM (edge-detail)', async () => {
+  it('outside-click closes topmost/active inspector via WM (edge-detail) and cancels interact flow', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -949,7 +956,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       // Window must be closed...
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
-      // Option C: outside click MUST cancel the flow too.
+      // Outside click cancels the flow.
       expect(cancel).toHaveBeenCalledTimes(1)
       const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
       expect(st?.edgeAnchor).toBeFalsy()
@@ -964,7 +971,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: outside-click closes both inspector (node-card) and interact-panel (Option C)', async () => {
+  it('outside-click closes inspector (node-card) and cancels interact-panel (hard dismiss)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -975,7 +982,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       viz_color_key: 'unknown',
       net_balance: '0',
     }
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -995,9 +1002,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const getTopmost = (globalThis as any).__GEO_TEST_WM_GET_TOPMOST_IN_GROUP as ReturnType<typeof vi.fn>
       expect(getTopmost).toBeTruthy()
 
-      const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
-      expect(setOpen).toBeTruthy()
-
       // Outside click (empty canvas click)
       const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
       expect(canvas).toBeTruthy()
@@ -1006,12 +1010,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
 
       expect(getTopmost).toHaveBeenCalledWith('inspector')
-      // NodeCard must be closed via WM → onClose bridge to legacy open flag.
-      expect(setOpen).toHaveBeenCalledWith(false)
       expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(0)
 
-      // Interact panel must stay.
-      // Option C: outside click closes everything (interact + inspector).
+      // Interact flow must be cancelled (phase -> idle closes the interact window).
       expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(0)
     } finally {
       app.unmount()
@@ -1019,16 +1020,15 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
       delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_SELECTED_NODE
-      delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
       delete (globalThis as any).__GEO_TEST_WM_GET_TOPMOST_IN_GROUP
       vi.unstubAllGlobals()
     }
   })
 
-  it('wm=1: EdgeDetailPopup Close closes edge-detail window (UI-close) and does NOT cancel interact flow', async () => {
+  it('EdgeDetailPopup Close closes edge-detail window (UI-close) and does NOT cancel interact flow', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1078,9 +1078,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: EdgeDetailPopup send-payment → payment keeps edge anchor (wm.open gets non-null anchor)', async () => {
+  it('EdgeDetailPopup send-payment → payment keeps edge anchor (wm.open gets non-null anchor)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1121,7 +1121,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('MP-0: routesLoading in root yields tri-state unknown in ManualPaymentPanel (shows updating help)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1181,7 +1181,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   })
 
   it('ui=interact renders trustline/clearing panels depending on phase', async () => {
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     // Trustline create phase
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-trustline-create'
@@ -1220,7 +1220,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('clicking ActionBar "Run Clearing" changes phase and shows ClearingPanel (behavioral)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1244,9 +1244,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
   })
 
-  it('Escape calls interact.mode.cancel() when phase is not idle', async () => {
+  it('Escape delegates to WM and does not cancel confirm-payment (step-back instead)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1258,18 +1258,28 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
     expect(cancel).toBeTruthy()
 
+    const setTo = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID as ReturnType<typeof vi.fn>
+    expect(setTo).toBeTruthy()
+
+    const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
+    expect(handleEsc).toBeTruthy()
+
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(handleEsc).toHaveBeenCalledTimes(1)
+    expect(cancel).toHaveBeenCalledTimes(0)
+    expect(setTo).toHaveBeenCalledWith(null)
 
     app.unmount()
     host.remove()
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+    delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_TO_PID
+    delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
   })
 
-  it('wm=1: Escape delegates to wm.handleEsc() and does NOT cancel interact flow', async () => {
+  it('Escape delegates to wm.handleEsc() and does NOT cancel interact flow', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1308,9 +1318,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: ESC on picking-payment-to closes when initiatedWithPrefilledFrom=true (NodeCard)', async () => {
+  it('ESC on picking-payment-to closes when initiatedWithPrefilledFrom=true (NodeCard)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1356,9 +1366,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: ESC on picking-payment-to steps back when initiatedWithPrefilledFrom=false (ActionBar)', async () => {
+  it('ESC on picking-payment-to steps back when initiatedWithPrefilledFrom=false (ActionBar)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1408,9 +1418,126 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: EdgeDetail payment confirm ESC clears TO, then closes on 2nd ESC (prefilled)', async () => {
+  it('ActionBar payment — 2nd ESC after step-back closes window (cancel ×1)', async () => {
+    // AC regression: after step-back from picking-to → picking-from (ActionBar), 2nd ESC must close.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
+      st.initiatedWithPrefilledFrom = false
+      await nextTick()
+      await nextTick()
+
+      const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF as Ref<string>
+      phaseRef.value = 'picking-payment-to'
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID as ReturnType<typeof vi.fn>
+
+      // ESC #1: step-back (picking-to → picking-from)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(cancel).toHaveBeenCalledTimes(0)
+      expect(setFrom).toHaveBeenCalledWith(null)
+      // Mock setPaymentFromPid(null) advances phase to 'picking-payment-from'
+      expect(phaseRef.value).toBe('picking-payment-from')
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+
+      await nextTick()
+      await nextTick()
+
+      // ESC #2: no onBack matches picking-payment-from → WM closes → cancel ×1
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      delete (globalThis as any).__GEO_TEST_PHASE_REF
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('latched initiatedWithPrefilledFrom stays true after manual FROM change via dropdown', async () => {
+    // Regression: initiatedWithPrefilledFrom must be latched (not derived from fromPid truthy).
+    // After user changes FROM in dropdown, ESC must still close (not step-back to picking-from).
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-to'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      // Flow initiated via NodeCard (prefilled FROM = alice)
+      st.fromPid = 'alice'
+      st.initiatedWithPrefilledFrom = true
+      await nextTick()
+      await nextTick()
+
+      // User changes FROM via dropdown (setPaymentFromPid('carol'))
+      // initiatedWithPrefilledFrom remains true (latched — not reset by dropdown change)
+      st.fromPid = 'carol'
+      // Explicitly keep latched flag = true (simulates FSM behavior)
+      st.initiatedWithPrefilledFrom = true
+      await nextTick()
+      await nextTick()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID as ReturnType<typeof vi.fn>
+
+      // ESC should close (prefilled=true), not step-back to picking-from
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(setFrom).not.toHaveBeenCalledWith(null)
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('EdgeDetail payment confirm ESC clears TO, then closes on 2nd ESC (prefilled)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1465,9 +1592,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: Trustline picking-to closes when initiatedWithPrefilledFrom=true (NodeCard)', async () => {
+  it('Trustline picking-to closes when initiatedWithPrefilledFrom=true (NodeCard)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-trustline-to'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1512,9 +1639,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: Trustline picking-to steps back when initiatedWithPrefilledFrom=false (ActionBar)', async () => {
+  it('Trustline picking-to steps back when initiatedWithPrefilledFrom=false (ActionBar)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-trustline-to'
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1557,9 +1684,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('wm=1: Trustline edit ESC clears TO and stays open, then closes on 2nd ESC (prefilled)', async () => {
-    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=1')
+  it('ActionBar trustline — 2nd ESC after step-back closes window (cancel ×1)', async () => {
+    // AC regression: after step-back from picking-trustline-to → picking-trustline-from, 2nd ESC must close.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-trustline-to'
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1575,10 +1703,126 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
       expect(st).toBeTruthy()
       st.fromPid = 'alice'
+      st.initiatedWithPrefilledFrom = false
+      await nextTick()
+      await nextTick()
+
+      const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF as Ref<string>
+      phaseRef.value = 'picking-trustline-to'
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      const setFrom = (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID as ReturnType<typeof vi.fn>
+
+      // ESC #1: step-back (picking-trustline-to → picking-trustline-from)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(cancel).toHaveBeenCalledTimes(0)
+      expect(setFrom).toHaveBeenCalledWith(null)
+      // Mock setTrustlineFromPid(null) advances phase to 'picking-trustline-from'
+      expect(phaseRef.value).toBe('picking-trustline-from')
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
+
+      await nextTick()
+      await nextTick()
+
+      // ESC #2: no onBack matches picking-trustline-from → WM closes → cancel ×1
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      delete (globalThis as any).__GEO_TEST_PHASE_REF
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('clearing confirm — ESC closes window without step-back, cancel called exactly once', async () => {
+    // AC-7 regression: Run Clearing has no step-back; ESC must close and cancel exactly once.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-clearing'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="clearing-panel"]')).toBeTruthy()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      // cancel must be called exactly once (no double-cancel from step-back + close)
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('[data-testid="clearing-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_STATE
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('Trustline edit ESC clears TO and stays open, then closes on 2nd ESC (prefilled)', async () => {
+    // IMPORTANT: `editing-trustline` may map to EdgeDetailPopup when `useFullTrustlineEditor=false`.
+    // This test asserts ESC step-back for the *full* trustline editor (TrustlineManagementPanel),
+    // so we must enter the trustline flow via ActionBar to set `useFullTrustlineEditor=true`.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Enter via ActionBar so the root sets useFullTrustlineEditor=true.
+      const tlBtn = host.querySelector('[data-testid="actionbar-trustline"]') as HTMLButtonElement | null
+      expect(tlBtn).toBeTruthy()
+      tlBtn!.click()
+      await nextTick()
+      await nextTick()
+
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st).toBeTruthy()
+      st.fromPid = 'alice'
       st.toPid = 'bob'
       st.initiatedWithPrefilledFrom = true
+
+      // Force phase to editor state (full editor window exists in WM layer).
+      const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF as Ref<string>
+      expect(phaseRef).toBeTruthy()
+      phaseRef.value = 'editing-trustline'
       await nextTick()
       await nextTick()
+
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
 
       const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
       const setTo = (globalThis as any).__GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID as ReturnType<typeof vi.fn>
@@ -1612,7 +1856,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('canvas shows crosshair cursor in interact picking phases', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'picking-payment-from'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1634,7 +1878,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('TrustlineManagementPanel: Close TL requires 2 clicks (armed confirmation)', async () => {
     // Enter via ActionBar to set useFullTrustlineEditor=true, then advance to editing-trustline.
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1679,7 +1923,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     // Enter via ActionBar so useFullTrustlineEditor=true → TrustlineManagementPanel shown,
     // EdgeDetailPopup hidden via forceHidden prop.
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1715,7 +1959,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('AC-ED-3: EdgeDetailPopup "Send Payment" activates Manual Payment and pre-fills pids (trustline to→from)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1761,7 +2005,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('Escape disarms Close TL confirmation (does not cancel flow)', async () => {
     // Enter via ActionBar to set useFullTrustlineEditor=true, then advance to editing-trustline.
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1805,37 +2049,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE
   })
 
-  it('Escape closes NodeCardOverlay first (does not cancel idle interact)', async () => {
-    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
-    setUrl('/?mode=real&ui=interact&wm=0')
-
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
-    app.mount(host)
-    await nextTick()
-
-    const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
-    expect(cancel).toBeTruthy()
-
-    const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
-    expect(setOpen).toBeTruthy()
-
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    expect(setOpen).toHaveBeenCalledWith(false)
-    expect(cancel).toHaveBeenCalledTimes(0)
-
-    app.unmount()
-    host.remove()
-    delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
-    delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
-    delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
-    delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
-  })
-
-  it('wm=1: Escape is routed to WM and closes NodeCard via back-stack (H-2 ESC policy)', async () => {
+  it('Escape closes NodeCard window first (does not cancel idle interact)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -1846,7 +2060,53 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       viz_color_key: 'unknown',
       net_balance: '0',
     }
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    app.mount(host)
+    await nextTick()
+    await nextTick()
+
+    const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+    expect(cancel).toBeTruthy()
+
+    const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
+    expect(handleEsc).toBeTruthy()
+
+    expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(handleEsc).toHaveBeenCalledTimes(1)
+    expect(cancel).toHaveBeenCalledTimes(0)
+
+    await nextTick()
+    await nextTick()
+    expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(0)
+
+    app.unmount()
+    host.remove()
+    delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+    delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+    delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+    delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+    delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
+  })
+
+  it('Escape is routed to WM and closes NodeCard via back-stack (H-2 ESC policy)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1861,9 +2121,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
 
-      const setOpen = (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN as ReturnType<typeof vi.fn>
-      expect(setOpen).toBeTruthy()
-
       const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
       expect(handleEsc).toBeTruthy()
 
@@ -1872,8 +2129,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       // Must go through WM.
       expect(handleEsc).toHaveBeenCalledTimes(1)
-      // In WM mode, NodeCard participates in window back-stack and is closed by ESC.
-      expect(setOpen).toHaveBeenCalledWith(false)
 
       // Not visible.
       expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(0)
@@ -1883,7 +2138,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
       delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_SELECTED_NODE
-      delete (globalThis as any).__GEO_TEST_SET_NODE_CARD_OPEN
       delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
       delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
       vi.unstubAllGlobals()
@@ -1901,13 +2155,14 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       viz_color_key: 'unknown',
       net_balance: '0',
     }
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
 
     const app = createApp({ render: () => h(SimulatorAppRoot as any) })
     app.mount(host)
+    await nextTick()
     await nextTick()
 
     const card = host.querySelector('.ds-ov-node-card') as HTMLElement | null
@@ -1934,7 +2189,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM
   })
 
-  it('wm=1: NodeCardOverlay "Send Payment" opens interact-panel once with node anchor (no intermediate window)', async () => {
+  it('NodeCardOverlay "Send Payment" opens interact-panel once with node anchor (no intermediate window)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
     ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
@@ -1946,7 +2201,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       net_balance: '0',
     }
     ;(globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER = { x: 111, y: 222 }
-    setUrl('/?mode=real&ui=interact&wm=1')
+    setUrl('/?mode=real&ui=interact')
 
     vi.stubGlobal('ResizeObserver', undefined as any)
 
@@ -1990,7 +2245,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('success toast: successful clearing confirm renders SuccessToast and allows dismiss', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
-    setUrl('/?mode=real&ui=interact&wm=0')
+    setUrl('/?mode=real&ui=interact')
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -2054,7 +2309,7 @@ describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
     simStorage.readDevtoolsOpenReal.mockReturnValue(true)
 
     // Add a legacy param that must be scrubbed.
-    setUrl('/?mode=real&ui=interact&devtools=1&wm=0&testMode=0')
+    setUrl('/?mode=real&ui=interact&devtools=1&testMode=0')
 
     // Prevent real navigation in happy-dom.
     // Prevent real navigation in happy-dom by intercepting href setter.
@@ -2105,7 +2360,7 @@ describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
     // Setup: in demo UI, with snapshot present.
     simStorage.readDevtoolsOpenRealSnapshot.mockReturnValue(false)
 
-    setUrl('/?mode=real&ui=demo&debug=1&devtools=1&wm=0&testMode=0')
+    setUrl('/?mode=real&ui=demo&debug=1&devtools=1&testMode=0')
 
     const nav = stubLocationHrefSetter()
 

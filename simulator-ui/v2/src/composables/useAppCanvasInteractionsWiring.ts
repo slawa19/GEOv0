@@ -9,8 +9,9 @@ export function useAppCanvasInteractionsWiring(opts: {
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
   pickEdgeAt?: (clientX: number, clientY: number) => { key: string; fromId: string; toId: string } | null
   selectNode: (id: string | null) => void
-  setNodeCardOpen: (open: boolean) => void
   clearHoveredEdge: () => void
+
+  onNodeDblClick?: (node: { id: string }, ptr: { clientX: number; clientY: number }) => boolean
 
   onEdgeClick?: (edge: { key: string; fromId: string; toId: string }, ptr: { clientX: number; clientY: number }) => boolean
 
@@ -24,8 +25,8 @@ export function useAppCanvasInteractionsWiring(opts: {
     pickNodeAt: opts.pickNodeAt,
     pickEdgeAt: opts.pickEdgeAt,
     setSelectedNodeId: opts.selectNode,
-    setNodeCardOpen: opts.setNodeCardOpen,
     clearHoveredEdge: opts.clearHoveredEdge,
+    onNodeDblClick: opts.onNodeDblClick,
     onEdgeClick: opts.onEdgeClick,
     dragToPin: opts.dragToPin,
     cameraSystem: opts.cameraSystem,

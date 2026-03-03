@@ -34,7 +34,7 @@
 
 **Текущий статус:** `.wm-layer` должен иметь `z-index: var(--ds-z-panel)` (локальный stacking context), поэтому симптом не должен воспроизводиться. Если воспроизводится — проверить, что это правило применилось и нет другого stacking context поверх WM-слоя.
 
-В legacy режиме (wm=0) проблемы нет — попап получает `z-index: 42` через `designSystem.overlays.css:350`.
+В legacy режиме (исторически; legacy runtime удалён) проблемы не было — попап получал `z-index: 42` через `designSystem.overlays.css:350`.
 
 **Затронутые файлы:**
 - `useWindowManager.ts`

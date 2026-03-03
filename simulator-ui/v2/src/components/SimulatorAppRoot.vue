@@ -22,8 +22,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
  import type { InteractPhase } from '../composables/useInteractMode'
 import { provideActivePanelState } from '../composables/useActivePanelState'
- import { useInteractPanelPosition } from '../composables/useInteractPanelPosition'
- import type { Point } from '../composables/useInteractPanelPosition'
+ import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
  import { toLower } from '../utils/stringHelpers'
@@ -99,24 +98,11 @@ import type { GraphLink } from '../types'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
-import { handleEscOverlayStack } from '../utils/escOverlayStack'
-import { buildReloadUrlPreservingWmOptOut } from '../utils/navigationUrl'
-
-  import { useWindowManager } from '../composables/windowManager/useWindowManager'
-  import type { WindowInstance } from '../composables/windowManager/types'
+import { useWindowManager } from '../composables/windowManager/useWindowManager'
+import type { WindowInstance } from '../composables/windowManager/types'
 import type { WindowAnchor } from '../composables/windowManager/types'
 import { isInteractPanelWindow, isNodeCardWindow } from '../composables/windowManager/types'
 import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
-import {
-  provideWindowManagerEnabled,
-  readWindowManagerEnabledFromUrl,
-} from '../composables/windowManager/featureFlag'
-
-// Step 2 runtime flag (default false): enable via query string `?wm=1`.
-const __USE_WINDOW_MANAGER: boolean = readWindowManagerEnabledFromUrl()
-
-// Expose WM enabled state to composables (avoid direct window.location reads).
-provideWindowManagerEnabled(__USE_WINDOW_MANAGER)
 
 function readWindowViewportFallback(): { width: number; height: number } {
   try {
@@ -157,7 +143,6 @@ function wmResetEdgeDetailKeepAlive() {
 }
 
 function uiCloseEdgeDetailWindow(winId: number, reason: 'action' | 'programmatic') {
-  if (!__USE_WINDOW_MANAGER) return
   wmEdgeDetailSuppressed.value = true
   wmResetEdgeDetailKeepAlive()
   wm.close(winId, reason)
@@ -165,8 +150,6 @@ function uiCloseEdgeDetailWindow(winId: number, reason: 'action' | 'programmatic
 }
 
 function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
-  if (!__USE_WINDOW_MANAGER) return null
-
   // WM source of truth: still query the topmost/active inspector window by WM z-order.
   // (Useful for tests and for any future "close-only-topmost" variants.)
   const top = wm.getTopmostInGroup('inspector')
@@ -175,33 +158,30 @@ function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
       ? top.type
       : null
 
-  // AC-4 / Option C: outside-click is a "hard" dismiss.
-  // Close all windows and cancel any active Interact flow to avoid orphaned state.
+  // Step 0 contract (normative): outside-click closes ONLY inspector overlays.
+  // It MUST NOT close interact windows and MUST NOT cancel the interact flow.
 
   // Clear keepAlive so frozen inspectors can't persist after an outside-click.
   wmResetEdgeDetailKeepAlive()
-  // Outside-click is not a UI-close suppression; the flow is cancelled anyway.
-  if (wmEdgeDetailSuppressed.value) wmEdgeDetailSuppressed.value = false
-  if (wmEdgeDetailSelectionKey.value) wmEdgeDetailSelectionKey.value = ''
 
-  // Best-effort: close both groups. Programmatic close must NOT trigger interact.onClose.
-  wm.closeGroup('inspector', 'programmatic')
-  wm.closeGroup('interact', 'programmatic')
-  wmEdgeDetailId.value = null
-  wmNodeCardId.value = null
+  if (!top || !topType) return null
 
-  // Cancel the flow explicitly (WM programmatic close does not call interact-panel onClose).
-  try {
-    interact.mode.cancel()
-  } catch {
-    // best-effort
+  // Outside-click is a UI-close. For edge-detail we must suppress auto-open
+  // until selection changes (otherwise the watcher will immediately reopen it).
+  if (topType === 'edge-detail') {
+    wmEdgeDetailSuppressed.value = true
+    wm.close(top.id, 'programmatic')
+    if (wmEdgeDetailId.value === top.id) wmEdgeDetailId.value = null
+    return 'edge-detail'
   }
 
-  return topType
+  // node-card
+  wm.close(top.id, 'programmatic')
+  if (wmNodeCardId.value === top.id) wmNodeCardId.value = null
+  return 'node-card'
 }
 
 function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: Point }) {
-  if (!__USE_WINDOW_MANAGER) return
   const id = wm.open({
     type: 'edge-detail',
     anchor: toWmAnchor(o.anchor, 'edge-click'),
@@ -211,7 +191,6 @@ function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: P
 }
 
 function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
-  if (!__USE_WINDOW_MANAGER) return
   const id = wm.open({
     type: 'node-card',
     anchor: toWmAnchor(o.anchor, 'node'),
@@ -221,9 +200,10 @@ function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
 }
 
 const app = useSimulatorApp({
-  uiCloseTopmostInspectorWindow: __USE_WINDOW_MANAGER ? uiCloseTopmostInspectorWindow : undefined,
-  uiOpenOrUpdateEdgeDetail: __USE_WINDOW_MANAGER ? uiOpenOrUpdateEdgeDetail : undefined,
-  uiOpenOrUpdateNodeCard: __USE_WINDOW_MANAGER ? uiOpenOrUpdateNodeCard : undefined,
+  uiCloseTopmostInspectorWindow,
+  uiOpenOrUpdateEdgeDetail,
+  uiOpenOrUpdateNodeCard,
+  uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -295,14 +275,10 @@ const {
   e2e,
 
   // selection + overlays
-  isNodeCardOpen,
-  setNodeCardOpen,
   hoveredEdge,
   clearHoveredEdge,
   edgeTooltipStyle: calcEdgeTooltipStyle,
   selectedNode,
-  nodeCardStyle,
-  nodeCardCardRef,
   selectedNodeScreenCenter,
   selectedNodeEdgeStats,
 
@@ -359,16 +335,7 @@ const { activePanelType } = provideActivePanelState(interactPhase)
  */
 const useFullTrustlineEditor = ref(false)
 
-/**
- * Централизованное управление anchor-позицией Interact-панелей.
- * (Legacy panels still use `panelAnchor`; WM uses it as a fallback when
- * there is no edge-popup initiated anchor.)
- */
- const { panelAnchor, openFrom: openPanelFrom } = useInteractPanelPosition(interactPhase)
-
-const legacyShowManualPaymentPanel = computed(
-  () => apiMode.value === 'real' && isInteractUi.value && activePanelType.value === 'payment',
-)
+// Legacy panels were removed; interact panels are WM-only.
 
 /**
  * Step 4: Interact → WindowManager bridging.
@@ -443,8 +410,7 @@ const wmInteractAnchor = computed<WindowAnchor | null>(() => {
   // NodeCard / ActionBar initiated anchors should apply to the first WM open.
   if (wmPanelOpenAnchor.value) return toWmAnchor(wmPanelOpenAnchor.value, 'panel')
 
-  // Fallback: generic panel anchor (ActionBar / NodeCard positioning).
-  return toWmAnchor(panelAnchor.value ?? null, 'panel')
+  return null
 })
 
 // IMPORTANT: avoid watching the anchor object by identity.
@@ -464,15 +430,13 @@ const wmInteractAnchorKey = computed(() => {
 // Same pattern as the inspector watcher below (line ~375).
 watch(
   [
-    () => __USE_WINDOW_MANAGER,
     () => apiMode.value,
     () => isInteractUi.value,
     () => String(interactPhase.value),
     () => useFullTrustlineEditor.value,
     () => wmInteractAnchorKey.value,
   ],
-  ([enabled, curApiMode, curIsInteractUi, phase, isFullEditor]) => {
-    if (!enabled) return
+  ([curApiMode, curIsInteractUi, phase, isFullEditor]) => {
 
     // Safety: only drive Interact windows in real interact UI.
     if (curApiMode !== 'real' || !curIsInteractUi) {
@@ -512,7 +476,6 @@ watch(
 // Vue can track WM state as a dependency, causing recursive update loops.
 watch(
   () => ({
-    enabled: __USE_WINDOW_MANAGER,
     apiMode: apiMode.value,
     isInteractUi: isInteractUi.value,
     phase: String(interactPhase.value),
@@ -523,8 +486,6 @@ watch(
     suppressed: wmEdgeDetailSuppressed.value,
   }),
   (s) => {
-    if (!s.enabled) return
-
     // Reset UI-close suppression on selection changes.
     // (When the same edge is re-selected, anchor typically changes; include anchor in the key.)
     const key = s.anchor
@@ -573,39 +534,6 @@ watch(
     if (wmEdgeDetailId.value != null) {
       wm.close(wmEdgeDetailId.value, 'programmatic')
       wmEdgeDetailId.value = null
-    }
-  },
-  { immediate: true },
-)
-
-watch(
-  () => ({
-    enabled: __USE_WINDOW_MANAGER,
-    open: isNodeCardOpen.value,
-    nodeId: selectedNode.value?.id ?? null,
-    anchor: selectedNodeScreenCenter.value,
-    dragging: !!dragToPin.dragState.active,
-  }),
-  (s) => {
-    if (!s.enabled) return
-
-    const shouldShow = !!s.nodeId && s.open && !s.dragging
-    if (shouldShow) {
-      wmNodeCardId.value = wm.open({
-        type: 'node-card',
-        anchor: toWmAnchor(s.anchor ?? null, 'node'),
-        data: {
-          nodeId: String(s.nodeId),
-          // Bridge WM-driven UI-close back into legacy open flag.
-          onClose: () => setNodeCardOpen(false),
-        },
-      })
-      return
-    }
-
-    if (wmNodeCardId.value != null) {
-      wm.close(wmNodeCardId.value, 'programmatic')
-      wmNodeCardId.value = null
     }
   },
   { immediate: true },
@@ -710,55 +638,34 @@ function dispatchInteractEsc(): boolean {
 }
 
 function onGlobalKeydown(ev: KeyboardEvent) {
-  // Step WM-ESC: when WM is active, delegate ESC handling to wm.handleEsc() first.
-  // wm.handleEsc() respects per-window escBehavior (close / back-then-close / ignore)
-  // and gives nested content a chance to consume ESC via dispatchInteractEsc.
-  if (__USE_WINDOW_MANAGER && (ev.key === 'Escape' || ev.key === 'Esc')) {
+  // WM-only: delegate ESC handling to WindowManager.
+  if (ev.key === 'Escape' || ev.key === 'Esc') {
     const consumed = wm.handleEsc(ev, {
       isFormLikeTarget,
       dispatchWindowEsc: dispatchInteractEsc,
     })
     if (consumed) return
-
-    // WM mode: do NOT fall back to legacy ESC overlay stack.
-    // Legacy stack would "magically" close WM-owned windows (NodeCard/EdgeDetail/etc)
-    // by calling setNodeCardOpen(false) and other non-WM closures.
-    return
   }
-
-  handleEscOverlayStack(ev, {
-    isNodeCardOpen: () => isNodeCardOpen.value,
-    closeNodeCard: () => setNodeCardOpen(false),
-
-    isInteractActive: () => isInteractActivePhase.value,
-    cancelInteract: () => interact.mode.cancel(),
-
-    isFormLikeTarget,
-    dispatchInteractEsc,
-  })
 }
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
 
-  // Step 3: Viewport ResizeObserver wiring (WM only).
-  // Keep an initial snapshot as a fallback, but use RO as the main source of viewport updates.
-  if (__USE_WINDOW_MANAGER) {
-    void nextTick(() => {
+  // Step 3: Viewport ResizeObserver wiring (WM-only).
+  void nextTick(() => {
+    const vp = readHostViewport(hostEl.value)
+    wm.setViewport(vp)
+  })
+
+  if (typeof ResizeObserver !== 'undefined') {
+    viewportRo = new ResizeObserver(() => {
       const vp = readHostViewport(hostEl.value)
       wm.setViewport(vp)
+      wm.reclampAll()
     })
 
-    if (typeof ResizeObserver !== 'undefined') {
-      viewportRo = new ResizeObserver(() => {
-        const vp = readHostViewport(hostEl.value)
-        wm.setViewport(vp)
-        wm.reclampAll()
-      })
-
-      const host = hostEl.value
-      if (host) viewportRo.observe(host)
-    }
+    const host = hostEl.value
+    if (host) viewportRo.observe(host)
   }
 })
 
@@ -831,11 +738,11 @@ async function runDemoFxOnce(action: () => Promise<void>): Promise<void> {
 }
 
 function setQueryAndReload(mut: (sp: URLSearchParams) => void) {
-  const nextHref = buildReloadUrlPreservingWmOptOut(window.location.href, (sp) => {
-    mut(sp)
-    // Always strip legacy `devtools` param — it must never propagate across reloads.
-    sp.delete('devtools')
-  })
+  const u = new URL(window.location.href)
+  mut(u.searchParams)
+  // Always strip legacy `devtools` param — it must never propagate across reloads.
+  u.searchParams.delete('devtools')
+  const nextHref = u.toString()
   // Setting href ensures full re-init (important when switching between pipelines).
   window.location.href = nextHref
 }
@@ -877,19 +784,9 @@ const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
 /**
  * Snapshot the selected node's screen-space center.
  * Must be called BEFORE closing the NodeCard (selectedNode is still valid at that point).
- * Falls back to parsing nodeCardStyle position if selectedNodeScreenCenter is unavailable.
  */
 function snapshotNodeCenter(): Point | null {
-  const center = selectedNodeScreenCenter.value
-  if (center) return center
-  // Fallback: parse card CSS position (top-left corner ≈ near node)
-  const style = nodeCardStyle.value
-  if (style.left && style.top) {
-    const x = parseInt(style.left as string, 10)
-    const y = parseInt(style.top as string, 10)
-    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y }
-  }
-  return null
+  return selectedNodeScreenCenter.value ?? null
 }
 
 /**
@@ -1001,19 +898,14 @@ function goInteract() {
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
 function onEdgeDetailChangeLimit() {
-  if (__USE_WINDOW_MANAGER) {
-    // MUST: anchor propagation from edge popup to interact-panel.
-    wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
+  // MUST: anchor propagation from edge popup to interact-panel.
+  wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
 
-    // Audit fix L-4 / Step 5: close ONLY the edge-detail inspector window, then open trustline.
-    if (wmEdgeDetailId.value != null) {
-      wm.close(wmEdgeDetailId.value, 'programmatic')
-      wmEdgeDetailId.value = null
-    }
+  // Audit fix L-4 / Step 5: close ONLY the edge-detail inspector window, then open trustline.
+  if (wmEdgeDetailId.value != null) {
+    wm.close(wmEdgeDetailId.value, 'programmatic')
+    wmEdgeDetailId.value = null
   }
-
-  // Позиционируем TrustlineManagementPanel рядом с тем же ребром.
-  openPanelFrom('change-limit', interact.mode.state.edgeAnchor ?? null)
 
   // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
   useFullTrustlineEditor.value = true
@@ -1044,17 +936,15 @@ function onEdgeDetailSendPayment() {
   if (!fromPid || !toPid) return
 
   // MUST: if initiated from edge popup, propagate edge anchor to interact-panel.
-  if (__USE_WINDOW_MANAGER) {
-    wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
+  wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
 
-    // KeepAlive: edge-detail stays open as context for the payment flow.
-    // Spec: "инспектор остаётся открыт как «база контекста», а Interact-панель
-    // открывается поверх для выполнения действия (Send Payment)."
-    // Freeze the current link data before cancel() clears interact state.
-    wmEdgeDetailKeepAlive.value = true
-    wmEdgeDetailFrozenLink.value = interactSelectedLink.value
-    // Do NOT close edge-detail — it persists as context.
-  }
+  // KeepAlive: edge-detail stays open as context for the payment flow.
+  // Spec: "инспектор остаётся открыт как «база контекста», а Interact-панель
+  // открывается поверх для выполнения действия (Send Payment)."
+  // Freeze the current link data before cancel() clears interact state.
+  wmEdgeDetailKeepAlive.value = true
+  wmEdgeDetailFrozenLink.value = interactSelectedLink.value
+  // Do NOT close edge-detail — it persists as context.
 
   // Atomically start payment with pre-filled FROM to avoid an intermediate
   // picking-payment-from phase (which can flash a useless empty window in WM mode).
@@ -1067,52 +957,28 @@ function startFlowFromNodeCard(opts: {
   openEditor?: boolean
   start: () => void
 }) {
-  if (__USE_WINDOW_MANAGER) {
-    // Not an edge-popup initiated action.
-    wmEdgePopupAnchor.value = null
-  }
+  // Not an edge-popup initiated action.
+  wmEdgePopupAnchor.value = null
   // Snapshot node screen center BEFORE closing the card (selectedNode cleared after close).
   const snapshot = snapshotNodeCenter()
 
   if (opts.openEditor) useFullTrustlineEditor.value = true
-  // H-1 coexistence: in WM mode NodeCard is an inspector window and must coexist with interact.
-  if (!__USE_WINDOW_MANAGER) setNodeCardOpen(false)
-
+  // H-1 coexistence: NodeCard is an inspector window and must coexist with interact.
   // WM: set anchor BEFORE phase change so the first `wm.open()` uses it.
-  if (__USE_WINDOW_MANAGER) {
-    wmPanelOpenAnchor.value = snapshot
-  }
+  wmPanelOpenAnchor.value = snapshot
   opts.start()
-
-  // Legacy panels: safe to set synchronously — flush:'sync' watcher in useInteractPanelPosition
-  // already fired during opts.start() and cleared anchor for the group change.
-  if (!__USE_WINDOW_MANAGER) {
-    openPanelFrom('node-card', snapshot)
-  }
 }
 
 function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void }) {
-  if (__USE_WINDOW_MANAGER) {
-    // Not an edge-popup initiated action.
-    wmEdgePopupAnchor.value = null
-  }
+  // Not an edge-popup initiated action.
+  wmEdgePopupAnchor.value = null
   // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
   const snapshot = getActionBarAnchor()
-  // H-1 coexistence: do not auto-close inspector under WM.
-  if (!__USE_WINDOW_MANAGER) setNodeCardOpen(false)
   if (opts.openEditor) useFullTrustlineEditor.value = true
 
   // WM: set anchor BEFORE phase change so the first `wm.open()` uses it.
-  if (__USE_WINDOW_MANAGER) {
-    wmPanelOpenAnchor.value = snapshot
-  }
+  wmPanelOpenAnchor.value = snapshot
   opts.start()
-
-  // Legacy panels: set top-right anchor explicitly — avoids relying on CSS `right: 12px` default
-  // which could be overridden by a stale inline style from a previous node-card session.
-  if (!__USE_WINDOW_MANAGER) {
-    openPanelFrom('action-bar', snapshot)
-  }
 }
 
 // BUG-1: NodeCardOverlay interact mode handlers
@@ -1167,7 +1033,6 @@ function onActionStartClearingFlow() {
 }
 
 // When phase changes, reset local UI flags.
-// Anchor clearing delegated to useInteractPanelPosition.
 // Reset useFullTrustlineEditor when leaving trustline phases (idle, payment, clearing)
 // so the NEXT edge click shows EdgeDetailPopup (not full editor).
 // NOTE: do NOT reset when transitioning between trustline sub-phases
@@ -1260,74 +1125,9 @@ watch(interactPhase, (phase) => {
       </div>
     </TopBar>
 
-  <Transition name="panel-slide" mode="out-in">
-      <ManualPaymentPanel
-        v-if="legacyShowManualPaymentPanel && !__USE_WINDOW_MANAGER"
-        key="payment"
-        :phase="interactPhase"
-        :state="interact.mode.state"
-        :unit="effectiveEq"
-        :available-capacity="interact.mode.availableCapacity.value"
-        :trustlines-loading="trustlinesLoading"
-        :payment-targets-loading="paymentTargetsLoading"
-        :payment-targets-max-hops="paymentTargetsMaxHops"
-        :payment-to-target-ids="paymentToTargetIds"
-        :trustlines="trustlines"
-        :trustlines-last-error="trustlinesLastError"
-        :payment-targets-last-error="paymentTargetsLastError"
-        :participants="interact.mode.participants.value"
-        :busy="interact.mode.busy.value"
-        :can-send-payment="interact.mode.canSendPayment.value"
-        :confirm-payment="interact.mode.confirmPayment"
-        :set-from-pid="interact.mode.setPaymentFromPid"
-        :set-to-pid="interact.mode.setPaymentToPid"
-        :cancel="interact.mode.cancel"
-        :anchor="panelAnchor"
-        :host-el="hostEl"
-      />
-
-      <TrustlineManagementPanel
-        v-else-if="apiMode === 'real' && isInteractUi && showTrustlinePanel && !__USE_WINDOW_MANAGER"
-        key="trustline"
-        ref="tlPanel"
-        :phase="interactPhase"
-        :state="interact.mode.state"
-        :unit="effectiveEq"
-        :used="emptyToNull(interactSelectedLink?.used)"
-        :current-limit="emptyToNull(interactSelectedLink?.trust_limit)"
-        :available="emptyToNull(interactSelectedLink?.available)"
-        :participants="interact.mode.participants.value"
-        :trustlines="interact.mode.trustlines.value"
-        :busy="interact.mode.busy.value"
-        :confirm-trustline-create="interact.mode.confirmTrustlineCreate"
-        :confirm-trustline-update="interact.mode.confirmTrustlineUpdate"
-        :confirm-trustline-close="interact.mode.confirmTrustlineClose"
-        :set-from-pid="interact.mode.setTrustlineFromPid"
-        :set-to-pid="interact.mode.setTrustlineToPid"
-        :select-trustline="interact.mode.selectTrustline"
-        :cancel="interact.mode.cancel"
-        :anchor="panelAnchor"
-        :host-el="hostEl"
-      />
-
-      <ClearingPanel
-        v-else-if="apiMode === 'real' && isInteractUi && activePanelType === 'clearing' && !__USE_WINDOW_MANAGER"
-        key="clearing"
-        :phase="interactPhase"
-        :state="interact.mode.state"
-        :busy="interact.mode.busy.value"
-        :equivalent="effectiveEq"
-        :confirm-clearing="interact.mode.confirmClearing"
-        :cancel="interact.mode.cancel"
-        :anchor="panelAnchor"
-        :host-el="hostEl"
-      />
-    </Transition>
-
     <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->
     <!-- R21: unified open/close transition for all windows. -->
     <TransitionGroup
-      v-if="__USE_WINDOW_MANAGER"
       name="ws"
       tag="div"
       class="wm-layer"
@@ -1354,7 +1154,6 @@ watch(interactPhase, (phase) => {
           v-if="win.type === 'edge-detail'"
           :phase="wmEdgeDetailEffectivePhase"
           :state="interact.mode.state"
-          :host-el="null"
           :unit="effectiveEq"
           :used="emptyToNull(wmEdgeDetailEffectiveLink?.used)"
           :reverse-used="emptyToNull(wmEdgeDetailEffectiveLink?.reverse_used)"
@@ -1363,7 +1162,6 @@ watch(interactPhase, (phase) => {
           :status="emptyToNullString(wmEdgeDetailEffectiveLink?.status)"
           :busy="wmEdgeDetailEffectiveBusy"
           :force-hidden="false"
-          render-mode="wm"
           :close="() => uiCloseEdgeDetailWindow(win.id, 'action')"
           @change-limit="onEdgeDetailChangeLimit"
           @close-line="onEdgeDetailCloseLine"
@@ -1373,7 +1171,6 @@ watch(interactPhase, (phase) => {
         <NodeCardOverlay
           v-else-if="isNodeCardWindow(win) && getNodeById(String(win.data.nodeId))"
           :node="getNodeById(String(win.data.nodeId))!"
-          :style="{}"
           :edge-stats="selectedNodeEdgeStats"
           :equivalent-text="state.snapshot?.equivalent ?? ''"
           :show-pin-actions="!isTestMode && !isWebDriver"
@@ -1387,16 +1184,13 @@ watch(interactPhase, (phase) => {
           :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
           :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
           :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
-          render-mode="wm"
           @close="() => {
             wm.close(win.id, 'action')
-            setNodeCardOpen(false)
           }"
         />
 
         <ManualPaymentPanel
           v-else-if="isWmInteractPanelWindow(win, 'payment')"
-          render-mode="wm"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
           :unit="effectiveEq"
@@ -1415,14 +1209,11 @@ watch(interactPhase, (phase) => {
           :set-from-pid="interact.mode.setPaymentFromPid"
           :set-to-pid="interact.mode.setPaymentToPid"
           :cancel="interact.mode.cancel"
-          :anchor="null"
-          :host-el="null"
         />
 
         <TrustlineManagementPanel
           v-else-if="isWmInteractPanelWindow(win, 'trustline')"
           ref="tlPanel"
-          render-mode="wm"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
           :unit="effectiveEq"
@@ -1439,67 +1230,19 @@ watch(interactPhase, (phase) => {
           :set-to-pid="interact.mode.setTrustlineToPid"
           :select-trustline="interact.mode.selectTrustline"
           :cancel="interact.mode.cancel"
-          :anchor="null"
-          :host-el="null"
         />
 
         <ClearingPanel
           v-else-if="isWmInteractPanelWindow(win, 'clearing')"
-          render-mode="wm"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
           :busy="interact.mode.busy.value"
           :equivalent="effectiveEq"
           :confirm-clearing="interact.mode.confirmClearing"
           :cancel="interact.mode.cancel"
-          :anchor="null"
-          :host-el="null"
         />
       </WindowShell>
     </TransitionGroup>
-
-    <EdgeDetailPopup
-      v-if="apiMode === 'real' && isInteractUi && !__USE_WINDOW_MANAGER"
-      :phase="interactPhase"
-      :state="interact.mode.state"
-      :host-el="hostEl"
-      :unit="effectiveEq"
-      :used="emptyToNull(interactSelectedLink?.used)"
-      :reverse-used="emptyToNull(interactSelectedLink?.reverse_used)"
-      :limit="emptyToNull(interactSelectedLink?.trust_limit)"
-      :available="emptyToNull(interactSelectedLink?.available)"
-      :status="emptyToNullString(interactSelectedLink?.status)"
-      :busy="interact.mode.busy.value"
-      :force-hidden="useFullTrustlineEditor"
-      :close="interact.mode.cancel"
-      @change-limit="onEdgeDetailChangeLimit"
-      @close-line="onEdgeDetailCloseLine"
-      @send-payment="onEdgeDetailSendPayment"
-    />
-
-    <NodeCardOverlay
-      v-if="isNodeCardOpen && selectedNode && !dragToPin.dragState.active && !__USE_WINDOW_MANAGER"
-      :ref="(el: any) => { if (nodeCardCardRef) nodeCardCardRef.value = el?.$el ?? el ?? null }"
-      :node="selectedNode"
-      :style="nodeCardStyle"
-      :edge-stats="selectedNodeEdgeStats"
-      :equivalent-text="state.snapshot?.equivalent ?? ''"
-      :show-pin-actions="!isTestMode && !isWebDriver"
-      :is-pinned="isSelectedPinned"
-      :pin="pinSelectedNode"
-      :unpin="unpinSelectedNode"
-      :interact-mode="isInteractUi"
-      :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
-      :trustlines-loading="isInteractUi ? interact.mode.trustlinesLoading.value : undefined"
-      :interact-busy="isInteractUi ? interact.mode.busy.value : undefined"
-      :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
-      :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
-      :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
-      @close="setNodeCardOpen(false)"
-    />
-
-
-
     <!-- E2E screenshot tests: minimal offline controls only (match stored snapshots). -->
     <div v-if="isE2eScreenshots" class="ds-ov-bottom ds-panel ds-ov-bar">
       <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runTxOnce">Single Tx</button>

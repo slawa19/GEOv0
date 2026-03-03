@@ -42,7 +42,7 @@ function mountPopup(overrides: Record<string, unknown> = {}) {
 }
 
 describe('EdgeDetailPopup', () => {
-  it('renders when phase=editing-trustline, edgeAnchor set, forceHidden=false (edge click)', async () => {
+  it('renders when forceHidden=false', async () => {
     const { app, host } = mountPopup({ forceHidden: false })
     await nextTick()
 
@@ -55,39 +55,6 @@ describe('EdgeDetailPopup', () => {
 
   it('does NOT render when forceHidden=true (TrustlineManagementPanel is shown instead)', async () => {
     const { app, host } = mountPopup({ forceHidden: true })
-    await nextTick()
-
-    const el = host.querySelector('[data-testid="edge-detail-popup"]')
-    expect(el).toBeFalsy()
-
-    app.unmount()
-    host.remove()
-  })
-
-  it('does NOT render when edgeAnchor is null (no edge click)', async () => {
-    const state = reactive({
-      phase: 'editing-trustline',
-      fromPid: 'alice',
-      toPid: 'bob',
-      selectedEdgeKey: 'alice→bob',
-      edgeAnchor: null,
-      error: null,
-      lastClearing: null,
-    })
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const app = createApp({
-      render: () =>
-        h(EdgeDetailPopup as any, {
-          phase: state.phase,
-          state,
-          unit: 'UAH',
-          forceHidden: false,
-          close: () => undefined,
-        }),
-    })
-    app.mount(host)
     await nextTick()
 
     const el = host.querySelector('[data-testid="edge-detail-popup"]')

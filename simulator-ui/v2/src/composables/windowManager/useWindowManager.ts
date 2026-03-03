@@ -255,21 +255,16 @@ export function useWindowManager(): WindowManagerApi {
       // Post-measurement reclamp: preserve position unless the window has drifted out of
       // viewport bounds (e.g. due to viewport resize or content growth pushing it out-of-bounds).
       //
-      // IMPORTANT: do NOT unconditionally re-apply snap8 here.
+      // IMPORTANT: do NOT re-apply snap8 here.
       // When measured size changes (e.g. interact-panel UPDATING→loaded: participants list
-      // appears, panel grows from ~100px to ~280px), maxLeft/maxTop shift, and snap8 would
-      // produce a DIFFERENT clamped value → visible position jump ("second window" artefact).
-      // Fix: only re-clamp (+ snap) when window already overflows viewport bounds.
+      // appears, panel grows from ~100px to ~280px), maxLeft/maxTop shift. Any re-snap based
+      // on the new bounds can produce a different value → visible position jump.
+      // Fix: only clamp if the current rect is out of bounds; keep exact user position otherwise.
       const clampedLeft = clamp(win.rect.left, pad, maxLeft)
-      if (clampedLeft !== win.rect.left) {
-        win.rect.left = snap8(clampedLeft)
-        win.rect.left = clamp(win.rect.left, pad, maxLeft)
-      }
+      if (clampedLeft !== win.rect.left) win.rect.left = clampedLeft
+
       const clampedTop = clamp(win.rect.top, pad, maxTop)
-      if (clampedTop !== win.rect.top) {
-        win.rect.top = snap8(clampedTop)
-        win.rect.top = clamp(win.rect.top, pad, maxTop)
-      }
+      if (clampedTop !== win.rect.top) win.rect.top = clampedTop
     }
 
     // Update rect dimensions from measured.
@@ -516,4 +511,3 @@ export function useWindowManager(): WindowManagerApi {
     handleEsc,
   }
 }
-

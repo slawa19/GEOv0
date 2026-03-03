@@ -1,8 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CSSProperties } from 'vue'
-
-import { normalizeAnchorToHostViewport, placeOverlayNearAnchor } from '../utils/overlayPosition'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { renderOrDash } from '../utils/valueFormat'
 
@@ -10,16 +7,9 @@ import { useDestructiveConfirmation } from '../composables/useDestructiveConfirm
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 
-type RenderMode = 'legacy' | 'wm'
-
 type Props = {
   phase: InteractPhase
   state: InteractState
-
-  /** Host element used as the overlay viewport (for clamping). */
-  hostEl?: HTMLElement | null
-
-  // Anchor is stored in FSM state: `state.edgeAnchor` (host-relative screen coordinates).
 
   unit: string
   used?: string | number | null
@@ -35,19 +25,11 @@ type Props = {
   /** When true, the popup is forced hidden (parent shows TrustlineManagementPanel instead). */
   forceHidden?: boolean
 
-  /**
-   * Step 5 (WM): when rendered inside WindowShell, EdgeDetailPopup must NOT
-   * self-position in host coordinates (left/top absolute).
-   */
-  renderMode?: RenderMode
-
   close: () => void
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  hostEl: undefined,
   forceHidden: false,
-  renderMode: 'legacy',
 })
 
 const emit = defineEmits<{
@@ -63,43 +45,20 @@ const emit = defineEmits<{
 // (i.e. when the user came from NodeCard ✏️ or ActionBar or clicked "Change Limit").
 // This is controlled by the parent via the `forceHidden` prop.
 const open = computed(() => {
-  if (props.renderMode === 'wm') return true
   if (props.forceHidden) return false
-  if (props.phase !== 'editing-trustline') return false
-  if (!props.state.edgeAnchor) return false
   return true
 })
 
-const popupStyle = computed<CSSProperties | undefined>(() => {
-  if (props.renderMode === 'wm') {
-    // WM owns geometry. Keep EdgeDetailPopup as a simple content block.
-    return {
-      position: 'static',
-      left: 'auto',
-      top: 'auto',
-      right: 'auto',
-      zIndex: 'auto',
-    }
-  }
-
-  let anchor = props.state.edgeAnchor
-  // Safety: if anchor is missing, fall back to CSS defaults.
-  if (!anchor) return undefined
-
-  const MIN_POPUP_W = 260
-  const MIN_POPUP_H = 140
-
-  const rect = props.hostEl?.getBoundingClientRect()
-
-  // Safety: tolerate mixed coordinate systems (host-relative vs viewport-based).
-  anchor = normalizeAnchorToHostViewport(anchor, rect)
-
-  return placeOverlayNearAnchor({
-    anchor,
-    overlaySize: { w: MIN_POPUP_W, h: MIN_POPUP_H },
-    viewport: rect ? { w: rect.width, h: rect.height } : undefined,
-  }) as CSSProperties
-})
+const popupStyle = computed(() =>
+  // WM owns geometry. Keep EdgeDetailPopup as a simple content block.
+  ({
+    position: 'static',
+    left: 'auto',
+    top: 'auto',
+    right: 'auto',
+    zIndex: 'auto',
+  }) as const,
+)
 
 const title = computed(() => {
   const from = props.state.fromPid

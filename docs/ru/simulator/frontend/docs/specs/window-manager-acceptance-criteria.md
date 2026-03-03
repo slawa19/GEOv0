@@ -52,9 +52,10 @@
 
 
 ### AC-4. Pointer UX (клик “в пустоту”)
+
 - MUST: клик по canvas background закрывает все открытые окна и отменяет активный flow (interact).
 - MUST: если открыты `interact` + `inspector`, один outside-click закрывает оба.
-- NOTE: это намеренно “жёсткое” поведение (Option C), чтобы не оставлять «осиротевшие» окна.
+- NOTE: это намеренно “жёсткое” поведение (hard dismiss), чтобы не оставлять «осиротевшие» окна / активный flow без контекста.
 
 Проверка:
 - Открыть interact-панель → клик по canvas закрывает панель.
@@ -122,12 +123,8 @@
     - `simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts`
 
 - AC-8 (двойной header/surface):
-  - ✅ Исправлено добавлением `renderMode="wm"` для interact панелей:
-    - `simulator-ui/v2/src/components/ManualPaymentPanel.vue`
-    - `simulator-ui/v2/src/components/TrustlineManagementPanel.vue`
-    - `simulator-ui/v2/src/components/ClearingPanel.vue`
-  - ✅ WM layer теперь использует `render-mode="wm"` без inline “position:static” хака:
-    - `simulator-ui/v2/src/components/SimulatorAppRoot.vue`
+  - ✅ Исправлено переходом на WM-only runtime: окна управляются только WindowManager, а компоненты окон больше не содержат legacy self-positioning.
+  - ✅ В WM-слое окна рендерятся через `WindowShell` (frameless geometry wrapper), без дополнительного “WS header”.
 
 ---
 
@@ -202,8 +199,7 @@
 Цель: убрать “двойные источники правды” и сделать WM режим единственным для окон в interact UI.
 
 1) Удалить legacy self-positioning из interact-панелей в WM пути
-  - Сейчас: панели поддерживают `renderMode='wm'`, но код `useOverlayPositioning(...)` всё ещё живёт в компоненте (нормально как переходное состояние).
-  - Дальше: либо выделить `LegacyOverlayWrapper` (только для legacy режима), либо вынести legacy позиционирование на уровень root, чтобы внутри панелей не было overlay-логики.
+  - Статус: legacy self-positioning выпилен; runtime WM-only.
 
 2) Единый контракт padding/scroll
   - Зафиксировать, что padding даёт `.ds-panel__body`.

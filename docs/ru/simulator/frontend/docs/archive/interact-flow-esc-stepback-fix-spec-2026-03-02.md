@@ -1,7 +1,7 @@
 # Interact Flow — ESC Step-Back Fix (Unified Spec)
 
 - **Дата**: 2026-03-02
-- **Статус**: Implemented (main fix merged; follow-ups from code-review tracked in TODO)
+- **Статус**: Implemented & Complete (all TODOs closed except optional ESC-dispatch localization and selector hardening)
 - **Компонент**: Interact FSM / WindowManager ESC policy (Simulator UI v2)
 - **История**: в этот документ слиты implementation-детали и AC из follow-up спеки; отдельный follow-up документ удалён после мерджа, чтобы не было расхождений.
 
@@ -262,7 +262,7 @@ fromParticipants computed:
 - `onActionStartClearingFlow()` → clearing flow → ESC закрывает окно (нет step-back)
 - Поведение не изменилось
 
-### AC-8: Регрессия legacy ESC stack (wm=0) не затронута
+### AC-8: Регрессия legacy ESC stack (legacy runtime) не затронута
 
 - В legacy режиме (без WM) обработка ESC через `handleEscOverlayStack` не изменена
 - Поведение идентично текущему
@@ -340,7 +340,7 @@ fromParticipants computed:
 
 Если пользователь при предзаполненном FROM вручную выбирает другой FROM через dropdown (`setPaymentFromPid(newPid)`), flow технически всё ещё `initiatedWithPrefilledFrom=true`. Это корректно — семантика флага: «шаг picking-from был пропущен при инициации, поэтому не нужен при step-back».
 
-### R-3: Legacy mode (wm=0) не затронут
+### R-3: Legacy mode (legacy runtime; удалён) не затронут
 
 Всё решение живёт в `onBack()`, которая вызывается только через WM policy. В legacy режиме ESC обрабатывается через `handleEscOverlayStack`, который вызывает `interact.mode.cancel()` напрямую.
 
@@ -445,12 +445,12 @@ fromParticipants computed:
 
 ## 12. TODO
 
-- [ ] FSM: унифицировать инициализацию flow-state (единый источник истины) и убрать ручное выставление state в атомарных стартах (см. [`useInteractFSM.startNewFlow()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:115), [`useInteractFSM.startPaymentFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:130), [`useInteractFSM.startTrustlineFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:145)).
-- [ ] Атомарные старты: нормализовать и валидировать `fromPid` (`trim` + guard); при пустом/невалидном `fromPid` — fallback на обычный flow (старт без prefill) (см. [`useInteractFSM.startPaymentFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:130), [`useInteractFSM.startTrustlineFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:145)).
-- [ ] Документировать контракт Option C hard dismiss как API/контракт закрытия (закрывает inspector + Interact, best-effort cancel, идемпотентно) (см. [`SimulatorAppRoot.uiCloseTopmostInspectorWindow()`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:167)).
-- [ ] (Опционально) Локализовать ESC-dispatch по topmost окну/DOM-контейнеру, чтобы избежать cross-window consumption (см. [`useWindowManager.handleEsc()`](simulator-ui/v2/src/composables/windowManager/useWindowManager.ts:428), [`SimulatorAppRoot.dispatchInteractEsc()`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:703)).
-- [ ] Тест: payment ActionBar — «второй ESC после step-back» (см. [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1359)).
-- [ ] Тест: trustline ActionBar — «второй ESC после step-back» (см. [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1515)).
-- [ ] Тест: clearing confirm — ESC закрывает окно без step-back, `cancel` вызывается ровно 1 раз (см. [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1270)).
-- [ ] Тест: latched-flag `initiatedWithPrefilledFrom` не пересчитывается после ручной смены FROM (см. [`SimulatorAppRoot.makeInteractPanelWindowData()`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:395), [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1311)).
-- [ ] Тесты: усилить селекторы (перейти на `data-testid`/role-based, уменьшить флейки) и заменить хрупкие места (пример: [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:721)).
+- [x] FSM: унифицировать инициализацию flow-state — реализовано: добавлена внутренняя `_initFlowState()` как единственный источник истины; все `start*` функции теперь роутятся через неё (см. [useInteractFSM.ts](../../../../../../simulator-ui/v2/src/composables/interact/useInteractFSM.ts)).
+- [x] Атомарные старты: нормализовать и валидировать `fromPid` — реализовано: `startPaymentFlowWithFrom` и `startTrustlineFlowWithFrom` теперь делают `trim()` и при пустом/невалидном значении fallback на обычный old без prefill (см. [useInteractFSM.ts](../../../../../../simulator-ui/v2/src/composables/interact/useInteractFSM.ts)).
+- [x] Документировать контракт Option C hard dismiss — реализовано: контракт задокументирован в комментарии `uiCloseTopmostInspectorWindow()` как «AC-4 / Option C: outside-click is a hard dismiss» (см. [SimulatorAppRoot.vue](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L167)).
+- [ ] (Опционально) Локализовать ESC-dispatch по topmost окну/DOM-контейнеру, чтобы избежать cross-window consumption (см. [`useWindowManager.handleEsc()`](../../../../../../simulator-ui/v2/src/composables/windowManager/useWindowManager.ts), [`SimulatorAppRoot.dispatchInteractEsc()`](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue)).
+- [x] Тест: payment ActionBar — «второй ESC после step-back» — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [x] Тест: trustline ActionBar — «второй ESC после step-back» — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [x] Тест: clearing confirm — ESC закрывает окно без step-back, `cancel` вызывается ровно 1 раз — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [x] Тест: latched-flag `initiatedWithPrefilledFrom` не пересчитывается после ручной смены FROM — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [ ] Тесты: усилить селекторы (перейти на `data-testid`/role-based, уменьшить флейки) и заменить хрупкие места — остаётся как ongoing tech debt.

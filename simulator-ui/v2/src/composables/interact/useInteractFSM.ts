@@ -101,6 +101,25 @@ export function useInteractFSM(opts: {
     state.error = null
   }
 
+  /**
+   * Internal single source of truth for initializing all flow-state fields.
+   * All public `start*` functions MUST route through this to avoid partial-init bugs
+   * when new fields are added to InteractState.
+   */
+  function _initFlowState(
+    phase: InteractPhase,
+    fromPid: string | null = null,
+    initiatedWithPrefilledFrom: boolean = false,
+  ) {
+    clearError()
+    state.phase = phase
+    state.fromPid = fromPid
+    state.toPid = null
+    state.initiatedWithPrefilledFrom = initiatedWithPrefilledFrom
+    state.selectedEdgeKey = null
+    state.edgeAnchor = null
+  }
+
   function resetToIdle() {
     state.phase = 'idle'
     state.fromPid = null
@@ -113,54 +132,49 @@ export function useInteractFSM(opts: {
   }
 
   function startNewFlow(p: InteractPhase) {
-    clearError()
-    state.phase = p
-    state.fromPid = null
-    state.toPid = null
-    state.initiatedWithPrefilledFrom = false
-    state.selectedEdgeKey = null
-    state.edgeAnchor = null
+    _initFlowState(p)
   }
 
   function startPaymentFlow() {
-    state.initiatedWithPrefilledFrom = false
-    startNewFlow('picking-payment-from')
+    _initFlowState('picking-payment-from')
   }
 
-  function startPaymentFlowWithFrom(fromPid: string) {
-    clearError()
-    state.phase = 'picking-payment-to'
-    state.fromPid = fromPid
-    state.toPid = null
-    state.initiatedWithPrefilledFrom = true
-    state.selectedEdgeKey = null
-    state.edgeAnchor = null
+  /**
+   * Atomically start payment flow with pre-filled FROM (skips picking-payment-from phase).
+   * Guards: if `fromPidRaw` is empty/whitespace after trim, falls back to `startPaymentFlow()`
+   * (no pre-fill, `initiatedWithPrefilledFrom = false`).
+   */
+  function startPaymentFlowWithFrom(fromPidRaw: string) {
+    const fromPid = fromPidRaw.trim()
+    if (!fromPid) {
+      // Invalid/empty fromPid: fall back to normal flow without pre-fill.
+      startPaymentFlow()
+      return
+    }
+    _initFlowState('picking-payment-to', fromPid, true)
   }
 
   function startTrustlineFlow() {
-    state.initiatedWithPrefilledFrom = false
-    startNewFlow('picking-trustline-from')
+    _initFlowState('picking-trustline-from')
   }
 
-  function startTrustlineFlowWithFrom(fromPid: string) {
-    clearError()
-    state.phase = 'picking-trustline-to'
-    state.fromPid = fromPid
-    state.toPid = null
-    state.initiatedWithPrefilledFrom = true
-    state.selectedEdgeKey = null
-    state.edgeAnchor = null
+  /**
+   * Atomically start trustline flow with pre-filled FROM (skips picking-trustline-from phase).
+   * Guards: if `fromPidRaw` is empty/whitespace after trim, falls back to `startTrustlineFlow()`
+   * (no pre-fill, `initiatedWithPrefilledFrom = false`).
+   */
+  function startTrustlineFlowWithFrom(fromPidRaw: string) {
+    const fromPid = fromPidRaw.trim()
+    if (!fromPid) {
+      // Invalid/empty fromPid: fall back to normal flow without pre-fill.
+      startTrustlineFlow()
+      return
+    }
+    _initFlowState('picking-trustline-to', fromPid, true)
   }
 
   function startClearingFlow() {
-    clearError()
-    state.phase = 'confirm-clearing'
-    state.fromPid = null
-    state.toPid = null
-    state.initiatedWithPrefilledFrom = false
-    state.selectedEdgeKey = null
-    state.edgeAnchor = null
-
+    _initFlowState('confirm-clearing')
     // Clear stale results so the panel doesn't flash previous cycles.
     state.lastClearing = null
   }

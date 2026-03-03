@@ -2,16 +2,8 @@
 import { computed } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
-import { useOverlayPositioning } from '../utils/overlayPosition'
 
 type Props = {
-  /**
-   * WindowManager integration:
-   * - legacy: panel is a standalone overlay and self-positions via anchor+hostEl
-   * - wm: panel is rendered inside WindowShell; WM owns geometry
-   */
-  renderMode?: 'legacy' | 'wm'
-
   phase: InteractPhase
   state: InteractState
   busy: boolean
@@ -20,39 +12,19 @@ type Props = {
 
   confirmClearing: () => Promise<void> | void
   cancel: () => void
-
-  /** Optional anchor для позиционирования рядом с источником открытия.
-   *  При null/undefined применяется CSS default (right: 12px, top: 110px). */
-  anchor?: { x: number; y: number } | null
-  /** Host element used as overlay viewport for clamping. */
-  hostEl?: HTMLElement | null
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  renderMode: 'legacy',
-})
-
-// IMPORTANT: panelSize.w must match CSS max-width of .ds-ov-panel (560px).
-// Using the smaller min-width (320px) causes clamping to underestimate the right edge
-// → panel overflows the screen by up to 240px when rendered at max-width.
-const anchorPositionStyle = useOverlayPositioning(
-  () => props.anchor,
-  () => props.hostEl,
-  { w: 560, h: 280 },
-  { enabled: () => !!props.anchor && !!props.hostEl },
-)
+const props = defineProps<Props>()
 
 const rootStyle = computed(() => {
-  if (props.renderMode === 'wm') {
-    return {
-      position: 'static',
-      left: 'auto',
-      top: 'auto',
-      right: 'auto',
-      zIndex: 'auto',
-    } as const
-  }
-  return anchorPositionStyle.value
+  // WM owns geometry. Keep ClearingPanel as a simple content block.
+  return {
+    position: 'static',
+    left: 'auto',
+    top: 'auto',
+    right: 'auto',
+    zIndex: 'auto',
+  } as const
 })
 
 const rootClass = computed(() => {
@@ -76,7 +48,6 @@ const isPreview = computed(() => props.phase === 'clearing-preview')
 const isConfirm = computed(() => props.phase === 'confirm-clearing')
 
 const open = computed(() => {
-  if (props.renderMode === 'wm') return true
   return isRunning.value || isPreview.value || isConfirm.value
 })
 

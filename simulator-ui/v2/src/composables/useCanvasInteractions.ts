@@ -30,8 +30,10 @@ export function useCanvasInteractions(opts: {
   pickNodeAt: (clientX: number, clientY: number) => { id: string } | null
   pickEdgeAt?: (clientX: number, clientY: number) => { key: string; fromId: string; toId: string } | null
   setSelectedNodeId: (id: string | null) => void
-  setNodeCardOpen: (open: boolean) => void
   clearHoveredEdge: () => void
+
+  /** Optional hook: return true when dblclick on a node was handled (prevents default selection). */
+  onNodeDblClick?: (node: { id: string }, ptr: { clientX: number; clientY: number }) => boolean
 
   /** Optional hook: return true when edge click was handled (prevents default clear-selection). */
   onEdgeClick?: (edge: { key: string; fromId: string; toId: string }, ptr: { clientX: number; clientY: number }) => boolean
@@ -71,8 +73,6 @@ export function useCanvasInteractions(opts: {
     const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
     if (hit) {
       opts.setSelectedNodeId(hit.id)
-      // Single click only selects; keep the card closed.
-      opts.setNodeCardOpen(false)
       return
     }
 
@@ -85,7 +85,6 @@ export function useCanvasInteractions(opts: {
     }
 
     opts.setSelectedNodeId(null)
-    opts.setNodeCardOpen(false)
     opts.clearHoveredEdge()
   }
 
@@ -93,8 +92,12 @@ export function useCanvasInteractions(opts: {
     const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
     if (!hit) return
 
+    if (opts.onNodeDblClick) {
+      const handled = opts.onNodeDblClick(hit, { clientX: ev.clientX, clientY: ev.clientY })
+      if (handled) return
+    }
+
     opts.setSelectedNodeId(hit.id)
-    opts.setNodeCardOpen(true)
   }
 
   function onCanvasPointerDown(ev: PointerEvent) {

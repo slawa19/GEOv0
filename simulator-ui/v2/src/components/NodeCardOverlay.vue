@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CSSProperties } from 'vue'
 import type { GraphNode } from '../types'
 import type { TrustlineInfo } from '../api/simulatorTypes'
 import { VIZ_MAPPING } from '../vizMapping'
@@ -14,13 +13,6 @@ type NodeEdgeStats = {
 
 type Props = {
   node: GraphNode
-  style: CSSProperties
-
-  /**
-   * Step 5 (WM): when rendered inside WindowShell, NodeCardOverlay must NOT
-   * self-position in host coordinates (left/top absolute).
-   */
-  renderMode?: 'legacy' | 'wm'
   edgeStats: NodeEdgeStats | null
   equivalentText: string
 
@@ -44,23 +36,18 @@ type Props = {
 
 const emit = defineEmits<{ close: [] }>()
 
-const props = withDefaults(defineProps<Props>(), {
-  renderMode: 'legacy',
-})
+const props = defineProps<Props>()
 
-const wrapperStyle = computed<CSSProperties>(() => {
-  if (props.renderMode === 'wm') {
-    // WM owns geometry. Keep NodeCardOverlay as a simple content block.
-    return {
-      position: 'static',
-      left: 'auto',
-      top: 'auto',
-      right: 'auto',
-      zIndex: 'auto',
-    }
-  }
-  return props.style
-})
+const wrapperStyle = computed(() =>
+  // WM owns geometry. Keep NodeCardOverlay as a simple content block.
+  ({
+    position: 'static',
+    left: 'auto',
+    top: 'auto',
+    right: 'auto',
+    zIndex: 'auto',
+  }) as const,
+)
 
 function safeNum(v: unknown): number {
   // UX-8: use parseAmountNumber() for decimal-like strings (e.g. "1,234.5" must not

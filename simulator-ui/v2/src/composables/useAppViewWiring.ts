@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 
 import type { GraphNode } from '../types'
-import type { LayoutLink, LayoutNode } from '../types/layout'
+import type { LayoutNode } from '../types/layout'
 
 import { useAppViewAndNodeCard } from './useAppViewAndNodeCard'
 
@@ -26,9 +26,6 @@ export function useAppViewWiring(opts: {
 
   getNodeById: (id: string) => GraphNode | null
   getLayoutNodeById: (id: string) => LayoutNode | null
-  getNodeScreenSize: (n: GraphNode) => { w: number; h: number }
-
-  getIncidentEdges: (nodeId: string) => LayoutLink[]
 }) {
   const viewAndNodeCard = useAppViewAndNodeCard({
     canvasEl: opts.canvasEl,
@@ -48,9 +45,6 @@ export function useAppViewWiring(opts: {
 
     getNodeById: opts.getNodeById,
     getLayoutNodeById: opts.getLayoutNodeById,
-    getNodeScreenSize: opts.getNodeScreenSize,
-
-    getIncidentEdges: opts.getIncidentEdges,
   })
 
   const cameraSystem = viewAndNodeCard.cameraSystem
@@ -76,8 +70,6 @@ export function useAppViewWiring(opts: {
 
     nodeCard,
     selectedNode: nodeCard.selectedNode,
-    nodeCardStyle: nodeCard.nodeCardStyle,
     selectedNodeScreenCenter: nodeCard.selectedNodeScreenCenter,
-    nodeCardCardRef: nodeCard.cardRef,
   }
 }

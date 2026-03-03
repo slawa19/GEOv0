@@ -1,9 +1,8 @@
 import { createApp, h, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { useNodeCard } from './useNodeCard'
-import { provideWindowManagerEnabled } from './windowManager/featureFlag'
 
-function withSetup<T>(fn: () => T, o?: { wmEnabled?: boolean }): T {
+function withSetup<T>(fn: () => T): T {
   let out!: T
   const host = document.createElement('div')
   document.body.appendChild(host)
@@ -19,7 +18,6 @@ function withSetup<T>(fn: () => T, o?: { wmEnabled?: boolean }): T {
   const Root = {
     name: 'Root',
     setup() {
-      provideWindowManagerEnabled(o?.wmEnabled ?? false)
       return () => h(Child)
     },
   }
@@ -33,7 +31,7 @@ function withSetup<T>(fn: () => T, o?: { wmEnabled?: boolean }): T {
 }
 
 describe('useNodeCard', () => {
-  it('returns display:none when no host or no selection', () => {
+  it('selectedNode is null when there is no selection', () => {
     const api = withSetup(() => {
       const selectedNodeId = ref<string | null>(null)
 
@@ -42,15 +40,32 @@ describe('useNodeCard', () => {
         selectedNodeId,
         getNodeById: () => null,
         getLayoutNodeById: () => null,
-        getNodeScreenSize: () => ({ w: 10, h: 10 }),
         worldToScreen: (x, y) => ({ x, y }),
       })
-    }, { wmEnabled: false })
+    })
 
-    expect(api.nodeCardStyle.value).toEqual({ display: 'none' })
+    expect(api.selectedNode.value).toBeNull()
+    expect(api.selectedNodeScreenCenter.value).toBeNull()
   })
 
-  it('computes clamped style from worldToScreen', () => {
+  it('selectedNodeScreenCenter is null when host is missing', () => {
+    const api = withSetup(() => {
+      const selectedNodeId = ref<string | null>('A')
+
+      return useNodeCard({
+        hostEl: ref(null),
+        selectedNodeId,
+        getNodeById: (id) => (id ? ({ id } as any) : null),
+        getLayoutNodeById: (id) => ({ id, __x: 10, __y: 20 }),
+        worldToScreen: (x, y) => ({ x, y }),
+      })
+    })
+
+    expect(api.selectedNode.value?.id).toBe('A')
+    expect(api.selectedNodeScreenCenter.value).toBeNull()
+  })
+
+  it('selectedNodeScreenCenter uses worldToScreen(layout.__x/__y) when available', () => {
     const api = withSetup(() => {
       const selectedNodeId = ref<string | null>('A')
 
@@ -63,49 +78,11 @@ describe('useNodeCard', () => {
         selectedNodeId,
         getNodeById: (id) => (id ? ({ id } as any) : null),
         getLayoutNodeById: (id) => ({ id, __x: 10, __y: 20 }),
-        getNodeScreenSize: () => ({ w: 10, h: 10 }),
-        worldToScreen: () => ({ x: 1000, y: 1000 }),
+        worldToScreen: (x, y) => ({ x: x + 1, y: y + 2 }),
       })
-    }, { wmEnabled: false })
+    })
 
-    const s = api.nodeCardStyle.value
-    expect(typeof s.left).toBe('string')
-    expect(typeof s.top).toBe('string')
-  })
-
-  it('cardRef is exported and initially null', () => {
-    const api = withSetup(() => {
-      const selectedNodeId = ref<string | null>(null)
-
-      return useNodeCard({
-        hostEl: ref(null),
-        selectedNodeId,
-        getNodeById: () => null,
-        getLayoutNodeById: () => null,
-        getNodeScreenSize: () => ({ w: 10, h: 10 }),
-        worldToScreen: (x, y) => ({ x, y }),
-      })
-    }, { wmEnabled: false })
-
-    // cardRef должен быть Ref и изначально равен null
-    expect('cardRef' in api).toBe(true)
-    expect(api.cardRef.value).toBeNull()
-  })
-
-  it('nodeCardStyle returns { display: block } in WM mode (reclamp не применяется)', () => {
-    const api = withSetup(() => {
-      const selectedNodeId = ref<string | null>('A')
-
-      return useNodeCard({
-        hostEl: ref(null),
-        selectedNodeId,
-        getNodeById: (id) => (id ? ({ id } as any) : null),
-        getLayoutNodeById: (id) => ({ id, __x: 10, __y: 20 }),
-        getNodeScreenSize: () => ({ w: 10, h: 10 }),
-        worldToScreen: (x, y) => ({ x, y }),
-      })
-    }, { wmEnabled: true })
-
-    expect(api.nodeCardStyle.value).toEqual({ display: 'block' })
+    expect(api.selectedNode.value?.id).toBe('A')
+    expect(api.selectedNodeScreenCenter.value).toEqual({ x: 11, y: 22 })
   })
 })

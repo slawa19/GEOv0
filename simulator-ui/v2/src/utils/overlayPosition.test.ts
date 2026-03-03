@@ -1,26 +1,44 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeAnchorToHostViewport } from './overlayPosition'
+import { placeOverlayNearAnchor } from './overlayPosition'
 
-describe('utils/overlayPosition — normalizeAnchorToHostViewport()', () => {
-  it('returns the anchor unchanged when hostRect is missing', () => {
-    expect(normalizeAnchorToHostViewport({ x: 10, y: 20 }, null)).toEqual({ x: 10, y: 20 })
+describe('utils/overlayPosition — placeOverlayNearAnchor()', () => {
+  it('returns px left/top values', () => {
+    expect(
+      placeOverlayNearAnchor({
+        anchor: { x: 10, y: 20 },
+        overlaySize: { w: 100, h: 50 },
+        viewport: { w: 400, h: 300 },
+        pad: 10,
+        offset: { x: 12, y: 12 },
+      }),
+    ).toEqual({ left: '22px', top: '32px' })
   })
 
-  it('returns the anchor unchanged when it is already within host-relative bounds', () => {
-    const rect = { left: 100, top: 200, right: 500, bottom: 600, width: 400, height: 400 } as DOMRect
-    expect(normalizeAnchorToHostViewport({ x: 10, y: 20 }, rect)).toEqual({ x: 10, y: 20 })
+  it('clamps to viewport bounds (right/bottom)', () => {
+    // vw - overlay.w - pad = 400 - 100 - 10 = 290
+    // vh - overlay.h - pad = 300 - 50 - 10 = 240
+    expect(
+      placeOverlayNearAnchor({
+        anchor: { x: 1000, y: 1000 },
+        overlaySize: { w: 100, h: 50 },
+        viewport: { w: 400, h: 300 },
+        pad: 10,
+        offset: { x: 12, y: 12 },
+      }),
+    ).toEqual({ left: '290px', top: '240px' })
   })
 
-  it('converts viewport-based anchor (clientX/clientY) to host-relative when detectable', () => {
-    const rect = { left: 100, top: 200, right: 500, bottom: 600, width: 400, height: 400 } as DOMRect
-    // This is within the host in viewport coords, but NOT within [0..width]x[0..height] for X.
-    expect(normalizeAnchorToHostViewport({ x: 450, y: 250 }, rect)).toEqual({ x: 350, y: 50 })
-  })
-
-  it('does not convert when hostRect has non-positive dimensions', () => {
-    const rect = { left: 100, top: 200, right: 100, bottom: 200, width: 0, height: 0 } as DOMRect
-    expect(normalizeAnchorToHostViewport({ x: 150, y: 250 }, rect)).toEqual({ x: 150, y: 250 })
+  it('clamps to viewport bounds (left/top)', () => {
+    expect(
+      placeOverlayNearAnchor({
+        anchor: { x: -1000, y: -1000 },
+        overlaySize: { w: 100, h: 50 },
+        viewport: { w: 400, h: 300 },
+        pad: 10,
+        offset: { x: 12, y: 12 },
+      }),
+    ).toEqual({ left: '10px', top: '10px' })
   })
 })
 

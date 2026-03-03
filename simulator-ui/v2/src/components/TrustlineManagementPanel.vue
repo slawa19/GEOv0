@@ -9,16 +9,8 @@ import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberForma
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import { renderOrDash } from '../utils/valueFormat'
-import { useOverlayPositioning } from '../utils/overlayPosition'
 
 type Props = {
-  /**
-   * WindowManager integration:
-   * - legacy: panel is a standalone overlay and self-positions via anchor+hostEl
-   * - wm: panel is rendered inside WindowShell; WM owns geometry
-   */
-  renderMode?: 'legacy' | 'wm'
-
   phase: InteractPhase
   state: InteractState
 
@@ -42,17 +34,9 @@ type Props = {
   confirmTrustlineUpdate: (newLimit: string) => Promise<void> | void
   confirmTrustlineClose: () => Promise<void> | void
   cancel: () => void
-
-  /** Optional anchor (host-relative screen coords) для позиционирования панели рядом с
-   *  кликнутым ребром или нодой. При null/undefined применяется CSS default (right/top). */
-  anchor?: { x: number; y: number } | null
-  /** Host element used as overlay viewport for clamping. */
-  hostEl?: HTMLElement | null
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  renderMode: 'legacy',
-})
+const props = defineProps<Props>()
 
 const limit = ref('')
 const newLimit = ref('')
@@ -213,7 +197,6 @@ const isPickTo = computed(() => props.phase === 'picking-trustline-to')
 const isCreate = computed(() => props.phase === 'confirm-trustline-create')
 const isEdit = computed(() => props.phase === 'editing-trustline')
 const open = computed(() => {
-  if (props.renderMode === 'wm') return true
   return isPickFrom.value || isPickTo.value || isCreate.value || isEdit.value
 })
 
@@ -266,32 +249,15 @@ function onTrustlinePick(key: string) {
   props.selectTrustline?.(from, to)
 }
 
-/** Dynamic positioning: when anchor is provided (opened from NodeCard or edge click),
- *  place the panel near the anchor instead of the fixed CSS top-right position.
- *  When no anchor, returns {} to let CSS `.ds-ov-panel` defaults apply. */
-// IMPORTANT: panelSize.w must match this panel's CSS max-width.
-// This component intentionally overrides `.ds-ov-panel` to be compact:
-// `max-width: min(380px, calc(100vw - 24px))`.
-// If we pass a larger width (e.g. 560), clamping becomes too conservative and
-// the panel is pushed left more than necessary.
-const anchorPositionStyle = useOverlayPositioning(
-  () => props.anchor,
-  () => props.hostEl,
-  { w: 380, h: 340 },
-  { enabled: () => !!props.anchor && !!props.hostEl },
-)
-
 const rootStyle = computed(() => {
-  if (props.renderMode === 'wm') {
-    return {
-      position: 'static',
-      left: 'auto',
-      top: 'auto',
-      right: 'auto',
-      zIndex: 'auto',
-    } as const
-  }
-  return anchorPositionStyle.value
+  // WM owns geometry. Keep TrustlineManagementPanel as a simple content block.
+  return {
+    position: 'static',
+    left: 'auto',
+    top: 'auto',
+    right: 'auto',
+    zIndex: 'auto',
+  } as const
 })
 
 const rootClass = computed(() => {

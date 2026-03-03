@@ -260,7 +260,7 @@ fromParticipants computed:
 - `onActionStartClearingFlow()` → clearing flow → ESC закрывает окно (нет step-back)
 - Поведение не изменилось
 
-### AC-8: Регрессия legacy ESC stack (wm=0) не затронута
+### AC-8: Регрессия legacy ESC stack (legacy runtime) не затронута
 
 - В legacy режиме (без WM) обработка ESC через `handleEscOverlayStack` не изменена
 - Поведение идентично текущему
@@ -338,7 +338,7 @@ fromParticipants computed:
 
 Если пользователь при предзаполненном FROM вручную выбирает другой FROM через dropdown (`setPaymentFromPid(newPid)`), flow технически всё ещё `initiatedWithPrefilledFrom=true`. Это корректно — семантика флага: «шаг picking-from был пропущен при инициации, поэтому не нужен при step-back».
 
-### R-3: Legacy mode (wm=0) не затронут
+### R-3: Legacy mode (legacy runtime; удалён) не затронут
 
 Всё решение живёт в `onBack()`, которая вызывается только через WM policy. В legacy режиме ESC обрабатывается через `handleEscOverlayStack`, который вызывает `interact.mode.cancel()` напрямую.
 
