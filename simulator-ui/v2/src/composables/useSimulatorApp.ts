@@ -216,7 +216,7 @@ export function useSimulatorApp(opts?: {
 
   const isE2eScreenshots = computed(() => isTestMode.value && isWebDriver && !allowRealModeInWebDriver.value)
 
-  const isNodeCardOpen = computed(() => {
+  const hasNodeCardInspectorOpen = computed(() => {
     try {
       return typeof opts?.uiIsNodeCardOpen === 'function' ? !!opts.uiIsNodeCardOpen() : false
     } catch {
@@ -1531,7 +1531,7 @@ export function useSimulatorApp(opts?: {
     getCameraZoom: () => camera.zoom,
     sizeForNode: (n) => sizeForNode(n),
     fxColorForNode,
-    isNodeCardOpen: () => isNodeCardOpen.value,
+    hasNodeCardInspectorOpen: () => hasNodeCardInspectorOpen.value,
   }).labelNodes
 
   const pickingAndHover = useAppPickingAndHover({
@@ -1568,8 +1568,9 @@ export function useSimulatorApp(opts?: {
    * Priority:
    *  1) EdgeDetailPopup (if open)
    *  2) NodeCardOverlay (if open)
-   *
-   * NOTE: interact panels (trustline/payment/clearing) are NOT closed on outside click in MVP.
+    *
+    * NOTE: interact panels are closed via `cancelInteract()` in Step 0.
+    * This callback is responsible only for inspector window dismissal.
    */
   function closeTopmostOverlayOnOutsideClick(): OutsideClickOverlayKey | null {
     // WM-only runtime: outside-click closure is owned by the root WindowManager layer.
@@ -2238,7 +2239,7 @@ export function useSimulatorApp(opts?: {
     },
 
     // selection + overlays
-    isNodeCardOpen,
+    hasNodeCardInspectorOpen,
     hoveredEdge,
     clearHoveredEdge,
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,

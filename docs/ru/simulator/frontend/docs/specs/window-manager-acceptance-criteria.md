@@ -84,7 +84,7 @@
 - MUST: не должно быть дублей: второй surface или второй `×` не появляется.
 
 Проверка:
-- При `wm=1` shell НЕ содержит `.ws-header` и `button.ws-close`.
+- В текущем runtime (WM-only) `WindowShell` НЕ содержит `.ws-header` и `button.ws-close`.
 - NodeCardOverlay/EdgeDetailPopup/Interact-панели в WM выглядят 1:1 как в legacy и без вложенных поверхностей.
 
 

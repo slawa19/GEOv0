@@ -1,7 +1,7 @@
 # Legacy removal (WM-only) — план выпиливания legacy из runtime
 
 > **Дата**: 2026-03-03  
-> **Статус**: DRAFT  
+> **Статус**: IMPLEMENTED (документ обновлён под текущее состояние репозитория)  
 > **Область**: `simulator-ui/v2` (только фронтенд)  
 > **Цель**: WM — единственный runtime-путь. Legacy UI — только статический референс по верстке (код компонентов + текстовые снапшоты HTML).
 
@@ -49,20 +49,18 @@
 **Изменения PR1 (детально)**
 1) **Удалить `?wm=0/1` как функциональный переключатель**
    - В `SimulatorAppRoot.vue` убрать чтение query-параметра `wm`.
-   - `__USE_WINDOW_MANAGER` становится константой `true` (или удаляется целиком).
+   - Удалить/обнулить любые runtime-флаги WM, обслуживавшие dual-path (в актуальном коде флаг уже отсутствует).
 
-2) **Удалить WM feature-flag API, завязанный на `wm` query**
-  - Удалить (или сделать недоступными) следующие API из `src/composables/windowManager/featureFlag.ts`:
-    - `readWindowManagerEnabledFromUrl()`
-    - `provideWindowManagerEnabled()`
-    - `useWindowManagerEnabled()`
-  - В `SimulatorAppRoot.vue` убрать `provideWindowManagerEnabled(...)` и любые импорты feature-flag.
-  - В `src/composables/useNodeCard.ts` убрать чтение `useWindowManagerEnabled()` (в WM-only runtime оно не нужно).
-  - Обновить/удалить тесты `src/composables/windowManager/featureFlag.test.ts` и `src/composables/useNodeCard.test.ts`.
+2) **Удалить WM feature-flag API, завязанный на `wm` query (если ещё есть)**
+  - Принцип: после WM-only перехода в runtime не должно быть кода, который:
+    - парсит `wm=0/1` из URL;
+    - пробрасывает “enabled/disabled” WM в зависимости от URL;
+    - держит dual-path в template.
+  - В текущем состоянии репозитория отдельного `featureFlag.ts`/`useWindowManagerEnabled()` уже нет — этот пункт остаётся как проверка на регрессии.
 
 3) **Убрать URL helper, сохраняющий `wm=0` при reload**
-  - Удалить `buildReloadUrlPreservingWmOptOut()` из `src/utils/navigationUrl.ts` (или заменить на нейтральный helper без `wm`).
-  - Удалить/обновить тест `src/utils/navigationUrl.test.ts`.
+  - Принцип: в коде не должно быть helper-ов, которые сохраняют/подмешивают `wm=0/1` в URL.
+  - В текущем состоянии репозитория отдельного `navigationUrl.ts`/`buildReloadUrlPreservingWmOptOut()` уже нет — этот пункт остаётся как проверка на регрессии.
 
 4) **Удалить legacy ветку template**
    - Удалить/вырезать из runtime шаблона ветку с legacy `<Transition name="panel-slide"> ...`.
@@ -81,7 +79,6 @@
   - Обновить `setUrl('/?...&wm=0')` → `setUrl('/?...')` в тестах:
     - `src/components/SimulatorAppRoot.interact.test.ts`
     - `src/components/ManualPaymentPanel.test.ts`
-    - `src/composables/windowManager/featureFlag.test.ts`
   - Если встречается `wm=0` вместе с `ui=demo`/`devtools=1` — удалить только `wm=0`, остальное оставить.
 
 **AC PR1**
@@ -116,26 +113,27 @@
 - NodeCard ownership (open/close) в WM.
 - Outside-click policy приводится к единому варианту.
 
-#### PR2a (PR2.A) — NodeCard: удалить `isNodeCardOpen` как источник правды в WM runtime
+#### PR2a (PR2.A) — NodeCard: удалить legacy shadow-state как источник правды в WM runtime
 
 **Проблема**
-- `isNodeCardOpen` (legacy boolean) и `windowsMap` (WM) одновременно участвуют в решении показывать/закрывать NodeCard.
+- Legacy boolean/shadow state и `windowsMap` (WM) одновременно участвуют в решении показывать/закрывать NodeCard.
 - Это порождает гонки и suppress-guards.
 
 **Изменения**
-- В WM runtime перестать использовать `isNodeCardOpen` для решения “окно должно быть открыто”.
+- В WM runtime перестать использовать любые legacy boolean/shadow flags для решения “окно должно быть открыто”.
 - Открытость NodeCard определяется только наличием окна в WM.
 - Удалить suppress-guards, которые нужны только для синхронизации legacy boolean ↔ WM.
 
 **Затронутые файлы (ожидаемо)**
-- `src/composables/useNodeSelectionAndCardOpen.ts` (владелец boolean `isNodeCardOpen`)
-- `src/composables/useSimulatorApp.ts` (wiring selection/card-open + suppress guards)
-- `src/components/SimulatorAppRoot.vue` (передача `isNodeCardOpen` в зависимости/рендер legacy-ветки — после PR1 должно быть уже удалено)
+_Примечание:_ в текущем WM-only runtime отдельный composable с boolean "open" состоянием NodeCard отсутствует.
 
-**Потребители `isNodeCardOpen` (перепроверить и обновить/удалить зависимости)**
-- `src/composables/useLabelNodes.ts`
-- `src/composables/useCanvasInteractions.ts`
-- `src/composables/useAppCanvasInteractionsWiring.ts`
+- `src/composables/useSimulatorApp.ts` (wiring selection/card-open + Step 0 контракт)
+- `src/components/SimulatorAppRoot.vue` (Step 5: WM open/close для inspector окон)
+- `src/composables/useCanvasInteractions.ts` и `src/composables/useAppCanvasInteractionsWiring.ts` (dblclick semantics)
+
+**Проверки на регрессии (WM-only)**
+- Нет логики, которая пытается закрывать/открывать NodeCard через legacy boolean/shadow state.
+- Двойной источник правды для "open" отсутствует.
 
 **Нюанс про click/dblclick в `useCanvasInteractions.ts` (важно для реализации PR2a)**
 - Нормативное поведение (должно сохраниться в WM-only runtime):
@@ -144,7 +142,7 @@
 - Следствие для PR2a: dblclick-обработчик НЕ является “мёртвым алиасом” и не должен быть удалён.
 
 **AC PR2.A**
-- Нет логических веток, где NodeCard закрывается/открывается через legacy boolean.
+- Нет логических веток, где NodeCard закрывается/открывается через shadow state.
 - Нет suppress-guards для NodeCard pipeline.
 
 #### PR2b (PR2.B) — Outside-click (canvas empty click): следовать Step 0 контракту
@@ -160,19 +158,16 @@
 - Это снимает риск путаницы “платёжный flow активен, но пользователь уже переключился/закрыл контекст”.
 
 **Изменения**
-- В WM callback `uiCloseTopmostInspectorWindow()` (в `SimulatorAppRoot.vue`) привести поведение к “close only inspector overlays”:
-  - Удалить/запретить:
-    - `wm.closeGroup('interact', ...)`
-    - (нет)
-  - Сохранить/адаптировать:
-    - `wmResetEdgeDetailKeepAlive()` (чтобы frozen inspector-контекст не переживал outside-click)
-    - закрытие **только** инспекторской группы (или topmost инспектора), например `wm.closeGroup('inspector', ...)`
-    - корректное обновление локальных id (`wmEdgeDetailId`, `wmNodeCardId`) в соответствии с тем, что реально закрыли
-    - логику suppression/selection-key вокруг edge-detail:
-      - сейчас `uiCloseTopmostInspectorWindow()` сбрасывает `wmEdgeDetailSuppressed/SelectionKey`, потому что сразу делает hard-dismiss + cancel.
-      - после перехода на soft close (без cancel) нужно **явно определить**, что происходит с `wmEdgeDetailSuppressed`:
-        - вариант по умолчанию: трактовать empty click как UI-close и временно **включать suppression**, чтобы edge-detail не переоткрылся до очистки selection
-        - подтвердить поведение тестом (и/или зафиксировать в комментарии рядом с watcher-логикой auto-open).
+
+- В Step 0 helper `__selectNodeFromCanvasStep0()` (в `useSimulatorApp.ts`) на пустом клике:
+  - вызвать `interact.mode.cancel()` (flow → idle),
+  - закрыть обе inspector-карточки (edge-detail + node-card) через 2 последовательных UI-close,
+  - очистить selection.
+
+- В WM callback `uiCloseTopmostInspectorWindow()` (в `SimulatorAppRoot.vue`) оставить только inspector UI-close:
+  - закрывать topmost inspector (edge-detail → node-card),
+  - использовать `wmResetEdgeDetailKeepAlive()` чтобы frozen inspector-контекст не переживал outside-click,
+  - НЕ закрывать `interact` группу напрямую — interact окно закрывается watcher-ом на `phase='idle'` после `cancel()`.
 
 **Тесты, которые должны защитить контракт Step 0**
 - Обязательно учесть `src/composables/useSimulatorApp.windowManagementStep0.test.ts` (оно фиксирует норму: “empty click cancels interact”).
@@ -258,6 +253,7 @@
 
 - Удалить “как включить legacy/`wm=0`” отовсюду.
 - В основной аудит-спеке добавить ссылку на каталог референса верстки (HTML snapshots) как на единственный поддерживаемый референс legacy UI.
+ - Уточнение по scope: документы в `docs/ru/simulator/frontend/docs/archive/` и `docs/ru/simulator/frontend/docs/specs/archive/` являются историческими и могут содержать упоминания `wm=0/1`/dual-path. Их не “чистим”, а помечаем как архивные.
 
 **AC PR3**
 - В runtime-коде нет `__USE_WINDOW_MANAGER` и нет legacy веток.
@@ -296,8 +292,8 @@
 
 ### Чеклист PR1
 - [x] `wm` query параметр больше не влияет
-- [x] Удалён/обнулён WM feature-flag API (`featureFlag.ts` + тесты)
-- [x] Удалён URL helper сохранения `wm=0` (`navigationUrl.ts` + тесты)
+- [x] Удалён URL-based WM toggle (нет парсинга `wm=0/1`, нет dual-path в runtime)
+- [x] Нет helper-ов, сохраняющих/подмешивающих `wm=0/1` в URL
 - [x] Legacy template ветка удалена
 - [x] ESC routing только через WM
 - [x] Мигрированы unit-тесты, использующие `wm=0`
@@ -306,7 +302,7 @@
 ### Чеклист PR2
 - [x] NodeCard open/close — только через WM
 - [x] Удалены suppress-guards (или они стали не нужны)
-- [x] Canvas empty click не отменяет interact flow
+- [x] Canvas empty click отменяет interact flow
 - [x] Unit tests проходят
 - [ ] Ручные сценарии пройдены
 

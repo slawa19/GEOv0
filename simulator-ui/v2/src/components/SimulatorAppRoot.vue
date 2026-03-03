@@ -158,8 +158,8 @@ function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
       ? top.type
       : null
 
-  // Step 0 contract (normative): outside-click closes ONLY inspector overlays.
-  // It MUST NOT close interact windows and MUST NOT cancel the interact flow.
+  // Step 0 contract (normative): this callback closes ONLY inspector overlays.
+  // Interact panels and flow cancellation are handled by Step 0 (canvas empty click policy).
 
   // Clear keepAlive so frozen inspectors can't persist after an outside-click.
   wmResetEdgeDetailKeepAlive()

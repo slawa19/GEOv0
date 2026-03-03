@@ -84,8 +84,8 @@ export function useWindowManager(): WindowManagerApi {
             // Best-effort: never block UI-close on errors.
           }
 
-          // Legacy fallback (pre-step-back wiring): keep previous placeholder semantics.
-          return d.phase === 'back' ? 'consumed' : 'pass'
+          // Safety fallback: if `onBack` isn't wired, default to UI-close.
+          return 'pass'
         }
         return {
           group: 'interact',

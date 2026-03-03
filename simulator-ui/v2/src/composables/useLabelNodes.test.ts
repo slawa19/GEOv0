@@ -59,7 +59,7 @@ describe('useLabelNodes', () => {
     expect(ids).toEqual(['A', 'B', 'C'])
   })
 
-  it('hides selected node label when isNodeCardOpen returns true', () => {
+  it('hides selected node label when hasNodeCardInspectorOpen returns true', () => {
     const { labelNodes } = useLabelNodes({
       isTestMode: () => false,
       getLabelsLod: () => 'neighbors' as any,
@@ -71,7 +71,7 @@ describe('useLabelNodes', () => {
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
       fxColorForNode: () => '#fff',
-      isNodeCardOpen: () => true,
+      hasNodeCardInspectorOpen: () => true,
     })
 
     const ids = labelNodes.value.map((n) => n.id)
@@ -81,7 +81,7 @@ describe('useLabelNodes', () => {
     expect(ids).toContain('C')
   })
 
-  it('shows selected node label when isNodeCardOpen returns false', () => {
+  it('shows selected node label when hasNodeCardInspectorOpen returns false', () => {
     const { labelNodes } = useLabelNodes({
       isTestMode: () => false,
       getLabelsLod: () => 'neighbors' as any,
@@ -93,7 +93,7 @@ describe('useLabelNodes', () => {
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
       fxColorForNode: () => '#fff',
-      isNodeCardOpen: () => false,
+      hasNodeCardInspectorOpen: () => false,
     })
 
     const ids = labelNodes.value.map((n) => n.id)
