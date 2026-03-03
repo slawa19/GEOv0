@@ -10,11 +10,17 @@ function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
     data: { panel: 'payment', phase: 'confirm-payment' },
     rect: { left: 100, top: 80, width: 400, height: 300 },
     z: 10,
+    effectiveZ: 10,
     active: true,
-    policy: { group: 'interact', singleton: 'reuse' },
+    policy: {
+      group: 'interact',
+      singleton: 'reuse',
+      escBehavior: 'close',
+      closeOnOutsideClick: false,
+    },
     constraints: { minWidth: 320, minHeight: 200, preferredWidth: 420, preferredHeight: 280 },
     anchor: null,
-    placement: 'default',
+    placement: 'docked-right',
     measured: null,
     ...overrides,
   } as WindowInstance
@@ -82,7 +88,7 @@ describe('WindowShell', () => {
       const style = shell.style
       expect(style.left).toBe('50px')
       expect(style.top).toBe('120px')
-      expect(style.zIndex).toBe('10')
+      expect(style.zIndex).toBe(String(inst.effectiveZ))
       expect(style.width).toBe('')
       expect(style.height).toBe('')
 

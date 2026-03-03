@@ -31,7 +31,7 @@ const shellStyle = computed(() => {
   const base = {
     left: props.instance.rect.left + 'px',
     top: props.instance.rect.top + 'px',
-    zIndex: String(props.instance.z),
+    zIndex: String(props.instance.effectiveZ),
   } as Record<string, string>
 
   if (props.frameless) {
@@ -249,4 +249,3 @@ function onCloseClick(ev: MouseEvent) {
   overflow: auto;
 }
 </style>
-

@@ -28,14 +28,15 @@
 - MUST: окно-контент не решает, закрывать ли другие окна.
 
 Проверка:
-- Открыть несколько окон, кликать по ним → верхним всегда становится последнее сфокусированное.
+- Открыть несколько окон в одной группе, кликать по ним → верхним становится последнее сфокусированное (порядок меняется **внутри группы**).
 - Убедиться, что ESC действует на topmost (active) окно.
 
 
 ### AC-2. Группы и coexistence
 - MUST: в группе `interact` одновременно не более одного окна.
 - MUST: в группе `inspector` одновременно не более одного окна (NodeCard XOR EdgeDetail).
-- MUST: `interact` и `inspector` могут сосуществовать (inspector остаётся под interact).
+- MUST: `interact` и `inspector` могут сосуществовать.
+- MUST: при coexistence действует приоритет слоёв: `interact` **всегда выше** `inspector` (даже если инспектор сфокусировали кликом). Фокус/active меняет порядок только внутри группы.
 
 Проверка:
 - Открыть NodeCard, затем запустить Manual payment → NodeCard остаётся открытым под панелью.
@@ -67,7 +68,9 @@
 - MUST: менеджер использует ResizeObserver измерения фактического DOM.
 - MUST: на изменение размеров окна или viewport вызывается reclamp.
 - MUST: окно всегда clamped внутри `.root` viewport, с минимальным pad 12px.
-- MUST: координаты снапаются к 8px сетке.
+- MUST: координаты снапаются к 8px сетке:
+  - initial placement (до первого измерения): snap всегда,
+  - post-measurement: snap применяется **только если** окно пришлось сдвигать clamp'ом обратно в viewport ("snap-on-clamp"); если окно уже in-bounds — позиция сохраняется без джампов.
 
 Проверка:
 - Переключение контента (например picking → confirm) не должно выталкивать окно за viewport.
@@ -121,6 +124,10 @@
   - ✅ tests:
     - `simulator-ui/v2/src/components/WindowShell.test.ts`
     - `simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts`
+
+Примечания по трассировке требований:
+- Layering priority (`interact` > `inspector`): `GROUP_BASE_Z` + `effectiveZ` (визуальный z-index), сортировка `windows`, topmost/ESC по `effectiveZ`.
+- Snap strategy C (snap-on-clamp): `reclamp()` применяет `snap8InRange()` только когда `didClamp=true`.
 
 - AC-8 (двойной header/surface):
   - ✅ Исправлено переходом на WM-only runtime: окна управляются только WindowManager, а компоненты окон больше не содержат legacy self-positioning.

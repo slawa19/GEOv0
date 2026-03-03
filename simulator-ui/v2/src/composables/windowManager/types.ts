@@ -58,7 +58,16 @@ export type WindowInstance = {
    */
   anchorOffset: { x: number; y: number } | null
   active: boolean
+  /**
+   * Z within the WM focus order (used for intra-group ordering).
+   * NOTE: visual stacking is controlled by `effectiveZ` to support group priorities.
+   */
   z: number
+  /**
+   * Visual stacking order (CSS z-index) with group priority applied.
+   * Requirement: `interact` MUST always render above `inspector`, regardless of focus.
+   */
+  effectiveZ: number
   placement: 'docked-right' | 'anchored'
   rect: WindowRect
   /** Нормативный MVP источник ограничений размеров (для first-frame estimate и maxHeight/overflow). */

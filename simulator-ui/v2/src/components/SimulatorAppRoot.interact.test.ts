@@ -911,6 +911,22 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       // Two windows: edge-detail + interact-panel.
       expect(host.querySelectorAll('.ws-shell').length).toBe(2)
+
+      // Layering priority: interact must be visually above inspector, even if inspector is focused.
+      const shells = Array.from(host.querySelectorAll('.ws-shell')) as HTMLElement[]
+      const interactShell = shells.find((el) => el.getAttribute('data-win-type') === 'interact-panel') as HTMLElement | undefined
+      const inspectorShell = shells.find((el) => el.getAttribute('data-win-type') === 'edge-detail') as HTMLElement | undefined
+      expect(interactShell).toBeTruthy()
+      expect(inspectorShell).toBeTruthy()
+
+      // Simulate focusing inspector (pointerdown on shell).
+      inspectorShell?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      const zInteract = Number(interactShell!.style.zIndex || '0')
+      const zInspector = Number(inspectorShell!.style.zIndex || '0')
+      expect(zInteract).toBeGreaterThan(zInspector)
     } finally {
       app.unmount()
       host.remove()

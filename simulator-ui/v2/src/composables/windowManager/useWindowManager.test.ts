@@ -261,6 +261,76 @@ describe('useWindowManager (MVP)', () => {
     expect(win.rect.top).toBe(12)
   })
 
+  it('AC5.5 strategy C: measured окно in-bounds может быть не по сетке — reclamp() не меняет позицию', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 800, height: 600 })
+
+    const id = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' }, anchor: null })
+    wm.updateMeasuredSize(id, { width: 300, height: 200 })
+    wm.reclamp(id)
+
+    const win = wm.windows.value.find((w) => w.id === id)!
+    // Put it in bounds but off-grid.
+    win.rect.left = 123
+    win.rect.top = 227
+
+    wm.reclamp(id)
+
+    expect(win.rect.left).toBe(123)
+    expect(win.rect.top).toBe(227)
+  })
+
+  it('AC5.5 strategy C: measured окно out-of-bounds — reclamp() делает clamp + snap8 внутри [pad,max]', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 800, height: 600 })
+
+    const id = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' }, anchor: null })
+    wm.updateMeasuredSize(id, { width: 300, height: 200 })
+    wm.reclamp(id)
+
+    const win = wm.windows.value.find((w) => w.id === id)!
+
+    // Move far out of bounds so clamp is required.
+    win.rect.left = 9999
+    win.rect.top = 9999
+
+    wm.reclamp(id)
+
+    const pad = 12
+    const maxLeft = Math.max(pad, 800 - 300 - pad)
+    const maxTop = Math.max(pad, 600 - 200 - pad)
+
+    // Must be in bounds.
+    expect(win.rect.left).toBeGreaterThanOrEqual(pad)
+    expect(win.rect.left).toBeLessThanOrEqual(maxLeft)
+    expect(win.rect.top).toBeGreaterThanOrEqual(pad)
+    expect(win.rect.top).toBeLessThanOrEqual(maxTop)
+
+    // Snap-on-clamp: position should land on 8px grid when a clamp happened.
+    expect(win.rect.left % 8).toBe(0)
+    expect(win.rect.top % 8).toBe(0)
+  })
+
+  it('Layering priority: focus(inspector) не поднимает его над interact (topmost для ESC остаётся interact)', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const inspectorId = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+    const interactId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+
+    // Force focus to inspector.
+    wm.focus(inspectorId)
+
+    // ESC should still close interact first (interact is visually topmost by group priority).
+    const r1 = wm.handleEsc(fakeKeyEv(null), {
+      isFormLikeTarget: () => false,
+      dispatchWindowEsc: () => true,
+    })
+    expect(r1).toBe(true)
+    expect(wm.windows.value.some((w) => w.id === interactId)).toBe(false)
+    expect(wm.windows.value.some((w) => w.id === inspectorId)).toBe(true)
+  })
+
   it('open(): collision avoidance — окна с одним anchor не получают идентичные x/y', () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
@@ -599,4 +669,3 @@ describe('useWindowManager (MVP)', () => {
     expect(wm.getTopmostInGroup('inspector')).toBeNull()
   })
 })
-

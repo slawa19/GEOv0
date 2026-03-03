@@ -15,8 +15,34 @@ import type {
 
 const MAX = 100000
 
+const GROUP_BASE_Z: Record<WindowGroup, number> = {
+  // Requirement: interact windows MUST always render above inspector.
+  // Use a large gap so focusCounter-based intra-group z never crosses groups.
+  inspector: 0,
+  interact: 1000000,
+}
+
 function snap8(v: number): number {
   return Math.round(v / 8) * 8
+}
+
+function snap8InRange(v: number, min: number, max: number): number {
+  if (min >= max) return min
+
+  let snapped = snap8(v)
+  if (snapped < min) {
+    const ceil = Math.ceil(min / 8) * 8
+    if (ceil <= max) return ceil
+    return min
+  }
+
+  if (snapped > max) {
+    const floor = Math.floor(max / 8) * 8
+    if (floor >= min) return floor
+    return max
+  }
+
+  return snapped
 }
 
 function cascadeShiftAvoidOverlaps(o: {
@@ -45,7 +71,7 @@ function cascadeShiftAvoidOverlaps(o: {
 function pickNextActiveId(windowsMap: Map<number, WindowInstance>): number | null {
   let best: { id: number; z: number } | null = null
   for (const [id, win] of windowsMap) {
-    if (!best || win.z > best.z) best = { id, z: win.z }
+    if (!best || win.effectiveZ > best.z) best = { id, z: win.effectiveZ }
   }
   return best?.id ?? null
 }
@@ -57,6 +83,10 @@ export function useWindowManager(): WindowManagerApi {
   const activeId = ref<number | null>(null)
   const viewport = ref({ width: 0, height: 0 })
   const idCounter = ref(0)
+
+  function computeEffectiveZ(win: WindowInstance): number {
+    return GROUP_BASE_Z[win.policy.group] + win.z
+  }
 
   function closeGroupExcept(g: WindowGroup, exceptId: number, reason: 'esc' | 'action' | 'programmatic'): void {
     const ids: number[] = []
@@ -199,6 +229,7 @@ export function useWindowManager(): WindowManagerApi {
     if (!win) return
     focusCounter.value += 1
     win.z = focusCounter.value
+    win.effectiveZ = computeEffectiveZ(win)
     setActive(id)
   }
 
@@ -260,11 +291,22 @@ export function useWindowManager(): WindowManagerApi {
       // appears, panel grows from ~100px to ~280px), maxLeft/maxTop shift. Any re-snap based
       // on the new bounds can produce a different value → visible position jump.
       // Fix: only clamp if the current rect is out of bounds; keep exact user position otherwise.
-      const clampedLeft = clamp(win.rect.left, pad, maxLeft)
-      if (clampedLeft !== win.rect.left) win.rect.left = clampedLeft
+      const beforeLeft = win.rect.left
+      const beforeTop = win.rect.top
 
-      const clampedTop = clamp(win.rect.top, pad, maxTop)
-      if (clampedTop !== win.rect.top) win.rect.top = clampedTop
+      const clampedLeft = clamp(beforeLeft, pad, maxLeft)
+      const clampedTop = clamp(beforeTop, pad, maxTop)
+
+      const didClamp = clampedLeft !== beforeLeft || clampedTop !== beforeTop
+
+      if (!didClamp) {
+        // Strategy C: keep exact coordinates when already in bounds.
+      } else {
+        // Snap-on-clamp: if we had to push the window into bounds, align to 8px grid
+        // while staying within [pad, max] constraints.
+        win.rect.left = snap8InRange(clampedLeft, pad, maxLeft)
+        win.rect.top = snap8InRange(clampedTop, pad, maxTop)
+      }
     }
 
     // Update rect dimensions from measured.
@@ -343,6 +385,8 @@ export function useWindowManager(): WindowManagerApi {
         win.anchor = anchor
         win.constraints = constraints
         win.policy = policy
+        // Policy may change group; update visual stacking base accordingly.
+        win.effectiveZ = computeEffectiveZ(win)
         win.placement = anchor ? 'anchored' : 'docked-right'
 
         // If window has not been measured yet, refresh rect size estimate.
@@ -415,6 +459,7 @@ export function useWindowManager(): WindowManagerApi {
       anchorOffset,
       active: false,
       z: 0,
+      effectiveZ: 0,
       placement,
       rect,
       constraints,
@@ -450,10 +495,10 @@ export function useWindowManager(): WindowManagerApi {
   ): boolean {
     if (o.isFormLikeTarget(ev.target)) return false
 
-    // Find topmost (active/max-z) window.
+    // Find topmost (visual max effectiveZ) window.
     let top: WindowInstance | null = null
     for (const [, win] of windowsMap) {
-      if (!top || win.z > top.z) top = win
+      if (!top || win.effectiveZ > top.effectiveZ) top = win
     }
     if (!top) return false
 
@@ -478,7 +523,7 @@ export function useWindowManager(): WindowManagerApi {
   }
 
   const windows = computed(() => {
-    return Array.from(windowsMap.values()).sort((a, b) => a.z - b.z)
+    return Array.from(windowsMap.values()).sort((a, b) => a.effectiveZ - b.effectiveZ)
   })
 
   function getTopmostInGroup(g: WindowGroup): WindowInstance | null {
@@ -487,11 +532,11 @@ export function useWindowManager(): WindowManagerApi {
       if (win.policy.group === g && win.active) return win
     }
 
-    // Fallback: max-z within the group.
+    // Fallback: max effectiveZ within the group.
     let top: WindowInstance | null = null
     for (const [, win] of windowsMap) {
       if (win.policy.group !== g) continue
-      if (!top || win.z > top.z) top = win
+      if (!top || win.effectiveZ > top.effectiveZ) top = win
     }
     return top
   }
