@@ -285,7 +285,6 @@ async function onRunClearingOnce() {
 }
 
 .bb-stack {
-  margin-top: 8px;
   gap: 8px;
 }
 

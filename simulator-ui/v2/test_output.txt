@@ -1,0 +1,568 @@
+
+> geo-simulator-ui-demo-fast-mock-v2@0.0.0 test:unit
+> vitest run --mode test --reporter=verbose
+
+
+[1m[46m RUN [49m[22m [36mv3.2.4 [39m[90md:/www/Projects/2025/GEOv0-PROJECT/simulator-ui/v2[39m
+
+ [32m✓[39m src/components/ErrorToast.test.ts[2m > [22mErrorToast[2m > [22muses props.dismissMs when message length <= 80[32m 15[2mms[22m[39m
+ [32m✓[39m src/components/ErrorToast.test.ts[2m > [22mErrorToast[2m > [22muses 6000ms when message length > 80[32m 3[2mms[22m[39m
+ [32m✓[39m src/components/ErrorToast.test.ts[2m > [22mErrorToast[2m > [22muses 8000ms when message length > 150[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/ErrorToast.test.ts[2m > [22mErrorToast[2m > [22munmount clears auto-dismiss timer[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/ErrorToast.test.ts[2m > [22mErrorToast[2m > [22mmanual dismiss clears timer (no later auto-dismiss)[32m 6[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframeless mode[2m > [22mdoes not render ws-header or ws-close button[32m 12[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframeless mode[2m > [22mdoes not apply ws-shell--framed class[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframeless mode[2m > [22minline style has left/top/zIndex but no width/height[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframeless mode[2m > [22mrenders slot content inside ws-body[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframeless mode[2m > [22mdoes not apply overflow:hidden (allows legacy clip-path/scanline effects)[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mdefaults[2m > [22mdefaults to framed mode (frameless=false) for forward-safety[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframed mode[2m > [22mrenders ws-header and ws-close when showHeader=true[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframed mode[2m > [22mapplies ws-shell--framed class[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/WindowShell.test.ts[2m > [22mWindowShell[2m > [22mframed mode[2m > [22minline style includes width/height from rect[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/ClearingPanel.test.ts[2m > [22mClearingPanel[2m > [22mCL-1: in confirm step shows running feedback + disables buttons when busy (not stuck)[32m 16[2mms[22m[39m
+ [32m✓[39m src/components/ClearingPanel.test.ts[2m > [22mClearingPanel[2m > [22mCL-1: in confirm step keeps normal help text when not busy[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/ClearingPanel.test.ts[2m > [22mClearingPanel[2m > [22mCL-2: in preview step shows loading state when lastClearing is not ready yet[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/SuccessToast.test.ts[2m > [22mSuccessToast[2m > [22mAC-A11Y-3: SuccessToast uses role="status" + aria-live="polite" when visible[32m 13[2mms[22m[39m
+ [32m✓[39m src/components/SuccessToast.test.ts[2m > [22mSuccessToast[2m > [22mauto-dismisses in 2500ms for short messages[32m 6[2mms[22m[39m
+ [32m✓[39m src/components/SuccessToast.test.ts[2m > [22mSuccessToast[2m > [22mauto-dismisses in 3500ms for long messages (>50 chars)[32m 3[2mms[22m[39m
+ [32m✓[39m src/components/SuccessToast.test.ts[2m > [22mSuccessToast[2m > [22mmanual dismiss emits dismiss (owner clears message)[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/SuccessToast.test.ts[2m > [22mSuccessToast[2m > [22munmount clears auto-dismiss timer[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/SuccessToast.test.ts[2m > [22mSuccessToast[2m > [22mmanual dismiss clears timer (no later auto-dismiss)[32m 4[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mopen() creates window with policy/group/constraints[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22msingleton='reuse': повторный open того же type обновляет data/constraints, не создаёт новый id[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mfocus mode: 'never' при reuse не меняет z и active[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mfocus mode: 'always' при reuse меняет z и active[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mfocus mode: 'auto' — первый open фокусирует, второй (reuse) не фокусирует[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22msingleton='reuse': после user-drag повторный open() без смены anchor не сбрасывает rect.left/top[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22minspector XOR: open(edge-detail) replaces node-card; closeGroup('interact') не трогает inspector[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mAudit fix C-1: trustline panel preferredWidth=380 и estimate использует 380[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mInteract panels: payment/clearing preferredWidth=560 (matches .ds-ov-panel max-width) and estimate uses 560[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mupdateMeasuredSize() + reclamp() держат окно в viewport и синхронизируют rect из measured[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mreclamp(): anchored окно без measured — позиция пересчитывается от anchor (+dx/dy) и clamp'ится[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mreclamp(): рост measured size (stub→full, docked-right) не меняет top/left если окно в bounds[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mreclamp(): рост measured size (stub→full, anchored) не меняет top/left если окно в bounds[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mreclamp(): viewport shrink после измерения — окно всё равно прижимается к pad[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mAC5.5 strategy C: measured окно in-bounds может быть не по сетке — reclamp() не меняет позицию[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mAC5.5 strategy C: measured окно out-of-bounds — reclamp() делает clamp + snap8 внутри [pad,max][32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mLayering priority: focus(inspector) не поднимает его над interact (topmost для ESC остаётся interact)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mopen(): collision avoidance — окна с одним anchor не получают идентичные x/y[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mcloseByType(): closes all windows of the given type and returns count[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mhandleEsc(): form guard → не закрывает[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mhandleEsc(): nested consume → не закрывает[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mhandleEsc(): escBehavior='close' → close(id,'esc')[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mhandleEsc(): node-card escBehavior='close' → close(id,'esc')[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mhandleEsc(): escBehavior='back-then-close' → onBack=true не закрывает; onBack=false закрывает[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mpolicy: closeOnOutsideClick interact-panel=false, edge-detail=true[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mAcceptance A1 / R6: 2 окна (interact + inspector) → ESC закрывает interact, затем inspector[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mAcceptance A1-variant: 2 окна (interact + node-card) → 2×ESC закрывают оба окна[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mhandleEsc() при 0 окнах: возвращает false и не бросает[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mclose()/focus() с несуществующим id: no-op[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22msetViewport() + reclampAll(): держит все окна внутри новых границ[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mclose() вызывает policy.onClose с корректным reason[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22minteract-panel onClose вызывается при ESC-close (back-then-close → pass)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22minteract-panel onClose НЕ вызывается при programmatic close[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mhandleEsc(): escBehavior='ignore' не закрывает окно[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mgetTopmostInGroup: возвращает active окно группы, или max-z fallback[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mP1-3 closing state[2m > [22mclose() переводит окно в state=closing, не удаляет из windowsMap сразу[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mP1-3 closing state[2m > [22mfinishClose() удаляет окно из map; идемпотентен[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mP1-3 closing state[2m > [22mhandleEsc() пропускает закрывающееся окно при поиске topmost[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mP1-3 closing state[2m > [22mrapid double ESC: оба окна получают closing-state в правильном порядке, не путая A и B[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mP1-3 closing state[2m > [22mopen() с singleton=reuse не переиспользует окно в closing state — создаёт новое[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/useWindowManager.test.ts[2m > [22museWindowManager (MVP)[2m > [22mP1-3 closing state[2m > [22mopen() создаёт WindowInstance с state=open[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useEdgeTooltip.test.ts[2m > [22museEdgeTooltip[2m > [22mformatEdgeAmountText uses used+trust_limit when present[32m 13[2mms[22m[39m
+ [32m✓[39m src/composables/useEdgeTooltip.test.ts[2m > [22museEdgeTooltip[2m > [22mformatEdgeAmountText falls back to available[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useEdgeTooltip.test.ts[2m > [22museEdgeTooltip[2m > [22medgeTooltipStyle — overlay size caching (§7.1 regression)[2m > [22mgetBoundingClientRect on tooltip element is called only once per null→key show transition, not on every pointermove[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useEdgeTooltip.test.ts[2m > [22museEdgeTooltip[2m > [22medgeTooltipStyle — overlay size caching (§7.1 regression)[2m > [22medgeTooltipStyle returns identical style on repeated calls for the same key (smoke)[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/EdgeDetailPopup.test.ts[2m > [22mEdgeDetailPopup[2m > [22mrenders when forceHidden=false[32m 18[2mms[22m[39m
+ [32m✓[39m src/components/EdgeDetailPopup.test.ts[2m > [22mEdgeDetailPopup[2m > [22mdoes NOT render when forceHidden=true (TrustlineManagementPanel is shown instead)[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/EdgeDetailPopup.test.ts[2m > [22mEdgeDetailPopup[2m > [22mED-1: used>0 blocks Close line (disabled) and shows warning[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/EdgeDetailPopup.test.ts[2m > [22mEdgeDetailPopup[2m > [22mAC-ED-5: reverse_used > 0, used = 0 => Close line disabled + inline warning[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/EdgeDetailPopup.test.ts[2m > [22mEdgeDetailPopup[2m > [22mED-4: used=0 does NOT block Close line[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/EdgeDetailPopup.test.ts[2m > [22mEdgeDetailPopup[2m > [22mED-2: renders utilization bar label (used=50, limit=100 => 50%)[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/EdgeDetailPopup.test.ts[2m > [22mEdgeDetailPopup[2m > [22mED-3: clicking Send Payment emits sendPayment[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mdisables quick actions when interactBusy=true (independent of trustlinesLoading)[32m 18[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mdoes NOT disable quick actions when trustlinesLoading=true but interactBusy=false[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mrenders loading placeholder when no trustlines and trustlinesLoading=true[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mdisables trustline edit buttons when interactBusy=true[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mNC-1: IN trustline renders edit button and clicking it calls onInteractEditTrustline(from,to)[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mNC-2: trustline row renders available column (fmtAmt(tl.available))[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mNC-3: trustline with available="0" gets saturated class[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/NodeCardOverlay.test.ts[2m > [22mNodeCardOverlay (Interact Mode flags)[2m > [22mNC-3: trustline is NOT saturated when available is unknown/NaN (non-finite)[32m 19[2mms[22m[39m
+ [32m✓[39m src/components/ActionBar.test.ts[2m > [22mActionBar[2m > [22menables flow start buttons in idle phase[32m 13[2mms[22m[39m
+ [32m✓[39m src/components/ActionBar.test.ts[2m > [22mActionBar[2m > [22mwhen busy in idle phase: disables buttons and explains why (title + hint)[32m 3[2mms[22m[39m
+ [32m✓[39m src/components/ActionBar.test.ts[2m > [22mActionBar[2m > [22mwhen cancelling in idle phase (busy=true, cancelling=true): shows cancelling hint + more specific title[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/ActionBar.test.ts[2m > [22mActionBar[2m > [22mlocks ActionBar when phase is active (phase!=idle): disables buttons, shows reason, blocks clicks[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mTL-1a: createValid accepts 0 (Create enabled for valid from/to + limit=0)[32m 33[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mTL-1: when newLimit < used, shows inline warn and disables Update[32m 10[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mTL-2 (Phase 1): when effectiveUsed > 0, disables Close and shows warning[32m 3[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mAC-TL-10: reverse_used > 0, used = 0 => Close TL disabled + inline warning[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mTL-1/TL-1a: normalizes amount before sending ('1,5' -> '1.5')[32m 10[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mTL-3: marks existing trustlines as (exists) in create-flow To dropdown[32m 5[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mAC-TL-7: newLimit="0" with used="0" enables Update and sends "0"[32m 5[2mms[22m[39m
+ [32m✓[39m src/components/TrustlineManagementPanel.test.ts[2m > [22mTrustlineManagementPanel[2m > [22mTL-4: pre-fills newLimit from effectiveLimit (trustlines list) rather than props.currentLimit[32m 6[2mms[22m[39m
+ [32m✓[39m src/legacyReference/legacyWindowsMarkupSnapshots.test.ts[2m > [22mLegacy windows reference — markup snapshots[2m > [22mNodeCardOverlay[32m 25[2mms[22m[39m
+ [32m✓[39m src/legacyReference/legacyWindowsMarkupSnapshots.test.ts[2m > [22mLegacy windows reference — markup snapshots[2m > [22mEdgeDetailPopup[32m 10[2mms[22m[39m
+ [32m✓[39m src/legacyReference/legacyWindowsMarkupSnapshots.test.ts[2m > [22mLegacy windows reference — markup snapshots[2m > [22mManualPaymentPanel[32m 25[2mms[22m[39m
+ [32m✓[39m src/legacyReference/legacyWindowsMarkupSnapshots.test.ts[2m > [22mLegacy windows reference — markup snapshots[2m > [22mTrustlineManagementPanel[32m 8[2mms[22m[39m
+ [32m✓[39m src/legacyReference/legacyWindowsMarkupSnapshots.test.ts[2m > [22mLegacy windows reference — markup snapshots[2m > [22mClearingPanel[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/BottomBar.test.ts[2m > [22mBottomBar — DevTools panel (<details>)[2m > [22mis controlled: toggle updates the model, and :open reflects the model[33m 882[2mms[22m[39m
+ [32m✓[39m src/components/BottomBar.test.ts[2m > [22mBottomBar — DevTools panel (<details>)[2m > [22mpersists to the correct storage key: real vs demo[32m 29[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mpayment flow: idle -> picking -> confirm -> idle[32m 13[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mtrustline flow: goes to editing-trustline when link exists[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mcancel resets to idle and clears error[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mcancel keeps busy=true until in-flight action settles; cancelled error does not leak[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mclearing flow: confirm -> preview (>=800ms) -> running -> idle[32m 5[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mtrustline create flow: picking-from -> picking-to -> confirm-trustline-create[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22msetPaymentFromPid and setPaymentToPid update state in picking phases[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mselectEdge transitions to editing-trustline phase[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22msuccessMessage is retriggered when the same toast text repeats (microtask reset)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mMP-6a: startPaymentFlow prefetches trustlines even when cache is warm[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mpayment-targets: snapshot change forces refresh for current From (prevents forever-stale targets)[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mavailableCapacity computed from snapshot link[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mclearing flow with 0 cycles does not error[32m 8[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mconfirmPayment uses resetToIdle (not cancel) on success — epoch not double-incremented[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mavailableTargetIds is an empty Set in idle phase (undefined reserved for loading/unknown only)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mavailableTargetIds is undefined in picking-payment-to while trustlinesLoading=true (unknown)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mavailableTargetIds is an empty Set in picking-payment-to when trustlines are known but no direct-hop targets exist[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mavailableTargetIds includes participants (excluding from) in picking-trustline-to[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.test.ts[2m > [22museInteractMode[2m > [22mdoes not start an alternative flow when phase is not idle (one flow at a time)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - refreshSnapshot debounce regression[2m > [22mstopSse cancels pending refreshSnapshot debounce so timer cannot trigger a second loadScene()[32m 10[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - refreshSnapshot debounce regression[2m > [22mstale run context (runId changed) prevents pending debounce timer from triggering loadScene()[32m 5[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - admin helpers[2m > [22mattachToRun trims runId and no-ops on blank[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - admin helpers[2m > [22mstopRunById trims runId and no-ops on blank[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - startRun conflict attach[2m > [22mattaches to active run when createRun returns HTTP 409[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - receiver label guards[2m > [22mreceiver label not emitted when amount is empty[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - receiver label guards[2m > [22mreceiver label not emitted for self-payment (from === to)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - receiver label guards[2m > [22mreceiver label uses resolveTxDirection when from/to missing but edges present[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - SSE replay dedup[2m > [22mdrops duplicate events by event_id (prevents duplicate labels/FX)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorRealMode.test.ts[2m > [22museSimulatorRealMode - SSE replay dedup[2m > [22mamount_flyout=false suppresses amount labels but keeps tx FX[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/InteractModeUi.test.ts[2m > [22mInteract Mode UI (components)[2m > [22mManualPaymentPanel: renders when phase=confirm-payment[32m 35[2mms[22m[39m
+ [32m✓[39m src/components/InteractModeUi.test.ts[2m > [22mInteract Mode UI (components)[2m > [22mManualPaymentPanel: cancel() closes panel (phase resets to idle)[32m 11[2mms[22m[39m
+ [32m✓[39m src/components/InteractModeUi.test.ts[2m > [22mInteract Mode UI (components)[2m > [22mActionBar: clicking buttons calls corresponding methods[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/InteractModeUi.test.ts[2m > [22mInteract Mode UI (components)[2m > [22mManualPaymentPanel: To dropdown excludes selected From (guard)[32m 28[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mMP-3: fromParticipants always includes selected fromPid even if filtered out by outgoing capacity[32m 44[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-A11Y-1/AC-A11Y-2: Amount aria-describedby=mp-amount-help + To aria-describedby=mp-to-help (help elements exist)[32m 11[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-12: refresh removes toPid from availableTargetIds => resets selection + inline warning[32m 13[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mMP-4: normalizes amount before sending ('1,5' -> '1.5')[32m 10[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mUX-8: shows inline reason when amount format is invalid[32m 10[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mUX-8: shows "Enter a positive amount." for 0[32m 13[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-3/MP-2: To option shows capacity label when trustlines are provided[32m 6[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mMP-2: To option renders capacity '0' (does not treat '0' as unknown)[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-5b: amount > direct capacity shows inline warning and does NOT disable confirm (multi-hop mode)[32m 8[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-19: confirm step shows disabled reason when canSendPayment=false (no route between selected participants)[32m 8[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mMP-4: busy=true does not show confirm disabled reason[32m 6[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-7: trustlinesLoading=true shows (updating…) and fallback help[32m 5[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-8: known-empty paymentToTargetIds shows empty To list + help[32m 7[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-11: FROM filtered when trustlines have outgoing (available > 0) (direct-hop)[32m 5[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-11: fallback full FROM list when trustlines are empty ('undefined')[32m 6[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-11: fallback full FROM list when trustlines are empty ('[]')[32m 5[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mdegraded mode: paymentTargetsLastError => To list shows fallback (not known-empty) + error help text[32m 13[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mAC-MP-11: fallback full FROM list when trustlines exist but have no outgoing capacity[32m 5[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mPhase 2.5 backend-first payment targets (AC-MP-15..18)[2m > [22mAC-MP-15: To dropdown contains exactly payment-targets.items[].to_pid (known-nonempty)[32m 10[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mPhase 2.5 backend-first payment targets (AC-MP-15..18)[2m > [22mAC-MP-16: availableTargetIds for canvas equals payment-targets.items[].to_pid (known-nonempty)[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mPhase 2.5 backend-first payment targets (AC-MP-15..18)[2m > [22mAC-MP-17: backend-first known-empty shows "Backend reports no payment routes from selected sender" (and includes max_hops in copy)[32m 4[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mPhase 2.5 backend-first payment targets (AC-MP-15..18)[2m > [22mAC-MP-18: payment-targets request runs once on From selection; not repeated on amount changes / rerender[32m 12[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mPhase 2.5 backend-first payment targets (AC-MP-15..18)[2m > [22mbackend-first: paymentTargetsLoading=true (unknown) shows updating help + fallback To list until resolved[32m 11[2mms[22m[39m
+ [32m✓[39m src/components/ManualPaymentPanel.test.ts[2m > [22mManualPaymentPanel[2m > [22mPhase 2.5 backend-first payment targets (AC-MP-15..18)[2m > [22mbackend-first degraded: payment-targets error shows fallback To list + degraded help; highlight targets become unknown[32m 6[2mms[22m[39m
+ [32m✓[39m src/layout/physicsD3.viewportRetune.test.ts[2m > [22mphysicsD3: retune forces on significant viewport resize[2m > [22mretunes link distance when viewport area changes >=4x[33m 1292[2mms[22m[39m
+ [32m✓[39m src/layout/physicsD3.viewportRetune.test.ts[2m > [22mphysicsD3: retune forces on significant viewport resize[2m > [22mdoes not retune link distance when resize is small (area ratio <4x)[32m 1[2mms[22m[39m
+ [32m✓[39m src/layout/forceLayout.test.ts[2m > [22mforceLayout[2m > [22mhandles empty snapshot[33m 1337[2mms[22m[39m
+ [32m✓[39m src/layout/forceLayout.test.ts[2m > [22mforceLayout[2m > [22mapplyForceLayout produces deterministic positions for same seed[32m 54[2mms[22m[39m
+ [32m✓[39m src/layout/forceLayout.test.ts[2m > [22mforceLayout[2m > [22mcomputeLayoutForMode returns links with stable __key[32m 27[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mui=interact renders interact HUD + ActionBar + ManualPaymentPanel and does not render intensity slider[32m 94[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mrenders ManualPaymentPanel through WindowLayer (WindowShell) and does not duplicate legacy panel[32m 29[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mrenders TrustlineManagementPanel through WindowLayer and does not duplicate legacy panel[32m 26[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mrenders ClearingPanel through WindowLayer and does not duplicate legacy panel[32m 20[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mrenders EdgeDetailPopup through WindowLayer (WindowShell)[32m 35[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mrenders NodeCardOverlay through WindowLayer (WindowShell)[32m 21[2mms[22m[39m
+ [32m✓[39m src/layout/forceLayout.test.ts[2m > [22mforceLayout[2m > [22mapplyForceLayout with w=h=1 produces coordinates in [0, 1] (ITEM-12 smoke)[32m 25[2mms[22m[39m
+ [32m✓[39m src/layout/forceLayout.test.ts[2m > [22mforceLayout[2m > [22mapplyForceLayout does NOT throw when a link references a missing node (dangling link)[32m 23[2mms[22m[39m
+ [32m✓[39m src/layout/forceLayout.test.ts[2m > [22mforceLayout[2m > [22mapplyForceLayout preserves all links in output when all links are valid (NOTE C-4)[32m 25[2mms[22m[39m
+ [32m✓[39m src/layout/forceLayout.test.ts[2m > [22mforceLayout[2m > [22mapplyForceLayout chargeTheta is configurable and affects output (Barnes–Hut)[33m 331[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mcoexistence — interact-panel and node-card both render (2 windows)[32m 24[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP1-1: реактивный watcher-update interact-panel (focus:never) не поднимает interact выше inspector (z-order stable)[32m 38[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mNodeCard action → opens interact-panel and keeps NodeCard open (H-1 coexistence)[32m 23[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mcross-group replace — Change Limit closes edge-detail window and opens trustline panel[32m 23[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22medge-detail UI-close closes the window and does NOT cancel interact flow (H-3)[32m 19[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mSend Payment from edge-detail keeps edge-detail window open (keepAlive)[32m 42[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22moutside-click closes topmost/active inspector via WM (edge-detail) and cancels interact flow[32m 15[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22moutside-click closes inspector (node-card) and cancels interact-panel (hard dismiss)[32m 34[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEdgeDetailPopup Close closes edge-detail window (UI-close) and does NOT cancel interact flow[32m 21[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEdgeDetailPopup send-payment → payment keeps edge anchor (wm.open gets non-null anchor)[32m 20[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mMP-0: routesLoading in root yields tri-state unknown in ManualPaymentPanel (shows updating help)[32m 16[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mui=interact renders trustline/clearing panels depending on phase[32m 22[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mclicking ActionBar "Run Clearing" changes phase and shows ClearingPanel (behavioral)[32m 12[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEscape delegates to WM and does not cancel confirm-payment (step-back instead)[32m 21[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEscape delegates to wm.handleEsc() and does NOT cancel interact flow[32m 8[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mESC on picking-payment-to closes when initiatedWithPrefilledFrom=true (NodeCard)[32m 9[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mESC on picking-payment-to steps back when initiatedWithPrefilledFrom=false (ActionBar)[32m 10[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mActionBar payment — 2nd ESC after step-back closes window (cancel ×1)[32m 18[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mlatched initiatedWithPrefilledFrom stays true after manual FROM change via dropdown[32m 12[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEdgeDetail payment confirm ESC clears TO, then closes on 2nd ESC (prefilled)[32m 18[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mTrustline picking-to closes when initiatedWithPrefilledFrom=true (NodeCard)[32m 10[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mTrustline picking-to steps back when initiatedWithPrefilledFrom=false (ActionBar)[32m 12[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mActionBar trustline — 2nd ESC after step-back closes window (cancel ×1)[32m 14[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mclearing confirm — ESC closes window without step-back, cancel called exactly once[32m 20[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mTrustline edit ESC clears TO and stays open, then closes on 2nd ESC (prefilled)[32m 25[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mcanvas shows crosshair cursor in interact picking phases[32m 18[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mTrustlineManagementPanel: Close TL requires 2 clicks (armed confirmation)[32m 17[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEdgeDetailPopup: hidden when TrustlineManagementPanel is visible (no duplicate windows)[32m 22[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22mtopologyFingerprint[2m > [22mreturns different fingerprints for same count but different last node ID[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22mtopologyFingerprint[2m > [22mreturns different fingerprints for same node IDs but edge swap (A→B vs A→C)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22mtopologyFingerprint[2m > [22mreturns the same fingerprint for identical snapshots[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22mtopologyFingerprint[2m > [22mreturns different fingerprints for empty edges vs one edge (same nodes)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22mtopologyFingerprint[2m > [22mis order-independent for nodes and links arrays (reorder-only patches)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mcomputeSnapshotStructuralKey changes when node IDs set changes (even if lengths are equal)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mcomputeSnapshotStructuralKey changes when edge changes (same node IDs, same counts)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22msnapshot structural watcher triggers relayout on edge swap (same node IDs)[32m 9[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22medge swap with same node IDs and counts invalidates snapKey → triggers relayout[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22msnapshot structural watcher triggers relayout on in-place node ID replacement (same counts)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mvisibility/DPR relayout runs strictly after resize updates layout.w/h (ordering regression)[32m 5[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mvisibilitychange triggers wakeUp + resize/layout scheduling when tab becomes visible[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mResizeObserver triggers requestResizeAndLayout (wakeUp) when host container resizes[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mcoalesces window.resize + ResizeObserver into one resize+relayout+wakeUp batch[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mcoalesces relayout RAF + resize-relayout RAF into a single compute (ITEM-18)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mdoes not wakeUp / recompute when resize signals arrive but size did not change[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mDPR watcher callback re-registers media query listener and schedules resize/layout[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mDPR listener setup does not throw when matchMedia throws (sandbox SecurityError)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mDPR listener setup supports legacy MediaQueryList.addListener API (no addEventListener)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mdebounced relayout respects lastLayoutKey cache[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mgenerated_at changes do not invalidate layout cache[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mrequestResizeAndLayout coalesces to one scheduled run[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mchanging layoutMode triggers relayout and wakeUp[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLayoutCoordinator.test.ts[2m > [22museLayoutCoordinator[2m > [22mwakeUp handler uses latest implementation even if changed after init[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mwakeUp() is idempotent: repeated calls do not double-schedule RAF[32m 5[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mwakeUp() cancels an active idle-timeout and guarantees a frame is queued[32m 4[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mafter reaching deep idle, no further scheduling happens until wakeUp()/ensureRenderLoop()[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mensureRenderLoop() restores scheduling after deep idle (no user input required)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mstopRenderLoop() disables the loop: wakeUp() must not resurrect scheduling[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mdeep idle -> wakeUp schedules next RAF[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mdoes not enter deep idle before the first successful renderFrame (no snapshot yet)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22msnapshot+layout appear after long wait (5s+) -> first frame renders automatically without user input[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mafter the first successful renderFrame, deep idle is allowed again (can stop scheduling)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mdoes not pass interaction-quality hints to renderers[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop deep idle / wakeUp / ensureRenderLoop invariants[2m > [22mresize invalidates gradient cache (clearGradientCache called only on real resize)[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop cachedPos hygiene on snapshot changes[2m > [22mdoes not request clear when there is overlap with cached ids (same scene)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop cachedPos hygiene on snapshot changes[2m > [22mrequests clear when snapshot ids do not intersect with cached ids (new scene)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop cachedPos hygiene on snapshot changes[2m > [22mprunes cachedPos when node composition changes but generated_at (snapshotKey) does not[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useRenderLoop.test.ts[2m > [22museRenderLoop cachedPos hygiene on snapshot changes[2m > [22mdoes not prune every frame when composition is stable (prune called once per change)[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mAC-ED-3: EdgeDetailPopup "Send Payment" activates Manual Payment and pre-fills pids (trustline to→from)[32m 27[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEscape disarms Close TL confirmation (does not cancel flow)[32m 20[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEscape closes NodeCard window first (does not cancel idle interact)[32m 18[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mEscape is routed to WM and closes NodeCard via back-stack (H-2 ESC policy)[32m 23[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mNodeCardOverlay: clicking "Send Payment" starts payment flow and shows ManualPaymentPanel (wiring)[32m 18[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mresetGlowSpritesCache() empties the cache; next request creates a new sprite[32m 3[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes -1.01 with step=0.5 to -1[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes -0.76 with step=0.5 to -1[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes -0.74 with step=0.5 to -0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes -0.51 with step=0.5 to -0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes -0.49 with step=0.5 to -0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes -0.26 with step=0.5 to -0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes -0.24 with step=0.5 to 0[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 0 with step=0.5 to 0[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 0.24 with step=0.5 to 0[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 0.26 with step=0.5 to 0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 0.49 with step=0.5 to 0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 0.51 with step=0.5 to 0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 0.74 with step=0.5 to 0.5[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 0.76 with step=0.5 to 1[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mquantizes 1.01 with step=0.5 to 1[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mq()[2m > [22mmaps non-finite values to a safe deterministic value[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mis deterministic for identical inputs[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mis deterministic for fx-dot[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mis deterministic for fx-ring[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mis deterministic for fx-bloom[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mnever emits NaN/Infinity/undefined in the key string (sanitizes via q())[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mnever emits NaN/Infinity/undefined in the key string for fx-dot[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mnever emits NaN/Infinity/undefined in the key string for fx-ring[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mnever emits NaN/Infinity/undefined in the key string for fx-bloom[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mblurPx=0 produces a deterministic, finite key; sprite generation does not crash when 2D ctx exists[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mincludes kind and differentiates kinds (bloom)[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mincludes kind and differentiates kinds (rim)[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mincludes kind and differentiates kinds (selection)[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mincludes kind and differentiates kinds (active)[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mdifferentiates FX kinds when other parameters are the same[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mkeyFor()[2m > [22mdifferentiates fx-ring keys by thicknessPx[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mgetGlowSprite() input hardening (ITEM-13)[2m > [22msanitizes NaN/Infinity inputs into a finite, valid canvas size[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mgetGlowSprite() input hardening (ITEM-13)[2m > [22mclamps pathological sprite sizes to MAX_SPRITE_PX[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mLRU eviction (MAX_CACHE)[2m > [22mevicts the oldest key when size grows beyond MAX_CACHE[32m 3[2mms[22m[39m
+ [32m✓[39m src/render/glowSprites.test.ts[2m > [22mrender/glowSprites — unit[2m > [22mLRU eviction (MAX_CACHE)[2m > [22mrefreshes recency on repeated access (poor-man LRU via Map insertion order)[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mNodeCardOverlay "Send Payment" opens interact-panel once with node anchor (no intermediate window)[32m 22[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22msuccess toast: successful clearing confirm renders SuccessToast and allows dismiss[32m 27[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP0-2: ESC while busy + confirm=true → cancel called + windows closed[32m 19[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP0-2: ESC while busy + confirm=false → nothing happens (windows stay, flow continues)[32m 22[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP0-2: ESC while NOT busy → no confirm shown, normal WM ESC handling[32m 28[2mms[22m[39m
+ [32m✓[39m src/composables/useNodeCard.test.ts[2m > [22museNodeCard[2m > [22mselectedNode is null when there is no selection[32m 12[2mms[22m[39m
+ [32m✓[39m src/composables/useNodeCard.test.ts[2m > [22museNodeCard[2m > [22mselectedNodeScreenCenter is null when host is missing[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useNodeCard.test.ts[2m > [22museNodeCard[2m > [22mselectedNodeScreenCenter uses worldToScreen(layout.__x/__y) when available[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mreturns zero metrics for null snapshot[32m 7[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mreturns zero metrics for empty snapshot (no links, no nodes)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mcomputes totalUsed and totalAvailable from active links[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22misClean = true when no debt (totalUsed == 0)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mignores closed/inactive links in totals[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mignores inactive nodes in activeParticipants count[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mhandles non-numeric used/available fields gracefully (treats as 0)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mparses string amounts correctly ("300.00" → 300)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mreacts to snapshot update after debounce[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mafter full clearing — totalUsed = 0, isClean = true[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSystemBalance.test.ts[2m > [22museSystemBalance[2m > [22mutilization = 0 when no links (avoid division by zero)[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP0-2: outside-click while busy + confirm=true → cancel called + windows closed[32m 21[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP0-2: outside-click while busy + confirm=false → nothing happens[32m 18[2mms[22m[39m
+ [31m×[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP1-3 rapid double ESC: interact + inspector — перший ESC переводить topmost в closing, другий закриває наступний open[32m 41[2mms[22m[39m
+[31m   → expected 2 to be +0 // Object.is equality[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Demo UI DevTools snapshot/restore wiring[2m > [22menter demo: snapshots real devtools open state; URL reload does not keep devtools param[32m 11[2mms[22m[39m
+ [32m✓[39m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Demo UI DevTools snapshot/restore wiring[2m > [22mexit demo: restores real state from snapshot and clears snapshot; URL reload does not keep devtools param[32m 23[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mmaps ApiError JSON body + flips actionsDisabled on 403 ACTIONS_DISABLED[32m 6[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mdoes not clear actionsDisabled optimistically between repeated 403 ACTIONS_DISABLED[32m 5[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mmaps ApiError with non-JSON body to HTTP_<status> code[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mthrows a mapped UNKNOWN error when runId is missing[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22msendPayment returns response on success and clears actionsDisabled[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mcreateTrustline returns response on success[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mrunClearing returns response with cycles on success[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mfetchParticipants returns items array on success[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mfetchTrustlines returns items array filtered by equivalent[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mclears runId and returns empty list on 404 from trustlines-list[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mclears runId and returns empty list on 404 from participants-list[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractActions.test.ts[2m > [22museInteractActions[2m > [22mreadonly computed runId: 404 clears persisted runId via onStaleRunId without Vue warn[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mactiveEdges supports TTL pruning[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mpushFloatingLabel respects throttleKey/throttleMs[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mpushFloatingLabel auto-generates unique ids even within the same nowMs tick[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mpushFloatingLabel does not drop throttle-window events when prior label is missing[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mpushFloatingLabel restarts throttled 'amt:' labels (new id) to avoid mid-flight updates[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mpushFloatingLabel enforces maxFloatingLabels[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mpruneFloatingLabels drops expired entries[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mfloatingLabelsView anchors above node top edge[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mfloatingLabelsView retriggers for pending labels when node appears in layout later[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useOverlayState.test.ts[2m > [22museOverlayState[2m > [22mresetOverlays cancels pending label retrigger timer[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useParticipantsList.test.ts[2m > [22museParticipantsList[2m > [22mtoParticipants: unknown targets (undefined) => all except from[32m 14[2mms[22m[39m
+ [32m✓[39m src/composables/useParticipantsList.test.ts[2m > [22museParticipantsList[2m > [22mtoParticipants: known-empty targets (Set size 0) => [] (no fallback)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useParticipantsList.test.ts[2m > [22museParticipantsList[2m > [22mtoParticipants: known non-empty targets => intersection, excluding from[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractDataCache.paymentTargets.test.ts[2m > [22museInteractDataCache: payment-targets cache TTL/refresh-policy[2m > [22mTTL: does not refetch within TTL window; refetches after TTL[32m 8[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractDataCache.paymentTargets.test.ts[2m > [22museInteractDataCache: payment-targets cache TTL/refresh-policy[2m > [22mrefresh trigger: snapshot generated_at change invalidates cache (next refresh refetches)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/usePersistedSimulatorPrefs.test.ts[2m > [22musePersistedSimulatorPrefs[2m > [22mloads valid values from storage and ignores invalid[32m 4[2mms[22m[39m
+ [32m✓[39m src/composables/usePersistedSimulatorPrefs.test.ts[2m > [22musePersistedSimulatorPrefs[2m > [22mpersists changes with debounce and calls requestResizeAndLayout on quality change[32m 4[2mms[22m[39m
+ [32m✓[39m src/composables/usePersistedSimulatorPrefs.test.ts[2m > [22musePersistedSimulatorPrefs[2m > [22mdispose cancels pending writes[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mworldToScreen and screenToWorld are inverse[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mclientToScreen uses host bounding rect[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mclampCameraPan centers content when it fits[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mhandlers implement click-vs-pan threshold[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mdoes not change panX/panY for micro-moves below 3px threshold[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mchanges panX/panY once movement reaches 3px threshold[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mdoes not pan when graph fully fits the viewport (locks to centered pan)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mlocks panning for a gesture when all nodes are already within viewport[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mdoes not activate panState when graph fits viewport (no-op background drag)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mactivates panState when graph is not fully visible[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useCamera.test.ts[2m > [22museCamera[2m > [22mcalls onCameraChanged exactly once per RAF-batched wheel deltas[32m 4[2mms[22m[39m
+ [32m✓[39m src/composables/useSceneState.test.ts[2m > [22museSceneState[2m > [22mloadScene loads snapshot and updates state[32m 6[2mms[22m[39m
+ [32m✓[39m src/composables/useSceneState.test.ts[2m > [22museSceneState[2m > [22mtreats scenario preview -> preview (different scenario id) as a full scene change even if node IDs match[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSceneState.test.ts[2m > [22museSceneState[2m > [22mnon-incremental loadScene clears ALL timers (including critical) because node context changed[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSceneState.test.ts[2m > [22museSceneState[2m > [22mloadScene skips expensive resets for incremental update (same node IDs)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSceneState.test.ts[2m > [22museSceneState[2m > [22mincremental update does not relayout when only links change[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSceneState.test.ts[2m > [22museSceneState[2m > [22msetup applies allow-listed eq and focuses existing node from URL[32m 2[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22mcomputes circle termination point deterministically[32m 2[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22mcomputes rounded-rect termination via ray-box intersection[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22mreturns node center for near-zero direction vector[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22mreturns finite coordinates when viz_size contains NaN/Infinity[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22mreturns finite coordinates when invZoom is 0 (cameraZoom===0 guard)[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22mreturns finite coordinates when invZoom is Infinity[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22muses defaults (w=12, h=12) when viz_size is absent (null)[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/linkGeometry.test.ts[2m > [22mgetLinkTermination()[2m > [22mreuses point objects across calls (hot-path allocation guard)[32m 7[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractDataCache.snapshotTrustlines.test.ts[2m > [22museInteractDataCache: snapshot→trustlines mapping[2m > [22mmaps reverse_used from snapshot.links when present (14.7)[32m 8[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractDataCache.snapshotTrustlines.test.ts[2m > [22museInteractDataCache: snapshot→trustlines mapping[2m > [22mdoes not invent reverse_used when snapshot.links does not have it (known limitation)[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useCanvasInteractions.test.ts[2m > [22museCanvasInteractions[2m > [22mselects node on click, clears selection on empty hit[32m 4[2mms[22m[39m
+ [32m✓[39m src/composables/useCanvasInteractions.test.ts[2m > [22museCanvasInteractions[2m > [22mdouble click selects node (single click is selection-only too)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCanvasInteractions.test.ts[2m > [22museCanvasInteractions[2m > [22mdblclick can be intercepted via onNodeDblClick hook[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCanvasInteractions.test.ts[2m > [22museCanvasInteractions[2m > [22mignores pointerdown in test mode[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCanvasInteractions.test.ts[2m > [22museCanvasInteractions[2m > [22mpointermove delegates to edgeHover and only pans when active[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCanvasInteractions.test.ts[2m > [22museCanvasInteractions[2m > [22mpointerup never directly clears selection — delegates entirely to onCanvasClick[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useCanvasInteractions.test.ts[2m > [22museCanvasInteractions[2m > [22mwheel is ignored during drag-to-pin active[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/baseGraph.test.ts[2m > [22mdrawBaseGraph — ITEM-14 orphan-link null-guard[2m > [22mbase pass: dangling target → does NOT throw[32m 5[2mms[22m[39m
+ [32m✓[39m src/render/baseGraph.test.ts[2m > [22mdrawBaseGraph — ITEM-14 orphan-link null-guard[2m > [22mbase pass: dangling source → does NOT throw[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/baseGraph.test.ts[2m > [22mdrawBaseGraph — ITEM-14 orphan-link null-guard[2m > [22mbase pass: fully dangling link (both endpoints missing) → does NOT throw[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/baseGraph.test.ts[2m > [22mdrawBaseGraph — ITEM-14 orphan-link null-guard[2m > [22moverlay pass: dangling target on focus-incident link → does NOT throw[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/baseGraph.test.ts[2m > [22mdrawBaseGraph — ITEM-14 orphan-link null-guard[2m > [22moverlay pass: dangling target on active link → does NOT throw[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/baseGraph.test.ts[2m > [22mdrawBaseGraph — ITEM-14 orphan-link null-guard[2m > [22mvalid link (both endpoints present): ctx.stroke() is called in base pass[32m 2[2mms[22m[39m
+ [32m✓[39m src/render/baseGraph.test.ts[2m > [22mdrawBaseGraph — ITEM-14 orphan-link null-guard[2m > [22mvalid link with selectedNodeId: ctx.stroke() is called in overlay pass too[32m 1[2mms[22m[39m
+ [32m✓[39m src/fixtures.test.ts[2m > [22mfixtures validation[2m > [22mvalidateSnapshot accepts a minimal valid snapshot[32m 5[2mms[22m[39m
+ [32m✓[39m src/fixtures.test.ts[2m > [22mfixtures validation[2m > [22mvalidateSnapshot throws on unknown viz keys in strict mode[32m 1[2mms[22m[39m
+ [32m✓[39m src/fixtures.test.ts[2m > [22mfixtures validation[2m > [22mvalidateSnapshot drops non-number/non-string amounts without throwing[32m 0[2mms[22m[39m
+ [32m✓[39m src/fixtures.test.ts[2m > [22mfixtures validation[2m > [22mvalidateEvents accepts a minimal tx.updated playlist[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useAppFxOverlays.test.ts[2m > [22museAppFxOverlays.scheduleTimeout()[2m > [22mcalls wakeUp() before firing timer callback[32m 6[2mms[22m[39m
+ [32m✓[39m src/composables/useAppFxOverlays.test.ts[2m > [22museAppFxOverlays.scheduleTimeout()[2m > [22mworks as before when wakeUp is not provided[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useAppFxOverlays.test.ts[2m > [22museAppFxOverlays.scheduleTimeout()[2m > [22mcleans up scheduled timers on component unmount[32m 9[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.startPaymentFlow.test.ts[2m > [22museInteractMode › startPaymentFlow[2m > [22mAC-MP-13: calls refreshTrustlines({ force: true }) when starting a payment flow (MP-6a)[32m 6[2mms[22m[39m
+ [32m✓[39m src/composables/useInteractMode.startPaymentFlow.test.ts[2m > [22museInteractMode › startPaymentFlow[2m > [22mAC-MP-13b: does NOT call refreshTrustlines({ force: true }) when already busy[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/layoutRawness.test.ts[2m > [22mITEM-9: layout nodes/links are raw + physics sync writes without Vue proxy overhead[2m > [22museLayoutCoordinator keeps layout.nodes/links and their elements non-reactive (raw)[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/layoutRawness.test.ts[2m > [22mITEM-9: layout nodes/links are raw + physics sync writes without Vue proxy overhead[2m > [22msyncToLayout updates raw node coords (__x/__y) after one tick[32m 2[2mms[22m[39m
+ [32m✓[39m src/demo/timerRegistry.test.ts[2m > [22mcreateTimerRegistry()[2m > [22mtracks size and removes fired timers[32m 5[2mms[22m[39m
+ [32m✓[39m src/demo/timerRegistry.test.ts[2m > [22mcreateTimerRegistry()[2m > [22mclearAll({keepCritical:true}) keeps critical timers and clears non-critical[32m 1[2mms[22m[39m
+ [32m✓[39m src/demo/timerRegistry.test.ts[2m > [22mcreateTimerRegistry()[2m > [22mclearAll() clears all timers[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/gradientCache.test.ts[2m > [22mrender/gradientCache — unit[2m > [22mcaches gradients per ctx and does not cross-contaminate between contexts[32m 3[2mms[22m[39m
+ [32m✓[39m src/render/gradientCache.test.ts[2m > [22mrender/gradientCache — unit[2m > [22mevicts oldest entries when size exceeds MAX_CACHE (LRU)[32m 2[2mms[22m[39m
+ [32m✓[39m src/render/gradientCache.test.ts[2m > [22mrender/gradientCache — unit[2m > [22mclearGradientCache(ctx) invalidates cache for that ctx[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/gradientCache.test.ts[2m > [22mrender/gradientCache — unit[2m > [22mcaches 3-stop gradients per ctx[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/gradientCache.test.ts[2m > [22mrender/gradientCache — unit[2m > [22mdoes not mix 2-stop and 3-stop cache keys[32m 0[2mms[22m[39m
+ [32m✓[39m src/components/TopBar.wiring.test.ts[2m > [22mTopBar wiring smoke[2m > [22memits kebab-case update events (HTML-safe)[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/TopBar.wiring.test.ts[2m > [22mTopBar wiring smoke[2m > [22muses events (not callback-props) for TopBar actions[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/TopBar.wiring.test.ts[2m > [22mTopBar wiring smoke[2m > [22mlistens to the same kebab-case update events in parent template[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/TopBar.wiring.test.ts[2m > [22mTopBar wiring smoke[2m > [22mlistens to TopBar events in parent template (instead of callback-props)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractFSM.test.ts[2m > [22museInteractFSM[2m > [22mresetToIdle()[2m > [22mclears edgeAnchor and resets phase to idle[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractFSM.test.ts[2m > [22museInteractFSM[2m > [22mresetToIdle()[2m > [22mpreserves lastClearing value after reset (intentional — used by HistoryLog)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractFSM.test.ts[2m > [22museInteractFSM[2m > [22mselectEdge defaults anchor to null[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/interact/useInteractFSM.test.ts[2m > [22museInteractFSM[2m > [22mselectTrustline trims ids and keeps idle if invalid[32m 1[2mms[22m[39m
+ [32m✓[39m src/demo/patches.test.ts[2m > [22mdemo/patches[2m > [22mapplyNodePatches updates snapshot + layout nodes[32m 3[2mms[22m[39m
+ [32m✓[39m src/demo/patches.test.ts[2m > [22mdemo/patches[2m > [22mapplyEdgePatches updates snapshot + layout links[32m 1[2mms[22m[39m
+ [32m✓[39m src/demo/patches.test.ts[2m > [22mdemo/patches[2m > [22mno-ops safely when snapshot is null or patches empty[32m 1[2mms[22m[39m
+ [32m✓[39m src/api/normalizeSimulatorEvent.test.ts[2m > [22mnormalizeSimulatorEvent[2m > [22mnormalizes tx.updated edges=null into [][32m 2[2mms[22m[39m
+ [32m✓[39m src/api/normalizeSimulatorEvent.test.ts[2m > [22mnormalizeSimulatorEvent[2m > [22mnormalizeSimulatorEvent: tx.updated[32m 1[2mms[22m[39m
+ [32m✓[39m src/api/normalizeSimulatorEvent.test.ts[2m > [22mnormalizeSimulatorEvent[2m > [22mnormalizeSimulatorEvent: tx.updated without amount keeps event (amount undefined)[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/normalizeSimulatorEvent.test.ts[2m > [22mnormalizeSimulatorEvent[2m > [22mnormalizeSimulatorEvent: tx.updated with missing from/to and empty edges keeps event[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/normalizeSimulatorEvent.test.ts[2m > [22mnormalizeSimulatorEvent[2m > [22mnormalizeSimulatorEvent: clearing.done[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/normalizeSimulatorEvent.test.ts[2m > [22mnormalizeSimulatorEvent[2m > [22mnormalizeSimulatorEvent: run_status parses totals + stall ticks[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useViewControls.test.ts[2m > [22museViewControls[2m > [22mformats translate3d with screen coords (no scale)[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useViewControls.test.ts[2m > [22museViewControls[2m > [22mresetView calls resetCamera then clampCameraPan[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/usePhysicsManager.test.ts[2m > [22mcreatePhysicsManager wakeUp integration[2m > [22mcalls wakeUp() after recreateForCurrentLayout creates and reheats engine[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/usePhysicsManager.test.ts[2m > [22mcreatePhysicsManager wakeUp integration[2m > [22mdoes NOT call wakeUp() when recreateForCurrentLayout early-returns (disabled)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/usePhysicsManager.test.ts[2m > [22mcreatePhysicsManager wakeUp integration[2m > [22mcalls wakeUp() on reheat(alpha>0) but not on reheat(0)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/usePhysicsManager.test.ts[2m > [22mcreatePhysicsManager wakeUp integration[2m > [22mcalls wakeUp() on updateViewport when reheatAlpha>0 but not when reheatAlpha=0[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/roundedRect.test.ts[2m > [22mroundedRectPath()[2m > [22mcalls native ctx.roundRect with correct `this` binding (no Illegal invocation)[32m 4[2mms[22m[39m
+ [32m✓[39m src/utils/txDirection.test.ts[2m > [22mresolveTxDirection[2m > [22mkeeps forward edges when endpoints already match[32m 3[2mms[22m[39m
+ [32m✓[39m src/utils/txDirection.test.ts[2m > [22mresolveTxDirection[2m > [22mfixes edges when each edge is swapped but order is correct[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/txDirection.test.ts[2m > [22mresolveTxDirection[2m > [22mfixes edges when order is reversed but direction is correct per edge[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/txDirection.test.ts[2m > [22mresolveTxDirection[2m > [22mfixes edges when both order and direction are reversed[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/txDirection.test.ts[2m > [22mresolveTxDirection[2m > [22minfers endpoints from edges when from/to are missing[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/interactWindowOfPhase.test.ts[2m > [22minteractWindowOfPhase()[2m > [22mmaps payment phases to interact-panel/payment[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/interactWindowOfPhase.test.ts[2m > [22minteractWindowOfPhase()[2m > [22mmaps trustline phases to interact-panel/trustline[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/interactWindowOfPhase.test.ts[2m > [22minteractWindowOfPhase()[2m > [22mmaps editing-trustline to edge-detail unless full editor is requested[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/interactWindowOfPhase.test.ts[2m > [22minteractWindowOfPhase()[2m > [22mmaps clearing phases to interact-panel/clearing[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/interactWindowOfPhase.test.ts[2m > [22minteractWindowOfPhase()[2m > [22mreturns null for idle/unknown phases[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/usePicking.test.ts[2m > [22musePicking geometry[2m > [22mdist2PointToSegment returns 0 on-segment[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/usePicking.test.ts[2m > [22musePicking geometry[2m > [22mclosestPointOnSegment clamps to endpoints[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/usePicking.test.ts[2m > [22musePicking[2m > [22mpickNodeAt selects nearest node within radius[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/usePicking.test.ts[2m > [22musePicking[2m > [22mpickEdgeAt selects edge near segment[32m 1[2mms[22m[39m
+ [32m✓[39m src/dev/geoSimDevHook.test.ts[2m > [22mdev/geoSimDevHook[2m > [22mdoes nothing when isDev=false[32m 1[2mms[22m[39m
+ [32m✓[39m src/dev/geoSimDevHook.test.ts[2m > [22mdev/geoSimDevHook[2m > [22minstalls window.__geoSim when isDev=true[32m 1[2mms[22m[39m
+ [32m✓[39m src/dev/geoSimDevHook.test.ts[2m > [22mdev/geoSimDevHook[2m > [22mcleanup from previous install does not remove a newer hook[32m 1[2mms[22m[39m
+ [32m✓[39m src/api/http.test.ts[2m > [22mapi/http authHeaders[2m > [22mroutes JWT-like tokens to Authorization header[32m 3[2mms[22m[39m
+ [32m✓[39m src/api/http.test.ts[2m > [22mapi/http authHeaders[2m > [22mroutes non-JWT tokens to X-Admin-Token header[32m 1[2mms[22m[39m
+ [32m✓[39m src/api/http.test.ts[2m > [22mapi/http authHeaders[2m > [22mignores empty tokens[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/http.test.ts[2m > [22mapi/http httpUrl[2m > [22mnormalizes backslashes in apiBase[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/http.test.ts[2m > [22mapi/http httpUrl[2m > [22mworks with normalized origin apiBase[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSnapshotIndex.test.ts[2m > [22museSnapshotIndex[2m > [22mreturns null when no snapshot[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useSnapshotIndex.test.ts[2m > [22museSnapshotIndex[2m > [22mindexes nodes by id and updates when snapshot changes[32m 2[2mms[22m[39m
+ [32m✓[39m src/utils/numberFormat.test.ts[2m > [22mutils/numberFormat[2m > [22masFiniteNumber coerces numbers and strings, else 0[32m 2[2mms[22m[39m
+ [32m✓[39m src/utils/numberFormat.test.ts[2m > [22mutils/numberFormat[2m > [22mformatAmount2 formats finite numbers with 2 decimals[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/numberFormat.test.ts[2m > [22mutils/numberFormat[2m > [22mparseAmountStringOrNull normalizes and validates amount strings[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/numberFormat.test.ts[2m > [22mutils/numberFormat[2m > [22mparseAmountNumber is strict (invalid -> NaN)[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/numberFormat.test.ts[2m > [22mutils/numberFormat[2m > [22mparseAmountNumberOrZero falls back to 0[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/usePinning.test.ts[2m > [22musePinning[2m > [22mcaptureBaseline + reapplyPinnedToLayout restores pinned positions after relayout[32m 5[2mms[22m[39m
+ [32m✓[39m src/composables/usePinning.test.ts[2m > [22musePinning[2m > [22mpinSelectedNode and unpinSelectedNode interact with physics[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useLabelNodes.test.ts[2m > [22museLabelNodes[2m > [22mreturns selection label in selection mode[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useLabelNodes.test.ts[2m > [22museLabelNodes[2m > [22mreturns neighbors when neighbors mode[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useLabelNodes.test.ts[2m > [22museLabelNodes[2m > [22mhides selected node label when hasNodeCardInspectorOpen returns true[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useLabelNodes.test.ts[2m > [22museLabelNodes[2m > [22mshows selected node label when hasNodeCardInspectorOpen returns false[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.pushClearingLabelDeferred.test.ts[2m > [22m__retryUntilTruthyOrDeadline()[2m > [22mtimes out: does not call onSuccess when value never becomes available[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.pushClearingLabelDeferred.test.ts[2m > [22m__retryUntilTruthyOrDeadline()[2m > [22msucceeds before deadline: calls onSuccess exactly once[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.windowManagementStep0.test.ts[2m > [22museSimulatorApp - window management Step 0 policy[2m > [22mempty click cancels interact; closes edge-detail then node-card when both are open (then clears selection)[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.windowManagementStep0.test.ts[2m > [22museSimulatorApp - window management Step 0 policy[2m > [22mdblclick on empty canvas cancels interact twice (dblclick → 2 clicks)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.windowManagementStep0.test.ts[2m > [22museSimulatorApp - window management Step 0 policy[2m > [22mP0-2: busy + outside-click + confirm=true → cancelInteract called, overlays closed[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.windowManagementStep0.test.ts[2m > [22museSimulatorApp - window management Step 0 policy[2m > [22mP0-2: busy + outside-click + confirm=false → nothing happens (no cancel, no close)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.windowManagementStep0.test.ts[2m > [22museSimulatorApp - window management Step 0 policy[2m > [22mP0-2: not busy + outside-click → cancelInteract called without confirm gate[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/fxRenderer.cache.test.ts[2m > [22mfxRenderer module-level caches[2m > [22mwarms nodeOutline Path2D cache and reset clears it[32m 3[2mms[22m[39m
+ [32m✓[39m src/render/fxRenderer.cache.test.ts[2m > [22mfxRenderer module-level caches[2m > [22mreset is idempotent[32m 1[2mms[22m[39m
+ [32m✓[39m src/api/apiBase.test.ts[2m > [22mapi/apiBase[2m > [22muses fallback when empty[32m 2[2mms[22m[39m
+ [32m✓[39m src/api/apiBase.test.ts[2m > [22mapi/apiBase[2m > [22mnormalizes backslashes to slashes[32m 1[2mms[22m[39m
+ [32m✓[39m src/api/apiBase.test.ts[2m > [22mapi/apiBase[2m > [22madds /api/v1 when given only an origin[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/apiBase.test.ts[2m > [22mapi/apiBase[2m > [22mexpands /api to /api/v1[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/apiBase.test.ts[2m > [22mapi/apiBase[2m > [22madds leading slash for path-like inputs[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/apiBase.test.ts[2m > [22mapi/apiBase[2m > [22mkeeps regular paths and urls[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useEdgeHover.test.ts[2m > [22museEdgeHover[2m > [22msets hoveredEdge when hovering a selected incident edge[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useEdgeHover.test.ts[2m > [22museEdgeHover[2m > [22mclears hoveredEdge when pointer is over a node[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useEdgeHover.test.ts[2m > [22museEdgeHover[2m > [22mdoes not clear hoveredEdge while panning[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/simulatorIsAnimating.test.ts[2m > [22mcreateSimulatorIsAnimating[2m > [22mdoes not depend on playlist.playing (demo playback alone must not keep animating)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/simulatorIsAnimating.test.ts[2m > [22mcreateSimulatorIsAnimating[2m > [22mreturns true during the short hold window after a demo event, then false[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/simulatorIsAnimating.test.ts[2m > [22mcreateSimulatorIsAnimating[2m > [22mreturns true when physics is running regardless of demo hold[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/simulatorIsAnimating.test.ts[2m > [22mcreateSimulatorIsAnimating[2m > [22mdemo hold can be triggered by the demo player callback (onDemoEvent)[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useFloatingLabelsViewFx.test.ts[2m > [22museFloatingLabelsViewFx[2m > [22mforces glow=0 when webdriver[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useFloatingLabelsViewFx.test.ts[2m > [22museFloatingLabelsViewFx[2m > [22mcomputes glow > 0 when label overlaps a node boundary[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/math.test.ts[2m > [22msafeClampToViewport[2m > [22msize=1, margin=22 → result in [0, 1][32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/math.test.ts[2m > [22msafeClampToViewport[2m > [22msize=50, margin=30 → effective margin=24, range=[24, 26][32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/math.test.ts[2m > [22msafeClampToViewport[2m > [22msize=200, margin=22 → normal range [22, 178][32m 0[2mms[22m[39m
+ [32m✓[39m src/api/sse.test.ts[2m > [22mparseSseChunk[2m > [22mparses id/event/data and ignores keep-alive comments[32m 2[2mms[22m[39m
+ [32m✓[39m src/api/sse.test.ts[2m > [22mparseSseChunk[2m > [22mhandles frames split across chunks[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/sse.test.ts[2m > [22mparseSseChunk[2m > [22mjoins multiple data lines with newline[32m 0[2mms[22m[39m
+ [32m✓[39m src/api/sse.test.ts[2m > [22mparseSseChunk[2m > [22mnormalizes CRLF[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenReal / writeDevtoolsOpenReal[2m > [22mreturns null when key is absent[32m 2[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenReal / writeDevtoolsOpenReal[2m > [22mpersists true as "1" and reads back true[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenReal / writeDevtoolsOpenReal[2m > [22mpersists false as "0" and reads back false[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenReal / writeDevtoolsOpenReal[2m > [22moverwrite: write true then false[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenDemo / writeDevtoolsOpenDemo[2m > [22mreturns null when key is absent[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenDemo / writeDevtoolsOpenDemo[2m > [22mpersists true as "1" and reads back true[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenDemo / writeDevtoolsOpenDemo[2m > [22mpersists false as "0" and reads back false[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenRealSnapshot / writeDevtoolsOpenRealSnapshot / clearDevtoolsOpenRealSnapshot[2m > [22mreturns null when snapshot key is absent[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenRealSnapshot / writeDevtoolsOpenRealSnapshot / clearDevtoolsOpenRealSnapshot[2m > [22mwrites and reads back snapshot true[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenRealSnapshot / writeDevtoolsOpenRealSnapshot / clearDevtoolsOpenRealSnapshot[2m > [22mwrites and reads back snapshot false[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mreadDevtoolsOpenRealSnapshot / writeDevtoolsOpenRealSnapshot / clearDevtoolsOpenRealSnapshot[2m > [22mclearDevtoolsOpenRealSnapshot removes the key → returns null[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mEnter-demo pattern (snapshot current real state before switching)[2m > [22msaves snapshot of real open state when entering demo, demo pref is independent[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mEnter-demo pattern (snapshot current real state before switching)[2m > [22msnapshot is null when real pref was never set, still saves false[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mExit-demo pattern (restore snapshot to real state after exiting demo)[2m > [22mrestores snapshot into real pref and clears snapshot[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mExit-demo pattern (restore snapshot to real state after exiting demo)[2m > [22mrestore false snapshot overrides real pref[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mKeys are independent[2m > [22mwriting real pref does not affect demo pref or snapshot[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorStorage.test.ts[2m > [22museSimulatorStorage — DevTools panel prefs[2m > [22mKeys are independent[2m > [22mclearing snapshot does not affect real or demo prefs[32m 0[2mms[22m[39m
+ [32m✓[39m src/config/fxConfig.test.ts[2m > [22mFX_CONFIG structure[2m > [22mclearing is canonical (mode-agnostic) and contains expected keys[32m 2[2mms[22m[39m
+ [32m✓[39m src/config/fxConfig.test.ts[2m > [22mintensityScale[2m > [22mreturns 1 for empty/undefined input[32m 1[2mms[22m[39m
+ [32m✓[39m src/config/fxConfig.test.ts[2m > [22mintensityScale[2m > [22mmaps known intensity keys[32m 0[2mms[22m[39m
+ [32m✓[39m src/config/fxConfig.test.ts[2m > [22mintensityScale[2m > [22mis case-insensitive[32m 0[2mms[22m[39m
+ [32m✓[39m src/config/fxConfig.test.ts[2m > [22mintensityScale[2m > [22mreturns 1 for unknown keys[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/clearingAmountAnchor.test.ts[2m > [22mutils/clearingAmountAnchor — computeClearingAmountAnchorFromEdgeMidpoints()[2m > [22mreturns null when no midpoints can be computed[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/clearingAmountAnchor.test.ts[2m > [22mutils/clearingAmountAnchor — computeClearingAmountAnchorFromEdgeMidpoints()[2m > [22mcomputes centroid of edge midpoints[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/clearingAmountAnchor.test.ts[2m > [22mutils/clearingAmountAnchor — computeClearingAmountAnchorFromEdgeMidpoints()[2m > [22mignores edges with missing endpoint coords[32m 0[2mms[22m[39m
+ [32m✓[39m src/layout/physicsD3.microJitter.test.ts[2m > [22mphysicsD3: NaN fallback micro-jitter[2m > [22mdoes not place two NaN nodes into identical fallback point[32m 3[2mms[22m[39m
+ [32m✓[39m src/layout/physicsD3.microJitter.test.ts[2m > [22mphysicsD3: NaN fallback micro-jitter[2m > [22mdoes not change behavior for valid finite coordinates[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSelectedNodeEdgeStats.test.ts[2m > [22museSelectedNodeEdgeStats[2m > [22mcomputes in/out limits and degree for selected node[32m 3[2mms[22m[39m
+ [32m✓[39m src/composables/useSelectedNodeEdgeStats.test.ts[2m > [22museSelectedNodeEdgeStats[2m > [22mreturns null when snapshot or selected id missing[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/overlayPosition.test.ts[2m > [22mutils/overlayPosition — placeOverlayNearAnchor()[2m > [22mreturns px left/top values[32m 2[2mms[22m[39m
+ [32m✓[39m src/utils/overlayPosition.test.ts[2m > [22mutils/overlayPosition — placeOverlayNearAnchor()[2m > [22mclamps to viewport bounds (right/bottom)[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/overlayPosition.test.ts[2m > [22mutils/overlayPosition — placeOverlayNearAnchor()[2m > [22mclamps to viewport bounds (left/top)[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/isZeroDecimalString.test.ts[2m > [22misZeroDecimalString()[2m > [22mсчитает нулём разные формы десятичной записи[32m 2[2mms[22m[39m
+ [32m✓[39m src/utils/isZeroDecimalString.test.ts[2m > [22misZeroDecimalString()[2m > [22mне считает нулём ненулевые и невалидные строки[32m 0[2mms[22m[39m
+ [32m✓[39m src/render/nodeSizing.test.ts[2m > [22msizeForNode()[2m > [22mfalls back to default when viz_size contains NaN[32m 1[2mms[22m[39m
+ [32m✓[39m src/render/nodeSizing.test.ts[2m > [22msizeForNode()[2m > [22menforces minimum size even for zero/negative values[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/geometry.test.ts[2m > [22mgeometry.overlaps()[2m > [22mreturns true when rects overlap by area[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/geometry.test.ts[2m > [22mgeometry.overlaps()[2m > [22mreturns false when rects only touch edges (no area overlap)[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/windowManager/geometry.test.ts[2m > [22mgeometry.overlaps()[2m > [22mreturns false when rects are disjoint[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/txAmountLabel.test.ts[2m > [22mutils/txAmountLabel[2m > [22mreturns null when inputs are blank after trim[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/txAmountLabel.test.ts[2m > [22mutils/txAmountLabel[2m > [22mnormalizes + amounts and trims nodeId[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/txAmountLabel.test.ts[2m > [22mutils/txAmountLabel[2m > [22mpreserves - sign and returns sign=-[32m 0[2mms[22m[39m
+ [32m✓[39m src/utils/runErrorClassification.test.ts[2m > [22mutils/runErrorClassification[2m > [22mtreats PAYMENT_TIMEOUT and INTERNAL_ERROR as user-facing[32m 1[2mms[22m[39m
+ [32m✓[39m src/utils/runErrorClassification.test.ts[2m > [22mutils/runErrorClassification[2m > [22mtreats other codes as non-user-facing[32m 0[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.auto-bootstrap-errors.test.ts[2m > [22m__autoBootstrapMaybeFillUiError()[2m > [22mfills state.error when best-effort fails and both real.lastError/state.error are empty[32m 1[2mms[22m[39m
+ [32m✓[39m src/composables/useSimulatorApp.auto-bootstrap-errors.test.ts[2m > [22m__autoBootstrapMaybeFillUiError()[2m > [22mdoes not overwrite when real.lastError is already set (lower level already populated error)[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/components/SimulatorAppRoot.interact.test.ts[2m > [22mSimulatorAppRoot - Interact Mode rendering[2m > [22mP1-3 rapid double ESC: interact + inspector — перший ESC переводить topmost в closing, другий закриває наступний open
+[31m[1mAssertionError[22m: expected 2 to be +0 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 2[39m
+
+[36m [2m❯[22m src/components/SimulatorAppRoot.interact.test.ts:[2m2711:34[22m[39m
+    [90m2709| [39m      // After both ESC events, both windows must be gone from WM's wi…
+    [90m2710| [39m      const shellsAfter = host.querySelectorAll('.ws-shell')
+    [90m2711| [39m      expect(shellsAfter.length).toBe(0)
+    [90m   | [39m                                 [31m^[39m
+    [90m2712| [39m    } finally {
+    [90m2713| [39m      app.unmount()
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m77 passed[39m[22m[90m (78)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m531 passed[39m[22m[90m (532)[39m
+[2m   Start at [22m 13:54:30
+[2m   Duration [22m 8.52s[2m (transform 7.29s, setup 0ms, collect 27.46s, tests 6.46s, environment 87.30s, prepare 11.52s)[22m
+

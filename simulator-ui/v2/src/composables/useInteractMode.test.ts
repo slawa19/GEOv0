@@ -15,6 +15,17 @@ describe('useInteractMode', () => {
     return { promise, resolve, reject }
   }
 
+  function abortError(): any {
+    try {
+      // DOMException is the closest match to what fetch() rejects with on abort.
+      return new DOMException('Aborted', 'AbortError')
+    } catch {
+      const e = new Error('Aborted')
+      ;(e as any).name = 'AbortError'
+      return e
+    }
+  }
+
   function mkActions() {
     return {
       sendPayment: vi.fn(async () => ({ ok: true } as any)),
@@ -60,7 +71,7 @@ describe('useInteractMode', () => {
     expect(im.canSendPayment.value).toBe(true)
 
     await im.confirmPayment('1.00')
-    expect(actions.sendPayment).toHaveBeenCalledWith('alice', 'bob', '1.00', 'UAH')
+    expect(actions.sendPayment).toHaveBeenCalledWith('alice', 'bob', '1.00', 'UAH', expect.anything())
     expect(im.successMessage.value).toBe('Payment sent: 1.00 UAH')
     expect(im.phase.value).toBe('idle')
     expect(im.busy.value).toBe(false)
@@ -142,6 +153,125 @@ describe('useInteractMode', () => {
     expect(im.cancelling.value).toBe(false)
     expect(im.phase.value).toBe('idle')
     expect(im.state.error).toBe(null)
+  })
+
+  it('RACE-4: cancel→restart aborts previous submit; no two in-flight submits; stale result causes no side-effects', async () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+      ],
+      links: [],
+    })
+
+    let inFlight = 0
+    let maxInFlight = 0
+    let commits = 0
+    let aborts = 0
+
+    const calls: Array<{ d: ReturnType<typeof deferred<any>>; signal?: AbortSignal }> = []
+
+    const actions = {
+      sendPayment: vi.fn((from: string, to: string, amount: string, eq: string, o?: any) => {
+        const d = deferred<any>()
+        const signal: AbortSignal | undefined = o?.signal
+
+        let finished = false
+        const finish = () => {
+          if (finished) return
+          finished = true
+          inFlight = Math.max(0, inFlight - 1)
+        }
+
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        calls.push({ d, signal })
+
+        const p = d.promise
+          .then((res) => {
+            commits += 1
+            return res
+          })
+          .finally(() => {
+            finish()
+          })
+
+        if (signal) {
+          if (signal.aborted) {
+            aborts += 1
+            finish()
+            d.reject(abortError())
+          } else {
+            const onAbort = () => {
+              aborts += 1
+              try { signal.removeEventListener('abort', onAbort as any) } catch { /* ignore */ }
+              finish()
+              d.reject(abortError())
+            }
+            signal.addEventListener('abort', onAbort as any)
+          }
+        }
+
+        return p
+      }),
+      createTrustline: vi.fn(async () => ({ ok: true } as any)),
+      updateTrustline: vi.fn(async () => ({ ok: true } as any)),
+      closeTrustline: vi.fn(async () => ({ ok: true } as any)),
+      runClearing: vi.fn(async () => ({ ok: true, cycles: [] } as any)),
+      fetchParticipants: vi.fn(async () => [] as any[]),
+      fetchTrustlines: vi.fn(async () => [] as any[]),
+      fetchPaymentTargets: vi.fn(async () => [] as any[]),
+    }
+
+    const runId = computed(() => 'run_test')
+    const equivalent = computed(() => 'UAH')
+
+    // First instance: starts submit, then gets cancelled (should abort request).
+    const im1 = useInteractMode({ actions: actions as any, runId, equivalent, snapshot })
+    im1.startPaymentFlow()
+    im1.selectNode('alice')
+    im1.selectNode('bob')
+
+    const p1 = im1.confirmPayment('1.00')
+    await Promise.resolve() // let runBusy start + call actions.sendPayment
+
+    expect(actions.sendPayment).toHaveBeenCalledTimes(1)
+    expect(inFlight).toBe(1)
+    expect(maxInFlight).toBe(1)
+    expect(im1.busy.value).toBe(true)
+
+    im1.cancel()
+    expect(im1.phase.value).toBe('idle')
+
+    // Abort is synchronous on AbortController; allow microtasks for promise plumbing.
+    await Promise.resolve()
+    expect(calls[0]?.signal?.aborted).toBe(true)
+    expect(aborts).toBe(1)
+
+    // Second instance: restart immediately; must not overlap with the previous in-flight submit.
+    const im2 = useInteractMode({ actions: actions as any, runId, equivalent, snapshot })
+    im2.startPaymentFlow()
+    im2.selectNode('alice')
+    im2.selectNode('bob')
+
+    const p2 = im2.confirmPayment('2.00')
+    await Promise.resolve()
+
+    expect(actions.sendPayment).toHaveBeenCalledTimes(2)
+    expect(maxInFlight).toBe(1)
+
+    // Resolve the *current* submit only.
+    calls[1]!.d.resolve({ ok: true })
+    await p2
+
+    // Old submit was aborted => must not produce a "commit".
+    await p1
+    expect(commits).toBe(1)
+    expect(im2.successMessage.value).toBe('Payment sent: 2.00 UAH')
+    // Cancelled instance must not be updated by any late/aborted result.
+    expect(im1.successMessage.value).toBe(null)
   })
 
   it('clearing flow: confirm -> preview (>=800ms) -> running -> idle', async () => {

@@ -80,7 +80,7 @@ export function useInteractMode(opts: {
 
   /** REF-3: exported helper for canvas/UI wiring. */
   isPickingPhase: ComputedRef<boolean>
-
+    isCanvasNodePickPhase: ComputedRef<boolean>
   // UI helpers (dropdowns)
   setPaymentFromPid: (pid: string | null) => void
   setPaymentToPid: (pid: string | null) => void
@@ -164,6 +164,10 @@ export function useInteractMode(opts: {
   let epoch = 0
   let busyOwnerEpoch: number | null = null
 
+  // RACE-4: each busy operation has its own AbortController, tied to epoch.
+  // `cancel()` aborts the active controller (best-effort) so the underlying HTTP is actually interrupted.
+  let activeAbort: { epoch: number; ctrl: AbortController } | null = null
+
   const busy = computed(() => busyRef.value)
 
   // P2.2: explicit UI signal when cancel was requested while an async action is in-flight.
@@ -214,7 +218,7 @@ export function useInteractMode(opts: {
   const state = fsm.state
   const phase = fsm.phase
   const isPickingPhase = fsm.isPickingPhase
-
+    const isCanvasNodePickPhase = fsm.isCanvasNodePickPhase
   const paymentTargetsActiveKey = computed(() => {
     const runId = normalizeRunId(opts.runId.value)
     const eq = normalizeEq(opts.equivalent.value)
@@ -359,7 +363,17 @@ export function useInteractMode(opts: {
 
   function cancel() {
     // Invalidate any in-flight result (success/error) so it can't update state after cancel.
+    // IMPORTANT: bump epoch BEFORE abort so an AbortError can't leak into state.error.
     epoch += 1
+
+    // RACE-4: abort active HTTP (best-effort).
+    const ctrl = activeAbort?.ctrl
+    activeAbort = null
+    try {
+      ctrl?.abort()
+    } catch {
+      // ignore
+    }
     fsm.resetToIdle()
 
     // If an operation is still in-flight, expose a user-facing hint that cancellation is pending.
@@ -439,7 +453,7 @@ export function useInteractMode(opts: {
   }
 
   async function runBusy<T>(
-    fn: (ctx: { isCurrent: () => boolean; resetToIdle: () => void }) => Promise<T>,
+    fn: (ctx: { isCurrent: () => boolean; resetToIdle: () => void; signal: AbortSignal }) => Promise<T>,
   ): Promise<T | undefined> {
     if (busyRef.value) return undefined
     busyRef.value = true
@@ -450,6 +464,8 @@ export function useInteractMode(opts: {
     epoch += 1
     const myEpoch = epoch
     busyOwnerEpoch = myEpoch
+    const ctrl = new AbortController()
+    activeAbort = { epoch: myEpoch, ctrl }
     const isCurrent = () => epoch === myEpoch
 
     const resetToIdle = () => {
@@ -458,7 +474,7 @@ export function useInteractMode(opts: {
     }
 
     try {
-      return await fn({ isCurrent, resetToIdle })
+      return await fn({ isCurrent, resetToIdle, signal: ctrl.signal })
     } catch (e: any) {
       // Don't leak errors into already-cancelled state.
       if (isCurrent()) {
@@ -475,6 +491,9 @@ export function useInteractMode(opts: {
       }
       return undefined
     } finally {
+      // Clear abort controller only if it still belongs to this operation.
+      if (activeAbort?.epoch === myEpoch) activeAbort = null
+
       // Always clear `busy` when the owning promise settles, even if cancelled.
       if (busyOwnerEpoch === myEpoch) {
         busyRef.value = false
@@ -488,9 +507,9 @@ export function useInteractMode(opts: {
     fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select From and To first')
-      await opts.actions.sendPayment(from, to, amount, opts.equivalent.value)
+      await opts.actions.sendPayment(from, to, amount, opts.equivalent.value, { signal })
       if (!isCurrent()) return
 
       setSuccessToastMessage(`Payment sent: ${amount} ${opts.equivalent.value}`)
@@ -507,9 +526,9 @@ export function useInteractMode(opts: {
     fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select From and To first')
-      await opts.actions.createTrustline(from, to, limit, opts.equivalent.value)
+      await opts.actions.createTrustline(from, to, limit, opts.equivalent.value, { signal })
       if (!isCurrent()) return
 
       setSuccessToastMessage(`Trustline created: ${from} → ${to}`)
@@ -526,9 +545,9 @@ export function useInteractMode(opts: {
     fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select trustline first')
-      await opts.actions.updateTrustline(from, to, newLimit, opts.equivalent.value)
+      await opts.actions.updateTrustline(from, to, newLimit, opts.equivalent.value, { signal })
       if (!isCurrent()) return
 
       setSuccessToastMessage(`Limit updated: ${newLimit} ${opts.equivalent.value}`)
@@ -548,9 +567,9 @@ export function useInteractMode(opts: {
     fsm.clearError()
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select trustline first')
-      await opts.actions.closeTrustline(from, to, opts.equivalent.value)
+      await opts.actions.closeTrustline(from, to, opts.equivalent.value, { signal })
       if (!isCurrent()) return
 
       setSuccessToastMessage(`Trustline closed: ${from} → ${to}`)
@@ -602,11 +621,11 @@ export function useInteractMode(opts: {
 
   async function confirmClearing(): Promise<void> {
     fsm.clearError()
-    await runBusy(async ({ isCurrent, resetToIdle }) => {
+    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
       fsm.enterClearingPreview()
 
-      const res = await opts.actions.runClearing(opts.equivalent.value)
+      const res = await opts.actions.runClearing(opts.equivalent.value, undefined, { signal })
       if (!isCurrent()) return
       fsm.setLastClearing(res)
 
@@ -689,6 +708,7 @@ export function useInteractMode(opts: {
     canSendPayment,
     canCreateTrustline,
     isPickingPhase,
+    isCanvasNodePickPhase,
 
     setPaymentFromPid,
     setPaymentToPid,
@@ -699,6 +719,5 @@ export function useInteractMode(opts: {
     history,
   }
 }
-
 
 

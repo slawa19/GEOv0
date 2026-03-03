@@ -1,4 +1,6 @@
-import { onMounted, onUnmounted, ref, watch, type Ref, type WatchSource } from 'vue'
+import { onUnmounted, ref, watch, type Ref, type WatchSource } from 'vue'
+
+import { useWindowContainerEl } from './windowManager/windowContainerContext'
 
 export type DestructiveConfirmationDisarmTrigger = {
   /**
@@ -18,7 +20,8 @@ export type UseDestructiveConfirmationOptions = {
   autoDisarmMs?: number | null
 
   /**
-   * Disarm on Interact ESC event (default: `geo:interact-esc`).
+   * Disarm on ESC key event from the *window container element*.
+   * Default: `keydown`.
    * The handler will `preventDefault()` only when armed (to consume ESC like before).
    */
   esc?: {
@@ -56,8 +59,12 @@ export function useDestructiveConfirmation(options: UseDestructiveConfirmationOp
   const armed = ref(false)
 
   const escEnabled = options.esc?.enabled ?? true
-  const escEventName = options.esc?.eventName ?? 'geo:interact-esc'
+  const escEventName = options.esc?.eventName ?? 'keydown'
   const escConsume = options.esc?.consume ?? true
+
+  // TODO-ESC: bind ESC handling to the per-window container element (provided by WindowShell).
+  const injectedContainerEl = useWindowContainerEl()
+  const containerEl = injectedContainerEl ?? ref<HTMLElement | null>(null)
 
   let autoDisarmTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -97,6 +104,10 @@ export function useDestructiveConfirmation(options: UseDestructiveConfirmationOp
   }
 
   function onEsc(ev: Event) {
+    const kev = ev as KeyboardEvent
+    const k = kev?.key
+    if (k !== 'Escape' && k !== 'Esc') return
+
     if (!armed.value) return
     disarm()
     if (escConsume) ev.preventDefault()
@@ -109,14 +120,30 @@ export function useDestructiveConfirmation(options: UseDestructiveConfirmationOp
     })
   }
 
-  onMounted(() => {
-    if (!escEnabled) return
-    window.addEventListener(escEventName, onEsc)
-  })
+  let boundEl: HTMLElement | null = null
+  const stopEscWatch = escEnabled
+    ? watch(
+        containerEl,
+        (nextEl, prevEl) => {
+          if (prevEl) {
+            prevEl.removeEventListener(escEventName, onEsc as EventListener)
+            if (boundEl === prevEl) boundEl = null
+          }
+
+          if (nextEl) {
+            nextEl.addEventListener(escEventName, onEsc as EventListener)
+            boundEl = nextEl
+          }
+        },
+        { immediate: true },
+      )
+    : null
 
   onUnmounted(() => {
-    if (escEnabled) {
-      window.removeEventListener(escEventName, onEsc)
+    stopEscWatch?.()
+    if (boundEl) {
+      boundEl.removeEventListener(escEventName, onEsc as EventListener)
+      boundEl = null
     }
     clearAutoDisarmTimer()
   })

@@ -18,6 +18,15 @@ import InteractHistoryLog from './InteractHistoryLog.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
+// ARCH-4 (WM bridging): `watchEffect` запрещён.
+// Здесь `wm.open()`/`wm.closeGroup()` читают реактивное состояние WM, и `watchEffect` может
+// незаметно создать циклические зависимости (и множественные `wm.open()` в одном flush).
+// Технический предохранитель: намеренно «забиваем» идентификатор `watchEffect`, чтобы
+// его нельзя было импортировать/вызвать в этом файле.
+// eslint для v2 не настроен, поэтому используем type-level guard.
+const watchEffect: never = null as never
+void watchEffect
+
  import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
  import type { InteractPhase } from '../composables/useInteractMode'
@@ -97,12 +106,14 @@ onUnmounted(() => {
 import type { GraphLink } from '../types'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
-import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
-import { useWindowManager } from '../composables/windowManager/useWindowManager'
-import type { WindowInstance } from '../composables/windowManager/types'
-import type { WindowAnchor } from '../composables/windowManager/types'
-import { isInteractPanelWindow, isNodeCardWindow } from '../composables/windowManager/types'
-import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
+ import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
+ import { keyEdge } from '../utils/edgeKey'
+ import { useWindowManager } from '../composables/windowManager/useWindowManager'
+ import type { WindowInstance } from '../composables/windowManager/types'
+ import type { WindowAnchor } from '../composables/windowManager/types'
+ import { isInteractPanelWindow, isNodeCardWindow } from '../composables/windowManager/types'
+ import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
+ import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
 
 function readWindowViewportFallback(): { width: number; height: number } {
   try {
@@ -118,38 +129,19 @@ function readWindowViewportFallback(): { width: number; height: number } {
   }
 }
 
-const wm = useWindowManager()
+ const wm = useWindowManager()
 
-// Step 5: inspector window ids (singleton=reuse → stable across updates).
-const wmEdgeDetailId = ref<number | null>(null)
-const wmNodeCardId = ref<number | null>(null)
+ // Step 5: inspector window ids (singleton=reuse → stable across updates).
+ const wmNodeCardId = ref<number | null>(null)
 
-// H-3: UI-close vs Flow-cancel for edge-detail.
-// EdgeDetailPopup is derived from Interact FSM state (editing-trustline + edgeAnchor).
-// In WM mode, UI-close must hide the *window* without cancelling the flow.
-// We implement a UI-only suppression flag that blocks auto-open until selection changes.
-const wmEdgeDetailSuppressed = ref(false)
-const wmEdgeDetailSelectionKey = ref<string>('')
+ const wmEdgeDetail = useWmEdgeDetail()
 
-// KeepAlive: when Send Payment is initiated from edge-detail, the edge-detail window
-// persists as context (inspector coexists with interact-panel). The watcher must NOT
-// auto-close it, and the component receives frozen link data instead of live interact state.
-const wmEdgeDetailKeepAlive = ref(false)
-const wmEdgeDetailFrozenLink = ref<GraphLink | null>(null)
+ function uiCloseEdgeDetailWindow(reason: 'action' | 'programmatic') {
+   wmEdgeDetail.close({ reason, suppress: true })
+   wmEdgeDetail.applyToWindowManager(wm, { closeReason: reason })
+ }
 
-function wmResetEdgeDetailKeepAlive() {
-  wmEdgeDetailKeepAlive.value = false
-  wmEdgeDetailFrozenLink.value = null
-}
-
-function uiCloseEdgeDetailWindow(winId: number, reason: 'action' | 'programmatic') {
-  wmEdgeDetailSuppressed.value = true
-  wmResetEdgeDetailKeepAlive()
-  wm.close(winId, reason)
-  if (wmEdgeDetailId.value === winId) wmEdgeDetailId.value = null
-}
-
-function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
+ function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
   // WM source of truth: still query the topmost/active inspector window by WM z-order.
   // (Useful for tests and for any future "close-only-topmost" variants.)
   const top = wm.getTopmostInGroup('inspector')
@@ -161,19 +153,19 @@ function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
   // Step 0 contract (normative): this callback closes ONLY inspector overlays.
   // Interact panels and flow cancellation are handled by Step 0 (canvas empty click policy).
 
-  // Clear keepAlive so frozen inspectors can't persist after an outside-click.
-  wmResetEdgeDetailKeepAlive()
+   // Clear keepAlive so frozen inspectors can't persist after an outside-click.
+   wmEdgeDetail.releaseKeepAlive()
+   wmEdgeDetail.applyToWindowManager(wm, { closeReason: 'programmatic' })
 
   if (!top || !topType) return null
 
-  // Outside-click is a UI-close. For edge-detail we must suppress auto-open
-  // until selection changes (otherwise the watcher will immediately reopen it).
-  if (topType === 'edge-detail') {
-    wmEdgeDetailSuppressed.value = true
-    wm.close(top.id, 'programmatic')
-    if (wmEdgeDetailId.value === top.id) wmEdgeDetailId.value = null
-    return 'edge-detail'
-  }
+   // Outside-click is a UI-close. For edge-detail we must suppress auto-open
+   // until selection changes (otherwise the watcher will immediately reopen it).
+   if (topType === 'edge-detail') {
+     wmEdgeDetail.close({ reason: 'programmatic', suppress: true })
+     wmEdgeDetail.applyToWindowManager(wm, { closeReason: 'programmatic' })
+     return 'edge-detail'
+   }
 
   // node-card
   wm.close(top.id, 'programmatic')
@@ -181,20 +173,34 @@ function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
   return 'node-card'
 }
 
-function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: Point }) {
-  const id = wm.open({
-    type: 'edge-detail',
-    anchor: toWmAnchor(o.anchor, 'edge-click'),
-    data: { fromPid: o.fromPid, toPid: o.toPid },
-  })
-  wmEdgeDetailId.value = id
-}
+ function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: Point }) {
+   wmEdgeDetail.open({
+     fromPid: o.fromPid,
+     toPid: o.toPid,
+     anchor: toWmAnchor(o.anchor, 'edge-click'),
+     focus: 'always',
+   })
+   wmEdgeDetail.applyToWindowManager(wm)
+ }
 
 function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
+  const reqNodeId = String(o.nodeId ?? '').trim()
+  if (!reqNodeId) return
+
+  // UX-5: repeated dblclick on the SAME node while its NodeCard is already the
+  // WM topmost window must be a no-op to avoid a visible flicker / extra relayout.
+  const top = wm.windows.value.length ? wm.windows.value[wm.windows.value.length - 1] : null
+  if (top && top.type === 'node-card') {
+    const topNodeId = String((top.data as any)?.nodeId ?? '').trim()
+    if (topNodeId && topNodeId === reqNodeId) return
+  }
+
   const id = wm.open({
     type: 'node-card',
     anchor: toWmAnchor(o.anchor, 'node'),
-    data: { nodeId: o.nodeId },
+    data: { nodeId: reqNodeId },
+    // User-initiated (node dblclick): always bring to front.
+    focus: 'always',
   })
   wmNodeCardId.value = id
 }
@@ -337,17 +343,18 @@ const useFullTrustlineEditor = ref(false)
 
 // Legacy panels were removed; interact panels are WM-only.
 
-/**
- * Step 4: Interact → WindowManager bridging.
- *
- * - interactPhase changes → WM opens/updates interact-panel window for {payment|trustline|clearing}
- * - Otherwise → closes interact group.
- *
- * Anchor propagation rule (MUST):
- * If action initiated from EdgeDetailPopup (edge popup) opens an interact-panel,
- * the window MUST receive anchor = state.edgeAnchor.
- */
- const wmEdgePopupAnchor = ref<Point | null>(null)
+ /**
+  * Step 4: Interact → WindowManager bridging.
+  *
+  * - interactPhase changes → WM opens/updates interact-panel window for {payment|trustline|clearing}
+  * - Otherwise → closes interact group.
+  *
+  * Anchor propagation rule (MUST):
+  * If action initiated from EdgeDetailPopup (edge popup) opens an interact-panel,
+  * the window MUST receive anchor = state.edgeAnchor.
+  */
+ // ARCH-4: `watchEffect` запрещён в WM bridging — используем только `watch`/`watchPostEffect` при явных deps.
+  const wmEdgePopupAnchor = ref<Point | null>(null)
 
 /**
  * WM-only anchor for opening an interact-panel from NodeCard / ActionBar.
@@ -403,6 +410,52 @@ function toWmAnchor(p: Point | null, source: string): WindowAnchor | null {
   return { x: p.x, y: p.y, space: 'host', source }
 }
 
+/**
+ * UX-9: NodeCard anchor follow during pan/zoom can fire extremely often.
+ * We limit watcher-driven `wm.open()` updates to at most 1 per 100ms.
+ *
+ * Strategy: periodic trailing throttle (updates are applied at most every `ms`,
+ * with the latest anchor). This reduces visual noise and avoids excessive WM churn.
+ */
+function createPeriodicTrailingThrottle<T>(ms: number, fn: (arg: T) => void): {
+  request: (arg: T) => void
+  cancel: () => void
+} {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pending = false
+  let lastArg: T | null = null
+
+  const tick = () => {
+    timer = null
+
+    if (!pending || lastArg == null) return
+    pending = false
+    const arg = lastArg
+
+    fn(arg)
+
+    // Keep the cadence while requests keep coming in.
+    // If no more requests happen, the next tick will see `pending=false` and stop.
+    timer = setTimeout(tick, ms)
+  }
+
+  const request = (arg: T) => {
+    lastArg = arg
+    pending = true
+    if (timer != null) return
+    timer = setTimeout(tick, ms)
+  }
+
+  const cancel = () => {
+    if (timer != null) clearTimeout(timer)
+    timer = null
+    pending = false
+    lastArg = null
+  }
+
+  return { request, cancel }
+}
+
 const wmInteractAnchor = computed<WindowAnchor | null>(() => {
   // Edge popup anchor has priority (normative requirement).
   if (wmEdgePopupAnchor.value) return toWmAnchor(wmEdgePopupAnchor.value, 'edge-popup')
@@ -423,6 +476,7 @@ const wmInteractAnchorKey = computed(() => {
   return `${a.x}|${a.y}|${a.space}|${a.source}`
 })
 
+// ARCH-4: `watchEffect` запрещён в WM bridging — используем только `watch`/`watchPostEffect` при явных deps.
 // IMPORTANT (Vue reactivity): use `watch` instead of `watchEffect` here.
 // `wm.open()` reads WM reactive state internally (windowsMap, viewport, idCounter).
 // If called inside a watchEffect, Vue tracks those reads as dependencies and can trigger
@@ -451,6 +505,8 @@ watch(
         type: 'interact-panel',
         anchor: wmInteractAnchor.value,
         data: makeInteractPanelWindowData(m.panel, phase),
+        // Watcher-driven (phase/interactUi change): do not steal focus.
+        focus: 'never',
       })
       return
     }
@@ -474,69 +530,103 @@ watch(
 // IMPORTANT (Vue reactivity): do NOT use watchEffect here.
 // `wm.open()` reads WM reactive state internally; if called inside a watchEffect,
 // Vue can track WM state as a dependency, causing recursive update loops.
-watch(
-  () => ({
-    apiMode: apiMode.value,
-    isInteractUi: isInteractUi.value,
-    phase: String(interactPhase.value),
-    isFullEditor: useFullTrustlineEditor.value,
-    anchor: interact.mode.state.edgeAnchor,
-    fromPid: interact.mode.state.fromPid,
-    toPid: interact.mode.state.toPid,
-    suppressed: wmEdgeDetailSuppressed.value,
-  }),
-  (s) => {
-    // Reset UI-close suppression on selection changes.
-    // (When the same edge is re-selected, anchor typically changes; include anchor in the key.)
-    const key = s.anchor
-      ? `${String(s.fromPid ?? '')}→${String(s.toPid ?? '')}@${String((s.anchor as any)?.x ?? '')},${String((s.anchor as any)?.y ?? '')}`
-      : ''
-    if (key && key !== wmEdgeDetailSelectionKey.value) {
-      wmEdgeDetailSelectionKey.value = key
-      if (wmEdgeDetailSuppressed.value) wmEdgeDetailSuppressed.value = false
-    }
+ watch(
+   [
+     () => apiMode.value,
+     () => isInteractUi.value,
+     () => String(interactPhase.value),
+     () => useFullTrustlineEditor.value,
+     () => String(interact.mode.state.fromPid ?? ''),
+     () => String(interact.mode.state.toPid ?? ''),
+     () => String((interact.mode.state.edgeAnchor as any)?.x ?? ''),
+     () => String((interact.mode.state.edgeAnchor as any)?.y ?? ''),
+   ],
+   ([curApiMode, curIsInteractUi, phase, isFullEditor, fromPid, toPid]) => {
+     const eligible = curApiMode === 'real' && curIsInteractUi && phase === 'editing-trustline' && !isFullEditor
+     const a = interact.mode.state.edgeAnchor
 
-    if (s.phase !== 'editing-trustline') {
-      // Outside of edge-detail phase, the suppression is irrelevant.
-      if (wmEdgeDetailSuppressed.value) wmEdgeDetailSuppressed.value = false
-      wmEdgeDetailSelectionKey.value = ''
-    }
+     const req =
+       eligible && a && fromPid && toPid
+         ? {
+             fromPid,
+             toPid,
+             anchor: toWmAnchor(a ?? null, 'interact-state'),
+             focus: 'never' as const,
+             source: 'auto' as const,
+           }
+         : null
 
-    const shouldShow =
-      s.apiMode === 'real' &&
-      s.isInteractUi &&
-      s.phase === 'editing-trustline' &&
-      !s.isFullEditor &&
-      !s.suppressed &&
-      !!s.anchor &&
-      !!s.fromPid &&
-      !!s.toPid
+     wmEdgeDetail.syncAuto(req)
+     wmEdgeDetail.applyToWindowManager(wm, { closeReason: 'programmatic' })
+   },
+   { immediate: true },
+ )
 
-    if (shouldShow) {
-      wmEdgeDetailId.value = wm.open({
-        type: 'edge-detail',
-        anchor: toWmAnchor(s.anchor ?? null, 'interact-state'),
-        data: {
-          fromPid: String(s.fromPid),
-          toPid: String(s.toPid),
-          onClose: () => wmResetEdgeDetailKeepAlive(),
-        },
-      })
-      return
-    }
+// ---------------------------------------------------------------------------
+// UX-9: NodeCard → WindowManager anchor follow (throttled)
+// ---------------------------------------------------------------------------
 
-    // KeepAlive: when a flow was initiated from edge-detail (e.g. Send Payment),
-    // the edge-detail window persists as context. Don't auto-close it.
-    if (wmEdgeDetailKeepAlive.value && wmEdgeDetailId.value != null) {
-      return
-    }
+const selectedNodeScreenCenterKey = computed(() => {
+  const p = selectedNodeScreenCenter.value
+  if (!p) return ''
+  return `${p.x}|${p.y}`
+})
 
-    if (wmEdgeDetailId.value != null) {
-      wm.close(wmEdgeDetailId.value, 'programmatic')
-      wmEdgeDetailId.value = null
-    }
+const nodeCardAnchorUpdater = createPeriodicTrailingThrottle(
+  100,
+  (o: { nodeId: string; anchor: Point | null }) => {
+    wmNodeCardId.value = wm.open({
+      type: 'node-card',
+      // Use the same anchor source as the initial open to avoid a spurious
+      // `anchorChanged` (WM compares source too).
+      anchor: toWmAnchor(o.anchor, 'node'),
+      data: { nodeId: o.nodeId },
+      // Watcher-driven (camera/layout changes): do not steal focus.
+      focus: 'never',
+    })
   },
-  { immediate: true },
+)
+
+onUnmounted(() => {
+  nodeCardAnchorUpdater.cancel()
+})
+
+watch(
+  [
+    // Whether a node-card window currently exists (WM source of truth).
+    () => wm.windows.value.some((w) => w.type === 'node-card' && w.state !== 'closing'),
+    // If selection changes, the screen center key likely changes too; keep both explicit.
+    () => String((selectedNode.value as any)?.id ?? ''),
+    () => selectedNodeScreenCenterKey.value,
+  ],
+  ([isOpen]) => {
+    if (!isOpen) return
+
+    const win = wm.windows.value.find((w) => w.type === 'node-card' && w.state !== 'closing')
+    if (!win) return
+
+    const nodeId = String((win.data as any)?.nodeId ?? '')
+    if (!nodeId) return
+
+    // Safety: only follow anchor when the NodeCard corresponds to the selected node.
+    // (Avoid jumping to an unrelated selection if those are decoupled in some flows.)
+    const selectedId = String((selectedNode.value as any)?.id ?? '')
+    if (!selectedId || selectedId !== nodeId) return
+
+    // Avoid redundant `wm.open()` right after the initial open.
+    // (That would cause extra WM churn and can trigger a visible jump while unmeasured.)
+    const p = selectedNodeScreenCenter.value
+    if (!p) return
+    const cur = win.anchor
+    if (cur && cur.x === p.x && cur.y === p.y && cur.space === 'host' && cur.source === 'node') {
+      return
+    }
+
+    nodeCardAnchorUpdater.request({
+      nodeId,
+      anchor: p,
+    })
+  },
 )
 
 function wmTitleFor(win: WindowInstance): string {
@@ -549,20 +639,39 @@ function wmTitleFor(win: WindowInstance): string {
 }
 
 // KeepAlive edge-detail: effective props (frozen when keepAlive, live otherwise).
-const wmEdgeDetailEffectiveLink = computed(() => {
-  if (wmEdgeDetailKeepAlive.value && wmEdgeDetailFrozenLink.value != null) {
-    return wmEdgeDetailFrozenLink.value
+ const wmEdgeDetailEffectiveLink = computed(() => {
+   if (wmEdgeDetail.state.value === 'keepAlive' && wmEdgeDetail.frozenLink.value != null) return wmEdgeDetail.frozenLink.value
+   return interactSelectedLink.value
+ })
+ const wmEdgeDetailEffectivePhase = computed<InteractPhase>(() => {
+   if (wmEdgeDetail.state.value === 'keepAlive') return 'editing-trustline' as InteractPhase
+   return interactPhase.value
+ })
+ const wmEdgeDetailEffectiveBusy = computed(() => {
+   if (wmEdgeDetail.state.value === 'keepAlive') return true // disable action buttons while parent flow is active
+   return interact.mode.busy.value
+ })
+
+ function wmEdgeDetailEffectiveState(win: WindowInstance) {
+   const live = interact.mode.state
+   if (win.type !== 'edge-detail') return live
+
+   // IMPORTANT: when edge-detail is kept alive (or otherwise decoupled from the live FSM),
+   // the window MUST render its own frozen context from WindowManager `win.data`.
+   if (wmEdgeDetail.state.value === 'keepAlive') {
+     const fromPid = String((win.data as any)?.fromPid ?? '')
+     const toPid = String((win.data as any)?.toPid ?? '')
+     const edgeKey = String((win.data as any)?.edgeKey ?? '') || (fromPid && toPid ? keyEdge(fromPid, toPid) : null)
+     return {
+      ...live,
+      fromPid: fromPid || null,
+      toPid: toPid || null,
+      selectedEdgeKey: edgeKey,
+    }
   }
-  return interactSelectedLink.value
-})
-const wmEdgeDetailEffectivePhase = computed<InteractPhase>(() => {
-  if (wmEdgeDetailKeepAlive.value) return 'editing-trustline' as InteractPhase
-  return interactPhase.value
-})
-const wmEdgeDetailEffectiveBusy = computed(() => {
-  if (wmEdgeDetailKeepAlive.value) return true // disable action buttons while parent flow is active
-  return interact.mode.busy.value
-})
+
+  return live
+}
 
 function isWmInteractPanelWindow(win: WindowInstance, panel: 'payment' | 'trustline' | 'clearing'): boolean {
   return isInteractPanelWindow(win) && win.data.panel === panel
@@ -628,21 +737,78 @@ function isFormLikeTarget(t: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
-function dispatchInteractEsc(): boolean {
+function dispatchTopmostWindowEsc(): boolean {
+  // TODO-ESC: dispatch to per-window container element (not global window).
   try {
-    const escEvt = new CustomEvent('geo:interact-esc', { cancelable: true })
-    return window.dispatchEvent(escEvt)
+    const top = wm.windows.value[wm.windows.value.length - 1] ?? null
+    if (!top) return true
+
+    const container = document.querySelector(`[data-win-id="${top.id}"]`) as HTMLElement | null
+    if (!container) return true
+
+    // Not bubbling to avoid re-entering onGlobalKeydown.
+    const escEv = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      cancelable: true,
+      bubbles: false,
+    })
+    return container.dispatchEvent(escEv)
   } catch {
     return true
   }
 }
 
+function confirmCancelInteractBusy(): boolean {
+  // P0-2 policy B: ESC / outside-click while busy must ask for confirmation.
+  // Use a synchronous confirm for now (minimal UX) to keep the gate atomic.
+  try {
+    const c = (window as any)?.confirm
+    if (typeof c !== 'function') return true
+    return !!c('Отменить операцию?')
+  } catch {
+    // Best-effort: if confirm cannot be shown, default to allowing cancel.
+    return true
+  }
+}
+
+function hardDismissInteractBusyIfNeeded(): boolean {
+  // Only relevant in Interact UI.
+  if (!isInteractUi.value) return false
+  if (!interact.mode.busy.value) return false
+
+  const ok = confirmCancelInteractBusy()
+  if (!ok) {
+    // User declined: consume ESC (no WM close, no flow cancel).
+    return true
+  }
+
+  // User confirmed: cancel flow (epoch bump) and close all related windows.
+  interact.mode.cancel()
+  // Ensure Interact panel window is closed immediately (watcher will also close it).
+  wm.closeGroup('interact', 'programmatic')
+
+  // Match Step0 hard dismiss behavior: close inspector windows too.
+  uiCloseTopmostInspectorWindow()
+  uiCloseTopmostInspectorWindow()
+  return true
+}
+
 function onGlobalKeydown(ev: KeyboardEvent) {
   // WM-only: delegate ESC handling to WindowManager.
   if (ev.key === 'Escape' || ev.key === 'Esc') {
+    // Preserve existing rule: do not treat ESC in inputs as a global dismiss.
+    if (isFormLikeTarget(ev.target)) return
+
+    // P0-2 policy B: while Interact is busy, ESC is gated by confirmation.
+    if (hardDismissInteractBusyIfNeeded()) return
+
+    // If nested content already consumed ESC via a container listener, do not run WM close logic.
+    if (ev.defaultPrevented) return
+
     const consumed = wm.handleEsc(ev, {
       isFormLikeTarget,
-      dispatchWindowEsc: dispatchInteractEsc,
+      dispatchWindowEsc: dispatchTopmostWindowEsc,
     })
     if (consumed) return
   }
@@ -897,15 +1063,13 @@ function goInteract() {
 
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
-function onEdgeDetailChangeLimit() {
+ function onEdgeDetailChangeLimit() {
   // MUST: anchor propagation from edge popup to interact-panel.
   wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
 
-  // Audit fix L-4 / Step 5: close ONLY the edge-detail inspector window, then open trustline.
-  if (wmEdgeDetailId.value != null) {
-    wm.close(wmEdgeDetailId.value, 'programmatic')
-    wmEdgeDetailId.value = null
-  }
+   // Audit fix L-4 / Step 5: close ONLY the edge-detail inspector window, then open trustline.
+   wmEdgeDetail.close({ suppress: false })
+   wmEdgeDetail.applyToWindowManager(wm, { closeReason: 'programmatic' })
 
   // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
   useFullTrustlineEditor.value = true
@@ -929,7 +1093,7 @@ function onEdgeDetailCloseLine() {
   void interact.mode.confirmTrustlineClose()
 }
 
-function onEdgeDetailSendPayment() {
+ function onEdgeDetailSendPayment() {
   // trustline from→to => payment to→from
   const fromPid = interact.mode.state.fromPid
   const toPid = interact.mode.state.toPid
@@ -938,13 +1102,12 @@ function onEdgeDetailSendPayment() {
   // MUST: if initiated from edge popup, propagate edge anchor to interact-panel.
   wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
 
-  // KeepAlive: edge-detail stays open as context for the payment flow.
-  // Spec: "инспектор остаётся открыт как «база контекста», а Interact-панель
-  // открывается поверх для выполнения действия (Send Payment)."
-  // Freeze the current link data before cancel() clears interact state.
-  wmEdgeDetailKeepAlive.value = true
-  wmEdgeDetailFrozenLink.value = interactSelectedLink.value
-  // Do NOT close edge-detail — it persists as context.
+   // KeepAlive: edge-detail stays open as context for the payment flow.
+   // Spec: "инспектор остаётся открыт как «база контекста», а Interact-панель
+   // открывается поверх для выполнения действия (Send Payment)."
+   // Freeze the current link data before cancel() clears interact state.
+   wmEdgeDetail.allowKeepAlive({ frozenLink: interactSelectedLink.value })
+   // Do NOT close edge-detail — it persists as context.
 
   // Atomically start payment with pre-filled FROM to avoid an intermediate
   // picking-payment-from phase (which can flash a useless empty window in WM mode).
@@ -1127,8 +1290,10 @@ watch(interactPhase, (phase) => {
 
     <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->
     <!-- R21: unified open/close transition for all windows. -->
+    <!-- P1-3: @after-leave calls finishClose() to complete removal from WM map after animation. -->
     <TransitionGroup
       name="ws"
+      @after-leave="(el) => { const id = parseInt((el as HTMLElement).dataset?.winId ?? ''); if (id) wm.finishClose(id) }"
       tag="div"
       class="wm-layer"
       aria-label="Window layer"
@@ -1137,13 +1302,13 @@ watch(interactPhase, (phase) => {
       <!-- NB: @close is dead in frameless mode (no ws-close button rendered).
            Close is handled by child components (legacy ×, Cancel, Close).
            Keeping the handler for forward-compatibility if framed mode is re-enabled. -->
-      <WindowShell
+        <WindowShell
         v-for="win in wm.windows.value"
         :key="win.id"
         :instance="win"
         :title="wmTitleFor(win)"
         :frameless="true"
-        @close="win.type === 'edge-detail' ? uiCloseEdgeDetailWindow(win.id, 'action') : wm.close(win.id, 'action')"
+        @close="win.type === 'edge-detail' ? uiCloseEdgeDetailWindow('action') : wm.close(win.id, 'action')"
         @focus="wm.focus(win.id)"
         @measured="(s) => {
           wm.updateMeasuredSize(win.id, s)
@@ -1153,7 +1318,7 @@ watch(interactPhase, (phase) => {
         <EdgeDetailPopup
           v-if="win.type === 'edge-detail'"
           :phase="wmEdgeDetailEffectivePhase"
-          :state="interact.mode.state"
+          :state="wmEdgeDetailEffectiveState(win)"
           :unit="effectiveEq"
           :used="emptyToNull(wmEdgeDetailEffectiveLink?.used)"
           :reverse-used="emptyToNull(wmEdgeDetailEffectiveLink?.reverse_used)"
@@ -1162,7 +1327,7 @@ watch(interactPhase, (phase) => {
           :status="emptyToNullString(wmEdgeDetailEffectiveLink?.status)"
           :busy="wmEdgeDetailEffectiveBusy"
           :force-hidden="false"
-          :close="() => uiCloseEdgeDetailWindow(win.id, 'action')"
+          :close="() => uiCloseEdgeDetailWindow('action')"
           @change-limit="onEdgeDetailChangeLimit"
           @close-line="onEdgeDetailCloseLine"
           @send-payment="onEdgeDetailSendPayment"

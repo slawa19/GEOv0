@@ -40,7 +40,7 @@ describe('useSimulatorApp - window management Step 0 policy', () => {
 
     __selectNodeFromCanvasStep0({
       id: null,
-      isInteractPickingPhase: false,
+      isInteractCanvasNodePickPhase: false,
       interactSelectNode: vi.fn(),
       closeTopmostOverlayOnOutsideClick,
       cancelInteract,
@@ -96,7 +96,7 @@ describe('useSimulatorApp - window management Step 0 policy', () => {
     // The important regression guard: the click(s) on empty canvas must NOT cancel interact.
     __selectNodeFromCanvasStep0({
       id: null,
-      isInteractPickingPhase: true,
+      isInteractCanvasNodePickPhase: true,
       interactSelectNode: vi.fn(),
       closeTopmostOverlayOnOutsideClick,
       cancelInteract,
@@ -109,7 +109,7 @@ describe('useSimulatorApp - window management Step 0 policy', () => {
 
     __selectNodeFromCanvasStep0({
       id: null,
-      isInteractPickingPhase: true,
+      isInteractCanvasNodePickPhase: true,
       interactSelectNode: vi.fn(),
       closeTopmostOverlayOnOutsideClick,
       cancelInteract,
@@ -122,6 +122,89 @@ describe('useSimulatorApp - window management Step 0 policy', () => {
     expect(closeEdgeDetail).toHaveBeenCalledTimes(2)
     expect(closeNodeCard).toHaveBeenCalledTimes(2)
     expect(selectNode).toHaveBeenCalledWith(null)
+  })
+
+  it('P0-2: busy + outside-click + confirm=true → cancelInteract called, overlays closed', () => {
+    const cancelInteract = vi.fn()
+    const selectNode = vi.fn()
+    const closeEdgeDetail = vi.fn()
+    const closeNodeCard = vi.fn()
+    const state = { edgeOpen: true, nodeOpen: true }
+    closeEdgeDetail.mockImplementation(() => { state.edgeOpen = false })
+    closeNodeCard.mockImplementation(() => { state.nodeOpen = false })
+
+    const closeTopmostOverlayOnOutsideClick = vi.fn(() => {
+      __closeTopmostOverlayOnOutsideClickPolicy({
+        edgeDetail: { open: state.edgeOpen, closeOnOutsideClick: true, close: closeEdgeDetail },
+        nodeCard: { open: state.nodeOpen, closeOnOutsideClick: true, close: closeNodeCard },
+      })
+    })
+
+    // User confirms cancel
+    const confirmCancelInteractBusy = vi.fn(() => true)
+
+    __selectNodeFromCanvasStep0({
+      id: null,
+      isInteractCanvasNodePickPhase: false,
+      interactSelectNode: vi.fn(),
+      isInteractBusy: true,
+      confirmCancelInteractBusy,
+      closeTopmostOverlayOnOutsideClick,
+      cancelInteract,
+      selectNode,
+    })
+
+    expect(confirmCancelInteractBusy).toHaveBeenCalledTimes(1)
+    expect(cancelInteract).toHaveBeenCalledTimes(1)
+    expect(closeTopmostOverlayOnOutsideClick).toHaveBeenCalledTimes(2)
+    expect(selectNode).toHaveBeenCalledWith(null)
+  })
+
+  it('P0-2: busy + outside-click + confirm=false → nothing happens (no cancel, no close)', () => {
+    const cancelInteract = vi.fn()
+    const selectNode = vi.fn()
+    const closeTopmostOverlayOnOutsideClick = vi.fn()
+
+    // User declines cancel
+    const confirmCancelInteractBusy = vi.fn(() => false)
+
+    __selectNodeFromCanvasStep0({
+      id: null,
+      isInteractCanvasNodePickPhase: false,
+      interactSelectNode: vi.fn(),
+      isInteractBusy: true,
+      confirmCancelInteractBusy,
+      closeTopmostOverlayOnOutsideClick,
+      cancelInteract,
+      selectNode,
+    })
+
+    expect(confirmCancelInteractBusy).toHaveBeenCalledTimes(1)
+    expect(cancelInteract).not.toHaveBeenCalled()
+    expect(closeTopmostOverlayOnOutsideClick).not.toHaveBeenCalled()
+    expect(selectNode).not.toHaveBeenCalled()
+  })
+
+  it('P0-2: not busy + outside-click → cancelInteract called without confirm gate', () => {
+    const cancelInteract = vi.fn()
+    const selectNode = vi.fn()
+    const closeTopmostOverlayOnOutsideClick = vi.fn()
+    const confirmCancelInteractBusy = vi.fn(() => false) // would block if called
+
+    __selectNodeFromCanvasStep0({
+      id: null,
+      isInteractCanvasNodePickPhase: false,
+      interactSelectNode: vi.fn(),
+      isInteractBusy: false,
+      confirmCancelInteractBusy,
+      closeTopmostOverlayOnOutsideClick,
+      cancelInteract,
+      selectNode,
+    })
+
+    // Gate must NOT be called when not busy
+    expect(confirmCancelInteractBusy).not.toHaveBeenCalled()
+    expect(cancelInteract).toHaveBeenCalledTimes(1)
   })
 })
 

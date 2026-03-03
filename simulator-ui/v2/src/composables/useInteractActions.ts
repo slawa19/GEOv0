@@ -118,23 +118,38 @@ export function useInteractActions(opts: {
 }): {
   /** True when backend rejects actions due to feature flag (HTTP 403 ACTIONS_DISABLED). */
   actionsDisabled: Ref<boolean>
-  sendPayment: (from: string, to: string, amount: string, eq: string, opts?: { clientActionId?: string }) => Promise<SimulatorActionPaymentRealResponse>
+  sendPayment: (
+    from: string,
+    to: string,
+    amount: string,
+    eq: string,
+    opts?: { clientActionId?: string; signal?: AbortSignal },
+  ) => Promise<SimulatorActionPaymentRealResponse>
   createTrustline: (
     from: string,
     to: string,
     limit: string,
     eq: string,
-    opts?: { clientActionId?: string },
+    opts?: { clientActionId?: string; signal?: AbortSignal },
   ) => Promise<SimulatorActionTrustlineCreateResponse>
   updateTrustline: (
     from: string,
     to: string,
     newLimit: string,
     eq: string,
-    opts?: { clientActionId?: string },
+    opts?: { clientActionId?: string; signal?: AbortSignal },
   ) => Promise<SimulatorActionTrustlineUpdateResponse>
-  closeTrustline: (from: string, to: string, eq: string, opts?: { clientActionId?: string }) => Promise<SimulatorActionTrustlineCloseResponse>
-  runClearing: (eq: string, maxDepth?: number, opts?: { clientActionId?: string }) => Promise<SimulatorActionClearingRealResponse>
+  closeTrustline: (
+    from: string,
+    to: string,
+    eq: string,
+    opts?: { clientActionId?: string; signal?: AbortSignal },
+  ) => Promise<SimulatorActionTrustlineCloseResponse>
+  runClearing: (
+    eq: string,
+    maxDepth?: number,
+    opts?: { clientActionId?: string; signal?: AbortSignal },
+  ) => Promise<SimulatorActionClearingRealResponse>
   fetchParticipants: () => Promise<ParticipantInfo[]>
   fetchTrustlines: (eq: string, pid?: string) => Promise<TrustlineInfo[]>
   /** Phase 2.5: backend-first payment targets (multi-hop reachability). */
@@ -207,7 +222,7 @@ export function useInteractActions(opts: {
           equivalent: eq,
           amount,
           client_action_id: o?.clientActionId ?? genClientActionId(),
-        }),
+        }, o?.signal ? { signal: o.signal } : undefined),
       ),
 
     createTrustline: (from, to, limit, eq, o) =>
@@ -218,7 +233,7 @@ export function useInteractActions(opts: {
           equivalent: eq,
           limit,
           client_action_id: o?.clientActionId ?? genClientActionId(),
-        }),
+        }, o?.signal ? { signal: o.signal } : undefined),
       ),
 
     updateTrustline: (from, to, newLimit, eq, o) =>
@@ -229,7 +244,7 @@ export function useInteractActions(opts: {
           equivalent: eq,
           new_limit: newLimit,
           client_action_id: o?.clientActionId ?? genClientActionId(),
-        }),
+        }, o?.signal ? { signal: o.signal } : undefined),
       ),
 
     closeTrustline: (from, to, eq, o) =>
@@ -239,7 +254,7 @@ export function useInteractActions(opts: {
           to_pid: to,
           equivalent: eq,
           client_action_id: o?.clientActionId ?? genClientActionId(),
-        }),
+        }, o?.signal ? { signal: o.signal } : undefined),
       ),
 
     runClearing: (eq, maxDepth, o) =>
@@ -248,7 +263,7 @@ export function useInteractActions(opts: {
           equivalent: eq,
           ...(maxDepth != null ? { max_depth: maxDepth } : {}),
           client_action_id: o?.clientActionId ?? genClientActionId(),
-        }),
+        }, o?.signal ? { signal: o.signal } : undefined),
       ),
 
     fetchParticipants: async () => {

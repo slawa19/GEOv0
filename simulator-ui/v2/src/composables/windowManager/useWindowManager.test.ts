@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { watch } from 'vue'
 
 import { useWindowManager } from './useWindowManager'
 import type { WindowInstance } from './types'
@@ -29,12 +30,11 @@ describe('useWindowManager (MVP)', () => {
     expect(w.constraints.minWidth).toBeGreaterThan(0)
   })
 
-  it("singleton='reuse': повторный open того же type обновляет data/constraints, не создаёт новый id и поднимает в фокус", () => {
+  it("singleton='reuse': повторный open того же type обновляет data/constraints, не создаёт новый id", () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
 
     const id1 = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
-    const z1 = wm.windows.value.find((w) => w.id === id1)!.z
 
     const id2 = wm.open({
       type: 'interact-panel',
@@ -47,9 +47,132 @@ describe('useWindowManager (MVP)', () => {
     const w = wm.windows.value.find((x) => x.id === id2)!
     expect(w.data).toEqual({ panel: 'trustline', phase: 'x' })
     expect(w.constraints.preferredWidth).toBe(380)
+  })
+
+  it('UX-6: rapid reuse open(node-card) is debounced (trailing) and applies only the last payload', () => {
+    vi.useFakeTimers()
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id = wm.open({
+      type: 'node-card',
+      data: { nodeId: 'A' },
+      anchor: { x: 10, y: 20, space: 'host', source: 'init' },
+    })
+
+    const getWin = () => wm.windows.value.find((w) => w.id === id)!
+
+    // Count how many times the nodeId actually changes (reactive commit count proxy).
+    const nodeIdChanges: string[] = []
+    const stop = watch(
+      () => (wm.windows.value.find((w) => w.id === id) as any)?.data?.nodeId as string | undefined,
+      (v) => {
+        if (typeof v === 'string') nodeIdChanges.push(v)
+      },
+      { flush: 'sync' },
+    )
+
+    try {
+      // Stress burst: 10 rapid opens within < 100ms; must coalesce to the last payload.
+      const ids = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']
+      for (let i = 0; i < ids.length; i += 1) {
+        const nodeId = ids[i]!
+        const nextId = wm.open({
+          type: 'node-card',
+          data: { nodeId },
+          anchor: { x: 100 + i, y: 200 + i, space: 'host', source: `stress-${nodeId}` },
+        })
+        expect(nextId).toBe(id)
+        // Keep all calls inside the debounce window.
+        if (i < ids.length - 1) vi.advanceTimersByTime(1)
+
+        // DoD: no intermediate application — window still shows the initial nodeId.
+        expect(getWin().data).toEqual({ nodeId: 'A' })
+      }
+
+      // Still inside a 50ms window from the last call: must not have flushed yet.
+      vi.advanceTimersByTime(49)
+      expect(getWin().data).toEqual({ nodeId: 'A' })
+      expect(nodeIdChanges).toEqual([])
+
+      // Past 100ms total since the last open: debounce MUST flush exactly once.
+      vi.advanceTimersByTime(60)
+      expect(getWin().data).toEqual({ nodeId: 'K' })
+      expect(getWin().anchor).toEqual({ x: 109, y: 209, space: 'host', source: 'stress-K' })
+
+      // DoD: exactly one reactive commit/update in the burst (the trailing payload).
+      expect(nodeIdChanges).toEqual(['K'])
+    } finally {
+      stop()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it("focus mode: 'never' при reuse не меняет z и active", () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    // Создаём interact-panel, потом node-card чтобы node-card не был наверху
+    const ipId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+    // Теперь откроем node-card (создание — всегда focus)
+    const ncId = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
+    // Поднимем interact-panel наверх через focus
+    wm.focus(ipId)
+    const zBefore = wm.windows.value.find((w) => w.id === ncId)!.z
+    const activeBefore = wm.windows.value.find((w) => w.id === ncId)!.active
+
+    // Реактивный upsert node-card с focus:'never'
+    wm.open({ type: 'node-card', data: { nodeId: 'n1-updated' }, focus: 'never' })
+
+    const ncAfter = wm.windows.value.find((w) => w.id === ncId)!
+    expect(ncAfter.data).toEqual({ nodeId: 'n1-updated' }) // data обновилась
+    expect(ncAfter.z).toBe(zBefore) // z не изменился
+    expect(ncAfter.active).toBe(activeBefore) // active не изменился
+  })
+
+  it("focus mode: 'always' при reuse меняет z и active", () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id1 = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
+    const z1 = wm.windows.value.find((w) => w.id === id1)!.z
+
+    // Открываем повторно с focus:'always'
+    const id2 = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'trustline', phase: 'x' },
+      focus: 'always',
+    })
+
+    expect(id2).toBe(id1)
+    const w = wm.windows.value.find((x) => x.id === id2)!
     expect(w.z).toBeGreaterThan(z1)
-    expect(last(wm.windows.value).id).toBe(id2)
-    expect(last(wm.windows.value).active).toBe(true)
+    expect(w.active).toBe(true)
+  })
+
+  it("focus mode: 'auto' — первый open фокусирует, второй (reuse) не фокусирует", () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    // Первый open: создание — всегда focus (независимо от 'auto')
+    const id1 = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' }, focus: 'auto' })
+    const w1 = wm.windows.value.find((w) => w.id === id1)!
+    expect(w1.active).toBe(true) // первый open всегда активирует
+
+    // Теперь откроем другое окно чтобы interact-panel потерял focus
+    // (node-card — другая группа, не вытесняет interact)
+    // Используем прямой wm.focus() для симуляции потери фокуса
+    // (в реальности другой wm.open создаёт другое окно и фокусирует его)
+    // Мы не можем открыть второй interact без reuse — он в reuse-singleton.
+    // Вместо этого: просто проверим что повторный open с 'auto' не меняет z.
+    const zAfterCreate = w1.z
+
+    const id2 = wm.open({ type: 'interact-panel', data: { panel: 'trustline', phase: 'x' }, focus: 'auto' })
+    expect(id2).toBe(id1)
+    const w2 = wm.windows.value.find((w) => w.id === id2)!
+    // 'auto' при reuse = не фокусирует: z остаётся тем же
+    expect(w2.z).toBe(zAfterCreate)
   })
 
   it("singleton='reuse': после user-drag повторный open() без смены anchor не сбрасывает rect.left/top", () => {
@@ -129,6 +252,33 @@ describe('useWindowManager (MVP)', () => {
     const clearing = wm.windows.value.find((x) => x.id === clearingId)!
     expect(clearing.constraints.preferredWidth).toBe(560)
     expect(clearing.rect.width).toBe(560)
+  })
+
+  it('PERF-4: interact-panel constraints are phase-aware (preferredHeight differs by phase)', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    // Same window (singleton reuse), different phases → different preferredHeight.
+    const idPicking = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'picking-payment-to' } })
+    const wPicking = wm.windows.value.find((x) => x.id === idPicking)!
+    const pickingH = wPicking.constraints.preferredHeight
+    expect(pickingH).toBe(420)
+
+    const idConfirm = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment' } })
+    expect(idConfirm).toBe(idPicking)
+    const wConfirm = wm.windows.value.find((x) => x.id === idConfirm)!
+    const confirmH = wConfirm.constraints.preferredHeight
+    expect(confirmH).toBe(360)
+
+    // Loading-like phase: accept either explicit 'loading-*' or existing clearing running phase.
+    const idLoading = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'loading-payment' } })
+    expect(idLoading).toBe(idPicking)
+    const wLoading = wm.windows.value.find((x) => x.id === idLoading)!
+    const loadingH = wLoading.constraints.preferredHeight
+    expect(loadingH).toBe(260)
+
+    // Ensure values are actually different (regression guard).
+    expect(new Set([pickingH, confirmH, loadingH]).size).toBe(3)
   })
 
   it('updateMeasuredSize() + reclamp() держат окно в viewport и синхронизируют rect из measured', () => {
@@ -309,6 +459,69 @@ describe('useWindowManager (MVP)', () => {
     // Snap-on-clamp: position should land on 8px grid when a clamp happened.
     expect(win.rect.left % 8).toBe(0)
     expect(win.rect.top % 8).toBe(0)
+  })
+
+  it('PERF-2: updateMeasuredSize() и reclamp() не делают no-op reactive writes при неизменной геометрии', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 800, height: 600 })
+
+    const id = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' }, anchor: null })
+    const win = wm.windows.value.find((w) => w.id === id)!
+
+    // Establish measured geometry.
+    wm.updateMeasuredSize(id, { width: 300, height: 200 })
+    wm.reclamp(id)
+
+    const measuredRef = win.measured
+    expect(measuredRef).toEqual({ width: 300, height: 200 })
+
+    // Intercept rect writes directly (more robust than spying on property setters on proxies).
+    const rect = win.rect as any
+    const store = { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+    let writes = 0
+
+    Object.defineProperty(rect, 'left', {
+      configurable: true,
+      get: () => store.left,
+      set: (v: number) => {
+        writes += 1
+        store.left = v
+      },
+    })
+    Object.defineProperty(rect, 'top', {
+      configurable: true,
+      get: () => store.top,
+      set: (v: number) => {
+        writes += 1
+        store.top = v
+      },
+    })
+    Object.defineProperty(rect, 'width', {
+      configurable: true,
+      get: () => store.width,
+      set: (v: number) => {
+        writes += 1
+        store.width = v
+      },
+    })
+    Object.defineProperty(rect, 'height', {
+      configurable: true,
+      get: () => store.height,
+      set: (v: number) => {
+        writes += 1
+        store.height = v
+      },
+    })
+
+    // Same measurement again.
+    wm.updateMeasuredSize(id, { width: 300, height: 200 })
+    wm.reclamp(id)
+
+    // updateMeasuredSize() must be a no-op (keeps same object ref).
+    expect(win.measured).toBe(measuredRef)
+
+    // No-op: neither updateMeasuredSize() nor reclamp() should touch rect.
+    expect(writes).toBe(0)
   })
 
   it('Layering priority: focus(inspector) не поднимает его над interact (topmost для ESC остаётся interact)', () => {
@@ -667,5 +880,178 @@ describe('useWindowManager (MVP)', () => {
     wm.closeGroup('inspector', 'programmatic')
     expect(wm.getTopmostInGroup('interact')).toBeNull()
     expect(wm.getTopmostInGroup('inspector')).toBeNull()
+  })
+
+  // P1-3: transition-aware close — closing state semantic tests.
+  describe('P1-3 closing state', () => {
+    it('close() переводит окно в state=closing, не удаляет из windowsMap сразу', () => {
+      const wm = useWindowManager()
+      wm.setViewport({ width: 1200, height: 800 })
+      const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+
+      wm.close(id, 'programmatic')
+
+      // windows (для TransitionGroup) не включает closing — leave-анимация запущена.
+      expect(wm.windows.value.some((w) => w.id === id)).toBe(false)
+      // Но finishClose ещё не вызван — id ещё есть в map (тест через getTopmostInGroup: не возвращает).
+      // Проверяем косвенно через open+finishClose: после finishClose окно исчезает и из map.
+      wm.finishClose(id)
+      // Повторный close — no-op (уже нет в map).
+      expect(() => wm.close(id, 'programmatic')).not.toThrow()
+    })
+
+    it('finishClose() удаляет окно из map; идемпотентен', () => {
+      const wm = useWindowManager()
+      wm.setViewport({ width: 1200, height: 800 })
+      const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+
+      wm.close(id, 'esc')
+      // Первый finishClose — удаляет.
+      expect(() => wm.finishClose(id)).not.toThrow()
+      // Второй finishClose — no-op, не бросает.
+      expect(() => wm.finishClose(id)).not.toThrow()
+    })
+
+    it('handleEsc() пропускает закрывающееся окно при поиске topmost', () => {
+      const wm = useWindowManager()
+      wm.setViewport({ width: 1200, height: 800 })
+
+      // Открываем 2 окна: inspector (ниже) и interact (выше).
+      const inspectorId = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+      const interactId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment', onBack: () => false } })
+
+      // ESC #1: закрывает interact → state=closing (ещё в map, но не в windows).
+      wm.handleEsc(fakeKeyEv(null), { isFormLikeTarget: () => false, dispatchWindowEsc: () => true })
+
+      // interact теперь в closing — в windows его нет.
+      expect(wm.windows.value.some((w) => w.id === interactId)).toBe(false)
+      // inspector ещё open.
+      expect(wm.windows.value.some((w) => w.id === inspectorId)).toBe(true)
+
+      // ESC #2: interact ещё в map (closing), но handleEsc должен его ИГНОРИРОВАТЬ и закрыть inspector.
+      wm.handleEsc(fakeKeyEv(null), { isFormLikeTarget: () => false, dispatchWindowEsc: () => true })
+
+      expect(wm.windows.value.some((w) => w.id === inspectorId)).toBe(false)
+      // Оба в closing или удалены; wm.windows пустой.
+      expect(wm.windows.value.length).toBe(0)
+    })
+
+    it('rapid double ESC: оба окна получают closing-state в правильном порядке, не путая A и B', () => {
+      const wm = useWindowManager()
+      wm.setViewport({ width: 1200, height: 800 })
+
+      const inspectorId = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
+      const interactId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment', onBack: () => false } })
+
+      // Симуляция rapid ESC: два вызова handleEsc подряд (до того как Vue отреагировал).
+      wm.handleEsc(fakeKeyEv(null), { isFormLikeTarget: () => false, dispatchWindowEsc: () => true })
+      wm.handleEsc(fakeKeyEv(null), { isFormLikeTarget: () => false, dispatchWindowEsc: () => true })
+
+      // Оба окна в closing (windows пустой).
+      expect(wm.windows.value.length).toBe(0)
+
+      // Порядок: interact закрылся первым (был topmost), inspector вторым.
+      // finishClose обоих — map тоже чист.
+      wm.finishClose(interactId)
+      wm.finishClose(inspectorId)
+      expect(() => wm.finishClose(interactId)).not.toThrow()
+    })
+
+    it('open() с singleton=reuse не переиспользует окно в closing state — создаёт новое', () => {
+      const wm = useWindowManager()
+      wm.setViewport({ width: 1200, height: 800 })
+
+      const id1 = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
+      wm.close(id1, 'esc')
+
+      // Окно в closing → reuse должен создать новое.
+      const id2 = wm.open({ type: 'node-card', data: { nodeId: 'n2' } })
+      expect(id2).not.toBe(id1)
+      expect(wm.windows.value.find((w) => w.id === id2)?.data).toEqual({ nodeId: 'n2' })
+    })
+
+    it('open() создаёт WindowInstance с state=open', () => {
+      const wm = useWindowManager()
+      wm.setViewport({ width: 1200, height: 800 })
+      const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+      const win = wm.windows.value.find((w) => w.id === id)!
+      expect(win.state).toBe('open')
+    })
+  })
+
+  it('UX-2: close() возвращает фокус на инициатор (если он ещё в DOM и focusable)', () => {
+    const initiator = document.createElement('button')
+    initiator.textContent = 'open'
+    document.body.appendChild(initiator)
+    initiator.focus()
+    expect(document.activeElement).toBe(initiator)
+
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id = wm.open({
+      type: 'edge-detail',
+      data: { fromPid: 'a', toPid: 'b' },
+    })
+
+    // Симулируем "потерю" фокуса на произвольный элемент.
+    const other = document.createElement('button')
+    other.textContent = 'other'
+    document.body.appendChild(other)
+    other.focus()
+    expect(document.activeElement).toBe(other)
+
+    wm.close(id, 'action')
+
+    expect(document.activeElement).toBe(initiator)
+
+    initiator.remove()
+    other.remove()
+  })
+
+  it('UX-2: focus-return stack работает LIFO для двух последовательных open/close', () => {
+    const a = document.createElement('button')
+    a.textContent = 'A'
+    document.body.appendChild(a)
+    a.focus()
+    expect(document.activeElement).toBe(a)
+
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const idA = wm.open({
+      type: 'edge-detail',
+      data: { fromPid: 'p1', toPid: 'p2' },
+    })
+
+    const b = document.createElement('button')
+    b.textContent = 'B'
+    document.body.appendChild(b)
+    b.focus()
+    expect(document.activeElement).toBe(b)
+
+    const idB = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'x' },
+    })
+
+    // Close B → focus back to initiator B.
+    const blur = document.createElement('button')
+    blur.textContent = 'blur'
+    document.body.appendChild(blur)
+    blur.focus()
+    expect(document.activeElement).toBe(blur)
+    wm.close(idB, 'action')
+    expect(document.activeElement).toBe(b)
+
+    // Close A → focus back to initiator A.
+    blur.focus()
+    expect(document.activeElement).toBe(blur)
+    wm.close(idA, 'action')
+    expect(document.activeElement).toBe(a)
+
+    a.remove()
+    b.remove()
+    blur.remove()
   })
 })

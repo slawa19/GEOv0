@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { WindowInstance } from '../composables/windowManager/types'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref } from 'vue'
+
+import { provideWindowContainerEl } from '../composables/windowManager/windowContainerContext'
 
 type Props = {
   instance: WindowInstance
@@ -26,6 +28,9 @@ const emit = defineEmits<{
 }>()
 
 const shellRef = ref<HTMLElement | null>(null)
+
+// TODO-ESC: expose per-window DOM container element for nested ESC consumers.
+provideWindowContainerEl(shellRef)
 
 const shellStyle = computed(() => {
   const base = {
@@ -59,18 +64,42 @@ const effectiveShowHeader = computed(() => props.showHeader && !props.frameless)
 
 let ro: ResizeObserver | null = null
 
-function emitMeasuredFrom(el: HTMLElement) {
+// PERF-2: coalesce frequent ResizeObserver callbacks to <= 1 emit / 16ms.
+// Important: keep trailing measurement (the latest size wins).
+let pendingMeasured: { width: number; height: number } | null = null
+let pendingTimer: ReturnType<typeof setTimeout> | null = null
+
+function queueMeasured(size: { width: number; height: number }) {
+  pendingMeasured = size
+  if (pendingTimer != null) return
+  pendingTimer = setTimeout(() => {
+    const last = pendingMeasured
+    pendingMeasured = null
+    pendingTimer = null
+    if (!last) return
+    emit('measured', last)
+  }, 16)
+}
+
+function measureFrom(el: HTMLElement): { width: number; height: number } {
   const rect = el.getBoundingClientRect()
   // Normative: measure the whole shell (header + body), i.e. the outer box.
-  emit('measured', {
+  return {
     width: Math.round(rect.width),
     height: Math.round(rect.height),
-  })
+  }
+}
+
+function emitMeasuredFrom(el: HTMLElement) {
+  emit('measured', measureFrom(el))
 }
 
 onMounted(() => {
   const el = shellRef.value
   if (!el) return
+
+  // P1-3: expose win id on DOM element for TransitionGroup @after-leave mapping.
+  el.dataset.winId = String(props.instance.id)
 
   // Tests / older environments may not have ResizeObserver.
   if (typeof ResizeObserver === 'undefined') {
@@ -89,14 +118,14 @@ onMounted(() => {
 
     if (borderSize) {
       const s = Array.isArray(borderSize) ? borderSize[0] : borderSize
-      emit('measured', {
+      queueMeasured({
         width: Math.round(s.inlineSize),
         height: Math.round(s.blockSize),
       })
       return
     }
 
-    emitMeasuredFrom(el)
+    queueMeasured(measureFrom(el))
   })
 
   ro.observe(el)
@@ -105,6 +134,12 @@ onMounted(() => {
 onUnmounted(() => {
   ro?.disconnect()
   ro = null
+
+  if (pendingTimer != null) {
+    clearTimeout(pendingTimer)
+    pendingTimer = null
+  }
+  pendingMeasured = null
 })
 
 function onPointerDown() {
@@ -124,6 +159,8 @@ function onCloseClick(ev: MouseEvent) {
     :data-win-id="String(props.instance.id)"
     :data-win-type="props.instance.type"
     :data-win-active="props.instance.active ? '1' : '0'"
+    role="dialog"
+    :aria-label="props.title ?? 'Window'"
     :style="shellStyle"
     @pointerdown="onPointerDown"
   >

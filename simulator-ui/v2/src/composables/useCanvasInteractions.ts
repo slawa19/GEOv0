@@ -11,7 +11,7 @@ export type CameraSystemLike = {
 }
 
 export type DragToPinLike = {
-  dragState: { active: boolean }
+  dragState: { active: boolean; dragging?: boolean }
   onPointerDown: (ev: PointerEvent) => boolean
   onPointerMove: (ev: PointerEvent) => boolean
   onPointerUp: (ev: PointerEvent) => boolean
@@ -49,6 +49,14 @@ export function useCanvasInteractions(opts: {
   // clear the user's node selection via onCanvasClick.
   let suppressNextClick = false
   let suppressClickTimer: ReturnType<typeof setTimeout> | null = null
+
+  // RACE-1: rapid dblclicks can synchronously trigger multiple open/select actions.
+  // Debounce dblclick handling so only the *last* node within the window is applied.
+  const dblClickDebounceMs = 150
+  let dblClickTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingDblClick:
+    | { node: { id: string }; ptr: { clientX: number; clientY: number } }
+    | null = null
 
   function markSuppressClick() {
     suppressNextClick = true
@@ -89,15 +97,33 @@ export function useCanvasInteractions(opts: {
   }
 
   function onCanvasDblClick(ev: MouseEvent) {
-    const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
-    if (!hit) return
-
-    if (opts.onNodeDblClick) {
-      const handled = opts.onNodeDblClick(hit, { clientX: ev.clientX, clientY: ev.clientY })
-      if (handled) return
+    // Cancel any pending dblclick action and keep only the latest.
+    if (dblClickTimer !== null) {
+      clearTimeout(dblClickTimer)
+      dblClickTimer = null
     }
 
-    opts.setSelectedNodeId(hit.id)
+    const hit = opts.pickNodeAt(ev.clientX, ev.clientY)
+    if (!hit) {
+      pendingDblClick = null
+      return
+    }
+
+    pendingDblClick = { node: hit, ptr: { clientX: ev.clientX, clientY: ev.clientY } }
+    dblClickTimer = setTimeout(() => {
+      dblClickTimer = null
+
+      const pending = pendingDblClick
+      pendingDblClick = null
+      if (!pending) return
+
+      if (opts.onNodeDblClick) {
+        const handled = opts.onNodeDblClick(pending.node, pending.ptr)
+        if (handled) return
+      }
+
+      opts.setSelectedNodeId(pending.node.id)
+    }, dblClickDebounceMs)
   }
 
   function onCanvasPointerDown(ev: PointerEvent) {
@@ -128,11 +154,16 @@ export function useCanvasInteractions(opts: {
     // won't clear selection when VITE_TEST_MODE=1.
     if (opts.isTestMode()) return
 
+    // Capture the drag state before onPointerUp resets it.
+    const wasPinDrag = opts.dragToPin.dragState.dragging
+
     if (opts.dragToPin.onPointerUp(ev)) {
       // Drag-to-pin consumed this pointer-up. The browser may still fire a `click`
       // event for the same gesture. Suppress it so the drag doesn't accidentally
       // deselect the node the user just pinned.
-      markSuppressClick()
+      if (wasPinDrag) {
+        markSuppressClick()
+      }
       return
     }
 

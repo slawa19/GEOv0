@@ -1,5 +1,5 @@
 import { createApp, h, nextTick } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import WindowShell from './WindowShell.vue'
 import type { WindowInstance } from '../composables/windowManager/types'
 
@@ -178,6 +178,88 @@ describe('WindowShell', () => {
       expect(shell.style.height).toBe('300px')
 
       cleanup(host, app)
+    })
+  })
+
+  describe('a11y dialog', () => {
+    it('sets role=dialog and aria-label (from title fallback)', async () => {
+      const { host, app } = mountShell({
+        instance: makeInstance(),
+        title: 'My Window',
+        frameless: false,
+      })
+      await nextTick()
+
+      const shell = host.querySelector('[data-win-id]') as HTMLElement
+      expect(shell.getAttribute('role')).toBe('dialog')
+      expect(shell.getAttribute('aria-label')).toBe('My Window')
+
+      cleanup(host, app)
+    })
+  })
+
+  describe('PERF-2: ResizeObserver coalesce', () => {
+    it('coalesces a burst of RO callbacks into <= 1 measured emit / 16ms and keeps trailing size', async () => {
+      vi.useFakeTimers()
+
+      const updateMeasured = vi.fn()
+      const reclamp = vi.fn()
+      const onMeasured = vi.fn((s: { width: number; height: number }) => {
+        updateMeasured(s)
+        reclamp()
+      })
+      let roCb: ((entries: any[]) => void) | null = null
+
+      const prevRO = (globalThis as any).ResizeObserver
+      ;(globalThis as any).ResizeObserver = class ResizeObserverMock {
+        private cb: (entries: any[]) => void
+        constructor(cb: (entries: any[]) => void) {
+          this.cb = cb
+          roCb = cb
+        }
+        observe() {}
+        disconnect() {}
+        unobserve() {}
+      }
+
+      try {
+        const { host, app } = mountShell({
+          instance: makeInstance(),
+          onMeasured,
+        })
+        await nextTick()
+
+        expect(typeof roCb).toBe('function')
+
+        // 10 quick callbacks in the same macrotask: should collapse to 1 emit after 16ms.
+        for (let i = 0; i < 10; i += 1) {
+          roCb!([
+            {
+              borderBoxSize: [{ inlineSize: 100 + i, blockSize: 200 + i }],
+            },
+          ])
+        }
+
+        expect(onMeasured).toHaveBeenCalledTimes(0)
+        expect(reclamp).toHaveBeenCalledTimes(0)
+
+        vi.advanceTimersByTime(15)
+        expect(onMeasured).toHaveBeenCalledTimes(0)
+        expect(reclamp).toHaveBeenCalledTimes(0)
+
+        vi.advanceTimersByTime(1)
+        expect(onMeasured).toHaveBeenCalledTimes(1)
+        expect(updateMeasured).toHaveBeenCalledTimes(1)
+        expect(reclamp).toHaveBeenCalledTimes(1)
+
+        // Trailing size must win.
+        expect(updateMeasured).toHaveBeenLastCalledWith({ width: 109, height: 209 })
+
+        cleanup(host, app)
+      } finally {
+        ;(globalThis as any).ResizeObserver = prevRO
+        vi.useRealTimers()
+      }
     })
   })
 })

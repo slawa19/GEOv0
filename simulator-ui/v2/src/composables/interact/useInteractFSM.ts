@@ -55,6 +55,7 @@ export function useInteractFSM(opts: {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
   isPickingPhase: ComputedRef<boolean>
+  isCanvasNodePickPhase: ComputedRef<boolean>
 
   clearError: () => void
   resetToIdle: () => void
@@ -96,6 +97,14 @@ export function useInteractFSM(opts: {
 
   const phase = computed(() => state.phase)
   const isPickingPhase = computed(() => state.phase.startsWith('picking-'))
+  const isCanvasNodePickPhase = computed(() => {
+    return (
+      state.phase.startsWith('picking-') ||
+      state.phase === 'confirm-payment' ||
+      state.phase === 'editing-trustline' ||
+      state.phase === 'confirm-trustline-create'
+    )
+  })
 
   function clearError() {
     state.error = null
@@ -220,6 +229,17 @@ export function useInteractFSM(opts: {
       return
     }
 
+    if (state.phase === 'confirm-payment') {
+      clearError()
+      if (id !== state.fromPid) {
+        state.toPid = id
+      } else {
+        state.toPid = null
+        state.phase = 'picking-payment-to'
+      }
+      return
+    }
+
     if (state.phase === 'picking-trustline-from') {
       clearError()
       state.fromPid = id
@@ -232,6 +252,21 @@ export function useInteractFSM(opts: {
       clearError()
       state.toPid = id
       recomputeTrustlinePhase()
+      return
+    }
+
+    if (state.phase === 'editing-trustline' || state.phase === 'confirm-trustline-create') {
+      clearError()
+      if (id !== state.fromPid) {
+        state.toPid = id
+        recomputeTrustlinePhase()
+      } else {
+        state.toPid = null
+        state.phase = 'picking-trustline-to'
+        state.selectedEdgeKey = null
+        state.edgeAnchor = null
+      }
+      return
     }
   }
 
@@ -372,6 +407,7 @@ export function useInteractFSM(opts: {
     state,
     phase,
     isPickingPhase,
+    isCanvasNodePickPhase,
 
     clearError,
     resetToIdle,

@@ -171,8 +171,10 @@ export function actionTrustlineCreate(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionTrustlineCreateRequest,
+  init?: RequestInit,
 ): Promise<SimulatorActionTrustlineCreateResponse> {
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-create`, {
+    ...(init ?? {}),
     method: 'POST',
     body: JSON.stringify(req),
   })
@@ -182,8 +184,10 @@ export function actionTrustlineUpdate(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionTrustlineUpdateRequest,
+  init?: RequestInit,
 ): Promise<SimulatorActionTrustlineUpdateResponse> {
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-update`, {
+    ...(init ?? {}),
     method: 'POST',
     body: JSON.stringify(req),
   })
@@ -193,8 +197,10 @@ export function actionTrustlineClose(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionTrustlineCloseRequest,
+  init?: RequestInit,
 ): Promise<SimulatorActionTrustlineCloseResponse> {
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-close`, {
+    ...(init ?? {}),
     method: 'POST',
     body: JSON.stringify(req),
   })
@@ -204,8 +210,10 @@ export function actionPaymentReal(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionPaymentRealRequest,
+  init?: RequestInit,
 ): Promise<SimulatorActionPaymentRealResponse> {
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/payment-real`, {
+    ...(init ?? {}),
     method: 'POST',
     body: JSON.stringify(req),
   })
@@ -215,8 +223,10 @@ export function actionClearingReal(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionClearingRealRequest,
+  init?: RequestInit,
 ): Promise<SimulatorActionClearingRealResponse> {
   return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-real`, {
+    ...(init ?? {}),
     method: 'POST',
     body: JSON.stringify(req),
   })

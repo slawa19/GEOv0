@@ -131,8 +131,13 @@ export function __closeTopmostOverlayOnOutsideClickPolicy(opts: {
 export function __selectNodeFromCanvasStep0(opts: {
   id: string | null
 
-  isInteractPickingPhase: boolean
+  isInteractCanvasNodePickPhase: boolean
   interactSelectNode: (nodeId: string) => void
+
+  /** P0-2: when true, hard dismiss (ESC/outside-click) must be confirmed. */
+  isInteractBusy?: boolean
+  /** P0-2: confirm callback used only when busy and user attempts a hard dismiss. */
+  confirmCancelInteractBusy?: () => boolean
 
   closeTopmostOverlayOnOutsideClick: () => void
 
@@ -142,13 +147,19 @@ export function __selectNodeFromCanvasStep0(opts: {
   selectNode: (id: string | null) => void
 }): void {
   // In Interact UI picking phases: treat node click as a flow input.
-  if (opts.id && opts.isInteractPickingPhase) {
+  if (opts.id && opts.isInteractCanvasNodePickPhase) {
     opts.interactSelectNode(opts.id)
     return
   }
 
   // Outside click: cancel active interact flow and close inspector card overlays (edge-detail + node-card).
   if (!opts.id) {
+    // P0-2 policy B: when Interact is busy, outside-click hard dismiss must be gated.
+    if (opts.isInteractBusy && typeof opts.confirmCancelInteractBusy === 'function') {
+      const ok = opts.confirmCancelInteractBusy()
+      if (!ok) return
+    }
+
     opts.cancelInteract()
 
     // Close twice to ensure both cards are dismissed when they co-exist (e.g. during transitions).
@@ -1562,6 +1573,11 @@ export function useSimulatorApp(opts?: {
     return !!interactMode.isPickingPhase.value
   })
 
+  const isInteractCanvasNodePickPhase = computed(() => {
+    if (!isInteractUi.value) return false
+    return !!interactMode.isCanvasNodePickPhase.value
+  })
+
   /**
    * Window management MVP (Step 0): close the topmost outside-click-closable overlay.
    *
@@ -1585,8 +1601,19 @@ export function useSimulatorApp(opts?: {
   function selectNodeFromCanvas(id: string | null) {
     __selectNodeFromCanvasStep0({
       id,
-      isInteractPickingPhase: isInteractPickingPhase.value,
+      isInteractCanvasNodePickPhase: isInteractCanvasNodePickPhase.value,
       interactSelectNode: (nodeId) => interactMode.selectNode(nodeId),
+      isInteractBusy: !!interactMode.busy.value,
+      confirmCancelInteractBusy: () => {
+        try {
+          const c = (window as any)?.confirm
+          if (typeof c !== 'function') return true
+          return !!c('Отменить операцию?')
+        } catch {
+          return true
+        }
+      },
+
       closeTopmostOverlayOnOutsideClick: () => {
         void closeTopmostOverlayOnOutsideClick()
       },
@@ -2200,6 +2227,7 @@ export function useSimulatorApp(opts?: {
 
     // derived interact UI helpers
     isInteractPickingPhase,
+    isInteractCanvasNodePickPhase,
 
     // interact mode
     interact: {

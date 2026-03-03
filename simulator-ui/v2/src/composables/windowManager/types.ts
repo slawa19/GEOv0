@@ -2,6 +2,15 @@ import type { ComputedRef } from 'vue'
 
 export type WindowGroup = 'interact' | 'inspector'
 
+/**
+ * Controls whether `wm.open()` changes z-order / active flag when reusing an existing window.
+ *
+ * - `'auto'`   (default): focus only on creation; reuse without focus change.
+ * - `'always'`: always focus (user-initiated: click, dblclick, button).
+ * - `'never'`  : never focus (watcher-driven reactive updates: SSE, phase change, pan/zoom).
+ */
+export type FocusMode = 'auto' | 'always' | 'never'
+
 export type WindowType = 'interact-panel' | 'node-card' | 'edge-detail'
 
 export type WindowSizeConstraints = {
@@ -42,14 +51,33 @@ export type InteractPanelData =
 export type WindowDataByType = {
   'interact-panel': InteractPanelData
   'node-card': { nodeId: string; onClose?: (reason: 'esc' | 'action' | 'programmatic') => void }
-  'edge-detail': { fromPid: string; toPid: string; onClose?: (reason: 'esc' | 'action' | 'programmatic') => void }
+  /**
+   * EdgeDetail UI context MUST be window-scoped.
+   *
+   * Rationale: during keepAlive/suppressed scenarios (e.g. edge-detail kept open
+   * while another interact flow runs), live InteractState.{fromPid,toPid,title}
+   * may drift. `win.data` is the source of truth for what this window represents.
+   */
+  'edge-detail': {
+    fromPid: string
+    toPid: string
+    /** Stable edge identifier for this window (best-effort if not provided). */
+    edgeKey?: string
+    /** Optional pre-rendered title for this window (best-effort; UI may recompute). */
+    title?: string
+    onClose?: (reason: 'esc' | 'action' | 'programmatic') => void
+  }
 }
 
 export type WindowData<T extends WindowType = WindowType> = WindowDataByType[T]
 
+export type WindowLifecycleState = 'open' | 'closing'
+
 export type WindowInstance = {
   id: number
   type: WindowType
+  /** P1-3: transition-aware close. 'closing' means leave-animation is in progress. */
+  state: WindowLifecycleState
   policy: WindowPolicy
   anchor: WindowAnchor | null
   /**
@@ -105,8 +133,15 @@ export type WindowManagerApi = {
     type: T
     anchor?: WindowAnchor | null
     data: WindowData<T>
+    /** @see FocusMode */
+    focus?: FocusMode
   }) => number
   close: (id: number, reason: 'esc' | 'action' | 'programmatic') => void
+  /**
+   * P1-3: Finalize the removal of a closing window from the map.
+   * Called from TransitionGroup @after-leave (or, as a fallback, by the safety timer).
+   */
+  finishClose: (id: number) => void
   /** Закрыть все окна данного типа (convenience helper). */
   closeByType: (type: WindowType, reason: 'esc' | 'action' | 'programmatic') => number
   /** Закрыть все окна группы. */

@@ -34,6 +34,7 @@ describe('useCanvasInteractions', () => {
   })
 
   it('double click selects node (single click is selection-only too)', () => {
+    vi.useFakeTimers()
     const setSelectedNodeId = vi.fn()
 
     const h = useCanvasInteractions({
@@ -57,14 +58,25 @@ describe('useCanvasInteractions', () => {
       getPanActive: () => false,
     })
 
-    h.onCanvasClick({ clientX: 3, clientY: 4 } as any)
-    expect(setSelectedNodeId).toHaveBeenLastCalledWith('B')
+    try {
+      h.onCanvasClick({ clientX: 3, clientY: 4 } as any)
+      expect(setSelectedNodeId).toHaveBeenLastCalledWith('B')
 
-    h.onCanvasDblClick({ clientX: 3, clientY: 4 } as any)
-    expect(setSelectedNodeId).toHaveBeenLastCalledWith('B')
+      // RACE-1: dblclick is debounced (150ms). No immediate selection side-effect.
+      h.onCanvasDblClick({ clientX: 3, clientY: 4 } as any)
+      expect(setSelectedNodeId).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(150)
+      expect(setSelectedNodeId).toHaveBeenCalledTimes(2)
+      expect(setSelectedNodeId).toHaveBeenLastCalledWith('B')
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 
   it('dblclick can be intercepted via onNodeDblClick hook', () => {
+    vi.useFakeTimers()
     const setSelectedNodeId = vi.fn()
     const onNodeDblClick = vi.fn(() => true)
 
@@ -90,9 +102,79 @@ describe('useCanvasInteractions', () => {
       getPanActive: () => false,
     })
 
-    h.onCanvasDblClick({ clientX: 7, clientY: 8 } as any)
-    expect(onNodeDblClick).toHaveBeenCalledTimes(1)
-    expect(setSelectedNodeId).toHaveBeenCalledTimes(0)
+    try {
+      h.onCanvasDblClick({ clientX: 7, clientY: 8 } as any)
+      // Debounced: not called immediately.
+      expect(onNodeDblClick).toHaveBeenCalledTimes(0)
+
+      vi.advanceTimersByTime(150)
+      expect(onNodeDblClick).toHaveBeenCalledTimes(1)
+      expect(setSelectedNodeId).toHaveBeenCalledTimes(0)
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it('debounces rapid dblclicks and applies only the last node (RACE-1)', () => {
+    vi.useFakeTimers()
+    const setSelectedNodeId = vi.fn()
+
+    // In the real app this hook opens the node card window (wm.open({ reuse })).
+    // This test asserts we only execute that action once, and only for the last node.
+    const onNodeDblClick = vi.fn(() => true)
+
+    const h = useCanvasInteractions({
+      isTestMode: () => false,
+      pickNodeAt: (x) => {
+        const ids = ['A', 'B', 'C', 'D', 'E']
+        const idx = Number(x) - 1
+        return idx >= 0 && idx < ids.length ? { id: ids[idx] } : null
+      },
+      setSelectedNodeId,
+      clearHoveredEdge: vi.fn(),
+      onNodeDblClick,
+      dragToPin: {
+        dragState: { active: false },
+        onPointerDown: () => false,
+        onPointerMove: () => false,
+        onPointerUp: () => false,
+      },
+      cameraSystem: {
+        onPointerDown: vi.fn(),
+        onPointerMove: vi.fn(),
+        onPointerUp: vi.fn(() => false),
+        onWheel: vi.fn(),
+      },
+      edgeHover: { onPointerMove: vi.fn() },
+      getPanActive: () => false,
+    })
+
+    try {
+      // 5 rapid dblclicks: A → B → C → D → E within <150ms between events.
+      const coords = [1, 2, 3, 4, 5]
+      for (let i = 0; i < coords.length; i++) {
+        h.onCanvasDblClick({ clientX: coords[i], clientY: 1 } as any)
+        if (i < coords.length - 1) vi.advanceTimersByTime(20)
+      }
+
+      // Nothing should have executed yet.
+      expect(onNodeDblClick).toHaveBeenCalledTimes(0)
+      expect(setSelectedNodeId).toHaveBeenCalledTimes(0)
+
+      // Still pending before 150ms elapsed since the last dblclick.
+      vi.advanceTimersByTime(149)
+      expect(onNodeDblClick).toHaveBeenCalledTimes(0)
+
+      // Flush the debounce window: exactly one action, for the last nodeId (E).
+      vi.advanceTimersByTime(1)
+      expect(onNodeDblClick).toHaveBeenCalledTimes(1)
+      expect(((onNodeDblClick as any).mock.calls[0]?.[0] as any)?.id).toBe('E')
+      expect(setSelectedNodeId).toHaveBeenCalledTimes(0)
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 
   it('ignores pointerdown in test mode', () => {
@@ -196,6 +278,86 @@ describe('useCanvasInteractions', () => {
     h.onCanvasPointerUp({} as any)
     expect(setSelectedNodeId).not.toHaveBeenCalled()
     expect(clearHoveredEdge).not.toHaveBeenCalled()
+  })
+
+  it('does NOT suppress click when dragToPin consumes pointerup but no drag occurred', () => {
+    const setSelectedNodeId = vi.fn()
+
+    const dragState = { active: true, dragging: false }
+
+    const h = useCanvasInteractions({
+      isTestMode: () => false,
+      pickNodeAt: (x, y) => (x === 1 && y === 2 ? { id: 'A' } : null),
+      setSelectedNodeId,
+      clearHoveredEdge: vi.fn(),
+      dragToPin: {
+        dragState,
+        onPointerDown: () => true,
+        onPointerMove: () => true,
+        // IMPORTANT: this simulates current dragToPin contract: pointerup is consumed
+        // even for a simple click (no actual drag).
+        onPointerUp: () => {
+          dragState.active = false
+          dragState.dragging = false
+          return true
+        },
+      },
+      cameraSystem: {
+        onPointerDown: vi.fn(),
+        onPointerMove: vi.fn(),
+        onPointerUp: vi.fn(() => false),
+        onWheel: vi.fn(),
+      },
+      edgeHover: { onPointerMove: vi.fn() },
+      getPanActive: () => false,
+    })
+
+    // Complete the pointer gesture (consumed by dragToPin).
+    h.onCanvasPointerUp({ pointerId: 1 } as any)
+
+    // Browser still fires `click` after pointerup; it must NOT be suppressed.
+    h.onCanvasClick({ clientX: 1, clientY: 2 } as any)
+    expect(setSelectedNodeId).toHaveBeenCalledTimes(1)
+    expect(setSelectedNodeId).toHaveBeenLastCalledWith('A')
+  })
+
+  it('suppresses click after a real drag-to-pin gesture', () => {
+    const setSelectedNodeId = vi.fn()
+
+    const dragState = { active: true, dragging: true }
+
+    const h = useCanvasInteractions({
+      isTestMode: () => false,
+      pickNodeAt: () => ({ id: 'A' }),
+      setSelectedNodeId,
+      clearHoveredEdge: vi.fn(),
+      dragToPin: {
+        dragState,
+        onPointerDown: () => true,
+        onPointerMove: () => true,
+        onPointerUp: () => {
+          // Typical drag end: state resets.
+          dragState.active = false
+          dragState.dragging = false
+          return true
+        },
+      },
+      cameraSystem: {
+        onPointerDown: vi.fn(),
+        onPointerMove: vi.fn(),
+        onPointerUp: vi.fn(() => false),
+        onWheel: vi.fn(),
+      },
+      edgeHover: { onPointerMove: vi.fn() },
+      getPanActive: () => false,
+    })
+
+    // Pointerup after real drag should mark suppressNextClick.
+    h.onCanvasPointerUp({ pointerId: 1 } as any)
+
+    // The subsequent click must be ignored (otherwise we'd accidentally change selection).
+    h.onCanvasClick({ clientX: 1, clientY: 2 } as any)
+    expect(setSelectedNodeId).not.toHaveBeenCalled()
   })
 
   it('wheel is ignored during drag-to-pin active', () => {

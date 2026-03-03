@@ -79,4 +79,51 @@ describe('useInteractFSM', () => {
     expect(h2.state.selectedEdgeKey).toBeNull()
     expect(h2.state.phase).toBe('idle')
   })
+
+  it('isCanvasNodePickPhase is true in confirm-payment and trustline edit/create phases', () => {
+    const h = useInteractFSM(makeOpts())
+
+    expect(h.isCanvasNodePickPhase.value).toBe(false)
+
+    h.startPaymentFlowWithFrom('alice')
+    h.selectNode('bob')
+    expect(h.state.phase).toBe('confirm-payment')
+    expect(h.isCanvasNodePickPhase.value).toBe(true)
+
+    // editing-trustline is reached via edge selection.
+    h.selectEdge(keyEdge('alice', 'bob'), { x: 1, y: 2 })
+    expect(h.state.phase).toBe('editing-trustline')
+    expect(h.isCanvasNodePickPhase.value).toBe(true)
+  })
+
+  it('confirm-payment: clicking another node re-picks To without leaving confirm-payment', () => {
+    const h = useInteractFSM(makeOpts())
+
+    h.startPaymentFlowWithFrom('alice')
+    expect(h.state.phase).toBe('picking-payment-to')
+
+    h.selectNode('bob')
+    expect(h.state.phase).toBe('confirm-payment')
+    expect(h.state.fromPid).toBe('alice')
+    expect(h.state.toPid).toBe('bob')
+
+    // Re-pick To
+    h.selectNode('carol')
+    expect(h.state.phase).toBe('confirm-payment')
+    expect(h.state.toPid).toBe('carol')
+  })
+
+  it('confirm-payment: clicking From resets To and returns to picking-payment-to', () => {
+    const h = useInteractFSM(makeOpts())
+
+    h.startPaymentFlowWithFrom('alice')
+    h.selectNode('bob')
+    expect(h.state.phase).toBe('confirm-payment')
+    expect(h.state.toPid).toBe('bob')
+
+    // Clicking From again is treated as an error-correcting gesture.
+    h.selectNode('alice')
+    expect(h.state.phase).toBe('picking-payment-to')
+    expect(h.state.toPid).toBeNull()
+  })
 })

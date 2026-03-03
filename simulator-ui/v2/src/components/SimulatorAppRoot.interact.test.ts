@@ -61,7 +61,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 // IMPORTANT: This test verifies conditional rendering in SimulatorAppRoot when the URL contains `ui=interact`.
 // We mock `useSimulatorApp()` to keep the test fast + deterministic while still deriving flags from the query string.
 
-vi.mock('../composables/useSimulatorApp', () => {
+  vi.mock('../composables/useSimulatorApp', () => {
         return {
     useSimulatorApp: (opts?: any) => {
       const qs = () => {
@@ -85,8 +85,14 @@ vi.mock('../composables/useSimulatorApp', () => {
       const phase = ref(String((globalThis as any).__GEO_TEST_INTERACT_PHASE ?? 'idle'))
       ;(globalThis as any).__GEO_TEST_PHASE_REF = phase
 
-      const selectedNode = ref<any>((globalThis as any).__GEO_TEST_SELECTED_NODE ?? null)
-      const selectedNodeScreenCenter = ref<any>((globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER ?? null)
+       const selectedNode = ref<any>((globalThis as any).__GEO_TEST_SELECTED_NODE ?? null)
+       const selectedNodeScreenCenter = ref<any>((globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER ?? null)
+       // Test helper: allow simulating camera pan/zoom by mutating the anchor ref.
+       ;(globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER_REF = selectedNodeScreenCenter
+
+       // Test helper: allow tests to simulate a node dblclick by calling the same
+       // root callback that the real dblclick path uses.
+       ;(globalThis as any).__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD = opts?.uiOpenOrUpdateNodeCard
 
       // Test helper: allow tests to request an initial NodeCard window by setting globals.
       // WM-only runtime: NodeCard is opened via uiOpenOrUpdateNodeCard(), not via boolean flags.
@@ -405,6 +411,24 @@ vi.mock('../composables/useSimulatorApp', () => {
           // Minimal integration wiring for root interaction tests:
           // emulate empty-canvas click behavior (outside click) by delegating
           // to WM-aware callback (WM-only runtime).
+          //
+          // P0-2: gate cancel on busy (mirrors real Step0 policy).
+          const busyRef = (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF
+          const isBusy = busyRef?.value === true
+
+          if (isBusy) {
+            // Show confirm gate (mirrors real confirmCancelInteractBusy).
+            try {
+              const c = (window as any)?.confirm
+              if (typeof c === 'function') {
+                const ok = !!c('Отменить операцию?')
+                if (!ok) return
+              }
+            } catch {
+              // best-effort
+            }
+          }
+
           try {
             const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL
             if (typeof cancel === 'function') cancel()
@@ -732,6 +756,80 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('P1-1: реактивный watcher-update interact-panel (focus:never) не поднимает interact выше inspector (z-order stable)', async () => {
+    // Scenario: interact + node-card coexist. Inspector is "on top" of itself
+    // (no manual focus change by user). Then a phase watcher fires again (reactive update).
+    // The interact-panel watcher now uses focus:'never', so the z-order must not jump.
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // Both windows should render.
+      expect(host.querySelectorAll('.ws-shell').length).toBe(2)
+
+      const getShells = () => {
+        const shells = Array.from(host.querySelectorAll('.ws-shell')) as HTMLElement[]
+        const interactShell = shells.find((el) => el.getAttribute('data-win-type') === 'interact-panel')
+        const inspectorShell = shells.find((el) => el.getAttribute('data-win-type') === 'node-card')
+        return { interactShell, inspectorShell }
+      }
+
+      const { interactShell, inspectorShell } = getShells()
+      expect(interactShell).toBeTruthy()
+      expect(inspectorShell).toBeTruthy()
+
+      // Capture z-index values before reactive update.
+      const zInteractBefore = Number(interactShell!.style.zIndex || '0')
+      const zInspectorBefore = Number(inspectorShell!.style.zIndex || '0')
+      // Interact group has higher base; it must always be above inspector.
+      expect(zInteractBefore).toBeGreaterThan(zInspectorBefore)
+
+      // Simulate reactive watcher update: change phase (this triggers the interact-panel watcher
+      // to call wm.open with focus:'never'). Then restore.
+      const phaseRef = (globalThis as any).__GEO_TEST_PHASE_REF as ReturnType<typeof ref> | undefined
+      if (phaseRef) {
+        phaseRef.value = 'picking-payment-from'
+        await nextTick()
+        phaseRef.value = 'confirm-payment'
+        await nextTick()
+        await nextTick()
+      }
+
+      // After reactive update the z-order must not have changed: interact still above inspector.
+      const { interactShell: interactAfter, inspectorShell: inspectorAfter } = getShells()
+      const zInteractAfter = Number(interactAfter?.style.zIndex || '0')
+      const zInspectorAfter = Number(inspectorAfter?.style.zIndex || '0')
+      expect(zInteractAfter).toBeGreaterThan(zInspectorAfter)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('NodeCard action → opens interact-panel and keeps NodeCard open (H-1 coexistence)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
@@ -892,6 +990,14 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
       expect(host.querySelectorAll('.ws-shell').length).toBe(1)
 
+      // Baseline: edge-detail title must match the selected trustline.
+      const getEdgeTitle = () => {
+        const popup = host.querySelector('[data-testid="edge-detail-popup"]') as HTMLElement | null
+        const title = popup?.querySelector('.popup__subtitle') as HTMLElement | null
+        return (title?.textContent ?? '').trim()
+      }
+      expect(getEdgeTitle()).toBe('alice → bob')
+
       const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
       expect(cancel).toBeTruthy()
 
@@ -905,6 +1011,20 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       // Edge-detail must STILL be visible (keepAlive).
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+
+      // Regression (P0-1): keepAlive edge-detail MUST render frozen context from WM window data,
+      // not from live interact state (which drifts to payment flow: bob -> alice).
+      const st = (globalThis as any).__GEO_TEST_INTERACT_STATE as any
+      expect(st?.fromPid).toBe('bob')
+      expect(st?.toPid).toBe('alice')
+      expect(getEdgeTitle()).toBe('alice → bob')
+
+      // Even if live interact state changes further, edge-detail context must remain frozen.
+      st.fromPid = 'carol'
+      st.toPid = 'dave'
+      await nextTick()
+      await nextTick()
+      expect(getEdgeTitle()).toBe('alice → bob')
 
       // Payment interact-panel must also appear (coexistence).
       expect(host.querySelectorAll('[data-testid="manual-payment-panel"]').length).toBe(1)
@@ -2259,6 +2379,139 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('UX-5: repeated dblclick on the same node while NodeCard is topmost does not call wm.open()', async () => {
+    // Arrange: NodeCard already opened for nodeId=A ('bob')
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    ;(globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER = { x: 111, y: 222 }
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+
+      // Flush queueMicrotask() used by the useSimulatorApp mock to request initial open.
+      await new Promise<void>((resolve) => queueMicrotask(() => resolve()))
+      await nextTick()
+      await nextTick()
+
+      // Sanity: NodeCard is visible and is the only window.
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+      expect(host.querySelectorAll('.ws-shell').length).toBe(1)
+
+      const wmOpen = (globalThis as any).__GEO_TEST_WM_OPEN as ReturnType<typeof vi.fn>
+      expect(wmOpen).toBeTruthy()
+
+      // Reset: ignore initial open call; we care about the repeated dblclick attempt.
+      wmOpen.mockClear()
+
+      // Act: simulate repeated dblclick on the same node.
+      const uiOpenOrUpdateNodeCard = (globalThis as any).__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD as
+        | ((o: { nodeId: string; anchor: { x: number; y: number } | null }) => void)
+        | undefined
+      expect(uiOpenOrUpdateNodeCard).toBeTruthy()
+      uiOpenOrUpdateNodeCard?.({ nodeId: 'bob', anchor: { x: 111, y: 222 } })
+      await nextTick()
+      await nextTick()
+
+      // Assert (DoD): no calls to wm.open() on repeated dblclick.
+      expect(wmOpen).toHaveBeenCalledTimes(0)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER
+      delete (globalThis as any).__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD
+      delete (globalThis as any).__GEO_TEST_WM_OPEN
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('UX-9: NodeCard anchor follow during camera changes is throttled to ≤ 1 call / 100ms', async () => {
+    vi.useFakeTimers()
+
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'bob',
+      name: 'Bob',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    ;(globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER = { x: 100, y: 200 }
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const wmOpen = (globalThis as any).__GEO_TEST_WM_OPEN as ReturnType<typeof vi.fn>
+      expect(wmOpen).toBeTruthy()
+
+      // Initial open is not part of the throttle budget for pan/zoom updates.
+      wmOpen.mockClear()
+
+      const centerRef = (globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER_REF as Ref<any>
+      expect(centerRef).toBeTruthy()
+
+      // Simulate a 500ms pan/zoom burst with updates every 10ms.
+      // Expectation: `wm.open()` for node-card happens at most 5 times.
+      for (let i = 0; i < 50; i += 1) {
+        centerRef.value = { x: 100 + i, y: 200 + i }
+        await nextTick()
+        vi.advanceTimersByTime(10)
+        await nextTick()
+      }
+
+      // Flush any pending trailing tick(s).
+      vi.advanceTimersByTime(1000)
+      await nextTick()
+
+      const calls = wmOpen.mock.calls.map((c: any[]) => c?.[0]).filter(Boolean)
+      const nodeCardCalls = calls.filter((o: any) => o.type === 'node-card')
+      expect(nodeCardCalls.length).toBeLessThanOrEqual(5)
+
+      // Also verify we apply the latest anchor after the burst stops.
+      const last = nodeCardCalls[nodeCardCalls.length - 1]
+      expect(last?.anchor).toEqual({ x: 149, y: 249, space: 'host', source: 'node' })
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER
+      delete (globalThis as any).__GEO_TEST_NODE_SCREEN_CENTER_REF
+      delete (globalThis as any).__GEO_TEST_WM_OPEN
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('success toast: successful clearing confirm renders SuccessToast and allows dismiss', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
     setUrl('/?mode=real&ui=interact')
@@ -2308,6 +2561,316 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
     delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
     delete (globalThis as any).__GEO_TEST_INTERACT_SUCCESS_MESSAGE
+  })
+
+  // -----------------------------------------------------------------------
+  // P0-2: busy-gate tests (ESC and outside-click while interact.mode.busy)
+  // -----------------------------------------------------------------------
+
+  it('P0-2: ESC while busy + confirm=true → cancel called + windows closed', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+    // Stub window.confirm to return true (user confirms cancel)
+    vi.stubGlobal('confirm', vi.fn(() => true))
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      // Set busy = true
+      const busyRef = (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF as ReturnType<typeof ref<boolean>>
+      expect(busyRef).toBeTruthy()
+      busyRef.value = true
+      await nextTick()
+
+      // ESC while busy
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      // confirm must have been shown
+      expect(window.confirm).toHaveBeenCalledTimes(1)
+      // cancel must have been called (epoch bump)
+      expect(cancel).toHaveBeenCalledTimes(1)
+      // interact panel must be gone
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('P0-2: ESC while busy + confirm=false → nothing happens (windows stay, flow continues)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+    // Stub window.confirm to return false (user declines cancel)
+    vi.stubGlobal('confirm', vi.fn(() => false))
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      // Set busy = true
+      const busyRef = (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF as ReturnType<typeof ref<boolean>>
+      expect(busyRef).toBeTruthy()
+      busyRef.value = true
+      await nextTick()
+
+      // ESC while busy
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      await nextTick()
+
+      // confirm must have been shown
+      expect(window.confirm).toHaveBeenCalledTimes(1)
+      // cancel must NOT have been called
+      expect(cancel).not.toHaveBeenCalled()
+      // interact panel must still be visible
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('P0-2: ESC while NOT busy → no confirm shown, normal WM ESC handling', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+    const confirmSpy = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirmSpy)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      // busy is false by default
+      const busyRef = (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF as ReturnType<typeof ref<boolean>>
+      expect(busyRef.value).toBe(false)
+
+      const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
+      expect(handleEsc).toBeTruthy()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+
+      // confirm must NOT have been shown (not busy)
+      expect(confirmSpy).not.toHaveBeenCalled()
+      // WM ESC must have been called
+      expect(handleEsc).toHaveBeenCalledTimes(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF
+      delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('P0-2: outside-click while busy + confirm=true → cancel called + windows closed', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+    vi.stubGlobal('confirm', vi.fn(() => true))
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      // Set busy = true
+      const busyRef = (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF as ReturnType<typeof ref<boolean>>
+      busyRef.value = true
+      await nextTick()
+
+      // Outside click (empty canvas click)
+      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
+      expect(canvas).toBeTruthy()
+      canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      // confirm must have been shown
+      expect(window.confirm).toHaveBeenCalledTimes(1)
+      // cancel must have been called
+      expect(cancel).toHaveBeenCalledTimes(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('P0-2: outside-click while busy + confirm=false → nothing happens', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+    vi.stubGlobal('confirm', vi.fn(() => false))
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+
+      const cancel = (globalThis as any).__GEO_TEST_INTERACT_CANCEL as ReturnType<typeof vi.fn>
+      expect(cancel).toBeTruthy()
+
+      // Set busy = true
+      const busyRef = (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF as ReturnType<typeof ref<boolean>>
+      busyRef.value = true
+      await nextTick()
+
+      // Outside click (empty canvas click)
+      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
+      expect(canvas).toBeTruthy()
+      canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      // confirm must have been shown
+      expect(window.confirm).toHaveBeenCalledTimes(1)
+      // cancel must NOT have been called
+      expect(cancel).not.toHaveBeenCalled()
+      // panel must still be visible
+      expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_INTERACT_BUSY_REF
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // P1-3: transition-aware close — rapid double ESC integration test.
+  // Scenario: 1 node-card window open (inspector). Rapid ESC ×2 — первый закрывает
+  // node-card (→ state=closing, excluded from wm.windows). Второй ESC не находит
+  // open-окон и возвращает false (нет accidental closing несуществующего окна).
+  it('P1-3 rapid double ESC: node-card — перший ESC переводить в closing, другий не знаходить відкритих вікон', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    ;(globalThis as any).__GEO_TEST_NODE_CARD_OPEN = true
+    ;(globalThis as any).__GEO_TEST_SELECTED_NODE = {
+      id: 'alice',
+      name: 'Alice',
+      type: 'person',
+      status: 'active',
+      viz_color_key: 'unknown',
+      net_balance: '0',
+    }
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const handleEsc = (globalThis as any).__GEO_TEST_WM_HANDLE_ESC as ReturnType<typeof vi.fn>
+      expect(handleEsc).toBeTruthy()
+
+      // There must be 1 window: node-card.
+      const shellsBefore = host.querySelectorAll('.ws-shell')
+      expect(shellsBefore.length).toBe(1)
+
+      // Rapid double ESC: dispatch 2 keydown events without waiting between them.
+      // First ESC: closes node-card → state=closing → removed from wm.windows.
+      // Second ESC: no open windows found → handleEsc returns false (no accidental close).
+      const r1 = handleEsc.mock.results // will be populated after dispatching
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+
+      // Both ESC events must have been routed through WM.
+      expect(handleEsc).toHaveBeenCalledTimes(2)
+
+      // First call must have consumed ESC (returned true — closed the node-card).
+      // Second call must have NOT consumed ESC (returned false — no open windows to close).
+      // Results are checked from the spy. Both calls are synchronous (keydown is sync).
+      const results = handleEsc.mock.results
+      expect(results[0]?.value).toBe(true)  // first ESC consumed
+      expect(results[1]?.value).toBe(false) // second ESC: no open window found
+
+      await nextTick()
+      await nextTick()
+
+      // After the first ESC, node-card is gone from wm.windows (closing state).
+      const shellsAfter = host.querySelectorAll('.ws-shell')
+      expect(shellsAfter.length).toBe(0)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_NODE_CARD_OPEN
+      delete (globalThis as any).__GEO_TEST_SELECTED_NODE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      delete (globalThis as any).__GEO_TEST_WM_HANDLE_ESC
+      vi.unstubAllGlobals()
+    }
   })
 })
 
