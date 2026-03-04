@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import type { InteractPhase } from '../composables/useInteractMode'
 import { type ActivePanelKey, useActivePanelStateShared } from '../composables/useActivePanelState'
 import { toLower } from '../utils/stringHelpers'
+import HudBar from './common/HudBar.vue'
 
 type Props = {
   phase: InteractPhase
@@ -55,7 +56,7 @@ function guardedStart(fn: () => void) {
 
 <template>
   <div class="action-bar" aria-label="Interact actions">
-    <div class="ds-panel ds-ov-bar">
+    <HudBar layout="start" fit>
       <button
         class="ds-btn ds-btn--secondary"
         :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'payment' }"
@@ -112,7 +113,7 @@ function guardedStart(fn: () => void) {
       >
         Cancel current action first (press ESC).
       </span>
-    </div>
+    </HudBar>
   </div>
 </template>
 

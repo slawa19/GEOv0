@@ -1218,7 +1218,7 @@ watch(interactPhase, (phase) => {
 <template>
   <div
     ref="hostEl"
-    class="root"
+    class="root ds-ov-layer"
     :data-theme="uiTheme"
     data-density="comfortable"
     data-motion="full"
@@ -1274,7 +1274,7 @@ watch(interactPhase, (phase) => {
       @update:intensity-percent="realActions.setIntensityPercent"
     >
       <!-- HUD elements stacked below TopBar rows (inside ds-ov-top-stack via slot) -->
-      <div v-if="dataReady && (isInteractUi || isAutoRunUi)" class="interact-hud-bar">
+      <template v-if="dataReady && (isInteractUi || isAutoRunUi)">
         <SystemBalanceBar
           :balance="interact.systemBalance"
           :equivalent="effectiveEq"
@@ -1292,7 +1292,7 @@ watch(interactPhase, (phase) => {
           :start-trustline-flow="onActionStartTrustlineFlow"
           :start-clearing-flow="onActionStartClearingFlow"
         />
-      </div>
+      </template>
     </TopBar>
 
     <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->

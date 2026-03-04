@@ -2,6 +2,7 @@
 import { computed, unref, type ComputedRef } from 'vue'
 
 import type { SystemBalance } from '../composables/useSystemBalance'
+import HudBar from './common/HudBar.vue'
 
 type Props = {
   /** Accepts either a raw SystemBalance object or a computed ref (as returned by useSystemBalance(...).balance). */
@@ -30,7 +31,7 @@ function fmt(n: number): string {
 
 <template>
   <div class="system-balance-bar" :class="{ 'system-balance-bar--compact': compact }" aria-label="System balance">
-    <div class="system-balance-bar__inner">
+    <HudBar variant="ghost" layout="start" fit class="system-balance-bar__inner">
       <div v-if="b.isClean && !compact" class="ds-panel ds-ov-metric">
         <span class="ds-badge ds-badge--ok">Clean</span>
         <span class="ds-label">System is clean — no debts</span>
@@ -63,7 +64,7 @@ function fmt(n: number): string {
           <div class="ds-progress__bar" :style="{ width: utilPct + '%' }" />
         </div>
       </div>
-    </div>
+    </HudBar>
   </div>
 </template>
 

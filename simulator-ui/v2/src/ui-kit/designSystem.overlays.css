@@ -98,68 +98,6 @@
   pointer-events: auto;
 }
 
-.ds-ov-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: nowrap;
-  gap: 12px;
-  width: 100%;
-}
-
-/* Frameless bars: controls sit directly on the scene background.
-   Keep this override scoped to bars only (do not affect other ds-panel surfaces). */
-.ds-ov-topbar.ds-panel,
-.ds-ov-bottombar.ds-panel {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  /* Allow dropdowns (e.g. Admin) to extend outside the bar.
-     ds-panel defaults to overflow:hidden for HUD clip-path; bars are layout-only. */
-  overflow: visible;
-  /* HUD panels use clip-path for angular corners; clip-path also clips dropdowns.
-     Bars are frameless, so disable clipping here. */
-  clip-path: none;
-}
-
-.ds-ov-topbar__left,
-.ds-ov-topbar__center,
-.ds-ov-topbar__right {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.ds-ov-topbar__left { flex: 0 0 auto; }
-.ds-ov-topbar__center { flex: 1 1 auto; justify-content: center; }
-.ds-ov-topbar__right { flex: 0 0 auto; justify-content: flex-end; }
-
-.ds-ov-bottombar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  /* Fill ds-ov-bottom (which has left/right insets). */
-  width: 100%;
-  box-sizing: border-box;
-  /* Slightly roomier than generic ds-ov-bar for better balance. */
-  padding: var(--ds-space-2) var(--ds-space-3);
-}
-
-.ds-ov-bottombar__left,
-.ds-ov-bottombar__right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.ds-ov-bottombar__left { justify-content: flex-start; }
-.ds-ov-bottombar__right { justify-content: flex-end; }
-
 .ds-ov-full {
   grid-column: 1 / -1;
 }

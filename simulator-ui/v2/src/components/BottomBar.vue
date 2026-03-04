@@ -4,6 +4,7 @@ import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
 import { EQUIVALENT_CODES } from '../config/equivalents'
 import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
+import HudBar from './common/HudBar.vue'
 
 type Props = {
   apiMode: 'fixtures' | 'real'
@@ -109,9 +110,10 @@ async function onRunClearingOnce() {
 </script>
 
 <template>
-  <div class="ds-ov-bottom ds-panel ds-ov-bar ds-ov-bottombar" aria-label="Bottom bar">
-    <div class="ds-ov-bottombar__left" aria-label="View settings">
-      <div class="ds-row bb-row" aria-label="Equivalent">
+  <div class="ds-ov-bottom">
+    <HudBar variant="ghost" layout="between" aria-label="Bottom bar">
+      <div class="hud-bar__left" aria-label="View settings">
+        <div class="ds-row bb-row" aria-label="Equivalent">
         <span class="ds-label">EQ</span>
         <template v-if="props.isDemoFixtures">
           <span class="ds-value ds-mono">UAH</span>
@@ -160,7 +162,7 @@ async function onRunClearingOnce() {
       </div>
     </div>
 
-    <div class="ds-ov-bottombar__right" aria-label="Tools">
+    <div class="hud-bar__right" aria-label="Tools">
       <div v-if="apiMode === 'real'" class="ds-ov-btn-group" aria-label="Run tools">
         <button
           class="ds-btn ds-btn--ghost ds-btn--sm"
@@ -268,6 +270,7 @@ async function onRunClearingOnce() {
         </button>
       </div>
     </div>
+    </HudBar>
   </div>
 </template>
 

@@ -5,6 +5,7 @@ import type { UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
 
 import { useTopBarContext } from '../composables/useTopBarContext'
+import HudBar from './common/HudBar.vue'
 
 const ctx = useTopBarContext()
 
@@ -266,8 +267,8 @@ function onApplyIntensity() {
 <template>
   <div class="ds-ov-top">
     <div class="ds-ov-top-stack">
-      <div class="ds-panel ds-ov-bar ds-ov-topbar" aria-label="Top bar">
-        <div class="ds-ov-topbar__left" aria-label="Mode">
+      <HudBar variant="ghost" layout="between" aria-label="Top bar">
+        <div class="hud-bar__left" aria-label="Mode">
           <div class="ds-row tb-mode-row">
             <div class="ds-segmented" role="group" aria-label="Simulator mode">
             <button
@@ -317,7 +318,7 @@ function onApplyIntensity() {
           </div>
         </div>
 
-        <div class="ds-ov-topbar__center" aria-label="Run controls">
+        <div class="hud-bar__center" aria-label="Run controls">
           <div v-if="showRunControls" class="ds-row tb-run-controls">
             <span class="ds-label">Scenario</span>
             <select
@@ -435,7 +436,7 @@ function onApplyIntensity() {
           </div>
         </div>
 
-        <div class="ds-ov-topbar__right" aria-label="Status">
+        <div class="hud-bar__right" aria-label="Status">
           <div v-if="ctx.apiMode.value === 'real'" class="ds-row tb-status-row">
             <span :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE">
               <span class="ds-dot" aria-hidden="true" /> SSE
@@ -557,7 +558,7 @@ function onApplyIntensity() {
             </details>
           </div>
         </div>
-      </div>
+      </HudBar>
 
       <div v-if="ctx.lastError.value" class="ds-alert ds-alert--err" aria-label="Error">
         <span class="ds-alert__icon">✕</span>

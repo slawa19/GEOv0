@@ -35,19 +35,6 @@
   --ds-z-alert: 200;
 }
 
-/* Interact HUD: SystemBalanceBar + ActionBar — stacks inside TopBar's ds-ov-top-stack */
-/* justify-content: space-between — SystemBalanceBar left, ActionBar right.
-   ActionBar right-aligns with overlay right inset so buttons and opening
-   panels appear on the same side of the screen. */
-.interact-hud-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  pointer-events: auto;
-}
-
 .canvas {
   position: absolute;
   inset: 0;
