@@ -47,7 +47,9 @@ const layoutClass = computed(() => {
   flex-wrap: wrap; /* responsive flex wrapping */
   width: 100%;
   box-sizing: border-box;
-  padding: var(--ds-space-2) var(--ds-space-3);
+  /* Vertical / horizontal padding driven by CSS variables so ancestor
+     contexts (e.g. .ds-ov-top-stack) can tighten them without !important. */
+  padding: var(--ds-hud-bar-py, var(--ds-space-2)) var(--ds-hud-bar-px, var(--ds-space-3));
   pointer-events: auto;
 }
 

@@ -95,9 +95,24 @@
 .ds-ov-top-stack {
   display: flex;
   flex-direction: column;
-  /* Vertical rhythm between TopBar / SystemBalanceBar / ActionBar rows */
-  gap: var(--ds-space-1, 4px);
+  /* Vertical rhythm between TopBar / SystemBalanceBar / ActionBar rows.
+     Uses a dedicated token so theme/density changes don't widen the ribbon. */
+  gap: var(--ds-ov-stack-gap, 3px);
   pointer-events: auto;
+
+  /* Push compact vertical padding to all descendant HudBars.
+     HudBar reads --ds-hud-bar-py via its own scoped CSS variable. */
+  --ds-hud-bar-py: 2px;
+}
+
+/* Safety: zero margins on direct children to prevent UA or inherited margin.
+   min-height equalises row heights so gaps look uniform. */
+.ds-ov-top-stack > * {
+  margin: 0;
+  min-height: var(--ds-ov-stack-row-min-h, 42px);
+  /* Wrapper divs (system-balance-bar, action-bar) must be flex
+     so their inner HudBar stretches to fill the min-height. */
+  display: flex;
 }
 
 .ds-ov-full {
@@ -242,7 +257,11 @@ details[open].ds-ov-details > summary::after {
   display: inline-flex;
   gap: var(--ds-space-3, 12px);
   align-items: center;
-  padding: var(--ds-space-1, 4px) var(--ds-space-2, 8px);
+  /* Height aligned with control/button height token so metric chips match
+     the segmented control row (TopBar) and action buttons row (ActionBar). */
+  box-sizing: border-box;
+  height: var(--ds-control-height);
+  padding: 0 var(--ds-space-2, 8px);
   min-width: 0;
 }
 

@@ -990,13 +990,20 @@ function getActionBarAnchor(): Point | null {
   // Prefer measuring the actual ActionBar element so interact panels open near the toolbar,
   // not at the far right edge of the viewport.
   const hostRect = host.getBoundingClientRect()
-  const actionBarEl = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
-  if (!actionBarEl) {
+  const actionBarContainer = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
+  if (!actionBarContainer) {
     // Fallback: previous behavior (top-right under the HUD stack).
     return { x: hostRect.width, y: 98 }
   }
-  const r = actionBarEl.getBoundingClientRect()
-  const x = r.right - hostRect.left
+
+  // Measure the actual HudBar (inline-flex when `fit` is enabled) to avoid accidentally
+  // anchoring by a full-width wrapper.
+  const barEl = (actionBarContainer.querySelector('.hud-bar') as HTMLElement | null) ?? actionBarContainer
+  const r = barEl.getBoundingClientRect()
+
+  // Anchor at the left edge under the bar so the panel opens near ActionBar,
+  // not docked to the far right.
+  const x = r.left - hostRect.left
   const y = r.bottom - hostRect.top
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   return { x, y }

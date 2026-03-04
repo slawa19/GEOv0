@@ -133,6 +133,18 @@
   /* HUD geometry */
   --ds-cut: 12px; /* corner cut size for HUD clip-path */
 
+  /* Toolbar stack vertical gap (TopBar ↔ SystemBalanceBar ↔ ActionBar).
+     Intentionally decoupled from --ds-space-* so theme/density scale changes
+     don't accidentally widen the toolbar ribbon. */
+  --ds-ov-stack-gap: 3px;
+
+  /* Minimum row height in the toolbar stack.
+     Ensures all rows (TopBar, SystemBalanceBar, ActionBar) render at the
+     same height so the visual gaps between them appear perfectly even.
+     Value covers the tallest natural content (admin-panel summary chip
+     with nested badge ≈ 37px + 4px padding ≈ 41px, rounded up). */
+  --ds-ov-stack-row-min-h: 42px;
+
   --ds-radius-sm: 6px;
   --ds-radius-md: 8px;
   --ds-radius-lg: 10px;
@@ -220,6 +232,8 @@
   --ds-space-2: 8px;
   --ds-space-3: 12px;
   --ds-space-4: 14px;
+
+  --ds-ov-stack-row-min-h: 38px;
 
   --ds-density-control-height-delta: -4px;
   --ds-density-control-padding-x-delta: -1px;

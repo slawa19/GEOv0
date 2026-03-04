@@ -476,6 +476,30 @@ function setUrl(search: string) {
   window.history.replaceState({}, '', search)
 }
 
+function stubRect(el: HTMLElement, rect: {
+  left: number
+  top: number
+  width: number
+  height: number
+  right?: number
+  bottom?: number
+}) {
+  const right = rect.right ?? rect.left + rect.width
+  const bottom = rect.bottom ?? rect.top + rect.height
+
+  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+    right,
+    bottom,
+    x: rect.left,
+    y: rect.top,
+    toJSON: () => ({}),
+  } as any)
+}
+
 function stubLocationHrefSetter() {
   const hrefSet = vi.fn()
   const prevLocation = window.location
@@ -508,6 +532,98 @@ function stubLocationHrefSetter() {
 }
 
 describe('SimulatorAppRoot - Interact Mode rendering', () => {
+  it('regression-guard: root must NOT use ds-ov-layer (pointer-events:none); it must use ds-ov-vars', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const root = host.querySelector('.root') as HTMLElement | null
+      expect(root).toBeTruthy()
+
+      // NOTE: `.ds-ov-layer` sets pointer-events:none and would break canvas interactions.
+      expect(root!.classList.contains('ds-ov-layer')).toBe(false)
+      expect(root!.classList.contains('ds-ov-vars')).toBe(true)
+
+      // Sanity: canvas exists under root.
+      expect(root!.querySelector('canvas.canvas')).toBeTruthy()
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('regression-guard: ActionBar-initiated interact-panel must anchor near ActionBar (not at host width)', async () => {
+    ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'idle'
+    setUrl('/?mode=real&ui=interact')
+
+    vi.stubGlobal('ResizeObserver', undefined as any)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({ render: () => h(SimulatorAppRoot as any) })
+    try {
+      app.mount(host)
+      await nextTick()
+      await nextTick()
+
+      const root = host.querySelector('.root') as HTMLElement | null
+      expect(root).toBeTruthy()
+
+      // Ensure deterministic geometry in happy-dom.
+      stubRect(root!, { left: 0, top: 0, width: 1400, height: 800 })
+
+      const actionBar = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
+      expect(actionBar).toBeTruthy()
+
+      const hudBar = (actionBar!.querySelector('.hud-bar') as HTMLElement | null) ?? actionBar!
+      stubRect(hudBar, { left: 40, top: 120, width: 620, height: 40 })
+
+      const btn = host.querySelector('[data-testid="actionbar-payment"]') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+
+      btn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      const open = (globalThis as any).__GEO_TEST_WM_OPEN as ReturnType<typeof vi.fn> | undefined
+      expect(open).toBeTruthy()
+
+      const calls = open!.mock.calls.map((c) => c[0]).filter(Boolean)
+      const lastInteract = [...calls].reverse().find((c: any) => c.type === 'interact-panel') as any
+      expect(lastInteract).toBeTruthy()
+
+      expect(lastInteract.anchor).toBeTruthy()
+      expect(lastInteract.anchor.space).toBe('host')
+      expect(lastInteract.anchor.source).toBe('panel')
+
+      // Key regression guard: anchor must be near ActionBar's left, not at host width (=1400).
+      expect(Number(lastInteract.anchor.x)).toBeGreaterThanOrEqual(0)
+      expect(Number(lastInteract.anchor.x)).toBeLessThan(200)
+    } finally {
+      app.unmount()
+      host.remove()
+      delete (globalThis as any).__GEO_TEST_INTERACT_PHASE
+      delete (globalThis as any).__GEO_TEST_INTERACT_CANCEL
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
   it('ui=interact renders interact HUD + ActionBar + ManualPaymentPanel and does not render intensity slider', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'confirm-payment'
     setUrl('/?mode=real&ui=interact')
