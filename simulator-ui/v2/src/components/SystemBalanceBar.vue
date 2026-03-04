@@ -69,15 +69,6 @@ function fmt(n: number): string {
 </template>
 
 <style scoped>
-.system-balance-bar__inner {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-}
-
 .sbb-util {
   gap: 10px;
 }

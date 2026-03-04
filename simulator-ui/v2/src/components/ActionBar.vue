@@ -56,7 +56,7 @@ function guardedStart(fn: () => void) {
 
 <template>
   <div class="action-bar" aria-label="Interact actions">
-    <HudBar layout="start" fit>
+    <HudBar variant="ghost" layout="start" fit>
       <button
         class="ds-btn ds-btn--secondary"
         :class="{ 'ds-btn--muted': !isIdle && activeKey !== 'payment' }"
@@ -128,10 +128,26 @@ function guardedStart(fn: () => void) {
 }
 
 .action-bar__hint {
-  margin-left: 10px;
   opacity: 0.75;
   font-size: 12px;
-  white-space: nowrap;
+  /*
+    Responsive safety:
+    - never force a single line (can overflow on <500px)
+    - allow wrapping/breaking long chunks
+    - keep buttons stable; hint can take remaining space or drop to a new row
+  */
+  order: 10;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+@media (max-width: 500px) {
+  .action-bar__hint {
+    flex-basis: 100%;
+  }
 }
 </style>
 

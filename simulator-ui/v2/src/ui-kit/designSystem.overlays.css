@@ -94,7 +94,7 @@
 .ds-ov-top-stack {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--ds-space-3, 12px);
   pointer-events: auto;
 }
 

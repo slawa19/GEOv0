@@ -1,6 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+/**
+ * HudBar — presentational container for HUD toolbars.
+ *
+ * Slot contract (consumer guidance):
+ * - You can render any content into the default slot.
+ * - For predictable alignment, consumers may group content into optional sections:
+ *   - `.hud-bar__left`   — size-to-content, aligned to start
+ *   - `.hud-bar__center` — flexible (grows/shrinks), centered
+ *   - `.hud-bar__right`  — size-to-content, aligned to end
+ *
+ * These section classnames are styled via `:deep()` inside HudBar.
+ * Avoid scoped CSS overrides in consumers; prefer structure + `variant/layout/fit` props.
+ */
 const props = withDefaults(defineProps<{
   variant?: 'solid' | 'ghost'
   layout?: 'between' | 'center' | 'start' | 'end'
@@ -41,7 +54,8 @@ const layoutClass = computed(() => {
 .hud-bar--variant-ghost {
   /* Frameless override for HUD controls to sit directly on the scene */
   background: transparent !important;
-  border-color: transparent !important;
+  /* BUG-4: avoid affecting box-model via border width */
+  border: none !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;

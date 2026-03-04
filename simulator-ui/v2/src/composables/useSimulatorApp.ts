@@ -28,7 +28,7 @@ import { normalizeTxAmountLabelInput } from '../utils/txAmountLabel'
 import { computeClearingAmountAnchorFromEdgeMidpoints } from '../utils/clearingAmountAnchor'
 import { isZeroDecimalString } from '../utils/isZeroDecimalString'
 import { createPatchApplier } from '../demo/patches'
-import { spawnEdgePulses, spawnNodeBursts, spawnSparks, type FxState } from '../render/fxRenderer'
+import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 export function __retryUntilTruthyOrDeadline<T>(opts: {
@@ -63,6 +63,7 @@ import { ApiError } from '../api/http'
 import type { AdminRunSummary } from '../api/simulatorApi'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
+import type { Point } from '../types/layout'
 
 import { useAppLifecycle } from './useAppLifecycle'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
@@ -519,6 +520,12 @@ export function useSimulatorApp(opts?: {
     },
   )
 
+  onUnmounted(() => {
+    // Avoid late mutations after unmount (e.g. in tests / HMR).
+    if (adminRefreshTimer != null) window.clearTimeout(adminRefreshTimer)
+    adminRefreshTimer = null
+  })
+
 
   // tx.failed often represents a "clean rejection" (routing capacity, trustline constraints).
   // Those should not be surfaced as global "errors" in the HUD.
@@ -634,6 +641,10 @@ export function useSimulatorApp(opts?: {
   // (In particular: gradients + full glow sprites are enabled only on `high`.)
   const quality = ref<Quality>(isE2eScreenshots.value ? 'high' : 'med')
 
+  // Startup quality FPS-guard: keep handles to cancel if the app unmounts early.
+  let qualityFpsGuardRafId: number | null = null
+  let stopQualityFpsGuardWatch: (() => void) | null = null
+
   // If Chrome struggles even right after opening the page (e.g. ~1 FPS),
   // auto-downgrade quality to recover responsiveness.
   // This is deliberately conservative: only kicks in on very low measured FPS.
@@ -643,11 +654,11 @@ export function useSimulatorApp(opts?: {
 
     let frames = 0
     let startMs = 0
-    let rafId = 0
     let guardActive = true
     let qualityTouchedWhileGuardActive = false
 
-    const stopWatch = watch(
+    stopQualityFpsGuardWatch?.()
+    stopQualityFpsGuardWatch = watch(
       quality,
       () => {
         if (guardActive) qualityTouchedWhileGuardActive = true
@@ -661,13 +672,15 @@ export function useSimulatorApp(opts?: {
 
       const elapsed = t - startMs
       if (elapsed < 1800) {
-        rafId = window.requestAnimationFrame(loop)
+        qualityFpsGuardRafId = window.requestAnimationFrame(loop)
         return
       }
 
       guardActive = false
-      stopWatch()
-      window.cancelAnimationFrame(rafId)
+      stopQualityFpsGuardWatch?.()
+      stopQualityFpsGuardWatch = null
+      if (qualityFpsGuardRafId != null) window.cancelAnimationFrame(qualityFpsGuardRafId)
+      qualityFpsGuardRafId = null
 
       const fps = (frames * 1000) / Math.max(1, elapsed)
 
@@ -678,7 +691,15 @@ export function useSimulatorApp(opts?: {
       }
     }
 
-    rafId = window.requestAnimationFrame(loop)
+    qualityFpsGuardRafId = window.requestAnimationFrame(loop)
+  })
+
+  onUnmounted(() => {
+    // In case the component is destroyed before the FPS guard finishes.
+    stopQualityFpsGuardWatch?.()
+    stopQualityFpsGuardWatch = null
+    if (qualityFpsGuardRafId != null) window.cancelAnimationFrame(qualityFpsGuardRafId)
+    qualityFpsGuardRafId = null
   })
 
   // §10: Cookie bootstrap — ensure session for anonymous visitors at startup.
@@ -730,10 +751,6 @@ export function useSimulatorApp(opts?: {
       state.error = ''
     },
   })
-
-  // BUG-3: Late-binding holder for FxState (initialized after FX wiring below).
-  // onClearingDone is only called at runtime, never during init, so this pattern is safe.
-  let _interactFxState: FxState | null = null
 
   const interactMode = useInteractMode({
     actions: interactActions,
@@ -910,6 +927,7 @@ export function useSimulatorApp(opts?: {
   }
 
   const gpuAccelLikely = ref(true)
+  let gpuQualityDowngradeTimer: number | null = null
   onMounted(() => {
     // Keep deterministic in tests and avoid fighting the user in webdriver.
     if (isTestMode.value) return
@@ -929,13 +947,19 @@ export function useSimulatorApp(opts?: {
         { flush: 'sync' },
       )
 
-      window.setTimeout(() => {
+      if (gpuQualityDowngradeTimer != null) window.clearTimeout(gpuQualityDowngradeTimer)
+      gpuQualityDowngradeTimer = window.setTimeout(() => {
         stop()
         if (!touched && quality.value !== 'low') {
           quality.value = 'low'
         }
       }, 400)
     }
+  })
+
+  onUnmounted(() => {
+    if (gpuQualityDowngradeTimer != null) window.clearTimeout(gpuQualityDowngradeTimer)
+    gpuQualityDowngradeTimer = null
   })
 
   const viewWiring = useAppViewWiring({
@@ -1057,8 +1081,6 @@ export function useSimulatorApp(opts?: {
   wakeUpImpl = renderLoop.wakeUp
 
   const fxState = fxOverlays.fxState
-  // BUG-3: bind FxState for interact clearing FX (late-binding via closure above).
-  _interactFxState = fxState
   const hoveredEdge = fxOverlays.hoveredEdge
   const clearHoveredEdge = fxOverlays.clearHoveredEdge
   const activeEdges = fxOverlays.activeEdges
