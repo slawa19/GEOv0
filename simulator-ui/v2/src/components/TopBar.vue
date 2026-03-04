@@ -581,13 +581,13 @@ function onApplyIntensity() {
 
 <style scoped>
 .tb-mode-row {
-  gap: 10px;
+  gap: var(--ds-space-3, 12px);
   flex-wrap: wrap;
   align-items: center;
 }
 
 .tb-theme-row {
-  gap: 6px;
+  gap: var(--ds-space-2, 8px);
   align-items: center;
 }
 
@@ -596,7 +596,7 @@ function onApplyIntensity() {
 }
 
 .tb-run-controls {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
   flex-wrap: wrap;
 }
 
@@ -606,15 +606,15 @@ function onApplyIntensity() {
 }
 
 .tb-adv-summary {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .tb-adv-stack {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .tb-adv-row {
-  gap: 6px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .tb-intensity-input {
@@ -623,23 +623,23 @@ function onApplyIntensity() {
 }
 
 .tb-status-row {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
   justify-content: flex-end;
   flex-wrap: wrap;
 }
 
 .tb-admin-summary {
   display: flex;
-  gap: 6px;
+  gap: var(--ds-space-2, 8px);
   align-items: center;
 }
 
 .tb-admin-stack {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .tb-admin-actions {
-  gap: 6px;
+  gap: var(--ds-space-2, 8px);
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
@@ -658,7 +658,7 @@ function onApplyIntensity() {
 }
 
 .tb-runs-list {
-  gap: 3px;
+  gap: var(--ds-space-1, 4px);
   max-height: 320px;
   overflow-y: auto;
 }
@@ -667,7 +667,7 @@ function onApplyIntensity() {
   display: grid;
   grid-template-columns: 64px 68px 1fr auto auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--ds-space-2, 8px);
   padding: 5px 8px;
   background: var(--ds-surface-1);
   border: 1px solid var(--ds-border);
@@ -704,7 +704,7 @@ function onApplyIntensity() {
 }
 
 .tb-run-actions {
-  gap: 4px;
+  gap: var(--ds-space-1, 4px);
   align-items: center;
   flex-shrink: 0;
 }

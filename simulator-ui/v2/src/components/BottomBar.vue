@@ -276,7 +276,7 @@ async function onRunClearingOnce() {
 
 <style scoped>
 .bb-row {
-  gap: 6px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .bb-details {
@@ -284,15 +284,15 @@ async function onRunClearingOnce() {
 }
 
 .bb-summary {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .bb-stack {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .bb-stack-inner {
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
 }
 
 .bb-fade-85 {

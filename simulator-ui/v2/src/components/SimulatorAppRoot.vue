@@ -985,8 +985,21 @@ function snapshotNodeCenter(): Point | null {
 function getActionBarAnchor(): Point | null {
   const host = hostEl.value
   if (!host) return null
-  const rect = host.getBoundingClientRect()
-  return { x: rect.width, y: 98 }
+
+  // IMPORTANT: WM anchors must be in host-relative coordinates.
+  // Prefer measuring the actual ActionBar element so interact panels open near the toolbar,
+  // not at the far right edge of the viewport.
+  const hostRect = host.getBoundingClientRect()
+  const actionBarEl = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
+  if (!actionBarEl) {
+    // Fallback: previous behavior (top-right under the HUD stack).
+    return { x: hostRect.width, y: 98 }
+  }
+  const r = actionBarEl.getBoundingClientRect()
+  const x = r.right - hostRect.left
+  const y = r.bottom - hostRect.top
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return { x, y }
 }
 
 /** Computed: should TrustlineManagementPanel be shown? */
@@ -1218,7 +1231,7 @@ watch(interactPhase, (phase) => {
 <template>
   <div
     ref="hostEl"
-    class="root ds-ov-layer"
+    class="root ds-ov-vars"
     :data-theme="uiTheme"
     data-density="comfortable"
     data-motion="full"

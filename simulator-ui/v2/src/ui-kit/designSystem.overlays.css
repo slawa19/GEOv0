@@ -45,8 +45,9 @@
 
   We use a single tokenized inset and also respect mobile safe-areas.
 */
-.ds-ov-layer {
-  --ds-ov-inset: 12px;
+.ds-ov-layer,
+.ds-ov-vars {
+  --ds-ov-inset: var(--ds-space-3, 12px);
   --ds-ov-safe-top: env(safe-area-inset-top, 0px);
   --ds-ov-safe-right: env(safe-area-inset-right, 0px);
   --ds-ov-safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -77,7 +78,7 @@
 
 .ds-ov-row {
   display: flex;
-  gap: 10px;
+  gap: var(--ds-space-3, 12px);
   align-items: center;
   pointer-events: auto;
 }
@@ -85,7 +86,7 @@
 .ds-ov-top-grid {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 10px;
+  gap: var(--ds-space-3, 12px);
   align-items: start;
   pointer-events: auto;
 }
@@ -94,7 +95,8 @@
 .ds-ov-top-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--ds-space-3, 12px);
+  /* Vertical rhythm between TopBar / SystemBalanceBar / ActionBar rows */
+  gap: var(--ds-space-1, 4px);
   pointer-events: auto;
 }
 
@@ -105,7 +107,7 @@
 .ds-ov-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--ds-space-3, 12px);
   align-items: center;
   min-width: 0;
 }
@@ -126,14 +128,14 @@
 
 .ds-ov-btn-group {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--ds-space-1, 4px);
   align-items: center;
 }
 
 details.ds-ov-details > summary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
   cursor: pointer;
 }
 
@@ -174,7 +176,7 @@ details[open].ds-ov-details > summary::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px;
+  padding: var(--ds-space-3, 12px);
 }
 
 /* Overlay right-side panels (Interact panels) */
@@ -229,18 +231,18 @@ details[open].ds-ov-details > summary::after {
 /* Compact toolbar-like surface (layout only; visuals come from ds-panel). */
 .ds-ov-bar {
   display: inline-flex;
-  gap: 8px;
+  gap: var(--ds-space-2, 8px);
   align-items: center;
   flex-wrap: wrap;
-  padding: 8px 10px;
+  padding: var(--ds-space-2, 8px) var(--ds-space-2, 8px);
 }
 
 /* Small metric chip (layout only; visuals come from ds-panel). */
 .ds-ov-metric {
   display: inline-flex;
-  gap: 10px;
+  gap: var(--ds-space-3, 12px);
   align-items: center;
-  padding: 6px 8px;
+  padding: var(--ds-space-1, 4px) var(--ds-space-2, 8px);
   min-width: 0;
 }
 
@@ -248,8 +250,8 @@ details[open].ds-ov-details > summary::after {
 .ds-ov-dropdown {
   position: absolute;
   left: 0;
-  top: calc(100% + 6px);
-  padding: 8px 10px;
+  top: calc(100% + var(--ds-space-2, 8px));
+  padding: var(--ds-space-2, 8px) var(--ds-space-2, 8px);
   min-width: 320px;
   max-width: min(520px, calc(100% - 24px));
   z-index: var(--ds-z-inset, 60);
@@ -277,7 +279,7 @@ details[open].ds-ov-details > summary::after {
   pointer-events: none;
   transform: translate3d(0, 0, 0);
 
-  padding: 8px 10px;
+  padding: var(--ds-space-2, 8px) var(--ds-space-2, 8px);
   border-radius: var(--ds-radius-md);
   background: var(--ds-surface-2);
   border: 1px solid var(--ds-border);

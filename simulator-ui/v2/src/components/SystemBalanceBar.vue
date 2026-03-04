@@ -70,7 +70,7 @@ function fmt(n: number): string {
 
 <style scoped>
 .sbb-util {
-  gap: 10px;
+  gap: var(--ds-space-3, 12px);
 }
 
 .sbb-track {
