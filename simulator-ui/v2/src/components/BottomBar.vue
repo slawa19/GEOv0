@@ -302,4 +302,44 @@ async function onRunClearingOnce() {
 .bb-fade-90 {
   opacity: 0.9;
 }
+
+/* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */
+@media (max-width: 500px) {
+  /* Force left/right sections to wrap onto their own rows and fill full width */
+  :deep(.hud-bar__left),
+  :deep(.hud-bar__right) {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* Allow rows inside sections to wrap too */
+  .bb-row {
+    flex-wrap: wrap;
+  }
+
+  /* Select elements: shrink to fit, no fixed min-width */
+  :deep(.ds-select) {
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 auto;
+  }
+
+  /* Buttons: allow shrinking */
+  :deep(.ds-btn) {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  /* ds-label: no forced nowrap */
+  :deep(.ds-label) {
+    white-space: normal;
+    flex-shrink: 1;
+  }
+
+  /* ds-value: no forced nowrap */
+  :deep(.ds-value) {
+    white-space: normal;
+  }
+}
 </style>

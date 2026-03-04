@@ -2,6 +2,25 @@
 
 Дата: 2026-03-01
 
+## ✅ Статус внедрения (обязательные отметки)
+
+Связанный план исполнения: [plans/refactor-implementation-order-plan-2026-03-04.md](plans/refactor-implementation-order-plan-2026-03-04.md)
+
+Заполнять при работе по этапам E1/E2/E4:
+
+- Status: NOT STARTED / IN PROGRESS / DONE
+- PR/Commit:
+- Verification date:
+- Gate: `typecheck` / `vitest`
+- Manual QA (если делали):
+
+Чеклист (минимум при DONE):
+- [ ] Обновлён статус в плане (таблица execution log)
+- [ ] Этот документ обновлён (статус + карта соответствия)
+- [ ] Пройдены gate-проверки (`typecheck`, `vitest`)
+- [ ] AC-5 геометрия (pad/top/inset) проверена на реальном UI
+- [ ] AC-7 reduced-motion проверен (если трогали transitions)
+
 Источник требований:
 - `plans/archive/simulator-window-management-audit.md` (нормативный документ рефакторинга)
 

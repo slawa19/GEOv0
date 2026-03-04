@@ -5,6 +5,21 @@
 > **Scope**: ARCH-2 (REQ-23) + ARCH-3 (REQ-24) из [interact-windows-audit-2026-03-02.md](interact-windows-audit-2026-03-02.md)
 > **Статус**: DRAFT v1
 
+## ✅ Статус внедрения (обязательные отметки)
+
+Связанный план исполнения (этап E2): [plans/refactor-implementation-order-plan-2026-03-04.md](plans/refactor-implementation-order-plan-2026-03-04.md)
+
+- Status: NOT STARTED / IN PROGRESS / DONE
+- PR/Commit:
+- Gate: `typecheck` / `vitest` (дата)
+- Manual QA (что проверили):
+
+Чеклист (минимум при DONE):
+- [ ] В плане обновлён execution log для E2
+- [ ] Сведены все watcher-ы в единый derived state + один applyDiff watch (как описано в §3)
+- [ ] Удалены/упрощены watcher-ы в `SimulatorAppRoot.vue` согласно §4
+- [ ] Пройдены gate-проверки (`typecheck`, `vitest`)
+
 ---
 
 ## Содержание

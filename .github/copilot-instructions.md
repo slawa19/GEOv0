@@ -87,6 +87,14 @@
   5) Only after explicit confirmation: implement changes and validate.
 - Rationale: premature fixes without shared understanding create endless tweak loops and make review harder.
 
+## Workflow guardrail: parallel work safety (CRITICAL)
+
+- If the user says they are working in parallel (or it is otherwise implied), Copilot MUST NOT modify, delete, revert, move, or reformat any files that Copilot did not create in this session.
+- In that case Copilot MUST either:
+  - ask for explicit confirmation before touching any such file(s), or
+  - limit changes strictly to files Copilot created.
+- Exceptions are allowed only when the user explicitly requests the change to specific file(s).
+
 - TrustLine direction is `from → to` = creditor → debtor (risk limit), *not* the reverse.
 - Keep changes deterministic and validate fixtures (`npm run validate:fixtures`) after regeneration.
 - Canonical decisions and data contracts must be recorded in stable docs under `docs/ru/*` (e.g. `docs/ru/09-decisions-and-defaults.md` and the relevant domain docs like `docs/ru/simulator/backend/*`). Do not leave “single source of truth” rules only in `plans/*` or code-review notes.

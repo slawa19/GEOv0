@@ -727,4 +727,57 @@ function onApplyIntensity() {
 .tb-fade-92 {
   opacity: 0.92;
 }
+
+/* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */
+@media (max-width: 500px) {
+  /* Force left/center/right sections to wrap onto their own rows */
+  :deep(.hud-bar__left),
+  :deep(.hud-bar__center),
+  :deep(.hud-bar__right) {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* Segmented control: allow wrapping inside */
+  :deep(.ds-segmented) {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  /* Each segment button: shrink to fit */
+  :deep(.ds-segment) {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  /* Select elements: shrink to fit */
+  :deep(.ds-select) {
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 auto;
+  }
+
+  /* Buttons: allow shrinking */
+  :deep(.ds-btn) {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  /* ds-label: no forced nowrap */
+  :deep(.ds-label) {
+    white-space: normal;
+    flex-shrink: 1;
+  }
+
+  /* Theme row: allow wrapping */
+  .tb-theme-row {
+    flex-wrap: wrap;
+  }
+
+  /* Mode row: already has flex-wrap:wrap - ensure min-width:0 */
+  .tb-mode-row {
+    min-width: 0;
+  }
+}
 </style>

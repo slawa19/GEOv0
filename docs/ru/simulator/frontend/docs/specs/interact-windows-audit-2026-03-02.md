@@ -6,6 +6,21 @@
 > **Ветка**: текущий `main` на момент аудита  
 > **Статус**: DRAFT v2 (обновлено по результатам ревью)
 
+## ✅ Трекинг внедрения (обязательные отметки)
+
+Этот файл — аудит/контекст. Реальные работы трекаются в плане:
+[plans/refactor-implementation-order-plan-2026-03-04.md](plans/refactor-implementation-order-plan-2026-03-04.md)
+
+Заполнять при переносе выводов аудита в код (обычно E2/E3/E4):
+
+- Status: NOT STARTED / IN PROGRESS / DONE
+- PR/Commit:
+- Updated:
+
+Чеклист (минимум при DONE):
+- [ ] В плане обновлён execution log соответствующего этапа
+- [ ] В этом документе отмечено, какие пункты закрыты (с ссылкой на PR/commit)
+
 Связанные спецификации:
 - План удаления legacy runtime (WM-only) + референс через скриншоты: [legacy-removal-wm-only-plan-2026-03-03.md](legacy-removal-wm-only-plan-2026-03-03.md)
 - Референс верстки legacy окон (HTML snapshots): [legacy-windows-reference/README.md](legacy-windows-reference/README.md)
