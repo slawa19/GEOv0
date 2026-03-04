@@ -184,37 +184,39 @@ async function onRunClearingOnce() {
 
         <details
           v-if="activeSegment === 'auto'"
-          class="ds-panel ds-ov-metric ds-ov-details bb-details"
+          class="ds-ov-details bb-details"
           aria-label="Artifacts"
         >
-          <summary class="ds-row bb-summary">
+          <summary class="ds-panel ds-ov-metric ds-row bb-summary">
             <span class="ds-badge ds-badge--info">Artifacts</span>
             <span class="ds-value bb-fade-85">{{ artifacts.length || 0 }}</span>
           </summary>
-          <div class="ds-stack bb-stack">
-            <div class="ds-row bb-row">
-              <button
-                class="ds-btn ds-btn--secondary ds-btn--sm"
-                type="button"
-                :disabled="!runId || artifactsLoading"
-                :title="!runId ? 'Start a run first' : 'Refresh artifacts'"
-                @click="refreshArtifacts"
-              >
-                {{ artifactsLoading ? 'Loading…' : 'Refresh' }}
-              </button>
-              <div v-if="!runId" class="ds-label bb-fade-85">Start a run first</div>
-              <div v-else-if="!artifacts.length" class="ds-label bb-fade-85">No artifacts</div>
-            </div>
-            <div v-if="artifacts.length" class="ds-row bb-row">
-              <button
-                v-for="a in artifacts"
-                :key="a.name"
-                class="ds-btn ds-btn--secondary ds-btn--sm"
-                type="button"
-                @click="downloadArtifact(a.name)"
-              >
-                {{ a.name }}
-              </button>
+          <div class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right">
+            <div class="ds-stack bb-stack">
+              <div class="ds-row bb-row">
+                <button
+                  class="ds-btn ds-btn--secondary ds-btn--sm"
+                  type="button"
+                  :disabled="!runId || artifactsLoading"
+                  :title="!runId ? 'Start a run first' : 'Refresh artifacts'"
+                  @click="refreshArtifacts"
+                >
+                  {{ artifactsLoading ? 'Loading…' : 'Refresh' }}
+                </button>
+                <div v-if="!runId" class="ds-label bb-fade-85">Start a run first</div>
+                <div v-else-if="!artifacts.length" class="ds-label bb-fade-85">No artifacts</div>
+              </div>
+              <div v-if="artifacts.length" class="ds-row bb-row">
+                <button
+                  v-for="a in artifacts"
+                  :key="a.name"
+                  class="ds-btn ds-btn--secondary ds-btn--sm"
+                  type="button"
+                  @click="downloadArtifact(a.name)"
+                >
+                  {{ a.name }}
+                </button>
+              </div>
             </div>
           </div>
         </details>
@@ -223,37 +225,44 @@ async function onRunClearingOnce() {
           v-if="isDevToolsVisible || allowDemoUi"
           :open="devToolsOpen"
           @toggle="onDevToolsToggle"
-          class="ds-panel ds-ov-metric ds-ov-details bb-details"
+          class="ds-ov-details bb-details"
           aria-label="Dev tools"
         >
-          <summary class="ds-row bb-summary">
+          <summary class="ds-panel ds-ov-metric ds-row bb-summary">
             <span class="ds-badge ds-badge--warn">Dev</span>
             <span class="ds-label bb-fade-90">Tools</span>
           </summary>
-          <div class="ds-stack bb-stack">
-            <div class="ds-row bb-row">
+          <div
+            class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right bb-devtools-dropdown"
+          >
+            <div class="ds-row bb-row bb-devtools-row">
               <button
                 class="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
                 :disabled="isDemoUi && isExiting"
                 @click="toggleDemoUi"
               >
-                {{ isDemoUi ? (isExiting ? 'Exiting…' : 'Exit Demo UI') : 'Enter Demo UI' }}
+                {{ isDemoUi ? (isExiting ? 'Exiting…' : 'Exit Demo') : 'Enter Demo' }}
               </button>
-            </div>
 
-            <div v-if="fxDebugEnabled" class="ds-stack bb-stack-inner">
-              <div class="ds-row bb-row">
-                <span class="ds-label">FX Debug</span>
-              </div>
-              <div class="ds-row bb-row">
-                <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="fxBusy" @click="onRunTxOnce">
+              <template v-if="isDemoUi && fxDebugEnabled">
+                <button
+                  class="ds-btn ds-btn--secondary ds-btn--sm"
+                  type="button"
+                  :disabled="fxBusy"
+                  @click="onRunTxOnce"
+                >
                   Single Tx
                 </button>
-                <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="fxBusy" @click="onRunClearingOnce">
+                <button
+                  class="ds-btn ds-btn--secondary ds-btn--sm"
+                  type="button"
+                  :disabled="fxBusy"
+                  @click="onRunClearingOnce"
+                >
                   Run Clearing
                 </button>
-              </div>
+              </template>
             </div>
           </div>
         </details>
@@ -285,6 +294,18 @@ async function onRunClearingOnce() {
 
 .bb-summary {
   gap: var(--ds-space-2, 8px);
+}
+
+.bb-devtools-dropdown {
+  /* Compact popover: only one row of buttons, no extra stacks/headers. */
+  min-width: 0;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+}
+
+.bb-devtools-row {
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .bb-stack {

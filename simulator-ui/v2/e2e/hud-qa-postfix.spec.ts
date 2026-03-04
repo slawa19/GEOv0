@@ -2,10 +2,11 @@
  * HUD QA §4 — Post-fix verification (after HudBar shrink fix)
  * Checks: overflow, dropdown clip, CSS vars, !important guards
  */
+/// <reference types="node" />
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
-import { mkdirSync, writeFileSync, readFileSync } from 'fs'
-import { resolve, join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { resolve, join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirnameCurrent = dirname(__filename)

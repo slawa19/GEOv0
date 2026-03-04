@@ -269,6 +269,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   margin-bottom: 6px;
 }
 
+.nco-interact-actions > .ds-btn {
+  flex: 1 1 0;
+  min-width: 140px;
+}
+
 /* Trustlines list */
 .nco-trustlines {
   margin-top: 1px;

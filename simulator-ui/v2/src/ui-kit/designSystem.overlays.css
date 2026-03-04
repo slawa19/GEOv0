@@ -273,8 +273,21 @@ details[open].ds-ov-details > summary::after {
   padding: var(--ds-space-2, 8px) var(--ds-space-2, 8px);
   min-width: 320px;
   max-width: min(520px, calc(100% - 24px));
+  max-height: min(70vh, 520px);
   z-index: var(--ds-z-inset, 60);
   pointer-events: auto;
+}
+
+/* When ds-ov-dropdown is combined with ds-panel, allow internal scrolling.
+   (ds-panel sets overflow: hidden by default.) */
+.ds-ov-dropdown.ds-panel {
+  overflow: auto;
+}
+
+/* Bottom-up dropdown (for BottomBar; TopBar is top-down by default). */
+.ds-ov-dropdown--up {
+  top: auto;
+  bottom: calc(100% + var(--ds-space-2, 8px));
 }
 
 .ds-ov-dropdown--right {

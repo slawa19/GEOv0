@@ -3026,7 +3026,7 @@ describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
       expect(devDetails).toBeTruthy()
       devDetails!.open = true
 
-      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Enter Demo UI')) as
+      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Enter Demo')) as
         | HTMLButtonElement
         | undefined
       expect(btn).toBeTruthy()
@@ -3075,7 +3075,7 @@ describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
       expect(devDetails).toBeTruthy()
       devDetails!.open = true
 
-      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Exit Demo UI')) as
+      const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').includes('Exit Demo')) as
         | HTMLButtonElement
         | undefined
       expect(btn).toBeTruthy()
