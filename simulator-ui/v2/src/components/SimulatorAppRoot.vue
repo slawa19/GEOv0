@@ -962,26 +962,30 @@ function snapshotNodeCenter(): Point | null {
   return getNodeScreenCenter(nodeId)
 }
 
-/**
- * Returns an anchor for ActionBar-opened panels.
- *
- * Design goals:
- * - Panel appears in the top-right corner, directly under the ActionBar buttons.
- * - Stays within screen bounds regardless of viewport width.
- * - Does NOT rely on CSS `right: 12px` default — explicit inline style wins every time.
- *
- * Math (see placeOverlayNearAnchor in overlayPosition.ts):
- *   left = clamp(anchor.x + offX, pad, vw - panelW - pad)
- *   with anchor.x = rect.width, offX = 12, pad = 12, panelW = 560:
- *   → left = clamp(rect.width + 12, 12, rect.width - 572)
- *   → left = rect.width - 572  (right-edge of panel = rect.width - 12 ✓)
- *
- *   top = clamp(anchor.y + offY, pad, vh - panelH - pad)
- *   with anchor.y = 98, offY = 12:
- *   → top = 110px  (matches .ds-ov-panel CSS default, just below ActionBar)
- *
- * If hostEl is unavailable (SSR / tests), returns null → CSS default applies.
- */
+ /**
+  * Returns an anchor for ActionBar-opened panels.
+  *
+  * Design goals:
+  * - Panel appears in the top-right corner, directly under the ActionBar buttons.
+  * - Stays within screen bounds regardless of viewport width.
+  * - Does NOT rely on CSS `right: 12px` default — explicit inline style wins every time.
+  *
+  * Anchor coordinates (WM requires host-relative coordinates; see R-14):
+  * - hostRect = host.getBoundingClientRect()
+  * - r = barEl.getBoundingClientRect()
+  * - x = r.left - hostRect.left
+  * - y = r.bottom - hostRect.top
+  *
+  * Positioning math (see placeOverlayNearAnchor in overlayPosition.ts):
+  *   left = clamp(x + offX, pad, hostRect.width - panelW - pad)
+  *   top  = clamp(y + offY, pad, hostRect.height - panelH - pad)
+  *
+  * Fallback (legacy top-right HUD behavior):
+  * - If the ActionBar element cannot be found, anchor to the host's right edge:
+  *   x = hostRect.width, y = 98.
+  *
+  * If hostEl is unavailable (SSR / tests), returns null → CSS default applies.
+  */
 function getActionBarAnchor(): Point | null {
   const host = hostEl.value
   if (!host) return null
