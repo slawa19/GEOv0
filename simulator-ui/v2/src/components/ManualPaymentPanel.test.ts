@@ -264,6 +264,80 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
+  it('AC-MP: selecting From as To clears To and shows self-payment warning', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'picking-payment-to',
+      fromPid: 'alice' as string | null,
+      toPid: 'alice' as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null as any,
+    })
+
+    const ui = reactive({
+      phase: 'picking-payment-to' as const,
+      paymentToTargetIds: undefined as Set<string> | undefined,
+    })
+
+    const setToPid = vi.fn((pid: string | null) => {
+      state.toPid = pid
+    })
+
+    const app = createApp({
+      render: () =>
+        h(ManualPaymentPanel as any, {
+          phase: ui.phase,
+          state,
+
+          unit: 'UAH',
+          availableCapacity: null,
+
+          trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
+          paymentToTargetIds: ui.paymentToTargetIds,
+          trustlines: [],
+
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+          ],
+
+          setFromPid: vi.fn(),
+          setToPid,
+
+          busy: false,
+          canSendPayment: false,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    // Become known to trigger the watcher.
+    ui.paymentToTargetIds = new Set(['bob'])
+    await nextTick()
+    await nextTick()
+
+    expect(state.toPid).toBe(null)
+
+    const warn = host.querySelector('[data-testid="manual-payment-to-invalid-warn"]') as HTMLElement
+    expect(warn).toBeTruthy()
+    expect((warn.textContent ?? '').trim()).toContain('You cannot send a payment to yourself')
+
+    app.unmount()
+    host.remove()
+  })
+
   it("MP-4: normalizes amount before sending ('1,5' -> '1.5')", async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

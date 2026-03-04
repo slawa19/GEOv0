@@ -977,6 +977,13 @@ export function useSimulatorApp(opts?: {
   const selectedNode = viewWiring.selectedNode
   const selectedNodeScreenCenter = viewWiring.selectedNodeScreenCenter
 
+  function getNodeScreenCenter(nodeId: string): Point | null {
+    if (!nodeId) return null
+    const node = getLayoutNodeByIdLive(nodeId)
+    if (!node) return null
+    return worldToScreen(node.__x, node.__y)
+  }
+
   const selectedNodeEdgeStats = useSelectedNodeEdgeStats({
     getSnapshot: () => state.snapshot,
     getSelectedNodeId: () => state.selectedNodeId,
@@ -1161,6 +1168,9 @@ export function useSimulatorApp(opts?: {
   const pinning = physicsAndPinning.pinning
   const pinnedPos = physicsAndPinning.pinnedPos
   const isSelectedPinned = physicsAndPinning.isSelectedPinned
+  const isNodePinned = physicsAndPinning.isPinned
+  const pinNode = physicsAndPinning.pinNode
+  const unpinNode = physicsAndPinning.unpinNode
   const pinSelectedNode = physicsAndPinning.pinSelectedNode
   const unpinSelectedNode = physicsAndPinning.unpinSelectedNode
 
@@ -1630,7 +1640,7 @@ export function useSimulatorApp(opts?: {
     selectNode(id)
 
     if (typeof opts?.uiOpenOrUpdateNodeCard === 'function') {
-      opts.uiOpenOrUpdateNodeCard({ nodeId: id, anchor: selectedNodeScreenCenter.value })
+      opts.uiOpenOrUpdateNodeCard({ nodeId: id, anchor: getNodeScreenCenter(id) })
     }
   }
 
@@ -2273,11 +2283,15 @@ export function useSimulatorApp(opts?: {
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
     selectedNode: viewWiring.selectedNode,
     selectedNodeScreenCenter,
+    getNodeScreenCenter,
     selectedNodeEdgeStats,
 
     // pinning
     dragToPin,
     isSelectedPinned,
+    isNodePinned,
+    pinNode,
+    unpinNode,
     pinSelectedNode,
     unpinSelectedNode,
 

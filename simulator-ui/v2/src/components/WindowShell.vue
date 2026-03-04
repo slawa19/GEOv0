@@ -187,6 +187,11 @@ function onCloseClick(ev: MouseEvent) {
   max-height: calc(100% - 24px);
 }
 
+/* UX-1: contain layout+style in frameless mode — browser hint that reflow stays inside shell */
+.ws-shell:not(.ws-shell--framed) {
+  contain: layout style;
+}
+
 .ws-shell--framed {
   display: flex;
   flex-direction: column;

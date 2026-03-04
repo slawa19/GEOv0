@@ -398,11 +398,15 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         edgeTooltipStyle: () => ({}),
         selectedNode: computed(() => selectedNode.value),
         selectedNodeScreenCenter: computed(() => selectedNodeScreenCenter.value),
+        getNodeScreenCenter: () => selectedNodeScreenCenter.value ?? null,
         selectedNodeEdgeStats: computed(() => null),
 
         // pinning
         dragToPin: reactive({ dragState: { active: false } }),
         isSelectedPinned: computed(() => false),
+        isNodePinned: () => false,
+        pinNode: vi.fn(),
+        unpinNode: vi.fn(),
         pinSelectedNode: vi.fn(),
         unpinSelectedNode: vi.fn(),
 
@@ -971,7 +975,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('Send Payment from edge-detail keeps edge-detail window open (keepAlive)', async () => {
+  it('ARCH-7: EdgeDetail in keepAlive shows frozen edge context, not live interact state (Send Payment from edge-detail keeps edge-detail window open)', async () => {
     ;(globalThis as any).__GEO_TEST_INTERACT_PHASE = 'editing-trustline'
     setUrl('/?mode=real&ui=interact')
 

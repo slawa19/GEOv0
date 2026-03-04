@@ -126,6 +126,9 @@ const confirmDisabledReason = computed<string | null>(() => {
 
   const from = (props.state.fromPid ?? '').trim()
   const to = (props.state.toPid ?? '').trim()
+  if (from && to && from === to) {
+    return 'You cannot send a payment to yourself.'
+  }
   if (from && to && props.canSendPayment === false) {
     return 'Backend reports no payment routes between selected participants.'
   }
@@ -310,6 +313,14 @@ watch(
     const to = (toPid ?? '').trim()
     if (!to) return
 
+    // Self-payment is always invalid (regardless of routes loading/known state).
+    const from = (props.state.fromPid ?? '').trim()
+    if (from && to === from) {
+      props.setToPid?.(null)
+      toSelectionInvalidWarning.value = 'You cannot send a payment to yourself. Please select a different recipient.'
+      return
+    }
+
     // Unknown: do NOT reset.
     if (targets === undefined) return
 
@@ -480,6 +491,11 @@ function onToChange(v: string) {
 </template>
 
 <style scoped>
+/* UX-1: min-height prevents 1-frame layout jump during loading stub → content growth */
+.ds-ov-panel {
+  min-height: 260px;
+}
+
 .mp-pick-help {
   margin: 6px 0 2px;
 }

@@ -45,6 +45,9 @@ export function useAppPhysicsAndPinning(deps: {
     physics,
     pinning,
     isSelectedPinned: pinning.isSelectedPinned,
+    isPinned: pinning.isPinned,
+    pinNode: pinning.pinNode,
+    unpinNode: pinning.unpinNode,
     pinSelectedNode: pinning.pinSelectedNode,
     unpinSelectedNode: pinning.unpinSelectedNode,
   }

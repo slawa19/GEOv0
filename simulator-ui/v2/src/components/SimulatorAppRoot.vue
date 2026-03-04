@@ -106,6 +106,7 @@ onUnmounted(() => {
 import type { GraphLink } from '../types'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
+import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { emptyToNull, emptyToNullString } from '../utils/valueFormat'
  import { keyEdge } from '../utils/edgeKey'
  import { useWindowManager } from '../composables/windowManager/useWindowManager'
@@ -285,14 +286,13 @@ const {
   clearHoveredEdge,
   edgeTooltipStyle: calcEdgeTooltipStyle,
   selectedNode,
-  selectedNodeScreenCenter,
-  selectedNodeEdgeStats,
+  getNodeScreenCenter,
 
   // pinning
   dragToPin,
-  isSelectedPinned,
-  pinSelectedNode,
-  unpinSelectedNode,
+  isNodePinned,
+  pinNode,
+  unpinNode,
 
   // handlers
   onCanvasClick,
@@ -311,6 +311,12 @@ const {
   getNodeById,
   resetView,
 } = app
+
+function nodeEdgeStatsFor(nodeId: string): ReturnType<typeof computeNodeEdgeStats> | null {
+  const snapshot = state.snapshot
+  if (!snapshot || !nodeId) return null
+  return computeNodeEdgeStats(snapshot, nodeId)
+}
 
 const interactPhase = computed<InteractPhase>(() => interact.mode.phase.value as InteractPhase)
 
@@ -566,10 +572,14 @@ watch(
 // UX-9: NodeCard → WindowManager anchor follow (throttled)
 // ---------------------------------------------------------------------------
 
-const selectedNodeScreenCenterKey = computed(() => {
-  const p = selectedNodeScreenCenter.value
+const nodeCardScreenCenterKey = computed(() => {
+  const win = wm.windows.value.find((w) => w.type === 'node-card' && w.state !== 'closing')
+  if (!win) return ''
+  const nodeId = String((win.data as any)?.nodeId ?? '')
+  if (!nodeId) return ''
+  const p = getNodeScreenCenter(nodeId)
   if (!p) return ''
-  return `${p.x}|${p.y}`
+  return `${nodeId}|${p.x}|${p.y}`
 })
 
 const nodeCardAnchorUpdater = createPeriodicTrailingThrottle(
@@ -595,9 +605,7 @@ watch(
   [
     // Whether a node-card window currently exists (WM source of truth).
     () => wm.windows.value.some((w) => w.type === 'node-card' && w.state !== 'closing'),
-    // If selection changes, the screen center key likely changes too; keep both explicit.
-    () => String((selectedNode.value as any)?.id ?? ''),
-    () => selectedNodeScreenCenterKey.value,
+    () => nodeCardScreenCenterKey.value,
   ],
   ([isOpen]) => {
     if (!isOpen) return
@@ -608,14 +616,9 @@ watch(
     const nodeId = String((win.data as any)?.nodeId ?? '')
     if (!nodeId) return
 
-    // Safety: only follow anchor when the NodeCard corresponds to the selected node.
-    // (Avoid jumping to an unrelated selection if those are decoupled in some flows.)
-    const selectedId = String((selectedNode.value as any)?.id ?? '')
-    if (!selectedId || selectedId !== nodeId) return
-
     // Avoid redundant `wm.open()` right after the initial open.
     // (That would cause extra WM churn and can trigger a visible jump while unmeasured.)
-    const p = selectedNodeScreenCenter.value
+    const p = getNodeScreenCenter(nodeId)
     if (!p) return
     const cur = win.anchor
     if (cur && cur.x === p.x && cur.y === p.y && cur.space === 'host' && cur.source === 'node') {
@@ -949,10 +952,14 @@ const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
 
 /**
  * Snapshot the selected node's screen-space center.
- * Must be called BEFORE closing the NodeCard (selectedNode is still valid at that point).
+ * Uses the WM NodeCard's nodeId (sticky inspector), not the global selection.
  */
 function snapshotNodeCenter(): Point | null {
-  return selectedNodeScreenCenter.value ?? null
+  const win = wm.windows.value.find((w) => w.type === 'node-card' && w.state !== 'closing')
+  if (!win) return null
+  const nodeId = String((win.data as any)?.nodeId ?? '')
+  if (!nodeId) return null
+  return getNodeScreenCenter(nodeId)
 }
 
 /**
@@ -1122,7 +1129,7 @@ function startFlowFromNodeCard(opts: {
 }) {
   // Not an edge-popup initiated action.
   wmEdgePopupAnchor.value = null
-  // Snapshot node screen center BEFORE closing the card (selectedNode cleared after close).
+  // Snapshot NodeCard node screen center BEFORE phase changes.
   const snapshot = snapshotNodeCenter()
 
   if (opts.openEditor) useFullTrustlineEditor.value = true
@@ -1336,12 +1343,12 @@ watch(interactPhase, (phase) => {
         <NodeCardOverlay
           v-else-if="isNodeCardWindow(win) && getNodeById(String(win.data.nodeId))"
           :node="getNodeById(String(win.data.nodeId))!"
-          :edge-stats="selectedNodeEdgeStats"
+          :edge-stats="nodeEdgeStatsFor(String(win.data.nodeId))"
           :equivalent-text="state.snapshot?.equivalent ?? ''"
           :show-pin-actions="!isTestMode && !isWebDriver"
-          :is-pinned="isSelectedPinned"
-          :pin="pinSelectedNode"
-          :unpin="unpinSelectedNode"
+          :is-pinned="isNodePinned(String(win.data.nodeId))"
+          :pin="() => pinNode(String(win.data.nodeId))"
+          :unpin="() => unpinNode(String(win.data.nodeId))"
           :interact-mode="isInteractUi"
           :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
           :trustlines-loading="isInteractUi ? interact.mode.trustlinesLoading.value : undefined"

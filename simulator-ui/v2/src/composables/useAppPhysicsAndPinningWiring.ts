@@ -38,6 +38,9 @@ export function useAppPhysicsAndPinningWiring(opts: {
     pinning: physicsAndPinning.pinning,
 
     isSelectedPinned: physicsAndPinning.isSelectedPinned,
+    isPinned: physicsAndPinning.isPinned,
+    pinNode: physicsAndPinning.pinNode,
+    unpinNode: physicsAndPinning.unpinNode,
     pinSelectedNode: physicsAndPinning.pinSelectedNode,
     unpinSelectedNode: physicsAndPinning.unpinSelectedNode,
   }

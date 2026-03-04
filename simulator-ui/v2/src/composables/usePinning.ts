@@ -28,6 +28,10 @@ export function usePinning(opts: {
     return pinnedPos.has(id)
   })
 
+  function isPinned(id: string): boolean {
+    return pinnedPos.has(id)
+  }
+
   function captureBaseline(nodes: readonly LayoutNode[]) {
     baselineLayoutPos.clear()
     for (const n of nodes) baselineLayoutPos.set(n.id, { x: n.__x, y: n.__y })
@@ -42,10 +46,7 @@ export function usePinning(opts: {
     }
   }
 
-  function pinSelectedNode() {
-    const id = getSelectedNodeId()
-    if (!id) return
-
+  function pinNode(id: string) {
     const ln = getLayoutNodeById(id)
     if (!ln) return
 
@@ -54,10 +55,7 @@ export function usePinning(opts: {
     wakeUp?.()
   }
 
-  function unpinSelectedNode() {
-    const id = getSelectedNodeId()
-    if (!id) return
-
+  function unpinNode(id: string) {
     pinnedPos.delete(id)
     physics.unpin(id)
 
@@ -65,10 +63,25 @@ export function usePinning(opts: {
     wakeUp?.()
   }
 
+  function pinSelectedNode() {
+    const id = getSelectedNodeId()
+    if (!id) return
+    pinNode(id)
+  }
+
+  function unpinSelectedNode() {
+    const id = getSelectedNodeId()
+    if (!id) return
+    unpinNode(id)
+  }
+
   return {
     isSelectedPinned,
+    isPinned,
     captureBaseline,
     reapplyPinnedToLayout,
+    pinNode,
+    unpinNode,
     pinSelectedNode,
     unpinSelectedNode,
   }

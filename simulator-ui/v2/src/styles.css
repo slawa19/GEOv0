@@ -1,4 +1,10 @@
-html, body {
+html, body, #app {
   height: 100%;
+  width: 100%;
   margin: 0;
+}
+
+/* Keep the simulator as a fixed viewport app (all scrolling is internal). */
+body {
+  overflow: hidden;
 }

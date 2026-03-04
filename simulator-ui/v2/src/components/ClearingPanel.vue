@@ -127,6 +127,11 @@ const busyUi = computed(() => props.busy || isRunning.value)
 </template>
 
 <style scoped>
+/* UX-1: min-height prevents 1-frame layout jump during loading stub → content growth */
+.ds-ov-panel {
+  min-height: 240px;
+}
+
 .cp-equivalent-row {
   margin-bottom: 2px;
 }

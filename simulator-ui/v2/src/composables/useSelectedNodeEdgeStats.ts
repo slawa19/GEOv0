@@ -17,34 +17,38 @@ type UseSelectedNodeEdgeStatsReturn = {
   selectedNodeEdgeStats: ComputedRef<SelectedNodeEdgeStats | null>
 }
 
+export function computeNodeEdgeStats(snapshot: GraphSnapshot, id: string): SelectedNodeEdgeStats {
+  let inLimit = 0
+  let outLimit = 0
+  let degree = 0
+
+  for (const l of snapshot.links) {
+    const limit = asFiniteNumber(l.trust_limit)
+    if (l.source === id) {
+      outLimit += limit
+      degree += 1
+      continue
+    }
+    if (l.target === id) {
+      inLimit += limit
+      degree += 1
+    }
+  }
+
+  return {
+    inLimitText: formatAmount2(inLimit),
+    outLimitText: formatAmount2(outLimit),
+    degree,
+  }
+}
+
 export function useSelectedNodeEdgeStats(deps: UseSelectedNodeEdgeStatsDeps): UseSelectedNodeEdgeStatsReturn {
   const selectedNodeEdgeStats = computed(() => {
     const snapshot = deps.getSnapshot()
     const id = deps.getSelectedNodeId()
     if (!snapshot || !id) return null
 
-    let inLimit = 0
-    let outLimit = 0
-    let degree = 0
-
-    for (const l of snapshot.links) {
-      const limit = asFiniteNumber(l.trust_limit)
-      if (l.source === id) {
-        outLimit += limit
-        degree += 1
-        continue
-      }
-      if (l.target === id) {
-        inLimit += limit
-        degree += 1
-      }
-    }
-
-    return {
-      inLimitText: formatAmount2(inLimit),
-      outLimitText: formatAmount2(outLimit),
-      degree,
-    }
+    return computeNodeEdgeStats(snapshot, id)
   })
 
   return { selectedNodeEdgeStats }

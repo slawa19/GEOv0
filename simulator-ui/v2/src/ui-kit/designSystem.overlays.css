@@ -33,20 +33,40 @@
   pointer-events: auto;
 }
 
+/*
+  Global overlay insets
+
+  Goal: all HUD bars and overlay panels should keep a stable, even spacing from
+  viewport edges.
+
+  Why: using `100vw` + centering transforms (`left:50%/translateX(-50%)`) can
+  produce subtle horizontal drift / uneven edge spacing (e.g. when the browser
+  shows scrollbars, or when viewport units differ from layout viewport).
+
+  We use a single tokenized inset and also respect mobile safe-areas.
+*/
+.ds-ov-layer {
+  --ds-ov-inset: 12px;
+  --ds-ov-safe-top: env(safe-area-inset-top, 0px);
+  --ds-ov-safe-right: env(safe-area-inset-right, 0px);
+  --ds-ov-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ds-ov-safe-left: env(safe-area-inset-left, 0px);
+}
+
 .ds-ov-top {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
+  top: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-top, 0px));
+  left: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-left, 0px));
+  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
   z-index: var(--ds-z-top, 40);
   pointer-events: none;
 }
 
 .ds-ov-bottom {
   position: absolute;
-  left: 50%;
-  bottom: 12px;
-  transform: translateX(-50%);
+  left: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-left, 0px));
+  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
+  bottom: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-bottom, 0px));
   z-index: var(--ds-z-bottom, 30);
   pointer-events: auto;
 }
@@ -121,8 +141,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  /* Match top-bar visual inset (ds-ov-top uses left/right: 12px). */
-  width: calc(100vw - 24px);
+  /* Fill ds-ov-bottom (which has left/right insets). */
+  width: 100%;
   box-sizing: border-box;
   /* Slightly roomier than generic ds-ov-bar for better balance. */
   padding: var(--ds-space-2) var(--ds-space-3);
@@ -222,13 +242,13 @@ details[open].ds-ov-details > summary::after {
 /* Overlay right-side panels (Interact panels) */
 .ds-ov-panel {
   position: absolute;
-  right: 12px;
-  top: 110px;
+  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
+  top: calc(110px + var(--ds-ov-safe-top, 0px));
   z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
   min-width: 320px;
-  max-width: min(560px, calc(100vw - 24px));
+  max-width: min(560px, calc(100% - 24px));
 }
 
 /* Edge detail popup (Interact mode) — visuals only; placement comes from inline style */
@@ -241,10 +261,10 @@ details[open].ds-ov-details > summary::after {
 /* Dev perf overlay — corner placement + tokenized visuals */
 .ds-ov-dev-perf {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
+  bottom: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-bottom, 0px));
   z-index: var(--ds-z-dev, 50);
-  max-width: min(720px, calc(100vw - 24px));
+  max-width: min(720px, calc(100% - 24px));
   max-height: min(70vh, 520px);
   overflow: auto;
   pointer-events: auto;
@@ -293,7 +313,7 @@ details[open].ds-ov-details > summary::after {
   top: calc(100% + 6px);
   padding: 8px 10px;
   min-width: 320px;
-  max-width: min(520px, calc(100vw - 24px));
+  max-width: min(520px, calc(100% - 24px));
   z-index: var(--ds-z-inset, 60);
   pointer-events: auto;
 }
@@ -350,7 +370,7 @@ details[open].ds-ov-details > summary::after {
 .ds-ov-node-card {
   position: absolute;
   width: 320px;
-  max-width: min(400px, calc(100vw - 24px));
+  max-width: min(400px, calc(100% - 24px));
   z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
