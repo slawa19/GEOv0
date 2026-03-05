@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { SimulatorMode } from '../api/simulatorTypes'
 import type { UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
+import { isJwtLike } from '../utils/isJwtLike'
 
 import { useTopBarContext } from '../composables/useTopBarContext'
 import HudBar from './common/HudBar.vue'
@@ -141,15 +142,6 @@ const stopSummary = computed(() => {
 // ============================
 // §10: Admin controls
 // ============================
-
-/**
- * Admin controls are only visible when an access token is present.
- * Anonymous visitors (cookie-only) do not see admin panel.
- */
-function isJwtLike(token: string): boolean {
-  const t = token.trim()
-  return t.split('.').length === 3
-}
 
 /**
  * Admin controls are only visible when the token is an admin token (non-JWT).

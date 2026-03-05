@@ -3,6 +3,7 @@ import { watch } from 'vue'
 
 import { useWindowManager } from './useWindowManager'
 import type { WindowInstance } from './types'
+import { DEFAULT_WM_CLAMP_PAD_PX, readOverlayGeometryPx } from '../../ui-kit/overlayGeometry'
 
 function last<T>(a: T[]): T {
   return a[a.length - 1]!
@@ -291,12 +292,44 @@ describe('useWindowManager (MVP)', () => {
     wm.reclamp(id)
     const w = wm.windows.value.find((x) => x.id === id)!
 
-    // viewport меньше окна → прижимаем к pad (12)
-    expect(w.rect.left).toBe(12)
-    expect(w.rect.top).toBe(12)
+    // viewport меньше окна → прижимаем к pad
+    expect(w.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(w.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
 
     expect(w.rect.width).toBe(380)
     expect(w.rect.height).toBe(260)
+  })
+
+  it('E1: reclamp pad is driven by a single DS token source (--ds-wm-clamp-pad)', () => {
+    const wm = useWindowManager()
+
+    const host = document.createElement('div')
+    host.style.setProperty('--ds-wm-clamp-pad', '20px')
+    host.style.setProperty('--ds-hud-stack-height', '110px')
+    document.body.appendChild(host)
+    try {
+      const geo = readOverlayGeometryPx(host)
+      expect(geo.wmClampPadPx).toBe(20)
+
+      wm.setGeometry({
+        clampPadPx: geo.wmClampPadPx,
+        dockedRightInsetPx: geo.wmClampPadPx,
+        dockedRightTopPx: geo.hudStackHeightPx,
+      })
+
+      wm.setViewport({ width: 300, height: 200 })
+
+      const id = wm.open({ type: 'interact-panel', data: { panel: 'trustline', phase: 'x' } })
+
+      wm.updateMeasuredSize(id, { width: 380, height: 260 })
+      wm.reclamp(id)
+      const w = wm.windows.value.find((x) => x.id === id)!
+
+      expect(w.rect.left).toBe(20)
+      expect(w.rect.top).toBe(20)
+    } finally {
+      host.remove()
+    }
   })
 
   it("reclamp(): anchored окно без measured — позиция пересчитывается от anchor (+dx/dy) и clamp'ится", () => {
@@ -407,8 +440,8 @@ describe('useWindowManager (MVP)', () => {
     wm.setViewport({ width: 300, height: 200 })
     wm.reclamp(id)
 
-    expect(win.rect.left).toBe(12)
-    expect(win.rect.top).toBe(12)
+    expect(win.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(win.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
   })
 
   it('AC5.5 strategy C: measured окно in-bounds может быть не по сетке — reclamp() не меняет позицию', () => {
@@ -446,7 +479,7 @@ describe('useWindowManager (MVP)', () => {
 
     wm.reclamp(id)
 
-    const pad = 12
+    const pad = DEFAULT_WM_CLAMP_PAD_PX
     const maxLeft = Math.max(pad, 800 - 300 - pad)
     const maxTop = Math.max(pad, 600 - 200 - pad)
 
@@ -777,11 +810,11 @@ describe('useWindowManager (MVP)', () => {
     const edge = wm.windows.value.find((w) => w.id === edgeId)!
     const interact = wm.windows.value.find((w) => w.id === interactId)!
 
-    // viewport меньше окна → прижимаем к pad (12)
-    expect(edge.rect.left).toBe(12)
-    expect(edge.rect.top).toBe(12)
-    expect(interact.rect.left).toBe(12)
-    expect(interact.rect.top).toBe(12)
+    // viewport меньше окна → прижимаем к pad
+    expect(edge.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(edge.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(interact.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(interact.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
   })
 
   it('close() вызывает policy.onClose с корректным reason', () => {

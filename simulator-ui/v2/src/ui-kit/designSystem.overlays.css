@@ -52,6 +52,10 @@
   --ds-ov-safe-right: env(safe-area-inset-right, 0px);
   --ds-ov-safe-bottom: env(safe-area-inset-bottom, 0px);
   --ds-ov-safe-left: env(safe-area-inset-left, 0px);
+
+  /* Geometry tokens (single source of truth for WM + legacy CSS fallbacks) */
+  --ds-hud-stack-height: 110px;
+  --ds-wm-clamp-pad: var(--ds-ov-inset, 12px);
 }
 
 .ds-ov-top {
@@ -198,7 +202,7 @@ details[open].ds-ov-details > summary::after {
 .ds-ov-panel {
   position: absolute;
   right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
-  top: calc(110px + var(--ds-ov-safe-top, 0px));
+  top: calc(var(--ds-hud-stack-height, 110px) + var(--ds-ov-safe-top, 0px));
   z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 

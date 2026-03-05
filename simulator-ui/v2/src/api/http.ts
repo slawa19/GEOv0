@@ -1,13 +1,8 @@
+import { isJwtLike } from '../utils/isJwtLike'
+
 export type HttpConfig = {
   apiBase: string
   accessToken?: string | null
-}
-
-function isJwtLike(token: string): boolean {
-  // Very small heuristic: JWT is typically three base64url segments separated by dots.
-  // We use it to route auth to either Authorization: Bearer <jwt> or X-Admin-Token: <token>.
-  const t = token.trim()
-  return t.split('.').length === 3
 }
 
 export function applyAuthHeaders(headers: Headers, token?: string | null): void {

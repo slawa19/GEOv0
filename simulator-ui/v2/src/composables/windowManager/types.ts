@@ -25,6 +25,15 @@ export type WindowSizeConstraints = {
 
 export type WindowRect = { left: number; top: number; width: number; height: number }
 
+export type WindowManagerGeometryPx = {
+  /** Minimum padding from viewport edges for reclamp() bounds. */
+  clampPadPx: number
+  /** Default top offset for docked-right windows (HUD stack height). */
+  dockedRightTopPx: number
+  /** Default right inset for docked-right windows. */
+  dockedRightInsetPx: number
+}
+
 export type AnchorSpace = 'host'
 export type WindowAnchor = { x: number; y: number; space: AnchorSpace; source: string }
 
@@ -120,6 +129,9 @@ export function isNodeCardWindow(
 
 export type WindowManagerApi = {
   windows: ComputedRef<WindowInstance[]>
+
+  /** Update geometry tokens used by placement/reclamp. */
+  setGeometry: (g: Partial<WindowManagerGeometryPx>) => void
 
   /**
    * Return the current topmost window in a group using WM z-order / active.

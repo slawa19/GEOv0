@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { __retryUntilTruthyOrDeadline } from './useSimulatorApp'
+import { __retryUntilTruthyOrDeadline } from './retryUntilTruthy'
 
 describe('__retryUntilTruthyOrDeadline()', () => {
   it('times out: does not call onSuccess when value never becomes available', () => {
@@ -25,7 +25,6 @@ describe('__retryUntilTruthyOrDeadline()', () => {
         onTimeout,
       })
 
-      // Move time forward beyond the deadline and re-run pending retries.
       nowMs.mockImplementation(() => 801)
       vi.advanceTimersByTime(801)
 
@@ -64,19 +63,15 @@ describe('__retryUntilTruthyOrDeadline()', () => {
         onTimeout,
       })
 
-      // 1st call (immediate) -> null
-      // 2nd call (after 80ms) -> null
       nowMs.mockImplementation(() => 80)
       vi.advanceTimersByTime(80)
 
-      // 3rd call (after 160ms) -> success
       nowMs.mockImplementation(() => 160)
       vi.advanceTimersByTime(80)
 
       expect(onSuccess).toHaveBeenCalledTimes(1)
       expect(onTimeout).toHaveBeenCalledTimes(0)
 
-      // Ensure no extra successes even if timers continue.
       nowMs.mockImplementation(() => 10_000)
       vi.runOnlyPendingTimers()
       expect(onSuccess).toHaveBeenCalledTimes(1)
@@ -85,4 +80,3 @@ describe('__retryUntilTruthyOrDeadline()', () => {
     }
   })
 })
-

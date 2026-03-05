@@ -10,15 +10,16 @@
 Связанный план исполнения (этап E2): [plans/refactor-implementation-order-plan-2026-03-04.md](plans/refactor-implementation-order-plan-2026-03-04.md)
 
 - Status: NOT STARTED / IN PROGRESS / DONE
-- PR/Commit:
-- Gate: `typecheck` / `vitest` (дата)
-- Manual QA (что проверили):
+- Status: DONE
+- PR/Commit: (local)
+- Gate: `typecheck` ✅, `vitest` ✅ (2026-03-04)
+- Manual QA (что проверили): не выполнялось
 
 Чеклист (минимум при DONE):
-- [ ] В плане обновлён execution log для E2
-- [ ] Сведены все watcher-ы в единый derived state + один applyDiff watch (как описано в §3)
-- [ ] Удалены/упрощены watcher-ы в `SimulatorAppRoot.vue` согласно §4
-- [ ] Пройдены gate-проверки (`typecheck`, `vitest`)
+- [x] В плане обновлён execution log для E2
+- [x] Сведены все watcher-ы в единый derived state + один applyDiff watch (как описано в §3)
+- [x] Удалены/упрощены watcher-ы в `SimulatorAppRoot.vue` согласно §4
+- [x] Пройдены gate-проверки (`typecheck`, `vitest`)
 
 ---
 

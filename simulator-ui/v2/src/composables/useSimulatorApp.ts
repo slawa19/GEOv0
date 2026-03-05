@@ -25,42 +25,16 @@ import { incCounter } from '../utils/counters'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { normalizeTxAmountLabelInput } from '../utils/txAmountLabel'
-import { computeClearingAmountAnchorFromEdgeMidpoints } from '../utils/clearingAmountAnchor'
-import { isZeroDecimalString } from '../utils/isZeroDecimalString'
 import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
-export function __retryUntilTruthyOrDeadline<T>(opts: {
-  startedAtMs: number
-  maxWaitMs: number
-  retryDelayMs: number
-  nowMs: () => number
-  scheduleTimeout: (fn: () => void, ms: number) => void
-  get: () => T | null
-  onSuccess: (v: T) => void
-  onTimeout?: () => void
-}) {
-  const v = opts.get()
-  if (v !== null) {
-    opts.onSuccess(v)
-    return
-  }
-
-  const now = opts.nowMs()
-  if (now - opts.startedAtMs < opts.maxWaitMs) {
-    opts.scheduleTimeout(() => __retryUntilTruthyOrDeadline(opts), opts.retryDelayMs)
-    return
-  }
-
-  opts.onTimeout?.()
-}
+import { __retryUntilTruthyOrDeadline } from '../utils/retryUntilTruthy'
+export { __retryUntilTruthyOrDeadline }
 
 import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
-import { ensureSession, adminGetAllRuns, adminStopAllRuns } from '../api/simulatorApi'
 import { ApiError } from '../api/http'
-import type { AdminRunSummary } from '../api/simulatorApi'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 import type { Point } from '../types/layout'
@@ -83,13 +57,19 @@ import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
-import { FX_CONFIG, intensityScale, CLEARING_LABEL_COLOR } from '../config/fxConfig'
+import { FX_CONFIG, intensityScale } from '../config/fxConfig'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
+
+import { useQualityAutoguards } from './useQualityAutoguards'
+import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
+import { useAdminRunsPanel } from './useAdminRunsPanel'
 
 import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
 import { useSystemBalance } from './useSystemBalance'
+
+import { useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
 
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
 
@@ -391,139 +371,22 @@ export function useSimulatorApp(opts?: {
   // §10: Cookie session state (anonymous visitors)
   // ============================
 
-  /** Actor kind returned by POST /session/ensure. `null` = not yet bootstrapped. */
-  const sessionActorKind = ref<string | null>(null)
-  /** Owner ID tied to the cookie session. */
-  const sessionOwnerId = ref<string | null>(null)
-  /** True while ensureSession is in-flight. */
-  const sessionBootstrapping = ref(false)
-
-  /**
-   * Bootstraps a cookie session for anonymous visitors.
-   * Called at startup in real mode when no accessToken is configured.
-   * Safe to call multiple times — skipped if already complete.
-   */
-  async function tryEnsureSession(): Promise<void> {
-    // Only needed when there is no explicit token (anonymous visitors path).
-    if (String(real.accessToken ?? '').trim()) return
-    if (sessionActorKind.value !== null) return // already done
-    if (sessionBootstrapping.value) return // in-flight
-
-    sessionBootstrapping.value = true
-    try {
-      const res = await ensureSession({ apiBase: real.apiBase })
-      sessionActorKind.value = res.actor_kind
-      sessionOwnerId.value = res.owner_id
-    } catch (e: unknown) {
-      // Non-fatal: log a warning, but let the UI proceed.
-      // The backend may reject unauthenticated requests with 401 if cookie fails,
-      // which will surface as a normal API error in the UI.
-      console.warn('[GEO] Cookie session bootstrap failed:', String((e as any)?.message ?? e))
-    } finally {
-      sessionBootstrapping.value = false
-    }
-  }
+  const session = useCookieSessionBootstrap({
+    isRealMode,
+    apiBase: computed(() => real.apiBase),
+    accessToken: computed(() => real.accessToken),
+  })
 
   // ============================
   // Admin state (requires admin token)
   // ============================
 
-  const adminRunsList = ref<AdminRunSummary[]>([])
-  const adminRunsLoading = ref(false)
-  const adminLastError = ref('')
-
-  async function adminGetRuns(): Promise<void> {
-    adminRunsLoading.value = true
-    adminLastError.value = ''
-    try {
-      const res = await adminGetAllRuns({ apiBase: real.apiBase, accessToken: real.accessToken })
-      adminRunsList.value = res.items ?? []
-    } catch (e: unknown) {
-      if (e instanceof ApiError && e.status === 403) {
-        adminLastError.value = 'Admin token rejected (HTTP 403)'
-      } else {
-        adminLastError.value = String((e as any)?.message ?? e)
-      }
-    } finally {
-      adminRunsLoading.value = false
-    }
-  }
-
-  async function adminStopRuns(): Promise<void> {
-    adminLastError.value = ''
-    try {
-      await adminStopAllRuns({ apiBase: real.apiBase, accessToken: real.accessToken })
-      // Refresh list after stop to reflect updated states.
-      await adminGetRuns()
-    } catch (e: unknown) {
-      if (e instanceof ApiError && e.status === 403) {
-        adminLastError.value = 'Admin token rejected (HTTP 403)'
-      } else {
-        adminLastError.value = String((e as any)?.message ?? e)
-      }
-    }
-  }
-
-  function isJwtLike(token: string): boolean {
-    const t = token.trim()
-    return t.split('.').length === 3
-  }
-
-  const hasAdminToken = computed(() => {
-    const t = String(real.accessToken ?? '').trim()
-    return !!t && !isJwtLike(t)
-  })
-
-  // Keep admin runs view fresh without constant polling.
-  // Triggers:
-  // - entering real mode with admin token (initial load)
-  // - run lifecycle changes (start/stop)
-  let adminRefreshTimer: number | null = null
-  function scheduleAdminRunsRefresh() {
-    if (!isRealMode.value) return
-    if (!hasAdminToken.value) return
-    if (adminRunsLoading.value) return
-
-    if (adminRefreshTimer != null) return
-    adminRefreshTimer = window.setTimeout(async () => {
-      adminRefreshTimer = null
-      // Double-check conditions at execution time.
-      if (!isRealMode.value || !hasAdminToken.value) return
-      if (adminRunsLoading.value) return
-      await adminGetRuns()
-    }, 200)
-  }
-
-  watch(
-    () => [isRealMode.value, hasAdminToken.value, real.apiBase] as const,
-    ([isReal, hasAdmin]) => {
-      if (!isReal || !hasAdmin) return
-      // Initial population so Admin shows count without requiring manual Refresh.
-      scheduleAdminRunsRefresh()
-    },
-    { immediate: true },
-  )
-
-  watch(
-    () => real.runId,
-    () => {
-      // When a new run is created/attached, refresh admin list.
-      scheduleAdminRunsRefresh()
-    },
-  )
-
-  watch(
-    () => toLower(real.runStatus?.state),
-    () => {
-      // When run transitions between states, refresh admin list.
-      scheduleAdminRunsRefresh()
-    },
-  )
-
-  onUnmounted(() => {
-    // Avoid late mutations after unmount (e.g. in tests / HMR).
-    if (adminRefreshTimer != null) window.clearTimeout(adminRefreshTimer)
-    adminRefreshTimer = null
+  const adminRunsPanel = useAdminRunsPanel({
+    isRealMode,
+    apiBase: computed(() => real.apiBase),
+    accessToken: computed(() => real.accessToken),
+    runId: computed(() => real.runId),
+    runStatus: computed(() => real.runStatus),
   })
 
 
@@ -641,72 +504,17 @@ export function useSimulatorApp(opts?: {
   // (In particular: gradients + full glow sprites are enabled only on `high`.)
   const quality = ref<Quality>(isE2eScreenshots.value ? 'high' : 'med')
 
-  // Startup quality FPS-guard: keep handles to cancel if the app unmounts early.
-  let qualityFpsGuardRafId: number | null = null
-  let stopQualityFpsGuardWatch: (() => void) | null = null
-
-  // If Chrome struggles even right after opening the page (e.g. ~1 FPS),
-  // auto-downgrade quality to recover responsiveness.
-  // This is deliberately conservative: only kicks in on very low measured FPS.
-  onMounted(() => {
-    if (isTestMode.value) return
-    if (isWebDriver) return
-
-    let frames = 0
-    let startMs = 0
-    let guardActive = true
-    let qualityTouchedWhileGuardActive = false
-
-    stopQualityFpsGuardWatch?.()
-    stopQualityFpsGuardWatch = watch(
-      quality,
-      () => {
-        if (guardActive) qualityTouchedWhileGuardActive = true
-      },
-      { flush: 'sync' },
-    )
-
-    const loop = (t: number) => {
-      if (startMs === 0) startMs = t
-      frames++
-
-      const elapsed = t - startMs
-      if (elapsed < 1800) {
-        qualityFpsGuardRafId = window.requestAnimationFrame(loop)
-        return
-      }
-
-      guardActive = false
-      stopQualityFpsGuardWatch?.()
-      stopQualityFpsGuardWatch = null
-      if (qualityFpsGuardRafId != null) window.cancelAnimationFrame(qualityFpsGuardRafId)
-      qualityFpsGuardRafId = null
-
-      const fps = (frames * 1000) / Math.max(1, elapsed)
-
-      // Emergency recovery: if we're below ~12 FPS on the landing view,
-      // force low quality to make the UI usable.
-      if (!qualityTouchedWhileGuardActive && fps < 12 && quality.value !== 'low') {
-        quality.value = 'low'
-      }
-    }
-
-    qualityFpsGuardRafId = window.requestAnimationFrame(loop)
-  })
-
-  onUnmounted(() => {
-    // In case the component is destroyed before the FPS guard finishes.
-    stopQualityFpsGuardWatch?.()
-    stopQualityFpsGuardWatch = null
-    if (qualityFpsGuardRafId != null) window.cancelAnimationFrame(qualityFpsGuardRafId)
-    qualityFpsGuardRafId = null
+  const { gpuAccelLikely } = useQualityAutoguards({
+    quality,
+    isTestMode,
+    isWebDriver,
   })
 
   // §10: Cookie bootstrap — ensure session for anonymous visitors at startup.
   // Only runs in real mode, and only if no explicit accessToken is configured.
   onMounted(() => {
     if (!isRealMode.value) return
-    void tryEnsureSession()
+    void session.tryEnsure()
   })
 
   // uiDerived reads camera.zoom (for overlay label scale). Keep this wiring robust
@@ -751,6 +559,20 @@ export function useSimulatorApp(opts?: {
       state.error = ''
     },
   })
+
+  // Clearing FX is wired later (depends on fxState + overlays), but must be callable
+  // from early wiring (e.g. Interact callbacks) without TDZ hazards.
+  let runClearingFxImpl: (params: ClearingFxParams) => void = () => undefined
+  function runClearingFx(params: ClearingFxParams) {
+    runClearingFxImpl(params)
+  }
+
+  let runRealClearingDoneFxImpl: (done: ClearingDoneEvent) => void = () => undefined
+  function runRealClearingDoneFx(done: ClearingDoneEvent) {
+    runRealClearingDoneFxImpl(done)
+  }
+
+  let resetClearingFxDedupImpl: () => void = () => undefined
 
   const interactMode = useInteractMode({
     actions: interactActions,
@@ -903,65 +725,6 @@ export function useSimulatorApp(opts?: {
     storage: isE2eScreenshots.value ? { getItem: () => null, setItem: () => undefined } : undefined,
   })
 
-  function detectGpuAccelerationLikelyAvailable(): boolean {
-    if (typeof document === 'undefined') return true
-    try {
-      const canvas = document.createElement('canvas')
-      const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null
-      if (!gl) return false
-
-      const dbg = gl.getExtension('WEBGL_debug_renderer_info') as any
-      if (dbg) {
-        const renderer = String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) ?? '')
-        const r = renderer.toLowerCase()
-        if (r.includes('microsoft basic render driver')) return false
-        if (r.includes('swiftshader')) return false
-        if (r.includes('llvmpipe')) return false
-      }
-
-      // If WebGL context exists, assume some form of GPU path is available.
-      return true
-    } catch {
-      return true
-    }
-  }
-
-  const gpuAccelLikely = ref(true)
-  let gpuQualityDowngradeTimer: number | null = null
-  onMounted(() => {
-    // Keep deterministic in tests and avoid fighting the user in webdriver.
-    if (isTestMode.value) return
-    if (isWebDriver) return
-
-    gpuAccelLikely.value = detectGpuAccelerationLikelyAvailable()
-
-    // If the browser is in software-only mode, prefer low quality by default.
-    // Do not override if the user touched quality shortly after mount.
-    if (!gpuAccelLikely.value) {
-      let touched = false
-      const stop = watch(
-        quality,
-        () => {
-          touched = true
-        },
-        { flush: 'sync' },
-      )
-
-      if (gpuQualityDowngradeTimer != null) window.clearTimeout(gpuQualityDowngradeTimer)
-      gpuQualityDowngradeTimer = window.setTimeout(() => {
-        stop()
-        if (!touched && quality.value !== 'low') {
-          quality.value = 'low'
-        }
-      }, 400)
-    }
-  })
-
-  onUnmounted(() => {
-    if (gpuQualityDowngradeTimer != null) window.clearTimeout(gpuQualityDowngradeTimer)
-    gpuQualityDowngradeTimer = null
-  })
-
   const viewWiring = useAppViewWiring({
     canvasEl,
     hostEl,
@@ -1095,6 +858,29 @@ export function useSimulatorApp(opts?: {
   const floatingLabelsViewFx = fxOverlays.floatingLabelsViewFx
   const scheduleTimeout = fxOverlays.scheduleTimeout
   const clearScheduledTimeouts = fxOverlays.clearScheduledTimeouts
+
+  const realClearingFx = useRealClearingFx({
+    fxState,
+    isTestMode,
+    isWebDriver,
+    keyEdge,
+    seedFn: fnv1a,
+    clearingColor: VIZ_MAPPING.fx.clearing_debt,
+    addActiveNode,
+    addActiveEdge,
+    pushClearingAmountOverlay,
+    scheduleTimeout,
+    getLayoutNodeById,
+    setFlash: (v) => {
+      state.flash = v
+    },
+    spawnEdgePulses,
+    spawnNodeBursts,
+  })
+
+  runClearingFxImpl = realClearingFx.runClearingFx
+  runRealClearingDoneFxImpl = realClearingFx.runRealClearingDoneFx
+  resetClearingFxDedupImpl = realClearingFx.resetDedup
 
   const ensureRenderLoop = renderLoop.ensureRenderLoop
   const stopRenderLoop = renderLoop.stopRenderLoop
@@ -1329,8 +1115,6 @@ export function useSimulatorApp(opts?: {
     }
   }
 
-  const REAL_CLEARING_FX = FX_CONFIG.clearing
-
   function pushFloatingLabelWhenReady(
     // This helper is node-anchored only: nodeId is required.
     // World-anchored clearing amount overlays must use pushClearingAmountOverlay instead.
@@ -1375,191 +1159,6 @@ export function useSimulatorApp(opts?: {
       offsetYPx: sign === '+' ? -18 : -6,
       throttleKey: `amt:${sign}:${id}`,
       throttleMs: opts?.throttleMs ?? 240,
-    })
-  }
-
-  function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
-    const out: string[] = []
-    const seen = new Set<string>()
-    for (const e of edges) {
-      if (!seen.has(e.from)) {
-        seen.add(e.from)
-        out.push(e.from)
-      }
-      if (!seen.has(e.to)) {
-        seen.add(e.to)
-        out.push(e.to)
-      }
-    }
-    return out
-  }
-
-  /** Normalised clearing FX parameters (shared between Interact HTTP response and SSE paths). */
-  type ClearingFxParams = {
-    edges: Array<{ from: string; to: string }>
-    totalAmount: string  // e.g. "10.00"
-    equivalent: string   // e.g. "UAH"
-    planId?: string      // для throttle key — опционально
-  }
-
-  /** Edge-signature dedup: prevents double FX spawn when both HTTP and SSE paths fire. */
-  // IMPORTANT: dedup policy must NOT suppress distinct clearing.done events that happen to
-  // share the same edge set (common in small graphs / debug "clearing-once" loops).
-  //
-  // - HTTP path (Interact clearing-real) has no plan_id -> dedup by edge signature
-  // - SSE path (clearing.done) has plan_id -> dedup by plan_id, but also suppress if
-  //   a matching edge signature was just processed by the HTTP path (double-fire)
-  const _clearingFxDedupByEdgeSig = new Map<string, number>() // edgeSig → timestamp (HTTP)
-  const _clearingFxDedupByPlanId = new Map<string, number>() // planId → timestamp (SSE)
-  const CLEARING_FX_DEDUP_WINDOW_MS = 3000
-
-  function gcClearingFxDedup(map: Map<string, number>, now: number) {
-    // Trim old entries (simple GC)
-    if (map.size <= 50) return
-    for (const [k, t] of map) {
-      if (now - t > CLEARING_FX_DEDUP_WINDOW_MS * 2) map.delete(k)
-    }
-  }
-
-  function runClearingFx(params: ClearingFxParams) {
-    const { edges: edgesAll, totalAmount, equivalent, planId } = params
-
-    const edgeSig = edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')
-    const now = Date.now()
-
-    if (planId) {
-      // 1) Never double-run the same plan_id (extra safety; SSE loop also dedups by event_id).
-      const prevPlan = _clearingFxDedupByPlanId.get(planId)
-      if (prevPlan && now - prevPlan < CLEARING_FX_DEDUP_WINDOW_MS) return
-
-      // 2) Suppress SSE FX if HTTP path already spawned FX for the same edges recently.
-      const prevHttp = _clearingFxDedupByEdgeSig.get(edgeSig)
-      if (prevHttp && now - prevHttp < CLEARING_FX_DEDUP_WINDOW_MS) return
-
-      _clearingFxDedupByPlanId.set(planId, now)
-      gcClearingFxDedup(_clearingFxDedupByPlanId, now)
-      // NOTE: do NOT write edgeSig here — otherwise distinct plan_ids with same edges would be suppressed.
-    } else {
-      // HTTP path (no planId): dedup by edge signature to prevent double-fire with SSE.
-      const prev = _clearingFxDedupByEdgeSig.get(edgeSig)
-      if (prev && now - prev < CLEARING_FX_DEDUP_WINDOW_MS) return
-      _clearingFxDedupByEdgeSig.set(edgeSig, now)
-      gcClearingFxDedup(_clearingFxDedupByEdgeSig, now)
-    }
-
-    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    const clearingColor = VIZ_MAPPING.fx.clearing_debt
-    const nodeIds = nodesFromEdges(edgesAll)
-
-    // 1. Flash
-    state.flash = 0.55
-
-    // 2. Active nodes
-    for (const id of nodeIds) addActiveNode(id, 5200)
-
-    // 3. Edge pulses (capped at 30)
-    const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
-    if (edgesFx.length > 0) {
-      spawnEdgePulses(fxState, {
-        edges: edgesFx,
-        nowMs,
-        durationMs: 4200,
-        color: clearingColor,
-        thickness: 3.2,
-        seedPrefix: `clearing:${planId ?? nowMs.toFixed(0)}`,
-        countPerEdge: 1,
-        keyEdge,
-        seedFn: fnv1a,
-        isTestMode: isTestMode.value && isWebDriver,
-      })
-    }
-
-    // 4. Active edges
-    for (const e of edgesAll) addActiveEdge(keyEdge(e.from, e.to), 5200)
-
-    // 5. Node bursts (capped at 40)
-    const burstNodeIds = nodeIds.slice(0, 40)
-    if (burstNodeIds.length > 0) {
-      spawnNodeBursts(fxState, {
-        nodeIds: burstNodeIds,
-        nowMs,
-        durationMs: 2800,
-        color: clearingColor,
-        kind: 'clearing',
-        seedPrefix: `clearing-burst:${planId ?? nowMs.toFixed(0)}`,
-        seedFn: fnv1a,
-        isTestMode: isTestMode.value && isWebDriver,
-      })
-    }
-
-    // 6. Clearing amount overlay (world-anchored centroid of edge midpoints; deferred until layout coords exist).
-    const clearedAmount = totalAmount.trim()
-    if (edgesAll.length > 0 && clearedAmount && !isZeroDecimalString(clearedAmount)) {
-      pushClearingLabelDeferred({
-        edges: edgesAll,
-        text: `−${clearedAmount.replace(/^-/, '')} ${equivalent}`,
-        planId,
-      })
-    }
-  }
-
-  function pushClearingLabelDeferred(
-    opts: { edges: Array<{ from: string; to: string }>; text: string; planId?: string },
-    startedAtMs = (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()),
-    retryDelayMs = 80,
-  ) {
-    const getNodeWorldPos = (id: string) => {
-      const ln = getLayoutNodeById(id)
-      if (!ln || typeof ln.__x !== 'number' || typeof ln.__y !== 'number') return null
-      return { x: ln.__x, y: ln.__y }
-    }
-
-    const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now())
-    const maxWaitMs = 800
-    const overlayId = `clearing-total:${opts.planId ?? Math.round(startedAtMs)}`
-
-    __retryUntilTruthyOrDeadline({
-      startedAtMs,
-      maxWaitMs,
-      retryDelayMs,
-      nowMs,
-      scheduleTimeout,
-      get: () => computeClearingAmountAnchorFromEdgeMidpoints(opts.edges, getNodeWorldPos),
-      onSuccess: (anchor) => {
-        const overlay = {
-          id: overlayId,
-          text: opts.text,
-          worldX: anchor.x,
-          worldY: anchor.y,
-          ttlMs: 3800,
-          styleKey: 'clearing-premium',
-          planId: opts.planId,
-        } satisfies import('./useOverlayState').ClearingAmountOverlay
-
-        if (pushClearingAmountOverlay) {
-          pushClearingAmountOverlay(overlay, { color: CLEARING_LABEL_COLOR, throttleMs: 500 })
-        }
-        // Back-compat (should not happen in normal app runtime): keep behavior safe.
-        // If overlay infrastructure isn't available, do NOT fall back to node-based anchoring.
-      },
-      // Time exceeded: SKIP (do not show a label in a wrong fallback position).
-      onTimeout: () => undefined,
-    })
-  }
-
-  function runRealClearingDoneFx(done: ClearingDoneEvent) {
-    const doneCycleEdges = (done as any)?.cycle_edges
-    const edges: Array<{ from: string; to: string }> = []
-    if (Array.isArray(doneCycleEdges) && doneCycleEdges.length > 0) {
-      for (const e of doneCycleEdges) edges.push({ from: e.from, to: e.to })
-    }
-    if (edges.length === 0) return  // no edges — no FX
-
-    runClearingFx({
-      edges,
-      totalAmount: String(done.cleared_amount ?? '0'),
-      equivalent: done.equivalent,
-      planId: done.plan_id,
     })
   }
 
@@ -1827,6 +1426,9 @@ export function useSimulatorApp(opts?: {
     clearScheduledTimeouts({ keepCritical: true })
     resetOverlays()
     clearHoveredEdge()
+
+    // Clear per-run dedup caches (avoid cross-run suppression).
+    resetClearingFxDedupImpl()
 
     // Reset token-bucket between runs so a newly started run can always show TX FX immediately.
     txFxTokens = REAL_TX_FX.burst
@@ -2220,29 +1822,29 @@ export function useSimulatorApp(opts?: {
 
     // §10: Cookie session state (anonymous visitors)
     session: {
-      actorKind: sessionActorKind,
-      ownerId: sessionOwnerId,
-      bootstrapping: sessionBootstrapping,
-      tryEnsure: tryEnsureSession,
+      actorKind: session.actorKind,
+      ownerId: session.ownerId,
+      bootstrapping: session.bootstrapping,
+      tryEnsure: session.tryEnsure,
     },
 
     // Admin controls (admin-token required)
     admin: {
-      runs: adminRunsList,
-      loading: adminRunsLoading,
-      lastError: adminLastError,
-      getRuns: adminGetRuns,
-      stopRuns: adminStopRuns,
+      runs: adminRunsPanel.runs,
+      loading: adminRunsPanel.loading,
+      lastError: adminRunsPanel.lastError,
+      getRuns: adminRunsPanel.getRuns,
+      stopRuns: adminRunsPanel.stopRuns,
       attachRun: async (runId: string) => {
         await realMode.attachToRun(runId)
       },
       stopRun: async (runId: string) => {
-        adminLastError.value = ''
+        adminRunsPanel.lastError.value = ''
         try {
           await realMode.stopRunById(runId, { source: 'ui', reason: 'admin_stop' })
-          await adminGetRuns()
+          await adminRunsPanel.getRuns()
         } catch (e: unknown) {
-          adminLastError.value = String((e as any)?.message ?? e)
+          adminRunsPanel.lastError.value = String((e as any)?.message ?? e)
         }
       },
     },

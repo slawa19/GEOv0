@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 
 import { clamp, estimateSizeFromConstraints, overlaps } from './geometry'
+import { DEFAULT_HUD_STACK_HEIGHT_PX, DEFAULT_WM_CLAMP_PAD_PX } from '../../ui-kit/overlayGeometry'
 import type {
   FocusMode,
   WindowAnchor,
@@ -9,6 +10,7 @@ import type {
   WindowGroup,
   WindowInstance,
   WindowManagerApi,
+  WindowManagerGeometryPx,
   WindowPolicy,
   WindowSizeConstraints,
   WindowType,
@@ -86,6 +88,45 @@ export function useWindowManager(): WindowManagerApi {
   const activeId = ref<number | null>(null)
   const viewport = ref({ width: 0, height: 0 })
   const idCounter = ref(0)
+
+  const geometry = ref<WindowManagerGeometryPx>({
+    clampPadPx: DEFAULT_WM_CLAMP_PAD_PX,
+    dockedRightInsetPx: DEFAULT_WM_CLAMP_PAD_PX,
+    dockedRightTopPx: DEFAULT_HUD_STACK_HEIGHT_PX,
+  })
+
+  function setGeometry(next: Partial<WindowManagerGeometryPx>): void {
+    const prev = geometry.value
+
+    const clampPadPx =
+      next.clampPadPx != null && Number.isFinite(next.clampPadPx) && next.clampPadPx >= 0
+        ? next.clampPadPx
+        : prev.clampPadPx
+
+    const dockedRightInsetPx =
+      next.dockedRightInsetPx != null && Number.isFinite(next.dockedRightInsetPx) && next.dockedRightInsetPx >= 0
+        ? next.dockedRightInsetPx
+        : prev.dockedRightInsetPx
+
+    const dockedRightTopPx =
+      next.dockedRightTopPx != null && Number.isFinite(next.dockedRightTopPx) && next.dockedRightTopPx >= 0
+        ? next.dockedRightTopPx
+        : prev.dockedRightTopPx
+
+    if (
+      clampPadPx === prev.clampPadPx &&
+      dockedRightInsetPx === prev.dockedRightInsetPx &&
+      dockedRightTopPx === prev.dockedRightTopPx
+    ) {
+      return
+    }
+
+    geometry.value = {
+      clampPadPx,
+      dockedRightInsetPx,
+      dockedRightTopPx,
+    }
+  }
 
   // UX-6: coalesce rapid bursts of `wm.open()` for singleton='reuse' windows.
   // Scope: node-card reuse updates caused by rapid user interactions.
@@ -370,7 +411,7 @@ export function useWindowManager(): WindowManagerApi {
     const win = windowsMap.get(id)
     if (!win) return
     const vp = viewport.value
-    const pad = 12
+    const pad = geometry.value.clampPadPx
 
     const before = {
       left: win.rect.left,
@@ -573,8 +614,8 @@ export function useWindowManager(): WindowManagerApi {
         win.rect.top = win.anchor.y + win.anchorOffset.y
       } else {
         win.anchorOffset = null
-        win.rect.left = viewport.value.width - win.rect.width - 12
-        win.rect.top = 110
+        win.rect.left = viewport.value.width - win.rect.width - geometry.value.dockedRightInsetPx
+        win.rect.top = geometry.value.dockedRightTopPx
       }
     } else {
       // Keep current user position, but allow width/height updates above.
@@ -687,8 +728,8 @@ export function useWindowManager(): WindowManagerApi {
             win.rect.top = win.anchor.y + win.anchorOffset.y
           } else {
             win.anchorOffset = null
-            win.rect.left = viewport.value.width - win.rect.width - 12
-            win.rect.top = 110
+            win.rect.left = viewport.value.width - win.rect.width - geometry.value.dockedRightInsetPx
+            win.rect.top = geometry.value.dockedRightTopPx
           }
         } else {
           // Keep current user position, but allow width/height updates above.
@@ -735,7 +776,12 @@ export function useWindowManager(): WindowManagerApi {
     const rect =
       placement === 'anchored' && anchor
         ? { left: anchor.x + anchorOffset!.x, top: anchor.y + anchorOffset!.y, width, height }
-        : { left: viewport.value.width - width - 12, top: 110, width, height }
+        : {
+            left: viewport.value.width - width - geometry.value.dockedRightInsetPx,
+            top: geometry.value.dockedRightTopPx,
+            width,
+            height,
+          }
 
     const id = (idCounter.value += 1)
     const win: WindowInstance = {
@@ -841,6 +887,7 @@ export function useWindowManager(): WindowManagerApi {
 
   return {
     windows,
+    setGeometry,
     getTopmostInGroup,
     open,
     close,
