@@ -32,6 +32,38 @@ export type WindowManagerGeometryPx = {
   dockedRightTopPx: number
   /** Default right inset for docked-right windows. */
   dockedRightInsetPx: number
+
+  /** Default dx for anchored placement before first measure. */
+  anchorOffsetXPx: number
+  /** Default dy for anchored placement before first measure. */
+  anchorOffsetYPx: number
+  /** Default cascade step when shifting windows to avoid overlaps. */
+  cascadeStepPx: number
+
+  /** Interact panel constraints (must stay aligned with overlay CSS). */
+  interactPanelMinWidthPx: number
+  interactPanelMinHeightPx: number
+  interactPanelPreferredWidthTrustlinePx: number
+  interactPanelPreferredWidthWidePx: number
+  interactPanelPreferredHeightLoadingPx: number
+  interactPanelPreferredHeightConfirmPx: number
+  interactPanelPreferredHeightPickingPx: number
+
+  /** Inspector: edge detail constraints. */
+  edgeDetailMinWidthPx: number
+  edgeDetailMinHeightPx: number
+  edgeDetailPreferredWidthPx: number
+  edgeDetailPreferredHeightPx: number
+
+  /** Inspector: node card constraints. */
+  nodeCardMinWidthPx: number
+  nodeCardMinHeightPx: number
+  nodeCardPreferredWidthPx: number
+  nodeCardPreferredHeightPx: number
+
+  /** WM visual stacking bases for group priority. */
+  groupZInspectorBase: number
+  groupZInteractBase: number
 }
 
 export type AnchorSpace = 'host'
@@ -79,6 +111,29 @@ export type WindowDataByType = {
 }
 
 export type WindowData<T extends WindowType = WindowType> = WindowDataByType[T]
+
+export type WindowOpenArgs =
+  | {
+      type: 'interact-panel'
+      anchor?: WindowAnchor | null
+      data: WindowDataByType['interact-panel']
+      /** @see FocusMode */
+      focus?: FocusMode
+    }
+  | {
+      type: 'node-card'
+      anchor?: WindowAnchor | null
+      data: WindowDataByType['node-card']
+      /** @see FocusMode */
+      focus?: FocusMode
+    }
+  | {
+      type: 'edge-detail'
+      anchor?: WindowAnchor | null
+      data: WindowDataByType['edge-detail']
+      /** @see FocusMode */
+      focus?: FocusMode
+    }
 
 export type WindowLifecycleState = 'open' | 'closing'
 
@@ -141,13 +196,7 @@ export type WindowManagerApi = {
    */
   getTopmostInGroup: (g: WindowGroup) => WindowInstance | null
 
-  open: <T extends WindowType>(o: {
-    type: T
-    anchor?: WindowAnchor | null
-    data: WindowData<T>
-    /** @see FocusMode */
-    focus?: FocusMode
-  }) => number
+  open: (o: WindowOpenArgs) => number
   close: (id: number, reason: 'esc' | 'action' | 'programmatic') => void
   /**
    * P1-3: Finalize the removal of a closing window from the map.

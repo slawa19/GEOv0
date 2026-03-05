@@ -289,7 +289,7 @@ async function onRunClearingOnce() {
 }
 
 .bb-details {
-  opacity: 0.92;
+  opacity: var(--ds-bb-details-opacity);
 }
 
 .bb-summary {
@@ -300,7 +300,7 @@ async function onRunClearingOnce() {
   /* Compact popover: only one row of buttons, no extra stacks/headers. */
   min-width: 0;
   width: max-content;
-  max-width: calc(100vw - 24px);
+  max-width: calc(100vw - var(--ds-bb-devtools-maxw-inset));
 }
 
 .bb-devtools-row {
@@ -317,11 +317,11 @@ async function onRunClearingOnce() {
 }
 
 .bb-fade-85 {
-  opacity: 0.85;
+  opacity: var(--ds-bb-fade-85-opacity);
 }
 
 .bb-fade-90 {
-  opacity: 0.9;
+  opacity: var(--ds-bb-fade-90-opacity);
 }
 
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */

@@ -2,9 +2,20 @@ import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
+import {
+  NODE_BODY_FILL_ALPHA_HI_A,
+  NODE_BODY_FILL_ALPHA_HI_B,
+  NODE_BODY_FILL_ALPHA_LO,
+  NODE_GLINT_BADGE_ALPHA,
+  NODE_GLINT_COLOR_HEX,
+  NODE_GLINT_INNER_STROKE_ALPHA,
+  NODE_GLOW_K_BY_QUALITY,
+  OPAQUE_BLACK_HEX,
+} from './fxConfig'
 import { getLinearGradient2Stops } from './gradientCache'
 import { drawGlowSprite } from './glowSprites'
 import { getNodeBaseGeometry } from './nodeGeometry'
+import { readCssVar } from './readCssVar'
 import { roundedRectPath } from './roundedRect'
 
 export type { LayoutNode } from '../types/layout'
@@ -67,7 +78,7 @@ function drawNodeIcon(
 
     // Window lines (cutouts)
     ctx.globalCompositeOperation = 'destination-out'
-    ctx.fillStyle = '#000000'
+    ctx.fillStyle = OPAQUE_BLACK_HEX
     const winW = 2.5 * s
     const winH = 2.5 * s
     const gap = 1.5 * s
@@ -92,7 +103,8 @@ function drawNodeBadge(
   const br = Math.max(px(1.6), r * 0.22)
   ctx.save()
   ctx.globalCompositeOperation = 'lighter'
-  ctx.fillStyle = withAlpha('#ffffff', 0.85)
+  const glint = readCssVar('--ds-glint', NODE_GLINT_COLOR_HEX)
+  ctx.fillStyle = withAlpha(glint, NODE_GLINT_BADGE_ALPHA)
   ctx.beginPath()
   ctx.arc(cx + r * 0.72, cy - r * 0.72, br, 0, Math.PI * 2)
   ctx.fill()
@@ -121,7 +133,7 @@ export function drawNodeShape(
   const q = opts.quality ?? 'high'
   // Sprite glow quality scaling.
   // (Even in low, we keep a modest glow for readability.)
-  const glowK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.55
+  const glowK = NODE_GLOW_K_BY_QUALITY[q] ?? 1
   const fill = fillForNode(node, mapping)
   const geom = getNodeBaseGeometry(node, invZ)
   const w = geom.w
@@ -173,12 +185,12 @@ export function drawNodeShape(
       x + w,
       y + h,
       0,
-      withAlpha(fill, 0.55),
+      withAlpha(fill, NODE_BODY_FILL_ALPHA_HI_A),
       1,
-      withAlpha(fill, 0.25),
+      withAlpha(fill, NODE_BODY_FILL_ALPHA_HI_B),
     )
   } else {
-    ctx.fillStyle = withAlpha(fill, 0.42)
+    ctx.fillStyle = withAlpha(fill, NODE_BODY_FILL_ALPHA_LO)
   }
   if (isRoundedRect) {
     roundedRectPath(ctx, x, y, w, h, rr)
@@ -210,7 +222,7 @@ export function drawNodeShape(
   })
 
   // Inner bright core stroke (white-ish)
-  ctx.strokeStyle = withAlpha('#ffffff', 0.9)
+  ctx.strokeStyle = withAlpha(NODE_GLINT_COLOR_HEX, NODE_GLINT_INNER_STROKE_ALPHA)
   ctx.lineWidth = Math.max(px(1), r * 0.05)
   
   if (isRoundedRect) {

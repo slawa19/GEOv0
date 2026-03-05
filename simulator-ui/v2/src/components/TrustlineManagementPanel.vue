@@ -461,13 +461,13 @@ defineExpose({
 /* Compact panel padding override (global --ds-space-4 ≥ 18px is too wide here) */
 .ds-ov-panel :deep(.ds-panel__header),
 .ds-ov-panel :deep(.ds-panel__body) {
-  padding: 12px;
+  padding: var(--ds-tlmp-panel-pad);
 }
 
 /* Select fields: don't stretch to full 1fr column width */
 .ds-controls__row .ds-select {
-  max-width: 180px;
-  min-width: 120px;
+  max-width: var(--ds-tlmp-select-max-w);
+  min-width: var(--ds-tlmp-select-min-w);
 }
 
 /* Fix: input+suffix (.ds-row) must not overflow the 1fr grid column.
@@ -489,7 +489,7 @@ defineExpose({
 }
 
 .tl-limit-input {
-  width: 125px;
+  width: var(--ds-tlmp-limit-input-w);
   flex: none;
 }
 

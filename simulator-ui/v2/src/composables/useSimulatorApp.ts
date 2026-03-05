@@ -9,7 +9,7 @@
  * Important: this is intentionally a thin wiring entry point — avoid changing behavior here unless necessary.
  */
 
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode, sizeForNode } from '../render/nodePainter'
@@ -24,16 +24,14 @@ import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
-import { normalizeTxAmountLabelInput } from '../utils/txAmountLabel'
 import { createPatchApplier } from '../demo/patches'
-import { spawnEdgePulses, spawnNodeBursts, spawnSparks } from '../render/fxRenderer'
+import { spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { __retryUntilTruthyOrDeadline } from '../utils/retryUntilTruthy'
 export { __retryUntilTruthyOrDeadline }
 
-import { getActiveRun, getSnapshot, getScenarioPreview } from '../api/simulatorApi'
-import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
+import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { ApiError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
@@ -64,14 +62,145 @@ import { createDemoActivityHold } from './demoActivityHold'
 import { useQualityAutoguards } from './useQualityAutoguards'
 import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
 import { useAdminRunsPanel } from './useAdminRunsPanel'
+import { useFxDebugControls } from './useFxDebugControls'
+import { useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
 import { useSystemBalance } from './useSystemBalance'
 
 import { useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
+import { useRealTxFx } from './realFx/useRealTxFx'
 
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
+
+type RealModeApi = ReturnType<typeof useSimulatorRealMode>
+type AdminRunsPanelApi = ReturnType<typeof useAdminRunsPanel>
+type CookieSessionApi = ReturnType<typeof useCookieSessionBootstrap>
+type InteractActionsApi = ReturnType<typeof useInteractActions>
+type InteractModeApi = ReturnType<typeof useInteractMode>
+type UiDerivedApi = ReturnType<typeof useAppUiDerivedState>
+type LabelNodesApi = ReturnType<typeof useLabelNodes>
+type PickingAndHoverApi = ReturnType<typeof useAppPickingAndHover>
+type FxOverlaysApi = ReturnType<typeof useAppFxOverlays>
+type ViewWiringApi = ReturnType<typeof useAppViewWiring>
+type DragToPinApi = ReturnType<typeof useAppDragToPinAndPreview>
+type PhysicsAndPinningApi = ReturnType<typeof useAppPhysicsAndPinningWiring>
+type CanvasInteractionsApi = ReturnType<typeof useAppCanvasInteractionsWiring>
+
+export type SimulatorAppApi = {
+  apiMode: ComputedRef<'fixtures' | 'real'>
+
+  isDemoFixtures: ComputedRef<boolean>
+  isDemoUi: ComputedRef<boolean>
+  isInteractUi: ComputedRef<boolean>
+  isTestMode: ComputedRef<boolean>
+  isWebDriver: boolean
+  isE2eScreenshots: ComputedRef<boolean>
+
+  real: RealModeState
+  realActions: {
+    setApiBase: (v: string) => void
+    setAccessToken: (v: string) => void
+    setSelectedScenarioId: (v: string) => void
+    setDesiredMode: (v: SimulatorMode) => void
+    setIntensityPercent: (v: number) => void
+  } & Pick<
+    RealModeApi,
+    | 'refreshScenarios'
+    | 'startRun'
+    | 'pause'
+    | 'resume'
+    | 'stop'
+    | 'applyIntensity'
+    | 'refreshSnapshot'
+    | 'refreshArtifacts'
+    | 'downloadArtifact'
+  >
+
+  session: Pick<CookieSessionApi, 'actorKind' | 'ownerId' | 'bootstrapping' | 'tryEnsure'>
+
+  admin: Pick<AdminRunsPanelApi, 'runs' | 'loading' | 'lastError' | 'getRuns' | 'stopRuns'> & {
+    attachRun: (runId: string) => Promise<void>
+    stopRun: (runId: string) => Promise<void>
+  }
+
+  state: SimulatorAppState
+  eq: Ref<string>
+  scene: Ref<SceneId>
+  layoutMode: Ref<LayoutMode>
+  quality: Ref<Quality>
+  labelsLod: Ref<LabelsLod>
+
+  effectiveEq: ComputedRef<string>
+
+  isInteractPickingPhase: ComputedRef<boolean>
+  isInteractCanvasNodePickPhase: ComputedRef<boolean>
+
+  interact: {
+    actions: InteractActionsApi
+    mode: InteractModeApi
+    systemBalance: ReturnType<typeof useSystemBalance>['balance']
+  }
+
+  gpuAccelLikely: ReturnType<typeof useQualityAutoguards>['gpuAccelLikely']
+
+  hostEl: Ref<HTMLElement | null>
+  canvasEl: Ref<HTMLCanvasElement | null>
+  fxCanvasEl: Ref<HTMLCanvasElement | null>
+  dragPreviewEl: Ref<HTMLElement | null>
+
+  overlayLabelScale: UiDerivedApi['overlayLabelScale']
+  showResetView: UiDerivedApi['showResetView']
+
+  showPerfOverlay: ComputedRef<boolean>
+  perf: any
+
+  fxDebug: {
+    enabled: ComputedRef<boolean>
+    busy: Ref<boolean>
+    runTxOnce: () => Promise<void>
+    runClearingOnce: () => Promise<void>
+  }
+
+  e2e: {
+    runTxOnce: () => Promise<void>
+    runClearingOnce: () => Promise<void>
+  }
+
+  hasNodeCardInspectorOpen: ComputedRef<boolean>
+  hoveredEdge: FxOverlaysApi['hoveredEdge']
+  clearHoveredEdge: FxOverlaysApi['clearHoveredEdge']
+  edgeTooltipStyle: PickingAndHoverApi['edgeTooltipStyle']
+  selectedNode: ViewWiringApi['selectedNode']
+  selectedNodeScreenCenter: ViewWiringApi['selectedNodeScreenCenter']
+  getNodeScreenCenter: (nodeId: string) => Point | null
+  selectedNodeEdgeStats: ReturnType<typeof useSelectedNodeEdgeStats>['selectedNodeEdgeStats']
+
+  dragToPin: DragToPinApi['dragToPin']
+  isSelectedPinned: PhysicsAndPinningApi['isSelectedPinned']
+  isNodePinned: PhysicsAndPinningApi['isPinned']
+  pinNode: PhysicsAndPinningApi['pinNode']
+  unpinNode: PhysicsAndPinningApi['unpinNode']
+  pinSelectedNode: PhysicsAndPinningApi['pinSelectedNode']
+  unpinSelectedNode: PhysicsAndPinningApi['unpinSelectedNode']
+
+  onCanvasClick: CanvasInteractionsApi['onCanvasClick']
+  onCanvasDblClick: CanvasInteractionsApi['onCanvasDblClick']
+  onCanvasPointerDown: CanvasInteractionsApi['onCanvasPointerDown']
+  onCanvasPointerMove: CanvasInteractionsApi['onCanvasPointerMove']
+  onCanvasPointerUp: CanvasInteractionsApi['onCanvasPointerUp']
+  onCanvasWheel: CanvasInteractionsApi['onCanvasWheel']
+
+  wakeUp: () => void
+
+  labelNodes: LabelNodesApi['labelNodes']
+  floatingLabelsViewFx: FxOverlaysApi['floatingLabelsViewFx']
+  worldToCssTranslateNoScale: ViewWiringApi['worldToCssTranslateNoScale']
+
+  getNodeById: ReturnType<typeof useSnapshotIndex>['getNodeById']
+  resetView: ViewWiringApi['resetView']
+}
 
 /**
  * Pure policy: decides which overlay is topmost and closeable on outside click.
@@ -183,7 +312,7 @@ export function useSimulatorApp(opts?: {
 
   /** Step 5 (WM): whether node-card inspector window is currently open (WM source of truth). */
   uiIsNodeCardOpen?: () => boolean
-}) {
+}): SimulatorAppApi {
   const eq = ref('UAH')
   const scene = ref<SceneId>('A')
 
@@ -791,6 +920,13 @@ export function useSimulatorApp(opts?: {
     wakeUp,
   })
 
+  // Render-loop callbacks must be safe even before physics/drag wiring is initialized.
+  // Use replaceable getters to avoid temporal coupling / TDZ hazards.
+  type DragToPinStateSafe = { active: boolean; dragging: boolean; nodeId: string | null }
+  let getDragToPinStateSafe = (): DragToPinStateSafe => ({ active: false, dragging: false, nodeId: null })
+  let tickPhysicsAndSyncSafe = (): boolean => false
+  let isPhysicsRunningSafe = (): boolean => false
+
   const renderLoop = useAppRenderLoop({
     canvasEl,
     fxCanvasEl,
@@ -818,17 +954,22 @@ export function useSimulatorApp(opts?: {
     activeNodes: fxOverlays.activeNodes,
     // Use 'focus' LOD during drag OR while physics is settling — both enable dragMode fast-path in baseGraph.
     getLinkLod: () => {
-      if (dragToPin.dragState.active && dragToPin.dragState.dragging) return 'focus'
-      if (typeof (physics as any).isRunning === 'function' && (physics as any).isRunning()) return 'focus'
+      const ds = getDragToPinStateSafe()
+      if (ds.active && ds.dragging) return 'focus'
+      if (isPhysicsRunningSafe()) return 'focus'
       return 'full'
     },
-    getHiddenNodeId: () => (dragToPin.dragState.active && dragToPin.dragState.dragging ? dragToPin.dragState.nodeId : null),
+    getHiddenNodeId: () => {
+      const ds = getDragToPinStateSafe()
+      return ds.active && ds.dragging ? ds.nodeId : null
+    },
     beforeDraw: () => {
-      const didTick = physics.tickAndSyncToLayout()
-      if (didTick || (dragToPin.dragState.active && dragToPin.dragState.dragging)) layoutCoordinator.bumpLayoutVersion()
+      const didTick = tickPhysicsAndSyncSafe()
+      const ds = getDragToPinStateSafe()
+      if (didTick || (ds.active && ds.dragging)) layoutCoordinator.bumpLayoutVersion()
     },
     isAnimating: createSimulatorIsAnimating({
-      isPhysicsRunning: () => physics.isRunning(),
+      isPhysicsRunning: () => isPhysicsRunningSafe(),
       isDemoHoldActive: () => isDemoUi.value && demoHold.isWithinHoldWindow(),
     }),
     // BUG-3 (P3): dim unavailable nodes during picking phases.
@@ -982,138 +1123,13 @@ export function useSimulatorApp(opts?: {
   const pinSelectedNode = physicsAndPinning.pinSelectedNode
   const unpinSelectedNode = physicsAndPinning.unpinSelectedNode
 
+  tickPhysicsAndSyncSafe = () => physics.tickAndSyncToLayout()
+  isPhysicsRunningSafe = () => physics.isRunning()
+
   layoutWiring.initComputeLayout({
     pinning,
     physics,
   })
-
-  // Real-mode TX visuals must be independent from any offline/demo playback.
-  type RealTxFxConfig = {
-    ratePerSec: number
-    burst: number
-    maxConcurrentSparks: number
-    maxEdgesPerEvent: number
-    ttlMinMs: number
-    ttlMaxMs: number
-    activeEdgePadMs: number
-    minGapMs: number
-  }
-
-  const REAL_TX_FX: RealTxFxConfig = {
-    // Token bucket: how many tx events per second can spawn sparks.
-    ratePerSec: 3.0,
-    burst: 2.0,
-    // Hard caps for perf.
-    maxConcurrentSparks: 28,
-    // Avoid animating long routes as a wall of particles.
-    maxEdgesPerEvent: 2,
-    // Clamp TTL to keep the scene from accumulating particles.
-    ttlMinMs: 340,
-    ttlMaxMs: 1200,
-    // Extra highlight time to make motion readable.
-    activeEdgePadMs: 260,
-    // Safety: prevent spamming even if tokens allow bursts.
-    minGapMs: 120,
-  }
-
-  function clampRealTxTtlMs(ttlRaw: unknown, fallbackMs = 1200): number {
-    const ttlN = Number(ttlRaw ?? fallbackMs)
-    const ttl = Number.isFinite(ttlN) ? ttlN : fallbackMs
-    return Math.max(REAL_TX_FX.ttlMinMs, Math.min(REAL_TX_FX.ttlMaxMs, ttl))
-  }
-
-  let txFxTokens = REAL_TX_FX.burst
-  let txFxLastRefillAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-  let txFxLastSpawnAtMs = 0
-
-  function refillTxFxTokens(nowMs: number) {
-    const dt = Math.max(0, nowMs - txFxLastRefillAtMs)
-    txFxLastRefillAtMs = nowMs
-    txFxTokens = Math.min(REAL_TX_FX.burst, txFxTokens + (dt * REAL_TX_FX.ratePerSec) / 1000)
-  }
-
-  function pickSparkEdges(
-    edges: TxUpdatedEvent['edges'],
-    endpoints?: { from?: string; to?: string },
-  ): Array<{ from: string; to: string }> {
-    if (!edges || edges.length === 0) return []
-    if (edges.length <= REAL_TX_FX.maxEdgesPerEvent) return edges
-
-    // UX: for long multi-hop routes, a couple of disjoint edge sparks can look like
-    // the amount labels belong to "different" nodes. Prefer a single clear spark
-    // in the sender->receiver direction.
-    const src = String(endpoints?.from ?? edges[0]!.from ?? '').trim()
-    const dst = String(endpoints?.to ?? edges[edges.length - 1]!.to ?? '').trim()
-    if (!src || !dst) return []
-    if (src === dst) return [{ from: src, to: dst }]
-    return [{ from: src, to: dst }]
-  }
-
-  function runRealTxFx(evt: TxUpdatedEvent) {
-    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    if (nowMs - txFxLastSpawnAtMs < REAL_TX_FX.minGapMs) return
-
-    refillTxFxTokens(nowMs)
-    if (txFxTokens < 1) return
-    if (fxState.sparks.length >= REAL_TX_FX.maxConcurrentSparks) return
-
-    const resolved = resolveTxDirection({ from: evt.from, to: evt.to, edges: evt.edges })
-    const sparkEdges = pickSparkEdges(resolved.edges, { from: resolved.from, to: resolved.to })
-    if (sparkEdges.length === 0) return
-
-    txFxTokens -= 1
-    txFxLastSpawnAtMs = nowMs
-
-    const ttlMs = clampRealTxTtlMs(evt.ttl_ms)
-    const k = intensityScale(evt.intensity_key)
-
-    // NOTE: We no longer add activeEdges for TX sparks — the beam itself provides
-    // sufficient visual feedback. ActiveEdges created a "stuck line" effect when
-    // combined with the shrinking beam trail.
-    // For clearing, activeEdges are still used to highlight the cycle path.
-
-    spawnSparks(fxState, {
-      edges: sparkEdges,
-      nowMs,
-      ttlMs,
-      colorCore: VIZ_MAPPING.fx.tx_spark.core,
-      colorTrail: VIZ_MAPPING.fx.tx_spark.trail,
-      thickness: 0.95 * k,
-      kind: 'beam',
-      seedPrefix: `real-tx:${evt.equivalent}`,
-      countPerEdge: 1,
-      keyEdge,
-      seedFn: fnv1a,
-      isTestMode: isTestMode.value && isWebDriver,
-    })
-
-    if (!(isTestMode.value && isWebDriver)) {
-      const src = resolved.from || sparkEdges[0]!.from
-      const dst = resolved.to || sparkEdges[sparkEdges.length - 1]!.to
-      spawnNodeBursts(fxState, {
-        nodeIds: [src],
-        nowMs,
-        durationMs: 280,
-        color: fxColorForNode(src, VIZ_MAPPING.fx.tx_spark.trail),
-        kind: 'tx-impact',
-        seedPrefix: 'real-tx-src',
-        seedFn: fnv1a,
-        isTestMode: false,
-      })
-      scheduleTimeout(() => {
-        spawnNodeBursts(fxState, {
-          nodeIds: [dst],
-          nowMs: typeof performance !== 'undefined' ? performance.now() : Date.now(),
-          durationMs: 420,
-          color: fxColorForNode(dst, VIZ_MAPPING.fx.tx_spark.trail),
-          kind: 'tx-impact',
-          seedPrefix: 'real-tx-dst',
-          seedFn: fnv1a,
-          isTestMode: false,
-        })
-      }, ttlMs)
-    }
-  }
 
   function pushFloatingLabelWhenReady(
     // This helper is node-anchored only: nodeId is required.
@@ -1133,34 +1149,25 @@ export function useSimulatorApp(opts?: {
     scheduleTimeout(() => pushFloatingLabelWhenReady(opts, retryLeft - 1, retryDelayMs), retryDelayMs)
   }
 
+  const realTxFx = useRealTxFx({
+    fxState,
+    isTestMode,
+    isWebDriver,
+    intensityScale,
+    resolveTxDirection,
+    keyEdge,
+    seedFn: fnv1a,
+    txSparkColorCore: VIZ_MAPPING.fx.tx_spark.core,
+    txSparkColorTrail: VIZ_MAPPING.fx.tx_spark.trail,
+    clearingDebtColor: VIZ_MAPPING.fx.clearing_debt,
+    fxColorForNode,
+    scheduleTimeout,
+    pushFloatingLabelWhenReady: (o) => pushFloatingLabelWhenReady(o as any),
+  })
 
-  function pushTxAmountLabel(
-    nodeId: string,
-    signedAmount: string,
-    unit: string,
-    opts?: { throttleMs?: number },
-  ) {
-    const input = normalizeTxAmountLabelInput(nodeId, signedAmount)
-    if (!input) return
-
-    const id = input.nodeId
-    const sign = input.sign
-    const amountText = input.amountText
-    const color = sign === '+' ? VIZ_MAPPING.fx.tx_spark.trail : VIZ_MAPPING.fx.clearing_debt
-
-    // Use direction-aware throttle key so sender (−) and receiver (+) labels
-    // don't coalesce into a single label when the same node participates in
-    // rapid back-to-back transactions (e.g. as sender then immediately as receiver).
-    pushFloatingLabelWhenReady({
-      nodeId: id,
-      text: `${sign}${amountText.replace(/^-/, '')} ${unit}`,
-      color: fxColorForNode(id, color),
-      ttlMs: 1900,
-      offsetYPx: sign === '+' ? -18 : -6,
-      throttleKey: `amt:${sign}:${id}`,
-      throttleMs: opts?.throttleMs ?? 240,
-    })
-  }
+  const pushTxAmountLabel = realTxFx.pushTxAmountLabel
+  const runRealTxFx = realTxFx.runRealTxFx
+  const clampRealTxTtlMs = realTxFx.clampRealTxTtlMs
 
   const labelNodes = useLabelNodes({
     isTestMode: () => isTestMode.value,
@@ -1289,6 +1296,8 @@ export function useSimulatorApp(opts?: {
     sizeForNode,
     fillForNode: (n) => fillForNode(n, VIZ_MAPPING),
   })
+
+  getDragToPinStateSafe = () => dragToPin.dragState as any
 
   const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,
@@ -1431,9 +1440,7 @@ export function useSimulatorApp(opts?: {
     resetClearingFxDedupImpl()
 
     // Reset token-bucket between runs so a newly started run can always show TX FX immediately.
-    txFxTokens = REAL_TX_FX.burst
-    txFxLastRefillAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    txFxLastSpawnAtMs = 0
+    realTxFx.resetRateLimiter()
 
     physics.stop()
   }
@@ -1492,162 +1499,17 @@ export function useSimulatorApp(opts?: {
     { immediate: true, flush: 'post' },
   )
 
-  const fxDebugBusy = ref(false)
+  const fxDebugControls = useFxDebugControls({
+    isFxDebugEnabled,
+    real,
+    effectiveEq,
+    markDemoActivity,
+    realMode,
+  })
 
-  async function ensureRunForFxDebug(): Promise<string> {
-    if (real.runId) {
-      // IMPORTANT:
-      // VSCode Simple Browser has its own storage partition (localStorage/cookies) separate from your external browser.
-      // It's common to end up with a persisted `geo.sim.v2.runId` that points to a run that is already terminal
-      // server-side (e.g. `stopped`). In that case, sending actions like `/actions/tx-once` yields HTTP 409.
-      //
-      // Fix: if the persisted run is in a terminal state, clear it and fall through to creating a fresh paused run.
-      try {
-        await realMode.refreshRunStatus()
-      } catch {
-        // best-effort; refreshRunStatus already handles 404 by resetting stale run
-      }
-
-      const st = toLower(real.runStatus?.state)
-      const isTerminal = st === 'stopped' || st === 'error'
-
-      if (isTerminal) {
-        realMode.resetStaleRun({ clearError: true })
-      } else {
-        // If this is an auto-started FX debug fixtures run, keep it paused so heartbeat doesn't spam events.
-        try {
-          const isFxDebugRun = localStorage.getItem('geo.sim.v2.fxDebugRun') === '1'
-          if (isFxDebugRun) {
-            const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
-            if (shouldPause) {
-              await realMode.pause()
-            }
-          }
-        } catch {
-          // ignore
-        }
-        return real.runId
-      }
-    }
-
-    if (!String(real.accessToken ?? '').trim()) {
-      throw new Error('Missing access token')
-    }
-
-    // FX Debug may be clicked before scenarios finish loading.
-    // Ensure a valid scenario selection exists before attempting to start a run.
-    if (!String(real.selectedScenarioId ?? '').trim()) {
-      await realMode.refreshScenarios()
-    }
-    if (!String(real.selectedScenarioId ?? '').trim()) {
-      const detail = String(real.lastError ?? '').trim()
-      throw new Error(detail ? `Failed to select scenario for FX debug: ${detail}` : 'No scenario selected for FX debug')
-    }
-
-    try {
-      localStorage.setItem('geo.sim.v2.fxDebugRun', '1')
-    } catch {
-      // ignore
-    }
-
-    // Autostart a paused fixtures run for fast FX debugging.
-    // Important: keep it paused so backend heartbeat doesn't flood tx.updated events.
-    // Use real-mode so the graph stays DB-enriched (fixtures mode is topology-only).
-    await realMode.startRun({ mode: 'real', pauseImmediately: true })
-
-    // If a run is already active server-side (e.g. another tab), the backend may reject
-    // creating a new one (SIMULATOR_MAX_ACTIVE_RUNS). In that case, attach to the active run.
-    if (!real.runId) {
-      const msg = String(real.lastError ?? '')
-      const looksLikeConflict = msg.includes('HTTP 409') || msg.includes(' 409 ') || msg.toLowerCase().includes('conflict')
-      if (looksLikeConflict) {
-        try {
-          const active = await getActiveRun({ apiBase: real.apiBase, accessToken: real.accessToken })
-          const activeRunId = String(active?.run_id ?? '').trim()
-          if (activeRunId) {
-            real.runId = activeRunId
-            await realMode.refreshRunStatus()
-            // If we attached to a running fixtures run (likely from a previous FX debug attempt), pause it.
-            try {
-              const st = toLower(real.runStatus?.state)
-              const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
-              if (shouldPause) {
-                await realMode.pause()
-              }
-            } catch {
-              // ignore
-            }
-            await realMode.refreshSnapshot()
-            return real.runId
-          }
-        } catch {
-          // fall through to error
-        }
-      }
-    }
-
-    if (!real.runId) {
-      const detail = String(real.lastError ?? '').trim()
-      throw new Error(detail ? `Failed to start run for FX debug: ${detail}` : 'Failed to start run for FX debug')
-    }
-    return real.runId
-  }
-
-  async function fxDebugTxOnce(): Promise<void> {
-    if (!isFxDebugEnabled.value) return
-    if (!real.accessToken) throw new Error('Missing access token')
-    markDemoActivity()
-    fxDebugBusy.value = true
-    try {
-      const runId = await ensureRunForFxDebugSerialized()
-
-      // Demo FX debug relies on SSE as the single source of truth.
-      // Best-effort: wait until the SSE connection is open so the emitted tx.updated is not missed.
-      await waitForRealSseOpen({ timeoutMs: 1200 })
-
-      await actionTxOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
-        equivalent: effectiveEq.value,
-        seed: `ui-fx-debug-tx:${Date.now()}`,
-        client_action_id: `ui-fx-debug-tx:${Date.now()}`,
-      })
-    } finally {
-      fxDebugBusy.value = false
-    }
-  }
-
-  async function fxDebugClearingOnce(): Promise<void> {
-    if (!isFxDebugEnabled.value) return
-    if (!real.accessToken) throw new Error('Missing access token')
-    markDemoActivity()
-    fxDebugBusy.value = true
-    try {
-      const runId = await ensureRunForFxDebugSerialized()
-
-      // Demo FX debug relies on SSE as the single source of truth.
-      // Best-effort: wait until the SSE connection is open so the emitted clearing.done is not missed.
-      await waitForRealSseOpen({ timeoutMs: 1200 })
-
-      await actionClearingOnce({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, {
-        equivalent: effectiveEq.value,
-        seed: `ui-fx-debug-clearing:${Date.now()}`,
-        client_action_id: `ui-fx-debug-clearing:${Date.now()}`,
-      })
-    } finally {
-      fxDebugBusy.value = false
-    }
-  }
-
-  async function waitForRealSseOpen(opts?: { timeoutMs?: number }): Promise<boolean> {
-    const timeoutMs = Math.max(0, Number(opts?.timeoutMs ?? 0))
-    if (timeoutMs <= 0) return real.sseState === 'open'
-
-    const startedAt = Date.now()
-    while (Date.now() - startedAt < timeoutMs) {
-      if (real.sseState === 'open') return true
-      await new Promise<void>((r) => setTimeout(r, 40))
-    }
-    return real.sseState === 'open'
-  }
+  const fxDebugBusy = fxDebugControls.busy
+  const fxDebugTxOnce = fxDebugControls.runTxOnce
+  const fxDebugClearingOnce = fxDebugControls.runClearingOnce
 
   // ── Demo UI: eager auto-bootstrap ────────────────────────────────────
   // When Demo UI opens (?mode=real&ui=demo), automatically create a paused run
@@ -1657,16 +1519,7 @@ export function useSimulatorApp(opts?: {
   //
   // Serialization: `_ensureRunPromise` prevents concurrent bootstrap + user-click
   // from racing and creating duplicate runs.
-  let _ensureRunPromise: Promise<string> | null = null
-
-  function ensureRunForFxDebugSerialized(): Promise<string> {
-    if (!_ensureRunPromise) {
-      _ensureRunPromise = ensureRunForFxDebug().finally(() => {
-        _ensureRunPromise = null
-      })
-    }
-    return _ensureRunPromise
-  }
+  const ensureRunForFxDebugSerialized = fxDebugControls.ensureRunSerialized
 
   if (isDemoUi.value && isRealMode.value) {
     const stopAutoBootstrap = watch(
@@ -1690,41 +1543,15 @@ export function useSimulatorApp(opts?: {
   // Goal: let users open `?mode=real&ui=interact` on a clean system and
   // immediately experiment with payments/trustlines/clearing without first
   // starting a scenario in Auto-Run.
-  const INTERACT_AUTOSTART_SCENARIO_ID = 'clearing-demo-10'
-  let _ensureInteractRunPromise: Promise<void> | null = null
-
-  async function ensureRunForInteract(): Promise<void> {
-    if (!isInteractUi.value || !isRealMode.value) return
-    if (real.runId) return
-
-    // Ensure we have scenarios; anonymous visitors use cookie-auth.
-    if (!String(real.selectedScenarioId ?? '').trim()) {
-      if (!real.loadingScenarios && (real.scenarios?.length ?? 0) === 0) {
-        await realMode.refreshScenarios()
-      }
-
-      const preferred = (real.scenarios ?? []).find((s) => String((s as any)?.scenario_id ?? '') === INTERACT_AUTOSTART_SCENARIO_ID)
-      if (preferred) {
-        real.selectedScenarioId = INTERACT_AUTOSTART_SCENARIO_ID
-      } else if ((real.scenarios?.length ?? 0) > 0) {
-        real.selectedScenarioId = String((real.scenarios[0] as any)?.scenario_id ?? '').trim()
-      }
-    }
-
-    if (!String(real.selectedScenarioId ?? '').trim()) return
-
-    // Start paused with intensity=0 to avoid background activity/flicker.
-    await realMode.startRun({ mode: 'real', intensityPercent: 0, pauseImmediately: true })
-  }
-
-  function ensureRunForInteractSerialized(): Promise<void> {
-    if (!_ensureInteractRunPromise) {
-      _ensureInteractRunPromise = ensureRunForInteract().finally(() => {
-        _ensureInteractRunPromise = null
-      })
-    }
-    return _ensureInteractRunPromise
-  }
+  const interactAutoBootstrap = useInteractAutoBootstrapRun({
+    isInteractUi: () => isInteractUi.value,
+    isRealMode: () => isRealMode.value,
+    real,
+    realMode: {
+      refreshScenarios: realMode.refreshScenarios,
+      startRun: (o) => realMode.startRun(o),
+    },
+  })
 
   if (isInteractUi.value && isRealMode.value) {
     const stopAutoBootstrap = watch(
@@ -1732,7 +1559,7 @@ export function useSimulatorApp(opts?: {
       async (ready) => {
         if (!ready) return
         try {
-          await ensureRunForInteractSerialized()
+          await interactAutoBootstrap.ensureSerialized()
         } catch (err) {
           // Best-effort: user can still start a run manually if needed.
           console.warn('[auto-bootstrap] best-effort failed:', err)
@@ -1780,7 +1607,7 @@ export function useSimulatorApp(opts?: {
     getLayoutSize: () => ({ w: layout.w, h: layout.h }),
   })
 
-  return {
+  const api = {
     apiMode,
 
     // flags
@@ -1938,5 +1765,7 @@ export function useSimulatorApp(opts?: {
     // helpers for template
     getNodeById,
     resetView: viewWiring.resetView,
-  }
+  } satisfies SimulatorAppApi
+
+  return api
 }

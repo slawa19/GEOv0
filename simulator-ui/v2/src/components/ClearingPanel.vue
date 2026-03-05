@@ -129,7 +129,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
 <style scoped>
 /* UX-1: min-height prevents 1-frame layout jump during loading stub → content growth */
 .ds-ov-panel {
-  min-height: 240px;
+  min-height: var(--ds-cp-min-h);
 }
 
 .cp-equivalent-row {
@@ -146,13 +146,13 @@ const busyUi = computed(() => props.busy || isRunning.value)
 
 .cp-spinner {
   display: inline-block;
-  width: 12px;
-  height: 12px;
+  width: var(--ds-cp-spinner-size);
+  height: var(--ds-cp-spinner-size);
   margin-left: 6px;
   border-radius: 999px;
   border: 2px solid currentColor;
   border-right-color: transparent;
-  animation: cp-spin 0.9s linear infinite;
+  animation: cp-spin var(--ds-cp-spinner-spin-dur) linear infinite;
   opacity: 0.7;
   vertical-align: -2px;
 }
@@ -169,7 +169,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
 .cp-cycles {
   margin: 8px 0 0;
   padding-left: 18px;
-  max-height: 140px;
+  max-height: var(--ds-cp-cycles-max-h);
   overflow: auto;
 }
 </style>

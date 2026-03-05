@@ -124,12 +124,12 @@ function guardedStart(fn: () => void) {
 }
 
 .ds-btn--muted {
-  opacity: 0.65;
+  opacity: var(--ds-ab-muted-opacity);
 }
 
 .action-bar__hint {
-  opacity: 0.75;
-  font-size: 12px;
+  opacity: var(--ds-ab-hint-opacity);
+  font-size: var(--ds-ab-hint-font-size);
   /*
     Responsive safety:
     - never force a single line (can overflow on <500px)
@@ -141,7 +141,7 @@ function guardedStart(fn: () => void) {
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
-  line-height: 1.2;
+  line-height: var(--ds-ab-hint-line-height);
 }
 
 @media (max-width: 500px) {

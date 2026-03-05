@@ -7,53 +7,54 @@ import { getLinkTermination } from '../linkGeometry'
 import { getNodeBaseGeometry } from '../nodeGeometry'
 import { easeOutCubic } from './easing'
 import {
+  BEAM_ALPHA_DECAY_POW,
+  BEAM_CORE_MIN_SPX,
+  BEAM_CORE_TH_K,
+  BEAM_HALO_GLOBAL_ALPHA,
+  BEAM_HALO_MIN_SPX,
+  BEAM_HALO_TH_K,
+  BEAM_MAX_TRAIL_FRAC,
+  BEAM_SEG_CORE_MIN_SPX,
+  BEAM_SEG_CORE_TH_K,
+  BEAM_SEG_HALO_MIN_SPX,
+  BEAM_SEG_HALO_TH_K,
+  BEAM_SEG_LEN_FRAC,
+  BEAM_SEG_MAX_SPX,
+  BEAM_SEG_MIN_SPX,
+  BEAM_SHRINK_START_T,
+  BEAM_TRAIL_ALPHA_K,
+  FX_ALPHA_EPS,
+  FX_SHADOW_BLUR_K_BY_QUALITY,
+  GLOW_BLUR_MIN_SPX,
+  GLOW_BLUR_R_K,
+  HEAD_DOT_MIN_SPX,
+  HEAD_DOT_TH_K,
+  NODE_GLINT_COLOR_HEX,
+  SEED_BUCKET_1K,
+  SEED_BUCKET_4K,
+  SPARK_CORE_LIFE_K,
+  SPARK_GLOW_BLUR_MIN_SPX,
+  SPARK_GLOW_BLUR_R_K,
+  SPARK_HEAD_MIN_SPX,
+  SPARK_HEAD_TH_K,
+  SPARK_PHASE_K,
+  SPARK_TRAIL_LEN_FRAC,
+  SPARK_TRAIL_LIFE_K,
+  SPARK_TRAIL_MAX_MS,
+  SPARK_TRAIL_MIN_MS,
+  SPARK_TRAIL_MIN_PX,
+  SPARK_TRAIL_TIME_FRAC,
+  SPARK_WOBBLE_FREQ_BASE,
+  SPARK_WOBBLE_FREQ_RANGE,
+  SPARK_WOBBLE_PHASE_OFF,
+} from '../fxConfig'
+import {
   invalidateNodeOutlineCacheForSnapshotKey,
   nodeOutlinePath2D,
 } from './outlineCache'
 import type { FxState } from './state'
 import { worldRectForCanvas } from './worldRect'
-
-const SEED_BUCKET_1K = 1000
-const SEED_BUCKET_4K = 4096
-const FX_ALPHA_EPS = 0.003
-
-// ── Beam FX constants ─────────────────────────────────────────────────────
-const BEAM_ALPHA_DECAY_POW   = 1.2   // lifePos^k — slightly convex alpha fade
-const BEAM_MAX_TRAIL_FRAC    = 0.85  // max trail = 85% of edge length
-const BEAM_SHRINK_START_T    = 0.7   // trail starts shrinking at 70% of journey
-const BEAM_TRAIL_ALPHA_K     = 0.55  // trail base-alpha multiplier
-const BEAM_HALO_GLOBAL_ALPHA = 0.9   // globalAlpha for the halo stroke pass
-const BEAM_HALO_MIN_SPX      = 1.8   // halo stroke min width (screen-px)
-const BEAM_HALO_TH_K         = 4.6   // halo stroke = max(MIN_SPX, th * K)
-const BEAM_CORE_MIN_SPX      = 0.9   // core stroke min width (screen-px)
-const BEAM_CORE_TH_K         = 1.25  // core stroke = max(MIN_SPX, th * K)
-const BEAM_SEG_LEN_FRAC      = 0.22  // bright-packet segment fraction of edge length
-const BEAM_SEG_MIN_SPX       = 18    // bright-packet min length (screen-px)
-const BEAM_SEG_MAX_SPX       = 54    // bright-packet max length (screen-px)
-const BEAM_SEG_HALO_MIN_SPX  = 2.0   // bright-packet halo stroke min width
-const BEAM_SEG_HALO_TH_K     = 5.2   // bright-packet halo = max(MIN, th * K)
-const BEAM_SEG_CORE_MIN_SPX  = 1.2   // bright-packet core stroke min width
-const BEAM_SEG_CORE_TH_K     = 3.0   // bright-packet core = max(MIN, th * K)
-// ── Head-dot constants (beam head) ────────────────────────────────────────
-const HEAD_DOT_MIN_SPX       = 3.0   // beam head-dot min rendered radius (screen-px)
-const HEAD_DOT_TH_K          = 4.2   // head-dot radius = max(MIN_SPX, th * K)
-const GLOW_BLUR_MIN_SPX      = 16    // minimum glow-sprite blur (screen-px)
-const GLOW_BLUR_R_K          = 5     // blur = max(GLOW_BLUR_MIN_SPX, r * K)
-// ── Spark FX constants ────────────────────────────────────────────────────
-const SPARK_TRAIL_TIME_FRAC  = 0.35  // trail time = ttlMs * k
-const SPARK_TRAIL_MIN_MS     = 150   // trail duration clamp min (ms)
-const SPARK_TRAIL_MAX_MS     = 500   // trail duration clamp max (ms)
-const SPARK_TRAIL_LEN_FRAC   = 0.75  // max trail len ≤ 75% of edge length
-const SPARK_TRAIL_MIN_PX     = 16    // minimum trail length (world-px)
-const SPARK_WOBBLE_FREQ_BASE  = 2.5  // base wobble frequency
-const SPARK_WOBBLE_FREQ_RANGE = 4.0  // wobble frequency random range
-const SPARK_WOBBLE_PHASE_OFF  = 11.3 // per-seed wobble phase randomizer
-const SPARK_TRAIL_LIFE_K     = 0.75  // alphaTrail = life * K
-const SPARK_CORE_LIFE_K      = 0.95  // alphaCore  = life * K
-const SPARK_HEAD_MIN_SPX     = 1.6   // spark head-dot min rendered radius (screen-px)
-const SPARK_HEAD_TH_K        = 2.4   // spark head-dot = max(MIN, th * K)
-const SPARK_GLOW_BLUR_MIN_SPX = 10   // minimum glow blur for spark head (screen-px)
-const SPARK_GLOW_BLUR_R_K    = 6     // spark blur = max(MIN, r * K)
+import { readCssVar } from '../readCssVar'
 
 export function renderFxFrame(opts: {
   nowMs: number
@@ -77,7 +78,7 @@ export function renderFxFrame(opts: {
   // Keep the same visuals as before for each quality preset,
   // but remove Interaction Quality dependencies from the FX stack.
   // Low quality should still keep a minimal blur so FX sprites don't degrade into hard geometry.
-  const shadowBlurK = q === 'high' ? 1 : q === 'med' ? 0.75 : 0.3
+  const shadowBlurK = FX_SHADOW_BLUR_K_BY_QUALITY[q] ?? 1
 
   // Snapshot-based Path2D cache invalidation: clear only when snapshot identity changes,
   // NOT every frame (per-frame clear was negating the entire cache benefit).
@@ -101,7 +102,6 @@ export function renderFxFrame(opts: {
   if (fxState.sparks.length > 0) {
     // Compact in-place filter.
     let write = 0
-    const SPARK_PHASE_K = 0.35
     for (let read = 0; read < fxState.sparks.length; read++) {
       const s = fxState.sparks[read]!
       const age = nowMs - s.startedAtMs
@@ -567,7 +567,7 @@ export function renderFxFrame(opts: {
           const crossfade = clamp01((t0 - 0.55) / 0.45) // 0→1 over the last 45%
           const blueAlpha = crossfade * 0.12
           ctx.globalAlpha = blueAlpha
-          ctx.strokeStyle = '#64748b' // base edge color (slate)
+          ctx.strokeStyle = mapping.link.color.default
           ctx.lineWidth = Math.max(spx(0.6), th * 1.0)
           ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
         }
@@ -579,7 +579,7 @@ export function renderFxFrame(opts: {
         const afterAlpha = 0.12 * 0.5 * (1 + Math.cos(Math.PI * afterT)) // 0.12 → 0
         if (afterAlpha >= FX_ALPHA_EPS) {
           ctx.globalAlpha = afterAlpha
-          ctx.strokeStyle = '#64748b'
+          ctx.strokeStyle = mapping.link.color.default
           ctx.lineWidth = Math.max(spx(0.6), th * 1.0)
           ctx.beginPath(); ctx.moveTo(a.__x, a.__y); ctx.lineTo(b.__x, b.__y); ctx.stroke()
         }
@@ -645,7 +645,8 @@ export function renderFxFrame(opts: {
         ctx.lineWidth = baseWidth
         ctx.stroke(outline)
 
-        ctx.strokeStyle = withAlpha('#ffffff', 0.7 * alpha)
+        const glint = readCssVar('--ds-glint', NODE_GLINT_COLOR_HEX)
+        ctx.strokeStyle = withAlpha(glint, 0.7 * alpha)
         ctx.lineWidth = Math.max(spx(1), baseWidth * 0.4)
         ctx.stroke(outline)
 

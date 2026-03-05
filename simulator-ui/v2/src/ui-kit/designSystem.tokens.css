@@ -160,6 +160,162 @@
   --ds-dur: 180ms;
   --ds-dur-slow: 260ms;
 
+  /* WindowShell (WM windows) */
+  --ds-ws-enter-ease: cubic-bezier(0.2, 0, 0, 1);
+  --ds-ws-enter-shift-y: 8px;
+  --ds-ws-header-gap: 8px;
+  --ds-ws-header-padding-y: 6px;
+  --ds-ws-header-padding-x: 8px;
+  --ds-ws-title-font-size: 12px;
+  --ds-ws-title-line-height: 16px;
+  --ds-ws-close-size: 24px;
+  --ds-ws-close-radius: var(--ds-radius-sm);
+
+  /* NodeCardOverlay (Interact) */
+  --ds-nco-tl-group-font-size: 10px;
+  --ds-nco-tl-group-letter-spacing: 0.08em;
+  --ds-nco-tl-group-opacity: 0.55;
+
+  --ds-nco-actions-gap: 4px;
+  --ds-nco-actions-margin-bottom: 6px;
+  --ds-nco-actions-min-btn-width: 140px;
+
+  --ds-nco-trustlines-margin-top: 1px;
+  --ds-nco-trustlines-min-h: 140px;
+  --ds-nco-trustlines-vh-offset: 120px;
+
+  --ds-nco-tl-group-margin-bottom: 2px;
+  --ds-nco-tl-group-gap-margin-top: 5px;
+
+  --ds-nco-row-gap: 4px;
+  --ds-nco-row-padding-y: 1px;
+  --ds-nco-row-saturated-border-w: 2px;
+  --ds-nco-row-saturated-pad-left: 2px;
+  --ds-nco-row-edit-padding-y: 1px;
+  --ds-nco-row-edit-padding-x: 3px;
+
+  --ds-nco-row-font-size: 0.8rem;
+  --ds-nco-row-amounts-font-size: 0.75rem;
+  --ds-nco-row-amounts-opacity: 0.8;
+  --ds-nco-row-avail-font-size: 0.7rem;
+  --ds-nco-row-avail-opacity: 0.6;
+  --ds-nco-row-edit-font-size: 0.75rem;
+  --ds-nco-row-edit-opacity: 0.6;
+  --ds-nco-row-edit-dur: 150ms;
+  --ds-nco-empty-font-size: 0.75rem;
+  --ds-nco-empty-opacity: 0.5;
+
+  /* SystemBalanceBar (HUD) */
+  --ds-sbb-track-width: 110px;
+  --ds-sbb-track-height: 6px;
+  --ds-sbb-progress-dur: 280ms;
+  --ds-sbb-progress-ease: ease;
+
+  /* ActionBar (HUD) */
+  --ds-ab-muted-opacity: 0.65;
+  --ds-ab-hint-opacity: 0.75;
+  --ds-ab-hint-font-size: 12px;
+  --ds-ab-hint-line-height: 1.2;
+
+  /* BottomBar (HUD) */
+  --ds-bb-details-opacity: 0.92;
+  --ds-bb-fade-85-opacity: 0.85;
+  --ds-bb-fade-90-opacity: 0.9;
+  --ds-bb-devtools-maxw-inset: 24px;
+
+  /* TopBar (HUD) */
+  --ds-tb-control-h: 28px;
+  --ds-tb-icon-size: 28px;
+  --ds-tb-admin-last-error-maxw: 220px;
+  --ds-tb-admin-dropdown-minw: 480px;
+  --ds-tb-admin-dropdown-maxw: 620px;
+  --ds-tb-admin-dropdown-vw-inset: 24px;
+  --ds-tb-runs-maxh: 320px;
+  --ds-tb-run-item-pad-y: 5px;
+  --ds-tb-run-item-pad-x: 8px;
+  --ds-tb-run-id-font-size: 11px;
+  --ds-tb-run-state-font-size: 10px;
+  --ds-tb-run-meta-font-size: 11px;
+  --ds-tb-run-scenario-opacity: 0.75;
+  --ds-tb-run-owner-opacity: 0.65;
+  --ds-tb-run-btn-h: 22px;
+  --ds-tb-run-btn-pad-x: 6px;
+  --ds-tb-fade-75-opacity: 0.75;
+  --ds-tb-fade-90-opacity: 0.9;
+  --ds-tb-fade-92-opacity: 0.92;
+
+  /* DS overlays (Interact panels) */
+  --ds-ov-panel-minw: 320px;
+  --ds-ov-panel-maxw: 560px;
+  --ds-ov-panel-maxw-inset: calc(var(--ds-wm-clamp-pad, 12px) * 2);
+
+  --ds-ov-node-card-w: 320px;
+  --ds-ov-node-card-maxw: 400px;
+  --ds-ov-node-card-avatar-size: 36px;
+  --ds-ov-node-card-body-gap: 8px;
+  --ds-ov-node-card-action-muted-opacity: 0.45;
+  --ds-ov-node-card-action-opacity-dur: 150ms;
+  --ds-ov-title-font-size: 12px;
+  --ds-ov-title-font-weight: 750;
+  --ds-ov-details-caret-halfw: 4px;
+  --ds-ov-details-caret-h: 5px;
+
+  --ds-ov-edge-detail-pad-y: 10px;
+  --ds-ov-edge-detail-pad-x: 12px;
+  --ds-ov-node-card-body-pad: 10px;
+
+  /* SimulatorAppRoot (Interact Mode history overlay) */
+  --ds-sar-interact-history-right: 12px;
+  --ds-sar-interact-history-bottom: 120px;
+  --ds-sar-interact-history-pad-y: 6px;
+  --ds-sar-interact-history-pad-x: 10px;
+
+  /* App.css (world labels / overlays) */
+  --ds-app-drag-preview-border: 1px solid rgba(255, 255, 255, 0.25);
+
+  --ds-app-node-label-font-size: 12px;
+  --ds-app-node-label-font-weight: 650;
+  --ds-app-node-label-text-shadow: 0 0 14px rgba(0, 0, 0, 0.92), 0 0 10px rgba(148, 163, 184, 0.42);
+
+  --ds-app-floating-label-font-size: 14px;
+  --ds-app-floating-label-font-weight: 700;
+
+  --ds-app-floating-label-float-dur: 2.6s;
+  --ds-app-floating-label-float-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --ds-app-clearing-premium-font-size: 32px;
+  --ds-app-clearing-premium-font-weight: 800;
+  --ds-app-clearing-premium-letter-spacing: 0.02em;
+  --ds-app-clearing-premium-pop-dur: 4.2s;
+  --ds-app-clearing-premium-pop-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  --ds-app-panel-slide-opacity-dur: 0.2s;
+  --ds-app-panel-slide-opacity-ease: ease;
+  --ds-app-panel-slide-transform-dur: 0.22s;
+  --ds-app-panel-slide-transform-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-app-panel-slide-shift-y: 12px;
+
+  /* Components */
+  --ds-mpp-min-h: 260px;
+
+  --ds-cp-min-h: 240px;
+  --ds-cp-spinner-size: 12px;
+  --ds-cp-spinner-spin-dur: 0.9s;
+  --ds-cp-cycles-max-h: 140px;
+
+  --ds-edp-minw: 260px;
+  --ds-edp-warn-pad-y: 4px;
+  --ds-edp-warn-pad-x: 6px;
+
+  --ds-tlmp-panel-pad: 12px;
+  --ds-tlmp-select-max-w: 180px;
+  --ds-tlmp-select-min-w: 120px;
+  --ds-tlmp-limit-input-w: 125px;
+
+  --ds-toast-minw: 240px;
+  --ds-toast-maxw: 480px;
+  --ds-toast-transition-dur: 0.2s;
+
   /* semantic defaults (will be overwritten by theme blocks below) */
   --ds-page-bg: #0f172a;
   --ds-text-1: rgba(226, 232, 240, 0.92);
@@ -208,6 +364,14 @@
   --ds-glow: 0 0 12px rgba(56, 189, 248, 0.22);
   --ds-glow-strong: 0 0 20px rgba(56, 189, 248, 0.32);
   --ds-scanline: rgba(56, 189, 248, 0.035);
+
+  /* Simulator canvas FX palette (must match vizMapping defaults) */
+  --ds-fx-tx-spark-core: #ffffff;
+  --ds-fx-tx-spark-trail: #22d3ee;
+  --ds-fx-clearing-credit: #22d3ee;
+  --ds-fx-clearing-debt: #f97316;
+  --ds-fx-flash-clearing-from: rgba(251,191,36,0.45);
+  --ds-fx-flash-clearing-to: rgba(251,191,36,0.00);
 }
 
 /* Density */

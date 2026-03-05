@@ -183,8 +183,8 @@ function onCloseClick(ev: MouseEvent) {
    * Max-size safety: keep window within the WM layer.
    * NOTE: in frameless mode we rely on intrinsic content sizing.
    */
-  max-width: calc(100% - 24px);
-  max-height: calc(100% - 24px);
+  max-width: calc(100% - var(--ds-wm-clamp-pad, 12px) - var(--ds-wm-clamp-pad, 12px));
+  max-height: calc(100% - var(--ds-wm-clamp-pad, 12px) - var(--ds-wm-clamp-pad, 12px));
 }
 
 /* UX-1: contain layout+style in frameless mode — browser hint that reflow stays inside shell */
@@ -213,15 +213,15 @@ function onCloseClick(ev: MouseEvent) {
 .ws-enter-active,
 .ws-leave-active {
   transition:
-    transform 180ms cubic-bezier(0.2, 0, 0, 1),
-    opacity 180ms cubic-bezier(0.2, 0, 0, 1);
+    transform var(--ds-dur) var(--ds-ws-enter-ease),
+    opacity var(--ds-dur) var(--ds-ws-enter-ease);
   will-change: transform, opacity;
 }
 
 .ws-enter-from,
 .ws-leave-to {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(var(--ds-ws-enter-shift-y));
 }
 
 .ws-enter-to,
@@ -241,8 +241,8 @@ function onCloseClick(ev: MouseEvent) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--ds-ws-header-gap);
+  padding: var(--ds-ws-header-padding-y) var(--ds-ws-header-padding-x);
   background: var(--ds-surface-0);
   border-bottom: 1px solid var(--ds-border-subtle);
   user-select: none;
@@ -251,8 +251,8 @@ function onCloseClick(ev: MouseEvent) {
 .ws-title {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--ds-ws-title-font-size);
+  line-height: var(--ds-ws-title-line-height);
   color: var(--ds-text-2);
   white-space: nowrap;
   overflow: hidden;
@@ -260,11 +260,11 @@ function onCloseClick(ev: MouseEvent) {
 }
 
 .ws-close {
-  width: 24px;
-  height: 24px;
+  width: var(--ds-ws-close-size);
+  height: var(--ds-ws-close-size);
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--ds-ws-close-radius);
   border: 1px solid var(--ds-border-subtle);
   background: var(--ds-surface-0);
   color: var(--ds-text-2);

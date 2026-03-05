@@ -100,7 +100,7 @@
   pointer-events: none;
   will-change: transform;
   transform: translate3d(0, 0, 0);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: var(--ds-app-drag-preview-border);
   backdrop-filter: blur(6px);
 }
 
@@ -134,15 +134,13 @@
 .node-label-inner {
   /* Centered label, placed below the node via computed world offset (no frame). */
   transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1));
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--ds-app-node-label-font-size);
+  font-weight: var(--ds-app-node-label-font-weight);
   padding: 1px 6px;
   border: none;
   background: transparent;
   text-align: center;
-  text-shadow:
-    0 0 14px rgba(0, 0, 0, 0.92),
-    0 0 10px rgba(148, 163, 184, 0.42);
+  text-shadow: var(--ds-app-node-label-text-shadow);
   filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.18));
   white-space: nowrap;
 }
@@ -156,10 +154,10 @@
 
 .floating-label-inner {
   display: inline-block;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--ds-app-floating-label-font-size);
+  font-weight: var(--ds-app-floating-label-font-weight);
   text-shadow: 0 0 10px currentColor; /* Default glow */
-  animation: floatUpFade 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: floatUpFade var(--ds-app-floating-label-float-dur) var(--ds-app-floating-label-float-ease) forwards;
   /* Keep centering constant; animate only a pixel offset for smooth motion. */
   transform: translate3d(-50%, -50%, 0) scale(var(--overlay-scale, 1)) translate3d(0, 0, 0);
   will-change: transform, opacity;
@@ -214,11 +212,11 @@
 /* ── Premium clearing amount label ── */
 
 .floating-label-inner.clearing-premium {
-  font-size: 32px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  font-size: var(--ds-app-clearing-premium-font-size);
+  font-weight: var(--ds-app-clearing-premium-font-weight);
+  letter-spacing: var(--ds-app-clearing-premium-letter-spacing);
   color: var(--ds-warn) !important;
-  animation: clearingPremiumPop 4.2s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation: clearingPremiumPop var(--ds-app-clearing-premium-pop-dur) var(--ds-app-clearing-premium-pop-ease) forwards;
   text-shadow:
     0 0 20px color-mix(in srgb, var(--ds-warn) 90%, transparent),
     0 0 40px color-mix(in srgb, var(--ds-warn) 50%, transparent),
@@ -267,13 +265,15 @@
 
 .panel-slide-enter-active,
 .panel-slide-leave-active {
-  transition: opacity 0.2s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    opacity var(--ds-app-panel-slide-opacity-dur) var(--ds-app-panel-slide-opacity-ease),
+    transform var(--ds-app-panel-slide-transform-dur) var(--ds-app-panel-slide-transform-ease);
 }
 
 .panel-slide-enter-from,
 .panel-slide-leave-to {
   opacity: 0;
-  transform: translateY(12px);
+  transform: translateY(var(--ds-app-panel-slide-shift-y));
 }
 
 /* Low quality: disable panel slide animation */

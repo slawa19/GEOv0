@@ -230,7 +230,7 @@ function onCloseLine() {
 .popup {
   position: absolute;
   z-index: var(--ds-z-panel, 42);
-  min-width: 260px;
+  min-width: var(--ds-edp-minw);
   max-width: min(460px, calc(100vw - 24px));
   pointer-events: auto;
 }
@@ -287,8 +287,8 @@ function onCloseLine() {
 
 .popup__inline-warn {
   flex: 1 0 100%;
-  padding: 4px 6px;
-  border-radius: 8px;
+  padding: var(--ds-edp-warn-pad-y) var(--ds-edp-warn-pad-x);
+  border-radius: var(--ds-radius-md);
   border: 1px solid color-mix(in srgb, var(--ds-warn) 35%, transparent);
   background: color-mix(in srgb, var(--ds-warn) 14%, transparent);
   color: color-mix(in srgb, var(--ds-warn) 18%, var(--ds-text-1));

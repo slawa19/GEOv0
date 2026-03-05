@@ -88,8 +88,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 240px;
-  max-width: 480px;
+  min-width: var(--ds-toast-minw);
+  max-width: var(--ds-toast-maxw);
   pointer-events: auto;
 }
 
@@ -118,7 +118,7 @@ onUnmounted(() => {
 /* Vue Transition */
 .success-toast-enter-active,
 .success-toast-leave-active {
-  transition: opacity 0.2s, transform 0.2s;
+  transition: opacity var(--ds-toast-transition-dur), transform var(--ds-toast-transition-dur);
 }
 
 .success-toast-enter-from,

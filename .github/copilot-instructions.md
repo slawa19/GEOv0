@@ -95,6 +95,19 @@
   - limit changes strictly to files Copilot created.
 - Exceptions are allowed only when the user explicitly requests the change to specific file(s).
 
+## Interaction policy: ask less by default
+
+Goal: minimize back-and-forth for routine refactors while staying safe.
+
+- Default: proceed autonomously on small, local, behavior-preserving changes within the current scoped task/stage; do not ask “continue?” after each micro-step.
+- Ask clarifying questions only when:
+  - there are multiple plausible implementations with different UX/semantics,
+  - the change could realistically alter visuals/behavior (not obviously behavior-preserving),
+  - it touches backend/protocol/fixtures/regeneration or any data contract.
+- If uncertainty is minor: pick the simplest option, state the assumption in one short line, and proceed.
+- Gates are non-negotiable: after each micro-batch of changes, run the required checks (e.g. `typecheck` + `vitest`). Only stop/ask if gates fail or a high-risk decision is needed.
+- Prefer batching: accumulate 3–10 safe “small items”, then run gates once, then update docs once.
+
 - TrustLine direction is `from → to` = creditor → debtor (risk limit), *not* the reverse.
 - Keep changes deterministic and validate fixtures (`npm run validate:fixtures`) after regeneration.
 - Canonical decisions and data contracts must be recorded in stable docs under `docs/ru/*` (e.g. `docs/ru/09-decisions-and-defaults.md` and the relevant domain docs like `docs/ru/simulator/backend/*`). Do not leave “single source of truth” rules only in `plans/*` or code-review notes.

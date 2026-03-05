@@ -264,34 +264,34 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 /* Interact Mode: quick-action buttons */
 .nco-interact-actions {
   display: flex;
-  gap: 4px;
+  gap: var(--ds-nco-actions-gap);
   flex-wrap: wrap;
-  margin-bottom: 6px;
+  margin-bottom: var(--ds-nco-actions-margin-bottom);
 }
 
 .nco-interact-actions > .ds-btn {
   flex: 1 1 0;
-  min-width: 140px;
+  min-width: var(--ds-nco-actions-min-btn-width);
 }
 
 /* Trustlines list */
 .nco-trustlines {
-  margin-top: 1px;
-  max-height: max(140px, calc(50vh - 120px));
+  margin-top: var(--ds-nco-trustlines-margin-top);
+  max-height: max(var(--ds-nco-trustlines-min-h), calc(50vh - var(--ds-nco-trustlines-vh-offset)));
   overflow-y: auto;
 }
 
 /* Group heading: OUT → N / IN ← N */
 .nco-tl-group-header {
-  font-size: 10px;
+  font-size: var(--ds-nco-tl-group-font-size);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.55;
-  margin-bottom: 2px;
+  letter-spacing: var(--ds-nco-tl-group-letter-spacing);
+  opacity: var(--ds-nco-tl-group-opacity);
+  margin-bottom: var(--ds-nco-tl-group-margin-bottom);
 }
 
 .nco-tl-group-header--gap {
-  margin-top: 5px;
+  margin-top: var(--ds-nco-tl-group-gap-margin-top);
 }
 
 /* Grid row: [peer-name] [used/limit] [edit-btn or placeholder] */
@@ -299,15 +299,15 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
   display: grid;
   grid-template-columns: minmax(60px, 80px) 1fr auto auto;
   align-items: center;
-  gap: 4px;
-  padding: 1px 0;
-  font-size: 0.8rem;
+  gap: var(--ds-nco-row-gap);
+  padding: var(--ds-nco-row-padding-y) 0;
+  font-size: var(--ds-nco-row-font-size);
 }
 
 /* NC-3: "available <= 0" should be visually emphasized (border only). */
 .nco-trustline-row--saturated {
-  border-left: 2px solid var(--ds-err);
-  padding-left: 2px;
+  border-left: var(--ds-nco-row-saturated-border-w) solid var(--ds-err);
+  padding-left: var(--ds-nco-row-saturated-pad-left);
 }
 
 .nco-trustline-row__peer {
@@ -317,26 +317,26 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 }
 
 .nco-trustline-row__amounts {
-  font-size: 0.75rem;
+  font-size: var(--ds-nco-row-amounts-font-size);
   text-align: right;
-  opacity: 0.8;
+  opacity: var(--ds-nco-row-amounts-opacity);
   font-variant-numeric: tabular-nums;
 }
 
 /* NC-2: available column */
 .nco-trustline-row__avail {
-  font-size: 0.7rem;
-  opacity: 0.6;
+  font-size: var(--ds-nco-row-avail-font-size);
+  opacity: var(--ds-nco-row-avail-opacity);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .nco-trustline-row__edit {
-  font-size: 0.75rem;
-  padding: 1px 3px;
+  font-size: var(--ds-nco-row-edit-font-size);
+  padding: var(--ds-nco-row-edit-padding-y) var(--ds-nco-row-edit-padding-x);
   line-height: 1;
-  opacity: 0.6;
-  transition: opacity 0.15s;
+  opacity: var(--ds-nco-row-edit-opacity);
+  transition: opacity var(--ds-nco-row-edit-dur);
 }
 
 .nco-trustline-row__edit:hover {
@@ -344,8 +344,8 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 }
 
 .nco-trustlines__empty {
-  font-size: 0.75rem;
-  opacity: 0.5;
+  font-size: var(--ds-nco-empty-font-size);
+  opacity: var(--ds-nco-empty-opacity);
   font-style: italic;
 }
 </style>

@@ -40,15 +40,17 @@ export function useAdminRunsPanel(deps: {
     lastError.value = ''
     try {
       const res = await adminGetAllRuns({ apiBase: deps.apiBase.value, accessToken: deps.accessToken.value })
+      if (disposed) return
       runs.value = res.items ?? []
     } catch (e: unknown) {
+      if (disposed) return
       if (e instanceof ApiError && e.status === 403) {
         lastError.value = 'Admin token rejected (HTTP 403)'
       } else {
         lastError.value = String((e as any)?.message ?? e)
       }
     } finally {
-      loading.value = false
+      if (!disposed) loading.value = false
     }
   }
 
@@ -59,6 +61,7 @@ export function useAdminRunsPanel(deps: {
       await adminStopAllRuns({ apiBase: deps.apiBase.value, accessToken: deps.accessToken.value })
       await getRuns()
     } catch (e: unknown) {
+      if (disposed) return
       if (e instanceof ApiError && e.status === 403) {
         lastError.value = 'Admin token rejected (HTTP 403)'
       } else {

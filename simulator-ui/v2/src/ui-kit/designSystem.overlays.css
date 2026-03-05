@@ -56,6 +56,34 @@
   /* Geometry tokens (single source of truth for WM + legacy CSS fallbacks) */
   --ds-hud-stack-height: 110px;
   --ds-wm-clamp-pad: var(--ds-ov-inset, 12px);
+
+  /* WindowManager design tokens */
+  --ds-wm-anchor-offset-x: 16px;
+  --ds-wm-anchor-offset-y: 16px;
+  --ds-wm-cascade-step: 32px;
+
+  /* WM constraints — keep aligned with DS overlay max widths to avoid first-frame jump */
+  --ds-wm-interact-minw: var(--ds-ov-panel-minw, 320px);
+  --ds-wm-interact-minh: 220px;
+  --ds-wm-interact-prefw-trustline: 380px;
+  --ds-wm-interact-prefw-wide: var(--ds-ov-panel-maxw, 560px);
+  --ds-wm-interact-prefh-loading: 260px;
+  --ds-wm-interact-prefh-confirm: 360px;
+  --ds-wm-interact-prefh-picking: 420px;
+
+  --ds-wm-edge-detail-minw: 340px;
+  --ds-wm-edge-detail-minh: 200px;
+  --ds-wm-edge-detail-prefw: 420px;
+  --ds-wm-edge-detail-prefh: 320px;
+
+  --ds-wm-node-card-minw: 320px;
+  --ds-wm-node-card-minh: 180px;
+  --ds-wm-node-card-prefw: 360px;
+  --ds-wm-node-card-prefh: 260px;
+
+  /* WM stacking: group priority bases (inside WM layer only) */
+  --ds-wm-group-z-inspector-base: 0;
+  --ds-wm-group-z-interact-base: 1000000;
 }
 
 .ds-ov-top {
@@ -175,9 +203,9 @@ details.ds-ov-details > summary::after {
   display: inline-block;
   width: 0;
   height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid var(--ds-text-3);
+  border-left: var(--ds-ov-details-caret-halfw) solid transparent;
+  border-right: var(--ds-ov-details-caret-halfw) solid transparent;
+  border-top: var(--ds-ov-details-caret-h) solid var(--ds-text-3);
   transition: transform var(--ds-dur) var(--ds-ease);
   margin-left: auto;
 }
@@ -206,13 +234,13 @@ details[open].ds-ov-details > summary::after {
   z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
-  min-width: 320px;
-  max-width: min(560px, calc(100% - 24px));
+  min-width: var(--ds-ov-panel-minw);
+  max-width: min(var(--ds-ov-panel-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)));
 }
 
 /* Edge detail popup (Interact mode) — visuals only; placement comes from inline style */
 .ds-ov-edge-detail {
-  padding: 10px 12px;
+  padding: var(--ds-ov-edge-detail-pad-y) var(--ds-ov-edge-detail-pad-x);
   border-radius: var(--ds-radius-md);
   box-shadow: none;
 }
@@ -223,7 +251,7 @@ details[open].ds-ov-details > summary::after {
   right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
   bottom: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-bottom, 0px));
   z-index: var(--ds-z-dev, 50);
-  max-width: min(720px, calc(100% - 24px));
+  max-width: min(720px, calc(100% - var(--ds-ov-panel-maxw-inset)));
   max-height: min(70vh, 520px);
   overflow: auto;
   pointer-events: auto;
@@ -276,7 +304,7 @@ details[open].ds-ov-details > summary::after {
   top: calc(100% + var(--ds-space-2, 8px));
   padding: var(--ds-space-2, 8px) var(--ds-space-2, 8px);
   min-width: 320px;
-  max-width: min(520px, calc(100% - 24px));
+  max-width: min(520px, calc(100% - var(--ds-ov-panel-maxw-inset)));
   max-height: min(70vh, 520px);
   z-index: var(--ds-z-inset, 60);
   pointer-events: auto;
@@ -325,8 +353,8 @@ details[open].ds-ov-details > summary::after {
 }
 
 .ds-ov-tooltip__title {
-  font-size: 12px;
-  font-weight: 750;
+  font-size: var(--ds-ov-title-font-size);
+  font-weight: var(--ds-ov-title-font-weight);
   color: var(--ds-text-1);
   white-space: nowrap;
   margin-bottom: 2px;
@@ -345,8 +373,8 @@ details[open].ds-ov-details > summary::after {
 
 .ds-ov-node-card {
   position: absolute;
-  width: 320px;
-  max-width: min(400px, calc(100% - 24px));
+  width: var(--ds-ov-node-card-w);
+  max-width: min(var(--ds-ov-node-card-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)));
   z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
@@ -357,7 +385,7 @@ details[open].ds-ov-details > summary::after {
 
 /* Override panel-body padding for compact card context */
 .ds-ov-node-card .ds-panel__body {
-  padding: 10px;
+  padding: var(--ds-ov-node-card-body-pad);
   position: relative;
 }
 
@@ -365,7 +393,7 @@ details[open].ds-ov-details > summary::after {
 .ds-ov-node-card__body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--ds-ov-node-card-body-gap);
 }
 
 /* Service actions: top-right overlay, does not consume layout height. */
@@ -381,7 +409,7 @@ details[open].ds-ov-details > summary::after {
 
 .ds-ov-node-card__identity {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: var(--ds-ov-node-card-avatar-size) minmax(0, 1fr) auto;
   column-gap: 8px;
   align-items: center;
 }
@@ -417,8 +445,8 @@ details[open].ds-ov-details > summary::after {
 }
 
 .ds-ov-node-card__avatar {
-  width: 36px;
-  height: 36px;
+  width: var(--ds-ov-node-card-avatar-size);
+  height: var(--ds-ov-node-card-avatar-size);
 }
 
 /* Balance inline with meta — color comes from node's viz_color_key (inline style) */
@@ -439,8 +467,8 @@ details[open].ds-ov-details > summary::after {
   display: grid;
   place-items: center;
   line-height: 1;
-  opacity: 0.45;
-  transition: opacity 0.15s var(--ds-ease);
+  opacity: var(--ds-ov-node-card-action-muted-opacity);
+  transition: opacity var(--ds-ov-node-card-action-opacity-dur) var(--ds-ease);
 }
 
 .ds-ov-node-card__action-btn:hover {
@@ -525,8 +553,8 @@ details[open].ds-ov-details > summary::after {
 }
 
 .ds-ov-message__title {
-  font-size: 12px;
-  font-weight: 750;
+  font-size: var(--ds-ov-title-font-size);
+  font-weight: var(--ds-ov-title-font-weight);
   color: var(--ds-text-1);
 }
 

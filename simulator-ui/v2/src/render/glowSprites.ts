@@ -1,4 +1,5 @@
 import { withAlpha } from './color'
+import { OPAQUE_BLACK_HEX } from './fxConfig'
 import { roundedRectPath } from './roundedRect'
 
 import { quantize } from '../utils/math'
@@ -204,7 +205,7 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
 
   if (o.kind === 'fx-ring') {
     // Glow-only ring: draw neutral (black) geometry so only the shadow is visible under `screen`.
-    ctx.strokeStyle = '#000000'
+    ctx.strokeStyle = OPAQUE_BLACK_HEX
     ctx.lineWidth = Math.max(0.1, lw)
     ctx.beginPath()
     ctx.arc(cx, cy, Math.max(0.1, o.r), 0, Math.PI * 2)
@@ -264,7 +265,7 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
     // BaseGraph historically used a 2-pass blur (outer + core) with black stroke in `screen`.
     // We bake both passes into one sprite for reuse.
     const stroke = () => {
-      ctx.strokeStyle = '#000000'
+      ctx.strokeStyle = OPAQUE_BLACK_HEX
       ctx.lineWidth = Math.max(0.1, lw)
       if (o.shape === 'circle') {
         ctx.beginPath()
@@ -289,7 +290,7 @@ function getGlowSprite(opts: GlowSpriteOpts): HTMLCanvasElement {
 
   if (o.kind === 'active') {
     // Active node glow: single-pass blur with black stroke in screen blending.
-    ctx.strokeStyle = '#000000'
+    ctx.strokeStyle = OPAQUE_BLACK_HEX
     ctx.lineWidth = Math.max(0.1, lw)
     if (o.shape === 'circle') {
       ctx.beginPath()

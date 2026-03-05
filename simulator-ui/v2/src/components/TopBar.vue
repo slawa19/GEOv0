@@ -584,7 +584,7 @@ function onApplyIntensity() {
 }
 
 .tb-select-28 {
-  height: 28px;
+  height: var(--ds-tb-control-h);
 }
 
 .tb-run-controls {
@@ -593,8 +593,8 @@ function onApplyIntensity() {
 }
 
 .tb-icon-28 {
-  height: 28px;
-  width: 28px;
+  height: var(--ds-tb-icon-size);
+  width: var(--ds-tb-icon-size);
 }
 
 .tb-adv-summary {
@@ -611,7 +611,7 @@ function onApplyIntensity() {
 
 .tb-intensity-input {
   width: 6ch;
-  height: 28px;
+  height: var(--ds-tb-control-h);
 }
 
 .tb-status-row {
@@ -638,20 +638,20 @@ function onApplyIntensity() {
 }
 
 .tb-admin-last-error {
-  max-width: 220px;
+  max-width: var(--ds-tb-admin-last-error-maxw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tb-admin-dropdown {
-  min-width: 480px;
-  max-width: min(620px, calc(100vw - 24px));
+  min-width: var(--ds-tb-admin-dropdown-minw);
+  max-width: min(var(--ds-tb-admin-dropdown-maxw), calc(100vw - var(--ds-tb-admin-dropdown-vw-inset)));
 }
 
 .tb-runs-list {
   gap: var(--ds-space-1, 4px);
-  max-height: 320px;
+  max-height: var(--ds-tb-runs-maxh);
   overflow-y: auto;
 }
 
@@ -660,7 +660,7 @@ function onApplyIntensity() {
   grid-template-columns: 64px 68px 1fr auto auto;
   align-items: center;
   gap: var(--ds-space-2, 8px);
-  padding: 5px 8px;
+  padding: var(--ds-tb-run-item-pad-y) var(--ds-tb-run-item-pad-x);
   background: var(--ds-surface-1);
   border: 1px solid var(--ds-border);
   border-radius: var(--ds-radius-lg);
@@ -668,19 +668,19 @@ function onApplyIntensity() {
 }
 
 .tb-run-id {
-  font-size: 11px;
+  font-size: var(--ds-tb-run-id-font-size);
   white-space: nowrap;
 }
 
 .tb-run-state {
-  font-size: 10px;
+  font-size: var(--ds-tb-run-state-font-size);
   text-align: center;
   white-space: nowrap;
 }
 
 .tb-run-scenario {
-  opacity: 0.75;
-  font-size: 11px;
+  opacity: var(--ds-tb-run-scenario-opacity);
+  font-size: var(--ds-tb-run-meta-font-size);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -688,8 +688,8 @@ function onApplyIntensity() {
 }
 
 .tb-run-owner {
-  opacity: 0.65;
-  font-size: 11px;
+  opacity: var(--ds-tb-run-owner-opacity);
+  font-size: var(--ds-tb-run-meta-font-size);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -702,22 +702,22 @@ function onApplyIntensity() {
 }
 
 .tb-run-btn {
-  height: 22px;
-  padding: 0 6px;
-  font-size: 11px;
+  height: var(--ds-tb-run-btn-h);
+  padding: 0 var(--ds-tb-run-btn-pad-x);
+  font-size: var(--ds-tb-run-meta-font-size);
   white-space: nowrap;
 }
 
 .tb-fade-75 {
-  opacity: 0.75;
+  opacity: var(--ds-tb-fade-75-opacity);
 }
 
 .tb-fade-90 {
-  opacity: 0.9;
+  opacity: var(--ds-tb-fade-90-opacity);
 }
 
 .tb-fade-92 {
-  opacity: 0.92;
+  opacity: var(--ds-tb-fade-92-opacity);
 }
 
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */

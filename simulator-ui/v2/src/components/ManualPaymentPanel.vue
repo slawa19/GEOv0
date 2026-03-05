@@ -493,7 +493,7 @@ function onToChange(v: string) {
 <style scoped>
 /* UX-1: min-height prevents 1-frame layout jump during loading stub → content growth */
 .ds-ov-panel {
-  min-height: 260px;
+  min-height: var(--ds-mpp-min-h);
 }
 
 .mp-pick-help {

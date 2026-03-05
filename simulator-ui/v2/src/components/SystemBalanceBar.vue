@@ -74,15 +74,15 @@ function fmt(n: number): string {
 }
 
 .sbb-track {
-  width: 110px;
-  height: 6px;
+  width: var(--ds-sbb-track-width);
+  height: var(--ds-sbb-track-height);
 }
 
 .ds-progress__bar {
   transition:
-    width 280ms ease,
-    background-color 280ms ease,
-    opacity 280ms ease;
+    width var(--ds-sbb-progress-dur) var(--ds-sbb-progress-ease),
+    background-color var(--ds-sbb-progress-dur) var(--ds-sbb-progress-ease),
+    opacity var(--ds-sbb-progress-dur) var(--ds-sbb-progress-ease);
 }
 </style>
 

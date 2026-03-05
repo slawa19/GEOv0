@@ -98,6 +98,31 @@ onMounted(() => {
       clampPadPx: geo.wmClampPadPx,
       dockedRightInsetPx: geo.wmClampPadPx,
       dockedRightTopPx: geo.hudStackHeightPx,
+
+      anchorOffsetXPx: geo.wmAnchorOffsetXPx,
+      anchorOffsetYPx: geo.wmAnchorOffsetYPx,
+      cascadeStepPx: geo.wmCascadeStepPx,
+
+      interactPanelMinWidthPx: geo.wmInteractMinWidthPx,
+      interactPanelMinHeightPx: geo.wmInteractMinHeightPx,
+      interactPanelPreferredWidthTrustlinePx: geo.wmInteractPreferredWidthTrustlinePx,
+      interactPanelPreferredWidthWidePx: geo.wmInteractPreferredWidthWidePx,
+      interactPanelPreferredHeightLoadingPx: geo.wmInteractPreferredHeightLoadingPx,
+      interactPanelPreferredHeightConfirmPx: geo.wmInteractPreferredHeightConfirmPx,
+      interactPanelPreferredHeightPickingPx: geo.wmInteractPreferredHeightPickingPx,
+
+      edgeDetailMinWidthPx: geo.wmEdgeDetailMinWidthPx,
+      edgeDetailMinHeightPx: geo.wmEdgeDetailMinHeightPx,
+      edgeDetailPreferredWidthPx: geo.wmEdgeDetailPreferredWidthPx,
+      edgeDetailPreferredHeightPx: geo.wmEdgeDetailPreferredHeightPx,
+
+      nodeCardMinWidthPx: geo.wmNodeCardMinWidthPx,
+      nodeCardMinHeightPx: geo.wmNodeCardMinHeightPx,
+      nodeCardPreferredWidthPx: geo.wmNodeCardPreferredWidthPx,
+      nodeCardPreferredHeightPx: geo.wmNodeCardPreferredHeightPx,
+
+      groupZInspectorBase: geo.wmGroupZInspectorBase,
+      groupZInteractBase: geo.wmGroupZInteractBase,
     })
   }
 })
@@ -120,6 +145,7 @@ import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
  import { useWindowController } from '../composables/useWindowController'
  import { readOverlayGeometryPx } from '../ui-kit/overlayGeometry'
+import { DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX, DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX } from '../ui-kit/overlayGeometry'
 
 function readWindowViewportFallback(): { width: number; height: number } {
   try {
@@ -127,11 +153,11 @@ function readWindowViewportFallback(): { width: number; height: number } {
     const width = Number(w?.innerWidth)
     const height = Number(w?.innerHeight)
     return {
-      width: Number.isFinite(width) && width > 0 ? width : 1280,
-      height: Number.isFinite(height) && height > 0 ? height : 720,
+      width: Number.isFinite(width) && width > 0 ? width : DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX,
+      height: Number.isFinite(height) && height > 0 ? height : DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX,
     }
   } catch {
-    return { width: 1280, height: 720 }
+    return { width: DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX, height: DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX }
   }
 }
 
@@ -1139,10 +1165,10 @@ watch(interactPhase, (phase) => {
 }
 
 .sar-interact-history-overlay {
-  right: 12px;
+  right: var(--ds-sar-interact-history-right);
   left: auto;
-  bottom: 120px;
-  padding: 6px 10px;
+  bottom: var(--ds-sar-interact-history-bottom);
+  padding: var(--ds-sar-interact-history-pad-y) var(--ds-sar-interact-history-pad-x);
   pointer-events: none;
 }
 </style>

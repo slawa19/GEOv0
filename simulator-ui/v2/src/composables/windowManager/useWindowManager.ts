@@ -1,12 +1,36 @@
 import { computed, reactive, ref } from 'vue'
 
 import { clamp, estimateSizeFromConstraints, overlaps } from './geometry'
-import { DEFAULT_HUD_STACK_HEIGHT_PX, DEFAULT_WM_CLAMP_PAD_PX } from '../../ui-kit/overlayGeometry'
+import {
+  DEFAULT_HUD_STACK_HEIGHT_PX,
+  DEFAULT_WM_ANCHOR_OFFSET_X_PX,
+  DEFAULT_WM_ANCHOR_OFFSET_Y_PX,
+  DEFAULT_WM_CASCADE_STEP_PX,
+  DEFAULT_WM_CLAMP_PAD_PX,
+  DEFAULT_WM_EDGE_DETAIL_MIN_HEIGHT_PX,
+  DEFAULT_WM_EDGE_DETAIL_MIN_WIDTH_PX,
+  DEFAULT_WM_EDGE_DETAIL_PREFERRED_HEIGHT_PX,
+  DEFAULT_WM_EDGE_DETAIL_PREFERRED_WIDTH_PX,
+  DEFAULT_WM_INTERACT_MIN_HEIGHT_PX,
+  DEFAULT_WM_INTERACT_MIN_WIDTH_PX,
+  DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX,
+  DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX,
+  DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_PICKING_PX,
+  DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX,
+  DEFAULT_WM_INTERACT_PREFERRED_WIDTH_WIDE_PX,
+  DEFAULT_WM_NODE_CARD_MIN_HEIGHT_PX,
+  DEFAULT_WM_NODE_CARD_MIN_WIDTH_PX,
+  DEFAULT_WM_NODE_CARD_PREFERRED_HEIGHT_PX,
+  DEFAULT_WM_NODE_CARD_PREFERRED_WIDTH_PX,
+  DEFAULT_WM_GROUP_Z_INSPECTOR_BASE,
+  DEFAULT_WM_GROUP_Z_INTERACT_BASE,
+} from '../../ui-kit/overlayGeometry'
 import type {
   FocusMode,
   WindowAnchor,
   WindowData,
   WindowDataByType,
+  WindowOpenArgs,
   WindowGroup,
   WindowInstance,
   WindowManagerApi,
@@ -17,13 +41,6 @@ import type {
 } from './types'
 
 const MAX = 100000
-
-const GROUP_BASE_Z: Record<WindowGroup, number> = {
-  // Requirement: interact windows MUST always render above inspector.
-  // Use a large gap so focusCounter-based intra-group z never crosses groups.
-  inspector: 0,
-  interact: 1000000,
-}
 
 function snap8(v: number): number {
   return Math.round(v / 8) * 8
@@ -55,7 +72,7 @@ function cascadeShiftAvoidOverlaps(o: {
   step?: number
 }): { left: number; top: number } {
   const maxAttempts = o.maxAttempts ?? 24
-  const step = o.step ?? 32
+  const step = o.step ?? DEFAULT_WM_CASCADE_STEP_PX
 
   let left = o.rect.left
   let top = o.rect.top
@@ -93,6 +110,31 @@ export function useWindowManager(): WindowManagerApi {
     clampPadPx: DEFAULT_WM_CLAMP_PAD_PX,
     dockedRightInsetPx: DEFAULT_WM_CLAMP_PAD_PX,
     dockedRightTopPx: DEFAULT_HUD_STACK_HEIGHT_PX,
+
+    anchorOffsetXPx: DEFAULT_WM_ANCHOR_OFFSET_X_PX,
+    anchorOffsetYPx: DEFAULT_WM_ANCHOR_OFFSET_Y_PX,
+    cascadeStepPx: DEFAULT_WM_CASCADE_STEP_PX,
+
+    interactPanelMinWidthPx: DEFAULT_WM_INTERACT_MIN_WIDTH_PX,
+    interactPanelMinHeightPx: DEFAULT_WM_INTERACT_MIN_HEIGHT_PX,
+    interactPanelPreferredWidthTrustlinePx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX,
+    interactPanelPreferredWidthWidePx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_WIDE_PX,
+    interactPanelPreferredHeightLoadingPx: DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX,
+    interactPanelPreferredHeightConfirmPx: DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX,
+    interactPanelPreferredHeightPickingPx: DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_PICKING_PX,
+
+    edgeDetailMinWidthPx: DEFAULT_WM_EDGE_DETAIL_MIN_WIDTH_PX,
+    edgeDetailMinHeightPx: DEFAULT_WM_EDGE_DETAIL_MIN_HEIGHT_PX,
+    edgeDetailPreferredWidthPx: DEFAULT_WM_EDGE_DETAIL_PREFERRED_WIDTH_PX,
+    edgeDetailPreferredHeightPx: DEFAULT_WM_EDGE_DETAIL_PREFERRED_HEIGHT_PX,
+
+    nodeCardMinWidthPx: DEFAULT_WM_NODE_CARD_MIN_WIDTH_PX,
+    nodeCardMinHeightPx: DEFAULT_WM_NODE_CARD_MIN_HEIGHT_PX,
+    nodeCardPreferredWidthPx: DEFAULT_WM_NODE_CARD_PREFERRED_WIDTH_PX,
+    nodeCardPreferredHeightPx: DEFAULT_WM_NODE_CARD_PREFERRED_HEIGHT_PX,
+
+    groupZInspectorBase: DEFAULT_WM_GROUP_Z_INSPECTOR_BASE,
+    groupZInteractBase: DEFAULT_WM_GROUP_Z_INTERACT_BASE,
   })
 
   function setGeometry(next: Partial<WindowManagerGeometryPx>): void {
@@ -113,10 +155,148 @@ export function useWindowManager(): WindowManagerApi {
         ? next.dockedRightTopPx
         : prev.dockedRightTopPx
 
+    const anchorOffsetXPx =
+      next.anchorOffsetXPx != null && Number.isFinite(next.anchorOffsetXPx) && next.anchorOffsetXPx >= 0
+        ? next.anchorOffsetXPx
+        : prev.anchorOffsetXPx
+
+    const anchorOffsetYPx =
+      next.anchorOffsetYPx != null && Number.isFinite(next.anchorOffsetYPx) && next.anchorOffsetYPx >= 0
+        ? next.anchorOffsetYPx
+        : prev.anchorOffsetYPx
+
+    const cascadeStepPx =
+      next.cascadeStepPx != null && Number.isFinite(next.cascadeStepPx) && next.cascadeStepPx >= 0
+        ? next.cascadeStepPx
+        : prev.cascadeStepPx
+
+    const interactPanelMinWidthPx =
+      next.interactPanelMinWidthPx != null && Number.isFinite(next.interactPanelMinWidthPx) && next.interactPanelMinWidthPx > 0
+        ? next.interactPanelMinWidthPx
+        : prev.interactPanelMinWidthPx
+
+    const interactPanelMinHeightPx =
+      next.interactPanelMinHeightPx != null && Number.isFinite(next.interactPanelMinHeightPx) && next.interactPanelMinHeightPx > 0
+        ? next.interactPanelMinHeightPx
+        : prev.interactPanelMinHeightPx
+
+    const interactPanelPreferredWidthTrustlinePx =
+      next.interactPanelPreferredWidthTrustlinePx != null &&
+      Number.isFinite(next.interactPanelPreferredWidthTrustlinePx) &&
+      next.interactPanelPreferredWidthTrustlinePx > 0
+        ? next.interactPanelPreferredWidthTrustlinePx
+        : prev.interactPanelPreferredWidthTrustlinePx
+
+    const interactPanelPreferredWidthWidePx =
+      next.interactPanelPreferredWidthWidePx != null &&
+      Number.isFinite(next.interactPanelPreferredWidthWidePx) &&
+      next.interactPanelPreferredWidthWidePx > 0
+        ? next.interactPanelPreferredWidthWidePx
+        : prev.interactPanelPreferredWidthWidePx
+
+    const interactPanelPreferredHeightLoadingPx =
+      next.interactPanelPreferredHeightLoadingPx != null &&
+      Number.isFinite(next.interactPanelPreferredHeightLoadingPx) &&
+      next.interactPanelPreferredHeightLoadingPx > 0
+        ? next.interactPanelPreferredHeightLoadingPx
+        : prev.interactPanelPreferredHeightLoadingPx
+
+    const interactPanelPreferredHeightConfirmPx =
+      next.interactPanelPreferredHeightConfirmPx != null &&
+      Number.isFinite(next.interactPanelPreferredHeightConfirmPx) &&
+      next.interactPanelPreferredHeightConfirmPx > 0
+        ? next.interactPanelPreferredHeightConfirmPx
+        : prev.interactPanelPreferredHeightConfirmPx
+
+    const interactPanelPreferredHeightPickingPx =
+      next.interactPanelPreferredHeightPickingPx != null &&
+      Number.isFinite(next.interactPanelPreferredHeightPickingPx) &&
+      next.interactPanelPreferredHeightPickingPx > 0
+        ? next.interactPanelPreferredHeightPickingPx
+        : prev.interactPanelPreferredHeightPickingPx
+
+    const edgeDetailMinWidthPx =
+      next.edgeDetailMinWidthPx != null && Number.isFinite(next.edgeDetailMinWidthPx) && next.edgeDetailMinWidthPx > 0
+        ? next.edgeDetailMinWidthPx
+        : prev.edgeDetailMinWidthPx
+
+    const edgeDetailMinHeightPx =
+      next.edgeDetailMinHeightPx != null && Number.isFinite(next.edgeDetailMinHeightPx) && next.edgeDetailMinHeightPx > 0
+        ? next.edgeDetailMinHeightPx
+        : prev.edgeDetailMinHeightPx
+
+    const edgeDetailPreferredWidthPx =
+      next.edgeDetailPreferredWidthPx != null &&
+      Number.isFinite(next.edgeDetailPreferredWidthPx) &&
+      next.edgeDetailPreferredWidthPx > 0
+        ? next.edgeDetailPreferredWidthPx
+        : prev.edgeDetailPreferredWidthPx
+
+    const edgeDetailPreferredHeightPx =
+      next.edgeDetailPreferredHeightPx != null &&
+      Number.isFinite(next.edgeDetailPreferredHeightPx) &&
+      next.edgeDetailPreferredHeightPx > 0
+        ? next.edgeDetailPreferredHeightPx
+        : prev.edgeDetailPreferredHeightPx
+
+    const nodeCardMinWidthPx =
+      next.nodeCardMinWidthPx != null && Number.isFinite(next.nodeCardMinWidthPx) && next.nodeCardMinWidthPx > 0
+        ? next.nodeCardMinWidthPx
+        : prev.nodeCardMinWidthPx
+
+    const nodeCardMinHeightPx =
+      next.nodeCardMinHeightPx != null && Number.isFinite(next.nodeCardMinHeightPx) && next.nodeCardMinHeightPx > 0
+        ? next.nodeCardMinHeightPx
+        : prev.nodeCardMinHeightPx
+
+    const nodeCardPreferredWidthPx =
+      next.nodeCardPreferredWidthPx != null &&
+      Number.isFinite(next.nodeCardPreferredWidthPx) &&
+      next.nodeCardPreferredWidthPx > 0
+        ? next.nodeCardPreferredWidthPx
+        : prev.nodeCardPreferredWidthPx
+
+    const nodeCardPreferredHeightPx =
+      next.nodeCardPreferredHeightPx != null &&
+      Number.isFinite(next.nodeCardPreferredHeightPx) &&
+      next.nodeCardPreferredHeightPx > 0
+        ? next.nodeCardPreferredHeightPx
+        : prev.nodeCardPreferredHeightPx
+
+    const groupZInspectorBase =
+      next.groupZInspectorBase != null && Number.isFinite(next.groupZInspectorBase) && next.groupZInspectorBase >= 0
+        ? next.groupZInspectorBase
+        : prev.groupZInspectorBase
+
+    const groupZInteractBase =
+      next.groupZInteractBase != null && Number.isFinite(next.groupZInteractBase) && next.groupZInteractBase >= 0
+        ? next.groupZInteractBase
+        : prev.groupZInteractBase
+
     if (
       clampPadPx === prev.clampPadPx &&
       dockedRightInsetPx === prev.dockedRightInsetPx &&
-      dockedRightTopPx === prev.dockedRightTopPx
+      dockedRightTopPx === prev.dockedRightTopPx &&
+      anchorOffsetXPx === prev.anchorOffsetXPx &&
+      anchorOffsetYPx === prev.anchorOffsetYPx &&
+      cascadeStepPx === prev.cascadeStepPx &&
+      interactPanelMinWidthPx === prev.interactPanelMinWidthPx &&
+      interactPanelMinHeightPx === prev.interactPanelMinHeightPx &&
+      interactPanelPreferredWidthTrustlinePx === prev.interactPanelPreferredWidthTrustlinePx &&
+      interactPanelPreferredWidthWidePx === prev.interactPanelPreferredWidthWidePx &&
+      interactPanelPreferredHeightLoadingPx === prev.interactPanelPreferredHeightLoadingPx &&
+      interactPanelPreferredHeightConfirmPx === prev.interactPanelPreferredHeightConfirmPx &&
+      interactPanelPreferredHeightPickingPx === prev.interactPanelPreferredHeightPickingPx &&
+      edgeDetailMinWidthPx === prev.edgeDetailMinWidthPx &&
+      edgeDetailMinHeightPx === prev.edgeDetailMinHeightPx &&
+      edgeDetailPreferredWidthPx === prev.edgeDetailPreferredWidthPx &&
+      edgeDetailPreferredHeightPx === prev.edgeDetailPreferredHeightPx &&
+      nodeCardMinWidthPx === prev.nodeCardMinWidthPx &&
+      nodeCardMinHeightPx === prev.nodeCardMinHeightPx &&
+      nodeCardPreferredWidthPx === prev.nodeCardPreferredWidthPx &&
+      nodeCardPreferredHeightPx === prev.nodeCardPreferredHeightPx &&
+      groupZInspectorBase === prev.groupZInspectorBase &&
+      groupZInteractBase === prev.groupZInteractBase
     ) {
       return
     }
@@ -125,6 +305,31 @@ export function useWindowManager(): WindowManagerApi {
       clampPadPx,
       dockedRightInsetPx,
       dockedRightTopPx,
+
+      anchorOffsetXPx,
+      anchorOffsetYPx,
+      cascadeStepPx,
+
+      interactPanelMinWidthPx,
+      interactPanelMinHeightPx,
+      interactPanelPreferredWidthTrustlinePx,
+      interactPanelPreferredWidthWidePx,
+      interactPanelPreferredHeightLoadingPx,
+      interactPanelPreferredHeightConfirmPx,
+      interactPanelPreferredHeightPickingPx,
+
+      edgeDetailMinWidthPx,
+      edgeDetailMinHeightPx,
+      edgeDetailPreferredWidthPx,
+      edgeDetailPreferredHeightPx,
+
+      nodeCardMinWidthPx,
+      nodeCardMinHeightPx,
+      nodeCardPreferredWidthPx,
+      nodeCardPreferredHeightPx,
+
+      groupZInspectorBase,
+      groupZInteractBase,
     }
   }
 
@@ -220,7 +425,7 @@ export function useWindowManager(): WindowManagerApi {
   }
 
   function computeEffectiveZ(win: WindowInstance): number {
-    return GROUP_BASE_Z[win.policy.group] + win.z
+    return (win.policy.group === 'interact' ? geometry.value.groupZInteractBase : geometry.value.groupZInspectorBase) + win.z
   }
 
   function closeGroupExcept(g: WindowGroup, exceptId: number, reason: 'esc' | 'action' | 'programmatic'): void {
@@ -234,8 +439,6 @@ export function useWindowManager(): WindowManagerApi {
   }
 
   // NOTE: keep `type` and `data` decoupled at the signature level.
-  // `WindowData<T>` doesn't always narrow reliably through generic inference at call sites,
-  // so we cast inside each switch branch for stability.
   function getPolicy(type: WindowType, data: WindowData): WindowPolicy {
     switch (type) {
       case 'interact-panel': {
@@ -307,6 +510,7 @@ export function useWindowManager(): WindowManagerApi {
   }
 
   function getConstraints(type: WindowType, data: WindowData): WindowSizeConstraints {
+    const g = geometry.value
     switch (type) {
       case 'interact-panel': {
         const d = data as WindowDataByType['interact-panel']
@@ -319,13 +523,13 @@ export function useWindowManager(): WindowManagerApi {
         const preferredHeight = (() => {
           const p = String(d.phase ?? '')
           // Treat explicit loading phases (or clearing running/preview) as the smallest.
-          if (p.includes('loading') || p.endsWith('-running') || p.endsWith('-preview')) return 260
+          if (p.includes('loading') || p.endsWith('-running') || p.endsWith('-preview')) return g.interactPanelPreferredHeightLoadingPx
           // Confirm steps are typically more compact than picking lists.
-          if (p.startsWith('confirm-')) return 360
+          if (p.startsWith('confirm-')) return g.interactPanelPreferredHeightConfirmPx
           // Picking steps are the default interact height.
-          if (p.startsWith('picking-')) return 420
+          if (p.startsWith('picking-')) return g.interactPanelPreferredHeightPickingPx
           // Unknown/custom phases: keep legacy value to avoid changing behavior broadly.
-          return 420
+          return g.interactPanelPreferredHeightPickingPx
         })()
 
         // Audit fix C-1: trustline preferredWidth MUST be 380.
@@ -334,14 +538,14 @@ export function useWindowManager(): WindowManagerApi {
         // jump after the first ResizeObserver measurement + reclamp.
         const preferredWidth =
           d.panel === 'trustline'
-            ? 380
+            ? g.interactPanelPreferredWidthTrustlinePx
             : d.panel === 'payment'
-              ? 560
-              : 560
+              ? g.interactPanelPreferredWidthWidePx
+              : g.interactPanelPreferredWidthWidePx
 
         return {
-          minWidth: 320,
-          minHeight: 220,
+          minWidth: g.interactPanelMinWidthPx,
+          minHeight: g.interactPanelMinHeightPx,
           maxWidth: MAX,
           maxHeight: MAX,
           preferredWidth,
@@ -350,21 +554,21 @@ export function useWindowManager(): WindowManagerApi {
       }
       case 'edge-detail':
         return {
-          minWidth: 340,
-          minHeight: 200,
+          minWidth: g.edgeDetailMinWidthPx,
+          minHeight: g.edgeDetailMinHeightPx,
           maxWidth: MAX,
           maxHeight: MAX,
-          preferredWidth: 420,
-          preferredHeight: 320,
+          preferredWidth: g.edgeDetailPreferredWidthPx,
+          preferredHeight: g.edgeDetailPreferredHeightPx,
         }
       case 'node-card':
         return {
-          minWidth: 320,
-          minHeight: 180,
+          minWidth: g.nodeCardMinWidthPx,
+          minHeight: g.nodeCardMinHeightPx,
           maxWidth: MAX,
           maxHeight: MAX,
-          preferredWidth: 360,
-          preferredHeight: 260,
+          preferredWidth: g.nodeCardPreferredWidthPx,
+          preferredHeight: g.nodeCardPreferredHeightPx,
         }
       default: {
         const _exhaustive: never = type
@@ -434,8 +638,8 @@ export function useWindowManager(): WindowManagerApi {
     // the current rect on reclamp() — this would undo user drags and also breaks
     // singleton='reuse' expectations.
     if (win.anchor && win.placement === 'anchored' && !measured) {
-      const dx = win.anchorOffset?.x ?? 16
-      const dy = win.anchorOffset?.y ?? 16
+      const dx = win.anchorOffset?.x ?? geometry.value.anchorOffsetXPx
+      const dy = win.anchorOffset?.y ?? geometry.value.anchorOffsetYPx
       nextLeft = win.anchor.x + dx
       nextTop = win.anchor.y + dy
     }
@@ -591,7 +795,7 @@ export function useWindowManager(): WindowManagerApi {
         ? prevAnchor.x !== anchor.x || prevAnchor.y !== anchor.y || prevAnchor.space !== anchor.space || prevAnchor.source !== anchor.source
         : false)
 
-    win.data = data as unknown as WindowData
+    win.data = data
     win.anchor = anchor
     win.constraints = constraints
     win.policy = policy
@@ -609,7 +813,7 @@ export function useWindowManager(): WindowManagerApi {
     // Re-position baseline only when necessary.
     if (anchorChanged || !win.measured) {
       if (win.placement === 'anchored' && win.anchor) {
-        win.anchorOffset = { x: 16, y: 16 }
+        win.anchorOffset = { x: geometry.value.anchorOffsetXPx, y: geometry.value.anchorOffsetYPx }
         win.rect.left = win.anchor.x + win.anchorOffset.x
         win.rect.top = win.anchor.y + win.anchorOffset.y
       } else {
@@ -632,7 +836,7 @@ export function useWindowManager(): WindowManagerApi {
       const others = Array.from(windowsMap.values())
         .filter((w) => w.id !== pending.id)
         .map((w) => w.rect)
-      const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others })
+      const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others, step: geometry.value.cascadeStepPx })
       win.rect.left = next.left
       win.rect.top = next.top
       if (win.anchor && win.placement === 'anchored') {
@@ -651,18 +855,7 @@ export function useWindowManager(): WindowManagerApi {
     reclamp(pending.id)
   }
 
-  function open<T extends WindowType>(o: {
-    type: T
-    anchor?: WindowAnchor | null
-    data: WindowData<T>
-    /**
-     * Controls z-order / active change on reuse.
-     * - `'auto'` (default): focus on creation only; reuse without focus.
-     * - `'always'`: always focus (user-initiated actions).
-     * - `'never'`: never focus (reactive/watcher-driven updates).
-     */
-    focus?: FocusMode
-  }): number {
+  function open(o: WindowOpenArgs): number {
     const initiator = captureInitiator()
     const type = o.type
     const data = o.data
@@ -680,10 +873,11 @@ export function useWindowManager(): WindowManagerApi {
 
         // UX-6: debounce rapid node-card reuse updates (apply only the trailing payload).
         // IMPORTANT: do NOT debounce focus:'never' (UX-9 anchor-follow updates).
-        if (type === 'node-card' && focusMode !== 'never') {
+        // IMPORTANT: use `o.type` for proper discriminated-union narrowing.
+        if (o.type === 'node-card' && focusMode !== 'never') {
           pendingNodeCardReuse = {
             id,
-            data: data as unknown as WindowDataByType['node-card'],
+            data: o.data,
             anchor,
             focusMode,
             initiator,
@@ -703,7 +897,7 @@ export function useWindowManager(): WindowManagerApi {
             ? prevAnchor.x !== anchor.x || prevAnchor.y !== anchor.y || prevAnchor.space !== anchor.space || prevAnchor.source !== anchor.source
             : false)
 
-        win.data = data as unknown as WindowData
+        win.data = data
         win.anchor = anchor
         win.constraints = constraints
         win.policy = policy
@@ -723,7 +917,7 @@ export function useWindowManager(): WindowManagerApi {
         // if the window already exists (measured) and anchor did not change.
         if (anchorChanged || !win.measured) {
           if (win.placement === 'anchored' && win.anchor) {
-            win.anchorOffset = { x: 16, y: 16 }
+            win.anchorOffset = { x: geometry.value.anchorOffsetXPx, y: geometry.value.anchorOffsetYPx }
             win.rect.left = win.anchor.x + win.anchorOffset.x
             win.rect.top = win.anchor.y + win.anchorOffset.y
           } else {
@@ -746,7 +940,7 @@ export function useWindowManager(): WindowManagerApi {
           const others = Array.from(windowsMap.values())
             .filter((w) => w.id !== id)
             .map((w) => w.rect)
-          const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others })
+          const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others, step: geometry.value.cascadeStepPx })
           win.rect.left = next.left
           win.rect.top = next.top
           if (win.anchor && win.placement === 'anchored') {
@@ -772,7 +966,10 @@ export function useWindowManager(): WindowManagerApi {
 
     const { width, height } = estimateSizeFromConstraints(constraints)
     const placement: WindowInstance['placement'] = anchor ? 'anchored' : 'docked-right'
-    const anchorOffset = placement === 'anchored' && anchor ? { x: 16, y: 16 } : null
+    const anchorOffset =
+      placement === 'anchored' && anchor
+        ? { x: geometry.value.anchorOffsetXPx, y: geometry.value.anchorOffsetYPx }
+        : null
     const rect =
       placement === 'anchored' && anchor
         ? { left: anchor.x + anchorOffset!.x, top: anchor.y + anchorOffset!.y, width, height }
@@ -798,7 +995,7 @@ export function useWindowManager(): WindowManagerApi {
       rect,
       constraints,
       measured: null,
-      data: data as unknown as WindowData,
+      data,
     }
     windowsMap.set(id, win)
 
@@ -810,7 +1007,7 @@ export function useWindowManager(): WindowManagerApi {
       const others = Array.from(windowsMap.values())
         .filter((w) => w.id !== id)
         .map((w) => w.rect)
-      const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others })
+      const next = cascadeShiftAvoidOverlaps({ rect: win.rect, others, step: geometry.value.cascadeStepPx })
       win.rect.left = next.left
       win.rect.top = next.top
       if (win.anchor && win.placement === 'anchored') {

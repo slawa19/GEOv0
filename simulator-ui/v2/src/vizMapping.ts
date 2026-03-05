@@ -15,6 +15,8 @@ export type VizMapping = {
   }
 }
 
+import { readCssVar } from './render/readCssVar'
+
 // Canonical mapping for demo-fast-mock v2.
 // UI MUST NOT compute semantic colors/sizes; it only interprets keys.
 export const VIZ_MAPPING: VizMapping = {
@@ -59,15 +61,15 @@ export const VIZ_MAPPING: VizMapping = {
   },
   fx: {
     tx_spark: {
-      core: '#ffffff',
-      trail: '#22d3ee',
+      core: readCssVar('--ds-fx-tx-spark-core', '#ffffff'),
+      trail: readCssVar('--ds-fx-tx-spark-trail', '#22d3ee'),
     },
-    clearing_credit: '#22d3ee',
-    clearing_debt: '#f97316',
+    clearing_credit: readCssVar('--ds-fx-clearing-credit', '#22d3ee'),
+    clearing_debt: readCssVar('--ds-fx-clearing-debt', '#f97316'),
     flash: {
       clearing: {
-        from: 'rgba(251,191,36,0.45)',
-        to: 'rgba(251,191,36,0.00)',
+        from: readCssVar('--ds-fx-flash-clearing-from', 'rgba(251,191,36,0.45)'),
+        to: readCssVar('--ds-fx-flash-clearing-to', 'rgba(251,191,36,0.00)'),
       },
     },
   },
