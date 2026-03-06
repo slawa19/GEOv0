@@ -1,10 +1,11 @@
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { useSnapshotIndex } from './useSnapshotIndex'
+import type { GraphSnapshot } from '../types'
 
 describe('useSnapshotIndex', () => {
   it('returns null when no snapshot', () => {
-    const snapshotRef = ref<any>(null)
+    const snapshotRef = ref<GraphSnapshot | null>(null)
     const { getNodeById } = useSnapshotIndex({
       getSnapshot: () => snapshotRef.value,
     })
@@ -13,8 +14,9 @@ describe('useSnapshotIndex', () => {
   })
 
   it('indexes nodes by id and updates when snapshot changes', () => {
-    const snapshotRef = ref<any>({
+    const snapshotRef = ref<GraphSnapshot>({
       equivalent: 'UAH',
+      generated_at: '2024-01-01T00:00:00Z',
       nodes: [
         { id: 'A', name: 'Alice' },
         { id: 'B', name: 'Bob' },
@@ -31,6 +33,7 @@ describe('useSnapshotIndex', () => {
 
     snapshotRef.value = {
       equivalent: 'UAH',
+      generated_at: '2024-01-01T00:00:00Z',
       nodes: [{ id: 'C', name: 'Carol' }],
       links: [],
     }

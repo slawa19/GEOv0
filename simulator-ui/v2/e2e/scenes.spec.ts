@@ -1,7 +1,7 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 /** Wait until the app signals data-ready and give the canvas time to render + generate glow sprites. */
-async function waitReady(page: any) {
+async function waitReady(page: Page) {
   await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
   // Allow the render loop to complete at least one full frame (sprite generation can take >50ms).
   await page.waitForTimeout(400)

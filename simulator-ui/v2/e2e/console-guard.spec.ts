@@ -1,14 +1,14 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type ConsoleMessage, type Page } from '@playwright/test'
 
-function attachErrorGuards(page: any) {
+function attachErrorGuards(page: Page) {
   const errors: string[] = []
 
-  page.on('pageerror', (err: any) => {
+  page.on('pageerror', (err: Error) => {
     const msg = String(err?.message ?? err)
     errors.push(`pageerror: ${msg}`)
   })
 
-  page.on('console', (msg: any) => {
+  page.on('console', (msg: ConsoleMessage) => {
     try {
       if (msg.type && msg.type() === 'error') {
         errors.push(`console.error: ${msg.text?.() ?? String(msg)}`)
@@ -24,7 +24,7 @@ function attachErrorGuards(page: any) {
 }
 
 /** Wait until the app signals data-ready (same convention as screenshot tests). */
-async function waitReady(page: any) {
+async function waitReady(page: Page) {
   await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
   await page.waitForTimeout(200)
 }

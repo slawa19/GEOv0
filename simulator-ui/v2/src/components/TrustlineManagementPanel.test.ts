@@ -1,9 +1,21 @@
-import { createApp, h, nextTick, reactive } from 'vue'
+import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import TrustlineManagementPanel from './TrustlineManagementPanel.vue'
 
-function baseState(partial?: Partial<any>) {
+type TrustlinePanelState = {
+  phase: string
+  fromPid: string | null
+  toPid: string | null
+  selectedEdgeKey: string | null
+  edgeAnchor: { x: number; y: number } | null
+  error: string | null
+  lastClearing: null
+}
+
+const trustlineManagementPanelComponent: Component = TrustlineManagementPanel
+
+function baseState(partial?: Partial<TrustlinePanelState>) {
   // Minimal InteractState shape used by the panel.
   return reactive({
     phase: 'idle',
@@ -12,7 +24,7 @@ function baseState(partial?: Partial<any>) {
     selectedEdgeKey: null as string | null,
     edgeAnchor: null as { x: number; y: number } | null,
     error: null as string | null,
-    lastClearing: null as any,
+    lastClearing: null,
     ...(partial ?? {}),
   })
 }
@@ -26,7 +38,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: 'confirm-trustline-create',
           state,
           unit: 'EQ',
@@ -74,7 +86,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: 'editing-trustline',
           state,
           unit: 'EQ',
@@ -121,7 +133,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: 'editing-trustline',
           state,
           unit: 'EQ',
@@ -161,7 +173,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: 'editing-trustline',
           state,
           unit: 'EQ',
@@ -224,7 +236,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: ui.phase,
           state,
           unit: 'EQ',
@@ -292,7 +304,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: 'confirm-trustline-create',
           state,
           unit: 'EQ',
@@ -351,7 +363,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: 'editing-trustline',
           state,
           unit: 'EQ',
@@ -404,7 +416,7 @@ describe('TrustlineManagementPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(TrustlineManagementPanel as any, {
+        h(trustlineManagementPanelComponent, {
           phase: 'editing-trustline',
           state,
           unit: 'EQ',

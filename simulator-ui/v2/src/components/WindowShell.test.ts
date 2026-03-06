@@ -1,7 +1,20 @@
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import WindowShell from './WindowShell.vue'
 import type { WindowInstance } from '../composables/windowManager/types'
+
+type ResizeObserverEntryLike = { borderBoxSize: Array<{ inlineSize: number; blockSize: number }> }
+type ResizeObserverCallbackLike = (entries: ResizeObserverEntryLike[]) => void
+
+const windowShellComponent: Component = WindowShell
+
+function setResizeObserverGlobal(value: typeof ResizeObserver | undefined): void {
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
 
 function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
   return {
@@ -35,7 +48,7 @@ function mountShell(
 
   const app = createApp({
     render: () =>
-      h(WindowShell as any, props, slotHtml ? { default: () => h('div', { class: 'test-content' }, slotHtml) } : undefined),
+      h(windowShellComponent, props, slotHtml ? { default: () => h('div', { class: 'test-content' }, slotHtml) } : undefined),
   })
 
   app.mount(host)
@@ -208,19 +221,19 @@ describe('WindowShell', () => {
         updateMeasured(s)
         reclamp()
       })
-      let roCb: ((entries: any[]) => void) | null = null
+      let roCb: ResizeObserverCallbackLike | null = null
 
-      const prevRO = (globalThis as any).ResizeObserver
-      ;(globalThis as any).ResizeObserver = class ResizeObserverMock {
-        private cb: (entries: any[]) => void
-        constructor(cb: (entries: any[]) => void) {
+      const prevRO = globalThis.ResizeObserver
+      setResizeObserverGlobal(class ResizeObserverMock {
+        private cb: ResizeObserverCallbackLike
+        constructor(cb: ResizeObserverCallbackLike) {
           this.cb = cb
           roCb = cb
         }
         observe() {}
         disconnect() {}
         unobserve() {}
-      }
+      } as unknown as typeof ResizeObserver)
 
       try {
         const { host, app } = mountShell({
@@ -257,7 +270,7 @@ describe('WindowShell', () => {
 
         cleanup(host, app)
       } finally {
-        ;(globalThis as any).ResizeObserver = prevRO
+        setResizeObserverGlobal(prevRO)
         vi.useRealTimers()
       }
     })

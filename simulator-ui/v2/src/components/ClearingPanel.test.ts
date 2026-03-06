@@ -1,5 +1,7 @@
 import { createApp, h, nextTick, reactive } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
+import type { SimulatorActionClearingRealResponse } from '../api/simulatorTypes'
+import type { InteractPhase } from '../composables/interact/useInteractFSM'
 
 import ClearingPanel from './ClearingPanel.vue'
 
@@ -9,20 +11,21 @@ describe('ClearingPanel', () => {
     document.body.appendChild(host)
 
     const state = reactive({
-      phase: 'confirm-clearing',
+      phase: 'confirm-clearing' as InteractPhase,
       fromPid: null as string | null,
       toPid: null as string | null,
+      initiatedWithPrefilledFrom: false,
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null as SimulatorActionClearingRealResponse | null,
     })
 
     const confirmClearing = vi.fn()
 
     const app = createApp({
       render: () =>
-        h(ClearingPanel as any, {
+        h(ClearingPanel, {
           phase: 'confirm-clearing',
           state,
           busy: true,
@@ -68,18 +71,19 @@ describe('ClearingPanel', () => {
     document.body.appendChild(host)
 
     const state = reactive({
-      phase: 'confirm-clearing',
+      phase: 'confirm-clearing' as InteractPhase,
       fromPid: null as string | null,
       toPid: null as string | null,
+      initiatedWithPrefilledFrom: false,
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null as SimulatorActionClearingRealResponse | null,
     })
 
     const app = createApp({
       render: () =>
-        h(ClearingPanel as any, {
+        h(ClearingPanel, {
           phase: 'confirm-clearing',
           state,
           busy: false,
@@ -118,18 +122,19 @@ describe('ClearingPanel', () => {
     document.body.appendChild(host)
 
     const state = reactive({
-      phase: 'clearing-preview',
+      phase: 'clearing-preview' as InteractPhase,
       fromPid: null as string | null,
       toPid: null as string | null,
+      initiatedWithPrefilledFrom: false,
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null as SimulatorActionClearingRealResponse | null,
     })
 
     const app = createApp({
       render: () =>
-        h(ClearingPanel as any, {
+        h(ClearingPanel, {
           phase: 'clearing-preview',
           state,
           busy: false,

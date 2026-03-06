@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
+
+import type { SimulatorEvent } from './simulatorTypes'
 import { normalizeSimulatorEvent } from './normalizeSimulatorEvent'
+
+function requireEventType<TType extends SimulatorEvent['type']>(
+  evt: SimulatorEvent | null,
+  type: TType,
+): Extract<SimulatorEvent, { type: TType }> {
+  expect(evt).toBeTruthy()
+  expect(evt?.type).toBe(type)
+  return evt as Extract<SimulatorEvent, { type: TType }>
+}
 
 describe('normalizeSimulatorEvent', () => {
   it('normalizes tx.updated edges=null into []', () => {
@@ -12,8 +23,8 @@ describe('normalizeSimulatorEvent', () => {
       edges: null,
     })
 
-    expect(evt && (evt as any).type).toBe('tx.updated')
-    expect((evt as any).edges).toEqual([])
+    const txUpdatedEvent = requireEventType(evt, 'tx.updated')
+    expect(txUpdatedEvent.edges).toEqual([])
   })
   it('normalizeSimulatorEvent: tx.updated', () => {
     const raw = {
@@ -58,13 +69,13 @@ describe('normalizeSimulatorEvent', () => {
       from: 'A',
       to: 'B',
       edges: [{ from: 'A', to: 'B' }],
-    }) as any
+    })
 
-    expect(evt.type).toBe('tx.updated')
-    expect(evt.amount).toBeUndefined()
-    expect(evt.from).toBe('A')
-    expect(evt.to).toBe('B')
-    expect(evt.edges).toEqual([{ from: 'A', to: 'B' }])
+    const txUpdatedEvent = requireEventType(evt, 'tx.updated')
+    expect(txUpdatedEvent.amount).toBeUndefined()
+    expect(txUpdatedEvent.from).toBe('A')
+    expect(txUpdatedEvent.to).toBe('B')
+    expect(txUpdatedEvent.edges).toEqual([{ from: 'A', to: 'B' }])
   })
 
   it('normalizeSimulatorEvent: tx.updated with missing from/to and empty edges keeps event', () => {
@@ -74,13 +85,13 @@ describe('normalizeSimulatorEvent', () => {
       type: 'tx.updated',
       equivalent: 'UAH',
       edges: [],
-    }) as any
+    })
 
-    expect(evt.type).toBe('tx.updated')
-    expect(evt.from).toBeUndefined()
-    expect(evt.to).toBeUndefined()
-    expect(evt.amount).toBeUndefined()
-    expect(evt.edges).toEqual([])
+    const txUpdatedEvent = requireEventType(evt, 'tx.updated')
+    expect(txUpdatedEvent.from).toBeUndefined()
+    expect(txUpdatedEvent.to).toBeUndefined()
+    expect(txUpdatedEvent.amount).toBeUndefined()
+    expect(txUpdatedEvent.edges).toEqual([])
   })
 
   it('normalizeSimulatorEvent: clearing.done', () => {

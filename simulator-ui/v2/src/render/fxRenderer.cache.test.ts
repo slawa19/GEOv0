@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 
 import { __testing, resetFxRendererCaches } from './fxRenderer'
+import type { LayoutNode } from '../types/layout'
 
 // JSDOM does not provide Path2D; fxRenderer caches Path2D instances.
 // Provide a tiny stub sufficient for our warmup path.
@@ -16,9 +17,21 @@ class MockPath2D {
   }
 }
 
+function setPath2DGlobal(value: typeof Path2D | undefined): void {
+  Object.defineProperty(globalThis, 'Path2D', {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
+
+function getPath2DGlobal(): typeof Path2D | undefined {
+  return (globalThis as typeof globalThis & { Path2D?: typeof Path2D }).Path2D
+}
+
 describe('fxRenderer module-level caches', () => {
   beforeEach(() => {
-    ;(globalThis as any).Path2D = (globalThis as any).Path2D ?? (MockPath2D as any)
+    setPath2DGlobal(getPath2DGlobal() ?? (MockPath2D as unknown as typeof Path2D))
     resetFxRendererCaches()
   })
 
@@ -26,7 +39,7 @@ describe('fxRenderer module-level caches', () => {
     expect(__testing._nodeOutlinePath2DCacheSize()).toBe(0)
 
     // Minimal LayoutNode-compatible object for sizeForNode/getNodeShape usage.
-    const n: any = {
+    const n: LayoutNode = {
       id: 'n1',
       __x: 10,
       __y: 20,

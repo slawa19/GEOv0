@@ -1,28 +1,65 @@
-import { computed, createApp, h, nextTick, reactive, ref } from 'vue'
+import { computed, createApp, h, nextTick, reactive, ref, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useInteractMode } from '../composables/useInteractMode'
+import type { GraphSnapshot } from '../types'
 
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import ActionBar from './ActionBar.vue'
 
+type InteractActions = Parameters<typeof useInteractMode>[0]['actions']
+type PaymentResult = Awaited<ReturnType<InteractActions['sendPayment']>>
+type ClearingResult = Awaited<ReturnType<InteractActions['runClearing']>>
+type ParticipantsResult = Awaited<ReturnType<InteractActions['fetchParticipants']>>
+type TrustlinesResult = Awaited<ReturnType<InteractActions['fetchTrustlines']>>
+type PaymentTargetsResult = Awaited<ReturnType<InteractActions['fetchPaymentTargets']>>
+
+const manualPaymentPanelComponent: Component = ManualPaymentPanel
+const actionBarComponent: Component = ActionBar
+
+function paymentSuccess(): PaymentResult {
+  return {
+    ok: true,
+    payment_id: 'pay_1',
+    from_pid: 'alice',
+    to_pid: 'bob',
+    equivalent: 'UAH',
+    amount: '1.00',
+    status: 'COMMITTED',
+  }
+}
+
+function clearingSuccess(): ClearingResult {
+  return {
+    ok: true,
+    equivalent: 'UAH',
+    cleared_cycles: 0,
+    total_cleared_amount: '0.00',
+    cycles: [],
+  }
+}
+
+function mkActions(): InteractActions {
+  return {
+    actionsDisabled: ref(false),
+    sendPayment: vi.fn<InteractActions['sendPayment']>(async () => paymentSuccess()),
+    createTrustline: vi.fn<InteractActions['createTrustline']>(async () => ({ ok: true, trustline_id: 'tl_1', from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', limit: '10.00' })),
+    updateTrustline: vi.fn<InteractActions['updateTrustline']>(async () => ({ ok: true, trustline_id: 'tl_1', old_limit: '10.00', new_limit: '10.00' })),
+    closeTrustline: vi.fn<InteractActions['closeTrustline']>(async () => ({ ok: true, trustline_id: 'tl_1' })),
+    runClearing: vi.fn<InteractActions['runClearing']>(async () => clearingSuccess()),
+    fetchParticipants: vi.fn<InteractActions['fetchParticipants']>(async () => [] as ParticipantsResult),
+    fetchTrustlines: vi.fn<InteractActions['fetchTrustlines']>(async () => [] as TrustlinesResult),
+    fetchPaymentTargets: vi.fn<InteractActions['fetchPaymentTargets']>(async () => [] as PaymentTargetsResult),
+  }
+}
+
 describe('Interact Mode UI (components)', () => {
   it('ManualPaymentPanel: renders when phase=confirm-payment', () => {
-    const snapshot = ref<any>(null)
-    const actions = {
-      actionsDisabled: ref(false),
-      sendPayment: vi.fn(async () => ({})),
-      createTrustline: vi.fn(async () => ({})),
-      updateTrustline: vi.fn(async () => ({})),
-      closeTrustline: vi.fn(async () => ({})),
-      runClearing: vi.fn(async () => ({})),
-      fetchParticipants: vi.fn(async () => []),
-      fetchTrustlines: vi.fn(async () => []),
-      fetchPaymentTargets: vi.fn(async () => []),
-    }
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
 
     const im = useInteractMode({
-      actions: actions as any,
+      actions,
       runId: computed(() => 'run_test'),
       equivalent: computed(() => 'UAH'),
       snapshot,
@@ -37,7 +74,7 @@ describe('Interact Mode UI (components)', () => {
     document.body.appendChild(host)
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: im.phase.value,
           state: im.state,
           unit: 'UAH',
@@ -64,20 +101,10 @@ describe('Interact Mode UI (components)', () => {
   })
 
   it('ManualPaymentPanel: cancel() closes panel (phase resets to idle)', async () => {
-    const snapshot = ref<any>(null)
-    const actions = {
-      actionsDisabled: ref(false),
-      sendPayment: vi.fn(async () => ({})),
-      createTrustline: vi.fn(async () => ({})),
-      updateTrustline: vi.fn(async () => ({})),
-      closeTrustline: vi.fn(async () => ({})),
-      runClearing: vi.fn(async () => ({})),
-      fetchParticipants: vi.fn(async () => []),
-      fetchTrustlines: vi.fn(async () => []),
-      fetchPaymentTargets: vi.fn(async () => []),
-    }
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
     const im = useInteractMode({
-      actions: actions as any,
+      actions,
       runId: computed(() => 'run_test'),
       equivalent: computed(() => 'UAH'),
       snapshot,
@@ -91,7 +118,7 @@ describe('Interact Mode UI (components)', () => {
     document.body.appendChild(host)
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: im.phase.value,
           state: im.state,
           unit: 'UAH',
@@ -137,7 +164,7 @@ describe('Interact Mode UI (components)', () => {
 
     const app = createApp({
       render: () =>
-        h(ActionBar as any, {
+        h(actionBarComponent, {
           phase: 'idle',
           busy: false,
           actionsDisabled: false,
@@ -175,7 +202,7 @@ describe('Interact Mode UI (components)', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const participants = [
@@ -192,7 +219,7 @@ describe('Interact Mode UI (components)', () => {
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: state.phase,
           state,
           unit: 'UAH',

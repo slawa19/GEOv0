@@ -40,7 +40,7 @@ const showRunControls = computed(() => ctx.activeSegment.value === 'auto')
 
 const showTestModeBadge = computed(() => {
   // Show only for humans; Playwright/WebDriver runs shouldn't change screenshots.
-  const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
+  const isWebDriver = typeof navigator !== 'undefined' && navigator.webdriver === true
   return !!ctx.isTestMode.value && !isWebDriver
 })
 
@@ -512,8 +512,8 @@ function onApplyIntensity() {
                     >
                         <span class="ds-label ds-mono tb-run-id" :title="run.run_id">{{ run.run_id.slice(0, 8) }}</span>
                         <span :class="['ds-badge', 'tb-run-state', toLower(run.state) === 'running' ? 'ds-badge--ok' : 'ds-badge--info']">{{ run.state }}</span>
-                        <span class="ds-label tb-run-scenario" :title="String((run as any).scenario_id ?? '')">{{ short(String((run as any).scenario_id ?? ''), 22) }}</span>
-                        <span class="ds-label ds-mono tb-run-owner" :title="String((run as any).owner_id ?? '')">{{ short(String((run as any).owner_id ?? ''), 12) }}</span>
+                        <span class="ds-label tb-run-scenario" :title="String(run.scenario_id ?? '')">{{ short(String(run.scenario_id ?? ''), 22) }}</span>
+                        <span class="ds-label ds-mono tb-run-owner" :title="String(run.owner_id ?? '')">{{ short(String(run.owner_id ?? ''), 12) }}</span>
 
                         <div class="ds-row tb-run-actions">
                           <button

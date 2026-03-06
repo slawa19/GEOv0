@@ -1,4 +1,4 @@
-import { createApp, h, nextTick, reactive } from 'vue'
+import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
@@ -32,9 +32,9 @@ function mountPopup(overrides: Record<string, unknown> = {}) {
 
   const onSendPayment = vi.fn()
 
+  const component: Component = EdgeDetailPopup
   const app = createApp({
-    render: () =>
-      h(EdgeDetailPopup as any, { ...defaultProps, ...overrides, onSendPayment }),
+    render: () => h(component, { ...defaultProps, ...overrides, onSendPayment }),
   })
 
   app.mount(host)

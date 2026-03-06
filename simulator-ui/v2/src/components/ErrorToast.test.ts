@@ -1,7 +1,9 @@
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import ErrorToast from './ErrorToast.vue'
+
+const errorToastComponent: Component = ErrorToast
 
 describe('ErrorToast', () => {
   it('uses props.dismissMs when message length <= 80', async () => {
@@ -13,7 +15,7 @@ describe('ErrorToast', () => {
       const onDismiss = vi.fn()
       const app = createApp({
         render: () =>
-          h(ErrorToast as any, {
+          h(errorToastComponent, {
             message: 'short',
             dismissMs: 1234,
             onDismiss,
@@ -43,7 +45,7 @@ describe('ErrorToast', () => {
       const onDismiss = vi.fn()
       const msg = 'x'.repeat(81)
       const app = createApp({
-        render: () => h(ErrorToast as any, { message: msg, dismissMs: 4000, onDismiss }),
+        render: () => h(errorToastComponent, { message: msg, dismissMs: 4000, onDismiss }),
       })
       app.mount(host)
       await nextTick()
@@ -69,7 +71,7 @@ describe('ErrorToast', () => {
       const onDismiss = vi.fn()
       const msg = 'x'.repeat(151)
       const app = createApp({
-        render: () => h(ErrorToast as any, { message: msg, dismissMs: 4000, onDismiss }),
+        render: () => h(errorToastComponent, { message: msg, dismissMs: 4000, onDismiss }),
       })
       app.mount(host)
       await nextTick()
@@ -94,7 +96,7 @@ describe('ErrorToast', () => {
 
       const onDismiss = vi.fn()
       const app = createApp({
-        render: () => h(ErrorToast as any, { message: 'err', dismissMs: 4000, onDismiss }),
+        render: () => h(errorToastComponent, { message: 'err', dismissMs: 4000, onDismiss }),
       })
 
       app.mount(host)
@@ -119,7 +121,7 @@ describe('ErrorToast', () => {
 
       const onDismiss = vi.fn()
       const app = createApp({
-        render: () => h(ErrorToast as any, { message: 'err', dismissMs: 4000, onDismiss }),
+        render: () => h(errorToastComponent, { message: 'err', dismissMs: 4000, onDismiss }),
       })
 
       app.mount(host)

@@ -182,6 +182,12 @@ export function isNodeCardWindow(
   return win.type === 'node-card'
 }
 
+export function isEdgeDetailWindow(
+  win: WindowInstance,
+): win is WindowInstance & { type: 'edge-detail'; data: WindowDataByType['edge-detail'] } {
+  return win.type === 'edge-detail'
+}
+
 export type WindowManagerApi = {
   windows: ComputedRef<WindowInstance[]>
 

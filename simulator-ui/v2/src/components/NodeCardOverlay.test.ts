@@ -1,4 +1,4 @@
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
@@ -25,8 +25,9 @@ function mountNodeCard(overrides: Record<string, unknown> = {}) {
     interactBusy: false,
   }
 
+  const component: Component = NodeCardOverlay
   const app = createApp({
-    render: () => h(NodeCardOverlay as any, { ...defaultProps, ...overrides }),
+    render: () => h(component, { ...defaultProps, ...overrides }),
   })
 
   app.mount(host)

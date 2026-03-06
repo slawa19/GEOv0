@@ -1,9 +1,132 @@
-import { computed, createApp, h, nextTick, reactive, ref } from 'vue'
+import { computed, createApp, h, nextTick, reactive, ref, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import { useInteractMode } from '../composables/useInteractMode'
 import type { GraphSnapshot } from '../types'
+import type {
+  ParticipantInfo,
+  SimulatorActionClearingRealResponse,
+  SimulatorActionPaymentRealResponse,
+  SimulatorActionTrustlineCloseResponse,
+  SimulatorActionTrustlineCreateResponse,
+  SimulatorActionTrustlineUpdateResponse,
+  SimulatorPaymentTargetsItem,
+  TrustlineInfo,
+} from '../api/simulatorTypes'
+
+type InteractActions = Parameters<typeof useInteractMode>[0]['actions']
+type ManualPaymentPanelState = {
+  phase: string
+  fromPid: string | null
+  toPid: string | null
+  selectedEdgeKey: string | null
+  edgeAnchor: { x: number; y: number } | null
+  error: string | null
+  lastClearing: null
+}
+
+const manualPaymentPanelComponent: Component = ManualPaymentPanel
+
+function paymentSuccess(): SimulatorActionPaymentRealResponse {
+  return {
+    ok: true,
+    payment_id: 'pay_1',
+    from_pid: 'alice',
+    to_pid: 'bob',
+    amount: '1.00',
+    equivalent: 'UAH',
+    status: 'COMMITTED',
+  }
+}
+
+function trustlineCreateSuccess(): SimulatorActionTrustlineCreateResponse {
+  return {
+    ok: true,
+    trustline_id: 'tl_create_1',
+    from_pid: 'alice',
+    to_pid: 'bob',
+    equivalent: 'UAH',
+    limit: '10.00',
+  }
+}
+
+function trustlineUpdateSuccess(): SimulatorActionTrustlineUpdateResponse {
+  return {
+    ok: true,
+    trustline_id: 'tl_update_1',
+    old_limit: '10.00',
+    new_limit: '10.00',
+  }
+}
+
+function trustlineCloseSuccess(): SimulatorActionTrustlineCloseResponse {
+  return {
+    ok: true,
+    trustline_id: 'tl_close_1',
+  }
+}
+
+function clearingSuccess(): SimulatorActionClearingRealResponse {
+  return {
+    ok: true,
+    equivalent: 'UAH',
+    cleared_cycles: 0,
+    total_cleared_amount: '0.00',
+    cycles: [],
+  }
+}
+
+function participant(pid: string, name: string): ParticipantInfo {
+  return {
+    pid,
+    name,
+    type: 'person',
+    status: 'active',
+  }
+}
+
+function paymentTarget(to_pid: string, hops = 1): SimulatorPaymentTargetsItem {
+  return {
+    to_pid,
+    hops,
+  }
+}
+
+function makePanelState(partial: Partial<ManualPaymentPanelState>): ManualPaymentPanelState {
+  return reactive({
+    phase: 'idle',
+    fromPid: null,
+    toPid: null,
+    selectedEdgeKey: null,
+    edgeAnchor: null,
+    error: null,
+    lastClearing: null,
+    ...partial,
+  }) as ManualPaymentPanelState
+}
+
+function makeInteractActions(o: {
+  participants: ParticipantInfo[]
+  paymentTargetsImpl: () => Promise<SimulatorPaymentTargetsItem[]>
+}): InteractActions {
+  return {
+    actionsDisabled: ref(false),
+    sendPayment: vi.fn<InteractActions['sendPayment']>(async () => paymentSuccess()),
+    createTrustline: vi.fn<InteractActions['createTrustline']>(async () => trustlineCreateSuccess()),
+    updateTrustline: vi.fn<InteractActions['updateTrustline']>(async () => trustlineUpdateSuccess()),
+    closeTrustline: vi.fn<InteractActions['closeTrustline']>(async () => trustlineCloseSuccess()),
+    runClearing: vi.fn<InteractActions['runClearing']>(async () => clearingSuccess()),
+    fetchParticipants: vi.fn<InteractActions['fetchParticipants']>(async () => o.participants),
+    fetchTrustlines: vi.fn<InteractActions['fetchTrustlines']>(async () => [] as TrustlineInfo[]),
+    fetchPaymentTargets: vi.fn<InteractActions['fetchPaymentTargets']>(async (eq: string, fromPid: string, maxHops?: number) => {
+      expect(String(eq)).toBe('UAH')
+      expect(String(fromPid)).toBe('alice')
+      expect(maxHops === 6 || maxHops === 8).toBe(true)
+      return await o.paymentTargetsImpl()
+    }),
+  }
+}
 
 async function settleUi() {
   // Let async composables (cache refreshes) resolve.
@@ -46,7 +169,7 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     // Outgoing candidates are derived from tl.to_pid for active TLs with available > 0.
@@ -62,7 +185,7 @@ describe('ManualPaymentPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-to',
           state,
 
@@ -126,12 +249,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'confirm-payment',
           state,
 
@@ -192,7 +315,7 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const ui = reactive({
@@ -209,7 +332,7 @@ describe('ManualPaymentPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: ui.phase,
           state,
 
@@ -275,7 +398,7 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const ui = reactive({
@@ -289,7 +412,7 @@ describe('ManualPaymentPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: ui.phase,
           state,
 
@@ -349,7 +472,7 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const ui = reactive({
@@ -361,7 +484,7 @@ describe('ManualPaymentPanel', () => {
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: ui.phase,
           state,
 
@@ -422,12 +545,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'confirm-payment',
           state,
 
@@ -488,12 +611,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'confirm-payment',
           state,
 
@@ -550,12 +673,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'confirm-payment',
           state,
 
@@ -612,12 +735,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-to',
           state,
           unit: 'UAH',
@@ -682,12 +805,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'confirm-payment',
           state,
           unit: 'UAH',
@@ -753,12 +876,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'confirm-payment',
           state,
           unit: 'UAH',
@@ -818,12 +941,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'confirm-payment',
           state,
 
@@ -880,12 +1003,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-to',
           state,
 
@@ -940,12 +1063,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-to',
           state,
 
@@ -1005,12 +1128,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-from',
           state,
 
@@ -1061,9 +1184,12 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
-  it.each([
-    { name: 'undefined', trustlines: undefined as any },
-    { name: '[]', trustlines: [] as any },
+  it.each<{
+    name: string
+    trustlines: TrustlineInfo[] | undefined
+  }>([
+    { name: 'undefined', trustlines: undefined },
+    { name: '[]', trustlines: [] },
   ])('AC-MP-11: fallback full FROM list when trustlines are empty ($name)', async ({ trustlines }) => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1075,12 +1201,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-from',
           state,
 
@@ -1134,12 +1260,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-to',
           state,
 
@@ -1205,12 +1331,12 @@ describe('ManualPaymentPanel', () => {
       selectedEdgeKey: null as string | null,
       edgeAnchor: null as { x: number; y: number } | null,
       error: null as string | null,
-      lastClearing: null as any,
+      lastClearing: null,
     })
 
     const app = createApp({
       render: () =>
-        h(ManualPaymentPanel as any, {
+        h(manualPaymentPanelComponent, {
           phase: 'picking-payment-from',
           state,
 
@@ -1258,37 +1384,13 @@ describe('ManualPaymentPanel', () => {
   })
 
   describe('Phase 2.5 backend-first payment targets (AC-MP-15..18)', () => {
-    function mkActions(o: {
-      participants: Array<{ pid: string; name: string }>
-      paymentTargetsImpl: () => Promise<Array<{ to_pid: string }>>
-    }) {
-      return {
-        // Not used in these tests, but required by useInteractMode typing/shape.
-        sendPayment: vi.fn(async () => ({ ok: true } as any)),
-        createTrustline: vi.fn(async () => ({ ok: true } as any)),
-        updateTrustline: vi.fn(async () => ({ ok: true } as any)),
-        closeTrustline: vi.fn(async () => ({ ok: true } as any)),
-        runClearing: vi.fn(async () => ({ ok: true, cycles: [] } as any)),
-
-        fetchParticipants: vi.fn(async () => o.participants as any),
-        fetchTrustlines: vi.fn(async () => [] as any[]),
-        fetchPaymentTargets: vi.fn(async (eq: string, fromPid: string, maxHops?: number) => {
-          // Ensure test explicitly exercises the backend-first request.
-          expect(String(eq)).toBe('UAH')
-          expect(String(fromPid)).toBe('alice')
-          expect(maxHops === 6 || maxHops === 8).toBe(true)
-          return (await o.paymentTargetsImpl()) as any
-        }),
-      }
-    }
-
     function mountWithInteractMode(im: ReturnType<typeof useInteractMode>) {
       const host = document.createElement('div')
       document.body.appendChild(host)
 
       const app = createApp({
         render: () =>
-          h(ManualPaymentPanel as any, {
+          h(manualPaymentPanelComponent, {
             phase: im.phase.value,
             state: im.state,
             unit: 'UAH',
@@ -1325,19 +1427,19 @@ describe('ManualPaymentPanel', () => {
       setUrl('/?mode=real&ui=interact')
 
       const participants = [
-        { pid: 'alice', name: 'Alice' },
-        { pid: 'bob', name: 'Bob' },
-        { pid: 'carol', name: 'Carol' },
-        { pid: 'dave', name: 'Dave' },
-      ]
-      const actions = mkActions({
+        participant('alice', 'Alice'),
+        participant('bob', 'Bob'),
+        participant('carol', 'Carol'),
+        participant('dave', 'Dave'),
+      ] satisfies ParticipantInfo[]
+      const actions = makeInteractActions({
         participants,
-        paymentTargetsImpl: async () => [{ to_pid: 'bob' }, { to_pid: 'carol' }],
+        paymentTargetsImpl: async () => [paymentTarget('bob'), paymentTarget('carol')],
       })
 
       const snapshot = ref<GraphSnapshot | null>(null)
       const im = useInteractMode({
-        actions: actions as any,
+        actions,
         runId: computed(() => 'run_test'),
         equivalent: computed(() => 'UAH'),
         snapshot,
@@ -1365,19 +1467,19 @@ describe('ManualPaymentPanel', () => {
       setUrl('/?mode=real&ui=interact')
 
       const participants = [
-        { pid: 'alice', name: 'Alice' },
-        { pid: 'bob', name: 'Bob' },
-        { pid: 'carol', name: 'Carol' },
-      ]
+        participant('alice', 'Alice'),
+        participant('bob', 'Bob'),
+        participant('carol', 'Carol'),
+      ] satisfies ParticipantInfo[]
       const expected = new Set(['bob', 'carol'])
-      const actions = mkActions({
+      const actions = makeInteractActions({
         participants,
-        paymentTargetsImpl: async () => [{ to_pid: 'bob' }, { to_pid: 'carol' }],
+        paymentTargetsImpl: async () => [paymentTarget('bob'), paymentTarget('carol')],
       })
 
       const snapshot = ref<GraphSnapshot | null>(null)
       const im = useInteractMode({
-        actions: actions as any,
+        actions,
         runId: computed(() => 'run_test'),
         equivalent: computed(() => 'UAH'),
         snapshot,
@@ -1397,17 +1499,17 @@ describe('ManualPaymentPanel', () => {
       setUrl('/?mode=real&ui=interact&payMaxHops=8')
 
       const participants = [
-        { pid: 'alice', name: 'Alice' },
-        { pid: 'bob', name: 'Bob' },
-      ]
-      const actions = mkActions({
+        participant('alice', 'Alice'),
+        participant('bob', 'Bob'),
+      ] satisfies ParticipantInfo[]
+      const actions = makeInteractActions({
         participants,
         paymentTargetsImpl: async () => [],
       })
 
       const snapshot = ref<GraphSnapshot | null>(null)
       const im = useInteractMode({
-        actions: actions as any,
+        actions,
         runId: computed(() => 'run_test'),
         equivalent: computed(() => 'UAH'),
         snapshot,
@@ -1438,17 +1540,17 @@ describe('ManualPaymentPanel', () => {
       setUrl('/?mode=real&ui=interact')
 
       const participants = [
-        { pid: 'alice', name: 'Alice' },
-        { pid: 'bob', name: 'Bob' },
-      ]
-      const actions = mkActions({
+        participant('alice', 'Alice'),
+        participant('bob', 'Bob'),
+      ] satisfies ParticipantInfo[]
+      const actions = makeInteractActions({
         participants,
-        paymentTargetsImpl: async () => [{ to_pid: 'bob' }],
+        paymentTargetsImpl: async () => [paymentTarget('bob')],
       })
 
       const snapshot = ref<GraphSnapshot | null>(null)
       const im = useInteractMode({
-        actions: actions as any,
+        actions,
         runId: computed(() => 'run_test'),
         equivalent: computed(() => 'UAH'),
         snapshot,
@@ -1488,23 +1590,23 @@ describe('ManualPaymentPanel', () => {
       setUrl('/?mode=real&ui=interact')
 
       const participants = [
-        { pid: 'alice', name: 'Alice' },
-        { pid: 'bob', name: 'Bob' },
-        { pid: 'carol', name: 'Carol' },
-        { pid: 'dave', name: 'Dave' },
-      ]
+        participant('alice', 'Alice'),
+        participant('bob', 'Bob'),
+        participant('carol', 'Carol'),
+        participant('dave', 'Dave'),
+      ] satisfies ParticipantInfo[]
 
-      let resolveTargets!: (v: Array<{ to_pid: string }>) => void
+      let resolveTargets!: (v: SimulatorPaymentTargetsItem[]) => void
       const paymentTargetsImpl = () =>
-        new Promise<Array<{ to_pid: string }>>((res) => {
+        new Promise<SimulatorPaymentTargetsItem[]>((res) => {
           resolveTargets = res
         })
 
-      const actions = mkActions({ participants, paymentTargetsImpl })
+      const actions = makeInteractActions({ participants, paymentTargetsImpl })
 
       const snapshot = ref<GraphSnapshot | null>(null)
       const im = useInteractMode({
-        actions: actions as any,
+        actions,
         runId: computed(() => 'run_test'),
         equivalent: computed(() => 'UAH'),
         snapshot,
@@ -1525,7 +1627,7 @@ describe('ManualPaymentPanel', () => {
         expect(valuesSet(toSel).has('dave')).toBe(true)
 
         // Now resolve backend payment-targets to known set.
-        resolveTargets([{ to_pid: 'bob' }])
+        resolveTargets([paymentTarget('bob')])
         await settleUi()
 
         // Known => filtered to exactly returned target(s).
@@ -1540,11 +1642,11 @@ describe('ManualPaymentPanel', () => {
       setUrl('/?mode=real&ui=interact')
 
       const participants = [
-        { pid: 'alice', name: 'Alice' },
-        { pid: 'bob', name: 'Bob' },
-        { pid: 'carol', name: 'Carol' },
-      ]
-      const actions = mkActions({
+        participant('alice', 'Alice'),
+        participant('bob', 'Bob'),
+        participant('carol', 'Carol'),
+      ] satisfies ParticipantInfo[]
+      const actions = makeInteractActions({
         participants,
         paymentTargetsImpl: async () => {
           throw new Error('boom')
@@ -1553,7 +1655,7 @@ describe('ManualPaymentPanel', () => {
 
       const snapshot = ref<GraphSnapshot | null>(null)
       const im = useInteractMode({
-        actions: actions as any,
+        actions,
         runId: computed(() => 'run_test'),
         equivalent: computed(() => 'UAH'),
         snapshot,

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 function makeSnapshot() {
   return {
@@ -33,7 +33,7 @@ function makeSnapshot() {
   }
 }
 
-async function waitReady(page: any) {
+async function waitReady(page: Page) {
   await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
   await page.waitForTimeout(250)
 }

@@ -4,6 +4,29 @@ import { computed, ref } from 'vue'
 import type { GraphSnapshot } from '../types'
 import { useInteractMode } from './useInteractMode'
 
+type InteractModeOptions = Parameters<typeof useInteractMode>[0]
+type InteractActions = InteractModeOptions['actions']
+type SendPaymentResult = Awaited<ReturnType<InteractActions['sendPayment']>>
+type TrustlineCreateResult = Awaited<ReturnType<InteractActions['createTrustline']>>
+type TrustlineUpdateResult = Awaited<ReturnType<InteractActions['updateTrustline']>>
+type TrustlineCloseResult = Awaited<ReturnType<InteractActions['closeTrustline']>>
+type ClearingResult = Awaited<ReturnType<InteractActions['runClearing']>>
+type ParticipantsResult = Awaited<ReturnType<InteractActions['fetchParticipants']>>
+type TrustlinesResult = Awaited<ReturnType<InteractActions['fetchTrustlines']>>
+type PaymentTargetsResult = Awaited<ReturnType<InteractActions['fetchPaymentTargets']>>
+type SendPaymentOptions = Parameters<InteractActions['sendPayment']>[4]
+
+type MockedInteractActions = InteractActions & {
+  sendPayment: ReturnType<typeof vi.fn<InteractActions['sendPayment']>>
+  createTrustline: ReturnType<typeof vi.fn<InteractActions['createTrustline']>>
+  updateTrustline: ReturnType<typeof vi.fn<InteractActions['updateTrustline']>>
+  closeTrustline: ReturnType<typeof vi.fn<InteractActions['closeTrustline']>>
+  runClearing: ReturnType<typeof vi.fn<InteractActions['runClearing']>>
+  fetchParticipants: ReturnType<typeof vi.fn<InteractActions['fetchParticipants']>>
+  fetchTrustlines: ReturnType<typeof vi.fn<InteractActions['fetchTrustlines']>>
+  fetchPaymentTargets: ReturnType<typeof vi.fn<InteractActions['fetchPaymentTargets']>>
+}
+
 describe('useInteractMode', () => {
   function deferred<T>() {
     let resolve!: (v: T) => void
@@ -15,28 +38,75 @@ describe('useInteractMode', () => {
     return { promise, resolve, reject }
   }
 
-  function abortError(): any {
+  function paymentSuccess(): SendPaymentResult {
+    return {
+      ok: true,
+      payment_id: 'payment-1',
+      from_pid: 'alice',
+      to_pid: 'bob',
+      equivalent: 'UAH',
+      amount: '1.00',
+      status: 'accepted',
+    }
+  }
+
+  function trustlineCreateSuccess(): TrustlineCreateResult {
+    return {
+      ok: true,
+      trustline_id: 'trustline-create-1',
+      from_pid: 'alice',
+      to_pid: 'bob',
+      equivalent: 'UAH',
+      limit: '10.00',
+    }
+  }
+
+  function trustlineUpdateSuccess(): TrustlineUpdateResult {
+    return {
+      ok: true,
+      trustline_id: 'trustline-update-1',
+      old_limit: '10.00',
+      new_limit: '20.00',
+    }
+  }
+
+  function trustlineCloseSuccess(): TrustlineCloseResult {
+    return {
+      ok: true,
+      trustline_id: 'trustline-close-1',
+    }
+  }
+
+  function clearingSuccess(overrides?: Partial<ClearingResult>): ClearingResult {
+    return {
+      ok: true,
+      cycles: [],
+      ...overrides,
+    } as ClearingResult
+  }
+
+  function abortError(): Error {
     try {
       // DOMException is the closest match to what fetch() rejects with on abort.
       return new DOMException('Aborted', 'AbortError')
     } catch {
       const e = new Error('Aborted')
-      ;(e as any).name = 'AbortError'
+      Object.defineProperty(e, 'name', { value: 'AbortError', configurable: true })
       return e
     }
   }
 
-  function mkActions() {
+  function mkActions(): MockedInteractActions {
     return {
-      sendPayment: vi.fn(async () => ({ ok: true } as any)),
-      createTrustline: vi.fn(async () => ({ ok: true } as any)),
-      updateTrustline: vi.fn(async () => ({ ok: true } as any)),
-      closeTrustline: vi.fn(async () => ({ ok: true } as any)),
-      runClearing: vi.fn(async () => ({ ok: true, cycles: [] } as any)),
-      // IMPORTANT: keep array literal from becoming `never[]` (breaks mock typing in tests).
-      fetchParticipants: vi.fn(async () => [] as any[]),
-      fetchTrustlines: vi.fn(async () => [] as any[]),
-      fetchPaymentTargets: vi.fn(async () => [] as any[]),
+      actionsDisabled: ref(false),
+      sendPayment: vi.fn<InteractActions['sendPayment']>(async () => paymentSuccess()),
+      createTrustline: vi.fn<InteractActions['createTrustline']>(async () => trustlineCreateSuccess()),
+      updateTrustline: vi.fn<InteractActions['updateTrustline']>(async () => trustlineUpdateSuccess()),
+      closeTrustline: vi.fn<InteractActions['closeTrustline']>(async () => trustlineCloseSuccess()),
+      runClearing: vi.fn<InteractActions['runClearing']>(async () => clearingSuccess()),
+      fetchParticipants: vi.fn<InteractActions['fetchParticipants']>(async () => [] as ParticipantsResult),
+      fetchTrustlines: vi.fn<InteractActions['fetchTrustlines']>(async () => [] as TrustlinesResult),
+      fetchPaymentTargets: vi.fn<InteractActions['fetchPaymentTargets']>(async () => [] as PaymentTargetsResult),
     }
   }
 
@@ -54,7 +124,7 @@ describe('useInteractMode', () => {
 
     const actions = mkActions()
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     expect(im.phase.value).toBe('idle')
     im.startPaymentFlow()
@@ -90,7 +160,7 @@ describe('useInteractMode', () => {
 
     const actions = mkActions()
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startTrustlineFlow()
     expect(im.phase.value).toBe('picking-trustline-from')
@@ -105,7 +175,7 @@ describe('useInteractMode', () => {
     const actions = mkActions()
     actions.sendPayment.mockRejectedValueOnce(new Error('boom'))
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     // Force an error state (failed payment confirm).
     im.startPaymentFlow()
@@ -124,11 +194,11 @@ describe('useInteractMode', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()
 
-    const d = deferred<any>()
+    const d = deferred<SendPaymentResult>()
     actions.sendPayment.mockImplementationOnce(() => d.promise)
 
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     im.selectNode('alice')
@@ -171,11 +241,12 @@ describe('useInteractMode', () => {
     let commits = 0
     let aborts = 0
 
-    const calls: Array<{ d: ReturnType<typeof deferred<any>>; signal?: AbortSignal }> = []
+    const calls: Array<{ d: ReturnType<typeof deferred<SendPaymentResult>>; signal?: AbortSignal }> = []
 
-    const actions = {
-      sendPayment: vi.fn((from: string, to: string, amount: string, eq: string, o?: any) => {
-        const d = deferred<any>()
+    const actions: MockedInteractActions = {
+      actionsDisabled: ref(false),
+      sendPayment: vi.fn<InteractActions['sendPayment']>((from: string, to: string, amount: string, eq: string, o?: SendPaymentOptions) => {
+        const d = deferred<SendPaymentResult>()
         const signal: AbortSignal | undefined = o?.signal
 
         let finished = false
@@ -204,32 +275,32 @@ describe('useInteractMode', () => {
             finish()
             d.reject(abortError())
           } else {
-            const onAbort = () => {
+            const onAbort: EventListener = () => {
               aborts += 1
-              try { signal.removeEventListener('abort', onAbort as any) } catch { /* ignore */ }
+              try { signal.removeEventListener('abort', onAbort) } catch { /* ignore */ }
               finish()
               d.reject(abortError())
             }
-            signal.addEventListener('abort', onAbort as any)
+            signal.addEventListener('abort', onAbort)
           }
         }
 
         return p
       }),
-      createTrustline: vi.fn(async () => ({ ok: true } as any)),
-      updateTrustline: vi.fn(async () => ({ ok: true } as any)),
-      closeTrustline: vi.fn(async () => ({ ok: true } as any)),
-      runClearing: vi.fn(async () => ({ ok: true, cycles: [] } as any)),
-      fetchParticipants: vi.fn(async () => [] as any[]),
-      fetchTrustlines: vi.fn(async () => [] as any[]),
-      fetchPaymentTargets: vi.fn(async () => [] as any[]),
+      createTrustline: vi.fn<InteractActions['createTrustline']>(async () => trustlineCreateSuccess()),
+      updateTrustline: vi.fn<InteractActions['updateTrustline']>(async () => trustlineUpdateSuccess()),
+      closeTrustline: vi.fn<InteractActions['closeTrustline']>(async () => trustlineCloseSuccess()),
+      runClearing: vi.fn<InteractActions['runClearing']>(async () => clearingSuccess()),
+      fetchParticipants: vi.fn<InteractActions['fetchParticipants']>(async () => [] as ParticipantsResult),
+      fetchTrustlines: vi.fn<InteractActions['fetchTrustlines']>(async () => [] as TrustlinesResult),
+      fetchPaymentTargets: vi.fn<InteractActions['fetchPaymentTargets']>(async () => [] as PaymentTargetsResult),
     }
 
     const runId = computed(() => 'run_test')
     const equivalent = computed(() => 'UAH')
 
     // First instance: starts submit, then gets cancelled (should abort request).
-    const im1 = useInteractMode({ actions: actions as any, runId, equivalent, snapshot })
+    const im1 = useInteractMode({ actions, runId, equivalent, snapshot })
     im1.startPaymentFlow()
     im1.selectNode('alice')
     im1.selectNode('bob')
@@ -251,7 +322,7 @@ describe('useInteractMode', () => {
     expect(aborts).toBe(1)
 
     // Second instance: restart immediately; must not overlap with the previous in-flight submit.
-    const im2 = useInteractMode({ actions: actions as any, runId, equivalent, snapshot })
+    const im2 = useInteractMode({ actions, runId, equivalent, snapshot })
     im2.startPaymentFlow()
     im2.selectNode('alice')
     im2.selectNode('bob')
@@ -263,7 +334,7 @@ describe('useInteractMode', () => {
     expect(maxInFlight).toBe(1)
 
     // Resolve the *current* submit only.
-    calls[1]!.d.resolve({ ok: true })
+    calls[1]!.d.resolve(paymentSuccess())
     await p2
 
     // Old submit was aborted => must not produce a "commit".
@@ -279,10 +350,10 @@ describe('useInteractMode', () => {
     try {
       const snapshot = ref<GraphSnapshot | null>(null)
       const actions = mkActions()
-      actions.runClearing.mockResolvedValueOnce({ ok: true, cycles: [], total_cleared_amount: '0.00' } as any)
+      actions.runClearing.mockResolvedValueOnce(clearingSuccess({ total_cleared_amount: '0.00' }))
 
       const runId = computed(() => 'run_test')
-      const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+      const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
       im.startClearingFlow()
       expect(im.phase.value).toBe('confirm-clearing')
@@ -328,7 +399,7 @@ describe('useInteractMode', () => {
       links: [], // no existing trustline alice->carol
     })
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: mkActions() as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startTrustlineFlow()
     expect(im.phase.value).toBe('picking-trustline-from')
@@ -344,7 +415,7 @@ describe('useInteractMode', () => {
   it('setPaymentFromPid and setPaymentToPid update state in picking phases', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: mkActions() as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     expect(im.phase.value).toBe('picking-payment-from')
@@ -361,7 +432,7 @@ describe('useInteractMode', () => {
   it('selectEdge transitions to editing-trustline phase', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: mkActions() as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     // selectEdge should set phase to 'editing-trustline'
     im.selectEdge('alice→bob')
@@ -371,9 +442,9 @@ describe('useInteractMode', () => {
   })
 
   it('successMessage is retriggered when the same toast text repeats (microtask reset)', async () => {
-    const origQueueMicrotask = (globalThis as any).queueMicrotask as ((fn: () => void) => void) | undefined
+    const origQueueMicrotask = globalThis.queueMicrotask
     const scheduled: Array<() => void> = []
-    ;(globalThis as any).queueMicrotask = (fn: () => void) => {
+    globalThis.queueMicrotask = (fn: () => void) => {
       scheduled.push(fn)
     }
 
@@ -389,7 +460,7 @@ describe('useInteractMode', () => {
 
     const actions = mkActions()
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     try {
       im.selectEdge('alice→bob')
@@ -410,7 +481,7 @@ describe('useInteractMode', () => {
       while (scheduled.length) scheduled.shift()?.()
       expect(im.successMessage.value).toBe(msg)
     } finally {
-      ;(globalThis as any).queueMicrotask = origQueueMicrotask
+      globalThis.queueMicrotask = origQueueMicrotask
     }
   })
 
@@ -418,13 +489,13 @@ describe('useInteractMode', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()
 
-    const d1 = deferred<any[]>()
-    const d2 = deferred<any[]>()
+    const d1 = deferred<TrustlinesResult>()
+    const d2 = deferred<TrustlinesResult>()
     actions.fetchTrustlines.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise)
 
     // Creating useInteractMode triggers an immediate trustlines refresh (watch on equivalent).
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
     expect(actions.fetchTrustlines).toHaveBeenCalledTimes(1)
 
     d1.resolve([])
@@ -450,10 +521,10 @@ describe('useInteractMode', () => {
     })
 
     const actions = mkActions()
-    actions.fetchPaymentTargets.mockResolvedValue([{ to_pid: 'bob', hops: 1 }] as any)
+    actions.fetchPaymentTargets.mockResolvedValue([{ to_pid: 'bob', hops: 1 }] as PaymentTargetsResult)
 
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     im.setPaymentFromPid('alice')
@@ -483,7 +554,7 @@ describe('useInteractMode', () => {
       links: [{ source: 'bob', target: 'alice', used: '200', available: '800', status: 'active' }],
     })
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: mkActions() as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     im.selectNode('alice')
@@ -497,17 +568,15 @@ describe('useInteractMode', () => {
     try {
       const snapshot = ref<GraphSnapshot | null>(null)
       const actions = mkActions()
-      actions.runClearing.mockResolvedValueOnce({
-        ok: true,
+      actions.runClearing.mockResolvedValueOnce(clearingSuccess({
         cleared_cycles: 0,
         total_cleared_amount: '0.00',
-        cycles: [],
         equivalent: 'UAH',
-      } as any)
+      }))
 
       const clearingDoneCallback = vi.fn()
       const im = useInteractMode({
-        actions: actions as any,
+        actions,
         runId: computed(() => 'run_test'),
         equivalent: computed(() => 'UAH'),
         snapshot,
@@ -533,7 +602,7 @@ describe('useInteractMode', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     im.selectNode('alice')
@@ -554,11 +623,12 @@ describe('useInteractMode', () => {
   it('availableTargetIds is an empty Set in idle phase (undefined reserved for loading/unknown only)', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: mkActions() as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     const ids = im.availableTargetIds.value
     expect(ids).toBeInstanceOf(Set)
-    expect((ids as Set<string>).size).toBe(0)
+    if (!ids) throw new Error('expected availableTargetIds to be a Set in idle phase')
+    expect(ids.size).toBe(0)
   })
 
   it('availableTargetIds is undefined in picking-payment-to while trustlinesLoading=true (unknown)', async () => {
@@ -573,11 +643,11 @@ describe('useInteractMode', () => {
     })
 
     const actions = mkActions()
-    const d = deferred<any[]>()
+    const d = deferred<TrustlinesResult>()
     actions.fetchTrustlines.mockImplementationOnce(() => d.promise)
 
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     im.setPaymentFromPid('alice')
@@ -608,7 +678,7 @@ describe('useInteractMode', () => {
     actions.fetchTrustlines.mockResolvedValueOnce([])
 
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: actions as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     im.setPaymentFromPid('alice')
@@ -621,7 +691,8 @@ describe('useInteractMode', () => {
     expect(im.trustlinesLoading.value).toBe(false)
     const ids = im.availableTargetIds.value
     expect(ids).toBeInstanceOf(Set)
-    expect((ids as Set<string>).size).toBe(0)
+    if (!ids) throw new Error('expected availableTargetIds to be a Set when trustlines are known')
+    expect(ids.size).toBe(0)
   })
 
   it('availableTargetIds includes participants (excluding from) in picking-trustline-to', () => {
@@ -636,7 +707,7 @@ describe('useInteractMode', () => {
       links: [],
     })
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: mkActions() as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startTrustlineFlow()
     im.setTrustlineFromPid('alice')
@@ -653,7 +724,7 @@ describe('useInteractMode', () => {
   it('does not start an alternative flow when phase is not idle (one flow at a time)', () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const runId = computed(() => 'run_test')
-    const im = useInteractMode({ actions: mkActions() as any, runId, equivalent: computed(() => 'UAH'), snapshot })
+    const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     im.startPaymentFlow()
     expect(im.phase.value).toBe('picking-payment-from')

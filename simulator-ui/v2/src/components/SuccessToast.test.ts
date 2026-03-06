@@ -1,7 +1,9 @@
-import { createApp, h, nextTick, ref } from 'vue'
+import { createApp, h, nextTick, ref, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import SuccessToast from './SuccessToast.vue'
+
+const successToastComponent: Component = SuccessToast
 
 describe('SuccessToast', () => {
   it('AC-A11Y-3: SuccessToast uses role="status" + aria-live="polite" when visible', async () => {
@@ -10,7 +12,7 @@ describe('SuccessToast', () => {
 
     const msg = ref<string | null>('ok')
     const app = createApp({
-      render: () => h(SuccessToast as any, { message: msg, onDismiss: vi.fn() }),
+      render: () => h(successToastComponent, { message: msg, onDismiss: vi.fn() }),
     })
     app.mount(host)
     await nextTick()
@@ -36,7 +38,7 @@ describe('SuccessToast', () => {
       })
 
       const app = createApp({
-        render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+        render: () => h(successToastComponent, { message: msg, onDismiss }),
       })
       app.mount(host)
       await nextTick()
@@ -73,7 +75,7 @@ describe('SuccessToast', () => {
       })
 
       const app = createApp({
-        render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+        render: () => h(successToastComponent, { message: msg, onDismiss }),
       })
       app.mount(host)
       await nextTick()
@@ -103,7 +105,7 @@ describe('SuccessToast', () => {
     })
 
     const app = createApp({
-      render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+      render: () => h(successToastComponent, { message: msg, onDismiss }),
     })
     app.mount(host)
     await nextTick()
@@ -137,7 +139,7 @@ describe('SuccessToast', () => {
       })
 
       const app = createApp({
-        render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+        render: () => h(successToastComponent, { message: msg, onDismiss }),
       })
 
       app.mount(host)
@@ -166,7 +168,7 @@ describe('SuccessToast', () => {
       })
 
       const app = createApp({
-        render: () => h(SuccessToast as any, { message: msg, onDismiss }),
+        render: () => h(successToastComponent, { message: msg, onDismiss }),
       })
       app.mount(host)
       await nextTick()

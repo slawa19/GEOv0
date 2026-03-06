@@ -3,8 +3,25 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { ApiError } from '../api/http'
-import { connectSse } from '../api/sse'
+import { connectSse, type SseConnectOpts } from '../api/sse'
 import { createRun, getActiveRun, getRun, stopRun } from '../api/simulatorApi'
+import type { ActiveRunResponse } from '../api/simulatorTypes'
+
+function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve()
+    signal?.addEventListener('abort', () => resolve(), { once: true })
+  })
+}
+
+function emitSsePayload(opts: SseConnectOpts, payload: { event_id: string } & Record<string, unknown>) {
+  opts.onMessage({ id: payload.event_id, data: JSON.stringify(payload) })
+}
+
+function restoreConnectSseImplementation(prevImpl: typeof connectSse | undefined) {
+  if (!prevImpl) throw new Error('expected connectSse mock implementation')
+  vi.mocked(connectSse).mockImplementation(prevImpl)
+}
 
 vi.mock('../api/simulatorApi', () => {
   return {
@@ -34,7 +51,7 @@ vi.mock('../api/simulatorApi', () => {
 
 vi.mock('../api/sse', () => {
   return {
-    connectSse: vi.fn(async (opts: any) => {
+    connectSse: vi.fn(async (opts: SseConnectOpts) => {
       // Simulate SSE replay: same event twice.
       const payload = {
         event_id: 'evt_tx_1',
@@ -48,14 +65,11 @@ vi.mock('../api/sse', () => {
         edges: [{ from: 'A', to: 'B' }],
       }
 
-      opts.onMessage({ id: 'evt_tx_1', data: JSON.stringify(payload) })
-      opts.onMessage({ id: 'evt_tx_1', data: JSON.stringify(payload) })
+      emitSsePayload(opts, payload)
+      emitSsePayload(opts, payload)
 
       // Keep the connection open until aborted.
-      await new Promise<void>((resolve) => {
-        if (opts?.signal?.aborted) return resolve()
-        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
-      })
+      await waitForAbort(opts.signal)
     }),
   }
 })
@@ -328,7 +342,8 @@ describe('useSimulatorRealMode - startRun conflict attach', () => {
     })
     // useSimulatorRealMode may call getActiveRun during boot discovery and again
     // when handling the 409 attach-to-active flow. Keep it stable for this test.
-    getActiveRunMock.mockResolvedValue({ run_id: 'r_attached' } as any)
+    const activeRun: ActiveRunResponse = { run_id: 'r_attached' }
+    getActiveRunMock.mockResolvedValue(activeRun)
 
     const real = createRealState()
     real.apiBase = 'http://x'
@@ -374,7 +389,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
   it('receiver label not emitted when amount is empty', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
-    connectSseMock.mockImplementation(async (opts: any) => {
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       const payload = {
         event_id: 'evt_no_amount',
         ts: '2026-01-01T00:00:00Z',
@@ -386,11 +401,8 @@ describe('useSimulatorRealMode - receiver label guards', () => {
         ttl_ms: 1200,
         edges: [{ from: 'A', to: 'B' }],
       }
-      opts.onMessage({ id: payload.event_id, data: JSON.stringify(payload) })
-      await new Promise<void>((resolve) => {
-        if (opts?.signal?.aborted) return resolve()
-        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
-      })
+      emitSsePayload(opts, payload)
+      await waitForAbort(opts.signal)
     })
 
     const real = createRealState()
@@ -429,13 +441,13 @@ describe('useSimulatorRealMode - receiver label guards', () => {
     expect(scheduleTimeout).toHaveBeenCalledTimes(0)
 
     h.stopSse()
-    connectSseMock.mockImplementation(prevImpl as any)
+    restoreConnectSseImplementation(prevImpl)
   })
 
   it('receiver label not emitted for self-payment (from === to)', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
-    connectSseMock.mockImplementation(async (opts: any) => {
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       const payload = {
         event_id: 'evt_self_pay',
         ts: '2026-01-01T00:00:00Z',
@@ -447,11 +459,8 @@ describe('useSimulatorRealMode - receiver label guards', () => {
         ttl_ms: 1200,
         edges: [{ from: 'A', to: 'A' }],
       }
-      opts.onMessage({ id: payload.event_id, data: JSON.stringify(payload) })
-      await new Promise<void>((resolve) => {
-        if (opts?.signal?.aborted) return resolve()
-        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
-      })
+      emitSsePayload(opts, payload)
+      await waitForAbort(opts.signal)
     })
 
     const real = createRealState()
@@ -492,13 +501,13 @@ describe('useSimulatorRealMode - receiver label guards', () => {
     expect(scheduleTimeout).toHaveBeenCalledTimes(0)
 
     h.stopSse()
-    connectSseMock.mockImplementation(prevImpl as any)
+    restoreConnectSseImplementation(prevImpl)
   })
 
   it('receiver label uses resolveTxDirection when from/to missing but edges present', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
-    connectSseMock.mockImplementation(async (opts: any) => {
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       const payload = {
         event_id: 'evt_edges_only',
         ts: '2026-01-01T00:00:00Z',
@@ -512,11 +521,8 @@ describe('useSimulatorRealMode - receiver label guards', () => {
           { from: 'Y', to: 'Z' },
         ],
       }
-      opts.onMessage({ id: payload.event_id, data: JSON.stringify(payload) })
-      await new Promise<void>((resolve) => {
-        if (opts?.signal?.aborted) return resolve()
-        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
-      })
+      emitSsePayload(opts, payload)
+      await waitForAbort(opts.signal)
     })
 
     const real = createRealState()
@@ -559,7 +565,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
     expect(scheduleTimeout).toHaveBeenCalledTimes(1)
 
     h.stopSse()
-    connectSseMock.mockImplementation(prevImpl as any)
+    restoreConnectSseImplementation(prevImpl)
   })
 })
 
@@ -624,7 +630,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
   it('amount_flyout=false suppresses amount labels but keeps tx FX', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
-    connectSseMock.mockImplementation(async (opts: any) => {
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       const payload = {
         event_id: 'evt_tx_2',
         ts: '2026-01-01T00:00:00Z',
@@ -638,12 +644,8 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
         edges: [{ from: 'A', to: 'B' }],
       }
 
-      opts.onMessage({ id: 'evt_tx_2', data: JSON.stringify(payload) })
-
-      await new Promise<void>((resolve) => {
-        if (opts?.signal?.aborted) return resolve()
-        opts?.signal?.addEventListener?.('abort', () => resolve(), { once: true })
-      })
+      emitSsePayload(opts, payload)
+      await waitForAbort(opts.signal)
     })
 
     const isRealModeRef = ref(true)
@@ -699,7 +701,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
     h.stopSse()
 
     // Restore default mock for other tests.
-    connectSseMock.mockImplementation(prevImpl as any)
+    restoreConnectSseImplementation(prevImpl)
   })
 })
 

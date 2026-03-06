@@ -38,13 +38,8 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
       timers.clearAll()
 
       try {
-        if (timersStatsHook && (globalThis as any).__geo_timers_stats === timersStatsHook) {
-          ;(globalThis as any).__geo_timers_stats = undefined
-          try {
-            delete (globalThis as any).__geo_timers_stats
-          } catch {
-            // Best-effort.
-          }
+        if (timersStatsHook && window.__geo_timers_stats === timersStatsHook) {
+          delete window.__geo_timers_stats
         }
       } catch {
         // ignore
@@ -58,7 +53,7 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
     const host = globalThis?.location?.hostname
     if (host === 'localhost' || host === '127.0.0.1') {
       timersStatsHook = () => timers.getStats()
-      ;(globalThis as any).__geo_timers_stats = timersStatsHook
+      window.__geo_timers_stats = timersStatsHook
     }
   } catch {
     // ignore

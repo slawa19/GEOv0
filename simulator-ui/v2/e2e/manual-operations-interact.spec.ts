@@ -1,4 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
+
+type SnapshotPayload = ReturnType<typeof makeSnapshot>
+interface ActionResult { status: number; body: unknown }
+interface PaymentRealReq { from_pid: string; to_pid: string; amount: string | number; [key: string]: unknown }
+interface TrustlineCloseReq { from_pid: string; to_pid: string; [key: string]: unknown }
 
 type Participant = { pid: string; name: string }
 type Trustline = {
@@ -69,16 +74,16 @@ function makeSnapshot(opts: {
   }
 }
 
-async function waitAppReady(page: any) {
+async function waitAppReady(page: Page) {
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
   // Also wait for ActionBar to be present (interact UI).
   await expect(page.locator('[data-testid="actionbar-payment"]')).toBeVisible({ timeout: 20_000 })
 }
 
-async function getSelectValues(page: any, css: string): Promise<string[]> {
+async function getSelectValues(page: Page, css: string): Promise<string[]> {
   const loc = page.locator(css)
   await expect(loc).toBeVisible()
-  return await loc.evaluate((el: any) => {
+  return await loc.evaluate((el: Element) => {
     const sel = el as HTMLSelectElement
     return Array.from(sel.options)
       .map((o) => String(o.value ?? '').trim())
@@ -86,23 +91,23 @@ async function getSelectValues(page: any, css: string): Promise<string[]> {
   })
 }
 
-async function getSelectValue(page: any, css: string): Promise<string> {
+async function getSelectValue(page: Page, css: string): Promise<string> {
   const loc = page.locator(css)
   await expect(loc).toBeVisible()
-  return await loc.evaluate((el: any) => String((el as HTMLSelectElement).value ?? ''))
+  return await loc.evaluate((el: Element) => String((el as HTMLSelectElement).value ?? ''))
 }
 
-async function mockRealInteractApp(page: any, o: {
+async function mockRealInteractApp(page: Page, o: {
   scenarioId?: string
   eq?: string
   runId?: string
-  snapshot: any
+  snapshot: SnapshotPayload
   participants: Participant[]
   trustlinesList?: Trustline[]
   trustlinesListStatus?: number
   paymentTargetsByFromPid: Record<string, Array<{ to_pid: string; hops?: number }>>
-  onPaymentReal?: (req: any) => { status: number; body: any }
-  onTrustlineClose?: (req: any) => { status: number; body: any }
+  onPaymentReal?: (req: PaymentRealReq) => ActionResult
+  onTrustlineClose?: (req: TrustlineCloseReq) => ActionResult
 }) {
   const eq = (o.eq ?? 'UAH').trim().toUpperCase()
   const scenarioId = o.scenarioId ?? 'greenfield-village-100-realistic-v2'
@@ -126,7 +131,7 @@ async function mockRealInteractApp(page: any, o: {
   )
 
   // Session bootstrap (anonymous cookie auth).
-  await page.route('**/simulator/session/ensure', async (route: any) => {
+  await page.route('**/simulator/session/ensure', async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -134,11 +139,11 @@ async function mockRealInteractApp(page: any, o: {
     })
   })
 
-  await page.route('**/simulator/runs/active', async (route: any) => {
+  await page.route('**/simulator/runs/active', async (route: Route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ run_id: null }) })
   })
 
-  await page.route(/\/simulator\/scenarios$/i, async (route: any) => {
+  await page.route(/\/simulator\/scenarios$/i, async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -148,16 +153,16 @@ async function mockRealInteractApp(page: any, o: {
     })
   })
 
-  await page.route(/\/simulator\/scenarios\/[^/]+\/graph\/preview/i, async (route: any) => {
+  await page.route(/\/simulator\/scenarios\/[^/]+\/graph\/preview/i, async (route: Route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o.snapshot) })
   })
 
   // Run creation + status.
-  await page.route(/\/simulator\/runs$/i, async (route: any) => {
+  await page.route(/\/simulator\/runs$/i, async (route: Route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ run_id: runId }) })
   })
 
-  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/pause`, async (route: any) => {
+  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/pause`, async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -173,7 +178,7 @@ async function mockRealInteractApp(page: any, o: {
     })
   })
 
-  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}`, async (route: any) => {
+  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}`, async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -189,12 +194,12 @@ async function mockRealInteractApp(page: any, o: {
     })
   })
 
-  await page.route(new RegExp(`/simulator/runs/${runId}/graph/snapshot`, 'i'), async (route: any) => {
+  await page.route(new RegExp(`/simulator/runs/${runId}/graph/snapshot`, 'i'), async (route: Route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o.snapshot) })
   })
 
   // SSE (events endpoint): return a tiny valid stream and close.
-  await page.route(new RegExp(`/simulator/runs/${runId}/events`, 'i'), async (route: any) => {
+  await page.route(new RegExp(`/simulator/runs/${runId}/events`, 'i'), async (route: Route) => {
     await route.fulfill({
       status: 200,
       headers: {
@@ -206,7 +211,7 @@ async function mockRealInteractApp(page: any, o: {
   })
 
   // Interact mode endpoints.
-  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/participants-list`, async (route: any) => {
+  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/participants-list`, async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -214,7 +219,7 @@ async function mockRealInteractApp(page: any, o: {
     })
   })
 
-  await page.route(new RegExp(`/simulator/runs/${runId}/actions/trustlines-list`, 'i'), async (route: any) => {
+  await page.route(new RegExp(`/simulator/runs/${runId}/actions/trustlines-list`, 'i'), async (route: Route) => {
     const st = o.trustlinesListStatus ?? 200
     if (st !== 200) {
       await route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify({ detail: 'boom' }) })
@@ -228,7 +233,7 @@ async function mockRealInteractApp(page: any, o: {
     })
   })
 
-  await page.route(new RegExp(`/simulator/runs/${runId}/payment-targets`, 'i'), async (route: any) => {
+  await page.route(new RegExp(`/simulator/runs/${runId}/payment-targets`, 'i'), async (route: Route) => {
     const url = new URL(route.request().url())
     const fromPid = String(url.searchParams.get('from_pid') ?? '').trim()
     const items = (o.paymentTargetsByFromPid[fromPid] ?? []).map((it) => ({
@@ -242,21 +247,21 @@ async function mockRealInteractApp(page: any, o: {
     })
   })
 
-  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/payment-real`, async (route: any) => {
-    const req = JSON.parse((await route.request().postData()) ?? '{}')
+  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/payment-real`, async (route: Route) => {
+    const req: PaymentRealReq = JSON.parse((await route.request().postData()) ?? '{}')
     const resp = o.onPaymentReal?.(req) ?? { status: 200, body: { ok: true } }
     await route.fulfill({ status: resp.status, contentType: 'application/json', body: JSON.stringify(resp.body) })
   })
 
-  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-close`, async (route: any) => {
-    const req = JSON.parse((await route.request().postData()) ?? '{}')
+  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-close`, async (route: Route) => {
+    const req: TrustlineCloseReq = JSON.parse((await route.request().postData()) ?? '{}')
     const resp = o.onTrustlineClose?.(req) ?? { status: 200, body: { ok: true, trustline_id: `${req.from_pid}→${req.to_pid}` } }
     await route.fulfill({ status: resp.status, contentType: 'application/json', body: JSON.stringify(resp.body) })
   })
 
   // trustline-update is not needed in E-3 (we only validate disabled UI),
   // but define it as a safety no-op so we can click Update in future refactors.
-  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-update`, async (route: any) => {
+  await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-update`, async (route: Route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, trustline_id: 'tl-1' }) })
   })
 

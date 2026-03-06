@@ -116,14 +116,14 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
         : null,
     }
 
-      const stop_requested_at = asString(raw.stop_requested_at)
-      if (stop_requested_at) (evt as any).stop_requested_at = stop_requested_at
-      const stop_source = asString(raw.stop_source)
-      if (stop_source != null) (evt as any).stop_source = stop_source
-      const stop_reason = asString(raw.stop_reason)
-      if (stop_reason != null) (evt as any).stop_reason = stop_reason
-      const stop_client = asString(raw.stop_client)
-      if (stop_client != null) (evt as any).stop_client = stop_client
+    const stop_requested_at = asString(raw.stop_requested_at)
+    if (stop_requested_at) evt.stop_requested_at = stop_requested_at
+    const stop_source = asString(raw.stop_source)
+    if (stop_source != null) evt.stop_source = stop_source
+    const stop_reason = asString(raw.stop_reason)
+    if (stop_reason != null) evt.stop_reason = stop_reason
+    const stop_client = asString(raw.stop_client)
+    if (stop_client != null) evt.stop_client = stop_client
 
     const attempts_total = asNumber(raw.attempts_total)
     if (attempts_total != null) evt.attempts_total = attempts_total
@@ -239,7 +239,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     const cleared_cycles = asNumber(raw.cleared_cycles) ?? undefined
     const cleared_amount = asString(raw.cleared_amount) ?? undefined
 
-    const cycle_edges_raw = asArray((raw as any).cycle_edges)
+    const cycle_edges_raw = asArray(raw.cycle_edges)
     const cycle_edges = cycle_edges_raw
       ? cycle_edges_raw
           .map((e) => {
@@ -249,7 +249,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
             if (!from || !to) return null
             return { from, to }
           })
-          .filter(Boolean)
+          .filter((edge): edge is { from: string; to: string } => edge != null)
       : undefined
 
     const evt: ClearingDoneEvent = {
@@ -260,7 +260,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
       plan_id,
       cleared_cycles,
       cleared_amount,
-      cycle_edges: (cycle_edges as any) ?? undefined,
+      cycle_edges,
       node_patch: normalizeNodePatchArray(raw.node_patch),
       edge_patch: normalizeEdgePatchArray(raw.edge_patch),
     }
@@ -293,7 +293,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     }
 
     const frozen_nodes: string[] = []
-    for (const n of asArray((payloadRaw as any).frozen_nodes) ?? []) {
+    for (const n of asArray(payloadRaw.frozen_nodes) ?? []) {
       if (typeof n === 'string' && n) frozen_nodes.push(n)
     }
 
@@ -328,7 +328,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
     }
 
     const frozen_edges: TopologyChangedEdgeRef[] = []
-    for (const e of asArray((payloadRaw as any).frozen_edges) ?? []) {
+    for (const e of asArray(payloadRaw.frozen_edges) ?? []) {
       if (!isRecord(e)) continue
       const from_pid = asString(e.from_pid)
       const to_pid = asString(e.to_pid)
@@ -342,7 +342,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
       })
     }
 
-    const reason = asString((raw as any).reason) ?? undefined
+    const reason = asString(raw.reason) ?? undefined
 
     const evt: TopologyChangedEvent = {
       event_id,
@@ -356,8 +356,8 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEvent | null {
         added_edges,
         removed_edges,
         frozen_edges: frozen_edges.length ? frozen_edges : undefined,
-        node_patch: normalizeNodePatchArray((payloadRaw as any).node_patch),
-        edge_patch: normalizeEdgePatchArray((payloadRaw as any).edge_patch),
+        node_patch: normalizeNodePatchArray(payloadRaw.node_patch),
+        edge_patch: normalizeEdgePatchArray(payloadRaw.edge_patch),
       },
       reason,
     }

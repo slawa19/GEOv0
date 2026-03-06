@@ -21,7 +21,7 @@ const props = defineProps<{
 type GpuInfo = { vendor: string | null; renderer: string | null }
 
 const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-const dpr = (((globalThis as any).window as any)?.devicePixelRatio as number | undefined) || 1
+const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : undefined) ?? 1
 
 const gpu = ref<GpuInfo>({ vendor: null, renderer: null })
 
@@ -31,7 +31,7 @@ function tryGetGpuInfo(): GpuInfo {
     const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null
     if (!gl) return { vendor: null, renderer: null }
 
-    const dbg = gl.getExtension('WEBGL_debug_renderer_info') as any
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info')
     if (!dbg) return { vendor: null, renderer: null }
 
     const vendor = String(gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) ?? '')
@@ -44,7 +44,7 @@ function tryGetGpuInfo(): GpuInfo {
 
 const text = computed(() => {
   const p = props.perf
-  const fmt = (v: any) => (v === null || v === undefined || v === '' ? '—' : String(v))
+  const fmt = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v))
 
   const lines = [
     `UA: ${ua}`,

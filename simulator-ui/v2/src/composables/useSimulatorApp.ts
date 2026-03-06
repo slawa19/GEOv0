@@ -29,9 +29,6 @@ import { createPatchApplier } from '../demo/patches'
 import { spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
-import { __retryUntilTruthyOrDeadline } from '../utils/retryUntilTruthy'
-export { __retryUntilTruthyOrDeadline }
-
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { ApiError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'

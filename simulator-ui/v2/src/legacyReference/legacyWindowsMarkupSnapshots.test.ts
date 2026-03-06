@@ -1,4 +1,4 @@
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from '../components/NodeCardOverlay.vue'
@@ -19,13 +19,13 @@ function normalizeHtml(raw: string): string {
     .trim()
 }
 
-async function renderOuterHtml(Component: any, props: Record<string, unknown>): Promise<string> {
-  vi.stubGlobal('ResizeObserver', undefined as any)
+async function renderOuterHtml(component: Component, props: Record<string, unknown>): Promise<string> {
+  vi.stubGlobal('ResizeObserver', undefined)
 
   const host = document.createElement('div')
   document.body.appendChild(host)
 
-  const app = createApp({ render: () => h(Component, props) })
+  const app = createApp({ render: () => h(component, props) })
   try {
     app.mount(host)
     await nextTick()
@@ -52,7 +52,7 @@ describe('Legacy windows reference — markup snapshots', () => {
       net_balance: '42',
     }
 
-    const html = await renderOuterHtml(NodeCardOverlay as any, {
+    const html = await renderOuterHtml(NodeCardOverlay, {
       node,
       edgeStats: { outLimitText: '100', inLimitText: '50', degree: 3 },
       equivalentText: 'UAH',
@@ -98,7 +98,7 @@ describe('Legacy windows reference — markup snapshots', () => {
       lastClearing: null,
     }
 
-    const html = await renderOuterHtml(EdgeDetailPopup as any, {
+    const html = await renderOuterHtml(EdgeDetailPopup, {
       phase,
       state,
       unit: 'UAH',
@@ -137,7 +137,7 @@ describe('Legacy windows reference — markup snapshots', () => {
       { pid: 'carol', name: 'Carol', type: 'person', status: 'active' },
     ]
 
-    const html = await renderOuterHtml(ManualPaymentPanel as any, {
+    const html = await renderOuterHtml(ManualPaymentPanel, {
       phase,
       state,
       unit: 'UAH',
@@ -195,7 +195,7 @@ describe('Legacy windows reference — markup snapshots', () => {
       },
     ]
 
-    const html = await renderOuterHtml(TrustlineManagementPanel as any, {
+    const html = await renderOuterHtml(TrustlineManagementPanel, {
       phase,
       state,
       unit: 'UAH',
@@ -241,7 +241,7 @@ describe('Legacy windows reference — markup snapshots', () => {
       },
     }
 
-    const html = await renderOuterHtml(ClearingPanel as any, {
+    const html = await renderOuterHtml(ClearingPanel, {
       phase,
       state,
       busy: false,

@@ -1,4 +1,5 @@
 import { createApp, h, nextTick } from 'vue'
+import type { Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import ActionBar from './ActionBar.vue'
@@ -22,7 +23,7 @@ function mountActionBar(overrides: Record<string, unknown> = {}) {
   }
 
   const app = createApp({
-    render: () => h(ActionBar as any, { ...defaultProps, ...overrides }),
+    render: () => h(ActionBar as Component, { ...defaultProps, ...overrides }),
   })
 
   app.mount(host)

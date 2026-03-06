@@ -4,13 +4,39 @@ import { effectScope, nextTick, ref } from 'vue'
 import type { GraphSnapshot } from '../../types'
 import { useInteractDataCache } from './useInteractDataCache'
 
+type CacheActions = Parameters<typeof useInteractDataCache>[0]['actions']
+type ParticipantsResult = Awaited<ReturnType<CacheActions['fetchParticipants']>>
+type TrustlinesResult = Awaited<ReturnType<CacheActions['fetchTrustlines']>>
+type PaymentTargetsResult = Awaited<ReturnType<CacheActions['fetchPaymentTargets']>>
+type MockedCacheActions = CacheActions & {
+  fetchParticipants: ReturnType<typeof vi.fn<CacheActions['fetchParticipants']>>
+  fetchTrustlines: ReturnType<typeof vi.fn<CacheActions['fetchTrustlines']>>
+  fetchPaymentTargets: ReturnType<typeof vi.fn<CacheActions['fetchPaymentTargets']>>
+}
+
 describe('useInteractDataCache: snapshot→trustlines mapping', () => {
   function mk(snapshotValue: GraphSnapshot) {
-    const actions = {
-      fetchParticipants: vi.fn(async () => [] as any[]),
+    const actions: MockedCacheActions = {
+      actionsDisabled: ref(false),
+      sendPayment: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      createTrustline: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      updateTrustline: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      closeTrustline: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      runClearing: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      fetchParticipants: vi.fn<CacheActions['fetchParticipants']>(async () => [] as ParticipantsResult),
       // Return a non-array so `useInteractDataCache` keeps using snapshot-derived trustlines.
-      fetchTrustlines: vi.fn(async () => null as any),
-      fetchPaymentTargets: vi.fn(async () => [] as any[]),
+      fetchTrustlines: vi.fn<CacheActions['fetchTrustlines']>(async () => null as unknown as TrustlinesResult),
+      fetchPaymentTargets: vi.fn<CacheActions['fetchPaymentTargets']>(async () => [] as PaymentTargetsResult),
     }
 
     const runId = ref('run_test')
@@ -20,7 +46,7 @@ describe('useInteractDataCache: snapshot→trustlines mapping', () => {
     const scope = effectScope()
     const cache = scope.run(() =>
       useInteractDataCache({
-        actions: actions as any,
+        actions,
         runId,
         equivalent,
         snapshot,

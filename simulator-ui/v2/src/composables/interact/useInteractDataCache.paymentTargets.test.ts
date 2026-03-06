@@ -4,12 +4,38 @@ import { effectScope, nextTick, ref } from 'vue'
 import type { GraphSnapshot } from '../../types'
 import { useInteractDataCache } from './useInteractDataCache'
 
+type CacheActions = Parameters<typeof useInteractDataCache>[0]['actions']
+type PaymentTargetsResult = Awaited<ReturnType<CacheActions['fetchPaymentTargets']>>
+type ParticipantsResult = Awaited<ReturnType<CacheActions['fetchParticipants']>>
+type TrustlinesResult = Awaited<ReturnType<CacheActions['fetchTrustlines']>>
+type MockedCacheActions = CacheActions & {
+  fetchParticipants: ReturnType<typeof vi.fn<CacheActions['fetchParticipants']>>
+  fetchTrustlines: ReturnType<typeof vi.fn<CacheActions['fetchTrustlines']>>
+  fetchPaymentTargets: ReturnType<typeof vi.fn<CacheActions['fetchPaymentTargets']>>
+}
+
 describe('useInteractDataCache: payment-targets cache TTL/refresh-policy', () => {
   function mk() {
-    const actions = {
-      fetchParticipants: vi.fn(async () => [] as any[]),
-      fetchTrustlines: vi.fn(async () => [] as any[]),
-      fetchPaymentTargets: vi.fn(async () => [] as any[]),
+    const actions: MockedCacheActions = {
+      actionsDisabled: ref(false),
+      sendPayment: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      createTrustline: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      updateTrustline: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      closeTrustline: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      runClearing: vi.fn(async () => {
+        throw new Error('not used in this test')
+      }),
+      fetchParticipants: vi.fn<CacheActions['fetchParticipants']>(async () => [] as ParticipantsResult),
+      fetchTrustlines: vi.fn<CacheActions['fetchTrustlines']>(async () => [] as TrustlinesResult),
+      fetchPaymentTargets: vi.fn<CacheActions['fetchPaymentTargets']>(async () => [] as PaymentTargetsResult),
     }
 
     const runId = ref('run_test')
@@ -19,7 +45,7 @@ describe('useInteractDataCache: payment-targets cache TTL/refresh-policy', () =>
     const scope = effectScope()
     const cache = scope.run(() =>
       useInteractDataCache({
-        actions: actions as any,
+        actions,
         runId,
         equivalent,
         snapshot,
@@ -41,7 +67,7 @@ describe('useInteractDataCache: payment-targets cache TTL/refresh-policy', () =>
       vi.setSystemTime(base)
 
       const { actions, cache, scope } = mk()
-      actions.fetchPaymentTargets.mockResolvedValue([{ to_pid: 'bob' }] as any)
+      actions.fetchPaymentTargets.mockResolvedValue([{ to_pid: 'bob', hops: 1 }] as PaymentTargetsResult)
 
       await cache.refreshPaymentTargets({ fromPid: 'alice', maxHops: 1 })
       expect(actions.fetchPaymentTargets).toHaveBeenCalledTimes(1)
@@ -63,7 +89,7 @@ describe('useInteractDataCache: payment-targets cache TTL/refresh-policy', () =>
 
   it('refresh trigger: snapshot generated_at change invalidates cache (next refresh refetches)', async () => {
     const { actions, cache, snapshot, scope } = mk()
-    actions.fetchPaymentTargets.mockResolvedValue([{ to_pid: 'bob' }] as any)
+    actions.fetchPaymentTargets.mockResolvedValue([{ to_pid: 'bob', hops: 1 }] as PaymentTargetsResult)
 
     await cache.refreshPaymentTargets({ fromPid: 'alice', maxHops: 1 })
     expect(actions.fetchPaymentTargets).toHaveBeenCalledTimes(1)

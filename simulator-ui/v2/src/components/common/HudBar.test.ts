@@ -1,17 +1,18 @@
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, type Component, type Slots } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import HudBar from './HudBar.vue'
 
 function mountHudBar(
   props: Record<string, unknown> = {},
-  slot: Record<string, any> | null = null,
+  slot: Slots | null = null,
 ) {
   const host = document.createElement('div')
   document.body.appendChild(host)
 
+  const component: Component = HudBar
   const app = createApp({
-    render: () => h(HudBar as any, props, slot ?? { default: () => 'content' }),
+    render: () => h(component, props, slot ?? { default: () => 'content' }),
   })
 
   app.mount(host)

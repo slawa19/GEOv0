@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { extractErrorMessage } from '../utils/errorMessage'
 import type { RunStatus } from '../api/simulatorTypes'
 import type { AdminRunSummary } from '../api/simulatorApi'
 import { adminGetAllRuns, adminStopAllRuns } from '../api/simulatorApi'
@@ -47,7 +48,7 @@ export function useAdminRunsPanel(deps: {
       if (e instanceof ApiError && e.status === 403) {
         lastError.value = 'Admin token rejected (HTTP 403)'
       } else {
-        lastError.value = String((e as any)?.message ?? e)
+        lastError.value = extractErrorMessage(e)
       }
     } finally {
       if (!disposed) loading.value = false
@@ -65,7 +66,7 @@ export function useAdminRunsPanel(deps: {
       if (e instanceof ApiError && e.status === 403) {
         lastError.value = 'Admin token rejected (HTTP 403)'
       } else {
-        lastError.value = String((e as any)?.message ?? e)
+        lastError.value = extractErrorMessage(e)
       }
     }
   }

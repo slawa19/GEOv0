@@ -26,6 +26,7 @@ import { provideActivePanelState } from '../composables/useActivePanelState'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
  import { toLower } from '../utils/stringHelpers'
+ import { extractErrorMessage } from '../utils/errorMessage'
 
 // TD-1: all localStorage access is delegated to this composable.
 const simulatorStorage = useSimulatorStorage()
@@ -140,7 +141,7 @@ import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { useWindowManager } from '../composables/windowManager/useWindowManager'
  import type { WindowInstance } from '../composables/windowManager/types'
  import type { WindowAnchor } from '../composables/windowManager/types'
- import { isInteractPanelWindow, isNodeCardWindow } from '../composables/windowManager/types'
+ import { isInteractPanelWindow, isNodeCardWindow, isEdgeDetailWindow } from '../composables/windowManager/types'
  import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
  import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
  import { useWindowController } from '../composables/useWindowController'
@@ -149,7 +150,7 @@ import { DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX, DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX
 
 function readWindowViewportFallback(): { width: number; height: number } {
   try {
-    const w = (globalThis as any).window as any
+    const w = typeof window !== 'undefined' ? window : null
     const width = Number(w?.innerWidth)
     const height = Number(w?.innerHeight)
     return {
@@ -336,7 +337,7 @@ const ctl = useWindowController({
   interactPhase,
   isFullEditor: useFullTrustlineEditor,
   interactState: interact.mode.state,
-  interactMode: interact.mode as any,
+  interactMode: interact.mode,
   wm,
   wmEdgeDetail,
   getNodeScreenCenter,
@@ -370,14 +371,14 @@ function wmTitleFor(win: WindowInstance): string {
 
  function wmEdgeDetailEffectiveState(win: WindowInstance) {
    const live = interact.mode.state
-   if (win.type !== 'edge-detail') return live
+   if (!isEdgeDetailWindow(win)) return live
 
    // IMPORTANT: when edge-detail is kept alive (or otherwise decoupled from the live FSM),
    // the window MUST render its own frozen context from WindowManager `win.data`.
    if (wmEdgeDetail.state.value === 'keepAlive') {
-     const fromPid = String((win.data as any)?.fromPid ?? '')
-     const toPid = String((win.data as any)?.toPid ?? '')
-     const edgeKey = String((win.data as any)?.edgeKey ?? '') || (fromPid && toPid ? keyEdge(fromPid, toPid) : null)
+     const fromPid = String(win.data.fromPid ?? '')
+     const toPid = String(win.data.toPid ?? '')
+     const edgeKey = String(win.data.edgeKey ?? '') || (fromPid && toPid ? keyEdge(fromPid, toPid) : null)
      return {
       ...live,
       fromPid: fromPid || null,
@@ -512,10 +513,12 @@ const interactSelectedLink = computed<GraphLink | null>(() => {
   return null
 })
 
-function formatDemoActionError(e: any): string {
-  const msg = String(e?.message ?? e)
-  const body = typeof e?.bodyText === 'string' && e.bodyText.trim() ? `\n${e.bodyText.trim()}` : ''
-  return `${msg}${body}`
+function formatDemoActionError(e: unknown): string {
+  const msg = extractErrorMessage(e)
+  // Structured API errors may carry a `bodyText` field with the raw response body.
+  const hasBodyText = e !== null && typeof e === 'object' && 'bodyText' in e
+  const bodyText = hasBodyText ? String((e as Record<string, unknown>).bodyText ?? '').trim() : ''
+  return bodyText ? `${msg}\n${bodyText}` : msg
 }
 
 const demoRunTxOnce = async () => {
@@ -531,7 +534,7 @@ async function runDemoFxOnce(action: () => Promise<void>): Promise<void> {
   real.lastError = ''
   try {
     await action()
-  } catch (e: any) {
+  } catch (e: unknown) {
     real.lastError = formatDemoActionError(e)
   }
 }
@@ -578,7 +581,22 @@ function enterDemoUi() {
 
 const isExiting = ref(false)
 
-const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
+type TrustlinePanelRef = InstanceType<typeof TrustlineManagementPanel>
+
+const tlPanel = ref<TrustlinePanelRef | TrustlinePanelRef[] | null>(null)
+
+function focusTrustlineNewLimit(): void {
+  const panelRef = tlPanel.value
+  if (Array.isArray(panelRef)) {
+    const panel = panelRef.find((candidate) => typeof candidate?.focusNewLimit === 'function')
+    panel?.focusNewLimit()
+    return
+  }
+
+  if (typeof panelRef?.focusNewLimit === 'function') {
+    panelRef.focusNewLimit()
+  }
+}
 
 /**
  * Snapshot the selected node's screen-space center.
@@ -586,8 +604,8 @@ const tlPanel = ref<InstanceType<typeof TrustlineManagementPanel> | null>(null)
  */
 function snapshotNodeCenter(): Point | null {
   const win = wm.windows.value.find((w) => w.type === 'node-card' && w.state !== 'closing')
-  if (!win) return null
-  const nodeId = String((win.data as any)?.nodeId ?? '')
+  if (!win || !isNodeCardWindow(win)) return null
+  const nodeId = win.data.nodeId
   if (!nodeId) return null
   return getNodeScreenCenter(nodeId)
 }
@@ -736,16 +754,10 @@ function goInteract() {
   // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
   useFullTrustlineEditor.value = true
   // Focus the limit editor in TrustlineManagementPanel via template ref.
+  // Defensive: template refs rendered through TransitionGroup / repeated windows may resolve
+  // either to a single instance or to an array of instances.
   void nextTick(() => {
-    const v = tlPanel.value as any
-    if (typeof v?.focusNewLimit === 'function') {
-      v.focusNewLimit()
-      return
-    }
-    if (Array.isArray(v)) {
-      const inst = v.find((x) => typeof x?.focusNewLimit === 'function')
-      inst?.focusNewLimit?.()
-    }
+    focusTrustlineNewLimit()
   })
 }
 

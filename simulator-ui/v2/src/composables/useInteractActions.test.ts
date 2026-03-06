@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 
 import { ApiError } from '../api/http'
+import type {
+  SimulatorActionClearingRealResponse,
+  SimulatorActionParticipantsListResponse,
+  SimulatorActionPaymentRealResponse,
+  SimulatorActionTrustlineCreateResponse,
+  SimulatorActionTrustlinesListResponse,
+} from '../api/simulatorTypes'
 
 const m = vi.hoisted(() => {
   return {
@@ -29,6 +36,39 @@ vi.mock('../api/simulatorApi', () => {
 
 import { isInteractActionError, useInteractActions } from './useInteractActions'
 
+function paymentResponse(): SimulatorActionPaymentRealResponse {
+  return {
+    ok: true,
+    payment_id: 'pay_1',
+    from_pid: 'a',
+    to_pid: 'b',
+    amount: '1.00',
+    equivalent: 'UAH',
+    status: 'COMMITTED',
+  }
+}
+
+function trustlineCreateResponse(): SimulatorActionTrustlineCreateResponse {
+  return {
+    ok: true,
+    trustline_id: 'tl_1',
+    from_pid: 'a',
+    to_pid: 'b',
+    equivalent: 'UAH',
+    limit: '1000',
+  }
+}
+
+function clearingResponse(): SimulatorActionClearingRealResponse {
+  return {
+    ok: true,
+    equivalent: 'UAH',
+    cleared_cycles: 1,
+    total_cleared_amount: '600.00',
+    cycles: [{ cleared_amount: '600', edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }] }],
+  }
+}
+
 describe('useInteractActions', () => {
   it('maps ApiError JSON body + flips actionsDisabled on 403 ACTIONS_DISABLED', async () => {
     const httpConfig = ref({ apiBase: 'http://example.test', accessToken: 'x' })
@@ -50,7 +90,7 @@ describe('useInteractActions', () => {
     })
     expect(ia.actionsDisabled.value).toBe(true)
 
-    m.actionPaymentReal.mockResolvedValueOnce({ ok: true } as any)
+    m.actionPaymentReal.mockResolvedValueOnce(paymentResponse())
     await ia.sendPayment('a', 'b', '1.00', 'UAH')
     expect(ia.actionsDisabled.value).toBe(false)
   })
@@ -121,8 +161,9 @@ describe('useInteractActions', () => {
       throw new Error('expected rejection')
     } catch (e) {
       expect(isInteractActionError(e)).toBe(true)
+      if (!isInteractActionError(e)) throw e
       expect(e).toMatchObject({ status: 0, code: 'UNKNOWN' })
-      expect(String((e as any).message)).toContain('run_id')
+      expect(e.message).toContain('run_id')
     }
   })
 
@@ -133,8 +174,8 @@ describe('useInteractActions', () => {
     const runId = ref('run_1')
     const ia = useInteractActions({ httpConfig, runId })
 
-    const mockResponse = { ok: true, payment_id: 'pay_1', from_pid: 'a', to_pid: 'b', amount: '1.00', equivalent: 'UAH', status: 'COMMITTED' }
-    m.actionPaymentReal.mockResolvedValueOnce(mockResponse as any)
+    const mockResponse = paymentResponse()
+    m.actionPaymentReal.mockResolvedValueOnce(mockResponse)
 
     const result = await ia.sendPayment('a', 'b', '1.00', 'UAH')
     expect(result).toMatchObject({ payment_id: 'pay_1', status: 'COMMITTED' })
@@ -146,8 +187,8 @@ describe('useInteractActions', () => {
     const runId = ref('run_1')
     const ia = useInteractActions({ httpConfig, runId })
 
-    const mockResponse = { ok: true, trustline_id: 'tl_1', from_pid: 'a', to_pid: 'b', equivalent: 'UAH', limit: '1000' }
-    m.actionTrustlineCreate.mockResolvedValueOnce(mockResponse as any)
+    const mockResponse = trustlineCreateResponse()
+    m.actionTrustlineCreate.mockResolvedValueOnce(mockResponse)
 
     const result = await ia.createTrustline('a', 'b', '1000', 'UAH')
     expect(result).toMatchObject({ trustline_id: 'tl_1', limit: '1000' })
@@ -158,9 +199,8 @@ describe('useInteractActions', () => {
     const runId = ref('run_1')
     const ia = useInteractActions({ httpConfig, runId })
 
-    const cycle = { cleared_amount: '600', edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }] }
-    const mockResponse = { ok: true, equivalent: 'UAH', cleared_cycles: 1, total_cleared_amount: '600.00', cycles: [cycle] }
-    m.actionClearingReal.mockResolvedValueOnce(mockResponse as any)
+    const mockResponse = clearingResponse()
+    m.actionClearingReal.mockResolvedValueOnce(mockResponse)
 
     const result = await ia.runClearing('UAH')
     expect(result.cleared_cycles).toBe(1)
@@ -174,7 +214,8 @@ describe('useInteractActions', () => {
     const ia = useInteractActions({ httpConfig, runId })
 
     const items = [{ pid: 'alice', name: 'Alice', type: 'person', status: 'active' }]
-    m.getParticipantsList.mockResolvedValueOnce({ items } as any)
+    const response: SimulatorActionParticipantsListResponse = { items }
+    m.getParticipantsList.mockResolvedValueOnce(response)
 
     const result = await ia.fetchParticipants()
     expect(result).toHaveLength(1)
@@ -186,8 +227,21 @@ describe('useInteractActions', () => {
     const runId = ref('run_1')
     const ia = useInteractActions({ httpConfig, runId })
 
-    const items = [{ from_pid: 'a', to_pid: 'b', equivalent: 'UAH', limit: '1000', used: '200', available: '800', status: 'active' }]
-    m.getTrustlinesList.mockResolvedValueOnce({ items } as any)
+    const items = [
+      {
+        from_pid: 'a',
+        from_name: 'Alice',
+        to_pid: 'b',
+        to_name: 'Bob',
+        equivalent: 'UAH',
+        limit: '1000',
+        used: '200',
+        available: '800',
+        status: 'active',
+      },
+    ]
+    const response: SimulatorActionTrustlinesListResponse = { items }
+    m.getTrustlinesList.mockResolvedValueOnce(response)
 
     const result = await ia.fetchTrustlines('UAH')
     expect(result).toHaveLength(1)
@@ -242,7 +296,7 @@ describe('useInteractActions', () => {
         real.runId = null
       })
 
-      const ia = useInteractActions({ httpConfig, runId: runId as any, onStaleRunId })
+      const ia = useInteractActions({ httpConfig, runId, onStaleRunId })
 
       m.getTrustlinesList.mockRejectedValueOnce(new ApiError('HTTP 404 Not Found for /x', { status: 404 }))
 

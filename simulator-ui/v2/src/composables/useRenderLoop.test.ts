@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { ref, type Ref } from 'vue'
 
 import { clearGradientCache } from '../render/gradientCache'
+import type { GraphSnapshot } from '../types'
 import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 
@@ -10,6 +12,27 @@ import {
   __shouldClearCachedPosOnSnapshotChange,
   useRenderLoop,
 } from './useRenderLoop'
+
+type RenderLoopDeps = Parameters<typeof useRenderLoop>[0]
+type DrawBaseGraph = RenderLoopDeps['drawBaseGraph']
+type DrawBaseGraphOpts = Parameters<DrawBaseGraph>[1]
+type RenderFxFrameOpts = Parameters<RenderLoopDeps['renderFxFrame']>[0]
+type TestCanvas = HTMLCanvasElement & {
+  style: Pick<CSSStyleDeclaration, 'width' | 'height'>
+}
+type TestCtx = Pick<
+  CanvasRenderingContext2D,
+  'setTransform' | 'clearRect' | 'fillRect' | 'translate' | 'scale' | 'save' | 'restore' | 'createRadialGradient'
+>
+type RenderLoopWindowMock = {
+  performance: { now: () => number }
+  requestAnimationFrame: ReturnType<typeof vi.fn>
+  cancelAnimationFrame: ReturnType<typeof vi.fn>
+  setTimeout: ReturnType<typeof vi.fn>
+  clearTimeout: ReturnType<typeof vi.fn>
+  __rafQueue: Array<(t: number) => void>
+  devicePixelRatio?: number
+}
 
 vi.mock('../render/gradientCache', () => ({
   clearGradientCache: vi.fn(),
@@ -34,12 +57,42 @@ function makePosMap() {
   return new Map<string, LayoutNode>()
 }
 
+function makeLayoutNode(id: string, x = 0, y = 0): LayoutNode {
+  return { id, __x: x, __y: y }
+}
+
+function makeSnapshot(nodes: Array<{ id: string }> = [], links: GraphSnapshot['links'] = []): GraphSnapshot {
+  return {
+    equivalent: 'UAH',
+    generated_at: 't1',
+    nodes,
+    links,
+    palette: {},
+  }
+}
+
+function makeCanvasRef(canvas: HTMLCanvasElement): Ref<HTMLCanvasElement | null> {
+  return ref<HTMLCanvasElement | null>(canvas)
+}
+
+function setMockWindow(value: (Window & typeof globalThis) | undefined): void {
+  Object.defineProperty(globalThis, 'window', {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
+
+function getMockWindow(): RenderLoopWindowMock {
+  return globalThis.window as unknown as RenderLoopWindowMock
+}
+
 function makeCanvas(): HTMLCanvasElement {
   // Minimal canvas stub for renderLoop: getContext must exist.
   return {
     width: 1,
     height: 1,
-    style: { width: '1px', height: '1px' } as any,
+    style: { width: '1px', height: '1px' } as unknown as CSSStyleDeclaration,
     getContext: () => ({
       setTransform: vi.fn(),
       clearRect: vi.fn(),
@@ -49,12 +102,12 @@ function makeCanvas(): HTMLCanvasElement {
       save: vi.fn(),
       restore: vi.fn(),
       createRadialGradient: () => ({ addColorStop: vi.fn() }),
-    }) as any,
-  } as any
+    }) as unknown as CanvasRenderingContext2D,
+  } as unknown as HTMLCanvasElement
 }
 
 function makeCanvasWithCtx() {
-  const ctx = {
+  const ctx: TestCtx = {
     setTransform: vi.fn(),
     clearRect: vi.fn(),
     fillRect: vi.fn(),
@@ -63,14 +116,14 @@ function makeCanvasWithCtx() {
     save: vi.fn(),
     restore: vi.fn(),
     createRadialGradient: () => ({ addColorStop: vi.fn() }),
-  } as any
+  }
 
-  const canvas: HTMLCanvasElement = {
+  const canvas: TestCanvas = {
     width: 1,
     height: 1,
-    style: { width: '1px', height: '1px' } as any,
-    getContext: () => ctx,
-  } as any
+    style: { width: '1px', height: '1px' },
+    getContext: () => ctx as unknown as CanvasRenderingContext2D,
+  } as unknown as TestCanvas
 
   return { canvas, ctx }
 }
@@ -80,9 +133,9 @@ function makeLoop() {
   const fxCanvas = makeCanvas()
 
   return useRenderLoop({
-    canvasEl: { value: canvas } as any,
-    fxCanvasEl: { value: fxCanvas } as any,
-    getSnapshot: () => ({ generated_at: 't1', nodes: [], links: [], palette: {} } as any),
+    canvasEl: makeCanvasRef(canvas),
+    fxCanvasEl: makeCanvasRef(fxCanvas),
+    getSnapshot: () => makeSnapshot(),
     getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
     getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
     isTestMode: () => false,
@@ -104,7 +157,7 @@ function makeLoop() {
 }
 
 describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () => {
-  const prevWindow = (globalThis as any).window
+  const prevWindow = globalThis.window
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -120,27 +173,27 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     const setTimeoutSpy = vi.fn(
       (fn: () => void, ms: number) => setTimeout(fn, ms) as unknown as number,
     )
-    const clearTimeoutSpy = vi.fn((id: number) => clearTimeout(id as unknown as any))
+    const clearTimeoutSpy = vi.fn((id: number) => clearTimeout(id as unknown as ReturnType<typeof setTimeout>))
 
-    ;(globalThis as any).window = {
+    setMockWindow({
       performance: { now: () => 0 },
       requestAnimationFrame,
       cancelAnimationFrame,
       setTimeout: setTimeoutSpy,
       clearTimeout: clearTimeoutSpy,
       __rafQueue: rafQueue,
-    }
+    } as unknown as Window & typeof globalThis)
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    ;(globalThis as any).window = prevWindow
+    setMockWindow(prevWindow)
   })
 
   it('wakeUp() is idempotent: repeated calls do not double-schedule RAF', () => {
     const loop = makeLoop()
     loop.ensureRenderLoop()
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     expect(win.requestAnimationFrame).toHaveBeenCalledTimes(1)
     expect(win.__rafQueue.length).toBe(1)
@@ -154,7 +207,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
   it('wakeUp() cancels an active idle-timeout and guarantees a frame is queued', () => {
     const loop = makeLoop()
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     loop.ensureRenderLoop()
 
@@ -181,7 +234,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
   it('after reaching deep idle, no further scheduling happens until wakeUp()/ensureRenderLoop()', () => {
     const loop = makeLoop()
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     loop.ensureRenderLoop()
 
@@ -216,7 +269,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
   it('ensureRenderLoop() restores scheduling after deep idle (no user input required)', () => {
     const loop = makeLoop()
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     loop.ensureRenderLoop()
     win.__rafQueue.shift()!(1000)
@@ -231,7 +284,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
   it('stopRenderLoop() disables the loop: wakeUp() must not resurrect scheduling', () => {
     const loop = makeLoop()
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     loop.ensureRenderLoop()
     expect(win.__rafQueue.length).toBe(1)
@@ -250,7 +303,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     const loop = makeLoop()
 
     loop.ensureRenderLoop()
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     // First scheduled frame.
     expect(win.__rafQueue.length).toBe(1)
@@ -278,11 +331,11 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     const { canvas, ctx } = makeCanvasWithCtx()
     const { canvas: fxCanvas } = makeCanvasWithCtx()
 
-    let snap: any = null
+    let snap: GraphSnapshot | null = null
 
     const loop = useRenderLoop({
-      canvasEl: { value: canvas } as any,
-      fxCanvasEl: { value: fxCanvas } as any,
+      canvasEl: makeCanvasRef(canvas),
+      fxCanvasEl: makeCanvasRef(fxCanvas),
       getSnapshot: () => snap,
       getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
@@ -303,7 +356,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       isAnimating: () => false,
     })
 
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     loop.ensureRenderLoop()
     expect(win.__rafQueue.length).toBe(1)
@@ -319,7 +372,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     expect(win.__rafQueue.length).toBe(1)
 
     // Snapshot appears: first frame should render without any external wakeUp.
-    snap = { generated_at: 't1', nodes: [], links: [], palette: {} }
+    snap = makeSnapshot()
     win.__rafQueue.shift()!(5000)
     expect(ctx.clearRect).toHaveBeenCalled()
     expect(ctx.fillRect).toHaveBeenCalled()
@@ -329,12 +382,12 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     const { canvas, ctx } = makeCanvasWithCtx()
     const { canvas: fxCanvas } = makeCanvasWithCtx()
 
-    let snap: any = null
+    let snap: GraphSnapshot | null = null
     let layout = { w: 0, h: 0, nodes: [], links: [] }
 
     const loop = useRenderLoop({
-      canvasEl: { value: canvas } as any,
-      fxCanvasEl: { value: fxCanvas } as any,
+      canvasEl: makeCanvasRef(canvas),
+      fxCanvasEl: makeCanvasRef(fxCanvas),
       getSnapshot: () => snap,
       getLayout: () => layout,
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
@@ -355,7 +408,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       isAnimating: () => false,
     })
 
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     loop.ensureRenderLoop()
     expect(win.__rafQueue.length).toBe(1)
@@ -372,7 +425,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
     // Snapshot + layout finally arrive (after 5s+). First real draw must happen automatically
     // on the already-scheduled frame (no wakeUp / ensureRenderLoop calls).
-    snap = { generated_at: 't1', nodes: [], links: [], palette: {} }
+    snap = makeSnapshot()
     layout = { w: 10, h: 10, nodes: [], links: [] }
     win.__rafQueue.shift()!(6100)
     expect(ctx.clearRect).toHaveBeenCalled()
@@ -383,11 +436,11 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     const { canvas, ctx } = makeCanvasWithCtx()
     const { canvas: fxCanvas } = makeCanvasWithCtx()
 
-    let snap: any = null
+    let snap: GraphSnapshot | null = null
 
     const loop = useRenderLoop({
-      canvasEl: { value: canvas } as any,
-      fxCanvasEl: { value: fxCanvas } as any,
+      canvasEl: makeCanvasRef(canvas),
+      fxCanvasEl: makeCanvasRef(fxCanvas),
       getSnapshot: () => snap,
       getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
@@ -408,7 +461,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       isAnimating: () => false,
     })
 
-    const win = (globalThis as any).window
+    const win = getMockWindow()
 
     loop.ensureRenderLoop()
 
@@ -419,7 +472,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     vi.runOnlyPendingTimers()
 
     // Now provide snapshot: this frame is the first successful render.
-    snap = { generated_at: 't1', nodes: [], links: [], palette: {} }
+    snap = makeSnapshot()
     const timeoutCallsBefore = win.setTimeout.mock.calls.length
     win.__rafQueue.shift()!(5000)
     expect(ctx.clearRect).toHaveBeenCalled()
@@ -435,15 +488,15 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     const { canvas, ctx } = makeCanvasWithCtx()
     const { canvas: fxCanvas } = makeCanvasWithCtx()
 
-    const drawBaseGraph = vi.fn((_ctx: any, opts: any) => opts.pos)
-    const renderFxFrame = vi.fn((_opts: any) => undefined)
+    const drawBaseGraph = vi.fn<DrawBaseGraph>((_ctx, opts) => opts.pos)
+    const renderFxFrame = vi.fn<RenderLoopDeps['renderFxFrame']>((_opts) => undefined)
 
-    ;(globalThis as any).window.devicePixelRatio = 2
+    getMockWindow().devicePixelRatio = 2
 
     const loop = useRenderLoop({
-      canvasEl: { value: canvas } as any,
-      fxCanvasEl: { value: fxCanvas } as any,
-      getSnapshot: () => ({ generated_at: 't1', nodes: [], links: [], palette: {} } as any),
+      canvasEl: makeCanvasRef(canvas),
+      fxCanvasEl: makeCanvasRef(fxCanvas),
+      getSnapshot: () => makeSnapshot(),
       getLayout: () => ({ w: 100, h: 80, nodes: [], links: [] }),
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
@@ -473,27 +526,27 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
     expect(ctx.clearRect).toHaveBeenCalled()
 
-    const baseOpts = drawBaseGraph.mock.calls[0]?.[1] as any
-    expect(baseOpts?.interaction).toBeUndefined()
-    expect(baseOpts?.interactionIntensity).toBeUndefined()
+    const baseOpts = drawBaseGraph.mock.calls[0]?.[1]
+    expect(baseOpts && 'interaction' in baseOpts).toBe(false)
+    expect(baseOpts && 'interactionIntensity' in baseOpts).toBe(false)
 
-    const fxOpts = renderFxFrame.mock.calls[0]?.[0] as any
-    expect(fxOpts?.interaction).toBeUndefined()
-    expect(fxOpts?.interactionIntensity).toBeUndefined()
+    const fxOpts = renderFxFrame.mock.calls[0]?.[0]
+    expect(fxOpts && 'interaction' in fxOpts).toBe(false)
+    expect(fxOpts && 'interactionIntensity' in fxOpts).toBe(false)
   })
 
   it('resize invalidates gradient cache (clearGradientCache called only on real resize)', () => {
-    ;(clearGradientCache as any).mockClear?.()
+    vi.mocked(clearGradientCache).mockClear()
 
     const { canvas, ctx } = makeCanvasWithCtx()
     const { canvas: fxCanvas } = makeCanvasWithCtx()
 
-    ;(globalThis as any).window.devicePixelRatio = 2
+    getMockWindow().devicePixelRatio = 2
 
     const loop = useRenderLoop({
-      canvasEl: { value: canvas } as any,
-      fxCanvasEl: { value: fxCanvas } as any,
-      getSnapshot: () => ({ generated_at: 't1', nodes: [], links: [], palette: {} } as any),
+      canvasEl: makeCanvasRef(canvas),
+      fxCanvasEl: makeCanvasRef(fxCanvas),
+      getSnapshot: () => makeSnapshot(),
       getLayout: () => ({ w: 100, h: 80, nodes: [], links: [] }),
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
@@ -527,9 +580,9 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
   it('does not request clear when there is overlap with cached ids (same scene)', () => {
     const cachedPos = new Map<string, LayoutNode>([
-      ['A', { id: 'A', __x: 1, __y: 1 } as any],
-      ['B', { id: 'B', __x: 2, __y: 2 } as any],
-      ['C', { id: 'C', __x: 3, __y: 3 } as any],
+      ['A', makeLayoutNode('A', 1, 1)],
+      ['B', makeLayoutNode('B', 2, 2)],
+      ['C', makeLayoutNode('C', 3, 3)],
     ])
 
     const snapshotNodes = [{ id: 'A' }, { id: 'B' }, { id: 'C' }]
@@ -544,8 +597,8 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
 
   it('requests clear when snapshot ids do not intersect with cached ids (new scene)', () => {
     const cachedPos = new Map<string, LayoutNode>([
-      ['A', { id: 'A', __x: 1, __y: 1 } as any],
-      ['B', { id: 'B', __x: 2, __y: 2 } as any],
+      ['A', makeLayoutNode('A', 1, 1)],
+      ['B', makeLayoutNode('B', 2, 2)],
     ])
 
     const snapshotNodes = [{ id: 'X' }, { id: 'Y' }, { id: 'Z' }]
@@ -560,29 +613,26 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
 
   it('prunes cachedPos when node composition changes but generated_at (snapshotKey) does not', () => {
     const cachedPos = new Map<string, LayoutNode>([
-      ['A', { id: 'A', __x: 1, __y: 1 } as any],
-      ['B', { id: 'B', __x: 2, __y: 2 } as any],
-      ['C', { id: 'C', __x: 3, __y: 3 } as any],
+      ['A', makeLayoutNode('A', 1, 1)],
+      ['B', makeLayoutNode('B', 2, 2)],
+      ['C', makeLayoutNode('C', 3, 3)],
     ])
 
     // First snapshot: [A,B,C]
-    const snap1: any = { equivalent: 'UAH', generated_at: 't1', nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }], links: [] }
+    const snap1 = makeSnapshot([{ id: 'A' }, { id: 'B' }, { id: 'C' }])
     // Patch update within the same scene: [A,B] but `generated_at` stays the same.
-    const snap2: any = { equivalent: 'UAH', generated_at: 't1', nodes: [{ id: 'A' }, { id: 'B' }], links: [] }
+    const snap2 = makeSnapshot([{ id: 'A' }, { id: 'B' }])
 
     // snapshotKey stays stable
-    const loop = makeLoop()
-    // Force two renders with different snapshots in deps.getSnapshot
     let current = snap1
-    ;(loop as any).__deps = undefined
 
     // Use a new loop instance with overridable getSnapshot
     const canvas = makeCanvas()
     const fxCanvas = makeCanvas()
     const loop2 = useRenderLoop({
-      canvasEl: { value: canvas } as any,
-      fxCanvasEl: { value: fxCanvas } as any,
-      getSnapshot: () => current as any,
+      canvasEl: makeCanvasRef(canvas),
+      fxCanvasEl: makeCanvasRef(fxCanvas),
+      getSnapshot: () => current,
       getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
@@ -590,14 +640,14 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
       getFlash: () => 0,
       setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
-      drawBaseGraph: (_ctx: any, opts: any) => {
+      drawBaseGraph: vi.fn<DrawBaseGraph>((_ctx, opts) => {
         // Inject our cachedPos map into the render path.
         // The render loop passes it as opts.pos.
         expect(opts.pos).toBeInstanceOf(Map)
-        ;(opts.pos as Map<string, LayoutNode>).clear()
-        for (const [k, v] of cachedPos) (opts.pos as Map<string, LayoutNode>).set(k, v)
+        opts.pos.clear()
+        for (const [k, v] of cachedPos) opts.pos.set(k, v)
         return opts.pos
-      },
+      }),
       renderFxFrame: () => undefined,
       mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
@@ -624,20 +674,20 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
     const pruneSpy = vi.spyOn(__cachedPosHygiene, 'pruneToSnapshotNodes')
 
     const cachedPos = new Map<string, LayoutNode>([
-      ['A', { id: 'A', __x: 1, __y: 1 } as any],
-      ['B', { id: 'B', __x: 2, __y: 2 } as any],
-      ['C', { id: 'C', __x: 3, __y: 3 } as any],
+      ['A', makeLayoutNode('A', 1, 1)],
+      ['B', makeLayoutNode('B', 2, 2)],
+      ['C', makeLayoutNode('C', 3, 3)],
     ])
 
     const canvas = makeCanvas()
     const fxCanvas = makeCanvas()
-    let current: any = { equivalent: 'UAH', generated_at: 't1', nodes: [{ id: 'A' }, { id: 'B' }, { id: 'C' }], links: [] }
+    let current: GraphSnapshot = makeSnapshot([{ id: 'A' }, { id: 'B' }, { id: 'C' }])
 
     // Wrap drawBaseGraph to keep internal pos growing like real code would.
     const loop = useRenderLoop({
-      canvasEl: { value: canvas } as any,
-      fxCanvasEl: { value: fxCanvas } as any,
-      getSnapshot: () => current as any,
+      canvasEl: makeCanvasRef(canvas),
+      fxCanvasEl: makeCanvasRef(fxCanvas),
+      getSnapshot: () => current,
       getLayout: () => ({ w: 10, h: 10, nodes: [], links: [] }),
       getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       isTestMode: () => false,
@@ -645,13 +695,13 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
       getFlash: () => 0,
       setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
-      drawBaseGraph: (_ctx: any, opts: any) => {
+      drawBaseGraph: vi.fn<DrawBaseGraph>((_ctx, opts) => {
         // Seed with cachedPos only once; subsequent frames use same map.
-        if ((opts.pos as Map<string, LayoutNode>).size === 0) {
-          for (const [k, v] of cachedPos) (opts.pos as Map<string, LayoutNode>).set(k, v)
+        if (opts.pos.size === 0) {
+          for (const [k, v] of cachedPos) opts.pos.set(k, v)
         }
         return opts.pos
-      },
+      }),
       renderFxFrame: () => undefined,
       mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },

@@ -3,6 +3,7 @@ import { watch } from 'vue'
 
 import { useWindowManager } from './useWindowManager'
 import type { WindowInstance } from './types'
+import { isNodeCardWindow } from './types'
 import { DEFAULT_WM_CLAMP_PAD_PX, readOverlayGeometryPx } from '../../ui-kit/overlayGeometry'
 
 function last<T>(a: T[]): T {
@@ -66,7 +67,10 @@ describe('useWindowManager (MVP)', () => {
     // Count how many times the nodeId actually changes (reactive commit count proxy).
     const nodeIdChanges: string[] = []
     const stop = watch(
-      () => (wm.windows.value.find((w) => w.id === id) as any)?.data?.nodeId as string | undefined,
+      () => {
+        const w = wm.windows.value.find((win) => win.id === id)
+        return w !== undefined && isNodeCardWindow(w) ? w.data.nodeId : undefined
+      },
       (v) => {
         if (typeof v === 'string') nodeIdChanges.push(v)
       },
@@ -509,7 +513,7 @@ describe('useWindowManager (MVP)', () => {
     expect(measuredRef).toEqual({ width: 300, height: 200 })
 
     // Intercept rect writes directly (more robust than spying on property setters on proxies).
-    const rect = win.rect as any
+    const rect = win.rect
     const store = { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
     let writes = 0
 
@@ -880,7 +884,7 @@ describe('useWindowManager (MVP)', () => {
     // open edge-detail, then manually override its policy for testing.
     const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
     const win = wm.windows.value.find((w) => w.id === id)!
-    ;(win.policy as any).escBehavior = 'ignore'
+    win.policy.escBehavior = 'ignore'
 
     const consumed = wm.handleEsc(fakeKeyEv(null), {
       isFormLikeTarget: () => false,

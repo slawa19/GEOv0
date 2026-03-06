@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
+import type { SimulatorActionClearingRealResponse } from '../../api/simulatorTypes'
 import type { GraphSnapshot } from '../../types'
 import { useInteractFSM } from './useInteractFSM'
 import { keyEdge } from '../../utils/edgeKey'
@@ -35,8 +36,13 @@ describe('useInteractFSM', () => {
       const { state, resetToIdle, setLastClearing, selectEdge } = useInteractFSM(makeOpts())
 
       // Set a fake clearing result before starting any flow.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fakeClearing = { cycles: 3 } as any
+      const fakeClearing: SimulatorActionClearingRealResponse = {
+        ok: true,
+        equivalent: 'UAH',
+        cleared_cycles: 3,
+        total_cleared_amount: '0.00',
+        cycles: [],
+      }
       setLastClearing(fakeClearing)
 
       // Move to a non-idle phase with an anchor.

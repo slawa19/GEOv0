@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 type ScenarioId = 'S1' | 'S2'
+type ScenarioSnapshot = ReturnType<typeof makeSnapshot>
 
 function makeSnapshot(opts: {
   eq: string
@@ -49,12 +50,12 @@ function makeSnapshot(opts: {
   }
 }
 
-async function waitReady(page: any) {
+async function waitReady(page: Page) {
   await page.waitForSelector('[data-ready="1"]', { timeout: 20_000 })
   await page.waitForTimeout(250)
 }
 
-async function readMetricValue(page: any, label: string): Promise<string> {
+async function readMetricValue(page: Page, label: string): Promise<string> {
   const bar = page.locator('[aria-label="System balance"]')
   await expect(bar).toBeVisible()
 
@@ -78,7 +79,7 @@ test('real mode: switching scenario changes loaded snapshot', async ({ page }) =
     }
   })
 
-  const scenarioSnapshots: Record<ScenarioId, any> = {
+  const scenarioSnapshots: Record<ScenarioId, ScenarioSnapshot> = {
     S1: makeSnapshot({
       eq: 'UAH',
       nodes: [
@@ -137,7 +138,7 @@ test('real mode: switching scenario changes loaded snapshot', async ({ page }) =
     const m = url.pathname.match(/\/simulator\/scenarios\/([^/]+)\/graph\/preview/i)
     const scenarioId = (m?.[1] ? decodeURIComponent(m[1]) : '') as ScenarioId
     lastPreviewScenario = scenarioId || null
-    const snap = (scenarioSnapshots as any)[scenarioId] ?? scenarioSnapshots.S1
+    const snap = scenarioSnapshots[scenarioId] ?? scenarioSnapshots.S1
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snap) })
   })
 

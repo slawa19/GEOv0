@@ -1,5 +1,6 @@
 import { createApp, h, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SceneId } from '../scenes'
 
 type SimulatorStorageMock = {
   readDevtoolsOpenReal: ReturnType<typeof vi.fn>
@@ -42,7 +43,7 @@ async function mountBottomBar(opts: { isDemoUi: boolean }) {
   const layoutMode = ref('admin-force')
   const quality = ref('med')
   const labelsLod = ref('off')
-  const scene = ref('A' as any)
+  const scene = ref<SceneId>('A')
 
   const defaultProps = {
     apiMode: 'real' as const,
@@ -76,13 +77,13 @@ async function mountBottomBar(opts: { isDemoUi: boolean }) {
 
   const app = createApp({
     render: () =>
-      h(BottomBar as any, {
+      h(BottomBar, {
         ...defaultProps,
         'onUpdate:eq': (v: string) => (eq.value = v),
         'onUpdate:layoutMode': (v: string) => (layoutMode.value = v),
         'onUpdate:quality': (v: string) => (quality.value = v),
         'onUpdate:labelsLod': (v: string) => (labelsLod.value = v),
-        'onUpdate:scene': (v: any) => (scene.value = v),
+        'onUpdate:scene': (v: SceneId) => (scene.value = v),
         eq: eq.value,
         layoutMode: layoutMode.value,
         quality: quality.value,

@@ -2,37 +2,91 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { __testing, resetGlowSpritesCache } from './glowSprites'
 
+type GlowSpriteOpts = Parameters<typeof __testing.keyFor>[0]
+type NodeGlowSpriteOpts = Extract<GlowSpriteOpts, { kind: 'bloom' | 'rim' | 'selection' | 'active' }>
+type FxGlowSpriteOpts = Extract<GlowSpriteOpts, { kind: 'fx-dot' | 'fx-ring' | 'fx-bloom' }>
+type TestCanvasContext = Pick<CanvasRenderingContext2D, 'save' | 'restore' | 'clearRect' | 'beginPath' | 'arc' | 'fill' | 'stroke'>
+type TestCanvas = Pick<HTMLCanvasElement, 'width' | 'height' | 'getContext'>
+type TestDocument = Pick<Document, 'createElement'>
+
+function setMockDocument(value: Document | undefined): void {
+  Object.defineProperty(globalThis, 'document', {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
+
+function makeNodeGlowOpts(
+  kind: NodeGlowSpriteOpts['kind'] = 'bloom',
+  overrides: Partial<NodeGlowSpriteOpts> = {},
+): NodeGlowSpriteOpts {
+  return {
+    kind,
+    shape: 'circle',
+    color: '#ffffff',
+    w: 10,
+    h: 10,
+    r: 10,
+    rr: 0,
+    blurPx: 2,
+    lineWidthPx: 1,
+    ...overrides,
+  }
+}
+
+function makeFxGlowOpts(kind: FxGlowSpriteOpts['kind'], overrides: Partial<FxGlowSpriteOpts> = {}): FxGlowSpriteOpts {
+  if (kind === 'fx-ring') {
+    return {
+      kind,
+      color: '#ffffff',
+      r: 10,
+      blurPx: 2,
+      thicknessPx: 3,
+      ...overrides,
+    } as unknown as FxGlowSpriteOpts
+  }
+  return {
+    kind,
+    color: '#ffffff',
+    r: 10,
+    blurPx: 2,
+    ...overrides,
+  } as unknown as FxGlowSpriteOpts
+}
+
 describe('render/glowSprites — unit', () => {
-  const originalDocument = (globalThis as any).document
+  const originalDocument = globalThis.document
 
   beforeAll(() => {
     // Node test environment has no DOM; glowSprites uses document.createElement('canvas').
     // Provide a minimal stub sufficient for cache/LRU logic.
-    ;(globalThis as any).document = {
+    const mockDocument: TestDocument = {
       createElement: (tag: string) => {
         if (tag !== 'canvas') throw new Error(`Unexpected createElement tag: ${tag}`)
-        return {
+        const ctx: TestCanvasContext = {
+          save: () => undefined,
+          restore: () => undefined,
+          clearRect: () => undefined,
+          beginPath: () => undefined,
+          arc: () => undefined,
+          fill: () => undefined,
+          stroke: () => undefined,
+        }
+        const canvas: TestCanvas = {
           width: 0,
           height: 0,
-          getContext: () => {
-            // Enough for the 'bloom' circle path used in LRU tests.
-            return {
-              save: () => undefined,
-              restore: () => undefined,
-              clearRect: () => undefined,
-              beginPath: () => undefined,
-              arc: () => undefined,
-              fill: () => undefined,
-              stroke: () => undefined,
-            } as any
-          },
-        } as any
+          getContext: ((contextId: string) =>
+            contextId === '2d' ? (ctx as unknown as CanvasRenderingContext2D) : null) as HTMLCanvasElement['getContext'],
+        }
+        return canvas as unknown as HTMLElement
       },
     }
+    setMockDocument(mockDocument as Document)
   })
 
   afterAll(() => {
-    ;(globalThis as any).document = originalDocument
+    setMockDocument(originalDocument)
   })
 
   beforeEach(() => {
@@ -40,17 +94,7 @@ describe('render/glowSprites — unit', () => {
   })
 
   it('resetGlowSpritesCache() empties the cache; next request creates a new sprite', () => {
-    const opts: any = {
-      kind: 'bloom',
-      shape: 'circle',
-      color: '#ffffff',
-      w: 10,
-      h: 10,
-      r: 10,
-      rr: 0,
-      blurPx: 2,
-      lineWidthPx: 1,
-    }
+    const opts = makeNodeGlowOpts('bloom')
 
     const key = __testing.keyFor(opts)
     const s1 = __testing._getGlowSprite(opts)
@@ -99,35 +143,18 @@ describe('render/glowSprites — unit', () => {
 
   describe('keyFor()', () => {
     it('is deterministic for identical inputs', () => {
-      const o: any = {
-        kind: 'bloom',
-        shape: 'circle',
-        w: 10,
-        h: 11,
-        r: 12,
-        rr: 0,
-        color: '#ff00ff',
-        blurPx: 3,
-        lineWidthPx: 1,
-      }
+      const o = makeNodeGlowOpts('bloom', { h: 11, r: 12, color: '#ff00ff', blurPx: 3 })
 
       expect(__testing.keyFor(o)).toBe(__testing.keyFor({ ...o }))
     })
 
     it.each(['fx-dot', 'fx-ring', 'fx-bloom'] as const)('is deterministic for %s', (kind) => {
-      const common: any = {
-        color: '#aabbcc',
-        r: 12.34,
-        blurPx: 5.67,
-      }
-
-      const o: any = kind === 'fx-ring' ? { ...common, kind, thicknessPx: 2.5 } : { ...common, kind }
+      const o = makeFxGlowOpts(kind, { color: '#aabbcc', r: 12.34, blurPx: 5.67, ...(kind === 'fx-ring' ? { thicknessPx: 2.5 } : {}) })
       expect(__testing.keyFor(o)).toBe(__testing.keyFor({ ...o }))
     })
 
     it('never emits NaN/Infinity/undefined in the key string (sanitizes via q())', () => {
-      const o: any = {
-        kind: 'rim',
+      const o = makeNodeGlowOpts('rim', {
         shape: 'rounded-rect',
         w: Number.NaN,
         h: Number.POSITIVE_INFINITY,
@@ -136,7 +163,7 @@ describe('render/glowSprites — unit', () => {
         color: '#00ff00',
         blurPx: Number.NaN,
         lineWidthPx: Number.POSITIVE_INFINITY,
-      }
+      })
 
       const key = __testing.keyFor(o)
       expect(key).not.toContain('NaN')
@@ -147,13 +174,12 @@ describe('render/glowSprites — unit', () => {
     it.each(['fx-dot', 'fx-ring', 'fx-bloom'] as const)(
       'never emits NaN/Infinity/undefined in the key string for %s',
       (kind) => {
-        const common: any = {
-          kind,
+        const o = makeFxGlowOpts(kind, {
           color: '#00ff00',
           r: Number.NaN,
           blurPx: Number.POSITIVE_INFINITY,
-        }
-        const o: any = kind === 'fx-ring' ? { ...common, thicknessPx: Number.NEGATIVE_INFINITY } : common
+          ...(kind === 'fx-ring' ? { thicknessPx: Number.NEGATIVE_INFINITY } : {}),
+        })
 
         const key = __testing.keyFor(o)
         expect(key).not.toContain('NaN')
@@ -163,12 +189,7 @@ describe('render/glowSprites — unit', () => {
     )
 
     it('blurPx=0 produces a deterministic, finite key; sprite generation does not crash when 2D ctx exists', () => {
-      const o: any = {
-        kind: 'fx-dot',
-        color: '#aabbcc',
-        r: 12.34,
-        blurPx: 0,
-      }
+      const o = makeFxGlowOpts('fx-dot', { color: '#aabbcc', r: 12.34, blurPx: 0 })
 
       const key1 = __testing.keyFor(o)
       const key2 = __testing.keyFor({ ...o })
@@ -180,7 +201,7 @@ describe('render/glowSprites — unit', () => {
 
       // Runtime part: only execute if Canvas 2D is available in the test environment.
       // (In Node-only envs it may be missing; keyFor invariants must still be testable.)
-      const c = (globalThis as any).document?.createElement?.('canvas')
+      const c = globalThis.document?.createElement?.('canvas') as HTMLCanvasElement | undefined
       const ctx = c?.getContext?.('2d')
       if (!ctx) return
 
@@ -190,20 +211,10 @@ describe('render/glowSprites — unit', () => {
     it.each(['bloom', 'rim', 'selection', 'active'] as const)(
       'includes kind and differentiates kinds (%s)',
       (kind) => {
-        const base: any = {
-          kind: 'bloom',
-          shape: 'circle',
-          w: 10,
-          h: 10,
-          r: 10,
-          rr: 0,
-          color: '#ffffff',
-          blurPx: 2,
-          lineWidthPx: 1,
-        }
+        const base = makeNodeGlowOpts('bloom')
 
         const k1 = __testing.keyFor(base)
-        const k2 = __testing.keyFor({ ...base, kind })
+        const k2 = __testing.keyFor(makeNodeGlowOpts(kind, { ...base, kind }))
         if (kind === 'bloom') {
           expect(k2).toBe(k1)
         } else {
@@ -213,16 +224,9 @@ describe('render/glowSprites — unit', () => {
     )
 
     it('differentiates FX kinds when other parameters are the same', () => {
-      const common: any = {
-        color: '#ffffff',
-        r: 10,
-        blurPx: 2,
-        thicknessPx: 3,
-      }
-
-      const kDot = __testing.keyFor({ kind: 'fx-dot', ...common })
-      const kBloom = __testing.keyFor({ kind: 'fx-bloom', ...common })
-      const kRing = __testing.keyFor({ kind: 'fx-ring', ...common })
+      const kDot = __testing.keyFor(makeFxGlowOpts('fx-dot', { color: '#ffffff', r: 10, blurPx: 2 }))
+      const kBloom = __testing.keyFor(makeFxGlowOpts('fx-bloom', { color: '#ffffff', r: 10, blurPx: 2 }))
+      const kRing = __testing.keyFor(makeFxGlowOpts('fx-ring', { color: '#ffffff', r: 10, blurPx: 2, thicknessPx: 3 }))
 
       expect(kDot).not.toBe(kBloom)
       expect(kDot).not.toBe(kRing)
@@ -230,27 +234,15 @@ describe('render/glowSprites — unit', () => {
     })
 
     it('differentiates fx-ring keys by thicknessPx', () => {
-      const common: any = {
-        kind: 'fx-ring',
-        color: '#ffffff',
-        r: 10,
-        blurPx: 2,
-      }
-
-      const k1 = __testing.keyFor({ ...common, thicknessPx: 1 })
-      const k2 = __testing.keyFor({ ...common, thicknessPx: 2 })
+      const k1 = __testing.keyFor(makeFxGlowOpts('fx-ring', { thicknessPx: 1 }))
+      const k2 = __testing.keyFor(makeFxGlowOpts('fx-ring', { thicknessPx: 2 }))
       expect(k2).not.toBe(k1)
     })
   })
 
   describe('getGlowSprite() input hardening (ITEM-13)', () => {
     it('sanitizes NaN/Infinity inputs into a finite, valid canvas size', () => {
-      const o: any = {
-        kind: 'fx-dot',
-        color: '#aabbcc',
-        r: Number.NaN,
-        blurPx: Number.POSITIVE_INFINITY,
-      }
+      const o = makeFxGlowOpts('fx-dot', { color: '#aabbcc', r: Number.NaN, blurPx: Number.POSITIVE_INFINITY })
 
       const s = __testing._getGlowSprite(o)
       expect(Number.isFinite(s.width)).toBe(true)
@@ -262,12 +254,7 @@ describe('render/glowSprites — unit', () => {
     })
 
     it('clamps pathological sprite sizes to MAX_SPRITE_PX', () => {
-      const o: any = {
-        kind: 'fx-bloom',
-        color: '#aabbcc',
-        r: 1e9,
-        blurPx: 1e9,
-      }
+      const o = makeFxGlowOpts('fx-bloom', { color: '#aabbcc', r: 1e9, blurPx: 1e9 })
 
       const s = __testing._getGlowSprite(o)
       expect(s.width).toBe(__testing.MAX_SPRITE_PX)
@@ -276,19 +263,15 @@ describe('render/glowSprites — unit', () => {
   })
 
   describe('LRU eviction (MAX_CACHE)', () => {
-    function optsFor(i: number): any {
-      return {
-        kind: 'bloom',
-        shape: 'circle',
-        color: '#ffffff',
+    function optsFor(i: number): GlowSpriteOpts {
+      return makeNodeGlowOpts('bloom', {
         // Make keys unique deterministically.
         w: i,
         h: 1,
         r: 1,
         rr: 0,
         blurPx: 0,
-        lineWidthPx: 1,
-      }
+      })
     }
 
     it('evicts the oldest key when size grows beyond MAX_CACHE', () => {
