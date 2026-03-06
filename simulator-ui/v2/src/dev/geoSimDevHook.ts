@@ -16,8 +16,14 @@ type InstallGeoSimDevHookDeps = {
   runClearingOnce: () => Promise<void> | void
 }
 
+type GeoSimWindow = Window & typeof globalThis & { __geoSim?: unknown }
+
+function getGeoSimWindow(): GeoSimWindow | null {
+  return typeof window !== 'undefined' ? (window as GeoSimWindow) : null
+}
+
 function clearGeoSimDevHook(expected?: unknown) {
-  const w = (globalThis as any).window as any
+  const w = getGeoSimWindow()
   if (!w) return
 
   if (expected !== undefined && w.__geoSim !== expected) return
@@ -39,7 +45,7 @@ export function uninstallGeoSimDevHook() {
 
 export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps): (() => void) | undefined {
   if (!deps.isDev()) return
-  const w = (globalThis as any).window as any
+  const w = getGeoSimWindow()
   if (!w) return
 
   // Idempotent safe re-install: always detach previous instance first.

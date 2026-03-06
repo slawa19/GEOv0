@@ -1,8 +1,7 @@
 import type { Ref } from 'vue'
 import type { GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
-import { drawBaseGraph, type LayoutLink as RenderLayoutLink } from '../render/baseGraph'
-import { type LayoutNode as RenderLayoutNode } from '../render/nodePainter'
+import { drawBaseGraph } from '../render/baseGraph'
 import { renderFxFrame, type FxState } from '../render/fxRenderer'
 import type { VizMapping } from '../vizMapping'
 import { useRenderLoop } from './useRenderLoop'
@@ -44,8 +43,8 @@ export function useAppRenderLoop(opts: {
       return {
         w: l.w,
         h: l.h,
-        nodes: l.nodes as unknown as RenderLayoutNode[],
-        links: l.links as unknown as RenderLayoutLink[],
+        nodes: l.nodes,
+        links: l.links,
       }
     },
     getCamera: opts.getCamera,

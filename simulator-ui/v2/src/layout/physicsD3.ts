@@ -10,8 +10,8 @@ import {
   type SimulationNodeDatum,
 } from 'd3-force'
 
-import type { LayoutLink, LayoutNode } from './forceLayout'
-import { sizeForNode } from '../render/nodePainter'
+import type { LayoutLink, LayoutNode } from '../types/layout'
+import { sizeForNode } from '../render/nodeSizing'
 import { clamp, safeClampToViewport } from '../utils/math'
 
 export type PhysicsQuality = 'low' | 'med' | 'high'

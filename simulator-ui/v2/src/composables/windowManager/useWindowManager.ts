@@ -364,12 +364,14 @@ export function useWindowManager(): WindowManagerApi {
 
   function isElementConnected(el: Element): boolean {
     // `isConnected` is widely supported; keep a safe fallback for test envs.
-    return typeof (el as any).isConnected === 'boolean' ? (el as any).isConnected : document.contains(el)
+    const maybe = el as unknown as { isConnected?: boolean }
+    return typeof maybe.isConnected === 'boolean' ? maybe.isConnected : document.contains(el)
   }
 
   function isElementDisabled(el: Element): boolean {
     // Covers HTML form controls; other elements simply won't have `disabled`.
-    return 'disabled' in (el as any) ? Boolean((el as any).disabled) : false
+    const maybe = el as unknown as { disabled?: unknown }
+    return typeof maybe.disabled === 'boolean' ? maybe.disabled : false
   }
 
   function tryFocus(el: Element | null): boolean {
@@ -377,7 +379,7 @@ export function useWindowManager(): WindowManagerApi {
     if (!isElementConnected(el)) return false
     if (isElementDisabled(el)) return false
 
-    const focusFn = (el as any).focus
+    const focusFn = (el as unknown as { focus?: unknown }).focus
     if (typeof focusFn !== 'function') return false
 
     try {

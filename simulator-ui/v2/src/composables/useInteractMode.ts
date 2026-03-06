@@ -124,7 +124,7 @@ export function useInteractMode(opts: {
   }
 
   function readPaymentTargetsMaxHopsFromEnv(): number | null {
-    const raw = String((import.meta as any)?.env?.VITE_PAYMENT_TARGETS_MAX_HOPS ?? '').trim()
+    const raw = String(import.meta.env?.VITE_PAYMENT_TARGETS_MAX_HOPS ?? '').trim()
     const n = Number(raw)
     if (n === PAYMENT_TARGETS_MAX_HOPS_DEFAULT) return n
     if (n === PAYMENT_TARGETS_MAX_HOPS_DEEP) return n

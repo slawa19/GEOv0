@@ -61,15 +61,15 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
     let activeTrustlines = 0
 
     for (const l of snap.links ?? []) {
-      if (!isActiveStatus((l as any)?.status)) continue
+      if (!isActiveStatus(l.status)) continue
       activeTrustlines += 1
-      totalUsed += parseAmountNumberOrZero((l as any)?.used)
-      totalAvailable += parseAmountNumberOrZero((l as any)?.available)
+      totalUsed += parseAmountNumberOrZero(l.used)
+      totalAvailable += parseAmountNumberOrZero(l.available)
     }
 
     let activeParticipants = 0
     for (const n of snap.nodes ?? []) {
-      if (isActiveStatus((n as any)?.status)) activeParticipants += 1
+      if (isActiveStatus(n.status)) activeParticipants += 1
     }
 
     const denom = totalUsed + totalAvailable

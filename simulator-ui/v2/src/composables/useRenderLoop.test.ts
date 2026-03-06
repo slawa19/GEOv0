@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 import { clearGradientCache } from '../render/gradientCache'
+import type { LayoutNode } from '../types/layout'
 
 import {
   __cachedPosHygiene,
@@ -505,10 +506,10 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
 describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
   it('does not request clear when there is overlap with cached ids (same scene)', () => {
-    const cachedPos = new Map<string, any>([
-      ['A', { x: 1, y: 1 }],
-      ['B', { x: 2, y: 2 }],
-      ['C', { x: 3, y: 3 }],
+    const cachedPos = new Map<string, LayoutNode>([
+      ['A', { id: 'A', __x: 1, __y: 1 } as any],
+      ['B', { id: 'B', __x: 2, __y: 2 } as any],
+      ['C', { id: 'C', __x: 3, __y: 3 } as any],
     ])
 
     const snapshotNodes = [{ id: 'A' }, { id: 'B' }, { id: 'C' }]
@@ -522,9 +523,9 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
   })
 
   it('requests clear when snapshot ids do not intersect with cached ids (new scene)', () => {
-    const cachedPos = new Map<string, any>([
-      ['A', { x: 1, y: 1 }],
-      ['B', { x: 2, y: 2 }],
+    const cachedPos = new Map<string, LayoutNode>([
+      ['A', { id: 'A', __x: 1, __y: 1 } as any],
+      ['B', { id: 'B', __x: 2, __y: 2 } as any],
     ])
 
     const snapshotNodes = [{ id: 'X' }, { id: 'Y' }, { id: 'Z' }]
@@ -538,10 +539,10 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
   })
 
   it('prunes cachedPos when node composition changes but generated_at (snapshotKey) does not', () => {
-    const cachedPos = new Map<string, any>([
-      ['A', { x: 1, y: 1 }],
-      ['B', { x: 2, y: 2 }],
-      ['C', { x: 3, y: 3 }],
+    const cachedPos = new Map<string, LayoutNode>([
+      ['A', { id: 'A', __x: 1, __y: 1 } as any],
+      ['B', { id: 'B', __x: 2, __y: 2 } as any],
+      ['C', { id: 'C', __x: 3, __y: 3 } as any],
     ])
 
     // First snapshot: [A,B,C]
@@ -573,8 +574,8 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
         // Inject our cachedPos map into the render path.
         // The render loop passes it as opts.pos.
         expect(opts.pos).toBeInstanceOf(Map)
-        ;(opts.pos as Map<string, any>).clear()
-        for (const [k, v] of cachedPos) (opts.pos as Map<string, any>).set(k, v)
+        ;(opts.pos as Map<string, LayoutNode>).clear()
+        for (const [k, v] of cachedPos) (opts.pos as Map<string, LayoutNode>).set(k, v)
         return opts.pos
       },
       renderFxFrame: () => undefined,
@@ -602,10 +603,10 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
   it('does not prune every frame when composition is stable (prune called once per change)', () => {
     const pruneSpy = vi.spyOn(__cachedPosHygiene, 'pruneToSnapshotNodes')
 
-    const cachedPos = new Map<string, any>([
-      ['A', { x: 1, y: 1 }],
-      ['B', { x: 2, y: 2 }],
-      ['C', { x: 3, y: 3 }],
+    const cachedPos = new Map<string, LayoutNode>([
+      ['A', { id: 'A', __x: 1, __y: 1 } as any],
+      ['B', { id: 'B', __x: 2, __y: 2 } as any],
+      ['C', { id: 'C', __x: 3, __y: 3 } as any],
     ])
 
     const canvas = makeCanvas()
@@ -626,8 +627,8 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
       pruneFloatingLabels: () => undefined,
       drawBaseGraph: (_ctx: any, opts: any) => {
         // Seed with cachedPos only once; subsequent frames use same map.
-        if ((opts.pos as Map<string, any>).size === 0) {
-          for (const [k, v] of cachedPos) (opts.pos as Map<string, any>).set(k, v)
+        if ((opts.pos as Map<string, LayoutNode>).size === 0) {
+          for (const [k, v] of cachedPos) (opts.pos as Map<string, LayoutNode>).set(k, v)
         }
         return opts.pos
       },

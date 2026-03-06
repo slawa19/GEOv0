@@ -45,6 +45,32 @@ type UsePersistedSimulatorPrefsReturn = {
   dispose: () => void
 }
 
+const NOOP_STORAGE: StorageLike = {
+  getItem: () => null,
+  setItem: () => undefined,
+  removeItem: () => undefined,
+}
+
+const NOOP_TIMERS: TimersLike = {
+  setTimeout: () => 0,
+  clearTimeout: () => undefined,
+}
+
+function getBrowserStorage(): StorageLike | null {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null
+  } catch {
+    return null
+  }
+}
+
+function getBrowserTimers(): TimersLike {
+  const w = typeof window !== 'undefined' ? window : undefined
+  return w
+    ? { setTimeout: (fn, ms) => w.setTimeout(fn, ms), clearTimeout: (id) => w.clearTimeout(id) }
+    : NOOP_TIMERS
+}
+
 function isOneOf<T extends string>(v: string, allowed: readonly T[]): v is T {
   return (allowed as readonly string[]).includes(v)
 }
@@ -79,20 +105,13 @@ export function usePersistedSimulatorPrefs(deps: UsePersistedSimulatorPrefsDeps)
   const storage: StorageLike =
     deps.storage ??
     (() => {
-      try {
-        return (((globalThis as any).window as any)?.localStorage ?? { getItem: () => null, setItem: () => undefined }) as any
-      } catch {
-        return { getItem: () => null, setItem: () => undefined } as any
-      }
+      return getBrowserStorage() ?? NOOP_STORAGE
     })()
 
   const timers: TimersLike =
     deps.timers ??
     (() => {
-      const w = (globalThis as any).window as any
-      return w
-        ? { setTimeout: (fn: () => void, ms: number) => w.setTimeout(fn, ms), clearTimeout: (id: number) => w.clearTimeout(id) }
-        : ({ setTimeout: () => 0, clearTimeout: () => undefined } as any)
+      return getBrowserTimers()
     })()
 
   const allowedLayoutModes: readonly LayoutMode[] = [
@@ -161,6 +180,7 @@ export function usePersistedSimulatorPrefs(deps: UsePersistedSimulatorPrefsDeps)
 // ---------------------------------------------------------------------------
 
 export function useSimulatorStorage(storage?: StorageLike) {
+  const browserStorage = getBrowserStorage()
   const _storage: StorageLike & { removeItem: (key: string) => void } =
     storage != null
       ? {
@@ -168,13 +188,13 @@ export function useSimulatorStorage(storage?: StorageLike) {
           setItem: (k, v) => { try { storage.setItem(k, v) } catch { /* ignore */ } },
           removeItem: (k) => { try { storage.removeItem?.(k) } catch { /* ignore */ } },
         }
-      : ((globalThis as any).window as any)?.localStorage
+      : browserStorage
         ? {
-            getItem: (k) => { try { return ((globalThis as any).window as any).localStorage.getItem(k) } catch { return null } },
-            setItem: (k, v) => { try { ((globalThis as any).window as any).localStorage.setItem(k, v) } catch { /* ignore */ } },
-            removeItem: (k) => { try { ((globalThis as any).window as any).localStorage.removeItem(k) } catch { /* ignore */ } },
+            getItem: (k) => { try { return browserStorage.getItem(k) } catch { return null } },
+            setItem: (k, v) => { try { browserStorage.setItem(k, v) } catch { /* ignore */ } },
+            removeItem: (k) => { try { browserStorage.removeItem(k) } catch { /* ignore */ } },
           }
-        : { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
+        : { ...NOOP_STORAGE, removeItem: () => undefined }
 
   function parse01(v: string | null): boolean | null {
     if (v === '1') return true

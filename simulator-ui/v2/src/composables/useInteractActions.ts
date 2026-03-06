@@ -36,16 +36,10 @@ export type InteractActionError = {
 }
 
 export function isInteractActionError(e: unknown): e is InteractActionError {
-  return (
-    !!e &&
-    typeof e === 'object' &&
-    'status' in e &&
-    'code' in e &&
-    'message' in e &&
-    typeof (e as any).status === 'number' &&
-    typeof (e as any).code === 'string' &&
-    typeof (e as any).message === 'string'
-  )
+  if (!e || typeof e !== 'object') return false
+  if (!('status' in e) || !('code' in e) || !('message' in e)) return false
+  const v = e as Record<string, unknown>
+  return typeof v.status === 'number' && typeof v.code === 'string' && typeof v.message === 'string'
 }
 
 function randomIdFallback(): string {
@@ -55,7 +49,7 @@ function randomIdFallback(): string {
 
 function genClientActionId(): string {
   try {
-    const c = (globalThis as any)?.crypto
+    const c = (globalThis as unknown as { crypto?: Crypto }).crypto
     if (c && typeof c.randomUUID === 'function') return c.randomUUID()
   } catch {
     // ignore
@@ -69,10 +63,12 @@ function parseActionErrorJson(bodyText: string | undefined): SimulatorActionErro
   if (!s) return null
   try {
     const v = JSON.parse(s) as unknown
-    const code = (v as any)?.code
-    const message = (v as any)?.message
+    if (!v || typeof v !== 'object') return null
+    const rec = v as Record<string, unknown>
+    const code = rec.code
+    const message = rec.message
     if (typeof code !== 'string' || typeof message !== 'string') return null
-    const details = (v as any)?.details
+    const details = rec.details
     return {
       code,
       message,

@@ -32,9 +32,9 @@ vi.mock('../composables/usePersistedSimulatorPrefs', async () => {
   }
 })
 
-async function mountBottomBar(opts: { isDemoUi: boolean }) {
-  const { default: BottomBar } = await import('./BottomBar.vue')
+const { default: BottomBar } = await import('./BottomBar.vue')
 
+async function mountBottomBar(opts: { isDemoUi: boolean }) {
   const host = document.createElement('div')
   document.body.appendChild(host)
 

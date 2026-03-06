@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { LayoutNode } from './nodePainter'
+import type { LayoutNode } from '../types/layout'
 import { getLinkTermination } from './linkGeometry'
 
 function node(

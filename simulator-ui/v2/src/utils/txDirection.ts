@@ -8,8 +8,10 @@ function cleanEdges(edges: unknown): DirectedEdge[] {
   if (!Array.isArray(edges)) return []
   const out: DirectedEdge[] = []
   for (const e of edges) {
-    const from = normId((e as any)?.from)
-    const to = normId((e as any)?.to)
+    if (!e || typeof e !== 'object') continue
+    const rec = e as Record<string, unknown>
+    const from = normId(rec.from)
+    const to = normId(rec.to)
     if (!from || !to) continue
     out.push({ from, to })
   }

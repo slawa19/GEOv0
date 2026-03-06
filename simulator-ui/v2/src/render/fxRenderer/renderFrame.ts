@@ -1,5 +1,5 @@
 import type { VizMapping } from '../../vizMapping'
-import type { LayoutNode } from '../nodePainter'
+import type { LayoutNode } from '../../types/layout'
 import { clamp01 } from '../../utils/math'
 import { withAlpha } from '../color'
 import { drawGlowSprite } from '../glowSprites'

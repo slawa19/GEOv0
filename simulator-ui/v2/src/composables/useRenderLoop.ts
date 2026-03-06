@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
+import type { LayoutNode } from '../types/layout'
 import { clearGradientCache } from '../render/gradientCache'
 import { clamp01 } from '../utils/math'
 
@@ -14,7 +15,7 @@ export function __snapshotKeyForRenderLoop(snap: GraphSnapshot): string {
 }
 
 export function __shouldClearCachedPosOnSnapshotChange(opts: {
-  cachedPos: Map<string, any>
+  cachedPos: Map<string, LayoutNode>
   snapshotNodes: Array<{ id: string }>
 }): boolean {
   const { cachedPos, snapshotNodes } = opts
@@ -43,7 +44,7 @@ export function __shouldClearCachedPosOnSnapshotChange(opts: {
 }
 
 export function __pruneCachedPosToSnapshotNodes(opts: {
-  cachedPos: Map<string, any>
+  cachedPos: Map<string, LayoutNode>
   snapshotNodes: Array<{ id: string }>
 }) {
   const { cachedPos, snapshotNodes } = opts
@@ -175,7 +176,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   let cachedFx: CanvasRenderingContext2D | null = null
 
   // Hot-path cache: avoid per-frame allocations for node lookup in render.
-  const cachedPos = new Map<string, any>()
+  const cachedPos = new Map<string, LayoutNode>()
 
   // Snapshot identity tracking for cache hygiene.
   // `cachedPos` can otherwise grow unbounded across full scene changes.

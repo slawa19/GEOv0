@@ -1,7 +1,7 @@
-import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
+import { fillForNode } from './nodeFill'
 import {
   NODE_BODY_FILL_ALPHA_HI_A,
   NODE_BODY_FILL_ALPHA_HI_B,
@@ -17,9 +17,6 @@ import { drawGlowSprite } from './glowSprites'
 import { getNodeBaseGeometry } from './nodeGeometry'
 import { readCssVar } from './readCssVar'
 import { roundedRectPath } from './roundedRect'
-
-export type { LayoutNode } from '../types/layout'
-export { sizeForNode } from './nodeSizing'
 
 /* ------------------------------------------------------------------ */
 /*  Lightweight icon / badge helpers                                  */
@@ -109,12 +106,6 @@ function drawNodeBadge(
   ctx.arc(cx + r * 0.72, cy - r * 0.72, br, 0, Math.PI * 2)
   ctx.fill()
   ctx.restore()
-}
-
-export function fillForNode(n: GraphNode, mapping: VizMapping): string {
-  // Backend-first: UI only interprets viz keys; never derives colors from `type`.
-  const key = String(n.viz_color_key ?? 'unknown')
-  return mapping.node.color[key]?.fill ?? mapping.node.color.unknown.fill
 }
 
 export function drawNodeShape(

@@ -1,18 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GraphSnapshot } from '../types'
-
-type ForceLayoutModule = typeof import('./forceLayout')
-
-async function loadForceLayout(): Promise<ForceLayoutModule> {
-  // Some other test files mock [`render.nodePainter`](simulator-ui/v2/src/render/nodePainter.ts:1)
-  // without exporting `sizeForNode()`. Since [`layout.forceLayout`](simulator-ui/v2/src/layout/forceLayout.ts:1)
-  // depends on it, that mock can leak via the shared module cache between test files.
-  //
-  // Ensure each test loads a fresh, unmocked module instance.
-  vi.resetModules()
-  vi.doUnmock('../render/nodePainter')
-  return await import('./forceLayout')
-}
+import { applyForceLayout, computeLayoutForMode } from './forceLayout'
 
 beforeEach(() => {
   vi.restoreAllMocks()
@@ -55,8 +43,7 @@ function makeRepulsionOnlySnapshot(n: number): GraphSnapshot {
 }
 
 describe('forceLayout', () => {
-  it('handles empty snapshot', async () => {
-    const { computeLayoutForMode } = await loadForceLayout()
+  it('handles empty snapshot', () => {
     const snapshot: GraphSnapshot = {
       equivalent: 'UAH',
       generated_at: '2026-01-25T00:00:00Z',
@@ -69,8 +56,7 @@ describe('forceLayout', () => {
     expect(out.links).toEqual([])
   }, 10_000)
 
-  it('applyForceLayout produces deterministic positions for same seed', async () => {
-    const { applyForceLayout } = await loadForceLayout()
+  it('applyForceLayout produces deterministic positions for same seed', () => {
     const snapshot = makeMockSnapshot()
 
     const r1 = applyForceLayout({ snapshot, w: 800, h: 600, seedKey: 'test', isTestMode: true })
@@ -80,8 +66,7 @@ describe('forceLayout', () => {
     expect(r1.links).toEqual(r2.links)
   })
 
-  it('computeLayoutForMode returns links with stable __key', async () => {
-    const { computeLayoutForMode } = await loadForceLayout()
+  it('computeLayoutForMode returns links with stable __key', () => {
     const snapshot = makeMockSnapshot()
 
     const out = computeLayoutForMode(snapshot, 800, 600, 'admin-force', true)
@@ -93,8 +78,7 @@ describe('forceLayout', () => {
     }
   })
 
-  it('applyForceLayout with w=h=1 produces coordinates in [0, 1] (ITEM-12 smoke)', async () => {
-    const { applyForceLayout } = await loadForceLayout()
+  it('applyForceLayout with w=h=1 produces coordinates in [0, 1] (ITEM-12 smoke)', () => {
     const snapshot = makeMockSnapshot()
     const out = applyForceLayout({ snapshot, w: 1, h: 1, seedKey: 'tiny', isTestMode: true })
     for (const n of out.nodes) {
@@ -106,8 +90,7 @@ describe('forceLayout', () => {
   })
 
   // NOTE C-4 (ITEM-17): dangling links must be filtered – no throw, clean output
-  it('applyForceLayout does NOT throw when a link references a missing node (dangling link)', async () => {
-    const { applyForceLayout } = await loadForceLayout()
+  it('applyForceLayout does NOT throw when a link references a missing node (dangling link)', () => {
     const snapshot: GraphSnapshot = {
       equivalent: 'UAH',
       generated_at: '2026-01-25T00:00:00Z',
@@ -141,8 +124,7 @@ describe('forceLayout', () => {
     }
   })
 
-  it('applyForceLayout preserves all links in output when all links are valid (NOTE C-4)', async () => {
-    const { applyForceLayout } = await loadForceLayout()
+  it('applyForceLayout preserves all links in output when all links are valid (NOTE C-4)', () => {
     const snapshot = makeMockSnapshot()
     const out = applyForceLayout({ snapshot, w: 800, h: 600, seedKey: 'valid-links', isTestMode: true })
     // All 4 links in makeMockSnapshot are valid → output must contain all of them
@@ -150,8 +132,7 @@ describe('forceLayout', () => {
   })
 
   // ITEM-6: Barnes–Hut repulsion via d3-quadtree + configurable theta.
-  it('applyForceLayout chargeTheta is configurable and affects output (Barnes–Hut)', async () => {
-    const { applyForceLayout } = await loadForceLayout()
+  it('applyForceLayout chargeTheta is configurable and affects output (Barnes–Hut)', () => {
     const snapshot = makeRepulsionOnlySnapshot(120)
 
     const a1 = applyForceLayout({ snapshot, w: 900, h: 700, seedKey: 'theta', isTestMode: true, chargeTheta: 0.35 })

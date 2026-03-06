@@ -1,4 +1,4 @@
-import type { LayoutNode } from '../nodePainter'
+import type { LayoutNode } from '../../types/layout'
 import { getNodeShape } from '../../types/nodeShape'
 import { LruCache } from '../../utils/lruCache'
 import { getNodeScaledGeometry } from '../nodeGeometry'

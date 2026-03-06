@@ -12,15 +12,29 @@ type RafLike = {
   cancelAnimationFrame: (id: number) => void
 }
 
+type WebGLDebugRendererInfoLike = {
+  UNMASKED_RENDERER_WEBGL: number
+}
+
+const NOOP_TIMERS: TimersLike = {
+  setTimeout: () => 0,
+  clearTimeout: () => undefined,
+}
+
+const NOOP_RAF: RafLike = {
+  requestAnimationFrame: () => 0,
+  cancelAnimationFrame: () => undefined,
+}
+
 function defaultTimers(): TimersLike {
-  const w = (globalThis as any).window as any
-  if (!w) return { setTimeout: () => 0, clearTimeout: () => undefined } as any
+  const w = typeof window !== 'undefined' ? window : undefined
+  if (!w) return NOOP_TIMERS
   return { setTimeout: (fn, ms) => w.setTimeout(fn, ms), clearTimeout: (id) => w.clearTimeout(id) }
 }
 
 function defaultRaf(): RafLike {
-  const w = (globalThis as any).window as any
-  if (!w) return { requestAnimationFrame: () => 0, cancelAnimationFrame: () => undefined } as any
+  const w = typeof window !== 'undefined' ? window : undefined
+  if (!w) return NOOP_RAF
   return { requestAnimationFrame: (fn) => w.requestAnimationFrame(fn), cancelAnimationFrame: (id) => w.cancelAnimationFrame(id) }
 }
 
@@ -31,7 +45,7 @@ function detectGpuAccelerationLikelyAvailable(): boolean {
     const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null
     if (!gl) return false
 
-    const dbg = gl.getExtension('WEBGL_debug_renderer_info') as any
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info') as WebGLDebugRendererInfoLike | null
     if (dbg) {
       const renderer = String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) ?? '')
       const r = renderer.toLowerCase()

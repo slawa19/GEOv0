@@ -1,4 +1,4 @@
-import type { LayoutNode } from './nodePainter'
+import type { LayoutNode } from '../types/layout'
 import { getNodeShape } from '../types/nodeShape'
 
 type PointLike = { x: number; y: number }

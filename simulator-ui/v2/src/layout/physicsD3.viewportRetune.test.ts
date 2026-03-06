@@ -93,15 +93,15 @@ vi.mock('d3-force', () => {
   }
 })
 
+const mod = await import('./physicsD3')
+const { createDefaultConfig, createPhysicsEngine, __testOnly_computeLinkDistancePx } = mod
+
 describe('physicsD3: retune forces on significant viewport resize', () => {
   beforeEach(() => {
     lastLinkForce = null
   })
 
   it('retunes link distance when viewport area changes >=4x', async () => {
-    const mod = await import('./physicsD3')
-    const { createDefaultConfig, createPhysicsEngine, __testOnly_computeLinkDistancePx } = mod
-
     const nodes = Array.from({ length: 100 }, (_, i) => ({ id: `n${i}`, __x: 0, __y: 0 }))
     const links = [{ source: 'n0', target: 'n1' }]
 
@@ -122,9 +122,6 @@ describe('physicsD3: retune forces on significant viewport resize', () => {
   })
 
   it('does not retune link distance when resize is small (area ratio <4x)', async () => {
-    const mod = await import('./physicsD3')
-    const { createDefaultConfig, createPhysicsEngine, __testOnly_computeLinkDistancePx } = mod
-
     const nodes = Array.from({ length: 100 }, (_, i) => ({ id: `n${i}`, __x: 0, __y: 0 }))
     const links = [{ source: 'n0', target: 'n1' }]
 

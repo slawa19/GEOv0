@@ -1,7 +1,7 @@
 import type { GraphNode, GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import { quadtree } from 'd3-quadtree'
-import { sizeForNode } from '../render/nodePainter'
+import { sizeForNode } from '../render/nodeSizing'
 import { fnv1a } from '../utils/hash'
 import { clamp, safeClampToViewport } from '../utils/math'
 import { keyEdge } from '../utils/edgeKey'
@@ -11,8 +11,6 @@ const warnDanglingLink = createThrottledWarn(5000)
 let danglingLinkFilteredCount = 0
 
 export type LayoutMode = 'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'
-
-export type { LayoutLink, LayoutNode } from '../types/layout'
 
 type ForceGroupAnchors = Map<string, { x: number; y: number }>
 

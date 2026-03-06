@@ -7,12 +7,14 @@ import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
 import { getLinkTermination } from './linkGeometry'
 import { getNodeBaseGeometry } from './nodeGeometry'
-import { drawNodeShape, fillForNode, type LayoutNode } from './nodePainter'
-
-export type { LayoutLink } from '../types/layout'
+import type { LayoutNode } from '../types/layout'
+import { fillForNode } from './nodeFill'
+import { drawNodeShape } from './nodePainter'
 
 const warnOrphanLink = createThrottledWarn(5000)
 let orphanLinkSkippedCount = 0
+
+const nodesRefByPos = new WeakMap<Map<string, LayoutNode>, LayoutNode[]>()
 
 function isTestRuntime(): boolean {
   return import.meta.env.MODE === 'test' || String(import.meta.env.VITE_TEST_MODE ?? '0') === '1'
@@ -99,11 +101,11 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   // When physics updates __x/__y in-place (same array, same object refs), the Map
   // entries are already current — no need to clear + rebuild O(n) every frame.
   // Also rebuild when the Map was cleared externally (e.g., on snapshot change in useRenderLoop).
-  const prevNodesRef = (pos as any).__nodesRef as LayoutNode[] | undefined
+  const prevNodesRef = nodesRefByPos.get(pos)
   if (prevNodesRef !== nodes || pos.size === 0) {
     pos.clear()
     for (const n of nodes) pos.set(n.id, n)
-    ;(pos as any).__nodesRef = nodes
+    nodesRefByPos.set(pos, nodes)
   }
 
   // Links: base pass = strictly semantic viz_* (no focus/active overrides).

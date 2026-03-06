@@ -24,7 +24,7 @@ export function placeOverlayNearAnchor(o: {
   const offX = o.offset?.x ?? 12
   const offY = o.offset?.y ?? 12
 
-  const w = (globalThis as any).window as any
+  const w = typeof window !== 'undefined' ? window : undefined
   const vw = o.viewport?.w ?? (w?.innerWidth ?? 10_000)
   const vh = o.viewport?.h ?? (w?.innerHeight ?? 10_000)
 

@@ -17,6 +17,9 @@ import { drawBaseGraph } from './baseGraph'
 
 vi.mock('./nodePainter', () => ({
   drawNodeShape: vi.fn(),
+}))
+
+vi.mock('./nodeFill', () => ({
   fillForNode: vi.fn(() => '#ffffff'),
 }))
 
