@@ -829,6 +829,9 @@ function onInteractSendPayment(fromPid: string) {
 
 function onInteractNewTrustline(fromPid: string) {
   startFlowFromNodeCard({
+    // NodeCard-initiated trustline flows have no edge anchor for the quick inspector.
+    // Keep using the full editor when the flow advances to create/edit phases.
+    openEditor: true,
     start: () => {
       interact.mode.startTrustlineFlowWithFrom(fromPid)
     },

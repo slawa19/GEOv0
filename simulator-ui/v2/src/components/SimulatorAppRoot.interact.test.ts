@@ -2494,6 +2494,60 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('NodeCardOverlay "New Trustline" keeps TrustlineManagementPanel visible after selecting recipient', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_NODE_CARD_OPEN', true)
+    setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())
+    setGeoTestGlobal('__GEO_TEST_NODE_SCREEN_CENTER', { x: 111, y: 222 })
+    setUrl('/?mode=real&ui=interact')
+
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const card = host.querySelector('.ds-ov-node-card') as HTMLElement | null
+      expect(card).toBeTruthy()
+
+      const btn = card!.querySelector('[data-testid="node-card-new-trustline"]') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+
+      btn?.click()
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
+
+      const interactState = getInteractState()
+      interactState.edgeAnchor = null
+
+      const setTo = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID')
+      setTo('alice')
+      await nextTick()
+      await nextTick()
+
+      expect(getPhaseRef().value).toBe('editing-trustline')
+      expect(host.querySelector('[data-testid="trustline-panel"]')).toBeTruthy()
+      expect(host.querySelector('[data-testid="edge-detail-popup"]')).toBeFalsy()
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_NODE_CARD_OPEN',
+        '__GEO_TEST_SELECTED_NODE',
+        '__GEO_TEST_NODE_SCREEN_CENTER',
+        '__GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID',
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('UX-5: repeated dblclick on the same node while NodeCard is topmost does not call wm.open()', async () => {
     // Arrange: NodeCard already opened for nodeId=A ('bob')
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
