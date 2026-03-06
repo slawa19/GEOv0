@@ -192,7 +192,7 @@ export function useSimulatorStorage(storage?: StorageLike) {
         ? {
             getItem: (k) => { try { return browserStorage.getItem(k) } catch { return null } },
             setItem: (k, v) => { try { browserStorage.setItem(k, v) } catch { /* ignore */ } },
-            removeItem: (k) => { try { browserStorage.removeItem(k) } catch { /* ignore */ } },
+            removeItem: (k) => { try { browserStorage.removeItem?.(k) } catch { /* ignore */ } },
           }
         : { ...NOOP_STORAGE, removeItem: () => undefined }
 

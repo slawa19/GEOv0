@@ -201,6 +201,8 @@ const HUD_HEIGHT = readCssVar('--ds-hud-height-px') // @token-sync: --ds-hud-hei
 
 **Решение:** Discriminated union, structural narrowing, явные type guards.
 
+Это правило распространяется не только на runtime-код, но и на тесты. `any` в mock-объектах, DOM event literals, `mock.calls`, SSE payload fixtures и window/document stubs создаёт такие же слепые зоны, как и в production-коде: тест может оставаться зелёным, но перестаёт защищать контракт.
+
 ```ts
 // ❌ ЗАПРЕЩЕНО
 function processEvent(e: unknown) {
@@ -226,6 +228,8 @@ function processEvent(e: SimEvent) {
 - Отключённые правила ESLint: `// eslint-disable-next-line @typescript-eslint/no-explicit-any`
 - `isRef()` runtime check для различения типов — признак потери type safety
 - Redundant `?? ''` / `?? 0` при типе, который гарантированно non-nullish
+- `any` в тестовых mock-объектах, event builders, `mock.calls`, window/document stubs
+- `any` как способ обойти несовпадение контракта между тестом и реальным API
 
 ---
 
@@ -640,6 +644,10 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 - Запуск: `npm run test:unit` из `simulator-ui/v2/`
 - Изолированность: НЕ импортировать canvas/WebGL модули в unit-тестах
 - Mock: использовать `vi.mock()` для тяжёлых зависимостей
+- Type safety: тесты и mocks ДОЛЖНЫ соблюдать те же правила типизации, что и runtime-код
+- MUST: typed builders/helpers для DOM events, window/document mocks, SSE payload fixtures, `mock.calls`
+- MUST NOT: использовать `as any` для ускорения написания теста или «починки» несовпавшего mock-контракта
+- SHOULD: если нужен мост к широкому DOM/API контракту, использовать один узкий `unknown` boundary с комментарием, а не распространять `any` по тесту
 
 ### 3.3 Frontend: Playwright (e2e)
 
@@ -706,6 +714,7 @@ test/add-overlay-geometry-tests
 - [ ] `npm run test:unit` — pass
 - [ ] `pytest tests/` — pass (если затронут backend)
 - [ ] Нет `as any` без комментария-обоснования
+- [ ] Тесты и mocks не обходят типизацию через `any`; узкие `unknown` bridges документированы
 - [ ] Нет magic numbers — только `--ds-*` токены
 - [ ] Нет дублированных утилит
 - [ ] Тест-файлы именованы корректно
@@ -755,10 +764,10 @@ simulator-ui/v2/src/ui-kit/
 | Создаёшь composable | SRP: одна зона ответственности. Размер < 150 строк. Нет closure-capture переменных до их инициализации |
 | Работаешь с CSS/JS значениями | Нет magic numbers. Все визуальные значения через `--ds-*`. JS читает через `readCssVar()`. Синхронные пары помечены `@token-sync` |
 | Добавляешь утилиту | Проверил `src/utils/` на дубли? Один файл = одна утилита (или группа связанных) |
-| Пишешь тест | Имя файла = имя модуля. Суффикс `.test.ts` для unit, `.spec.ts` для e2e. Нет тяжёлых render-зависимостей |
+| Пишешь тест | Имя файла = имя модуля. Суффикс `.test.ts` для unit, `.spec.ts` для e2e. Нет тяжёлых render-зависимостей. Typed builders/helpers вместо `any` |
 | Добавляешь persisted state | Используй `usePersistedSimulatorPrefs`, не `localStorage` напрямую |
 | Делаешь рефакторинг | Малые шаги (одно логическое изменение). Gate до и после. Поведение сохранено |
-| Пишешь TypeScript | No `as any`. Discriminated unions для variant-типов. Structural narrowing |
+| Пишешь TypeScript | No `as any` в runtime и тестах. Discriminated unions для variant-типов. Structural narrowing |
 | Удаляешь / переименовываешь | Нет orphan тест-файлов. Нет мёртвого кода. Импорты обновлены |
 | Добавляешь новый design token | Добавил в `designSystem.tokens.css`. Обновил `AI-AGENT-GUIDE.md` |
 | Архитектурное решение | Записал ADR в `plans/` или `docs/`. Обновил `plans/INDEX.md` |

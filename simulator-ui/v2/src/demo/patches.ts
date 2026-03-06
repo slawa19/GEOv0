@@ -38,7 +38,10 @@ export function createPatchApplier(opts: {
 }) {
   const { getSnapshot, getLayoutNodes, getLayoutLinks, keyEdge } = opts
 
-  function applyNodePatchInPlace(target: any, p: NodePatch) {
+  type PatchableNode = GraphSnapshot['nodes'][number] | LayoutNode
+  type PatchableLink = GraphSnapshot['links'][number] | LayoutLink
+
+  function applyNodePatchInPlace(target: PatchableNode | undefined, p: NodePatch) {
     if (!target) return
     if (p.net_balance_atoms !== undefined) target.net_balance_atoms = p.net_balance_atoms
     if (p.net_sign !== undefined) target.net_sign = p.net_sign
@@ -48,7 +51,7 @@ export function createPatchApplier(opts: {
     if (p.viz_size !== undefined) target.viz_size = p.viz_size
   }
 
-  function applyEdgePatchInPlace(target: any, p: EdgePatch) {
+  function applyEdgePatchInPlace(target: PatchableLink | undefined, p: EdgePatch) {
     if (!target) return
     if (p.trust_limit !== undefined) target.trust_limit = p.trust_limit
     if (p.used !== undefined) target.used = p.used
@@ -72,12 +75,12 @@ export function createPatchApplier(opts: {
       if (si !== undefined) {
         // IMPORTANT: mutate in-place to preserve node identity.
         // This keeps drag/physics references valid during scenario playback and reduces GC.
-        applyNodePatchInPlace(snapshot.nodes[si] as any, p)
+        applyNodePatchInPlace(snapshot.nodes[si], p)
       }
 
       const li = layoutIdx.get(p.id)
       if (li !== undefined) {
-        applyNodePatchInPlace(layoutNodes[li] as any, p)
+        applyNodePatchInPlace(layoutNodes[li], p)
       }
     }
   }
@@ -96,12 +99,12 @@ export function createPatchApplier(opts: {
 
       const si = snapIdx.get(k)
       if (si !== undefined) {
-        applyEdgePatchInPlace(snapshot.links[si] as any, p)
+        applyEdgePatchInPlace(snapshot.links[si], p)
       }
 
       const li = layoutIdx.get(k)
       if (li !== undefined) {
-        applyEdgePatchInPlace(layoutLinks[li] as any, p)
+        applyEdgePatchInPlace(layoutLinks[li], p)
       }
     }
   }

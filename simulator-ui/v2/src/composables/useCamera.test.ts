@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { LayoutNodeLike } from './useCamera'
 import { useCamera } from './useCamera'
+
+type PointerEventLike = Pick<PointerEvent, 'pointerId' | 'clientX' | 'clientY'>
+type WheelEventLike = Pick<WheelEvent, 'clientX' | 'clientY' | 'deltaY'>
+
+function pointerEvent(init: PointerEventLike): PointerEvent {
+  return init as unknown as PointerEvent
+}
+
+function wheelEvent(init: WheelEventLike): WheelEvent {
+  return init as unknown as WheelEvent
+}
+
+function createCanvasStub(): HTMLCanvasElement {
+  return { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+}
 
 describe('useCamera', () => {
   it('worldToScreen and screenToWorld are inverse', () => {
@@ -42,7 +58,7 @@ describe('useCamera', () => {
   })
 
   it('clampCameraPan centers content when it fits', () => {
-    const nodes = [
+    const nodes: LayoutNodeLike[] = [
       { __x: 0, __y: 0 },
       { __x: 100, __y: 100 },
     ]
@@ -67,7 +83,7 @@ describe('useCamera', () => {
   })
 
   it('handlers implement click-vs-pan threshold', () => {
-    const canvas = { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+    const canvas = createCanvasStub()
 
     const cameraSystem = useCamera({
       canvasEl: { value: canvas },
@@ -78,21 +94,21 @@ describe('useCamera', () => {
       isTestMode: () => false,
     })
 
-    cameraSystem.onPointerDown({ pointerId: 1, clientX: 10, clientY: 10 } as any)
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 11, clientY: 11 } as any) // d2=2 < 9
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 1, clientX: 10, clientY: 10 }))
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 11, clientY: 11 })) // d2=2 < 9
 
-    const wasClick = cameraSystem.onPointerUp({ pointerId: 1 } as any)
+    const wasClick = cameraSystem.onPointerUp(pointerEvent({ pointerId: 1, clientX: 11, clientY: 11 }))
     expect(wasClick).toBe(true)
 
-    cameraSystem.onPointerDown({ pointerId: 2, clientX: 10, clientY: 10 } as any)
-    cameraSystem.onPointerMove({ pointerId: 2, clientX: 13, clientY: 10 } as any) // d2=9
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 2, clientX: 10, clientY: 10 }))
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 2, clientX: 13, clientY: 10 })) // d2=9
 
-    const wasClick2 = cameraSystem.onPointerUp({ pointerId: 2 } as any)
+    const wasClick2 = cameraSystem.onPointerUp(pointerEvent({ pointerId: 2, clientX: 13, clientY: 10 }))
     expect(wasClick2).toBe(false)
   })
 
   it('does not change panX/panY for micro-moves below 3px threshold', () => {
-    const canvas = { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+    const canvas = createCanvasStub()
 
     const cameraSystem = useCamera({
       canvasEl: { value: canvas },
@@ -106,16 +122,16 @@ describe('useCamera', () => {
     cameraSystem.camera.panX = 123
     cameraSystem.camera.panY = -45
 
-    cameraSystem.onPointerDown({ pointerId: 1, clientX: 10, clientY: 10 } as any)
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 12, clientY: 11 } as any) // d2=5 < 9
-    cameraSystem.onPointerUp({ pointerId: 1 } as any)
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 1, clientX: 10, clientY: 10 }))
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 12, clientY: 11 })) // d2=5 < 9
+    cameraSystem.onPointerUp(pointerEvent({ pointerId: 1, clientX: 12, clientY: 11 }))
 
     expect(cameraSystem.camera.panX).toBe(123)
     expect(cameraSystem.camera.panY).toBe(-45)
   })
 
   it('changes panX/panY once movement reaches 3px threshold', () => {
-    const canvas = { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+    const canvas = createCanvasStub()
 
     const cameraSystem = useCamera({
       canvasEl: { value: canvas },
@@ -129,23 +145,23 @@ describe('useCamera', () => {
     cameraSystem.camera.panX = 10
     cameraSystem.camera.panY = 20
 
-    cameraSystem.onPointerDown({ pointerId: 1, clientX: 10, clientY: 10 } as any)
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 1, clientX: 10, clientY: 10 }))
     // First move crosses the threshold. Pan should START from this position,
     // so we don't apply the full delta from pointerdown (prevents "jump").
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 13, clientY: 10 } as any) // d2=9
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 13, clientY: 10 })) // d2=9
     expect(cameraSystem.camera.panX).toBe(10)
     expect(cameraSystem.camera.panY).toBe(20)
 
     // Next move should actually pan.
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 16, clientY: 10 } as any)
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 16, clientY: 10 }))
     expect(cameraSystem.camera.panX).toBe(13)
     expect(cameraSystem.camera.panY).toBe(20)
   })
 
   it('does not pan when graph fully fits the viewport (locks to centered pan)', () => {
-    const canvas = { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+    const canvas = createCanvasStub()
 
-    const nodes = [
+    const nodes: LayoutNodeLike[] = [
       { __x: 0, __y: 0 },
       { __x: 100, __y: 100 },
     ]
@@ -169,20 +185,20 @@ describe('useCamera', () => {
     const centeredY = cameraSystem.camera.panY
 
     // Try to pan a lot.
-    cameraSystem.onPointerDown({ pointerId: 1, clientX: 10, clientY: 10 } as any)
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 20, clientY: 10 } as any) // crosses threshold
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 120, clientY: 10 } as any) // big move
-    cameraSystem.onPointerUp({ pointerId: 1 } as any)
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 1, clientX: 10, clientY: 10 }))
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 20, clientY: 10 })) // crosses threshold
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 120, clientY: 10 })) // big move
+    cameraSystem.onPointerUp(pointerEvent({ pointerId: 1, clientX: 120, clientY: 10 }))
 
     expect(cameraSystem.camera.panX).toBeCloseTo(centeredX)
     expect(cameraSystem.camera.panY).toBeCloseTo(centeredY)
   })
 
   it('locks panning for a gesture when all nodes are already within viewport', () => {
-    const canvas = { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+    const canvas = createCanvasStub()
 
     // Graph bounds are inside a large viewport.
-    const nodes = [
+    const nodes: LayoutNodeLike[] = [
       { __x: 100, __y: 100 },
       { __x: 200, __y: 200 },
     ]
@@ -202,10 +218,10 @@ describe('useCamera', () => {
     cameraSystem.camera.panY = 0
 
     // Start a pan gesture and attempt to drag.
-    cameraSystem.onPointerDown({ pointerId: 1, clientX: 10, clientY: 10 } as any)
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 14, clientY: 10 } as any) // crosses threshold
-    cameraSystem.onPointerMove({ pointerId: 1, clientX: 200, clientY: 200 } as any)
-    cameraSystem.onPointerUp({ pointerId: 1 } as any)
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 1, clientX: 10, clientY: 10 }))
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 14, clientY: 10 })) // crosses threshold
+    cameraSystem.onPointerMove(pointerEvent({ pointerId: 1, clientX: 200, clientY: 200 }))
+    cameraSystem.onPointerUp(pointerEvent({ pointerId: 1, clientX: 200, clientY: 200 }))
 
     // Locked: should remain unchanged.
     expect(cameraSystem.camera.panX).toBe(0)
@@ -213,9 +229,9 @@ describe('useCamera', () => {
   })
 
   it('does not activate panState when graph fits viewport (no-op background drag)', () => {
-    const canvas = { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+    const canvas = createCanvasStub()
 
-    const nodes = [
+    const nodes: LayoutNodeLike[] = [
       { __x: 0, __y: 0 },
       { __x: 100, __y: 100 },
     ]
@@ -233,15 +249,15 @@ describe('useCamera', () => {
     cameraSystem.camera.panX = 0
     cameraSystem.camera.panY = 0
 
-    cameraSystem.onPointerDown({ pointerId: 1, clientX: 10, clientY: 10 } as any)
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 1, clientX: 10, clientY: 10 }))
     expect(cameraSystem.panState.active).toBe(false)
   })
 
   it('activates panState when graph is not fully visible', () => {
-    const canvas = { setPointerCapture: () => undefined } as unknown as HTMLCanvasElement
+    const canvas = createCanvasStub()
 
     // Graph bounds exceed viewport.
-    const nodes = [
+    const nodes: LayoutNodeLike[] = [
       { __x: 0, __y: 0 },
       { __x: 2000, __y: 100 },
     ]
@@ -259,7 +275,7 @@ describe('useCamera', () => {
     cameraSystem.camera.panX = 0
     cameraSystem.camera.panY = 0
 
-    cameraSystem.onPointerDown({ pointerId: 1, clientX: 10, clientY: 10 } as any)
+    cameraSystem.onPointerDown(pointerEvent({ pointerId: 1, clientX: 10, clientY: 10 }))
     expect(cameraSystem.panState.active).toBe(true)
   })
 
@@ -285,9 +301,9 @@ describe('useCamera', () => {
     })
 
     // Multiple wheel events in the same tick => must coalesce into one apply.
-    cameraSystem.onWheel({ clientX: 10, clientY: 20, deltaY: 100 } as any)
-    cameraSystem.onWheel({ clientX: 10, clientY: 20, deltaY: 50 } as any)
-    cameraSystem.onWheel({ clientX: 10, clientY: 20, deltaY: -25 } as any)
+    cameraSystem.onWheel(wheelEvent({ clientX: 10, clientY: 20, deltaY: 100 }))
+    cameraSystem.onWheel(wheelEvent({ clientX: 10, clientY: 20, deltaY: 50 }))
+    cameraSystem.onWheel(wheelEvent({ clientX: 10, clientY: 20, deltaY: -25 }))
 
     expect(onCameraChanged).toHaveBeenCalledTimes(0)
 

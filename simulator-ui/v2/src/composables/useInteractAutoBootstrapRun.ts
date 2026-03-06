@@ -1,4 +1,10 @@
+import type { ScenarioSummary } from '../api/simulatorTypes'
+
 export const INTERACT_AUTOSTART_SCENARIO_ID = 'clearing-demo-10'
+
+function readScenarioId(scenario: ScenarioSummary | null | undefined): string {
+  return String(scenario?.scenario_id ?? '').trim()
+}
 
 export function useInteractAutoBootstrapRun(deps: {
   isInteractUi: () => boolean
@@ -7,7 +13,7 @@ export function useInteractAutoBootstrapRun(deps: {
     runId: string | null
     selectedScenarioId: string | null
     loadingScenarios?: boolean
-    scenarios?: unknown[] | null
+    scenarios?: ScenarioSummary[] | null
   }
   realMode: {
     refreshScenarios: () => Promise<void>
@@ -30,12 +36,12 @@ export function useInteractAutoBootstrapRun(deps: {
       const scenarios = deps.real.scenarios ?? []
 
       const preferred = scenarios.find(
-        (s) => String((s as any)?.scenario_id ?? '') === INTERACT_AUTOSTART_SCENARIO_ID,
+        (s) => readScenarioId(s) === INTERACT_AUTOSTART_SCENARIO_ID,
       )
       if (preferred) {
         deps.real.selectedScenarioId = INTERACT_AUTOSTART_SCENARIO_ID
       } else if (scenarios.length > 0) {
-        deps.real.selectedScenarioId = String((scenarios[0] as any)?.scenario_id ?? '').trim()
+        deps.real.selectedScenarioId = readScenarioId(scenarios[0])
       }
     }
 

@@ -9,6 +9,12 @@ function normalizeEq(v: unknown): string {
   return String(v ?? '').trim().toUpperCase()
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message
+  const message = String(error ?? '').trim()
+  return message || fallback
+}
+
 export function useInteractDataCache(opts: {
   actions: ReturnType<typeof useInteractActions>
   runId: Ref<string>
@@ -165,10 +171,10 @@ export function useInteractDataCache(opts: {
         trustlinesFetchedAtMs = now
         trustlinesLastErrorRef.value = null
       }
-    } catch (e: any) {
+    } catch (error) {
       // Best-effort: fall back on snapshot-derived trustlines.
       // Keep a lightweight error signal for UI hints/debugging.
-      trustlinesLastErrorRef.value = String(e?.message ?? e ?? 'Trustlines refresh failed')
+      trustlinesLastErrorRef.value = getErrorMessage(error, 'Trustlines refresh failed')
     } finally {
       trustlinesLoadingCount = Math.max(0, trustlinesLoadingCount - 1)
       trustlinesLoadingRef.value = trustlinesLoadingCount > 0
@@ -245,7 +251,7 @@ export function useInteractDataCache(opts: {
 
       const ids = new Set<string>()
       for (const it of items ?? []) {
-        const pid = normalizePid((it as any)?.to_pid)
+        const pid = normalizePid(it.to_pid)
         if (!pid) continue
         ids.add(pid)
       }
@@ -255,7 +261,7 @@ export function useInteractDataCache(opts: {
       paymentTargetsByKey.value = next
       paymentTargetsLastErrorRef.value = null
       paymentTargetsFetchedAtMsByKey.set(key, now)
-    } catch (e: any) {
+    } catch (error) {
       // Ignore stale error for the same key.
       if (paymentTargetsFetchEpochByKey.get(key) !== myEpoch) return
 
@@ -263,7 +269,7 @@ export function useInteractDataCache(opts: {
       const next = new Map(paymentTargetsByKey.value)
       next.set(key, new Set())
       paymentTargetsByKey.value = next
-      paymentTargetsLastErrorRef.value = String(e?.message ?? e ?? 'Payment targets refresh failed')
+      paymentTargetsLastErrorRef.value = getErrorMessage(error, 'Payment targets refresh failed')
       // Treat error response as “known” for UI determinism, but still revalidate after TTL.
       paymentTargetsFetchedAtMsByKey.set(key, now)
     } finally {

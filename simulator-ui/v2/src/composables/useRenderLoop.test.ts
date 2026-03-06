@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 import { clearGradientCache } from '../render/gradientCache'
 import type { LayoutNode } from '../types/layout'
+import type { VizMapping } from '../vizMapping'
 
 import {
   __cachedPosHygiene,
@@ -13,6 +14,25 @@ import {
 vi.mock('../render/gradientCache', () => ({
   clearGradientCache: vi.fn(),
 }))
+
+const TEST_MAPPING: VizMapping = {
+  node: { color: {} },
+  link: {
+    width_px: {},
+    alpha: {},
+    color: { default: '#000' },
+  },
+  fx: {
+    tx_spark: { core: '#000', trail: '#000' },
+    clearing_credit: '#000',
+    clearing_debt: '#000',
+    flash: { clearing: { from: '#000', to: '#000' } },
+  },
+}
+
+function makePosMap() {
+  return new Map<string, LayoutNode>()
+}
 
 function makeCanvas(): HTMLCanvasElement {
   // Minimal canvas stub for renderLoop: getContext must exist.
@@ -70,9 +90,9 @@ function makeLoop() {
     getFlash: () => 0,
     setFlash: () => undefined,
     pruneFloatingLabels: () => undefined,
-    drawBaseGraph: () => ({}),
+    drawBaseGraph: () => makePosMap(),
     renderFxFrame: () => undefined,
-    mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+    mapping: TEST_MAPPING,
     fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
     getSelectedNodeId: () => null,
     activeEdges: new Map<string, number>(),
@@ -271,9 +291,9 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getFlash: () => 0,
       setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
-      drawBaseGraph: () => ({}),
+      drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
-      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
       getSelectedNodeId: () => null,
       activeEdges: new Map<string, number>(),
@@ -323,9 +343,9 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getFlash: () => 0,
       setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
-      drawBaseGraph: () => ({}),
+      drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
-      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
       getSelectedNodeId: () => null,
       activeEdges: new Map<string, number>(),
@@ -376,9 +396,9 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getFlash: () => 0,
       setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
-      drawBaseGraph: () => ({}),
+      drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
-      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
       getSelectedNodeId: () => null,
       activeEdges: new Map<string, number>(),
@@ -433,7 +453,7 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       pruneFloatingLabels: () => undefined,
       drawBaseGraph,
       renderFxFrame,
-      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
       getSelectedNodeId: () => null,
       activeEdges: new Map<string, number>(),
@@ -481,9 +501,9 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
       getFlash: () => 0,
       setFlash: () => undefined,
       pruneFloatingLabels: () => undefined,
-      drawBaseGraph: () => ({}),
+      drawBaseGraph: () => makePosMap(),
       renderFxFrame: () => undefined,
-      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
       getSelectedNodeId: () => null,
       activeEdges: new Map<string, number>(),
@@ -579,7 +599,7 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
         return opts.pos
       },
       renderFxFrame: () => undefined,
-      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
       getSelectedNodeId: () => null,
       activeEdges: new Map<string, number>(),
@@ -633,7 +653,7 @@ describe('useRenderLoop cachedPos hygiene on snapshot changes', () => {
         return opts.pos
       },
       renderFxFrame: () => undefined,
-      mapping: { fx: { flash: { clearing: { from: '#000', to: '#000' } } } },
+      mapping: TEST_MAPPING,
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] },
       getSelectedNodeId: () => null,
       activeEdges: new Map<string, number>(),

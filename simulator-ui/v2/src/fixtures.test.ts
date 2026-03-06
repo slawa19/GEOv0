@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { validateEvents, validateSnapshot } from './fixtures'
 
-function mkBaseSnapshot() {
+type RawSnapshot = {
+  equivalent: string
+  generated_at: string
+  nodes: Array<Record<string, unknown>>
+  links: Array<Record<string, unknown>>
+}
+
+function mkBaseSnapshot(): RawSnapshot {
   return {
     equivalent: 'UAH',
     generated_at: '2026-01-27T00:00:00Z',
@@ -40,9 +47,9 @@ describe('fixtures validation', () => {
 
   it('validateSnapshot drops non-number/non-string amounts without throwing', () => {
     const raw = mkBaseSnapshot()
-    ;(raw.links[0] as any).trust_limit = { bad: true }
-    ;(raw.links[0] as any).used = NaN
-    ;(raw.links[0] as any).available = Infinity
+    raw.links[0]!.trust_limit = { bad: true }
+    raw.links[0]!.used = NaN
+    raw.links[0]!.available = Infinity
 
     const snap = validateSnapshot(raw, 'mem:snapshot.json')
     expect(snap.links[0]!.trust_limit).toBeUndefined()

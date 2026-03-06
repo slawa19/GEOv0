@@ -76,6 +76,21 @@
 
 ## Guardrails
 
+## Development standards (must-follow)
+
+- Full source of truth for development standards: `docs/ru/development-standards.md`.
+- Compact AI-agent version: `.clinerules`.
+- When updating development rules, keep `docs/ru/development-standards.md` and `.clinerules` in sync.
+- For TypeScript/Vue work in `simulator-ui/v2`, follow these mandatory rules:
+  - no `as any` in runtime code;
+  - no `as any` in tests, mocks, DOM event literals, `mock.calls`, window/document stubs;
+  - prefer discriminated unions, structural narrowing, and typed builders/helpers;
+  - if a bridge to a broad DOM/external API is unavoidable, use a single narrow `unknown` boundary with a short comment;
+  - do not use `any` to silence type errors in tests — fix the mock contract instead;
+  - no ad-hoc `localStorage` access when an existing storage composable/adapter exists;
+  - no magic visual values when a DS token or existing config module should be the source of truth.
+- Treat test type-safety as production quality: typed tests are part of the contract, not disposable scaffolding.
+
 ## Workflow guardrail: spec-first, then implement (CRITICAL)
 
 - If the user explicitly asks to first **investigate**, **describe the problem**, and **write a refactoring spec / acceptance criteria / solution options**, Copilot MUST NOT start implementing fixes immediately.

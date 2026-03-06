@@ -1,11 +1,46 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { LayoutLink, LayoutNode } from '../types/layout'
 
 // We mock d3-force to observe forceLink().distance(...) retuning without relying on d3 internals.
-let lastLinkForce: any = null
+type MockLinkForce = {
+  _distance: number | undefined
+  _distanceCalls: number[]
+  id: () => MockLinkForce
+  strength: () => MockLinkForce
+  distance: (v?: number) => MockLinkForce | number | undefined
+}
+
+type MockAxisForce = {
+  _x?: number
+  _y?: number
+  x?: (v?: number) => MockAxisForce | number | undefined
+  y?: (v?: number) => MockAxisForce | number | undefined
+  strength: () => MockAxisForce
+}
+
+type MockSimulation = {
+  alpha: (v?: number) => MockSimulation | number
+  alphaMin: (v?: number) => MockSimulation | number
+  alphaDecay: () => MockSimulation
+  velocityDecay: () => MockSimulation
+  force: (name: string, f?: unknown) => MockSimulation | unknown
+  stop: () => MockSimulation
+  tick: () => MockSimulation
+}
+
+let lastLinkForce: MockLinkForce | null = null
+
+function makeNode(id: string): LayoutNode {
+  return { id, __x: 0, __y: 0 }
+}
+
+function makeLink(source: string, target: string): LayoutLink {
+  return { __key: `${source}->${target}`, source, target }
+}
 
 vi.mock('d3-force', () => {
   const mkLinkForce = () => {
-    const f: any = {
+    const f: MockLinkForce = {
       _distance: undefined as number | undefined,
       _distanceCalls: [] as number[],
       id: () => f,
@@ -23,14 +58,15 @@ vi.mock('d3-force', () => {
   }
 
   const mkXYForce = (axis: 'x' | 'y') => {
-    const f: any = {
+    const f: MockAxisForce = {
       [`_${axis}`]: undefined as number | undefined,
       [axis]: (v?: number) => {
         if (typeof v === 'number') {
-          f[`_${axis}`] = v
+          if (axis === 'x') f._x = v
+          else f._y = v
           return f
         }
-        return f[`_${axis}`]
+        return axis === 'x' ? f._x : f._y
       },
       strength: () => f,
     }
@@ -38,11 +74,11 @@ vi.mock('d3-force', () => {
   }
 
   const mkSimulation = () => {
-    const forces = new Map<string, any>()
+    const forces = new Map<string, unknown>()
     let alphaV = 1
     let alphaMinV = 0
 
-    const sim: any = {
+    const sim: MockSimulation = {
       alpha: (v?: number) => {
         if (typeof v === 'number') {
           alphaV = v
@@ -59,7 +95,7 @@ vi.mock('d3-force', () => {
       },
       alphaDecay: () => sim,
       velocityDecay: () => sim,
-      force: (name: string, f?: any) => {
+      force: (name: string, f?: unknown) => {
         if (typeof f === 'undefined') return forces.get(name)
         forces.set(name, f)
         return sim
@@ -74,11 +110,11 @@ vi.mock('d3-force', () => {
   return {
     forceSimulation: () => mkSimulation(),
     forceManyBody: () => {
-      const f: any = { strength: () => f }
+      const f = { strength: () => f }
       return f
     },
     forceCollide: () => {
-      const f: any = {
+      const f = {
         radius: () => f,
         strength: () => f,
       }
@@ -102,44 +138,48 @@ describe('physicsD3: retune forces on significant viewport resize', () => {
   })
 
   it('retunes link distance when viewport area changes >=4x', async () => {
-    const nodes = Array.from({ length: 100 }, (_, i) => ({ id: `n${i}`, __x: 0, __y: 0 }))
-    const links = [{ source: 'n0', target: 'n1' }]
+    const nodes = Array.from({ length: 100 }, (_, i) => makeNode(`n${i}`))
+    const links = [makeLink('n0', 'n1')]
 
     const config = createDefaultConfig({ width: 200, height: 200, nodeCount: nodes.length, quality: 'low' })
-    const engine = createPhysicsEngine({ nodes: nodes as any, links: links as any, config })
+    const engine = createPhysicsEngine({ nodes, links, config })
 
     const d0 = __testOnly_computeLinkDistancePx({ width: 200, height: 200, nodeCount: nodes.length })
     const d1 = __testOnly_computeLinkDistancePx({ width: 800, height: 800, nodeCount: nodes.length })
     expect(d1).not.toBe(d0)
 
     expect(lastLinkForce).toBeTruthy()
-    expect(lastLinkForce.distance()).toBe(d0)
+    const linkForce = lastLinkForce
+    if (!linkForce) throw new Error('Link force was not captured')
+    expect(linkForce.distance()).toBe(d0)
 
     engine.updateViewport(800, 800)
 
-    expect(lastLinkForce.distance()).toBe(d1)
-    expect(lastLinkForce._distanceCalls).toEqual([d0, d1])
+    expect(linkForce.distance()).toBe(d1)
+    expect(linkForce._distanceCalls).toEqual([d0, d1])
   })
 
   it('does not retune link distance when resize is small (area ratio <4x)', async () => {
-    const nodes = Array.from({ length: 100 }, (_, i) => ({ id: `n${i}`, __x: 0, __y: 0 }))
-    const links = [{ source: 'n0', target: 'n1' }]
+    const nodes = Array.from({ length: 100 }, (_, i) => makeNode(`n${i}`))
+    const links = [makeLink('n0', 'n1')]
 
     const config = createDefaultConfig({ width: 800, height: 800, nodeCount: nodes.length, quality: 'low' })
-    const engine = createPhysicsEngine({ nodes: nodes as any, links: links as any, config })
+    const engine = createPhysicsEngine({ nodes, links, config })
 
     const d0 = __testOnly_computeLinkDistancePx({ width: 800, height: 800, nodeCount: nodes.length })
     const d1 = __testOnly_computeLinkDistancePx({ width: 820, height: 820, nodeCount: nodes.length })
     expect(d1).not.toBe(d0)
 
     expect(lastLinkForce).toBeTruthy()
-    expect(lastLinkForce.distance()).toBe(d0)
+    const linkForce = lastLinkForce
+    if (!linkForce) throw new Error('Link force was not captured')
+    expect(linkForce.distance()).toBe(d0)
 
     engine.updateViewport(820, 820)
 
     // Still the old distance (no retune, despite d1 being different).
-    expect(lastLinkForce.distance()).toBe(d0)
-    expect(lastLinkForce._distanceCalls).toEqual([d0])
+    expect(linkForce.distance()).toBe(d0)
+    expect(linkForce._distanceCalls).toEqual([d0])
   })
 })
 

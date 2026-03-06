@@ -3,16 +3,17 @@ import { computed, isProxy, isReactive, markRaw, ref } from 'vue'
 
 import { createPhysicsEngine, createDefaultConfig } from '../layout/physicsD3'
 import { useLayoutCoordinator } from './useLayoutCoordinator'
+import type { LayoutLink, LayoutNode } from '../types/layout'
 
-type N = { id: string; __x: number; __y: number; x?: number; y?: number }
-type L = { __key: string; source: string; target: string }
+type N = LayoutNode & { x?: number; y?: number }
+type L = LayoutLink
 
 describe('ITEM-9: layout nodes/links are raw + physics sync writes without Vue proxy overhead', () => {
   it('useLayoutCoordinator keeps layout.nodes/links and their elements non-reactive (raw)', () => {
     const coordinator = useLayoutCoordinator<N, L, 'm', { generated_at: string; nodes: unknown[]; links: unknown[] }>({
-      canvasEl: { value: null } as any,
-      fxCanvasEl: { value: null } as any,
-      hostEl: { value: null } as any,
+      canvasEl: ref<HTMLCanvasElement | null>(null),
+      fxCanvasEl: ref<HTMLCanvasElement | null>(null),
+      hostEl: ref<HTMLDivElement | null>(null),
       snapshot: computed(() => null),
       layoutMode: ref('m'),
       dprClamp: computed(() => 1),
@@ -46,7 +47,7 @@ describe('ITEM-9: layout nodes/links are raw + physics sync writes without Vue p
     const links: L[] = markRaw([{ __key: 'A→B', source: 'A', target: 'B' }])
 
     const config = createDefaultConfig({ width: 200, height: 100, nodeCount: nodes.length, quality: 'low' })
-    const engine = createPhysicsEngine({ nodes: nodes as any, links: links as any, config })
+    const engine = createPhysicsEngine({ nodes, links, config })
 
     // Force a visible delta (engine reads `n.x/n.y` produced by d3-force).
     nodes[0]!.x = 111

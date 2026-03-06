@@ -2,11 +2,17 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { roundedRectPath } from './roundedRect'
 
+type RoundedRectCtx = Pick<CanvasRenderingContext2D,
+  'beginPath' | 'rect' | 'moveTo' | 'lineTo' | 'quadraticCurveTo' | 'closePath'
+> & {
+  roundRect: (x: number, y: number, w: number, h: number, r: number) => void
+}
+
 describe('roundedRectPath()', () => {
   it('calls native ctx.roundRect with correct `this` binding (no Illegal invocation)', () => {
-    const calls: any[] = []
+    const calls: Array<[number, number, number, number, number]> = []
 
-    const ctx: any = {
+    const ctx: RoundedRectCtx = {
       beginPath: vi.fn(),
       rect: vi.fn(),
       moveTo: vi.fn(),
@@ -20,7 +26,7 @@ describe('roundedRectPath()', () => {
       },
     }
 
-    expect(() => roundedRectPath(ctx, 10, 20, 30, 40, 6)).not.toThrow()
+    expect(() => roundedRectPath(ctx as unknown as CanvasRenderingContext2D, 10, 20, 30, 40, 6)).not.toThrow()
     expect(calls.length).toBe(1)
   })
 })

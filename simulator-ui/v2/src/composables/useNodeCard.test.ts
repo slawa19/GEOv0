@@ -1,5 +1,7 @@
 import { createApp, h, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
+import type { GraphNode } from '../types'
+import type { LayoutNodeWithId } from '../types/layout'
 import { useNodeCard } from './useNodeCard'
 
 function withSetup<T>(fn: () => T): T {
@@ -31,6 +33,14 @@ function withSetup<T>(fn: () => T): T {
 }
 
 describe('useNodeCard', () => {
+  function makeNode(id: string): GraphNode {
+    return { id }
+  }
+
+  function makeLayoutNode(id: string, x: number, y: number): LayoutNodeWithId {
+    return { id, __x: x, __y: y }
+  }
+
   it('selectedNode is null when there is no selection', () => {
     const api = withSetup(() => {
       const selectedNodeId = ref<string | null>(null)
@@ -55,8 +65,8 @@ describe('useNodeCard', () => {
       return useNodeCard({
         hostEl: ref(null),
         selectedNodeId,
-        getNodeById: (id) => (id ? ({ id } as any) : null),
-        getLayoutNodeById: (id) => ({ id, __x: 10, __y: 20 }),
+        getNodeById: (id) => (id ? makeNode(id) : null),
+        getLayoutNodeById: (id) => makeLayoutNode(id, 10, 20),
         worldToScreen: (x, y) => ({ x, y }),
       })
     })
@@ -69,15 +79,15 @@ describe('useNodeCard', () => {
     const api = withSetup(() => {
       const selectedNodeId = ref<string | null>('A')
 
-      const hostEl = ref<any>({
+      const hostEl = ref<HTMLElement | null>({
         getBoundingClientRect: () => ({ width: 300, height: 200 }),
-      })
+      } as HTMLElement)
 
       return useNodeCard({
         hostEl,
         selectedNodeId,
-        getNodeById: (id) => (id ? ({ id } as any) : null),
-        getLayoutNodeById: (id) => ({ id, __x: 10, __y: 20 }),
+        getNodeById: (id) => (id ? makeNode(id) : null),
+        getLayoutNodeById: (id) => makeLayoutNode(id, 10, 20),
         worldToScreen: (x, y) => ({ x: x + 1, y: y + 2 }),
       })
     })

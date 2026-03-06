@@ -342,6 +342,18 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
     rMax?: number
   }
 
+  type QuadLeaf = QuadExt & {
+    data?: number
+    next?: QuadLeaf
+  }
+
+  type QuadInternal = QuadExt & Array<QuadNode | undefined>
+  type QuadNode = QuadLeaf | QuadInternal
+
+  function isQuadInternal(node: QuadNode): node is QuadInternal {
+    return Array.isArray(node)
+  }
+
   function buildRepulsionQuadtree() {
     // Note: use indices rather than node objects to keep the quadtree lean & deterministic.
     const qt = quadtree<number>()
@@ -351,16 +363,15 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
 
     // Precompute center-of-mass & mass per quad (Barnes–Hut), and max radius for collision pruning.
     qt.visitAfter((quad: unknown) => {
-      const q = quad as unknown as QuadExt & { data?: number; next?: unknown } & Array<unknown>
+      const q = quad as QuadNode
 
-      if (!q.length) {
+      if (!isQuadInternal(q)) {
         // Leaf: may hold a linked list of points with identical coordinates.
         let m = 0
         let cxAcc = 0
         let cyAcc = 0
         let rMax = 0
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let cur: any = quad
+        let cur: QuadLeaf | undefined = q
         while (cur) {
           const idx = cur.data as number
           m += 1
@@ -383,7 +394,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
       let cyAcc = 0
       let rMax = 0
       for (let kChild = 0; kChild < 4; kChild++) {
-        const child = (quad as unknown as Array<unknown>)[kChild] as (QuadExt & { length?: number }) | undefined
+        const child = q[kChild]
         if (!child || !child.mass) continue
         m += child.mass
         cxAcc += (child.cx ?? 0) * child.mass
@@ -430,12 +441,12 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
       const ri = r[i] ?? 0
 
       qt.visit((quad: unknown, x0: number, y0: number, x1: number, y1: number) => {
-        const q = quad as unknown as QuadExt & { data?: number; next?: unknown } & Array<unknown>
+        const q = quad as QuadNode
         const m = q.mass ?? 0
         if (!m) return true
 
         // Internal node: Barnes–Hut approximation.
-        if (q.length) {
+        if (isQuadInternal(q)) {
           const dx = xi - (q.cx ?? 0)
           const dy = yi - (q.cy ?? 0)
           const dist2 = dx * dx + dy * dy + softening2
@@ -456,8 +467,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
         }
 
         // Leaf node: exact interactions with each point in the leaf's linked list.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let cur: any = quad
+        let cur: QuadLeaf | undefined = q
         while (cur) {
           const j = cur.data as number
           if (j !== i) {

@@ -1,14 +1,33 @@
 import { computed, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import type { GraphSnapshot } from '../types'
+import type { GraphLink, GraphNode, GraphSnapshot } from '../types'
 import { useSceneState } from './useSceneState'
+
+type UseSceneStateDeps = Parameters<typeof useSceneState>[0]
+type ClearScheduledTimeoutArg = Parameters<UseSceneStateDeps['clearScheduledTimeouts']>[0]
+
+function makeNode(id: string, name?: string): GraphNode {
+  return name ? { id, name } : { id }
+}
+
+function makeLink(source: string, target: string): GraphLink {
+  return { source, target }
+}
+
+function setMockWindow(windowValue: (Window & typeof globalThis) | undefined): void {
+  Object.defineProperty(globalThis, 'window', {
+    value: windowValue,
+    configurable: true,
+    writable: true,
+  })
+}
 
 function makeSnapshot(): GraphSnapshot {
   return {
     equivalent: 'UAH',
     generated_at: '2026-01-25T00:00:00Z',
-    nodes: [{ id: 'A' }, { id: 'B' }],
-    links: [{ source: 'A', target: 'B' }],
+    nodes: [makeNode('A'), makeNode('B')],
+    links: [makeLink('A', 'B')],
   }
 }
 
@@ -88,18 +107,15 @@ describe('useSceneState', () => {
     const snapshot1: GraphSnapshot = {
       equivalent: 'UAH',
       generated_at: '2026-02-01T00:00:00Z',
-      nodes: [
-        { id: 'A', name: 'Alice' } as any,
-        { id: 'B', name: 'Bob' } as any,
-      ],
-      links: [{ source: 'A', target: 'B' } as any],
+      nodes: [makeNode('A', 'Alice'), makeNode('B', 'Bob')],
+      links: [makeLink('A', 'B')],
     }
 
     const snapshot2: GraphSnapshot = {
       ...snapshot1,
       generated_at: '2026-02-01T00:00:01Z',
       // Same node IDs, but represent a different scenario context.
-      links: [{ source: 'B', target: 'A' } as any],
+      links: [makeLink('B', 'A')],
     }
 
     const loadSnapshot = vi.fn()
@@ -214,11 +230,15 @@ describe('useSceneState', () => {
     await s.loadScene()
 
     // Non-incremental: keepCritical pass first, then unconditional clear.
-    const keepCriticalCalls = clearScheduledTimeouts.mock.calls.filter(
-      (args: any[]) => args[0]?.keepCritical === true,
+    const clearTimeoutCalls = clearScheduledTimeouts.mock.calls as unknown as Array<
+      [ClearScheduledTimeoutArg?]
+    >
+
+    const keepCriticalCalls = clearTimeoutCalls.filter(
+      ([arg]: [ClearScheduledTimeoutArg?]) => arg?.keepCritical === true,
     )
-    const fullClearCalls = clearScheduledTimeouts.mock.calls.filter(
-      (args: any[]) => args[0] === undefined || args[0]?.keepCritical !== true,
+    const fullClearCalls = clearTimeoutCalls.filter(
+      ([arg]: [ClearScheduledTimeoutArg?]) => arg === undefined || arg?.keepCritical !== true,
     )
     expect(keepCriticalCalls.length).toBeGreaterThanOrEqual(1)
     expect(fullClearCalls.length).toBeGreaterThanOrEqual(1)
@@ -316,8 +336,8 @@ describe('useSceneState', () => {
       generated_at: '2026-01-25T00:00:01Z',
       // Same node IDs, but link composition differs (preview → run can do this).
       links: [
-        { source: 'A', target: 'B' },
-        { source: 'B', target: 'A' },
+        makeLink('A', 'B'),
+        makeLink('B', 'A'),
       ],
     }
 
@@ -373,8 +393,11 @@ describe('useSceneState', () => {
     })
 
     // Simulate deep-link (Vitest runs in node env here)
-    const prevWindow = (globalThis as any).window
-    ;(globalThis as any).window = { location: { search: '?scene=B&layout=type-split&eq=eur&focus=A' } }
+    const prevWindow = globalThis.window
+    setMockWindow({
+      ...globalThis,
+      location: { ...globalThis.location, search: '?scene=B&layout=type-split&eq=eur&focus=A' },
+    } as unknown as Window & typeof globalThis)
 
     const snapshot = makeSnapshot()
     const loadSnapshot = vi.fn(async () => ({ snapshot, sourcePath: 'snap.json' }))
@@ -409,7 +432,7 @@ describe('useSceneState', () => {
       expect(loadSnapshot).toHaveBeenCalled()
       expect(state.selectedNodeId).toBe('A')
     } finally {
-      ;(globalThis as any).window = prevWindow
+      setMockWindow(prevWindow)
     }
   })
 })

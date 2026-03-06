@@ -14,18 +14,21 @@ import {
   stopRun,
 } from '../api/simulatorApi'
 import type {
+  ActiveRunResponse,
   ArtifactIndexItem,
   RunStatus,
   RunStatusEvent,
   ScenarioSummary,
+  SimulatorEvent,
   SimulatorMode,
+  TopologyChangedEvent,
   TxFailedEvent,
 } from '../api/simulatorTypes'
 import { connectSse } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 
-import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, EdgePatch, GraphLink, GraphNode, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
@@ -61,6 +64,69 @@ export type RealModeState = {
 export type PatchApplier = {
   applyNodePatches: (patches: NodePatch[] | undefined) => void
   applyEdgePatches: (patches: EdgePatch[] | undefined) => void
+}
+
+type RealModeDiag = {
+  rx_messages: number
+  json_parse_errors: number
+  normalize_dropped: number
+  events_by_type: Record<string, number>
+  tx_sender_labels: number
+  tx_receiver_labels: number
+  tx_receiver_scheduled: number
+  tx_receiver_guard_dropped: number
+  amount_flyout_suppressed: number
+  burst_throttle_enabled_events: number
+  burst_throttle_ms_last: number
+}
+
+type GeoRealModeGlobal = typeof globalThis & { __geo_real_mode_diag?: RealModeDiag }
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (isRecord(e) && typeof e.message === 'string') return e.message
+  return String(e)
+}
+
+function readString(v: unknown): string | null {
+  return typeof v === 'string' ? v : null
+}
+
+function readNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function extractRunId(v: ActiveRunResponse | null | undefined): string {
+  return String(v?.run_id ?? '').trim()
+}
+
+function isRunStatusEvent(evt: unknown): evt is RunStatusEvent {
+  if (!isRecord(evt)) return false
+  return (
+    evt.type === 'run_status' &&
+    readString(evt.run_id) !== null &&
+    readString(evt.scenario_id) !== null &&
+    readNumber(evt.sim_time_ms) !== null &&
+    readNumber(evt.intensity_percent) !== null &&
+    readNumber(evt.ops_sec) !== null &&
+    readNumber(evt.queue_depth) !== null
+  )
+}
+
+function isTxUpdatedEvent(evt: unknown): evt is TxUpdatedEvent {
+  return isRecord(evt) && evt.type === 'tx.updated' && typeof evt.equivalent === 'string'
+}
+
+function isTxFailedEvent(evt: unknown): evt is TxFailedEvent {
+  return isRecord(evt) && evt.type === 'tx.failed' && typeof evt.equivalent === 'string'
+}
+
+function isTopologyChangedEvent(evt: SimulatorEvent): evt is TopologyChangedEvent {
+  return evt.type === 'topology.changed' && isRecord(evt.payload)
 }
 
 export function useSimulatorRealMode(opts: {
@@ -142,11 +208,11 @@ export function useSimulatorRealMode(opts: {
   // Diagnostics (dev-only, per plan section 10)
   // -----------------
 
-  const diag = {
+  const diag: RealModeDiag = {
     rx_messages: 0,
     json_parse_errors: 0,
     normalize_dropped: 0,
-    events_by_type: {} as Record<string, number>,
+    events_by_type: {},
     tx_sender_labels: 0,
     tx_receiver_labels: 0,
     tx_receiver_scheduled: 0,
@@ -157,7 +223,7 @@ export function useSimulatorRealMode(opts: {
   }
 
   if (isLocalhost) {
-    ;(globalThis as any).__geo_real_mode_diag = diag
+    ;(globalThis as GeoRealModeGlobal).__geo_real_mode_diag = diag
   }
 
   const incDiag = incCounter
@@ -317,7 +383,7 @@ export function useSimulatorRealMode(opts: {
         resetStaleRun({ clearError: true })
         return
       }
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     }
   }
 
@@ -426,32 +492,6 @@ export function useSimulatorRealMode(opts: {
     return Math.max(250, Math.round(base + jitter))
   }
 
-  function isRunStatusEvent(evt: unknown): evt is RunStatusEvent {
-    if (!evt || typeof evt !== 'object') return false
-    const e = evt as any
-    return (
-      e.type === 'run_status' &&
-      typeof e.run_id === 'string' &&
-      typeof e.scenario_id === 'string' &&
-      typeof e.sim_time_ms === 'number' &&
-      typeof e.intensity_percent === 'number' &&
-      typeof e.ops_sec === 'number' &&
-      typeof e.queue_depth === 'number'
-    )
-  }
-
-  function isTxUpdatedEvent(evt: unknown): evt is TxUpdatedEvent {
-    if (!evt || typeof evt !== 'object') return false
-    const e = evt as any
-    return e.type === 'tx.updated' && typeof e.equivalent === 'string'
-  }
-
-  function isTxFailedEvent(evt: unknown): evt is TxFailedEvent {
-    if (!evt || typeof evt !== 'object') return false
-    const e = evt as any
-    return e.type === 'tx.failed' && typeof e.equivalent === 'string'
-  }
-
   async function runSseLoop() {
     const mySeq = ++sseSeq
     stopSse()
@@ -504,7 +544,7 @@ export function useSimulatorRealMode(opts: {
               return
             }
 
-            incDiag(diag.events_by_type, String((evt as any).type ?? 'unknown'))
+            incDiag(diag.events_by_type, String(evt.type ?? 'unknown'))
 
             // Prefer payload event_id when present.
             real.lastEventId = evt.event_id
@@ -640,24 +680,20 @@ export function useSimulatorRealMode(opts: {
               return
             }
 
-            if (evt.type === 'topology.changed') {
-              const t = evt as any
-              const payload = t?.payload as any
-              const hasPayload = !!payload && typeof payload === 'object'
+            if (isTopologyChangedEvent(evt)) {
+              const t = evt
+              const payload = t.payload
 
-              const hasPatches =
-                hasPayload &&
-                (((payload.node_patch?.length ?? 0) > 0) || ((payload.edge_patch?.length ?? 0) > 0))
+              const hasPatches = (payload.node_patch?.length ?? 0) > 0 || (payload.edge_patch?.length ?? 0) > 0
 
               const isEmptyPayload =
-                !hasPayload ||
-                ((payload.added_nodes?.length ?? 0) === 0 &&
-                  (payload.removed_nodes?.length ?? 0) === 0 &&
-                  (payload.frozen_nodes?.length ?? 0) === 0 &&
-                  (payload.added_edges?.length ?? 0) === 0 &&
-                  (payload.removed_edges?.length ?? 0) === 0 &&
-                  (payload.frozen_edges?.length ?? 0) === 0 &&
-                  !hasPatches)
+                payload.added_nodes.length === 0 &&
+                payload.removed_nodes.length === 0 &&
+                (payload.frozen_nodes?.length ?? 0) === 0 &&
+                payload.added_edges.length === 0 &&
+                payload.removed_edges.length === 0 &&
+                (payload.frozen_edges?.length ?? 0) === 0 &&
+                !hasPatches
 
               if ((isEmptyPayload && !hasPatches) || !state.snapshot) {
                 void refreshSnapshot()
@@ -675,11 +711,11 @@ export function useSimulatorRealMode(opts: {
               // Patch-only event (e.g. trust drift / inject_debt): apply patches and return.
               if (
                 hasPatches &&
-                (payload.added_nodes?.length ?? 0) === 0 &&
-                (payload.removed_nodes?.length ?? 0) === 0 &&
+                payload.added_nodes.length === 0 &&
+                payload.removed_nodes.length === 0 &&
                 (payload.frozen_nodes?.length ?? 0) === 0 &&
-                (payload.added_edges?.length ?? 0) === 0 &&
-                (payload.removed_edges?.length ?? 0) === 0 &&
+                payload.added_edges.length === 0 &&
+                payload.removed_edges.length === 0 &&
                 (payload.frozen_edges?.length ?? 0) === 0
               ) {
                 if (payload.node_patch) realPatchApplier.applyNodePatches(payload.node_patch)
@@ -697,7 +733,7 @@ export function useSimulatorRealMode(opts: {
                 return 'unknown'
               }
 
-              const ensureNodeDefaults = (n: any) => {
+              const ensureNodeDefaults = (n: GraphNode) => {
                 if (!n) return
                 const tp = toLowerTrim(String(n.type ?? ''))
                 const isBiz = tp === 'business'
@@ -715,7 +751,7 @@ export function useSimulatorRealMode(opts: {
               for (const r of payload.added_nodes ?? []) {
                 const id = String(r?.pid ?? '').trim()
                 if (!id || nodesById.has(id)) continue
-                const node: any = {
+                const node: GraphNode = {
                   id,
                   name: r?.name ?? undefined,
                   type: r?.type ?? undefined,
@@ -753,7 +789,7 @@ export function useSimulatorRealMode(opts: {
                 const k = keyEdge(s, d)
                 if (linksByKey.has(k)) continue
                 const limit = r?.limit ?? undefined
-                const link: any = {
+                const link: GraphLink = {
                   source: s,
                   target: d,
                   trust_limit: limit,
@@ -793,13 +829,13 @@ export function useSimulatorRealMode(opts: {
               // Recompute links_count.
               const counts: Record<string, number> = {}
               for (const l of snap.links) {
-                const s = String((l as any).source)
-                const d = String((l as any).target)
+                const s = String(l.source)
+                const d = String(l.target)
                 counts[s] = (counts[s] ?? 0) + 1
                 counts[d] = (counts[d] ?? 0) + 1
               }
               for (const n of snap.nodes) {
-                ;(n as any).links_count = counts[String((n as any).id)] ?? 0
+                n.links_count = counts[n.id] ?? 0
               }
 
               // Bump generated_at so layout coordinator can detect updates.
@@ -826,7 +862,7 @@ export function useSimulatorRealMode(opts: {
       } catch (e: unknown) {
         if (ctrl.signal.aborted) return
 
-        const msg = String((e as any)?.message ?? e)
+        const msg = getErrorMessage(e)
         if (msg.includes('SSE HTTP 404') || msg.includes('HTTP 404')) {
           resetStaleRun({ clearError: true })
           return
@@ -871,7 +907,7 @@ export function useSimulatorRealMode(opts: {
       real.scenarios = res.items ?? []
       ensureScenarioSelectionValid()
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     } finally {
       real.loadingScenarios = false
     }
@@ -911,7 +947,7 @@ export function useSimulatorRealMode(opts: {
         // attach to the already-active run instead of failing silently.
         if (e instanceof ApiError && e.status === 409) {
           const active = await getActiveRun({ apiBase: real.apiBase, accessToken: real.accessToken })
-          const activeRunId = String((active as any)?.run_id ?? '').trim()
+          const activeRunId = extractRunId(active)
           if (activeRunId) {
             real.runId = activeRunId
           } else {
@@ -937,7 +973,7 @@ export function useSimulatorRealMode(opts: {
           } catch (e: unknown) {
             if (i === delaysMs.length) {
               // Best-effort: still proceed so UI can show status/errors.
-              real.lastError = String((e as any)?.message ?? e)
+              real.lastError = getErrorMessage(e)
               break
             }
             await new Promise((r) => setTimeout(r, delaysMs[i]!))
@@ -953,7 +989,7 @@ export function useSimulatorRealMode(opts: {
       // SSE loop is long-lived; do not await it.
       void runSseLoop()
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     } finally {
       startRunInProgress = false
     }
@@ -965,7 +1001,7 @@ export function useSimulatorRealMode(opts: {
     try {
       real.runStatus = await pauseRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     }
   }
 
@@ -975,7 +1011,7 @@ export function useSimulatorRealMode(opts: {
     try {
       real.runStatus = await resumeRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     }
   }
 
@@ -992,7 +1028,7 @@ export function useSimulatorRealMode(opts: {
       })
       await refreshRunStatus()
     } catch (e: unknown) {
-      const msg = String((e as any)?.message ?? e)
+      const msg = getErrorMessage(e)
 
       // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
       // treat stop as idempotent and reset local state instead of surfacing a hard error.
@@ -1025,7 +1061,7 @@ export function useSimulatorRealMode(opts: {
       await refreshSnapshot()
       void runSseLoop()
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     }
   }
 
@@ -1053,7 +1089,7 @@ export function useSimulatorRealMode(opts: {
         resetStaleRun({ clearError: true })
         return
       }
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     }
   }
 
@@ -1065,7 +1101,7 @@ export function useSimulatorRealMode(opts: {
       const idx = await listArtifacts({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
       real.artifacts = idx.items ?? []
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     } finally {
       real.artifactsLoading = false
     }
@@ -1089,7 +1125,7 @@ export function useSimulatorRealMode(opts: {
       a.remove()
       URL.revokeObjectURL(blobUrl)
     } catch (e: unknown) {
-      real.lastError = String((e as any)?.message ?? e)
+      real.lastError = getErrorMessage(e)
     }
   }
 

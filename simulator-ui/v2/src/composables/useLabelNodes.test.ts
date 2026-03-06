@@ -1,37 +1,53 @@
 import { describe, expect, it } from 'vitest'
+import type { GraphNode, GraphSnapshot } from '../types'
+import type { LayoutLink, LayoutNode } from '../types/layout'
+import type { LabelsLod } from '../types/uiPrefs'
 import { useLabelNodes } from './useLabelNodes'
 
-const layoutNodes = [
+const layoutNodes: LayoutNode[] = [
   { id: 'A', __x: 10, __y: 20 },
   { id: 'B', __x: 30, __y: 40 },
   { id: 'C', __x: 50, __y: 60 },
-] as any
+] 
 
-const layoutLinks = [
+const layoutLinks: LayoutLink[] = [
   { __key: 'A->B', source: 'A', target: 'B' },
   { __key: 'C->A', source: 'C', target: 'A' },
-] as any
+] 
 
-const snapshot = {
+const snapshot: GraphSnapshot = {
   equivalent: 'UAH',
+  generated_at: '2026-01-27T00:00:00Z',
   nodes: [
     { id: 'A', name: 'Alice' },
     { id: 'B', name: 'Bob' },
     { id: 'C', name: 'Carol' },
   ],
   links: [],
-} as any
+}
+
+function findLayoutNode(id: string): LayoutNode | null {
+  return layoutNodes.find((n) => n.id === id) ?? null
+}
+
+function findSnapshotNode(id: string): GraphNode | null {
+  return snapshot.nodes.find((n) => n.id === id) ?? null
+}
+
+function createLabelsLodGetter(value: LabelsLod): () => LabelsLod {
+  return () => value
+}
 
 describe('useLabelNodes', () => {
   it('returns selection label in selection mode', () => {
     const { labelNodes } = useLabelNodes({
       isTestMode: () => false,
-      getLabelsLod: () => 'selection' as any,
+      getLabelsLod: createLabelsLodGetter('selection'),
       getSnapshot: () => snapshot,
       getSelectedNodeId: () => 'A',
       getLayoutLinks: () => layoutLinks,
-      getLayoutNodeById: (id) => layoutNodes.find((n: any) => n.id === id) ?? null,
-      getNodeById: (id) => snapshot.nodes.find((n: any) => n.id === id) ?? null,
+      getLayoutNodeById: findLayoutNode,
+      getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
       fxColorForNode: () => '#fff',
@@ -44,12 +60,12 @@ describe('useLabelNodes', () => {
   it('returns neighbors when neighbors mode', () => {
     const { labelNodes } = useLabelNodes({
       isTestMode: () => false,
-      getLabelsLod: () => 'neighbors' as any,
+      getLabelsLod: createLabelsLodGetter('neighbors'),
       getSnapshot: () => snapshot,
       getSelectedNodeId: () => 'A',
       getLayoutLinks: () => layoutLinks,
-      getLayoutNodeById: (id) => layoutNodes.find((n: any) => n.id === id) ?? null,
-      getNodeById: (id) => snapshot.nodes.find((n: any) => n.id === id) ?? null,
+      getLayoutNodeById: findLayoutNode,
+      getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
       fxColorForNode: () => '#fff',
@@ -62,12 +78,12 @@ describe('useLabelNodes', () => {
   it('hides selected node label when hasNodeCardInspectorOpen returns true', () => {
     const { labelNodes } = useLabelNodes({
       isTestMode: () => false,
-      getLabelsLod: () => 'neighbors' as any,
+      getLabelsLod: createLabelsLodGetter('neighbors'),
       getSnapshot: () => snapshot,
       getSelectedNodeId: () => 'A',
       getLayoutLinks: () => layoutLinks,
-      getLayoutNodeById: (id) => layoutNodes.find((n: any) => n.id === id) ?? null,
-      getNodeById: (id) => snapshot.nodes.find((n: any) => n.id === id) ?? null,
+      getLayoutNodeById: findLayoutNode,
+      getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
       fxColorForNode: () => '#fff',
@@ -84,12 +100,12 @@ describe('useLabelNodes', () => {
   it('shows selected node label when hasNodeCardInspectorOpen returns false', () => {
     const { labelNodes } = useLabelNodes({
       isTestMode: () => false,
-      getLabelsLod: () => 'neighbors' as any,
+      getLabelsLod: createLabelsLodGetter('neighbors'),
       getSnapshot: () => snapshot,
       getSelectedNodeId: () => 'A',
       getLayoutLinks: () => layoutLinks,
-      getLayoutNodeById: (id) => layoutNodes.find((n: any) => n.id === id) ?? null,
-      getNodeById: (id) => snapshot.nodes.find((n: any) => n.id === id) ?? null,
+      getLayoutNodeById: findLayoutNode,
+      getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
       fxColorForNode: () => '#fff',

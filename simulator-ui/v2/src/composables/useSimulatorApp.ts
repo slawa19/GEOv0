@@ -36,7 +36,7 @@ import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { ApiError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
-import type { Point } from '../types/layout'
+import type { LayoutLink, LayoutNode, Point } from '../types/layout'
 
 import { useAppLifecycle } from './useAppLifecycle'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
@@ -74,6 +74,12 @@ import { useRealClearingFx, type ClearingFxParams } from './realFx/useRealCleari
 import { useRealTxFx } from './realFx/useRealTxFx'
 
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string') return err.message
+  return String(err)
+}
 
 type RealModeApi = ReturnType<typeof useSimulatorRealMode>
 type AdminRunsPanelApi = ReturnType<typeof useAdminRunsPanel>
@@ -155,7 +161,18 @@ export type SimulatorAppApi = {
   showResetView: UiDerivedApi['showResetView']
 
   showPerfOverlay: ComputedRef<boolean>
-  perf: any
+  perf: {
+    lastFps: number | null
+    fxBudgetScale: number | null
+    maxParticles: number | null
+    renderQuality: string | null
+    dprClamp: number | null
+    canvasCssW: number | null
+    canvasCssH: number | null
+    canvasPxW: number | null
+    canvasPxH: number | null
+    canvasDpr: number | null
+  }
 
   fxDebug: {
     enabled: ComputedRef<boolean>
@@ -293,7 +310,7 @@ export function __autoBootstrapMaybeFillUiError(opts: {
   const hasStateError = !!String(opts.state.error ?? '').trim()
   if (hasRealError || hasStateError) return
 
-  opts.state.error = `Auto-start failed: ${String((opts.err as any)?.message ?? opts.err)}`
+  opts.state.error = `Auto-start failed: ${getErrorMessage(opts.err)}`
 }
 
 export function useSimulatorApp(opts?: {
@@ -324,7 +341,7 @@ export function useSimulatorApp(opts?: {
 
   // Playwright sets navigator.webdriver=true.
   // Use it to keep screenshot tests stable even if someone runs the dev server with VITE_TEST_MODE=1.
-  const isWebDriver = typeof navigator !== 'undefined' && (navigator as any).webdriver === true
+  const isWebDriver = typeof navigator !== 'undefined' && navigator.webdriver === true
 
   const allowRealModeInWebDriver = computed(() => {
     if (!isTestMode.value) return false
@@ -371,7 +388,7 @@ export function useSimulatorApp(opts?: {
 
   const isLocalhost = (() => {
     try {
-      const host = String(((globalThis as any).window as any)?.location?.hostname ?? '')
+      const host = String(typeof window !== 'undefined' ? window.location.hostname : '')
       return ['localhost', '127.0.0.1', '::1'].includes(host)
     } catch {
       return false
@@ -794,7 +811,7 @@ export function useSimulatorApp(opts?: {
     // When the scene loader decides an update is incremental (same node IDs), it may skip relayout.
     // In that case we must sync viz fields AND reconcile topology into the existing layout objects used for rendering.
     const snapNodeById = new Map(snapshot.nodes.map((n) => [n.id, n] as const))
-    for (const n of layout.nodes as any[]) {
+    for (const n of layout.nodes) {
       const src = snapNodeById.get(String(n.id))
       if (!src) continue
       n.name = src.name
@@ -812,14 +829,14 @@ export function useSimulatorApp(opts?: {
 
     // Links are more volatile than nodes (preview → run, scenario switch, live run updates).
     // We want to keep node positions/camera stable, but we MUST reflect link add/remove changes.
-    const oldLinkByKey = new Map<string, any>()
-    for (const l of layout.links as any[]) {
+    const oldLinkByKey = new Map<string, LayoutLink>()
+    for (const l of layout.links) {
       const k = String(l.__key ?? keyEdge(String(l.source), String(l.target)))
       oldLinkByKey.set(k, l)
     }
 
-    const nextLinks: any[] = []
-    for (const src of snapshot.links as any[]) {
+    const nextLinks: LayoutLink[] = []
+    for (const src of snapshot.links) {
       const k = keyEdge(String(src.source), String(src.target))
       const existing = oldLinkByKey.get(k)
       if (existing) {
@@ -840,7 +857,7 @@ export function useSimulatorApp(opts?: {
     }
 
     // Assign even if length matches: link composition/order may change.
-    ;(layout as any).links = nextLinks
+    layout.links = nextLinks
 
     wakeUp()
   }
@@ -1043,7 +1060,7 @@ export function useSimulatorApp(opts?: {
 
   const showPerfOverlay = computed(() => {
     if (isTestMode.value) return false
-    const w = (globalThis as any).window as any
+    const w = typeof window !== 'undefined' ? window : undefined
     if (!w) return false
     try {
       return new URLSearchParams(w.location.search).get('perf') === '1'
@@ -1071,12 +1088,11 @@ export function useSimulatorApp(opts?: {
     if (!showPerfOverlay.value) return
 
     const poll = () => {
-      const fx = fxState as any
-      perf.lastFps = typeof fx?.__lastFps === 'number' ? fx.__lastFps : null
-      perf.fxBudgetScale = typeof fx?.__fxBudgetScale === 'number' ? fx.__fxBudgetScale : null
-      perf.maxParticles = typeof fx?.__maxParticles === 'number' ? fx.__maxParticles : null
-      perf.renderQuality = typeof fx?.__renderQuality === 'string' ? fx.__renderQuality : null
-      perf.dprClamp = typeof fx?.__dprClamp === 'number' ? fx.__dprClamp : null
+      perf.lastFps = typeof fxState.__lastFps === 'number' ? fxState.__lastFps : null
+      perf.fxBudgetScale = typeof fxState.__fxBudgetScale === 'number' ? fxState.__fxBudgetScale : null
+      perf.maxParticles = typeof fxState.__maxParticles === 'number' ? fxState.__maxParticles : null
+      perf.renderQuality = typeof fxState.__renderQuality === 'string' ? fxState.__renderQuality : null
+      perf.dprClamp = typeof fxState.__dprClamp === 'number' ? fxState.__dprClamp : null
 
       const c = canvasEl.value
       if (c) {
@@ -1163,7 +1179,7 @@ export function useSimulatorApp(opts?: {
     clearingDebtColor: VIZ_MAPPING.fx.clearing_debt,
     fxColorForNode,
     scheduleTimeout,
-    pushFloatingLabelWhenReady: (o) => pushFloatingLabelWhenReady(o as any),
+    pushFloatingLabelWhenReady,
   })
 
   const pushTxAmountLabel = realTxFx.pushTxAmountLabel
@@ -1245,7 +1261,7 @@ export function useSimulatorApp(opts?: {
       isInteractBusy: !!interactMode.busy.value,
       confirmCancelInteractBusy: () => {
         try {
-          const c = (window as any)?.confirm
+          const c = window.confirm
           if (typeof c !== 'function') return true
           return !!c('Отменить операцию?')
         } catch {
@@ -1298,7 +1314,7 @@ export function useSimulatorApp(opts?: {
     fillForNode: (n) => fillForNode(n, VIZ_MAPPING),
   })
 
-  getDragToPinStateSafe = () => dragToPin.dragState as any
+  getDragToPinStateSafe = () => dragToPin.dragState
 
   const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,
@@ -1672,7 +1688,7 @@ export function useSimulatorApp(opts?: {
           await realMode.stopRunById(runId, { source: 'ui', reason: 'admin_stop' })
           await adminRunsPanel.getRuns()
         } catch (e: unknown) {
-          adminRunsPanel.lastError.value = String((e as any)?.message ?? e)
+          adminRunsPanel.lastError.value = getErrorMessage(e)
         }
       },
     },

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import type { LayoutNode } from '../types/layout'
 import { useFloatingLabelsViewFx } from './useFloatingLabelsViewFx'
+
+function makeLayoutNode(id: string, x = 0, y = 0): LayoutNode {
+  return { id, __x: x, __y: y }
+}
 
 describe('useFloatingLabelsViewFx', () => {
   it('forces glow=0 when webdriver', () => {
     const { floatingLabelsViewFx } = useFloatingLabelsViewFx({
       getFloatingLabelsView: () => [{ id: 1, x: 10, y: 20, text: 'x', color: '#fff' }],
       isWebDriver: () => true,
-      getLayoutNodes: () => [{ id: 'n', __x: 0, __y: 0 } as any],
+      getLayoutNodes: () => [makeLayoutNode('n')],
       sizeForNode: () => ({ w: 20, h: 20 }),
       worldToScreen: (x, y) => ({ x, y }),
     })
@@ -18,7 +23,7 @@ describe('useFloatingLabelsViewFx', () => {
     const { floatingLabelsViewFx } = useFloatingLabelsViewFx({
       getFloatingLabelsView: () => [{ id: 1, x: 0, y: 0, text: 'x', color: '#fff' }],
       isWebDriver: () => false,
-      getLayoutNodes: () => [{ id: 'n', __x: 0, __y: 0 } as any],
+      getLayoutNodes: () => [makeLayoutNode('n')],
       sizeForNode: () => ({ w: 20, h: 20 }),
       worldToScreen: (x, y) => ({ x, y }),
     })

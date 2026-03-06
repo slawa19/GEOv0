@@ -1,6 +1,22 @@
 import { describe, expect, it, vi } from 'vitest'
 import { useCanvasInteractions } from './useCanvasInteractions'
 
+type MouseEventLike = Pick<MouseEvent, 'clientX' | 'clientY'>
+type PointerEventLike = Partial<Pick<PointerEvent, 'pointerId' | 'clientX' | 'clientY'>>
+type WheelEventLike = Partial<Pick<WheelEvent, 'deltaY' | 'clientX' | 'clientY'>>
+
+function mouseEvent(init: MouseEventLike): MouseEvent {
+  return init as unknown as MouseEvent
+}
+
+function pointerEvent(init: PointerEventLike = {}): PointerEvent {
+  return ({ pointerId: 1, clientX: 0, clientY: 0, ...init }) as unknown as PointerEvent
+}
+
+function wheelEvent(init: WheelEventLike = {}): WheelEvent {
+  return ({ deltaY: 0, clientX: 0, clientY: 0, ...init }) as unknown as WheelEvent
+}
+
 describe('useCanvasInteractions', () => {
   it('selects node on click, clears selection on empty hit', () => {
     const setSelectedNodeId = vi.fn()
@@ -26,10 +42,10 @@ describe('useCanvasInteractions', () => {
       getPanActive: () => false,
     })
 
-    h.onCanvasClick({ clientX: 1, clientY: 2 } as any)
+    h.onCanvasClick(mouseEvent({ clientX: 1, clientY: 2 }))
     expect(setSelectedNodeId).toHaveBeenLastCalledWith('A')
 
-    h.onCanvasClick({ clientX: 9, clientY: 9 } as any)
+    h.onCanvasClick(mouseEvent({ clientX: 9, clientY: 9 }))
     expect(setSelectedNodeId).toHaveBeenLastCalledWith(null)
   })
 
@@ -59,11 +75,11 @@ describe('useCanvasInteractions', () => {
     })
 
     try {
-      h.onCanvasClick({ clientX: 3, clientY: 4 } as any)
+      h.onCanvasClick(mouseEvent({ clientX: 3, clientY: 4 }))
       expect(setSelectedNodeId).toHaveBeenLastCalledWith('B')
 
       // RACE-1: dblclick is debounced (150ms). No immediate selection side-effect.
-      h.onCanvasDblClick({ clientX: 3, clientY: 4 } as any)
+      h.onCanvasDblClick(mouseEvent({ clientX: 3, clientY: 4 }))
       expect(setSelectedNodeId).toHaveBeenCalledTimes(1)
 
       vi.advanceTimersByTime(150)
@@ -78,7 +94,9 @@ describe('useCanvasInteractions', () => {
   it('dblclick can be intercepted via onNodeDblClick hook', () => {
     vi.useFakeTimers()
     const setSelectedNodeId = vi.fn()
-    const onNodeDblClick = vi.fn(() => true)
+    const onNodeDblClick = vi.fn<
+      (node: { id: string }, ptr: { clientX: number; clientY: number }) => boolean
+    >(() => true)
 
     const h = useCanvasInteractions({
       isTestMode: () => false,
@@ -103,7 +121,7 @@ describe('useCanvasInteractions', () => {
     })
 
     try {
-      h.onCanvasDblClick({ clientX: 7, clientY: 8 } as any)
+      h.onCanvasDblClick(mouseEvent({ clientX: 7, clientY: 8 }))
       // Debounced: not called immediately.
       expect(onNodeDblClick).toHaveBeenCalledTimes(0)
 
@@ -122,7 +140,9 @@ describe('useCanvasInteractions', () => {
 
     // In the real app this hook opens the node card window (wm.open({ reuse })).
     // This test asserts we only execute that action once, and only for the last node.
-    const onNodeDblClick = vi.fn(() => true)
+    const onNodeDblClick = vi.fn<
+      (node: { id: string }, ptr: { clientX: number; clientY: number }) => boolean
+    >(() => true)
 
     const h = useCanvasInteractions({
       isTestMode: () => false,
@@ -154,7 +174,7 @@ describe('useCanvasInteractions', () => {
       // 5 rapid dblclicks: A → B → C → D → E within <150ms between events.
       const coords = [1, 2, 3, 4, 5]
       for (let i = 0; i < coords.length; i++) {
-        h.onCanvasDblClick({ clientX: coords[i], clientY: 1 } as any)
+        h.onCanvasDblClick(mouseEvent({ clientX: coords[i], clientY: 1 }))
         if (i < coords.length - 1) vi.advanceTimersByTime(20)
       }
 
@@ -169,7 +189,8 @@ describe('useCanvasInteractions', () => {
       // Flush the debounce window: exactly one action, for the last nodeId (E).
       vi.advanceTimersByTime(1)
       expect(onNodeDblClick).toHaveBeenCalledTimes(1)
-      expect(((onNodeDblClick as any).mock.calls[0]?.[0] as any)?.id).toBe('E')
+      const firstArg = onNodeDblClick.mock.calls[0]?.[0]
+      expect(firstArg?.id).toBe('E')
       expect(setSelectedNodeId).toHaveBeenCalledTimes(0)
     } finally {
       vi.clearAllTimers()
@@ -201,7 +222,7 @@ describe('useCanvasInteractions', () => {
       getPanActive: () => false,
     })
 
-    h.onCanvasPointerDown({} as any)
+    h.onCanvasPointerDown(pointerEvent())
     expect(cameraDown).not.toHaveBeenCalled()
   })
 
@@ -232,12 +253,12 @@ describe('useCanvasInteractions', () => {
       getPanActive: () => pan,
     })
 
-    h.onCanvasPointerMove({} as any)
+    h.onCanvasPointerMove(pointerEvent())
     expect(hoverMove).toHaveBeenCalledTimes(1)
     expect(cameraMove).not.toHaveBeenCalled()
 
     pan = true
-    h.onCanvasPointerMove({} as any)
+    h.onCanvasPointerMove(pointerEvent())
     expect(hoverMove).toHaveBeenCalledTimes(2)
     expect(cameraMove).toHaveBeenCalledTimes(1)
   })
@@ -270,12 +291,12 @@ describe('useCanvasInteractions', () => {
     })
 
     // wasClick=false: nothing should happen
-    h.onCanvasPointerUp({} as any)
+    h.onCanvasPointerUp(pointerEvent())
     expect(setSelectedNodeId).not.toHaveBeenCalled()
 
     // wasClick=true: selection logic is delegated to onCanvasClick; pointerup must NOT clear it
     cameraUp.mockReturnValueOnce(true)
-    h.onCanvasPointerUp({} as any)
+    h.onCanvasPointerUp(pointerEvent())
     expect(setSelectedNodeId).not.toHaveBeenCalled()
     expect(clearHoveredEdge).not.toHaveBeenCalled()
   })
@@ -313,10 +334,10 @@ describe('useCanvasInteractions', () => {
     })
 
     // Complete the pointer gesture (consumed by dragToPin).
-    h.onCanvasPointerUp({ pointerId: 1 } as any)
+    h.onCanvasPointerUp(pointerEvent({ pointerId: 1 }))
 
     // Browser still fires `click` after pointerup; it must NOT be suppressed.
-    h.onCanvasClick({ clientX: 1, clientY: 2 } as any)
+    h.onCanvasClick(mouseEvent({ clientX: 1, clientY: 2 }))
     expect(setSelectedNodeId).toHaveBeenCalledTimes(1)
     expect(setSelectedNodeId).toHaveBeenLastCalledWith('A')
   })
@@ -353,10 +374,10 @@ describe('useCanvasInteractions', () => {
     })
 
     // Pointerup after real drag should mark suppressNextClick.
-    h.onCanvasPointerUp({ pointerId: 1 } as any)
+    h.onCanvasPointerUp(pointerEvent({ pointerId: 1 }))
 
     // The subsequent click must be ignored (otherwise we'd accidentally change selection).
-    h.onCanvasClick({ clientX: 1, clientY: 2 } as any)
+    h.onCanvasClick(mouseEvent({ clientX: 1, clientY: 2 }))
     expect(setSelectedNodeId).not.toHaveBeenCalled()
   })
 
@@ -386,11 +407,11 @@ describe('useCanvasInteractions', () => {
       getPanActive: () => false,
     })
 
-    h.onCanvasWheel({} as any)
+    h.onCanvasWheel(wheelEvent())
     expect(wheel).not.toHaveBeenCalled()
 
     dragState.active = false
-    h.onCanvasWheel({} as any)
+    h.onCanvasWheel(wheelEvent())
     expect(wheel).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,18 +1,56 @@
 import type { Ref } from 'vue'
 
-import type { GraphSnapshot } from '../types'
-import type { LayoutNode } from '../types/layout'
+import type { FxState } from '../render/fxRenderer'
+import type { GraphNode, GraphSnapshot } from '../types'
+import type { LayoutLink, LayoutNode } from '../types/layout'
 import { clearGradientCache } from '../render/gradientCache'
 import { clamp01 } from '../utils/math'
+import type { VizMapping } from '../vizMapping'
 
 type Quality = 'low' | 'med' | 'high'
 
-export function __snapshotKeyForRenderLoop(snap: GraphSnapshot): string {
+type RenderLoopTimerHandle = ReturnType<typeof globalThis.setTimeout>
+type RenderLoopAnimationHandle = number | RenderLoopTimerHandle
+
+type RenderLoopWindowLike = {
+  devicePixelRatio: number
+  requestAnimationFrame: (callback: FrameRequestCallback) => RenderLoopAnimationHandle
+  cancelAnimationFrame: (handle: RenderLoopAnimationHandle) => void
+  setTimeout: typeof globalThis.setTimeout
+  clearTimeout: typeof globalThis.clearTimeout
+  performance?: Pick<Performance, 'now'>
+}
+
+function getRenderLoopWindow(): RenderLoopWindowLike {
+  const maybeWindow = typeof globalThis.window !== 'undefined' ? globalThis.window : undefined
+  return {
+    devicePixelRatio: Math.max(1, Number(maybeWindow?.devicePixelRatio ?? 1)),
+    requestAnimationFrame:
+      maybeWindow?.requestAnimationFrame?.bind(maybeWindow) ??
+      ((callback) => globalThis.setTimeout(() => callback(globalThis.performance?.now?.() ?? Date.now()), 16)),
+    cancelAnimationFrame: (handle) => {
+      if (typeof handle === 'number' && maybeWindow?.cancelAnimationFrame) {
+        maybeWindow.cancelAnimationFrame(handle)
+        return
+      }
+      globalThis.clearTimeout(handle)
+    },
+    setTimeout: maybeWindow?.setTimeout?.bind(maybeWindow) ?? globalThis.setTimeout.bind(globalThis),
+    clearTimeout: maybeWindow?.clearTimeout?.bind(maybeWindow) ?? globalThis.clearTimeout.bind(globalThis),
+    performance: maybeWindow?.performance ?? globalThis.performance,
+  }
+}
+
+export function __snapshotKeyForRenderLoop(
+  snap: Pick<Partial<GraphSnapshot>, 'equivalent' | 'generated_at'> | null | undefined,
+): string {
   // Be defensive: tests and some call sites may pass partial snapshots.
-  const eq = String((snap as any)?.equivalent ?? '')
-  const ts = String((snap as any)?.generated_at ?? '')
+  const eq = String(snap?.equivalent ?? '')
+  const ts = String(snap?.generated_at ?? '')
   return `${eq}|${ts}`
 }
+
+type RenderLayout = { w: number; h: number; nodes: LayoutNode[]; links: LayoutLink[] }
 
 export function __shouldClearCachedPosOnSnapshotChange(opts: {
   cachedPos: Map<string, LayoutNode>
@@ -88,7 +126,7 @@ type UseRenderLoopDeps = {
   fxCanvasEl: Ref<HTMLCanvasElement | null>
 
   getSnapshot: () => GraphSnapshot | null
-  getLayout: () => { w: number; h: number; nodes: any[]; links: any[] }
+  getLayout: () => RenderLayout
   getCamera: () => { panX: number; panY: number; zoom: number }
 
   isTestMode: () => boolean
@@ -103,10 +141,39 @@ type UseRenderLoopDeps = {
   pruneActiveEdges?: (nowMs: number) => void
   pruneActiveNodes?: (nowMs: number) => void
 
-  drawBaseGraph: (ctx: CanvasRenderingContext2D, opts: any) => any
-  renderFxFrame: (opts: any) => void
-  mapping: any
-  fxState: any
+  drawBaseGraph: (ctx: CanvasRenderingContext2D, opts: {
+    w: number
+    h: number
+    nodes: LayoutNode[]
+    links: LayoutLink[]
+    mapping: VizMapping
+    palette: GraphSnapshot['palette']
+    selectedNodeId: string | null
+    activeEdges: Map<string, number>
+    activeNodes?: Set<string>
+    dimmedNodeIds: Set<string> | null
+    cameraZoom: number
+    quality: Quality
+    linkLod: 'full' | 'focus'
+    dragMode: boolean
+    hiddenNodeId: string | null
+    pos: Map<string, LayoutNode>
+  }) => Map<string, LayoutNode>
+  renderFxFrame: (opts: {
+    nowMs: number
+    ctx: CanvasRenderingContext2D
+    pos: Map<string, LayoutNode>
+    w: number
+    h: number
+    mapping: VizMapping
+    fxState: FxState
+    isTestMode: boolean
+    cameraZoom: number
+    quality: Quality
+    snapshotKey: string
+  }) => void
+  mapping: VizMapping
+  fxState: FxState
 
   getSelectedNodeId: () => string | null
   activeEdges: Map<string, number>
@@ -157,8 +224,8 @@ const FX_BUDGET_SMOOTHING = 0.8
 const PERF_EMA_ALPHA = 0.9
 
 export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
-  let rafId: number | null = null
-  let timeoutId: number | null = null
+  let rafId: RenderLoopAnimationHandle | null = null
+  let timeoutId: RenderLoopTimerHandle | null = null
 
   let running = false
 
@@ -235,7 +302,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   }
 
   function pruneFxToMaxParticles(maxParticles: number) {
-    const fxState = deps.fxState as any
+    const fxState = deps.fxState
     if (!fxState) return
 
     const sparks = Array.isArray(fxState.sparks) ? fxState.sparks : null
@@ -249,7 +316,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     let overflow = total - max
 
-    const dropFront = (arr: any[] | null) => {
+    const dropFront = <T>(arr: T[] | null) => {
       if (!arr || overflow <= 0) return
       const d = Math.min(arr.length, overflow)
       if (d > 0) {
@@ -312,8 +379,8 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     // Additionally, in real-mode patch flows `generated_at` can stay stable while node composition
     // changes — detect that cheaply and prune once per change.
     const key = __snapshotKeyForRenderLoop(snap)
-    const snapshotNodes = Array.isArray((snap as any).nodes) ? ((snap as any).nodes as Array<{ id: string }>) : []
-    const linksCount = Array.isArray((snap as any).links) ? ((snap as any).links as unknown[]).length : 0
+    const snapshotNodes: GraphNode[] = Array.isArray(snap.nodes) ? snap.nodes : []
+    const linksCount = Array.isArray(snap.links) ? snap.links.length : 0
     const nodesSig = __nodesSignatureForCachedPosHygiene(snapshotNodes)
 
     const keyChanged = lastSnapshotKey !== key
@@ -358,13 +425,13 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     // DPR clamp: static per user quality (no adaptive downscaling).
     if (!deps.isTestMode()) {
-      const win = ((globalThis as any).window ?? (globalThis as any)) as any
-      const deviceDpr = Math.max(1, Number(win.devicePixelRatio ?? 1))
+      const win = getRenderLoopWindow()
+      const deviceDpr = win.devicePixelRatio
       const baseClamp = baseDprClampForQuality(userQuality)
       // Canvas resize creates a visible flash; avoid unnecessary DPR changes.
       const desiredDpr = Math.min(deviceDpr, baseClamp)
       ensureCanvasDpr(layout.w, layout.h, desiredDpr)
-      ;(deps.fxState as any).__dprClamp = baseClamp
+      deps.fxState.__dprClamp = baseClamp
     }
 
     const dpr = canvas.width / Math.max(1, layout.w)
@@ -439,10 +506,10 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
       const scale = activeForPerf ? fxBudgetScale : 1
       const effectiveMaxParticles = Math.max(40, Math.floor(baseMaxParticles * scale))
 
-      ;(deps.fxState as any).__maxParticles = effectiveMaxParticles
-      ;(deps.fxState as any).__fxBudgetScale = scale
-      ;(deps.fxState as any).__lastFps = lastFps
-      ;(deps.fxState as any).__renderQuality = renderQuality
+      deps.fxState.__maxParticles = effectiveMaxParticles
+      deps.fxState.__fxBudgetScale = scale
+      deps.fxState.__lastFps = lastFps
+      deps.fxState.__renderQuality = renderQuality
       pruneFxToMaxParticles(effectiveMaxParticles)
     }
 
@@ -491,7 +558,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (deps.activeEdges && deps.activeEdges.size > 0) return true
     if (deps.activeNodes && deps.activeNodes.size > 0) return true
 
-    const fxState = deps.fxState as any
+    const fxState = deps.fxState
     const sparks = Array.isArray(fxState?.sparks) ? fxState.sparks.length : 0
     const edgePulses = Array.isArray(fxState?.edgePulses) ? fxState.edgePulses.length : 0
     const nodeBursts = Array.isArray(fxState?.nodeBursts) ? fxState.nodeBursts.length : 0
@@ -511,7 +578,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   function scheduleNext(nowMs: number) {
     if (!running) return
 
-    const win = ((globalThis as any).window ?? (globalThis as any)) as any
+    const win = getRenderLoopWindow()
 
     // Keep full-speed rendering briefly after activity ends to avoid flicker.
     const active = isAnimatingNow()
@@ -558,7 +625,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
   function ensureRenderLoop() {
     if (rafId !== null || timeoutId !== null) return
-    const win = ((globalThis as any).window ?? (globalThis as any)) as any
+    const win = getRenderLoopWindow()
     running = true
     const nowMs = win.performance?.now?.() ?? Date.now()
     lastActiveAtMs = nowMs
@@ -567,7 +634,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   }
 
   function stopRenderLoop() {
-    const win = ((globalThis as any).window ?? (globalThis as any)) as any
+    const win = getRenderLoopWindow()
     if (rafId !== null) win.cancelAnimationFrame(rafId)
     if (timeoutId !== null) win.clearTimeout(timeoutId)
     rafId = null
@@ -583,7 +650,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
    * - User interacts with the canvas (mouse/touch)
    */
   function wakeUp() {
-    const win = ((globalThis as any).window ?? (globalThis as any)) as any
+    const win = getRenderLoopWindow()
     const nowMs = win.performance?.now?.() ?? Date.now()
 
     lastActivityTime = nowMs

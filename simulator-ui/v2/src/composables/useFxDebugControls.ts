@@ -114,7 +114,7 @@ export function useFxDebugControls(deps: {
       if (looksLikeConflict) {
         try {
           const active = await getActiveRun({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken })
-          const activeRunId = String((active as any)?.run_id ?? '').trim()
+          const activeRunId = String(active.run_id ?? '').trim()
           if (activeRunId) {
             deps.real.runId = activeRunId
             await deps.realMode.refreshRunStatus()

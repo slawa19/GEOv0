@@ -93,6 +93,21 @@ function asOptionalAnyNumberOrString(value: unknown): string | number | undefine
   return undefined
 }
 
+function asOptionalNodeBadges(
+  value: unknown,
+  label: string,
+): DemoEvent extends { type: 'tx.updated' } ? never : Array<{ id: string; viz_badge_key: string | null }> | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error(`${label} must be array`)
+  return value.map((badge, idx) => {
+    if (!isRecord(badge)) throw new Error(`${label}[${idx}] must be object`)
+    return {
+      id: asString(badge.id, `${label}[${idx}].id`),
+      viz_badge_key: asOptionalNullableString(badge.viz_badge_key) ?? null,
+    }
+  })
+}
+
 type NetSign = -1 | 0 | 1 | null | undefined
 
 function normalizeBalanceAtomsMagnitude(
@@ -341,20 +356,20 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
         equivalent: asString(evt.equivalent, `events[${idx}].equivalent (${sourcePath})`),
         ttl_ms: ttl,
         intensity_key: asOptionalString(evt.intensity_key),
-        edges: evt.edges.map((e: any, eidx: number) => {
+        edges: evt.edges.map((e, eidx) => {
           if (!isRecord(e)) throw new Error(`tx.updated.edges[${eidx}] must be object (${sourcePath})`)
           const from = asString(e.from, `tx.updated.edges[${eidx}].from (${sourcePath})`)
           const to = asString(e.to, `tx.updated.edges[${eidx}].to (${sourcePath})`)
-          const style = isRecord(e.style) ? (e.style as any) : undefined
+          const style = isRecord(e.style) ? e.style : undefined
           const vw = style ? asOptionalString(style.viz_width_key) : undefined
           const va = style ? asOptionalString(style.viz_alpha_key) : undefined
           if (vw) assertVizKeyKnown('viz_width_key', vw, `event tx edge:${from}->${to} (${sourcePath})`)
           if (va) assertVizKeyKnown('viz_alpha_key', va, `event tx edge:${from}->${to} (${sourcePath})`)
           return { from, to, style: style ? { viz_width_key: vw, viz_alpha_key: va } : undefined }
         }),
-        node_badges: Array.isArray(evt.node_badges) ? (evt.node_badges as any) : undefined,
-        node_patch: asNodePatchArray((evt as any).node_patch, `tx.updated.node_patch (${sourcePath})`),
-        edge_patch: asEdgePatchArray((evt as any).edge_patch, `tx.updated.edge_patch (${sourcePath})`),
+        node_badges: asOptionalNodeBadges(evt.node_badges, `tx.updated.node_badges (${sourcePath})`),
+        node_patch: asNodePatchArray(evt.node_patch, `tx.updated.node_patch (${sourcePath})`),
+        edge_patch: asEdgePatchArray(evt.edge_patch, `tx.updated.edge_patch (${sourcePath})`),
       }
     }
 
@@ -367,9 +382,9 @@ export function validateEvents(raw: unknown, sourcePath: string): DemoEvent[] {
         plan_id: asString(evt.plan_id, `events[${idx}].plan_id (${sourcePath})`),
         cleared_cycles: asOptionalNumber(evt.cleared_cycles),
         cleared_amount: asOptionalString(evt.cleared_amount),
-        cycle_edges: evt.cycle_edges === undefined ? undefined : asEdgeArray((evt as any).cycle_edges, `clearing.done.cycle_edges (${sourcePath})`),
-        node_patch: asNodePatchArray((evt as any).node_patch, `clearing.done.node_patch (${sourcePath})`),
-        edge_patch: asEdgePatchArray((evt as any).edge_patch, `clearing.done.edge_patch (${sourcePath})`),
+        cycle_edges: evt.cycle_edges === undefined ? undefined : asEdgeArray(evt.cycle_edges, `clearing.done.cycle_edges (${sourcePath})`),
+        node_patch: asNodePatchArray(evt.node_patch, `clearing.done.node_patch (${sourcePath})`),
+        edge_patch: asEdgePatchArray(evt.edge_patch, `clearing.done.edge_patch (${sourcePath})`),
       }
     }
 

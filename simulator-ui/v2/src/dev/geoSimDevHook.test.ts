@@ -2,10 +2,25 @@ import { describe, expect, it } from 'vitest'
 import type { FxState } from '../render/fxRenderer'
 import { installGeoSimDevHook, uninstallGeoSimDevHook } from './geoSimDevHook'
 
+type GeoSimHook = {
+  isTestMode: boolean
+  isWebDriver: boolean
+  loading: boolean
+  error: string
+  hasSnapshot: boolean
+  fxState: FxState
+}
+
+type TestWindow = Window & typeof globalThis & { __geoSim?: GeoSimHook }
+
+function getTestWindow(): TestWindow {
+  return globalThis.window as TestWindow
+}
+
 describe('dev/geoSimDevHook', () => {
   it('does nothing when isDev=false', () => {
-    const prev = (globalThis as any).window
-    ;(globalThis as any).window = {}
+    const prev = globalThis.window
+    globalThis.window = {} as TestWindow
 
     const cleanup = installGeoSimDevHook({
       isDev: () => false,
@@ -19,14 +34,14 @@ describe('dev/geoSimDevHook', () => {
 
     expect(cleanup).toBeUndefined()
 
-    expect((globalThis as any).window.__geoSim).toBeUndefined()
+    expect(getTestWindow().__geoSim).toBeUndefined()
 
-    ;(globalThis as any).window = prev
+    globalThis.window = prev
   })
 
   it('installs window.__geoSim when isDev=true', () => {
-    const prev = (globalThis as any).window
-    ;(globalThis as any).window = {}
+    const prev = globalThis.window
+    globalThis.window = {} as TestWindow
 
     const fxState = { sparks: [], edgePulses: [], nodeBursts: [] } as FxState
 
@@ -42,24 +57,24 @@ describe('dev/geoSimDevHook', () => {
 
     expect(cleanup).toBeTypeOf('function')
 
-    const hook = (globalThis as any).window.__geoSim
+    const hook = getTestWindow().__geoSim
     expect(hook).toBeTruthy()
-    expect(hook.isTestMode).toBe(false)
-    expect(hook.isWebDriver).toBe(true)
-    expect(hook.loading).toBe(true)
-    expect(hook.error).toBe('oops')
-    expect(hook.hasSnapshot).toBe(true)
-    expect(hook.fxState).toBe(fxState)
+    expect(hook?.isTestMode).toBe(false)
+    expect(hook?.isWebDriver).toBe(true)
+    expect(hook?.loading).toBe(true)
+    expect(hook?.error).toBe('oops')
+    expect(hook?.hasSnapshot).toBe(true)
+    expect(hook?.fxState).toBe(fxState)
 
     cleanup?.()
-    expect((globalThis as any).window.__geoSim).toBeUndefined()
+    expect(getTestWindow().__geoSim).toBeUndefined()
 
-    ;(globalThis as any).window = prev
+    globalThis.window = prev
   })
 
   it('cleanup from previous install does not remove a newer hook', () => {
-    const prev = (globalThis as any).window
-    ;(globalThis as any).window = {}
+    const prev = globalThis.window
+    globalThis.window = {} as TestWindow
 
     const fx1 = { sparks: [], edgePulses: [], nodeBursts: [] } as FxState
     const fx2 = { sparks: [], edgePulses: [], nodeBursts: [] } as FxState
@@ -74,9 +89,9 @@ describe('dev/geoSimDevHook', () => {
       runClearingOnce: () => undefined,
     })
 
-    const hook1 = (globalThis as any).window.__geoSim
+    const hook1 = getTestWindow().__geoSim
     expect(hook1).toBeTruthy()
-    expect(hook1.fxState).toBe(fx1)
+    expect(hook1?.fxState).toBe(fx1)
 
     const cleanup2 = installGeoSimDevHook({
       isDev: () => true,
@@ -88,20 +103,20 @@ describe('dev/geoSimDevHook', () => {
       runClearingOnce: () => undefined,
     })
 
-    const hook2 = (globalThis as any).window.__geoSim
+    const hook2 = getTestWindow().__geoSim
     expect(hook2).toBeTruthy()
     expect(hook2).not.toBe(hook1)
-    expect(hook2.fxState).toBe(fx2)
+    expect(hook2?.fxState).toBe(fx2)
 
     cleanup1?.()
-    expect((globalThis as any).window.__geoSim).toBe(hook2)
+    expect(getTestWindow().__geoSim).toBe(hook2)
 
     cleanup2?.()
-    expect((globalThis as any).window.__geoSim).toBeUndefined()
+    expect(getTestWindow().__geoSim).toBeUndefined()
 
     // Idempotent global uninstall.
     uninstallGeoSimDevHook()
 
-    ;(globalThis as any).window = prev
+    globalThis.window = prev
   })
 })

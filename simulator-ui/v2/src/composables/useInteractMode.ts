@@ -95,6 +95,11 @@ export function useInteractMode(opts: {
   const CLEARING_PREVIEW_DWELL_MS = 800
   const CLEARING_RUNNING_DWELL_MS = 200
 
+  function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message
+    return String(error)
+  }
+
   // NOTE: payment targets are backend-first (Phase 2.5) and include multi-hop reachability.
   // IMPORTANT: capacity shown in the UI is best-effort only (direct-hop hint).
   // Backend remains the source of truth for amount feasibility.
@@ -475,10 +480,10 @@ export function useInteractMode(opts: {
 
     try {
       return await fn({ isCurrent, resetToIdle, signal: ctrl.signal })
-    } catch (e: any) {
+    } catch (error) {
       // Don't leak errors into already-cancelled state.
       if (isCurrent()) {
-        const msg = String(e?.message ?? e)
+        const msg = getErrorMessage(error)
         // Ensure repeated identical errors still retrigger the ErrorToast timer.
         if (state.error === msg) {
           state.error = null

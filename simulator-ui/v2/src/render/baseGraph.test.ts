@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { LayoutLink } from '../types/layout'
+import type { LayoutLink, LayoutNode } from '../types/layout'
 import type { VizMapping } from '../vizMapping'
 import { drawBaseGraph } from './baseGraph'
 
@@ -114,7 +114,7 @@ function makeCtx(): MockCtx {
   } as unknown as MockCtx
 }
 
-function makeNode(id: string, x = 0, y = 0): any {
+function makeNode(id: string, x = 0, y = 0): LayoutNode {
   return {
     id,
     __x: x,

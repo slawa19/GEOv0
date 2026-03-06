@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
 import { useRealClearingFx } from './useRealClearingFx'
+import type { ClearingAmountOverlay } from '../useOverlayState'
+
+type OverlayCall = {
+  overlay: ClearingAmountOverlay
+  opts: { color: string; throttleMs?: number }
+}
 
 describe('useRealClearingFx', () => {
   it('deferred clearing amount overlay: pushes only after layout coords become available', () => {
@@ -18,8 +24,8 @@ describe('useRealClearingFx', () => {
         return null
       }
 
-      const overlayCalls: any[] = []
-      const pushClearingAmountOverlay = (overlay: any, opts: any) => {
+      const overlayCalls: OverlayCall[] = []
+      const pushClearingAmountOverlay = (overlay: ClearingAmountOverlay, opts: { color: string; throttleMs?: number }) => {
         overlayCalls.push({ overlay, opts })
       }
 
@@ -73,7 +79,7 @@ describe('useRealClearingFx', () => {
     try {
       const isTestMode = ref(false)
 
-      const overlayCalls: any[] = []
+      const overlayCalls: OverlayCall[] = []
 
       const fx = useRealClearingFx({
         fxState: {},
@@ -136,7 +142,7 @@ describe('useRealClearingFx', () => {
         setFlash: () => undefined,
         nowMs: () => Date.now(),
         nowEpochMs: () => Date.now(),
-        spawnEdgePulses: spawnEdgePulses as any,
+        spawnEdgePulses,
         spawnNodeBursts: () => undefined,
       })
 

@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 
+import type { FxState } from '../../render/fxRenderer'
 import { spawnNodeBursts as spawnNodeBurstsDefault, spawnSparks as spawnSparksDefault } from '../../render/fxRenderer'
 import type { TxUpdatedEvent } from '../../types'
 import { normalizeTxAmountLabelInput } from '../../utils/txAmountLabel'
@@ -61,9 +62,10 @@ export function __pickSparkEdges(
 
 type SpawnSparksFn = typeof spawnSparksDefault
 type SpawnNodeBurstsFn = typeof spawnNodeBurstsDefault
+type FxStateLike = Partial<Pick<FxState, 'sparks' | 'edgePulses' | 'nodeBursts'>>
 
 export function useRealTxFx(deps: {
-  fxState: any
+  fxState: FxStateLike
   isTestMode: Readonly<Ref<boolean>>
   isWebDriver: boolean
 
@@ -137,13 +139,22 @@ export function useRealTxFx(deps: {
     txFxLastSpawnAtMs = 0
   }
 
+  function getFxState(): FxState {
+    const fxState = deps.fxState as FxState
+    if (!Array.isArray(fxState.sparks)) fxState.sparks = []
+    if (!Array.isArray(fxState.edgePulses)) fxState.edgePulses = []
+    if (!Array.isArray(fxState.nodeBursts)) fxState.nodeBursts = []
+    return fxState
+  }
+
   function runRealTxFx(evt: TxUpdatedEvent) {
     const tNowMs = nowMs()
     if (tNowMs - txFxLastSpawnAtMs < cfg.minGapMs) return
 
     refillTxFxTokens(tNowMs)
     if (txFxTokens < 1) return
-    if ((deps.fxState?.sparks?.length ?? 0) >= cfg.maxConcurrentSparks) return
+    const fxState = getFxState()
+    if ((fxState.sparks?.length ?? 0) >= cfg.maxConcurrentSparks) return
 
     const resolved = deps.resolveTxDirection({ from: evt.from, to: evt.to, edges: evt.edges })
     const sparkEdges = __pickSparkEdges(resolved.edges, { from: resolved.from, to: resolved.to }, cfg)
@@ -155,7 +166,7 @@ export function useRealTxFx(deps: {
     const ttlMs = clampRealTxTtlMs(evt.ttl_ms)
     const k = deps.intensityScale(evt.intensity_key ?? undefined)
 
-    spawnSparks(deps.fxState, {
+    spawnSparks(fxState, {
       edges: sparkEdges,
       nowMs: tNowMs,
       ttlMs,
@@ -173,7 +184,7 @@ export function useRealTxFx(deps: {
     if (!(deps.isTestMode.value && deps.isWebDriver)) {
       const src = resolved.from || sparkEdges[0]!.from
       const dst = resolved.to || sparkEdges[sparkEdges.length - 1]!.to
-      spawnNodeBursts(deps.fxState, {
+      spawnNodeBursts(fxState, {
         nodeIds: [src],
         nowMs: tNowMs,
         durationMs: 280,
@@ -184,7 +195,7 @@ export function useRealTxFx(deps: {
         isTestMode: false,
       })
       deps.scheduleTimeout(() => {
-        spawnNodeBursts(deps.fxState, {
+        spawnNodeBursts(fxState, {
           nodeIds: [dst],
           nowMs: nowMs(),
           durationMs: 420,

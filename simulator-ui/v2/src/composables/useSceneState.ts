@@ -65,6 +65,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   let lastSnapshotNodeIds: Set<string> | null = null
   let hasLoadedOnce = false
 
+  function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message
+    return String(error)
+  }
+
   function parseSceneContext(sourcePath: string | null | undefined): { kind: 'scenario' | 'run' | 'other'; id: string } {
     const s = String(sourcePath ?? '').trim()
     if (!s) return { kind: 'other', id: '' }
@@ -176,8 +181,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
         deps.resizeAndLayout()
       }
       deps.ensureRenderLoop()
-    } catch (e: any) {
-      deps.state.error = String(e?.message ?? e)
+    } catch (error) {
+      deps.state.error = getErrorMessage(error)
     } finally {
       deps.state.loading = false
     }

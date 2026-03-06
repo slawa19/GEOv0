@@ -2,14 +2,15 @@ import { createApp, defineComponent, h, nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import WindowShell from '../components/WindowShell.vue'
-import type { WindowInstance } from './windowManager/types'
+import type { WindowDataByType, WindowInstance } from './windowManager/types'
 import { useDestructiveConfirmation } from './useDestructiveConfirmation'
 
 function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
+  const data: WindowDataByType['edge-detail'] = { fromPid: 'A', toPid: 'B', title: 'A → B' }
   return {
     id: 1,
     type: 'edge-detail',
-    data: { edge: { from: 'A', to: 'B' } } as any,
+    data,
     rect: { left: 10, top: 10, width: 200, height: 120 },
     z: 1,
     effectiveZ: 1,
@@ -20,13 +21,21 @@ function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
       escBehavior: 'close',
       closeOnOutsideClick: false,
     },
-    constraints: { minWidth: 120, minHeight: 80, preferredWidth: 200, preferredHeight: 120 },
+    constraints: {
+      minWidth: 120,
+      minHeight: 80,
+      maxWidth: 100000,
+      maxHeight: 100000,
+      preferredWidth: 200,
+      preferredHeight: 120,
+    },
     anchor: null,
+    anchorOffset: null,
     placement: 'docked-right',
     measured: null,
     state: 'open',
     ...overrides,
-  } as WindowInstance
+  }
 }
 
 describe('useDestructiveConfirmation (TODO-ESC)', () => {
@@ -47,7 +56,7 @@ describe('useDestructiveConfirmation (TODO-ESC)', () => {
     const app = createApp({
       render: () =>
         h(
-          WindowShell as any,
+          WindowShell,
           {
             instance: makeInstance(),
             frameless: true,

@@ -56,24 +56,63 @@ type UseLayoutCoordinatorReturn<N, L> = {
   setClampCameraPan: (fn: () => void) => void
 }
 
-function getWin(): any {
-  return ((globalThis as any).window ?? globalThis) as any
+type LayoutCoordinatorWindowLike = {
+  devicePixelRatio?: number
+  requestAnimationFrame?: (callback: FrameRequestCallback) => number
+  cancelAnimationFrame?: (handle: number) => void
+  setTimeout: typeof globalThis.setTimeout
+  clearTimeout: typeof globalThis.clearTimeout
+  performance?: Pick<Performance, 'now'>
+  matchMedia?: typeof window.matchMedia
+  addEventListener?: Window['addEventListener']
+  removeEventListener?: Window['removeEventListener']
 }
 
-function getDoc(): any {
-  const w = (globalThis as any).window as any
-  return ((globalThis as any).document ?? w?.document) as any
+type LayoutCoordinatorDocumentLike = {
+  visibilityState?: Document['visibilityState']
+  addEventListener?: Document['addEventListener']
+  removeEventListener?: Document['removeEventListener']
 }
 
-function addMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {
+type LegacyMediaQueryList = MediaQueryList & {
+  addListener?: (listener: (event: MediaQueryListEvent) => void) => void
+  removeListener?: (listener: (event: MediaQueryListEvent) => void) => void
+}
+
+type LayoutTimerHandle = ReturnType<typeof globalThis.setTimeout>
+type LayoutAnimationHandle = number | LayoutTimerHandle
+
+function getWin(): LayoutCoordinatorWindowLike {
+  const maybeWindow = typeof globalThis.window !== 'undefined' ? globalThis.window : undefined
+  return {
+    devicePixelRatio: maybeWindow?.devicePixelRatio,
+    requestAnimationFrame: maybeWindow?.requestAnimationFrame?.bind(maybeWindow),
+    cancelAnimationFrame: maybeWindow?.cancelAnimationFrame?.bind(maybeWindow),
+    setTimeout: maybeWindow?.setTimeout?.bind(maybeWindow) ?? globalThis.setTimeout.bind(globalThis),
+    clearTimeout: maybeWindow?.clearTimeout?.bind(maybeWindow) ?? globalThis.clearTimeout.bind(globalThis),
+    performance: maybeWindow?.performance ?? globalThis.performance,
+    matchMedia: maybeWindow?.matchMedia?.bind(maybeWindow),
+    addEventListener: maybeWindow?.addEventListener?.bind(maybeWindow),
+    removeEventListener: maybeWindow?.removeEventListener?.bind(maybeWindow),
+  }
+}
+
+function getDoc(): LayoutCoordinatorDocumentLike | undefined {
+  const maybeWindow = typeof globalThis.window !== 'undefined' ? globalThis.window : undefined
+  return typeof globalThis.document !== 'undefined' ? globalThis.document : maybeWindow?.document
+}
+
+function addMqlListener(mql: MediaQueryList, cb: (ev: MediaQueryListEvent) => void) {
+  const legacyMql = mql as LegacyMediaQueryList
   if (typeof mql.addEventListener === 'function') mql.addEventListener('change', cb)
   // Legacy Safari.
-  else if (typeof (mql as any).addListener === 'function') (mql as any).addListener(cb)
+  else if (typeof legacyMql.addListener === 'function') legacyMql.addListener(cb)
 }
 
-function removeMqlListener(mql: MediaQueryList, cb: (ev?: any) => void) {
+function removeMqlListener(mql: MediaQueryList, cb: (ev: MediaQueryListEvent) => void) {
+  const legacyMql = mql as LegacyMediaQueryList
   if (typeof mql.removeEventListener === 'function') mql.removeEventListener('change', cb)
-  else if (typeof (mql as any).removeListener === 'function') (mql as any).removeListener(cb)
+  else if (typeof legacyMql.removeListener === 'function') legacyMql.removeListener(cb)
 }
 
 /**
@@ -139,10 +178,10 @@ export function useLayoutCoordinator<
     layout.links = markRaw(rawLinks)
   }
 
-	let resizeRafId: number | null = null
-	let resizeRelayoutRafId: number | null = null
-	let relayoutDebounceId: number | null = null
-	let relayoutRafId: number | null = null
+  let resizeRafId: LayoutAnimationHandle | null = null
+  let resizeRelayoutRafId: LayoutAnimationHandle | null = null
+  let relayoutDebounceId: LayoutTimerHandle | null = null
+  let relayoutRafId: LayoutAnimationHandle | null = null
 	let relayoutAfterResizePending = false
 
   // ITEM-18 (LOW): coordinate RAF scheduling between resize-relayout and plain relayout.
@@ -265,17 +304,20 @@ export function useLayoutCoordinator<
 		deps.wakeUp?.()
 	}
 
-  function getRafScheduler(): (cb: (t: number) => void) => number {
+  function getRafScheduler(): (cb: (t: number) => void) => LayoutAnimationHandle {
     const win = getWin()
     return typeof win.requestAnimationFrame === 'function'
       ? win.requestAnimationFrame.bind(win)
       : (cb) => win.setTimeout(() => cb(win.performance?.now?.() ?? Date.now()), 0)
   }
 
-  function cancelRaf(id: number) {
+  function cancelRaf(id: LayoutAnimationHandle) {
     const win = getWin()
-    if (typeof win.cancelAnimationFrame === 'function') win.cancelAnimationFrame(id)
-    else win.clearTimeout(id)
+    if (typeof id === 'number' && typeof win.cancelAnimationFrame === 'function') {
+      win.cancelAnimationFrame(id)
+      return
+    }
+    win.clearTimeout(id)
   }
 
   function performRelayoutNow() {

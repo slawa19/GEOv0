@@ -2,21 +2,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createTimerRegistry } from './timerRegistry'
 
+type TimerWindow = Pick<Window, 'setTimeout' | 'clearTimeout'>
+
+function createTimerWindow(): TimerWindow {
+  return {
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+  }
+}
+
 describe('createTimerRegistry()', () => {
-  const prevWindow = (globalThis as any).window
+  const prevWindow = globalThis.window
 
   afterEach(() => {
     vi.useRealTimers()
-    ;(globalThis as any).window = prevWindow
+    globalThis.window = prevWindow
   })
 
   it('tracks size and removes fired timers', () => {
     vi.useFakeTimers()
 
-    ;(globalThis as any).window = {
-      setTimeout: globalThis.setTimeout.bind(globalThis),
-      clearTimeout: globalThis.clearTimeout.bind(globalThis),
-    }
+    globalThis.window = createTimerWindow() as Window & typeof globalThis
 
     const reg = createTimerRegistry()
 
@@ -35,10 +41,7 @@ describe('createTimerRegistry()', () => {
   it('clearAll({keepCritical:true}) keeps critical timers and clears non-critical', () => {
     vi.useFakeTimers()
 
-    ;(globalThis as any).window = {
-      setTimeout: globalThis.setTimeout.bind(globalThis),
-      clearTimeout: globalThis.clearTimeout.bind(globalThis),
-    }
+    globalThis.window = createTimerWindow() as Window & typeof globalThis
 
     const reg = createTimerRegistry()
 
@@ -62,10 +65,7 @@ describe('createTimerRegistry()', () => {
   it('clearAll() clears all timers', () => {
     vi.useFakeTimers()
 
-    ;(globalThis as any).window = {
-      setTimeout: globalThis.setTimeout.bind(globalThis),
-      clearTimeout: globalThis.clearTimeout.bind(globalThis),
-    }
+    globalThis.window = createTimerWindow() as Window & typeof globalThis
 
     const reg = createTimerRegistry()
 

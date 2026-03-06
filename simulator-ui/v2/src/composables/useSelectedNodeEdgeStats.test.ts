@@ -1,20 +1,22 @@
 import { describe, expect, it } from 'vitest'
+import type { GraphSnapshot } from '../types'
 import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 
-function makeSnapshot() {
+function makeSnapshot(): GraphSnapshot {
   return {
     equivalent: 'UAH',
+    generated_at: '2026-01-25T00:00:00Z',
     nodes: [
       { id: 'A', name: 'A' },
       { id: 'B', name: 'B' },
       { id: 'C', name: 'C' },
     ],
     links: [
-      { __key: 'A->B', source: 'A', target: 'B', trust_limit: 10 },
-      { __key: 'C->A', source: 'C', target: 'A', trust_limit: 5 },
-      { __key: 'A->C', source: 'A', target: 'C', trust_limit: 3 },
+      { source: 'A', target: 'B', trust_limit: 10 },
+      { source: 'C', target: 'A', trust_limit: 5 },
+      { source: 'A', target: 'C', trust_limit: 3 },
     ],
-  } as any
+  }
 }
 
 describe('useSelectedNodeEdgeStats', () => {

@@ -2,75 +2,127 @@ import { computed, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { computeSnapshotStructuralKey, topologyFingerprint, useLayoutCoordinator } from './useLayoutCoordinator'
 
-type Listener = (ev?: any) => void
+type TestEvent = { type: string }
+type Listener<T = TestEvent> = (ev?: T) => void
+type MockCanvas = Pick<HTMLCanvasElement, 'width' | 'height'> & {
+  style: Pick<CSSStyleDeclaration, 'width' | 'height'>
+}
+type MockHost = Pick<HTMLDivElement, 'getBoundingClientRect'>
+type MockWindow = {
+  devicePixelRatio: number
+  performance: { now: () => number }
+  setTimeout: typeof globalThis.setTimeout
+  clearTimeout: typeof globalThis.clearTimeout
+  requestAnimationFrame: (cb: FrameRequestCallback) => number
+  cancelAnimationFrame: (id: number) => void
+  matchMedia?: ((query: string) => MediaQueryList) | undefined
+  addEventListener: (type: string, cb: Listener<TestEvent>) => void
+  removeEventListener: (type: string, cb: Listener<TestEvent>) => void
+  dispatchEvent: (ev: TestEvent) => void
+}
+type MockDocument = {
+  visibilityState: 'visible' | 'hidden'
+  addEventListener: (type: string, cb: Listener<TestEvent>) => void
+  removeEventListener: (type: string, cb: Listener<TestEvent>) => void
+  dispatchEvent: (ev: TestEvent) => void
+}
+
+function setGlobalWindow(value: (Window & typeof globalThis) | undefined) {
+  Object.defineProperty(globalThis, 'window', {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
+
+function setGlobalDocument(value: Document | undefined) {
+  Object.defineProperty(globalThis, 'document', {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
+
+function setGlobalResizeObserver(value: typeof ResizeObserver | undefined) {
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
 
 function createMockEventTarget() {
-  const listeners = new Map<string, Set<Listener>>()
+  const listeners = new Map<string, Set<Listener<TestEvent>>>()
   return {
-    addEventListener: (type: string, cb: Listener) => {
+    addEventListener: (type: string, cb: Listener<TestEvent>) => {
       if (!listeners.has(type)) listeners.set(type, new Set())
       listeners.get(type)!.add(cb)
     },
-    removeEventListener: (type: string, cb: Listener) => {
+    removeEventListener: (type: string, cb: Listener<TestEvent>) => {
       listeners.get(type)?.delete(cb)
     },
-    dispatchEvent: (ev: { type: string }) => {
+    dispatchEvent: (ev: TestEvent) => {
       for (const cb of listeners.get(ev.type) ?? []) cb(ev)
     },
   }
 }
 
-function createMockCanvas() {
+function createMockCanvas(): HTMLCanvasElement {
   return {
     width: 0,
     height: 0,
     style: { width: '', height: '' },
-  } as any
+  } as unknown as HTMLCanvasElement
 }
 
-function createMockHost(w: number, h: number) {
+function createMockHost(w: number, h: number): HTMLDivElement {
   return {
     getBoundingClientRect: () => ({ width: w, height: h }),
-  } as any
+  } as unknown as HTMLDivElement
 }
 
-function withMockWindowAndDocument<T>(fn: (ctx: { win: any; doc: any }) => T): T {
-  const prevWindow = (globalThis as any).window
-  const prevDocument = (globalThis as any).document
-  const prevResizeObserver = (globalThis as any).ResizeObserver
+function triggerResizeObserver(callback: ResizeObserverCallback | null, target: HTMLDivElement): void {
+  if (!callback) throw new Error('ResizeObserver callback was not captured')
+  callback([{ target } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+}
+
+function withMockWindowAndDocument<T>(fn: (ctx: { win: MockWindow; doc: MockDocument }) => T): T {
+  const prevWindow = globalThis.window
+  const prevDocument = globalThis.document
+  const prevResizeObserver = globalThis.ResizeObserver
 
   const winTarget = createMockEventTarget()
   const docTarget = createMockEventTarget()
 
-  const win = {
+  const win: MockWindow = {
     ...winTarget,
     devicePixelRatio: 1,
     performance: { now: () => 0 },
     setTimeout: globalThis.setTimeout.bind(globalThis),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
     requestAnimationFrame: (cb: (t: number) => void) => {
-      return globalThis.setTimeout(() => cb(0), 0) as any
+      return globalThis.setTimeout(() => cb(0), 0) as unknown as number
     },
-    cancelAnimationFrame: (id: any) => {
-      globalThis.clearTimeout(id)
+    cancelAnimationFrame: (id: number) => {
+      globalThis.clearTimeout(id as unknown as ReturnType<typeof globalThis.setTimeout>)
     },
-    matchMedia: undefined as any,
+    matchMedia: undefined,
   }
 
-  const doc = {
+  const doc: MockDocument = {
     ...docTarget,
     visibilityState: 'visible' as 'visible' | 'hidden',
   }
 
-  ;(globalThis as any).window = win
-  ;(globalThis as any).document = doc
+  setGlobalWindow(win as unknown as Window & typeof globalThis)
+  setGlobalDocument(doc as unknown as Document)
 
   try {
     return fn({ win, doc })
   } finally {
-    ;(globalThis as any).window = prevWindow
-    ;(globalThis as any).document = prevDocument
-    ;(globalThis as any).ResizeObserver = prevResizeObserver
+    setGlobalWindow(prevWindow)
+    setGlobalDocument(prevDocument)
+    setGlobalResizeObserver(prevResizeObserver)
   }
 }
 
@@ -310,7 +362,7 @@ describe('useLayoutCoordinator', () => {
       // In the original bug, relayout was scheduled via setTimeout(0) and could run
       // before the resize RAF updated layout.w/h.
       win.requestAnimationFrame = (cb: (t: number) => void) => {
-        return globalThis.setTimeout(() => cb(0), 16) as any
+        return globalThis.setTimeout(() => cb(0), 16) as unknown as number
       }
 
       const wakeUp = vi.fn()
@@ -389,15 +441,15 @@ describe('useLayoutCoordinator', () => {
 
     withMockWindowAndDocument(() => {
       const wakeUp = vi.fn()
-      let roCb: ((entries: any[]) => void) | null = null
+      let roCb: ResizeObserverCallback | null = null
 
-      ;(globalThis as any).ResizeObserver = class {
-        constructor(cb: (entries: any[]) => void) {
+      setGlobalResizeObserver(class {
+        constructor(cb: ResizeObserverCallback) {
           roCb = cb
         }
         observe() {}
         disconnect() {}
-      }
+      } as unknown as typeof ResizeObserver)
 
       const host = createMockHost(500, 400)
 
@@ -416,8 +468,7 @@ describe('useLayoutCoordinator', () => {
       })
 
       coordinator.setupResizeListener()
-      if (!roCb) throw new Error('ResizeObserver callback was not captured')
-      ;(roCb as any)([{ target: host }])
+      triggerResizeObserver(roCb, host)
       vi.runAllTimers()
       expect(wakeUp).toHaveBeenCalled()
       coordinator.teardownResizeListener()
@@ -432,15 +483,15 @@ describe('useLayoutCoordinator', () => {
 		withMockWindowAndDocument(({ win }) => {
 			const wakeUp = vi.fn()
 			const computeLayout = vi.fn()
-			let roCb: ((entries: any[]) => void) | null = null
+      let roCb: ResizeObserverCallback | null = null
 
-			;(globalThis as any).ResizeObserver = class {
-				constructor(cb: (entries: any[]) => void) {
+      setGlobalResizeObserver(class {
+        constructor(cb: ResizeObserverCallback) {
 					roCb = cb
 				}
 				observe() {}
 				disconnect() {}
-			}
+      } as unknown as typeof ResizeObserver)
 
 			const host = createMockHost(640, 480)
 
@@ -459,11 +510,10 @@ describe('useLayoutCoordinator', () => {
 			})
 
 			coordinator.setupResizeListener()
-			if (!roCb) throw new Error('ResizeObserver callback was not captured')
 
 			// Same "batch" / tick: both signals arrive before RAF flush.
 			win.dispatchEvent({ type: 'resize' })
-			;(roCb as any)([{ target: host }])
+      triggerResizeObserver(roCb, host)
 
 			vi.runAllTimers()
 
@@ -558,15 +608,15 @@ describe('useLayoutCoordinator', () => {
 		withMockWindowAndDocument(({ win }) => {
 			const wakeUp = vi.fn()
 			const computeLayout = vi.fn()
-			let roCb: ((entries: any[]) => void) | null = null
+      let roCb: ResizeObserverCallback | null = null
 
-			;(globalThis as any).ResizeObserver = class {
-				constructor(cb: (entries: any[]) => void) {
+      setGlobalResizeObserver(class {
+        constructor(cb: ResizeObserverCallback) {
 					roCb = cb
 				}
 				observe() {}
 				disconnect() {}
-			}
+      } as unknown as typeof ResizeObserver)
 
 			const host = createMockHost(320, 200)
 
@@ -585,18 +635,17 @@ describe('useLayoutCoordinator', () => {
 			})
 
 			coordinator.setupResizeListener()
-			if (!roCb) throw new Error('ResizeObserver callback was not captured')
 
 			// First batch: size changes from initial 0 -> 320x200, must compute + wake.
 			win.dispatchEvent({ type: 'resize' })
-			;(roCb as any)([{ target: host }])
+      triggerResizeObserver(roCb, host)
 			vi.runAllTimers()
 			expect(computeLayout).toHaveBeenCalledTimes(1)
 			expect(wakeUp).toHaveBeenCalledTimes(1)
 
 			// Second batch: no size change, must be a no-op (no extra compute/wake).
 			win.dispatchEvent({ type: 'resize' })
-			;(roCb as any)([{ target: host }])
+      triggerResizeObserver(roCb, host)
 			vi.runAllTimers()
 
 			expect(computeLayout).toHaveBeenCalledTimes(1)
@@ -630,7 +679,7 @@ describe('useLayoutCoordinator', () => {
             const idx = mqlListeners.indexOf(cb)
             if (idx >= 0) mqlListeners.splice(idx, 1)
           },
-        } as any
+        } as unknown as MediaQueryList
       }
 
       const coordinator = useLayoutCoordinator({
@@ -653,7 +702,7 @@ describe('useLayoutCoordinator', () => {
 
       // Simulate DPR change: update dpr and fire the media-query listener.
       win.devicePixelRatio = 2
-      mqlListeners[0]?.({ matches: false } as any)
+      mqlListeners[0]?.({ matches: false } as MediaQueryListEvent)
       vi.runAllTimers()
 
       // Should have re-registered with new `(resolution: <dpr>dppx)`.
@@ -706,7 +755,7 @@ describe('useLayoutCoordinator', () => {
             const idx = listeners.indexOf(cb)
             if (idx >= 0) listeners.splice(idx, 1)
           },
-        } as any
+        } as unknown as MediaQueryList
       }
 
       const coordinator = useLayoutCoordinator({
@@ -890,7 +939,7 @@ describe('useLayoutCoordinator', () => {
     let w = 800
     const host = {
       getBoundingClientRect: () => ({ width: w, height: 600 }),
-    } as any
+    } as unknown as HTMLDivElement
 
     const canvas = createMockCanvas()
     const fxCanvas = createMockCanvas()

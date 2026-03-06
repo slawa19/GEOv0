@@ -55,7 +55,7 @@ describe('getLinkTermination()', () => {
   it('returns finite coordinates when viz_size contains NaN/Infinity', () => {
     const n = node({ x: 0, y: 0, shape: 'circle' })
     // Manually override viz_size to contain non-finite values.
-    ;(n as any).viz_size = { w: Number.NaN, h: Number.POSITIVE_INFINITY }
+    n.viz_size = { w: Number.NaN, h: Number.POSITIVE_INFINITY }
     const target = { __x: 10, __y: 0 }
 
     const p = getLinkTermination(n, target, 1)

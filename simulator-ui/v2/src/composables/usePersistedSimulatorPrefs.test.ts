@@ -10,6 +10,11 @@ type MemStorage = {
   _data: Map<string, string>
 }
 
+type NumberTimers = {
+  setTimeout: (fn: () => void, ms: number) => number
+  clearTimeout: (id: number) => void
+}
+
 function createMemStorage(seed?: Record<string, string>): MemStorage {
   const _data = new Map<string, string>(seed ? Object.entries(seed) : [])
   return {
@@ -17,6 +22,28 @@ function createMemStorage(seed?: Record<string, string>): MemStorage {
     getItem: (k) => (_data.has(k) ? _data.get(k)! : null),
     setItem: (k, v) => {
       _data.set(k, String(v))
+    },
+  }
+}
+
+function createNumberTimers(): NumberTimers {
+  let nextId = 1
+  const handles = new Map<number, ReturnType<typeof globalThis.setTimeout>>()
+  return {
+    setTimeout: (fn, ms) => {
+      const id = nextId++
+      handles.set(id, globalThis.setTimeout(() => {
+        handles.delete(id)
+        fn()
+      }, ms))
+      return id
+    },
+    clearTimeout: (id) => {
+      const handle = handles.get(id)
+      if (handle !== undefined) {
+        globalThis.clearTimeout(handle)
+        handles.delete(id)
+      }
     },
   }
 }
@@ -32,7 +59,6 @@ describe('usePersistedSimulatorPrefs', () => {
     const layoutMode = ref<LayoutMode>('admin-force')
     const quality = ref<Quality>('high')
     const labelsLod = ref<LabelsLod>('selection')
-
     const prefs = usePersistedSimulatorPrefs({
       layoutMode,
       quality,
@@ -62,6 +88,7 @@ describe('usePersistedSimulatorPrefs', () => {
     const layoutMode = ref<LayoutMode>('admin-force')
     const quality = ref<Quality>('high')
     const labelsLod = ref<LabelsLod>('selection')
+    const timers = createNumberTimers()
 
     const prefs = usePersistedSimulatorPrefs({
       layoutMode,
@@ -69,10 +96,7 @@ describe('usePersistedSimulatorPrefs', () => {
       labelsLod,
       requestResizeAndLayout,
       storage,
-      timers: {
-        setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
-        clearTimeout: (id) => clearTimeout(id as unknown as any),
-      },
+      timers,
       debounceMs: 250,
     })
 
@@ -108,6 +132,7 @@ describe('usePersistedSimulatorPrefs', () => {
     const layoutMode = ref<LayoutMode>('admin-force')
     const quality = ref<Quality>('high')
     const labelsLod = ref<LabelsLod>('selection')
+    const timers = createNumberTimers()
 
     const prefs = usePersistedSimulatorPrefs({
       layoutMode,
@@ -115,10 +140,7 @@ describe('usePersistedSimulatorPrefs', () => {
       labelsLod,
       requestResizeAndLayout: () => undefined,
       storage,
-      timers: {
-        setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown as number,
-        clearTimeout: (id) => clearTimeout(id as unknown as any),
-      },
+      timers,
       debounceMs: 250,
     })
 

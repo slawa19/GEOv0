@@ -1,4 +1,5 @@
 import { installGeoSimDevHook, uninstallGeoSimDevHook } from '../dev/geoSimDevHook'
+import type { FxState } from '../render/fxRenderer'
 import type { SimulatorAppState } from '../types/simulatorApp'
 
 export function useGeoSimDevHookSetup(opts: {
@@ -6,7 +7,7 @@ export function useGeoSimDevHookSetup(opts: {
   isTestMode: () => boolean
   isWebDriver: () => boolean
   getState: () => SimulatorAppState
-  fxState: unknown
+  fxState: FxState
   runTxOnce: () => void
   runClearingOnce: () => void
 }) {
@@ -22,7 +23,7 @@ export function useGeoSimDevHookSetup(opts: {
       isTestMode: opts.isTestMode,
       isWebDriver: opts.isWebDriver,
       getState: opts.getState,
-      fxState: opts.fxState as any,
+      fxState: opts.fxState,
       runTxOnce: opts.runTxOnce,
       runClearingOnce: opts.runClearingOnce,
     })

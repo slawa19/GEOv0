@@ -1,7 +1,7 @@
 export function createThrottledWarn(everyMs: number) {
   let lastWarnAtMs = 0
 
-  return (enabled: boolean, ...args: any[]): boolean => {
+  return (enabled: boolean, ...args: unknown[]): boolean => {
     if (!enabled) return false
     const now = Date.now()
     if (now - lastWarnAtMs < everyMs) return false

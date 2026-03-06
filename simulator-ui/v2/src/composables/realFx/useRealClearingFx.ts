@@ -2,7 +2,9 @@ import type { Ref } from 'vue'
 
 import type { ClearingDoneEvent } from '../../types'
 import { CLEARING_LABEL_COLOR } from '../../config/fxConfig'
+import type { FxState } from '../../render/fxRenderer'
 import { spawnEdgePulses as spawnEdgePulsesDefault, spawnNodeBursts as spawnNodeBurstsDefault } from '../../render/fxRenderer'
+import type { LayoutNode } from '../../types/layout'
 import { computeClearingAmountAnchorFromEdgeMidpoints } from '../../utils/clearingAmountAnchor'
 import { isZeroDecimalString } from '../../utils/isZeroDecimalString'
 import { __retryUntilTruthyOrDeadline } from '../../utils/retryUntilTruthy'
@@ -17,6 +19,8 @@ export type ClearingFxParams = {
 
 type SpawnEdgePulsesFn = typeof spawnEdgePulsesDefault
 type SpawnNodeBurstsFn = typeof spawnNodeBurstsDefault
+type FxStateLike = Partial<Pick<FxState, 'sparks' | 'edgePulses' | 'nodeBursts'>>
+type LayoutNodePosition = Pick<LayoutNode, '__x' | '__y'>
 
 function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
   const out: string[] = []
@@ -35,7 +39,7 @@ function nodesFromEdges(edges: Array<{ from: string; to: string }>): string[] {
 }
 
 export function useRealClearingFx(deps: {
-  fxState: any
+  fxState: FxStateLike
   isTestMode: Readonly<Ref<boolean>>
   isWebDriver: boolean
 
@@ -56,7 +60,7 @@ export function useRealClearingFx(deps: {
   ) => void
 
   scheduleTimeout: (fn: () => void, ms: number) => void
-  getLayoutNodeById: (nodeId: string) => any
+  getLayoutNodeById: (nodeId: string) => LayoutNodePosition | null
   setFlash: (v: number) => void
 
   nowMs?: () => number
@@ -138,6 +142,14 @@ export function useRealClearingFx(deps: {
     })
   }
 
+  function getFxState(): FxState {
+    const fxState = deps.fxState as FxState
+    if (!Array.isArray(fxState.sparks)) fxState.sparks = []
+    if (!Array.isArray(fxState.edgePulses)) fxState.edgePulses = []
+    if (!Array.isArray(fxState.nodeBursts)) fxState.nodeBursts = []
+    return fxState
+  }
+
   function runClearingFx(params: ClearingFxParams) {
     const { edges: edgesAll, totalAmount, equivalent, planId } = params
 
@@ -161,6 +173,7 @@ export function useRealClearingFx(deps: {
     }
 
     const tNowMs = nowMs()
+    const fxState = getFxState()
     const nodeIds = nodesFromEdges(edgesAll)
 
     deps.setFlash(0.55)
@@ -169,7 +182,7 @@ export function useRealClearingFx(deps: {
 
     const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
     if (edgesFx.length > 0) {
-      spawnEdgePulses(deps.fxState, {
+      spawnEdgePulses(fxState, {
         edges: edgesFx,
         nowMs: tNowMs,
         durationMs: 4200,
@@ -187,7 +200,7 @@ export function useRealClearingFx(deps: {
 
     const burstNodeIds = nodeIds.slice(0, 40)
     if (burstNodeIds.length > 0) {
-      spawnNodeBursts(deps.fxState, {
+      spawnNodeBursts(fxState, {
         nodeIds: burstNodeIds,
         nowMs: tNowMs,
         durationMs: 2800,
@@ -210,18 +223,17 @@ export function useRealClearingFx(deps: {
   }
 
   function runRealClearingDoneFx(done: ClearingDoneEvent) {
-    const doneCycleEdges = (done as any)?.cycle_edges
     const edges: Array<{ from: string; to: string }> = []
-    if (Array.isArray(doneCycleEdges) && doneCycleEdges.length > 0) {
-      for (const e of doneCycleEdges) edges.push({ from: e.from, to: e.to })
+    if (Array.isArray(done.cycle_edges) && done.cycle_edges.length > 0) {
+      for (const e of done.cycle_edges) edges.push({ from: e.from, to: e.to })
     }
     if (edges.length === 0) return
 
     runClearingFx({
       edges,
-      totalAmount: String((done as any)?.cleared_amount ?? '0'),
-      equivalent: String((done as any)?.equivalent ?? ''),
-      planId: String((done as any)?.plan_id ?? '') || undefined,
+      totalAmount: String(done.cleared_amount ?? '0'),
+      equivalent: String(done.equivalent ?? ''),
+      planId: String(done.plan_id ?? '') || undefined,
     })
   }
 

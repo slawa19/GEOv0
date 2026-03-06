@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
-import { useWmEdgeDetail, type EdgeDetailWmPort } from './useWmEdgeDetail'
+import {
+  useWmEdgeDetail,
+  type EdgeDetailCloseReason,
+  type EdgeDetailWmOpenArgs,
+  type EdgeDetailWmPort,
+} from './useWmEdgeDetail'
 
-function createMockWm(): { wm: EdgeDetailWmPort; calls: any[] } {
+type WmCall =
+  | { type: 'open'; args: EdgeDetailWmOpenArgs }
+  | { type: 'close'; winId: number; reason: EdgeDetailCloseReason }
+
+function createMockWm(): { wm: EdgeDetailWmPort; calls: WmCall[] } {
   let id = 100
-  const calls: any[] = []
+  const calls: WmCall[] = []
   return {
     calls,
     wm: {

@@ -2,7 +2,7 @@ import { effectScope, nextTick, ref } from 'vue'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useSystemBalance } from './useSystemBalance'
-import type { GraphSnapshot } from '../types'
+import type { GraphLink, GraphNode, GraphSnapshot } from '../types'
 
 // ----------------------------------------------------------------
 // Helpers
@@ -12,28 +12,27 @@ function makeLink(
   source: string,
   target: string,
   opts: { used?: string; available?: string; status?: string } = {},
-): any {
+): GraphLink {
   return {
     source,
     target,
     used: opts.used ?? '0',
     available: opts.available ?? '1000',
-    amountText: opts.used ?? '0',
     status: opts.status ?? 'active',
     trust_limit: String(Number(opts.used ?? 0) + Number(opts.available ?? 1000)),
   }
 }
 
-function makeNode(id: string, opts: { status?: string } = {}): any {
+function makeNode(id: string, opts: { status?: string } = {}): GraphNode {
   return { id, name: id, status: opts.status ?? 'active' }
 }
 
 function makeSnapshot(
-  links: any[] = [],
-  nodes: any[] = [],
+  links: GraphLink[] = [],
+  nodes: GraphNode[] = [],
   equivalent = 'UAH',
 ): GraphSnapshot {
-  return { links, nodes, equivalent } as any
+  return { links, nodes, equivalent, generated_at: '2026-01-25T00:00:00Z' }
 }
 
 // ----------------------------------------------------------------
@@ -183,7 +182,7 @@ describe('useSystemBalance', () => {
     const links = [
       { source: 'a', target: 'b', used: 'n/a', available: undefined, status: 'active' },
     ]
-    const snapshot = ref<GraphSnapshot | null>(makeSnapshot(links as any, []))
+    const snapshot = ref<GraphSnapshot | null>(makeSnapshot(links, []))
 
     const scope = effectScope()
     let balance: ReturnType<typeof useSystemBalance>['balance'] | undefined

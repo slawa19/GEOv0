@@ -5,7 +5,8 @@ import type { Point } from '../types/layout'
 
 import type { InteractPhase, InteractState } from './useInteractMode'
 import { interactWindowOfPhase } from './windowManager/interactWindowOfPhase'
-import type { FocusMode, WindowAnchor, WindowManagerApi } from './windowManager/types'
+import { isNodeCardWindow } from './windowManager/types'
+import type { FocusMode, WindowAnchor, WindowDataByType, WindowManagerApi, WindowOpenArgs } from './windowManager/types'
 
 import { useWmEdgeDetail, type EdgeDetailCloseReason } from './useWmEdgeDetail'
 
@@ -30,26 +31,46 @@ type InteractModeApi = {
 
 type DesiredWindowState = {
 	key: string
-	type: 'interact-panel' | 'node-card' | 'edge-detail'
+	type: WindowOpenArgs['type']
 	shouldBeOpen: boolean
-	data: any
+	data: WindowDataByType[WindowOpenArgs['type']]
 	anchor: WindowAnchor | null
 	focus: FocusMode
 }
+
+type DesiredInteractPanelWindowState = Omit<DesiredWindowState, 'type' | 'data'> & {
+	type: 'interact-panel'
+	data: WindowDataByType['interact-panel']
+}
+
+type DesiredNodeCardWindowState = Omit<DesiredWindowState, 'type' | 'data'> & {
+	type: 'node-card'
+	data: WindowDataByType['node-card']
+}
+
+type DesiredEdgeDetailWindowState = Omit<DesiredWindowState, 'type' | 'data'> & {
+	type: 'edge-detail'
+	data: WindowDataByType['edge-detail']
+}
+
+type DesiredWindowStateExact =
+	| DesiredInteractPanelWindowState
+	| DesiredNodeCardWindowState
+	| DesiredEdgeDetailWindowState
 
 function anchorKey(a: WindowAnchor | null): string {
 	if (!a) return ''
 	return `${a.x}|${a.y}|${a.space}|${a.source}`
 }
 
-function interactDataKey(d: any): string {
+function interactDataKey(d: WindowDataByType['interact-panel']): string {
 	// IMPORTANT: do not include function identities (onBack/onClose) in comparisons.
-	const panel = String(d?.panel ?? '')
-	const phase = String(d?.phase ?? '')
+	const panel = String(d.panel ?? '')
+	const phase = String(d.phase ?? '')
 	return `${panel}|${phase}`
 }
 
-function desiredSlotKey(s: DesiredWindowState): string {
+function desiredSlotKey(s: DesiredWindowStateExact): string {
 	if (s.type === 'interact-panel') return `${s.type}@${anchorKey(s.anchor)}@${interactDataKey(s.data)}`
 	if (s.type === 'node-card') return `${s.type}@${anchorKey(s.anchor)}@${String(s.data?.nodeId ?? '')}`
 	if (s.type === 'edge-detail') {
@@ -57,11 +78,24 @@ function desiredSlotKey(s: DesiredWindowState): string {
 		const toPid = String(s.data?.toPid ?? '')
 		return `${s.type}@${anchorKey(s.anchor)}@${fromPid}→${toPid}`
 	}
-	const _exhaustive: never = s.type
-	return _exhaustive
+	return ''
 }
 
-function applyDiff(prev: DesiredWindowState[], next: DesiredWindowState[], wm: WindowManagerApi): void {
+function openDesiredWindow(wm: WindowManagerApi, next: DesiredWindowStateExact, focus: FocusMode) {
+	switch (next.type) {
+		case 'interact-panel':
+			wm.open({ type: 'interact-panel', anchor: next.anchor, data: next.data, focus })
+			return
+		case 'node-card':
+			wm.open({ type: 'node-card', anchor: next.anchor, data: next.data, focus })
+			return
+		case 'edge-detail':
+			wm.open({ type: 'edge-detail', anchor: next.anchor, data: next.data, focus })
+			return
+	}
+}
+
+function applyDiff(prev: DesiredWindowStateExact[], next: DesiredWindowStateExact[], wm: WindowManagerApi): void {
 	const prevByKey = new Map(prev.map((s) => [s.key, s] as const))
 	const nextByKey = new Map(next.map((s) => [s.key, s] as const))
 
@@ -85,23 +119,13 @@ function applyDiff(prev: DesiredWindowState[], next: DesiredWindowState[], wm: W
 		if (!n?.shouldBeOpen) continue
 
 		if (!p?.shouldBeOpen) {
-			wm.open({
-				type: n.type as any,
-				anchor: n.anchor,
-				data: n.data,
-				focus: n.focus,
-			})
+			openDesiredWindow(wm, n, n.focus)
 			continue
 		}
 
 		// UPDATE (shallow-by-value)
 		if (desiredSlotKey(p) !== desiredSlotKey(n)) {
-			wm.open({
-				type: n.type as any,
-				anchor: n.anchor,
-				data: n.data,
-				focus: 'never',
-			})
+			openDesiredWindow(wm, n, 'never')
 		}
 	}
 }
@@ -146,13 +170,13 @@ function createPeriodicTrailingThrottle<T>(ms: number, fn: (arg: T) => void): {
 }
 
 function isFormLikeTarget(t: EventTarget | null): boolean {
-	const el = t as any
-	const tag = String(el?.tagName ?? '').toLowerCase()
+	if (!(t instanceof HTMLElement)) return false
+	const tag = String(t.tagName ?? '').toLowerCase()
 	if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
 
 	// contenteditable
 	try {
-		if (typeof el?.isContentEditable === 'boolean' && el.isContentEditable) return true
+		if (typeof t.isContentEditable === 'boolean' && t.isContentEditable) return true
 	} catch {
 		// ignore
 	}
@@ -185,7 +209,7 @@ function confirmCancelInteractBusy(): boolean {
 	// P0-2 policy B: ESC / outside-click while busy must ask for confirmation.
 	// Use a synchronous confirm for now (minimal UX) to keep the gate atomic.
 	try {
-		const c = (window as any)?.confirm
+		const c = window.confirm
 		if (typeof c !== 'function') return true
 		return !!c('Отменить операцию?')
 	} catch {
@@ -207,7 +231,7 @@ export function useWindowController(opts: {
 
 	getNodeScreenCenter: (nodeId: string) => Point | null
 }): {
-	desiredWindows: ComputedRef<DesiredWindowState[]>
+	desiredWindows: ComputedRef<DesiredWindowStateExact[]>
 
 	wmEdgePopupAnchor: Ref<Point | null>
 	wmPanelOpenAnchor: Ref<Point | null>
@@ -287,7 +311,7 @@ export function useWindowController(opts: {
 		return `${a.x}|${a.y}|${a.space}|${a.source}`
 	})
 
-	const desiredWindows = computed<DesiredWindowState[]>(() => {
+	const desiredWindows = computed<DesiredWindowStateExact[]>(() => {
 		const apiMode = String(opts.apiMode.value)
 		const isInteractUi = Boolean(opts.isInteractUi.value)
 		const phase = String(opts.interactPhase.value) as InteractPhase
@@ -318,7 +342,7 @@ export function useWindowController(opts: {
 
 		const fromPid = String(opts.interactState.fromPid ?? '')
 		const toPid = String(opts.interactState.toPid ?? '')
-		const a = (opts.interactState as any).edgeAnchor as Point | null
+		const a = opts.interactState.edgeAnchor
 
 		const eligible = curApiMode === 'real' && curIsInteractUi && phase === 'editing-trustline' && !isFullEditor
 		if (!eligible) return null
@@ -333,7 +357,7 @@ export function useWindowController(opts: {
 		}
 	})
 
-	let prevDesired: DesiredWindowState[] = []
+	let prevDesired: DesiredWindowStateExact[] = []
 
 	watch(
 		[
@@ -373,9 +397,9 @@ export function useWindowController(opts: {
 	// ---------------------------------------------------------------------------
 
 	const nodeCardScreenCenterKey = computed(() => {
-		const win = opts.wm.windows.value.find((w) => w.type === 'node-card' && w.state !== 'closing')
-		if (!win) return ''
-		const nodeId = String((win.data as any)?.nodeId ?? '')
+		const win = opts.wm.windows.value.find((w) => isNodeCardWindow(w) && w.state !== 'closing')
+		if (!win || !isNodeCardWindow(win)) return ''
+		const nodeId = String(win.data.nodeId ?? '')
 		if (!nodeId) return ''
 		const p = opts.getNodeScreenCenter(nodeId)
 		if (!p) return ''
@@ -413,10 +437,10 @@ export function useWindowController(opts: {
 		([isOpen]) => {
 			if (!isOpen) return
 
-			const win = opts.wm.windows.value.find((w) => w.type === 'node-card' && w.state !== 'closing')
-			if (!win) return
+			const win = opts.wm.windows.value.find((w) => isNodeCardWindow(w) && w.state !== 'closing')
+			if (!win || !isNodeCardWindow(win)) return
 
-			const nodeId = String((win.data as any)?.nodeId ?? '')
+			const nodeId = String(win.data.nodeId ?? '')
 			if (!nodeId) return
 
 			// Avoid redundant `wm.open()` right after the initial open.
@@ -484,8 +508,8 @@ export function useWindowController(opts: {
 		// UX-5: repeated dblclick on the SAME node while its NodeCard is already the
 		// WM topmost window must be a no-op to avoid a visible flicker / extra relayout.
 		const top = opts.wm.windows.value.length ? opts.wm.windows.value[opts.wm.windows.value.length - 1] : null
-		if (top && top.type === 'node-card') {
-			const topNodeId = String((top.data as any)?.nodeId ?? '').trim()
+		if (top && isNodeCardWindow(top)) {
+			const topNodeId = String(top.data.nodeId ?? '').trim()
 			if (topNodeId && topNodeId === reqNodeId) return
 		}
 
