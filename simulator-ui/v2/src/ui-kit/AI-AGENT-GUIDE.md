@@ -22,6 +22,7 @@ flowchart TD
 - Tokens: [`designSystem.tokens.css`](simulator-ui/v2/src/ui-kit/designSystem.tokens.css:1)
 - Primitives: [`designSystem.primitives.css`](simulator-ui/v2/src/ui-kit/designSystem.primitives.css:1)
 - Demo usage: [`DesignSystemDemoApp.vue`](simulator-ui/v2/src/dev/DesignSystemDemoApp.vue:1)
+- Overlay/window guardrails: [`docs/ru/simulator/frontend/docs/overlay-window-development-rules.md`](docs/ru/simulator/frontend/docs/overlay-window-development-rules.md)
 
 ### Где смотреть изменения визуала (обязательно)
 
@@ -33,6 +34,8 @@ flowchart TD
 - Vue entry: [`design-system-demo.ts`](simulator-ui/v2/src/design-system-demo.ts:1)
 
 Правило: любой новый примитив или изменение токенов **обязательно отражать** в этой демо-странице.
+
+Если изменение касается `WindowShell`, window-manager sizing/layout policy или overlay family contract, агент обязан дополнительно свериться с [`docs/ru/simulator/frontend/docs/overlay-window-development-rules.md`](docs/ru/simulator/frontend/docs/overlay-window-development-rules.md). Этот guide не заменяет тот документ, а покрывает только DS layer.
 
 ## 1) Главные правила (нельзя нарушать)
 

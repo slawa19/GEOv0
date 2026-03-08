@@ -89,6 +89,7 @@
   - do not use `any` to silence type errors in tests — fix the mock contract instead;
   - no ad-hoc `localStorage` access when an existing storage composable/adapter exists;
   - no magic visual values when a DS token or existing config module should be the source of truth.
+- For overlay/window-manager work in `simulator-ui/v2`, also follow `docs/ru/simulator/frontend/docs/overlay-window-development-rules.md`.
 - Treat test type-safety as production quality: typed tests are part of the contract, not disposable scaffolding.
 
 ## Workflow guardrail: spec-first, then implement (CRITICAL)
@@ -122,6 +123,12 @@ Goal: minimize back-and-forth for routine refactors while staying safe.
 - If uncertainty is minor: pick the simplest option, state the assumption in one short line, and proceed.
 - Gates are non-negotiable: after each micro-batch of changes, run the required checks (e.g. `typecheck` + `vitest`). Only stop/ask if gates fail or a high-risk decision is needed.
 - Prefer batching: accumulate 3–10 safe “small items”, then run gates once, then update docs once.
+
+## Interaction policy: file links in chat
+
+- When referencing workspace files in chat responses, use workspace-relative Markdown links, for example `[plans/INDEX.md](../plans/INDEX.md)`.
+- Do not use absolute Windows paths in Markdown links in chat responses; they may not open from the chat UI.
+- If a clickable file reference is needed, prefer the repo-relative path exactly as it appears in the workspace.
 
 - TrustLine direction is `from → to` = creditor → debtor (risk limit), *not* the reverse.
 - Keep changes deterministic and validate fixtures (`npm run validate:fixtures`) after regeneration.

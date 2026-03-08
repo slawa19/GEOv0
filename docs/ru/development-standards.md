@@ -605,6 +605,8 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 
 Подробные правила: [`simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md`](../../simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md)
 
+Для overlay/window-manager компонентов simulator UI дополнительно обязателен документ [`docs/ru/simulator/frontend/docs/overlay-window-development-rules.md`](simulator/frontend/docs/overlay-window-development-rules.md).
+
 - **TypeScript**: `strict: true` в tsconfig — без исключений
 - **Vue 3**: Composition API + `<script setup lang="ts">` — Options API не использовать
 - **Именование**:
@@ -770,6 +772,7 @@ simulator-ui/v2/src/ui-kit/
 | Пишешь TypeScript | No `as any` в runtime и тестах. Discriminated unions для variant-типов. Structural narrowing |
 | Удаляешь / переименовываешь | Нет orphan тест-файлов. Нет мёртвого кода. Импорты обновлены |
 | Добавляешь новый design token | Добавил в `designSystem.tokens.css`. Обновил `AI-AGENT-GUIDE.md` |
+| Меняешь overlay/window компоненты | Выбрал family и sizing mode до кодинга. Не смешал WM/shell/content responsibilities. Сверился с `overlay-window-development-rules.md` |
 | Архитектурное решение | Записал ADR в `plans/` или `docs/`. Обновил `plans/INDEX.md` |
 
 ---
@@ -779,5 +782,6 @@ simulator-ui/v2/src/ui-kit/
 - [`docs/ru/06-contributing.md`](06-contributing.md) — процесс разработки, git workflow, code style
 - [`docs/ru/documentation-rules.md`](documentation-rules.md) — правила документирования
 - [`simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md`](../../simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md) — Design System, токены, компоненты UI-kit
+- [`docs/ru/simulator/frontend/docs/overlay-window-development-rules.md`](simulator/frontend/docs/overlay-window-development-rules.md) — guardrails для overlay windows, WindowShell и window-manager
 - [`plans/INDEX.md`](../../plans/INDEX.md) — индекс планов и архитектурных решений
 - [`.clinerules`](../../.clinerules) — компактная версия этих правил для AI-агента
