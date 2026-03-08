@@ -55,6 +55,7 @@
 
   /* Geometry tokens (single source of truth for WM + legacy CSS fallbacks) */
   --ds-hud-stack-height: 110px;
+  --ds-hud-bottom-stack-height: 56px;
   --ds-wm-clamp-pad: var(--ds-ov-inset, 12px);
 
   /* WindowManager design tokens */
@@ -226,16 +227,19 @@ details[open].ds-ov-details > summary::after {
   padding: var(--ds-space-3, 12px);
 }
 
-/* Overlay right-side panels (Interact panels) */
+/* Overlay panel primitive: visual sizing only. Positioning belongs to the owner layer. */
 .ds-ov-panel {
-  position: absolute;
-  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
-  top: calc(var(--ds-hud-stack-height, 110px) + var(--ds-ov-safe-top, 0px));
-  z-index: var(--ds-z-panel, 42);
   pointer-events: auto;
 
   min-width: var(--ds-ov-panel-minw);
   max-width: min(var(--ds-ov-panel-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)));
+}
+
+.ds-ov-panel--legacy-positioned {
+  position: absolute;
+  right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
+  top: calc(var(--ds-hud-stack-height, 110px) + var(--ds-ov-safe-top, 0px));
+  z-index: var(--ds-z-panel, 42);
 }
 
 /* Edge detail popup (Interact mode) — visuals only; placement comes from inline style */
@@ -275,6 +279,51 @@ details[open].ds-ov-details > summary::after {
   -webkit-backdrop-filter: var(--ds-blur);
 }
 
+.ds-ov-toast {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--ds-z-alert, 200);
+  display: flex;
+  align-items: center;
+  gap: var(--ds-toast-gap, 8px);
+  min-width: min(var(--ds-toast-minw), calc(100% - var(--ds-wm-clamp-pad, 12px) - var(--ds-wm-clamp-pad, 12px)));
+  max-width: min(var(--ds-toast-maxw), calc(100% - var(--ds-wm-clamp-pad, 12px) - var(--ds-wm-clamp-pad, 12px)));
+  pointer-events: auto;
+}
+
+.ds-ov-toast--error {
+  bottom: calc(var(--ds-hud-bottom-stack-height, 56px) + var(--ds-toast-stack-gap, 12px));
+}
+
+.ds-ov-toast--success {
+  bottom: calc(
+    var(--ds-hud-bottom-stack-height, 56px) + var(--ds-toast-stack-gap, 12px) + var(--ds-toast-stack-step, 60px)
+  );
+}
+
+.ds-ov-toast__icon {
+  flex-shrink: 0;
+  opacity: var(--ds-toast-icon-opacity, 0.9);
+}
+
+.ds-ov-toast__text {
+  flex: 1 1 auto;
+  word-break: break-word;
+}
+
+.ds-ov-toast__close {
+  flex-shrink: 0;
+  min-width: var(--ds-toast-close-min-size, 24px);
+  min-height: var(--ds-toast-close-min-size, 24px);
+  opacity: var(--ds-toast-close-opacity, 0.85);
+  transition: opacity var(--ds-toast-close-opacity-dur, 0.15s);
+}
+
+.ds-ov-toast__close:hover {
+  opacity: var(--ds-toast-close-hover-opacity, 1);
+}
+
 /* Compact toolbar-like surface (layout only; visuals come from ds-panel). */
 .ds-ov-bar {
   display: inline-flex;
@@ -303,9 +352,10 @@ details[open].ds-ov-details > summary::after {
   left: 0;
   top: calc(100% + var(--ds-space-2, 8px));
   padding: var(--ds-space-2, 8px) var(--ds-space-2, 8px);
-  min-width: 320px;
-  max-width: min(520px, calc(100% - var(--ds-ov-panel-maxw-inset)));
-  max-height: min(70vh, 520px);
+  width: var(--ds-ov-dropdown-width, auto);
+  min-width: var(--ds-ov-dropdown-minw, var(--ds-ov-dropdown-default-minw));
+  max-width: min(var(--ds-ov-dropdown-maxw, var(--ds-ov-dropdown-default-maxw)), calc(100vw - var(--ds-ov-dropdown-vw-inset, var(--ds-ov-panel-maxw-inset))));
+  max-height: min(var(--ds-ov-dropdown-maxh-vh, var(--ds-ov-dropdown-default-maxh-vh)), var(--ds-ov-dropdown-maxh, var(--ds-ov-dropdown-default-maxh)));
   z-index: var(--ds-z-inset, 60);
   pointer-events: auto;
 }
@@ -328,7 +378,12 @@ details[open].ds-ov-details > summary::after {
 }
 
 .ds-ov-dropdown--narrow {
-  min-width: 260px;
+  min-width: var(--ds-ov-dropdown-narrow-minw);
+}
+
+.ds-ov-dropdown--fit-content {
+  width: max-content;
+  min-width: 0;
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -365,6 +420,63 @@ details[open].ds-ov-details > summary::after {
   color: var(--ds-text-2);
   white-space: nowrap;
   font-family: var(--ds-font-mono);
+}
+
+.ds-ov-tooltip__divider {
+  height: 1px;
+  background: var(--ds-border-subtle);
+  margin: var(--ds-ov-tooltip-divider-margin-y) 0;
+}
+
+.ds-ov-tooltip__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ds-ov-tooltip-row-gap);
+  font-size: var(--ds-ov-tooltip-row-font-size);
+  opacity: var(--ds-ov-tooltip-row-opacity);
+}
+
+.ds-ov-tooltip__label {
+  opacity: var(--ds-ov-tooltip-label-opacity);
+}
+
+.ds-ov-tooltip__val {
+  font-family: var(--ds-font-mono, monospace);
+}
+
+.ds-ov-dev-perf__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-ov-dev-row-gap);
+  padding: var(--ds-ov-dev-row-pad-top) var(--ds-ov-dev-row-pad-x) var(--ds-ov-dev-row-pad-bottom);
+}
+
+.ds-ov-dev-perf__title {
+  color: var(--ds-text-1);
+}
+
+.ds-ov-dev-perf__pre {
+  margin: 0;
+  padding: 0 var(--ds-ov-dev-pre-pad-x) var(--ds-ov-dev-pre-pad-bottom);
+  font-size: var(--ds-typo-label-font-size);
+  line-height: var(--ds-typo-body-line-height);
+  color: var(--ds-text-2);
+  white-space: pre-wrap;
+}
+
+.ds-ov-dev-perf__warn {
+  margin: 0 var(--ds-ov-dev-warn-margin-x) var(--ds-ov-dev-warn-margin-bottom);
+  padding: var(--ds-ov-dev-warn-pad-y) var(--ds-ov-dev-warn-pad-x);
+  border-radius: var(--ds-ov-dev-warn-radius);
+  border: 1px solid color-mix(in srgb, var(--ds-warn) 35%, transparent);
+  background: color-mix(in srgb, var(--ds-warn) 18%, transparent);
+  color: color-mix(in srgb, var(--ds-warn) 12%, var(--ds-text-1));
+  font-family: var(--ds-typo-alert-font-family);
+  font-size: var(--ds-typo-alert-font-size);
+  letter-spacing: var(--ds-typo-alert-letter-spacing);
+  font-weight: var(--ds-typo-alert-font-weight);
+  line-height: var(--ds-typo-body-line-height);
 }
 
 /* ──────────────────────────────────────────────────────────────

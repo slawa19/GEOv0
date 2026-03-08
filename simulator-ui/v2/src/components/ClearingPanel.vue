@@ -87,7 +87,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
           <template v-else>This will run a clearing cycle in backend.</template>
         </div>
 
-        <div class="ds-row cp-actions">
+        <div class="ds-row ds-row--actions cp-actions">
           <button class="ds-btn ds-btn--primary" type="button" :disabled="busyUi" @click="onConfirm">
             {{ busyUi ? 'Running…' : 'Confirm' }}
           </button>
@@ -119,7 +119,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
         <div class="ds-help">Running…</div>
       </template>
 
-      <div v-if="!isConfirm" class="ds-row cp-actions">
+      <div v-if="!isConfirm" class="ds-row ds-row--actions cp-actions">
         <button class="ds-btn ds-btn--ghost" type="button" :disabled="busyUi" @click="cancel">Close</button>
       </div>
     </div>
@@ -173,5 +173,4 @@ const busyUi = computed(() => props.busy || isRunning.value)
   overflow: auto;
 }
 </style>
-
 

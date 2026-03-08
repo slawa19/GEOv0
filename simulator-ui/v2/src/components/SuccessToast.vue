@@ -58,14 +58,14 @@ onUnmounted(() => {
   <Transition name="success-toast">
     <div
       v-if="visible && messageText"
-      class="success-toast ds-alert ds-alert--ok ds-ov-surface"
+      class="success-toast ds-alert ds-alert--ok ds-ov-surface ds-ov-toast ds-ov-toast--success"
       role="status"
       aria-live="polite"
     >
-      <span class="success-toast__icon" aria-hidden="true">✓</span>
-      <span class="success-toast__text">{{ messageText }}</span>
+      <span class="success-toast__icon ds-ov-toast__icon" aria-hidden="true">✓</span>
+      <span class="success-toast__text ds-ov-toast__text">{{ messageText }}</span>
       <button
-        class="success-toast__close ds-btn ds-btn--ghost ds-btn--icon"
+        class="success-toast__close ds-ov-toast__close ds-btn ds-btn--ghost ds-btn--icon"
         type="button"
         aria-label="Dismiss"
         @click="dismiss"
@@ -77,44 +77,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.success-toast {
-  position: absolute;
-  /* P1-3: offset above ErrorToast (bottom: 68px) to prevent visual overlap when
-   * both toasts are briefly visible (rare but possible in degraded flows). */
-  bottom: 128px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--ds-z-alert, 200);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: var(--ds-toast-minw);
-  max-width: var(--ds-toast-maxw);
-  pointer-events: auto;
-}
-
-.success-toast__icon {
-  flex-shrink: 0;
-  opacity: 0.9;
-}
-
-.success-toast__text {
-  flex: 1 1 auto;
-  word-break: break-word;
-}
-
-.success-toast__close {
-  flex-shrink: 0;
-  min-width: 24px;
-  min-height: 24px;
-  opacity: 0.85;
-  transition: opacity 0.15s;
-}
-
-.success-toast__close:hover {
-  opacity: 1;
-}
-
 /* Vue Transition */
 .success-toast-enter-active,
 .success-toast-leave-active {
@@ -124,7 +86,7 @@ onUnmounted(() => {
 .success-toast-enter-from,
 .success-toast-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(8px);
+  transform: translateX(-50%) translateY(var(--ds-toast-enter-shift-y));
 }
 </style>
 

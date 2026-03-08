@@ -1,8 +1,13 @@
 import { createApp, h, nextTick } from 'vue'
+import { readFileSync } from 'node:fs'
 import type { Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import ActionBar from './ActionBar.vue'
+
+function readHere(rel: string): string {
+  return readFileSync(new URL(rel, import.meta.url), 'utf8')
+}
 
 function mountActionBar(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -140,6 +145,18 @@ describe('ActionBar', () => {
 
     app.unmount()
     host.remove()
+  })
+
+  it('keeps the shared HudBar contract and only uses a local hint-wrap exception', () => {
+    const sfc = readHere('./ActionBar.vue')
+
+    expect(sfc).toContain('<HudBar variant="ghost" layout="start" fit>')
+    expect(sfc).toContain('.action-bar__hint {')
+    expect(sfc).toContain('order: 10;')
+    expect(sfc).toContain('flex: 1 1 auto;')
+    expect(sfc).toContain('@media (max-width: 500px) {')
+    expect(sfc).not.toContain(':deep(.ds-select) {')
+    expect(sfc).not.toContain(':deep(.ds-btn) {')
   })
 })
 

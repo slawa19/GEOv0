@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import ErrorToast from './ErrorToast.vue'
 
 const errorToastComponent: Component = ErrorToast
+const errorToastSource = readFileSync(resolve(process.cwd(), 'src/components/ErrorToast.vue'), 'utf8')
 
 describe('ErrorToast', () => {
   it('uses props.dismissMs when message length <= 80', async () => {
@@ -143,6 +146,32 @@ describe('ErrorToast', () => {
       host.remove()
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  it('uses bottom geometry contract and viewport clamp formulas', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = createApp({
+      render: () => h(errorToastComponent, { message: 'err', dismissMs: 4000, onDismiss: vi.fn() }),
+    })
+
+    try {
+      app.mount(host)
+      await nextTick()
+
+      const toast = host.querySelector('.error-toast') as HTMLElement | null
+      expect(toast).toBeTruthy()
+
+      expect(errorToastSource).toContain('ds-ov-toast')
+      expect(errorToastSource).toContain('ds-ov-toast--error')
+      expect(errorToastSource).toContain('ds-ov-toast__close')
+      expect(errorToastSource).toContain('--ds-toast-transition-dur')
+      expect(errorToastSource).toContain('--ds-toast-enter-shift-y')
+    } finally {
+      app.unmount()
+      host.remove()
     }
   })
 })

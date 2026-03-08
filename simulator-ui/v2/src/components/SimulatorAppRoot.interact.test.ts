@@ -52,6 +52,8 @@ type GeoTestGlobals = {
   __GEO_TEST_WM_OPEN?: ReturnType<typeof vi.fn>
   __GEO_TEST_WM_HANDLE_ESC?: ReturnType<typeof vi.fn>
   __GEO_TEST_WM_GET_TOPMOST_IN_GROUP?: ReturnType<typeof vi.fn>
+  __GEO_TEST_WM_SET_GEOMETRY?: ReturnType<typeof vi.fn>
+  __GEO_TEST_WM_RECLAMP_ALL?: ReturnType<typeof vi.fn>
   __GEO_TEST_INTERACT_PHASE?: string
   __GEO_TEST_PHASE_REF?: Ref<string>
   __GEO_TEST_SELECTED_NODE?: TestSelectedNode
@@ -69,6 +71,7 @@ type GeoTestGlobals = {
   __GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID?: ReturnType<typeof vi.fn>
   __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE?: ReturnType<typeof vi.fn>
   __GEO_TEST_INTERACT_SUCCESS_MESSAGE?: Ref<string | null>
+  __GEO_TEST_INTERACT_HISTORY?: Array<Record<string, unknown>>
   __GEO_TEST_INTERACT_BUSY_REF?: Ref<boolean>
   __GEO_TEST_TRUSTLINES_LOADING_REF?: Ref<boolean>
   __GEO_TEST_PAYMENT_TARGETS_LOADING_REF?: Ref<boolean>
@@ -77,14 +80,12 @@ type GeoTestGlobals = {
   __GEO_TEST_INTERACT_STATE?: TestInteractState
 }
 
-const geoTestGlobals = globalThis as unknown as GeoTestGlobals
-
 function setGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K, value: GeoTestGlobals[K]): void {
-  geoTestGlobals[key] = value
+  Reflect.set(globalThis, key, value)
 }
 
 function getGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K): GeoTestGlobals[K] {
-  return geoTestGlobals[key]
+  return Reflect.get(globalThis, key) as GeoTestGlobals[K]
 }
 
 function getRequiredGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K): NonNullable<GeoTestGlobals[K]> {
@@ -94,7 +95,7 @@ function getRequiredGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K): NonNu
 }
 
 function clearGeoTestGlobals(...keys: Array<keyof GeoTestGlobals>): void {
-  for (const key of keys) delete geoTestGlobals[key]
+  for (const key of keys) Reflect.deleteProperty(globalThis, key)
 }
 
 function getInteractState(): TestInteractState {
@@ -152,7 +153,15 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       const getTopmostInGroup = vi.fn<typeof origGetTopmostInGroup>((g) => origGetTopmostInGroup(g))
       setGeoTestGlobal('__GEO_TEST_WM_GET_TOPMOST_IN_GROUP', getTopmostInGroup)
 
-      return { ...wm, open, handleEsc, getTopmostInGroup }
+      const origSetGeometry = wm.setGeometry
+      const setGeometry = vi.fn<typeof origSetGeometry>((o) => origSetGeometry(o))
+      setGeoTestGlobal('__GEO_TEST_WM_SET_GEOMETRY', setGeometry)
+
+      const origReclampAll = wm.reclampAll
+      const reclampAll = vi.fn<typeof origReclampAll>(() => origReclampAll())
+      setGeoTestGlobal('__GEO_TEST_WM_RECLAMP_ALL', reclampAll)
+
+      return { ...wm, open, handleEsc, getTopmostInGroup, setGeometry, reclampAll }
     },
   }
 })
@@ -454,7 +463,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
                 successMessage.value = 'Clearing done: 1/1 cycles'
               }),
               cancel,
-              history: reactive<Array<Record<string, unknown>>>([]),
+              history: reactive<Array<Record<string, unknown>>>(getGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY') ?? []),
             },
           systemBalance: computed(() => ({
             isClean: true,
@@ -581,7 +590,47 @@ function mountSimulatorAppRoot(host: HTMLElement) {
 }
 
 function stubMissingResizeObserver() {
-  vi.stubGlobal('ResizeObserver', undefined as unknown as typeof ResizeObserver)
+  vi.stubGlobal('ResizeObserver', undefined)
+}
+
+type ResizeObserverRecord = {
+  callback: ResizeObserverCallback
+  observed: Element[]
+  instance: {
+    observe: (target: Element) => void
+    disconnect: () => void
+    unobserve: (target: Element) => void
+  }
+}
+
+function stubResizeObserverRecords() {
+  const records: ResizeObserverRecord[] = []
+
+  class ResizeObserverMock {
+    private record: ResizeObserverRecord
+
+    constructor(callback: ResizeObserverCallback) {
+      this.record = {
+        callback,
+        observed: [],
+        instance: this,
+      }
+      records.push(this.record)
+    }
+
+    observe(target: Element) {
+      this.record.observed.push(target)
+    }
+
+    disconnect() {}
+
+    unobserve(target: Element) {
+      this.record.observed = this.record.observed.filter((candidate) => candidate !== target)
+    }
+  }
+
+  vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+  return { records }
 }
 
 function setUrl(search: string) {
@@ -734,6 +783,384 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       app.unmount()
       host.remove()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('publishes measured top/bottom stack geometry and drives WM/top + toast/bottom consumer paths', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
+    setUrl('/?mode=real&ui=interact')
+
+    const { records } = stubResizeObserverRecords()
+
+    let topHeight = 144
+    let bottomHeight = 72
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('root')) {
+        return {
+          left: 0,
+          top: 0,
+          width: 1280,
+          height: 720,
+          right: 1280,
+          bottom: 720,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-top')) {
+        return {
+          left: 0,
+          top: 0,
+          width: 1280,
+          height: topHeight,
+          right: 1280,
+          bottom: topHeight,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-bottom') && !this.classList.contains('sar-interact-history-overlay')) {
+        return {
+          left: 0,
+          top: 720 - bottomHeight,
+          width: 1280,
+          height: bottomHeight,
+          right: 1280,
+          bottom: 720,
+          x: 0,
+          y: 720 - bottomHeight,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      return {
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+        right: 0,
+        bottom: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect
+    })
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const root = host.querySelector('.root') as HTMLElement | null
+      const topStack = host.querySelector('.ds-ov-top') as HTMLElement | null
+      const bottomStack = Array.from(host.querySelectorAll('.ds-ov-bottom')).find(
+        (el) => !(el as HTMLElement).classList.contains('sar-interact-history-overlay'),
+      ) as HTMLElement | undefined
+
+      expect(root).toBeTruthy()
+      expect(topStack).toBeTruthy()
+      expect(bottomStack).toBeTruthy()
+
+      expect(root!.style.getPropertyValue('--ds-hud-stack-height')).toBe('144px')
+      expect(root!.style.getPropertyValue('--ds-hud-bottom-stack-height')).toBe('72px')
+
+      const setGeometry = getGeoTestGlobal('__GEO_TEST_WM_SET_GEOMETRY')
+      const reclampAll = getGeoTestGlobal('__GEO_TEST_WM_RECLAMP_ALL')
+      expect(setGeometry).toBeTruthy()
+      expect(reclampAll).toBeTruthy()
+      expect(setGeometry).toHaveBeenCalledWith({ dockedRightTopPx: 144 })
+      expect(reclampAll).toHaveBeenCalled()
+
+      getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE').value = 'Geometry-aware toast'
+      await nextTick()
+      expect(host.querySelector('.success-toast')).toBeTruthy()
+
+      topHeight = 184
+      bottomHeight = 96
+
+      const topRecord = records.find((record) => record.observed.includes(topStack!))
+      const bottomRecord = records.find((record) => record.observed.includes(bottomStack!))
+      expect(topRecord).toBeTruthy()
+      expect(bottomRecord).toBeTruthy()
+
+      topRecord!.callback([], topRecord!.instance)
+      bottomRecord!.callback([], bottomRecord!.instance)
+      await nextTick()
+
+      expect(root!.style.getPropertyValue('--ds-hud-stack-height')).toBe('184px')
+      expect(root!.style.getPropertyValue('--ds-hud-bottom-stack-height')).toBe('96px')
+      expect(setGeometry).toHaveBeenCalledWith({ dockedRightTopPx: 184 })
+    } finally {
+      app.unmount()
+      host.remove()
+      rectSpy.mockRestore()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_SUCCESS_MESSAGE',
+        '__GEO_TEST_WM_SET_GEOMETRY',
+        '__GEO_TEST_WM_RECLAMP_ALL',
+      )
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('dedupes unchanged HUD geometry publishes and only reclamps WM on meaningful deltas', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
+    setUrl('/?mode=real&ui=interact')
+
+    const { records } = stubResizeObserverRecords()
+
+    let topHeight = 144
+    let bottomHeight = 72
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('root')) {
+        return {
+          left: 0,
+          top: 0,
+          width: 1280,
+          height: 720,
+          right: 1280,
+          bottom: 720,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-top')) {
+        return {
+          left: 0,
+          top: 0,
+          width: 1280,
+          height: topHeight,
+          right: 1280,
+          bottom: topHeight,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-bottom') && !this.classList.contains('sar-interact-history-overlay')) {
+        return {
+          left: 0,
+          top: 720 - bottomHeight,
+          width: 1280,
+          height: bottomHeight,
+          right: 1280,
+          bottom: 720,
+          x: 0,
+          y: 720 - bottomHeight,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      return {
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+        right: 0,
+        bottom: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect
+    })
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const root = host.querySelector('.root') as HTMLElement | null
+      const topStack = host.querySelector('.ds-ov-top') as HTMLElement | null
+      const bottomStack = Array.from(host.querySelectorAll('.ds-ov-bottom')).find(
+        (el) => !(el as HTMLElement).classList.contains('sar-interact-history-overlay'),
+      ) as HTMLElement | undefined
+
+      expect(root).toBeTruthy()
+      expect(topStack).toBeTruthy()
+      expect(bottomStack).toBeTruthy()
+
+      const topRecord = records.find((record) => record.observed.includes(topStack!))
+      const bottomRecord = records.find((record) => record.observed.includes(bottomStack!))
+      expect(topRecord).toBeTruthy()
+      expect(bottomRecord).toBeTruthy()
+
+      const setGeometry = getGeoTestGlobal('__GEO_TEST_WM_SET_GEOMETRY')
+      const reclampAll = getGeoTestGlobal('__GEO_TEST_WM_RECLAMP_ALL')
+      expect(setGeometry).toBeTruthy()
+      expect(reclampAll).toBeTruthy()
+
+      const setGeometryCallsAfterMount = setGeometry!.mock.calls.length
+      const reclampCallsAfterMount = reclampAll!.mock.calls.length
+
+      topRecord!.callback([], topRecord!.instance)
+      bottomRecord!.callback([], bottomRecord!.instance)
+      await nextTick()
+
+      expect(setGeometry!.mock.calls.length).toBe(setGeometryCallsAfterMount)
+      expect(reclampAll!.mock.calls.length).toBe(reclampCallsAfterMount)
+
+      topHeight = 176
+      topRecord!.callback([], topRecord!.instance)
+      await nextTick()
+
+      expect(setGeometry!.mock.calls.length).toBe(setGeometryCallsAfterMount + 1)
+      expect(setGeometry).toHaveBeenLastCalledWith({ dockedRightTopPx: 176 })
+      expect(reclampAll!.mock.calls.length).toBe(reclampCallsAfterMount + 1)
+
+      bottomHeight = 88
+      bottomRecord!.callback([], bottomRecord!.instance)
+      await nextTick()
+
+      expect(root!.style.getPropertyValue('--ds-hud-bottom-stack-height')).toBe('88px')
+      expect(setGeometry!.mock.calls.length).toBe(setGeometryCallsAfterMount + 1)
+      expect(reclampAll!.mock.calls.length).toBe(reclampCallsAfterMount + 1)
+    } finally {
+      app.unmount()
+      host.remove()
+      rectSpy.mockRestore()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_WM_SET_GEOMETRY',
+        '__GEO_TEST_WM_RECLAMP_ALL',
+      )
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('keeps InteractHistoryLog coexisting with BottomBar without polluting bottom-stack geometry ownership', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
+    setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [
+      { id: '1', icon: 'P', text: 'Send payment', timeText: '10:00' },
+      { id: '2', icon: 'T', text: 'Update trustline', timeText: '10:01' },
+    ])
+    setUrl('/?mode=real&ui=interact')
+
+    const { records } = stubResizeObserverRecords()
+
+    let topHeight = 144
+    let bottomHeight = 72
+    const historyHeight = 220
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('root')) {
+        return {
+          left: 0,
+          top: 0,
+          width: 1280,
+          height: 720,
+          right: 1280,
+          bottom: 720,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-top')) {
+        return {
+          left: 0,
+          top: 0,
+          width: 1280,
+          height: topHeight,
+          right: 1280,
+          bottom: topHeight,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('sar-interact-history-overlay')) {
+        return {
+          left: 900,
+          top: 720 - historyHeight,
+          width: 320,
+          height: historyHeight,
+          right: 1220,
+          bottom: 720,
+          x: 900,
+          y: 720 - historyHeight,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-bottom')) {
+        return {
+          left: 0,
+          top: 720 - bottomHeight,
+          width: 1280,
+          height: bottomHeight,
+          right: 1280,
+          bottom: 720,
+          x: 0,
+          y: 720 - bottomHeight,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      return {
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+        right: 0,
+        bottom: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect
+    })
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const root = host.querySelector('.root') as HTMLElement | null
+      const historyOverlay = host.querySelector('.sar-interact-history-overlay') as HTMLElement | null
+      const bottomStack = Array.from(host.querySelectorAll('.ds-ov-bottom')).find(
+        (el) => !(el as HTMLElement).classList.contains('sar-interact-history-overlay'),
+      ) as HTMLElement | undefined
+
+      expect(root).toBeTruthy()
+      expect(historyOverlay).toBeTruthy()
+      expect(bottomStack).toBeTruthy()
+      expect(historyOverlay?.textContent).toContain('Recent actions')
+
+      expect(root!.style.getPropertyValue('--ds-hud-bottom-stack-height')).toBe('72px')
+
+      const observedHistory = records.some((record) => historyOverlay != null && record.observed.includes(historyOverlay))
+      const observedBottom = records.some((record) => bottomStack != null && record.observed.includes(bottomStack))
+      expect(observedHistory).toBe(false)
+      expect(observedBottom).toBe(true)
+    } finally {
+      app.unmount()
+      host.remove()
+      rectSpy.mockRestore()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_HISTORY')
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
     }

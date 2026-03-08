@@ -8,7 +8,7 @@ type ResizeObserverCallbackLike = (entries: ResizeObserverEntryLike[]) => void
 
 const windowShellComponent: Component = WindowShell
 
-function setResizeObserverGlobal(value: typeof ResizeObserver | undefined): void {
+function setResizeObserverGlobal(value: unknown): void {
   Object.defineProperty(globalThis, 'ResizeObserver', {
     value,
     configurable: true,
@@ -28,11 +28,22 @@ function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
     policy: {
       group: 'interact',
       singleton: 'reuse',
-      escBehavior: 'close',
+      sizingMode: 'fixed-width-auto-height',
+      widthOwner: 'policy',
+      heightOwner: 'measured',
+      escBehavior: 'back-then-close',
       closeOnOutsideClick: false,
     },
-    constraints: { minWidth: 320, minHeight: 200, preferredWidth: 420, preferredHeight: 280 },
+    constraints: {
+      minWidth: 320,
+      minHeight: 200,
+      maxWidth: 100000,
+      maxHeight: 100000,
+      preferredWidth: 420,
+      preferredHeight: 280,
+    },
     anchor: null,
+    anchorOffset: null,
     placement: 'docked-right',
     measured: null,
     ...overrides,
@@ -92,7 +103,7 @@ describe('WindowShell', () => {
       cleanup(host, app)
     })
 
-    it('inline style has left/top/zIndex but no width/height', async () => {
+    it('inline style has left/top/zIndex; width set by WM policy for policy-owned windows', async () => {
       const inst = makeInstance({ rect: { left: 50, top: 120, width: 400, height: 300 } })
       const { host, app } = mountShell({ instance: inst, frameless: true })
       await nextTick()
@@ -102,8 +113,10 @@ describe('WindowShell', () => {
       expect(style.left).toBe('50px')
       expect(style.top).toBe('120px')
       expect(style.zIndex).toBe(String(inst.effectiveZ))
-      expect(style.width).toBe('')
-      expect(style.height).toBe('')
+      // For policy-owned (fixed-width-auto-height) windows, width IS applied from WM.
+      // Height remains auto (content-driven).
+      expect(style.width).toBe('400px') // policy-owned width applied
+      expect(style.height).toBe('') // height auto-height (content-driven)
 
       cleanup(host, app)
     })
@@ -226,6 +239,7 @@ describe('WindowShell', () => {
       const prevRO = globalThis.ResizeObserver
       setResizeObserverGlobal(class ResizeObserverMock {
         private cb: ResizeObserverCallbackLike
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         constructor(cb: ResizeObserverCallbackLike) {
           this.cb = cb
           roCb = cb
@@ -233,7 +247,7 @@ describe('WindowShell', () => {
         observe() {}
         disconnect() {}
         unobserve() {}
-      } as unknown as typeof ResizeObserver)
+      })
 
       try {
         const { host, app } = mountShell({
@@ -269,6 +283,52 @@ describe('WindowShell', () => {
         expect(updateMeasured).toHaveBeenLastCalledWith({ width: 109, height: 209 })
 
         cleanup(host, app)
+      } finally {
+        setResizeObserverGlobal(prevRO)
+        vi.useRealTimers()
+      }
+    })
+
+    it('unmount-before-timeout clears queued measurement and prevents stale emit', async () => {
+      vi.useFakeTimers()
+
+      const onMeasured = vi.fn()
+      let roCb: ResizeObserverCallbackLike | null = null
+
+      const prevRO = globalThis.ResizeObserver
+      setResizeObserverGlobal(class ResizeObserverMock {
+        private cb: ResizeObserverCallbackLike
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        constructor(cb: ResizeObserverCallbackLike) {
+          this.cb = cb
+          roCb = cb
+        }
+        observe() {}
+        disconnect() {}
+        unobserve() {}
+      })
+
+      try {
+        const { host, app } = mountShell({
+          instance: makeInstance(),
+          onMeasured,
+        })
+        await nextTick()
+
+        expect(typeof roCb).toBe('function')
+        // Use non-null assertion: we verified typeof === 'function' above
+        roCb!([
+          {
+            borderBoxSize: [{ inlineSize: 333, blockSize: 222 }],
+          },
+        ])
+
+        expect(onMeasured).toHaveBeenCalledTimes(0)
+
+        cleanup(host, app)
+        vi.advanceTimersByTime(32)
+
+        expect(onMeasured).toHaveBeenCalledTimes(0)
       } finally {
         setResizeObserverGlobal(prevRO)
         vi.useRealTimers()

@@ -364,13 +364,13 @@ export function useWindowManager(): WindowManagerApi {
 
   function isElementConnected(el: Element): boolean {
     // `isConnected` is widely supported; keep a safe fallback for test envs.
-    const maybe = el as unknown as { isConnected?: boolean }
+    const maybe = el as Element & { isConnected?: boolean }
     return typeof maybe.isConnected === 'boolean' ? maybe.isConnected : document.contains(el)
   }
 
   function isElementDisabled(el: Element): boolean {
     // Covers HTML form controls; other elements simply won't have `disabled`.
-    const maybe = el as unknown as { disabled?: unknown }
+    const maybe = el as Element & { disabled?: unknown }
     return typeof maybe.disabled === 'boolean' ? maybe.disabled : false
   }
 
@@ -379,7 +379,7 @@ export function useWindowManager(): WindowManagerApi {
     if (!isElementConnected(el)) return false
     if (isElementDisabled(el)) return false
 
-    const focusFn = (el as unknown as { focus?: unknown }).focus
+    const focusFn = (el as Element & { focus?: unknown }).focus
     if (typeof focusFn !== 'function') return false
 
     try {
@@ -461,6 +461,9 @@ export function useWindowManager(): WindowManagerApi {
         return {
           group: 'interact',
           singleton: 'reuse',
+          sizingMode: 'fixed-width-auto-height',
+          widthOwner: 'policy',
+          heightOwner: 'measured',
           escBehavior: 'back-then-close',
           closeOnOutsideClick: false,
           onEsc,
@@ -479,6 +482,9 @@ export function useWindowManager(): WindowManagerApi {
           // Step 5: inspector windows are singleton-by-type, but MUST be 'reuse'
           // to avoid cross-group replace (inspector ↔ interact) side-effects.
           singleton: 'reuse',
+          sizingMode: 'bounded-intrinsic',
+          widthOwner: 'measured',
+          heightOwner: 'measured',
           escBehavior: 'close',
           closeOnOutsideClick: true,
           onClose: (reason) => {
@@ -493,6 +499,9 @@ export function useWindowManager(): WindowManagerApi {
         return {
           group: 'inspector',
           singleton: 'reuse',
+          sizingMode: 'fixed-width-auto-height',
+          widthOwner: 'policy',
+          heightOwner: 'measured',
           // ESC/back-stack: node-card participates in window stack.
           escBehavior: 'close',
           closeOnOutsideClick: true,
@@ -579,6 +588,24 @@ export function useWindowManager(): WindowManagerApi {
     }
   }
 
+  function syncRectToSizingPolicy(win: WindowInstance): void {
+    const estimated = estimateSizeFromConstraints(win.constraints)
+
+    if (!win.measured) {
+      win.rect.width = estimated.width
+      win.rect.height = estimated.height
+      return
+    }
+
+    if (win.policy.widthOwner === 'policy') {
+      win.rect.width = estimated.width
+    }
+
+    if (win.policy.heightOwner === 'policy') {
+      win.rect.height = estimated.height
+    }
+  }
+
   function setActive(next: number | null): void {
     activeId.value = next
     for (const [, win] of windowsMap) win.active = win.id === next
@@ -618,6 +645,7 @@ export function useWindowManager(): WindowManagerApi {
     if (!win) return
     const vp = viewport.value
     const pad = geometry.value.clampPadPx
+    const estimated = estimateSizeFromConstraints(win.constraints)
 
     const before = {
       left: win.rect.left,
@@ -627,13 +655,15 @@ export function useWindowManager(): WindowManagerApi {
     }
 
     const measured = win.measured
-    const w = measured?.width ?? before.width
-    const h = measured?.height ?? before.height
+    const resolvedWidth = measured && win.policy.widthOwner === 'measured' ? measured.width : estimated.width
+    const resolvedHeight = measured && win.policy.heightOwner === 'measured' ? measured.height : estimated.height
+    const w = resolvedWidth
+    const h = resolvedHeight
 
     let nextLeft = before.left
     let nextTop = before.top
-    let nextWidth = before.width
-    let nextHeight = before.height
+    let nextWidth = resolvedWidth
+    let nextHeight = resolvedHeight
 
     // If pinned to anchor, recalculate position from anchor first.
     // IMPORTANT: once the window has been measured (exists in DOM), do NOT overwrite
@@ -683,12 +713,6 @@ export function useWindowManager(): WindowManagerApi {
         nextLeft = snap8InRange(clampedLeft, pad, maxLeft)
         nextTop = snap8InRange(clampedTop, pad, maxTop)
       }
-    }
-
-    // Update rect dimensions from measured.
-    if (measured) {
-      nextWidth = measured.width
-      nextHeight = measured.height
     }
 
     // PERF-2: avoid no-op reactive writes (skip commit) when geometry is unchanged.
@@ -805,12 +829,7 @@ export function useWindowManager(): WindowManagerApi {
     win.effectiveZ = computeEffectiveZ(win)
     win.placement = anchor ? 'anchored' : 'docked-right'
 
-    // If window has not been measured yet, refresh rect size estimate.
-    if (!win.measured) {
-      const est = estimateSizeFromConstraints(constraints)
-      win.rect.width = est.width
-      win.rect.height = est.height
-    }
+    syncRectToSizingPolicy(win)
 
     // Re-position baseline only when necessary.
     if (anchorChanged || !win.measured) {
@@ -907,12 +926,7 @@ export function useWindowManager(): WindowManagerApi {
         win.effectiveZ = computeEffectiveZ(win)
         win.placement = anchor ? 'anchored' : 'docked-right'
 
-        // If window has not been measured yet, refresh rect size estimate.
-        if (!win.measured) {
-          const est = estimateSizeFromConstraints(constraints)
-          win.rect.width = est.width
-          win.rect.height = est.height
-        }
+        syncRectToSizingPolicy(win)
 
         // Re-position baseline only when necessary.
         // Feedback: for singleton='reuse', do not override user's dragged position

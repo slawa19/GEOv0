@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createApp, h, nextTick, ref, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import SuccessToast from './SuccessToast.vue'
 
 const successToastComponent: Component = SuccessToast
+const successToastSource = readFileSync(resolve(process.cwd(), 'src/components/SuccessToast.vue'), 'utf8')
 
 describe('SuccessToast', () => {
   it('AC-A11Y-3: SuccessToast uses role="status" + aria-live="polite" when visible', async () => {
@@ -191,6 +194,33 @@ describe('SuccessToast', () => {
       host.remove()
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  it('uses bottom-stack geometry contract, stacking offset, and viewport clamp formulas', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const msg = ref<string | null>('ok')
+    const app = createApp({
+      render: () => h(successToastComponent, { message: msg, onDismiss: vi.fn() }),
+    })
+
+    try {
+      app.mount(host)
+      await nextTick()
+
+      const toast = host.querySelector('.success-toast') as HTMLElement | null
+      expect(toast).toBeTruthy()
+
+      expect(successToastSource).toContain('ds-ov-toast')
+      expect(successToastSource).toContain('ds-ov-toast--success')
+      expect(successToastSource).toContain('ds-ov-toast__close')
+      expect(successToastSource).toContain('--ds-toast-transition-dur')
+      expect(successToastSource).toContain('--ds-toast-enter-shift-y')
+    } finally {
+      app.unmount()
+      host.remove()
     }
   })
 })

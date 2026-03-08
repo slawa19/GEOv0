@@ -1684,6 +1684,69 @@ describe('ManualPaymentPanel', () => {
         host.remove()
       }
     })
+
+    it('Batch 2a: long participant labels keep the consumer on shared ds-controls markup without local width hacks', async () => {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+
+      const state = reactive({
+        phase: 'picking-payment-to',
+        fromPid: 'alice' as string | null,
+        toPid: null as string | null,
+        selectedEdgeKey: null as string | null,
+        edgeAnchor: null as { x: number; y: number } | null,
+        error: null as string | null,
+        lastClearing: null,
+      })
+
+      const longName = 'Long option label '.repeat(12).trim()
+
+      const app = createApp({
+        render: () =>
+          h(manualPaymentPanelComponent, {
+            phase: 'picking-payment-to',
+            state,
+            unit: 'UAH',
+            availableCapacity: null,
+            trustlinesLoading: false,
+            paymentTargetsLoading: false,
+            paymentTargetsLastError: null,
+            paymentToTargetIds: new Set(['bob']),
+            trustlines: [],
+            participants: [
+              { pid: 'alice', name: longName },
+              { pid: 'bob', name: longName },
+            ],
+            setFromPid: vi.fn(),
+            setToPid: vi.fn(),
+            busy: false,
+            canSendPayment: false,
+            confirmPayment: vi.fn(),
+            cancel: vi.fn(),
+            anchor: null,
+            hostEl: null,
+          }),
+      })
+
+      app.mount(host)
+      await nextTick()
+
+      const panel = host.querySelector('[data-testid="manual-payment-panel"]') as HTMLElement | null
+      const row = host.querySelector('#mp-to')?.closest('.ds-controls__row') as HTMLElement | null
+      const select = host.querySelector('#mp-to') as HTMLSelectElement | null
+
+      expect(panel).toBeTruthy()
+      expect(row).toBeTruthy()
+      expect(select).toBeTruthy()
+
+      expect(panel!.style.width).toBe('')
+      expect(panel!.style.maxWidth).toBe('')
+      expect(row!.classList.contains('ds-controls__row')).toBe(true)
+      expect((select!.querySelector('option[value="bob"]')?.textContent ?? '')).toContain('Long option label')
+
+      app.unmount()
+      host.remove()
+    })
   })
 })
 

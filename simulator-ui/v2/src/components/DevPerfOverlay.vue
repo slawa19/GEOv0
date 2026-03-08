@@ -128,62 +128,26 @@ onUnmounted(() => {
 
 <template>
   <div v-if="enabled" class="perf ds-ov-item ds-ov-surface ds-ov-dev-perf" role="region" aria-label="Performance diagnostics">
-    <div class="row">
-      <div class="title ds-label">Perf probe</div>
+    <div class="row ds-ov-dev-perf__row">
+      <div class="title ds-label ds-ov-dev-perf__title">Perf probe</div>
       <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
     </div>
 
     <div
       v-if="String(gpu.renderer ?? '').includes('Microsoft Basic Render Driver')"
-      class="warn"
+      class="warn ds-ov-dev-perf__warn"
       role="note"
     >
       Hardware acceleration appears disabled (Microsoft Basic Render Driver). Expect severe slowness in Chrome.
       Check <span class="ds-mono">chrome://gpu</span> and enable hardware acceleration.
     </div>
 
-    <pre class="pre ds-mono">{{ text }}</pre>
+    <pre class="pre ds-mono ds-ov-dev-perf__pre">{{ text }}</pre>
   </div>
 </template>
 
 <style scoped>
 .perf {
   /* visuals + placement live in DS overlays layer */
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px 6px 12px;
-}
-
-.title {
-  color: var(--ds-text-1);
-}
-
-
-.pre {
-  margin: 0;
-  padding: 0 12px 12px 12px;
-  font-size: var(--ds-typo-label-font-size);
-  line-height: var(--ds-typo-body-line-height);
-  color: var(--ds-text-2);
-  white-space: pre-wrap;
-}
-
-.warn {
-  margin: 0 12px 8px 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--ds-warn) 35%, transparent);
-  background: color-mix(in srgb, var(--ds-warn) 18%, transparent);
-  color: color-mix(in srgb, var(--ds-warn) 12%, var(--ds-text-1));
-  font-family: var(--ds-typo-alert-font-family);
-  font-size: var(--ds-typo-alert-font-size);
-  letter-spacing: var(--ds-typo-alert-letter-spacing);
-  font-weight: var(--ds-typo-alert-font-weight);
-  line-height: var(--ds-typo-body-line-height);
 }
 </style>

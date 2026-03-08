@@ -137,6 +137,16 @@ flowchart TD
 - Data: `ds-node-card` и его элементы
 - Progress: `ds-progress__track`, `ds-progress__bar`
 
+### Канонические overlay composition primitives
+
+- `ds-ov-bar`: compact HUD-like surface shell; позиционирование остаётся у consumer layer.
+- `ds-ov-metric`: compact metric chip для `TopBar`, `BottomBar`, `SystemBalanceBar`; это shared primitive, а не runtime surface.
+- `ds-ov-dropdown`: bounded-intrinsic dropdown shell для HUD/details меню.
+- `ds-ov-toast`: shared notification-toast shell; bottom offset и clamp читаются только из DS tokens.
+- `ds-ov-message`: message/info overlay shell.
+
+Правило: `HudBar`, `ds-ov-bar` и `ds-ov-metric` не заносятся в runtime surface catalog как отдельные surfaces. Это composition primitives, которыми пользуются runtime surfaces.
+
 ## 5) Как добавить новый примитив (процедура)
 
 Шаги для агента:
@@ -168,6 +178,46 @@ HUD — это **не отдельный CSS зоопарк**, а:
 
 - новый параллельный набор классов (например `.hud-btn2`)
 - копипастить целые панели в scoped CSS компонентов
+
+### 6.1 Runtime surface catalog
+
+| Runtime surface | Family | Sizing mode | Positioning owner | Width owner | Height owner | Z-layer token |
+|---|---|---|---|---|---|---|
+| WM interact window | `interact-panel` | `fixed-width-auto-height` | WindowManager | WM policy | measured/fallback | `--ds-z-panel` within WM stack |
+| WM inspector window | `inspector-card` | `fixed-width-auto-height` or `bounded-intrinsic` | WindowManager | WM policy | measured/fallback | `--ds-z-panel` within WM stack |
+| Top HUD stack | `hud-bar` | `stretch` | root top stack | stack container | content/min-row token | `--ds-z-top` |
+| Bottom HUD stack | `hud-bar` | `stretch` | root bottom stack | stack container | content/min-row token | `--ds-z-bottom` |
+| TopBar Advanced dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
+| TopBar Admin dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
+| BottomBar Artifacts dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
+| BottomBar DevTools dropdown | `hud-dropdown` | `bounded-intrinsic` | details/dropdown shell | dropdown token contract | dropdown token contract | `--ds-z-inset` |
+| Toast | `notification-toast` | `intrinsic` | bottom stack offset | DS toast clamp tokens | content | `--ds-z-alert` |
+| InteractHistoryLog | `bottom-overlay` | `intrinsic` | root bottom overlay | content | content | `--ds-z-bottom` |
+| DevPerfOverlay | `dev-overlay` | `intrinsic` | fixed corner | DS overlay max-width contract | content/max-height token | `--ds-z-dev` |
+| EdgeTooltip | `tooltip` | `intrinsic` | cursor-following shell | content | content | `--ds-z-tooltip` |
+| Canvas labels/floating labels | `canvas-overlay` | `stretch` | viewport | viewport | viewport | `--ds-z-world-labels` |
+
+Validation outcome for current shipped scope:
+
+- `EdgeTooltip` micro-layout lives in `designSystem.overlays.css`; the component only binds content and placement style.
+- `DevPerfOverlay` spacing/layout lives in `designSystem.overlays.css`; the component keeps only diagnostics/copy logic.
+- `InteractHistoryLog`, toasts, HUD dropdowns, `DevPerfOverlay`, `EdgeTooltip`, and canvas overlays all sit inside the current runtime family table and z-layer contract.
+- Inspector extraction remains deferred: `NodeCardOverlay` stays on the `ds-ov-node-card` + `ds-node-card` contract, while `EdgeDetailPopup` stays on the `ds-ov-edge-detail` quick-info/action contract. No shared `ds-inspector-row` primitive is introduced until a repeated rail contract appears.
+
+### 6.2 Runtime z-layer map
+
+Source of truth stays in `App.css`; composition consumers in `designSystem.overlays.css` must reference these tokens instead of literals.
+
+| Token | Role |
+|---|---|
+| `--ds-z-world-labels` | world labels and transient canvas labels above canvas, below UI overlays |
+| `--ds-z-bottom` | bottom HUD stack and bottom runtime overlays |
+| `--ds-z-top` | top HUD stack |
+| `--ds-z-panel` | WM-managed inspector/panel surfaces |
+| `--ds-z-dev` | dev overlays and floating diagnostics |
+| `--ds-z-tooltip` | tooltip surfaces |
+| `--ds-z-inset` | dropdown/inset overlays above bars but below alerts |
+| `--ds-z-alert` | notification toasts and alert-level overlays |
 
 ## 7) Чеклист качества для PR от агента
 

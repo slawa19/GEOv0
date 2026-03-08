@@ -71,4 +71,24 @@ describe('TopBar wiring smoke', () => {
     expect(parent).toContain('@admin-attach-run="admin.attachRun"')
     expect(parent).toContain('@admin-stop-run="admin.stopRun"')
   })
+
+  it('keeps dropdown surfaces on the shared overlay contract and leaves generic narrow HUD rules to HudBar', () => {
+    const sfc = readHere('./TopBar.vue')
+
+    expect(sfc).toContain("import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'")
+    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown"')
+    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right tb-admin-dropdown"')
+    expect(sfc).toContain('@keydown.capture="onAdvancedDetailsKeydown"')
+    expect(sfc).toContain('@keydown.capture="onAdminDetailsKeydown"')
+    expect(sfc).toContain('--ds-ov-dropdown-minw: var(--ds-tb-admin-dropdown-minw);')
+    expect(sfc).toContain('--ds-ov-dropdown-maxw: var(--ds-tb-admin-dropdown-maxw);')
+    expect(sfc).toContain('width: var(--ds-tb-intensity-input-w);')
+    expect(sfc).toContain('grid-template-columns: var(--ds-tb-run-id-col-w) var(--ds-tb-run-state-col-w) 1fr auto auto;')
+    expect(sfc).toContain(':deep(.ds-segmented) {')
+    expect(sfc).toContain(':deep(.ds-segment) {')
+
+    expect(sfc).not.toContain(':deep(.ds-select) {')
+    expect(sfc).not.toContain(':deep(.ds-btn) {')
+    expect(sfc).not.toContain(':deep(.ds-label) {')
+  })
 })

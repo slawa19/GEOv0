@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
 import { EQUIVALENT_CODES } from '../config/equivalents'
+import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
 import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
 import HudBar from './common/HudBar.vue'
 
@@ -71,6 +72,23 @@ function readDevToolsOpenForCurrentMode(): boolean {
 }
 
 const devToolsOpen = ref(readDevToolsOpenForCurrentMode())
+const artifactsOpen = ref(false)
+
+const {
+  detailsRef: artifactsDetailsRef,
+  summaryRef: artifactsSummaryRef,
+  surfaceRef: artifactsSurfaceRef,
+  onToggle: onArtifactsToggle,
+  onDetailsKeydown: onArtifactsDetailsKeydown,
+} = useHudDropdownFocus(artifactsOpen)
+
+const {
+  detailsRef: devToolsDetailsRef,
+  summaryRef: devToolsSummaryRef,
+  surfaceRef: devToolsSurfaceRef,
+  onToggle: onDevToolsDropdownToggle,
+  onDetailsKeydown: onDevToolsDetailsKeydown,
+} = useHudDropdownFocus(devToolsOpen)
 
 watch(
   () => props.isDemoUi,
@@ -91,9 +109,7 @@ watch(
 )
 
 function onDevToolsToggle(ev: Event) {
-  const el = ev.target as HTMLDetailsElement | null
-  if (!el) return
-  devToolsOpen.value = !!el.open
+  onDevToolsDropdownToggle(ev)
 }
 
 const allowDemoUi = import.meta.env.VITE_ALLOW_DEMO_UI === 'true'
@@ -184,14 +200,22 @@ async function onRunClearingOnce() {
 
         <details
           v-if="activeSegment === 'auto'"
+          ref="artifactsDetailsRef"
+          :open="artifactsOpen"
           class="ds-ov-details bb-details"
           aria-label="Artifacts"
+          @keydown.capture="onArtifactsDetailsKeydown"
+          @toggle="onArtifactsToggle"
         >
-          <summary class="ds-panel ds-ov-metric ds-row bb-summary">
+          <summary ref="artifactsSummaryRef" class="ds-panel ds-ov-metric ds-row bb-summary">
             <span class="ds-badge ds-badge--info">Artifacts</span>
             <span class="ds-value bb-fade-85">{{ artifacts.length || 0 }}</span>
           </summary>
-          <div class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right">
+          <div
+            ref="artifactsSurfaceRef"
+            class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right"
+            tabindex="-1"
+          >
             <div class="ds-stack bb-stack">
               <div class="ds-row bb-row">
                 <button
@@ -223,17 +247,21 @@ async function onRunClearingOnce() {
 
         <details
           v-if="isDevToolsVisible || allowDemoUi"
+          ref="devToolsDetailsRef"
           :open="devToolsOpen"
+          @keydown.capture="onDevToolsDetailsKeydown"
           @toggle="onDevToolsToggle"
           class="ds-ov-details bb-details"
           aria-label="Dev tools"
         >
-          <summary class="ds-panel ds-ov-metric ds-row bb-summary">
+          <summary ref="devToolsSummaryRef" class="ds-panel ds-ov-metric ds-row bb-summary">
             <span class="ds-badge ds-badge--warn">Dev</span>
             <span class="ds-label bb-fade-90">Tools</span>
           </summary>
           <div
-            class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right bb-devtools-dropdown"
+            ref="devToolsSurfaceRef"
+            class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right ds-ov-dropdown--fit-content bb-devtools-dropdown"
+            tabindex="-1"
           >
             <div class="ds-row bb-row bb-devtools-row">
               <button
@@ -297,10 +325,7 @@ async function onRunClearingOnce() {
 }
 
 .bb-devtools-dropdown {
-  /* Compact popover: only one row of buttons, no extra stacks/headers. */
-  min-width: 0;
-  width: max-content;
-  max-width: calc(100vw - var(--ds-bb-devtools-maxw-inset));
+  --ds-ov-dropdown-vw-inset: var(--ds-bb-devtools-maxw-inset);
 }
 
 .bb-devtools-row {
@@ -326,36 +351,9 @@ async function onRunClearingOnce() {
 
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */
 @media (max-width: 500px) {
-  /* Force left/right sections to wrap onto their own rows and fill full width */
-  :deep(.hud-bar__left),
-  :deep(.hud-bar__right) {
-    flex: 1 1 100%;
-    min-width: 0;
-    width: 100%;
-  }
-
   /* Allow rows inside sections to wrap too */
   .bb-row {
     flex-wrap: wrap;
-  }
-
-  /* Select elements: shrink to fit, no fixed min-width */
-  :deep(.ds-select) {
-    min-width: 0;
-    max-width: 100%;
-    flex: 1 1 auto;
-  }
-
-  /* Buttons: allow shrinking */
-  :deep(.ds-btn) {
-    min-width: 0;
-    flex-shrink: 1;
-  }
-
-  /* ds-label: no forced nowrap */
-  :deep(.ds-label) {
-    white-space: normal;
-    flex-shrink: 1;
   }
 
   /* ds-value: no forced nowrap */

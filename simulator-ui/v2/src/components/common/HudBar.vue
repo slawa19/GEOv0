@@ -89,4 +89,30 @@ const layoutClass = computed(() => {
 :deep(.hud-bar__left) { flex: 0 0 auto; justify-content: flex-start; }
 :deep(.hud-bar__center) { flex: 1 1 auto; justify-content: center; }
 :deep(.hud-bar__right) { flex: 0 0 auto; justify-content: flex-end; }
+
+@media (max-width: 500px) {
+  :deep(.hud-bar__left),
+  :deep(.hud-bar__center),
+  :deep(.hud-bar__right) {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  :deep(.ds-select) {
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 auto;
+  }
+
+  :deep(.ds-btn) {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  :deep(.ds-label) {
+    white-space: normal;
+    flex-shrink: 1;
+  }
+}
 </style>

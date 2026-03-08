@@ -1,7 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
+
+const edgeDetailPopupSource = readFileSync(resolve(process.cwd(), 'src/components/EdgeDetailPopup.vue'), 'utf8')
 
 function mountPopup(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -156,5 +160,11 @@ describe('EdgeDetailPopup', () => {
 
     app.unmount()
     host.remove()
+  })
+
+  it('keeps the edge-detail inspector on WM/DS contracts without introducing ds-inspector-row', () => {
+    expect(edgeDetailPopupSource).toContain("position: 'static'")
+    expect(edgeDetailPopupSource).toContain('class="popup ds-ov-item ds-ov-surface ds-ov-edge-detail"')
+    expect(edgeDetailPopupSource).not.toContain('ds-inspector-row')
   })
 })

@@ -1,7 +1,12 @@
 import { createApp, h, nextTick, type Component, type Slots } from 'vue'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import HudBar from './HudBar.vue'
+
+function readHere(rel: string): string {
+  return readFileSync(new URL(rel, import.meta.url), 'utf8')
+}
 
 function mountHudBar(
   props: Record<string, unknown> = {},
@@ -61,6 +66,18 @@ describe('HudBar', () => {
 
     app.unmount()
     host.remove()
+  })
+
+  it('owns the shared narrow-viewport HUD section and control shrink contract', () => {
+    const sfc = readHere('./HudBar.vue')
+
+    expect(sfc).toContain('@media (max-width: 500px)')
+    expect(sfc).toContain(':deep(.hud-bar__left),')
+    expect(sfc).toContain(':deep(.hud-bar__center),')
+    expect(sfc).toContain(':deep(.hud-bar__right) {')
+    expect(sfc).toContain(':deep(.ds-select) {')
+    expect(sfc).toContain(':deep(.ds-btn) {')
+    expect(sfc).toContain(':deep(.ds-label) {')
   })
 })
 

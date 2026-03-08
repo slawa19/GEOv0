@@ -145,8 +145,12 @@ import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
  import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
  import { useWindowController } from '../composables/useWindowController'
- import { readOverlayGeometryPx } from '../ui-kit/overlayGeometry'
-import { DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX, DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX } from '../ui-kit/overlayGeometry'
+import {
+  createMeasuredPublishedGeometryValue,
+  DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX,
+  DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX,
+  readOverlayGeometryPx,
+} from '../ui-kit/overlayGeometry'
 
 function readWindowViewportFallback(): { width: number; height: number } {
   try {
@@ -166,6 +170,7 @@ const wm = useWindowManager()
 const wmEdgeDetail = useWmEdgeDetail()
 
 let windowController: ReturnType<typeof useWindowController> | null = null
+let getHostEl = (): HTMLElement | null => null
 
 function uiCloseTopmostInspectorWindow(): 'edge-detail' | 'node-card' | null {
   return windowController?.uiCloseTopmostInspectorWindow() ?? null
@@ -198,6 +203,10 @@ const app = useSimulatorApp({
 wm.setViewport(readWindowViewportFallback())
 
 let viewportRo: ResizeObserver | null = null
+let topStackGeometryRo: ResizeObserver | null = null
+let bottomStackGeometryRo: ResizeObserver | null = null
+let topStackGeometryPublisher: ReturnType<typeof createMeasuredPublishedGeometryValue> | null = null
+let bottomStackGeometryPublisher: ReturnType<typeof createMeasuredPublishedGeometryValue> | null = null
 
 function readHostViewport(host: HTMLElement | null): { width: number; height: number } {
   try {
@@ -209,6 +218,103 @@ function readHostViewport(host: HTMLElement | null): { width: number; height: nu
   } catch {
     return readWindowViewportFallback()
   }
+}
+
+function queryTopStackElement(): HTMLElement | null {
+  const host = getHostEl()
+  const el = host?.querySelector('.ds-ov-top')
+  return el instanceof HTMLElement ? el : null
+}
+
+function queryBottomStackElement(): HTMLElement | null {
+  const host = getHostEl()
+  if (!host) return null
+
+  const candidates = host.querySelectorAll('.ds-ov-bottom')
+  for (const candidate of candidates) {
+    if (!(candidate instanceof HTMLElement)) continue
+    if (candidate.classList.contains('sar-interact-history-overlay')) continue
+    return candidate
+  }
+
+  return null
+}
+
+function readPublishedStackHeightPx(el: HTMLElement | null): number | null {
+  const height = Number(el?.getBoundingClientRect?.().height ?? 0)
+  if (!Number.isFinite(height) || !(height > 0)) return null
+  return Math.round(height)
+}
+
+function applyPublishedTopStackHeightPx(nextPx: number): void {
+  const host = getHostEl()
+  if (!host) return
+
+  host.style.setProperty('--ds-hud-stack-height', `${nextPx}px`)
+  wm.setGeometry({ dockedRightTopPx: nextPx })
+  wm.reclampAll()
+}
+
+function applyPublishedBottomStackHeightPx(nextPx: number): void {
+  const host = getHostEl()
+  if (!host) return
+
+  host.style.setProperty('--ds-hud-bottom-stack-height', `${nextPx}px`)
+}
+
+function bindOverlayGeometryPublishers(): void {
+  const host = getHostEl()
+  if (!host || typeof ResizeObserver === 'undefined') return
+
+  resetOverlayGeometryPublishers()
+
+  const fallback = readOverlayGeometryPx(host)
+
+  topStackGeometryPublisher = createMeasuredPublishedGeometryValue(
+    fallback.hudStackHeightPx,
+    applyPublishedTopStackHeightPx,
+  )
+  bottomStackGeometryPublisher = createMeasuredPublishedGeometryValue(
+    fallback.hudBottomStackHeightPx,
+    applyPublishedBottomStackHeightPx,
+  )
+
+  const topEpoch = topStackGeometryPublisher.nextEpoch()
+  const bottomEpoch = bottomStackGeometryPublisher.nextEpoch()
+  const topEl = queryTopStackElement()
+  const bottomEl = queryBottomStackElement()
+
+  topStackGeometryPublisher.publish(readPublishedStackHeightPx(topEl), topEpoch)
+  bottomStackGeometryPublisher.publish(readPublishedStackHeightPx(bottomEl), bottomEpoch)
+
+  topStackGeometryRo?.disconnect()
+  bottomStackGeometryRo?.disconnect()
+
+  if (topEl) {
+    topStackGeometryRo = new ResizeObserver(() => {
+      topStackGeometryPublisher?.publish(readPublishedStackHeightPx(topEl), topEpoch)
+    })
+    topStackGeometryRo.observe(topEl)
+  }
+
+  if (bottomEl) {
+    bottomStackGeometryRo = new ResizeObserver(() => {
+      bottomStackGeometryPublisher?.publish(readPublishedStackHeightPx(bottomEl), bottomEpoch)
+    })
+    bottomStackGeometryRo.observe(bottomEl)
+  }
+}
+
+function resetOverlayGeometryPublishers(): void {
+  topStackGeometryRo?.disconnect()
+  bottomStackGeometryRo?.disconnect()
+  topStackGeometryRo = null
+  bottomStackGeometryRo = null
+
+  topStackGeometryPublisher?.reset()
+  bottomStackGeometryPublisher?.reset()
+  topStackGeometryPublisher = null
+  bottomStackGeometryPublisher = null
 }
 
 const {
@@ -292,6 +398,8 @@ const {
   getNodeById,
   resetView,
 } = app
+
+getHostEl = () => hostEl.value
 
 function nodeEdgeStatsFor(nodeId: string): ReturnType<typeof computeNodeEdgeStats> | null {
   const snapshot = state.snapshot
@@ -455,6 +563,7 @@ onMounted(() => {
   void nextTick(() => {
     const vp = readHostViewport(hostEl.value)
     wm.setViewport(vp)
+    bindOverlayGeometryPublishers()
   })
 
   if (typeof ResizeObserver !== 'undefined') {
@@ -474,6 +583,7 @@ onUnmounted(() => {
 
   viewportRo?.disconnect()
   viewportRo = null
+  resetOverlayGeometryPublishers()
 })
 
 const interactRunTerminal = computed(() => {

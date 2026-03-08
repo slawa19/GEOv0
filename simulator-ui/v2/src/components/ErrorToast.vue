@@ -60,14 +60,14 @@ onUnmounted(() => {
   <Transition name="error-toast">
     <div
       v-if="visible && message"
-      class="error-toast ds-alert ds-alert--err ds-ov-surface"
+      class="error-toast ds-alert ds-alert--err ds-ov-surface ds-ov-toast ds-ov-toast--error"
       role="alert"
       aria-live="assertive"
     >
-      <span class="error-toast__icon" aria-hidden="true">⚠</span>
-      <span class="error-toast__text">{{ message }}</span>
+      <span class="error-toast__icon ds-ov-toast__icon" aria-hidden="true">⚠</span>
+      <span class="error-toast__text ds-ov-toast__text">{{ message }}</span>
       <button
-        class="error-toast__close ds-btn ds-btn--ghost ds-btn--icon"
+        class="error-toast__close ds-ov-toast__close ds-btn ds-btn--ghost ds-btn--icon"
         type="button"
         aria-label="Dismiss"
         @click="dismiss"
@@ -77,49 +77,15 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.error-toast {
-  position: absolute;
-  bottom: 68px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--ds-z-alert, 200);
-  min-width: 240px;
-  max-width: 480px;
-  /* visuals are driven by design system primitives + tokens */
-  pointer-events: auto;
-}
-
-.error-toast__icon {
-  flex-shrink: 0;
-  opacity: 0.9;
-}
-
-.error-toast__text {
-  flex: 1 1 auto;
-  word-break: break-word;
-}
-
-.error-toast__close {
-  flex-shrink: 0;
-  min-width: 24px;
-  min-height: 24px;
-  opacity: 0.85;
-  transition: opacity 0.15s;
-}
-
-.error-toast__close:hover {
-  opacity: 1;
-}
-
 /* Vue Transition */
 .error-toast-enter-active,
 .error-toast-leave-active {
-  transition: opacity 0.2s, transform 0.2s;
+  transition: opacity var(--ds-toast-transition-dur), transform var(--ds-toast-transition-dur);
 }
 
 .error-toast-enter-from,
 .error-toast-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(8px);
+  transform: translateX(-50%) translateY(var(--ds-toast-enter-shift-y));
 }
 </style>

@@ -459,5 +459,62 @@ describe('TrustlineManagementPanel', () => {
     app.unmount()
     host.remove()
   })
+
+  it('Batch 2a: long trustline labels keep the consumer on the expected select + suffix-row structure', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
+    const longName = 'Very long trustline label '.repeat(10).trim()
+
+    const app = createApp({
+      render: () =>
+        h(trustlineManagementPanelComponent, {
+          phase: 'editing-trustline',
+          state,
+          unit: 'EQ',
+          used: '0.00',
+          currentLimit: '10.00',
+          available: '10.00',
+          participants: [
+            { pid: 'alice', name: longName },
+            { pid: 'bob', name: longName },
+          ],
+          trustlines: [
+            {
+              from_pid: 'alice',
+              from_name: longName,
+              to_pid: 'bob',
+              to_name: longName,
+              equivalent: 'EQ',
+              limit: '10.00',
+              used: '0.00',
+              available: '10.00',
+              status: 'active',
+            },
+          ],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const select = host.querySelector('#tl-pick') as HTMLSelectElement | null
+    const inputRow = host.querySelector('.tl-input-row') as HTMLElement | null
+
+    expect(select).toBeTruthy()
+    expect(inputRow).toBeTruthy()
+
+    expect(inputRow!.classList.contains('ds-row')).toBe(true)
+    expect((select!.querySelector('option[value="alice|bob"]')?.textContent ?? '')).toContain('Very long trustline label')
+
+    app.unmount()
+    host.remove()
+  })
 })
 

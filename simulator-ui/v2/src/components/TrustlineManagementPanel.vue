@@ -414,7 +414,7 @@ defineExpose({
         Cannot close: trustline has outstanding debt ({{ closeDebtText }}). Reduce debt to 0 first.
       </div>
 
-      <div class="ds-row tl-actions">
+      <div class="ds-row ds-row--actions tl-actions">
         <button v-if="isCreate" class="ds-btn ds-btn--primary" type="button" :disabled="busy || !createValid" @click="onCreate">
           {{ busy ? 'Creating…' : 'Create' }}
         </button>
@@ -451,13 +451,6 @@ defineExpose({
 </template>
 
 <style scoped>
-/* Compact: shrink panel to content width, cap at viewport */
-.ds-ov-panel {
-  width: fit-content;
-  min-width: 0;
-  max-width: min(380px, calc(100vw - 24px));
-}
-
 /* Compact panel padding override (global --ds-space-4 ≥ 18px is too wide here) */
 .ds-ov-panel :deep(.ds-panel__header),
 .ds-ov-panel :deep(.ds-panel__body) {
@@ -514,6 +507,5 @@ defineExpose({
   }
 }
 </style>
-
 
 

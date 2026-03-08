@@ -4,14 +4,21 @@ import { watch } from 'vue'
 import { useWindowManager } from './useWindowManager'
 import type { WindowInstance } from './types'
 import { isNodeCardWindow } from './types'
-import { DEFAULT_WM_CLAMP_PAD_PX, readOverlayGeometryPx } from '../../ui-kit/overlayGeometry'
+import {
+  createMeasuredPublishedGeometryValue,
+  DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX,
+  DEFAULT_WM_CLAMP_PAD_PX,
+  readOverlayGeometryPx,
+} from '../../ui-kit/overlayGeometry'
 
 function last<T>(a: T[]): T {
   return a[a.length - 1]!
 }
 
 function fakeKeyEv(target: EventTarget | null = null): KeyboardEvent {
-  return { target } as unknown as KeyboardEvent
+  const ev = new KeyboardEvent('keydown', { key: 'Escape' })
+  Object.defineProperty(ev, 'target', { value: target, configurable: true })
+  return ev
 }
 
 describe('useWindowManager (MVP)', () => {
@@ -304,6 +311,53 @@ describe('useWindowManager (MVP)', () => {
     expect(w.rect.height).toBe(260)
   })
 
+  it('fixed-width-auto-height: long labels / measured width growth do not expand interact window and measured height still updates', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id = wm.open({ type: 'interact-panel', data: { panel: 'trustline', phase: 'x' } })
+    const win = wm.windows.value.find((x) => x.id === id)!
+
+    expect(win.rect.width).toBe(380)
+
+    wm.updateMeasuredSize(id, { width: 920, height: 264 })
+    wm.reclamp(id)
+
+    expect(win.rect.width).toBe(380)
+    expect(win.rect.height).toBe(264)
+  })
+
+  it('fixed-width-auto-height: picking -> confirm reuse keeps width stable while height follows the latest valid measurement', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1280, height: 800 })
+
+    const idPicking = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'picking-payment-to' } })
+    const picking = wm.windows.value.find((x) => x.id === idPicking)!
+
+    wm.updateMeasuredSize(idPicking, { width: 880, height: 420 })
+    wm.reclamp(idPicking)
+
+    const leftBeforeConfirm = picking.rect.left
+    const topBeforeConfirm = picking.rect.top
+
+    expect(picking.rect.width).toBe(560)
+    expect(picking.rect.height).toBe(420)
+
+    const idConfirm = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment' } })
+    expect(idConfirm).toBe(idPicking)
+
+    const confirm = wm.windows.value.find((x) => x.id === idConfirm)!
+    expect(confirm.rect.width).toBe(560)
+
+    wm.updateMeasuredSize(idConfirm, { width: 940, height: 360 })
+    wm.reclamp(idConfirm)
+
+    expect(confirm.rect.left).toBe(leftBeforeConfirm)
+    expect(confirm.rect.top).toBe(topBeforeConfirm)
+    expect(confirm.rect.width).toBe(560)
+    expect(confirm.rect.height).toBe(360)
+  })
+
   it('E1: reclamp pad is driven by a single DS token source (--ds-wm-clamp-pad)', () => {
     const wm = useWindowManager()
 
@@ -331,6 +385,21 @@ describe('useWindowManager (MVP)', () => {
 
       expect(w.rect.left).toBe(20)
       expect(w.rect.top).toBe(20)
+    } finally {
+      host.remove()
+    }
+  })
+
+  it('E1: top/bottom overlay geometry readers expose published stack vars with fallback token path', () => {
+    const host = document.createElement('div')
+    host.style.setProperty('--ds-hud-stack-height', '144px')
+    host.style.setProperty('--ds-hud-bottom-stack-height', '72px')
+    document.body.appendChild(host)
+
+    try {
+      const geo = readOverlayGeometryPx(host)
+      expect(geo.hudStackHeightPx).toBe(144)
+      expect(geo.hudBottomStackHeightPx).toBe(72)
     } finally {
       host.remove()
     }
@@ -388,8 +457,8 @@ describe('useWindowManager (MVP)', () => {
     expect(win.rect.left).toBe(leftAfterFirstMeasure)
     expect(win.rect.top).toBe(topAfterFirstMeasure)
 
-    // Dimensions must track measured.
-    expect(win.rect.width).toBe(540)
+    // Width stays policy-owned; only height tracks measured content.
+    expect(win.rect.width).toBe(560)
     expect(win.rect.height).toBe(280)
   })
 
@@ -1090,5 +1159,22 @@ describe('useWindowManager (MVP)', () => {
     a.remove()
     b.remove()
     blur.remove()
+  })
+
+  it('measured/published geometry value ignores stale publish after reset and restores fallback safely', () => {
+    const applied: number[] = []
+    const publisher = createMeasuredPublishedGeometryValue(DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX, (nextPx) => {
+      applied.push(nextPx)
+    })
+
+    const firstEpoch = publisher.nextEpoch()
+    expect(publisher.publish(72, firstEpoch)).toBe(true)
+    expect(applied).toEqual([72])
+
+    publisher.reset()
+    expect(applied).toEqual([72, DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX])
+
+    expect(publisher.publish(96, firstEpoch)).toBe(false)
+    expect(applied).toEqual([72, DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX])
   })
 })

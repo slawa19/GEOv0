@@ -465,7 +465,7 @@ function onToChange(v: string) {
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
 
-      <div class="ds-row mp-actions">
+      <div class="ds-row ds-row--actions mp-actions">
         <button
           v-if="isConfirm"
           class="ds-btn ds-btn--primary"
@@ -520,7 +520,6 @@ function onToChange(v: string) {
   margin: 2px 0 0;
 }
 </style>
-
 
 
 

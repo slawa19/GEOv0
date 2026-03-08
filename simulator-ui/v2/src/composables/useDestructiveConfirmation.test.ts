@@ -18,6 +18,9 @@ function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
     policy: {
       group: 'inspector',
       singleton: 'reuse',
+      sizingMode: 'bounded-intrinsic',
+      widthOwner: 'measured',
+      heightOwner: 'measured',
       escBehavior: 'close',
       closeOnOutsideClick: false,
     },

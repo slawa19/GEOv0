@@ -1,6 +1,11 @@
 import { createApp, h, nextTick, ref } from 'vue'
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SceneId } from '../scenes'
+
+function readHere(rel: string): string {
+  return readFileSync(new URL(rel, import.meta.url), 'utf8')
+}
 
 type SimulatorStorageMock = {
   readDevtoolsOpenReal: ReturnType<typeof vi.fn>
@@ -35,7 +40,7 @@ vi.mock('../composables/usePersistedSimulatorPrefs', async () => {
 
 const { default: BottomBar } = await import('./BottomBar.vue')
 
-async function mountBottomBar(opts: { isDemoUi: boolean }) {
+async function mountBottomBar(opts: { isDemoUi: boolean; propOverrides?: Record<string, unknown> }) {
   const host = document.createElement('div')
   document.body.appendChild(host)
 
@@ -73,6 +78,7 @@ async function mountBottomBar(opts: { isDemoUi: boolean }) {
     fxBusy: false,
     runTxOnce: vi.fn(),
     runClearingOnce: vi.fn(),
+    ...opts.propOverrides,
   }
 
   const app = createApp({
@@ -173,6 +179,98 @@ describe('BottomBar — DevTools panel (<details>)', () => {
       app.unmount()
       host.remove()
     }
+  })
+
+  it('moves keyboard-opened focus inside Dev tools and restores summary focus on Escape', async () => {
+    const { app, host } = await mountBottomBar({ isDemoUi: false })
+    await nextTick()
+
+    const details = host.querySelector('details[aria-label="Dev tools"]') as HTMLDetailsElement
+    const summary = details.querySelector('summary') as HTMLElement
+    const firstButton = details.querySelector('.bb-devtools-dropdown button') as HTMLButtonElement
+
+    expect(details).toBeTruthy()
+    expect(summary).toBeTruthy()
+    expect(firstButton).toBeTruthy()
+
+    summary.focus()
+    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    await nextTick()
+
+    expect(document.activeElement).toBe(firstButton)
+
+    firstButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+
+    expect(details.open).toBe(false)
+    expect(document.activeElement).toBe(summary)
+    expect(storageMock.writeDevtoolsOpenReal).toHaveBeenLastCalledWith(false)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('moves keyboard-opened focus inside Artifacts and restores summary focus on Escape', async () => {
+    const downloadArtifact = vi.fn()
+    const { app, host } = await mountBottomBar({
+      isDemoUi: false,
+      propOverrides: {
+        artifacts: [{ name: 'run-report.csv' }],
+        downloadArtifact,
+      },
+    })
+    await nextTick()
+
+    const details = host.querySelector('details[aria-label="Artifacts"]') as HTMLDetailsElement
+    const summary = details.querySelector('summary') as HTMLElement
+    const refreshButton = Array.from(details.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === 'Refresh',
+    ) as HTMLButtonElement | undefined
+    const downloadButton = Array.from(details.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === 'run-report.csv',
+    ) as HTMLButtonElement | undefined
+
+    expect(details).toBeTruthy()
+    expect(summary).toBeTruthy()
+    expect(refreshButton).toBeTruthy()
+    expect(downloadButton).toBeTruthy()
+
+    summary.focus()
+    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    await nextTick()
+
+    expect(document.activeElement).toBe(refreshButton)
+
+    downloadButton?.focus()
+    downloadButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(refreshButton)
+
+    refreshButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+
+    expect(details.open).toBe(false)
+    expect(document.activeElement).toBe(summary)
+    expect(downloadArtifact).toHaveBeenCalledTimes(0)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('keeps dropdown surfaces on the shared overlay contract and leaves generic narrow HUD rules to HudBar', () => {
+    const sfc = readHere('./BottomBar.vue')
+
+    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right"')
+    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right ds-ov-dropdown--fit-content bb-devtools-dropdown"')
+    expect(sfc).toContain('--ds-ov-dropdown-vw-inset: var(--ds-bb-devtools-maxw-inset);')
+    expect(sfc).toContain(':deep(.ds-value) {')
+
+    expect(sfc).not.toContain(':deep(.ds-select) {')
+    expect(sfc).not.toContain(':deep(.ds-btn) {')
+    expect(sfc).not.toContain(':deep(.ds-label) {')
   })
 })
 

@@ -13,6 +13,10 @@ export type FocusMode = 'auto' | 'always' | 'never'
 
 export type WindowType = 'interact-panel' | 'node-card' | 'edge-detail'
 
+export type WindowSizingMode = 'fixed-width-auto-height' | 'bounded-intrinsic'
+
+export type WindowAxisOwner = 'policy' | 'measured'
+
 export type WindowSizeConstraints = {
   minWidth: number
   minHeight: number
@@ -72,6 +76,9 @@ export type WindowAnchor = { x: number; y: number; space: AnchorSpace; source: s
 export type WindowPolicy = {
   group: WindowGroup
   singleton: 'reuse' | 'replace'
+  sizingMode: WindowSizingMode
+  widthOwner: WindowAxisOwner
+  heightOwner: WindowAxisOwner
   escBehavior: 'close' | 'back-then-close' | 'ignore'
   closeOnOutsideClick: boolean
   /** Callback для 'back-then-close': окно пытается «съесть» ESC (шаг назад).

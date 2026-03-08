@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import { fmtAmt } from '../utils/numberFormat'
+
+const nodeCardOverlaySource = readFileSync(resolve(process.cwd(), 'src/components/NodeCardOverlay.vue'), 'utf8')
 
 function mountNodeCard(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -233,6 +237,12 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
       app.unmount()
       host.remove()
     }
+  })
+
+  it('keeps the node-card inspector on WM/DS contracts without introducing ds-inspector-row', () => {
+    expect(nodeCardOverlaySource).toContain("position: 'static'")
+    expect(nodeCardOverlaySource).toContain('class="ds-ov-node-card"')
+    expect(nodeCardOverlaySource).not.toContain('ds-inspector-row')
   })
 
 })

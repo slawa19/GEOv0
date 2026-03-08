@@ -47,11 +47,11 @@ const visible = computed(() => {
 }
 
 .interact-history__header {
-  font-size: 0.7rem;
-  opacity: 0.45;
+  font-size: var(--ds-typo-section-label-font-size);
+  opacity: var(--ds-ihl-header-opacity);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 4px;
+  letter-spacing: var(--ds-typo-section-label-letter-spacing);
+  margin-bottom: var(--ds-ihl-header-margin-bottom);
 }
 
 .interact-history__list {
@@ -60,16 +60,16 @@ const visible = computed(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--ds-ihl-list-gap);
 }
 
 .interact-history__item {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  font-size: 0.78rem;
-  opacity: 0.7;
-  transition: opacity 0.3s;
+  gap: var(--ds-ihl-item-gap);
+  font-size: var(--ds-ihl-item-font-size);
+  opacity: var(--ds-ihl-item-opacity);
+  transition: opacity var(--ds-dur-slow);
 }
 
 .interact-history__item--latest {
@@ -78,8 +78,8 @@ const visible = computed(() => {
 
 .interact-history__icon {
   flex-shrink: 0;
-  font-size: 0.75rem;
-  min-width: 1.2em;
+  font-size: var(--ds-ihl-icon-font-size);
+  min-width: var(--ds-ihl-icon-minw);
   text-align: center;
 }
 
@@ -92,7 +92,7 @@ const visible = computed(() => {
 
 .interact-history__time {
   flex-shrink: 0;
-  font-size: 0.7rem;
-  opacity: 0.5;
+  font-size: var(--ds-ihl-time-font-size);
+  opacity: var(--ds-ihl-time-opacity);
 }
 </style>

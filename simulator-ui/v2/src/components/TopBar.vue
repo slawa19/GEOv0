@@ -5,6 +5,7 @@ import type { UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
 import { isJwtLike } from '../utils/isJwtLike'
 
+import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
 import { useTopBarContext } from '../composables/useTopBarContext'
 import HudBar from './common/HudBar.vue'
 
@@ -177,7 +178,24 @@ const adminStopAllBtnClass = computed(() => {
 })
 
 /** Toggle state for the admin panel (details element). */
+const advancedPanelOpen = ref(false)
 const adminPanelOpen = ref(false)
+
+const {
+  detailsRef: advancedDetailsRef,
+  summaryRef: advancedSummaryRef,
+  surfaceRef: advancedSurfaceRef,
+  onToggle: onAdvancedToggle,
+  onDetailsKeydown: onAdvancedDetailsKeydown,
+} = useHudDropdownFocus(advancedPanelOpen)
+
+const {
+  detailsRef: adminDetailsRef,
+  summaryRef: adminSummaryRef,
+  surfaceRef: adminSurfaceRef,
+  onToggle: onAdminToggle,
+  onDetailsKeydown: onAdminDetailsKeydown,
+} = useHudDropdownFocus(adminPanelOpen)
 
 /** Preserve previous UX: open admin panel after a successful runs fetch. */
 const shouldOpenAdminPanelAfterLoad = ref(false)
@@ -368,8 +386,16 @@ function onApplyIntensity() {
               Stop
             </button>
 
-            <details class="ds-ov-details" aria-label="Advanced">
+            <details
+              ref="advancedDetailsRef"
+              class="ds-ov-details"
+              aria-label="Advanced"
+              :open="advancedPanelOpen"
+              @keydown.capture="onAdvancedDetailsKeydown"
+              @toggle="onAdvancedToggle"
+            >
               <summary
+                ref="advancedSummaryRef"
                 class="ds-panel ds-ov-metric ds-row tb-adv-summary"
                 aria-label="Advanced settings"
               >
@@ -378,8 +404,10 @@ function onApplyIntensity() {
               </summary>
 
               <div
+                ref="advancedSurfaceRef"
                 class="ds-panel ds-ov-surface ds-ov-dropdown"
                 aria-label="Advanced dropdown"
+                tabindex="-1"
               >
                 <div class="ds-stack tb-adv-stack">
                   <div class="ds-row tb-adv-row">
@@ -449,12 +477,15 @@ function onApplyIntensity() {
             <!-- §10: Admin controls — admin-only (requires admin token) -->
             <details
               v-if="showAdminControls"
+              ref="adminDetailsRef"
               class="ds-ov-details"
               aria-label="Admin controls"
               :open="adminPanelOpen"
-              @toggle="adminPanelOpen = ($event.target as HTMLDetailsElement).open"
+              @keydown.capture="onAdminDetailsKeydown"
+              @toggle="onAdminToggle"
             >
               <summary
+                ref="adminSummaryRef"
                 class="ds-panel ds-ov-metric tb-admin-summary"
                 aria-label="Admin"
               >
@@ -463,8 +494,10 @@ function onApplyIntensity() {
               </summary>
 
               <div
+                ref="adminSurfaceRef"
                 class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right tb-admin-dropdown"
                 aria-label="Admin dropdown"
+                tabindex="-1"
               >
                 <div class="ds-stack tb-admin-stack">
                   <div class="ds-row tb-admin-actions">
@@ -610,7 +643,7 @@ function onApplyIntensity() {
 }
 
 .tb-intensity-input {
-  width: 6ch;
+  width: var(--ds-tb-intensity-input-w);
   height: var(--ds-tb-control-h);
 }
 
@@ -645,8 +678,9 @@ function onApplyIntensity() {
 }
 
 .tb-admin-dropdown {
-  min-width: var(--ds-tb-admin-dropdown-minw);
-  max-width: min(var(--ds-tb-admin-dropdown-maxw), calc(100vw - var(--ds-tb-admin-dropdown-vw-inset)));
+  --ds-ov-dropdown-minw: var(--ds-tb-admin-dropdown-minw);
+  --ds-ov-dropdown-maxw: var(--ds-tb-admin-dropdown-maxw);
+  --ds-ov-dropdown-vw-inset: var(--ds-tb-admin-dropdown-vw-inset);
 }
 
 .tb-runs-list {
@@ -657,7 +691,7 @@ function onApplyIntensity() {
 
 .tb-run-item {
   display: grid;
-  grid-template-columns: 64px 68px 1fr auto auto;
+  grid-template-columns: var(--ds-tb-run-id-col-w) var(--ds-tb-run-state-col-w) 1fr auto auto;
   align-items: center;
   gap: var(--ds-space-2, 8px);
   padding: var(--ds-tb-run-item-pad-y) var(--ds-tb-run-item-pad-x);
@@ -722,15 +756,6 @@ function onApplyIntensity() {
 
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */
 @media (max-width: 500px) {
-  /* Force left/center/right sections to wrap onto their own rows */
-  :deep(.hud-bar__left),
-  :deep(.hud-bar__center),
-  :deep(.hud-bar__right) {
-    flex: 1 1 100%;
-    min-width: 0;
-    width: 100%;
-  }
-
   /* Segmented control: allow wrapping inside */
   :deep(.ds-segmented) {
     flex-wrap: wrap;
@@ -740,25 +765,6 @@ function onApplyIntensity() {
   /* Each segment button: shrink to fit */
   :deep(.ds-segment) {
     min-width: 0;
-    flex-shrink: 1;
-  }
-
-  /* Select elements: shrink to fit */
-  :deep(.ds-select) {
-    min-width: 0;
-    max-width: 100%;
-    flex: 1 1 auto;
-  }
-
-  /* Buttons: allow shrinking */
-  :deep(.ds-btn) {
-    min-width: 0;
-    flex-shrink: 1;
-  }
-
-  /* ds-label: no forced nowrap */
-  :deep(.ds-label) {
-    white-space: normal;
     flex-shrink: 1;
   }
 

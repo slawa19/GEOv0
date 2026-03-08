@@ -56,26 +56,3 @@ defineProps<Props>()
   </div>
 </template>
 
-<style scoped>
-.ds-ov-tooltip__divider {
-  height: 1px;
-  background: rgba(255,255,255,0.15);
-  margin: 4px 0;
-}
-
-.ds-ov-tooltip__row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 0.78rem;
-  opacity: 0.9;
-}
-
-.ds-ov-tooltip__label {
-  opacity: 0.65;
-}
-
-.ds-ov-tooltip__val {
-  font-family: var(--ds-font-mono, monospace);
-}
-</style>
