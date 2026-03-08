@@ -1,20 +1,11 @@
 import { nextTick, ref, type Ref } from 'vue'
 
-const HUD_DROPDOWN_FOCUSABLE = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"]):not([disabled])',
-].join(', ')
-
-function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
-  if (!root) return []
-  return Array.from(root.querySelectorAll<HTMLElement>(HUD_DROPDOWN_FOCUSABLE)).filter(
-    (el) => !el.hasAttribute('disabled') && el.tabIndex >= 0,
-  )
-}
+import {
+  getDropdownFocusableElements,
+  isDropdownOpenKey,
+  scheduleDropdownFocusRestore,
+  trapDropdownTabNavigation,
+} from './dropdownFocusCore'
 
 export function useHudDropdownFocus(open: Ref<boolean>) {
   const detailsRef = ref<HTMLDetailsElement | null>(null)
@@ -25,7 +16,7 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
   let restoreFocusPending = false
 
   function focusFirstInside(): void {
-    const target = getFocusableElements(surfaceRef.value)[0] ?? surfaceRef.value
+    const target = getDropdownFocusableElements(surfaceRef.value)[0] ?? surfaceRef.value
     target?.focus()
   }
 
@@ -37,7 +28,7 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
     open.value = false
     if (detailsRef.value) detailsRef.value.open = false
     restoreFocusPending = true
-    void nextTick(() => {
+    scheduleDropdownFocusRestore(() => {
       if (!restoreFocusPending) return
       restoreFocusPending = false
       restoreSummaryFocus()
@@ -80,7 +71,7 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
     const key = event.key
 
     if (
-      (key === 'Enter' || key === ' ' || key === 'Spacebar' || key === 'ArrowDown') &&
+      isDropdownOpenKey(key) &&
       target != null &&
       (target === summaryRef.value || summaryRef.value?.contains(target) === true)
     ) {
@@ -98,29 +89,8 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
 
     if (key !== 'Tab') return
 
-    const focusables = getFocusableElements(surfaceRef.value)
-    if (focusables.length === 0) {
+    if (trapDropdownTabNavigation(surfaceRef.value, event.shiftKey)) {
       event.preventDefault()
-      surfaceRef.value?.focus()
-      return
-    }
-
-    const active = document.activeElement
-    const first = focusables[0]
-    const last = focusables[focusables.length - 1]
-    const activeInsideSurface = active instanceof HTMLElement && (surfaceRef.value?.contains(active) ?? false)
-
-    if (event.shiftKey) {
-      if (!activeInsideSurface || active === first) {
-        event.preventDefault()
-        last.focus()
-      }
-      return
-    }
-
-    if (!activeInsideSurface || active === last) {
-      event.preventDefault()
-      first.focus()
     }
   }
 

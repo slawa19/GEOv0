@@ -9,6 +9,7 @@ import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberForma
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import { renderOrDash } from '../utils/valueFormat'
+import OverlaySelect from './common/OverlaySelect.vue'
 
 type Props = {
   phase: InteractPhase
@@ -249,6 +250,34 @@ function onTrustlinePick(key: string) {
   props.selectTrustline?.(from, to)
 }
 
+const fromOptions = computed(() => participantsSorted.value.map((participant) => ({
+  value: participant.pid,
+  label: participantLabel(participant),
+})))
+
+const toOptions = computed(() => toParticipants.value.map((participant) => ({
+  value: participant.pid,
+  label: participantLabel(participant) + (isCreate.value && existingActiveToPidsForFrom.value.has((participant.pid ?? '').trim()) ? ' (exists)' : ''),
+})))
+
+const trustlineOptions = computed(() => trustlinesForFrom.value.map((trustline) => ({
+  value: encodeTlKey(trustline),
+  label: `${trustline.from_name || trustline.from_pid} → ${trustline.to_name || trustline.to_pid}`,
+})))
+
+function onFromSelect(value: string | null) {
+  props.setFromPid?.(value)
+}
+
+function onToSelect(value: string | null) {
+  props.setToPid?.(value)
+}
+
+function onTrustlineSelect(value: string | null) {
+  if (!value) return
+  onTrustlinePick(value)
+}
+
 const rootStyle = computed(() => {
   // WM owns geometry. Keep TrustlineManagementPanel as a simple content block.
   return {
@@ -285,56 +314,47 @@ defineExpose({
 
     <div class="ds-panel__body ds-stack">
       <div v-if="participantsSorted.length && isPickFrom" class="ds-controls__row ds-controls__row--compact">
-        <label class="ds-label" for="tl-from">From</label>
-        <select
+        <label id="tl-from-label" class="ds-label" for="tl-from__trigger">From</label>
+          <OverlaySelect
           id="tl-from"
-          class="ds-select"
-          :value="state.fromPid ?? ''"
+            :model-value="state.fromPid ?? null"
+            :options="fromOptions"
           :disabled="busy"
-          aria-label="Trustline from participant"
-          @change="props.setFromPid?.(($event.target as HTMLSelectElement).value || null)"
-        >
-          <option value="">—</option>
-          <option v-for="p in participantsSorted" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
-        </select>
+              labelledBy="tl-from-label"
+              triggerLabel="Trustline from participant"
+            @update:model-value="onFromSelect"
+          />
       </div>
 
       <div v-if="participantsSorted.length && (isPickTo || isCreate)" class="ds-controls__row ds-controls__row--compact">
-        <label class="ds-label" for="tl-to">To</label>
-        <select
+        <label id="tl-to-label" class="ds-label" for="tl-to__trigger">To</label>
+          <OverlaySelect
           id="tl-to"
-          class="ds-select"
-          :value="state.toPid ?? ''"
+            :model-value="state.toPid ?? null"
+            :options="toOptions"
           :disabled="busy || !state.fromPid"
-          :title="!state.fromPid && !busy ? 'Select \'From\' participant first' : undefined"
-          aria-label="Trustline to participant"
-          @change="props.setToPid?.(($event.target as HTMLSelectElement).value || null)"
-        >
-          <option value="">—</option>
-          <option v-for="p in toParticipants" :key="p.pid" :value="p.pid">
-            {{ participantLabel(p) + (isCreate && existingActiveToPidsForFrom.has((p.pid ?? '').trim()) ? ' (exists)' : '') }}
-          </option>
-        </select>
+              labelledBy="tl-to-label"
+              :title="!state.fromPid && !busy ? 'Select \'From\' participant first' : undefined"
+              triggerLabel="Trustline to participant"
+              surfaceLabel="Trustline to participant options"
+            @update:model-value="onToSelect"
+          />
       </div>
 
       <div v-if="(isCreate || isEdit) && trustlinesSorted.length" class="ds-controls__row ds-controls__row--compact">
-        <label class="ds-label" for="tl-pick">Existing</label>
-        <select
+        <label id="tl-pick-label" class="ds-label" for="tl-pick__trigger">Existing</label>
+          <OverlaySelect
           id="tl-pick"
-          class="ds-select"
-          :value="state.fromPid && state.toPid
-            ? encodeTlKey({ from_pid: state.fromPid, to_pid: state.toPid })
-            : ''"
+            :model-value="state.fromPid && state.toPid
+              ? encodeTlKey({ from_pid: state.fromPid, to_pid: state.toPid })
+              : null"
+            :options="trustlineOptions"
           :disabled="busy"
-          title="Available only in edit/create mode"
-          aria-label="Pick existing trustline"
-          @change="onTrustlinePick(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">—</option>
-          <option v-for="tl in trustlinesForFrom" :key="encodeTlKey(tl)" :value="encodeTlKey(tl)">
-            {{ (tl.from_name || tl.from_pid) + ' → ' + (tl.to_name || tl.to_pid) }}
-          </option>
-        </select>
+              labelledBy="tl-pick-label"
+              title="Available only in edit/create mode"
+              triggerLabel="Pick existing trustline"
+            @update:model-value="onTrustlineSelect"
+          />
       </div>
 
       <div v-if="isPickFrom" class="ds-help tl-pick-help">Pick From node (canvas) or choose from dropdown.</div>

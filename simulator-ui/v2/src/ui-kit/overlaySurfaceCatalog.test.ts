@@ -67,6 +67,13 @@ describe('overlaySurfaceCatalog', () => {
       zLayerToken: '--ds-z-bottom',
     })
 
+    expect(getOverlaySurfaceDescriptor('interact-select-dropdown')).toMatchObject({
+      family: 'hud-dropdown',
+      sizingMode: 'bounded-intrinsic',
+      positioningOwner: 'window-shell-anchor',
+      zLayerToken: '--ds-z-inset',
+    })
+
     expect(getOverlaySurfaceDescriptor('hud-dropdown')).toMatchObject({
       family: 'hud-dropdown',
       sizingMode: 'bounded-intrinsic',

@@ -262,6 +262,7 @@
   /* DS overlays (Interact panels) */
   --ds-controls-label-rail-w: 110px;
   --ds-controls-field-max-w: 360px;
+  --ds-controls-interact-select-max-w: 320px;
   --ds-controls-suffix-max-w: 220px;
   --ds-ov-panel-minw: 320px;
   --ds-ov-panel-maxw: 560px;

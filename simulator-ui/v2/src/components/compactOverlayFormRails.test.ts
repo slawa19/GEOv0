@@ -12,6 +12,8 @@ const trustlineManagementPanelComponent: Component = TrustlineManagementPanel
 describe('shared compact overlay form rails', () => {
   it('keeps compact-row and suffix primitives in the shared design-system rail contract', () => {
     const cssSource = readFileSync(resolve(process.cwd(), 'src/ui-kit/designSystem.primitives.css'), 'utf8')
+    const tokenSource = readFileSync(resolve(process.cwd(), 'src/ui-kit/designSystem.tokens.css'), 'utf8')
+    const overlaySelectSource = readFileSync(resolve(process.cwd(), 'src/components/common/OverlaySelect.vue'), 'utf8')
 
     expect(cssSource).toContain('.ds-controls__row--compact > .ds-input,')
     expect(cssSource).toContain('.ds-controls__row--compact > .ds-select,')
@@ -19,6 +21,8 @@ describe('shared compact overlay form rails', () => {
     expect(cssSource).toContain('width: min(100%, var(--ds-controls-field-max-w));')
     expect(cssSource).toContain('.ds-controls__suffix {')
     expect(cssSource).toContain('width: min(100%, var(--ds-controls-suffix-max-w));')
+    expect(tokenSource).toContain('--ds-controls-interact-select-max-w: 320px;')
+    expect(overlaySelectSource).toContain('var(--ds-controls-interact-select-max-w)')
   })
 
   it('keeps ManualPaymentPanel on shared compact-row primitives without local width clamps', async () => {

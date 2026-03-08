@@ -297,6 +297,11 @@ describe('ManualPaymentPanel', () => {
     const toHelp = host.querySelector('#mp-to-help') as HTMLElement | null
     expect(toHelp).toBeTruthy()
 
+    const toLabel = host.querySelector('#mp-to-label') as HTMLLabelElement | null
+    const toTrigger = host.querySelector('#mp-to__trigger') as HTMLButtonElement | null
+    expect(toLabel?.htmlFor).toBe('mp-to__trigger')
+    expect(toTrigger?.getAttribute('aria-labelledby')).toBe('mp-to-label')
+
     const amountInput = host.querySelector('#mp-amount') as HTMLInputElement
     expect(amountInput.getAttribute('aria-describedby')).toBe('mp-amount-help')
     const amountHelp = host.querySelector('#mp-amount-help') as HTMLElement | null
@@ -384,6 +389,72 @@ describe('ManualPaymentPanel', () => {
     const warn = host.querySelector('[data-testid="manual-payment-to-invalid-warn"]') as HTMLElement
     expect(warn).toBeTruthy()
     expect(warn.textContent ?? '').toContain('Selected recipient is no longer available. Please re-select.')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('closes the To dropdown on Escape without unmounting the payment panel', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'picking-payment-to',
+      fromPid: 'alice' as string | null,
+      toPid: 'bob' as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null,
+    })
+
+    const app = createApp({
+      render: () =>
+        h(manualPaymentPanelComponent, {
+          phase: 'picking-payment-to',
+          state,
+          unit: 'UAH',
+          availableCapacity: null,
+          trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
+          paymentToTargetIds: new Set(['bob']),
+          trustlines: [],
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+          ],
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+          busy: false,
+          canSendPayment: true,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+    await nextTick()
+
+    const trigger = host.querySelector('#mp-to__trigger') as HTMLButtonElement | null
+    expect(trigger).toBeTruthy()
+
+    trigger?.focus()
+    trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    await nextTick()
+    await nextTick()
+
+    const dropdown = document.body.querySelector('#mp-to__surface') as HTMLElement | null
+    expect(dropdown).toBeTruthy()
+
+    const selected = dropdown?.querySelector('[data-dropdown-selected="1"]') as HTMLButtonElement | null
+    selected?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+    await nextTick()
+
+    expect(document.body.querySelector('#mp-to__surface')).toBeNull()
+    expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
 
     app.unmount()
     host.remove()

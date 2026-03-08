@@ -410,6 +410,49 @@ describe('TrustlineManagementPanel', () => {
     host.remove()
   })
 
+  it('keeps disabled reason on the To trigger when From is not selected', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = baseState({ fromPid: null, toPid: null })
+
+    const app = createApp({
+      render: () =>
+        h(trustlineManagementPanelComponent, {
+          phase: 'confirm-trustline-create',
+          state,
+          unit: 'EQ',
+          used: '0',
+          currentLimit: null,
+          available: null,
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+          ],
+          trustlines: [],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const label = host.querySelector('#tl-to-label') as HTMLLabelElement | null
+    const trigger = host.querySelector('#tl-to__trigger') as HTMLButtonElement | null
+
+    expect(label?.htmlFor).toBe('tl-to__trigger')
+    expect(trigger?.disabled).toBe(true)
+    expect(trigger?.title).toBe("Select 'From' participant first")
+    expect(trigger?.getAttribute('aria-labelledby')).toBe('tl-to-label')
+
+    app.unmount()
+    host.remove()
+  })
+
   it('TL-4: pre-fills newLimit from effectiveLimit (trustlines list) rather than props.currentLimit', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

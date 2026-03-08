@@ -7,6 +7,7 @@ import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
+import OverlaySelect from './common/OverlaySelect.vue'
 
 type Props = {
   phase: InteractPhase
@@ -352,6 +353,16 @@ function onToChange(v: string) {
   props.setToPid?.(v ? v : null)
   toSelectionInvalidWarning.value = null
 }
+
+const fromOptions = computed(() => fromParticipants.value.map((participant) => ({
+  value: participant.pid,
+  label: participantLabel(participant),
+})))
+
+const toOptions = computed(() => toParticipants.value.map((participant) => ({
+  value: participant.pid,
+  label: toOptionLabel(participant),
+})))
 </script>
 
 <template>
@@ -365,37 +376,34 @@ function onToChange(v: string) {
 
     <div class="ds-panel__body ds-stack">
       <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
-        <label class="ds-label" for="mp-from">From</label>
-        <select
+        <label id="mp-from-label" class="ds-label" for="mp-from__trigger">From</label>
+        <OverlaySelect
           id="mp-from"
-          class="ds-select"
-          :value="state.fromPid ?? ''"
+          :model-value="state.fromPid ?? null"
+          :options="fromOptions"
           :disabled="busy"
-          aria-label="From participant"
-          @change="onFromChange(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">—</option>
-          <option v-for="p in fromParticipants" :key="p.pid" :value="p.pid">{{ participantLabel(p) }}</option>
-        </select>
+          labelledBy="mp-from-label"
+          triggerLabel="From participant"
+          @update:model-value="onFromChange($event ?? '')"
+        />
       </div>
 
       <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
-        <label class="ds-label" for="mp-to">
+        <label id="mp-to-label" class="ds-label" for="mp-to__trigger">
           To
           <span v-if="toListUpdating" class="ds-muted ds-mono"> (updating…)</span>
         </label>
-        <select
+        <OverlaySelect
           id="mp-to"
-          class="ds-select"
-          :value="state.toPid ?? ''"
+          :model-value="state.toPid ?? null"
+          :options="toOptions"
           :disabled="busy || !state.fromPid || toKnownEmpty"
-          aria-label="To participant"
-          aria-describedby="mp-to-help"
-          @change="onToChange(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">—</option>
-          <option v-for="p in toParticipants" :key="p.pid" :value="p.pid">{{ toOptionLabel(p) }}</option>
-        </select>
+          labelledBy="mp-to-label"
+          triggerLabel="To participant"
+          describedBy="mp-to-help"
+          surfaceLabel="To participant options"
+          @update:model-value="onToChange($event ?? '')"
+        />
       </div>
 
       <div

@@ -26,6 +26,7 @@ export type OverlaySizingMode =
 
 export type OverlayPositioningOwner =
   | 'window-manager'
+  | 'window-shell-anchor'
   | 'root-top-stack'
   | 'root-bottom-stack'
   | 'details-shell'
@@ -69,6 +70,7 @@ export type OverlayAriaLive = 'polite' | 'assertive'
 export type OverlaySurfaceKey =
   | 'wm-interact-window'
   | 'wm-inspector-window'
+  | 'interact-select-dropdown'
   | 'top-hud-stack'
   | 'bottom-hud-stack'
   | 'hud-dropdown'
@@ -144,6 +146,15 @@ export const overlaySurfaceCatalog = {
     widthOwner: 'stack-container',
     heightOwner: 'min-row-token',
     zLayerToken: '--ds-z-bottom',
+  },
+  'interact-select-dropdown': {
+    key: 'interact-select-dropdown',
+    family: 'hud-dropdown',
+    sizingMode: 'bounded-intrinsic',
+    positioningOwner: 'window-shell-anchor',
+    widthOwner: 'dropdown-token-contract',
+    heightOwner: 'dropdown-token-contract',
+    zLayerToken: '--ds-z-inset',
   },
   'hud-dropdown': {
     key: 'hud-dropdown',
