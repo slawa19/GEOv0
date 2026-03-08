@@ -15,6 +15,7 @@ import {
   DEFAULT_WM_EDGE_DETAIL_PREFERRED_WIDTH_PX,
   DEFAULT_WM_INTERACT_MIN_HEIGHT_PX,
   DEFAULT_WM_INTERACT_MIN_WIDTH_PX,
+  DEFAULT_WM_INTERACT_PREFERRED_WIDTH_PAYMENT_PX,
   DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX,
   DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX,
   DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_PICKING_PX,
@@ -122,6 +123,7 @@ export function useWindowManager(): WindowManagerApi {
     interactPanelMinWidthPx: DEFAULT_WM_INTERACT_MIN_WIDTH_PX,
     interactPanelMinHeightPx: DEFAULT_WM_INTERACT_MIN_HEIGHT_PX,
     interactPanelPreferredWidthTrustlinePx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX,
+    interactPanelPreferredWidthPaymentPx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_PAYMENT_PX,
     interactPanelPreferredWidthWidePx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_WIDE_PX,
     interactPanelPreferredHeightLoadingPx: DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX,
     interactPanelPreferredHeightConfirmPx: DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX,
@@ -190,6 +192,13 @@ export function useWindowManager(): WindowManagerApi {
       next.interactPanelPreferredWidthTrustlinePx > 0
         ? next.interactPanelPreferredWidthTrustlinePx
         : prev.interactPanelPreferredWidthTrustlinePx
+
+    const interactPanelPreferredWidthPaymentPx =
+      next.interactPanelPreferredWidthPaymentPx != null &&
+      Number.isFinite(next.interactPanelPreferredWidthPaymentPx) &&
+      next.interactPanelPreferredWidthPaymentPx > 0
+        ? next.interactPanelPreferredWidthPaymentPx
+        : prev.interactPanelPreferredWidthPaymentPx
 
     const interactPanelPreferredWidthWidePx =
       next.interactPanelPreferredWidthWidePx != null &&
@@ -287,6 +296,7 @@ export function useWindowManager(): WindowManagerApi {
       interactPanelMinWidthPx === prev.interactPanelMinWidthPx &&
       interactPanelMinHeightPx === prev.interactPanelMinHeightPx &&
       interactPanelPreferredWidthTrustlinePx === prev.interactPanelPreferredWidthTrustlinePx &&
+      interactPanelPreferredWidthPaymentPx === prev.interactPanelPreferredWidthPaymentPx &&
       interactPanelPreferredWidthWidePx === prev.interactPanelPreferredWidthWidePx &&
       interactPanelPreferredHeightLoadingPx === prev.interactPanelPreferredHeightLoadingPx &&
       interactPanelPreferredHeightConfirmPx === prev.interactPanelPreferredHeightConfirmPx &&
@@ -317,6 +327,7 @@ export function useWindowManager(): WindowManagerApi {
       interactPanelMinWidthPx,
       interactPanelMinHeightPx,
       interactPanelPreferredWidthTrustlinePx,
+      interactPanelPreferredWidthPaymentPx,
       interactPanelPreferredWidthWidePx,
       interactPanelPreferredHeightLoadingPx,
       interactPanelPreferredHeightConfirmPx,
@@ -548,14 +559,12 @@ export function useWindowManager(): WindowManagerApi {
         })()
 
         // Audit fix C-1: trustline preferredWidth MUST be 380.
-        // IMPORTANT: payment/clearing preferredWidth MUST match `.ds-ov-panel` max-width (560px),
-        // otherwise WindowShell will render with an incorrect first-frame estimate and then visibly
-        // jump after the first ResizeObserver measurement + reclamp.
+        // Payment now has its own policy width; clearing stays on the wide contract.
         const preferredWidth =
           d.panel === 'trustline'
             ? g.interactPanelPreferredWidthTrustlinePx
             : d.panel === 'payment'
-              ? g.interactPanelPreferredWidthWidePx
+              ? g.interactPanelPreferredWidthPaymentPx
               : g.interactPanelPreferredWidthWidePx
 
         return {

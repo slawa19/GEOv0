@@ -11,6 +11,7 @@ export const DEFAULT_WM_CASCADE_STEP_PX = 32
 export const DEFAULT_WM_INTERACT_MIN_WIDTH_PX = 320
 export const DEFAULT_WM_INTERACT_MIN_HEIGHT_PX = 220
 export const DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX = 380
+export const DEFAULT_WM_INTERACT_PREFERRED_WIDTH_PAYMENT_PX = 440
 export const DEFAULT_WM_INTERACT_PREFERRED_WIDTH_WIDE_PX = 560
 export const DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX = 260
 export const DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX = 360
@@ -45,6 +46,7 @@ export type OverlayGeometryPx = {
   wmInteractMinWidthPx: number
   wmInteractMinHeightPx: number
   wmInteractPreferredWidthTrustlinePx: number
+  wmInteractPreferredWidthPaymentPx: number
   wmInteractPreferredWidthWidePx: number
   wmInteractPreferredHeightLoadingPx: number
   wmInteractPreferredHeightConfirmPx: number
@@ -196,6 +198,7 @@ export function readOverlayGeometryPx(el?: Element | null): OverlayGeometryPx {
       wmInteractMinWidthPx: DEFAULT_WM_INTERACT_MIN_WIDTH_PX,
       wmInteractMinHeightPx: DEFAULT_WM_INTERACT_MIN_HEIGHT_PX,
       wmInteractPreferredWidthTrustlinePx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX,
+      wmInteractPreferredWidthPaymentPx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_PAYMENT_PX,
       wmInteractPreferredWidthWidePx: DEFAULT_WM_INTERACT_PREFERRED_WIDTH_WIDE_PX,
       wmInteractPreferredHeightLoadingPx: DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX,
       wmInteractPreferredHeightConfirmPx: DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX,
@@ -234,6 +237,11 @@ export function readOverlayGeometryPx(el?: Element | null): OverlayGeometryPx {
     target,
     '--ds-wm-interact-prefw-trustline',
     DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX,
+  )
+  const wmInteractPreferredWidthPaymentPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-interact-prefw-payment',
+    DEFAULT_WM_INTERACT_PREFERRED_WIDTH_PAYMENT_PX,
   )
   const wmInteractPreferredWidthWidePx = readCssVarPositivePxWithFallback(
     target,
@@ -332,6 +340,7 @@ export function readOverlayGeometryPx(el?: Element | null): OverlayGeometryPx {
     wmInteractMinWidthPx,
     wmInteractMinHeightPx,
     wmInteractPreferredWidthTrustlinePx,
+    wmInteractPreferredWidthPaymentPx,
     wmInteractPreferredWidthWidePx,
     wmInteractPreferredHeightLoadingPx,
     wmInteractPreferredHeightConfirmPx,

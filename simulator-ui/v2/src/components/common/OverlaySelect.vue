@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { useOverlayDropdownFocus } from '../../composables/useOverlayDropdownFocus'
 import { useWindowContainerEl } from '../../composables/windowManager/windowContainerContext'
@@ -109,7 +109,7 @@ function updateSurfacePosition(): void {
   const triggerRect = trigger.getBoundingClientRect()
   const gap = readPositiveCssPx(trigger, '--ds-space-2', 8)
   const inset = readPositiveCssPx(trigger, '--ds-space-2', 8)
-  const maxSurfaceWidth = readPositiveCssPx(trigger, '--ds-controls-interact-select-max-w', triggerRect.width)
+  const maxSurfaceWidth = readPositiveCssPx(trigger, '--ds-controls-interact-select-surface-max-w', triggerRect.width)
   const viewportMaxWidth = Math.max(0, bounds.width - inset * 2)
 
   const baseStyle: Record<string, string> = {
@@ -174,9 +174,11 @@ if (typeof window !== 'undefined') {
   window.addEventListener('resize', onGlobalResize)
 }
 
-if (typeof document !== 'undefined') {
-  document.addEventListener('pointerdown', onGlobalPointerDown, true)
-}
+onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.addEventListener('pointerdown', onGlobalPointerDown, true)
+  }
+})
 
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
@@ -268,7 +270,7 @@ onUnmounted(() => {
 
 .overlay-select__trigger {
   display: inline-flex;
-  width: min(100%, var(--ds-controls-interact-select-max-w));
+  width: min(100%, var(--ds-controls-interact-select-trigger-max-w));
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
@@ -314,7 +316,7 @@ onUnmounted(() => {
 .overlay-select__surface {
   z-index: calc(var(--ds-z-inset, 60) + 1);
   --ds-ov-dropdown-minw: 0px;
-  --ds-ov-dropdown-maxw: var(--ds-controls-interact-select-max-w);
+  --ds-ov-dropdown-maxw: var(--ds-controls-interact-select-surface-max-w);
   padding: 4px 0;
   font-family: var(--ds-typo-control-font-family);
   font-size: var(--ds-typo-control-font-size);

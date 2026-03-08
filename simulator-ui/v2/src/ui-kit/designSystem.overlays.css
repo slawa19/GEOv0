@@ -67,6 +67,7 @@
   --ds-wm-interact-minw: var(--ds-ov-panel-minw, 320px);
   --ds-wm-interact-minh: 220px;
   --ds-wm-interact-prefw-trustline: 380px;
+  --ds-wm-interact-prefw-payment: 440px;
   --ds-wm-interact-prefw-wide: var(--ds-ov-panel-maxw, 560px);
   --ds-wm-interact-prefh-loading: 260px;
   --ds-wm-interact-prefh-confirm: 360px;

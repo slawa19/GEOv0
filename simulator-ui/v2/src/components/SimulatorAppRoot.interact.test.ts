@@ -1121,7 +1121,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('keeps confirm-payment interact-panel on policy width after shell measurement and viewport resize reclamp', async () => {
+  it('keeps confirm-payment interact-panel on payment policy width after shell measurement and viewport resize reclamp', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
     setUrl('/?mode=real&ui=interact')
 
@@ -1202,7 +1202,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(root).toBeTruthy()
       expect(interactShell).toBeTruthy()
       const initialLeft = Number.parseInt(interactShell!.style.left, 10)
-      expect(interactShell!.style.width).toBe('560px')
+      expect(interactShell!.style.width).toBe('440px')
       expect(Number.isFinite(initialLeft)).toBe(true)
       expect(initialLeft).toBeGreaterThan(0)
       expect(interactShell!.style.top).toBe('144px')
@@ -1224,15 +1224,15 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await new Promise((resolve) => setTimeout(resolve, 20))
       await nextTick()
 
-      expect(interactShell!.style.width).toBe('560px')
+      expect(interactShell!.style.width).toBe('440px')
       expect(Number.parseInt(interactShell!.style.left, 10)).toBe(initialLeft)
 
       viewportWidth = 920
       viewportRecord!.callback([], viewportRecord!.instance as ResizeObserver)
       await nextTick()
 
-      expect(interactShell!.style.width).toBe('560px')
-      expect(interactShell!.style.left).toBe('344px')
+      expect(interactShell!.style.width).toBe('440px')
+      expect(interactShell!.style.left).toBe('464px')
       expect(Number.parseInt(interactShell!.style.left, 10)).toBeLessThan(initialLeft)
       expect(interactShell!.style.top).toBe('144px')
     } finally {

@@ -21,8 +21,10 @@ describe('shared compact overlay form rails', () => {
     expect(cssSource).toContain('width: min(100%, var(--ds-controls-field-max-w));')
     expect(cssSource).toContain('.ds-controls__suffix {')
     expect(cssSource).toContain('width: min(100%, var(--ds-controls-suffix-max-w));')
-    expect(tokenSource).toContain('--ds-controls-interact-select-max-w: 320px;')
-    expect(overlaySelectSource).toContain('var(--ds-controls-interact-select-max-w)')
+    expect(tokenSource).toContain('--ds-controls-interact-select-trigger-max-w: 280px;')
+    expect(tokenSource).toContain('--ds-controls-interact-select-surface-max-w: 360px;')
+    expect(overlaySelectSource).toContain('var(--ds-controls-interact-select-trigger-max-w)')
+    expect(overlaySelectSource).toContain('var(--ds-controls-interact-select-surface-max-w)')
   })
 
   it('keeps ManualPaymentPanel on shared compact-row primitives without local width clamps', async () => {

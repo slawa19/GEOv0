@@ -50,6 +50,7 @@ export type WindowManagerGeometryPx = {
   interactPanelMinWidthPx: number
   interactPanelMinHeightPx: number
   interactPanelPreferredWidthTrustlinePx: number
+  interactPanelPreferredWidthPaymentPx: number
   interactPanelPreferredWidthWidePx: number
   interactPanelPreferredHeightLoadingPx: number
   interactPanelPreferredHeightConfirmPx: number

@@ -107,6 +107,7 @@ onMounted(() => {
       interactPanelMinWidthPx: geo.wmInteractMinWidthPx,
       interactPanelMinHeightPx: geo.wmInteractMinHeightPx,
       interactPanelPreferredWidthTrustlinePx: geo.wmInteractPreferredWidthTrustlinePx,
+      interactPanelPreferredWidthPaymentPx: geo.wmInteractPreferredWidthPaymentPx,
       interactPanelPreferredWidthWidePx: geo.wmInteractPreferredWidthWidePx,
       interactPanelPreferredHeightLoadingPx: geo.wmInteractPreferredHeightLoadingPx,
       interactPanelPreferredHeightConfirmPx: geo.wmInteractPreferredHeightConfirmPx,
