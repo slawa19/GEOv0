@@ -15,14 +15,14 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('overlayGeometry', () => {
   it('falls back safely when CSS geometry tokens are missing or invalid', () => {
-    const host = document.createElement('div')
-    const computedStyle = document.createElement('div').style
-
-    vi.spyOn(computedStyle, 'getPropertyValue').mockImplementation((name: string) => {
+    const host = {} as Element
+    const getComputedStyle = vi.fn(() => ({
+      getPropertyValue(name: string) {
         switch (name) {
           case '--ds-wm-clamp-pad':
             return 'invalid'
@@ -43,8 +43,9 @@ describe('overlayGeometry', () => {
           default:
             return ''
         }
-      })
-    vi.spyOn(window, 'getComputedStyle').mockReturnValue(computedStyle)
+      },
+    }))
+    vi.stubGlobal('window', { getComputedStyle })
 
     const geo = readOverlayGeometryPx(host)
 
@@ -72,10 +73,6 @@ describe('overlayGeometry', () => {
   })
 
   it('keeps documented defaults available when no explicit host is provided', () => {
-    const computedStyle = document.createElement('div').style
-    vi.spyOn(computedStyle, 'getPropertyValue').mockReturnValue('')
-    vi.spyOn(window, 'getComputedStyle').mockReturnValue(computedStyle)
-
     const geo = readOverlayGeometryPx()
 
     expect(geo.wmClampPadPx).toBe(DEFAULT_WM_CLAMP_PAD_PX)

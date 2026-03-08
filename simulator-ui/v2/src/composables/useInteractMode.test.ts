@@ -545,6 +545,63 @@ describe('useInteractMode', () => {
     expect(actions.fetchPaymentTargets).toHaveBeenCalledTimes(2)
   })
 
+  it('payment-targets: fast cancel and restart do not let stale previous From results leak into the current phase', async () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+        { id: 'carol', status: 'active' },
+      ],
+      links: [],
+    })
+
+    const actions = mkActions()
+    const aliceTargets = deferred<PaymentTargetsResult>()
+    const bobTargets = deferred<PaymentTargetsResult>()
+
+    actions.fetchPaymentTargets
+      .mockImplementationOnce(() => aliceTargets.promise)
+      .mockImplementationOnce(() => bobTargets.promise)
+
+    const runId = computed(() => 'run_test')
+    const im = useInteractMode({ actions, runId, equivalent: computed(() => 'UAH'), snapshot })
+
+    im.startPaymentFlow()
+    im.setPaymentFromPid('alice')
+    expect(im.phase.value).toBe('picking-payment-to')
+    expect(im.paymentTargetsLoading.value).toBe(true)
+    expect(im.paymentToTargetIds.value).toBeUndefined()
+
+    im.cancel()
+    expect(im.phase.value).toBe('idle')
+
+    im.startPaymentFlow()
+    im.setPaymentFromPid('bob')
+    expect(im.phase.value).toBe('picking-payment-to')
+    expect(im.state.fromPid).toBe('bob')
+    expect(im.paymentTargetsLoading.value).toBe(true)
+
+    aliceTargets.resolve([{ to_pid: 'carol', hops: 1 }] as PaymentTargetsResult)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(im.state.fromPid).toBe('bob')
+    expect(im.paymentTargetsLoading.value).toBe(true)
+    expect(im.paymentToTargetIds.value).toBeUndefined()
+
+    bobTargets.resolve([{ to_pid: 'alice', hops: 1 }] as PaymentTargetsResult)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const ids = im.paymentToTargetIds.value
+    expect(ids).toBeInstanceOf(Set)
+    if (!ids) throw new Error('expected paymentToTargetIds to resolve for the current From')
+    expect(ids.has('alice')).toBe(true)
+    expect(ids.has('carol')).toBe(false)
+  })
+
   it('availableCapacity computed from snapshot link', () => {
     const snapshot = ref<GraphSnapshot | null>({
       equivalent: 'UAH',

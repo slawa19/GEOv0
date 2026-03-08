@@ -121,6 +121,23 @@ describe('WindowShell', () => {
       cleanup(host, app)
     })
 
+    it('does not reintroduce legacy positioning props; WM rect remains the only placement source', async () => {
+      const inst = makeInstance({ rect: { left: 64, top: 152, width: 420, height: 320 } })
+      const { host, app } = mountShell({ instance: inst, frameless: true })
+      await nextTick()
+
+      const shell = host.querySelector('[data-win-id]') as HTMLElement
+      const style = shell.style
+      expect(style.left).toBe('64px')
+      expect(style.top).toBe('152px')
+      expect(style.right).toBe('')
+      expect(style.bottom).toBe('')
+      expect(style.transform).toBe('')
+      expect(style.position).toBe('')
+
+      cleanup(host, app)
+    })
+
     it('renders slot content inside ws-body', async () => {
       const { host, app } = mountShell(
         { instance: makeInstance(), frameless: true },

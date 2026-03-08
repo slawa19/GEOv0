@@ -7,6 +7,7 @@ import { isNodeCardWindow } from './types'
 import {
   createMeasuredPublishedGeometryValue,
   DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX,
+  DEFAULT_HUD_STACK_HEIGHT_PX,
   DEFAULT_WM_CLAMP_PAD_PX,
   readOverlayGeometryPx,
 } from '../../ui-kit/overlayGeometry'
@@ -305,7 +306,7 @@ describe('useWindowManager (MVP)', () => {
 
     // viewport меньше окна → прижимаем к pad
     expect(w.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
-    expect(w.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(w.rect.top).toBe(DEFAULT_HUD_STACK_HEIGHT_PX)
 
     expect(w.rect.width).toBe(380)
     expect(w.rect.height).toBe(260)
@@ -384,7 +385,7 @@ describe('useWindowManager (MVP)', () => {
       const w = wm.windows.value.find((x) => x.id === id)!
 
       expect(w.rect.left).toBe(20)
-      expect(w.rect.top).toBe(20)
+      expect(w.rect.top).toBe(110)
     } finally {
       host.remove()
     }
@@ -514,7 +515,98 @@ describe('useWindowManager (MVP)', () => {
     wm.reclamp(id)
 
     expect(win.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
-    expect(win.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(win.rect.top).toBe(DEFAULT_HUD_STACK_HEIGHT_PX)
+  })
+
+  it('reclamp(): published HUD top inset growth pushes docked-right measured windows below the toolbar stack', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1280, height: 768 })
+
+    const id = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'confirm-payment' },
+      anchor: null,
+    })
+
+    wm.updateMeasuredSize(id, { width: 540, height: 280 })
+    wm.reclamp(id)
+
+    const win = wm.windows.value.find((w) => w.id === id)!
+    expect(win.rect.top).toBe(112)
+
+    wm.setGeometry({ dockedRightTopPx: 224 })
+    wm.reclampAll()
+
+    expect(win.rect.top).toBe(224)
+    expect(win.rect.left).toBe(704)
+    expect(win.rect.width).toBe(560)
+    expect(win.rect.height).toBe(280)
+  })
+
+  it('reclamp(): rapid phase toggles keep singleton reuse geometry on the latest valid measurement and ignore invalid intermediate sizes', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1280, height: 800 })
+
+    const idPicking = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'picking-payment-to' } })
+    wm.updateMeasuredSize(idPicking, { width: 880, height: 420 })
+    wm.reclamp(idPicking)
+
+    const picking = wm.windows.value.find((w) => w.id === idPicking)!
+    const leftSnapshot = picking.rect.left
+    const topSnapshot = picking.rect.top
+
+    const idConfirm = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment' } })
+    expect(idConfirm).toBe(idPicking)
+
+    wm.updateMeasuredSize(idConfirm, { width: 940, height: 360 })
+    wm.reclamp(idConfirm)
+
+    const idLoading = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'loading-payment' } })
+    expect(idLoading).toBe(idPicking)
+
+    wm.updateMeasuredSize(idLoading, { width: 0, height: 0 })
+    wm.reclamp(idLoading)
+
+    const loading = wm.windows.value.find((w) => w.id === idLoading)!
+    expect(loading.rect.left).toBe(leftSnapshot)
+    expect(loading.rect.top).toBe(topSnapshot)
+    expect(loading.rect.width).toBe(560)
+    expect(loading.rect.height).toBe(360)
+
+    wm.updateMeasuredSize(idLoading, { width: 420, height: 260 })
+    wm.reclamp(idLoading)
+
+    expect(loading.rect.left).toBe(leftSnapshot)
+    expect(loading.rect.top).toBe(topSnapshot)
+    expect(loading.rect.width).toBe(560)
+    expect(loading.rect.height).toBe(260)
+  })
+
+  it('reclampAll(): resize storm keeps the latest valid measured geometry and latest docked HUD inset without stale collapse', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1280, height: 768 })
+
+    const id = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment' } })
+    wm.updateMeasuredSize(id, { width: 540, height: 280 })
+    wm.reclamp(id)
+
+    const win = wm.windows.value.find((w) => w.id === id)!
+
+    for (const [topInset, size] of [
+      [168, { width: 0, height: 0 }],
+      [184, { width: 540, height: 280 }],
+      [200, { width: 0, height: 0 }],
+      [216, { width: 620, height: 312 }],
+    ] as const) {
+      wm.setGeometry({ dockedRightTopPx: topInset })
+      wm.updateMeasuredSize(id, size)
+      wm.reclampAll()
+    }
+
+    expect(win.rect.left).toBe(704)
+    expect(win.rect.top).toBe(216)
+    expect(win.rect.width).toBe(560)
+    expect(win.rect.height).toBe(312)
   })
 
   it('AC5.5 strategy C: measured окно in-bounds может быть не по сетке — reclamp() не меняет позицию', () => {
@@ -887,7 +979,7 @@ describe('useWindowManager (MVP)', () => {
     expect(edge.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
     expect(edge.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
     expect(interact.rect.left).toBe(DEFAULT_WM_CLAMP_PAD_PX)
-    expect(interact.rect.top).toBe(DEFAULT_WM_CLAMP_PAD_PX)
+    expect(interact.rect.top).toBe(DEFAULT_HUD_STACK_HEIGHT_PX)
   })
 
   it('close() вызывает policy.onClose с корректным reason', () => {

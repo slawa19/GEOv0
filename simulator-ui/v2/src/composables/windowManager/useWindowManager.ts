@@ -645,6 +645,7 @@ export function useWindowManager(): WindowManagerApi {
     if (!win) return
     const vp = viewport.value
     const pad = geometry.value.clampPadPx
+    const topBound = win.placement === 'docked-right' ? Math.max(pad, geometry.value.dockedRightTopPx) : pad
     const estimated = estimateSizeFromConstraints(win.constraints)
 
     const before = {
@@ -677,12 +678,12 @@ export function useWindowManager(): WindowManagerApi {
     }
 
     const maxLeft = Math.max(pad, vp.width - w - pad)
-    const maxTop = Math.max(pad, vp.height - h - pad)
+    const maxTop = Math.max(topBound, vp.height - h - pad)
 
     if (!measured) {
       // Initial placement (estimated size): establish a clean snap-aligned position.
       nextLeft = clamp(nextLeft, pad, maxLeft)
-      nextTop = clamp(nextTop, pad, maxTop)
+      nextTop = clamp(nextTop, topBound, maxTop)
 
       // Snap to 8px grid.
       nextLeft = snap8(nextLeft)
@@ -690,7 +691,7 @@ export function useWindowManager(): WindowManagerApi {
 
       // Re-clamp after snapping (important when viewport < window size).
       nextLeft = clamp(nextLeft, pad, maxLeft)
-      nextTop = clamp(nextTop, pad, maxTop)
+      nextTop = clamp(nextTop, topBound, maxTop)
     } else {
       // Post-measurement reclamp: preserve position unless the window has drifted out of
       // viewport bounds (e.g. due to viewport resize or content growth pushing it out-of-bounds).
@@ -701,7 +702,7 @@ export function useWindowManager(): WindowManagerApi {
       // on the new bounds can produce a different value → visible position jump.
       // Fix: only clamp if the current rect is out of bounds; keep exact user position otherwise.
       const clampedLeft = clamp(nextLeft, pad, maxLeft)
-      const clampedTop = clamp(nextTop, pad, maxTop)
+      const clampedTop = clamp(nextTop, topBound, maxTop)
 
       const didClamp = clampedLeft !== nextLeft || clampedTop !== nextTop
 
@@ -711,7 +712,7 @@ export function useWindowManager(): WindowManagerApi {
         // Snap-on-clamp: if we had to push the window into bounds, align to 8px grid
         // while staying within [pad, max] constraints.
         nextLeft = snap8InRange(clampedLeft, pad, maxLeft)
-        nextTop = snap8InRange(clampedTop, pad, maxTop)
+        nextTop = snap8InRange(clampedTop, topBound, maxTop)
       }
     }
 
