@@ -7,7 +7,7 @@ import type { WindowAnchor } from './windowManager/types'
 
 export type EdgeDetailState = 'closed' | 'live' | 'suppressed' | 'keepAlive'
 
-export type EdgeDetailCloseReason = 'action' | 'programmatic'
+export type EdgeDetailCloseReason = 'action' | 'outside-click' | 'programmatic'
 export type EdgeDetailFocusPolicy = 'always' | 'never'
 
 export type EdgeDetailOpenRequest = {

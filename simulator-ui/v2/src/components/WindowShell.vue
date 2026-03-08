@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import type { WindowInstance } from '../composables/windowManager/types'
-import { computed, onMounted, onUnmounted, provide, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 
 import { provideWindowContainerEl } from '../composables/windowManager/windowContainerContext'
 
 type Props = {
   instance: WindowInstance
   title?: string
+  role?: 'dialog' | 'region'
+  ariaLabel?: string
   /** MVP: allow migrated windows to disable the generic header to avoid double-headers. */
   showHeader?: boolean
   /** Option B: WM owns geometry only; visuals stay in legacy components. */
@@ -15,6 +17,8 @@ type Props = {
 
 const props = withDefaults(defineProps<Props>(), {
   title: undefined,
+  role: 'dialog',
+  ariaLabel: undefined,
   showHeader: true,
   frameless: false,
 })
@@ -28,6 +32,15 @@ const emit = defineEmits<{
 }>()
 
 const shellRef = ref<HTMLElement | null>(null)
+
+const WINDOW_SHELL_FOCUSABLE = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"]):not([disabled])',
+].join(', ')
 
 // TODO-ESC: expose per-window DOM container element for nested ESC consumers.
 provideWindowContainerEl(shellRef)
@@ -67,6 +80,7 @@ const shellStyle = computed(() => {
 })
 
 const effectiveShowHeader = computed(() => props.showHeader && !props.frameless)
+const focusContainmentEnabled = computed(() => props.instance.type === 'interact-panel')
 
 let ro: ResizeObserver | null = null
 
@@ -100,9 +114,35 @@ function emitMeasuredFrom(el: HTMLElement) {
   emit('measured', measureFrom(el))
 }
 
+function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return []
+  return Array.from(root.querySelectorAll<HTMLElement>(WINDOW_SHELL_FOCUSABLE)).filter(
+    (el) => !el.hasAttribute('disabled') && el.tabIndex >= 0,
+  )
+}
+
+function focusInitialTarget() {
+  if (!focusContainmentEnabled.value) return
+
+  const shell = shellRef.value
+  if (!shell) return
+
+  const active = document.activeElement
+  if (active instanceof HTMLElement && shell.contains(active)) return
+
+  const target = getFocusableElements(shell)[0] ?? shell
+  target.focus()
+}
+
 onMounted(() => {
   const el = shellRef.value
   if (!el) return
+
+  if (focusContainmentEnabled.value && props.instance.active) {
+    void nextTick(() => {
+      focusInitialTarget()
+    })
+  }
 
   // P1-3: expose win id on DOM element for TransitionGroup @after-leave mapping.
   el.dataset.winId = String(props.instance.id)
@@ -148,6 +188,18 @@ onUnmounted(() => {
   pendingMeasured = null
 })
 
+watch(
+  () => props.instance.active,
+  (isActive, wasActive) => {
+    if (!focusContainmentEnabled.value) return
+    if (!isActive || isActive === wasActive) return
+    void nextTick(() => {
+      if (!props.instance.active) return
+      focusInitialTarget()
+    })
+  },
+)
+
 function onPointerDown() {
   emit('focus')
 }
@@ -155,6 +207,39 @@ function onPointerDown() {
 function onCloseClick(ev: MouseEvent) {
   ev.stopPropagation()
   emit('close')
+}
+
+function onShellKeydown(event: KeyboardEvent) {
+  if (!focusContainmentEnabled.value) return
+  if (event.key !== 'Tab') return
+
+  const shell = shellRef.value
+  if (!shell) return
+
+  const focusables = getFocusableElements(shell)
+  if (focusables.length === 0) {
+    event.preventDefault()
+    shell.focus()
+    return
+  }
+
+  const active = document.activeElement
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  const activeInside = active instanceof HTMLElement && shell.contains(active)
+
+  if (event.shiftKey) {
+    if (!activeInside || active === first) {
+      event.preventDefault()
+      last.focus()
+    }
+    return
+  }
+
+  if (!activeInside || active === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 </script>
 
@@ -165,9 +250,11 @@ function onCloseClick(ev: MouseEvent) {
     :data-win-id="String(props.instance.id)"
     :data-win-type="props.instance.type"
     :data-win-active="props.instance.active ? '1' : '0'"
-    role="dialog"
-    :aria-label="props.title ?? 'Window'"
+    :tabindex="focusContainmentEnabled ? -1 : undefined"
+    :role="props.role"
+    :aria-label="props.ariaLabel ?? props.title ?? 'Window'"
     :style="shellStyle"
+    @keydown="onShellKeydown"
     @pointerdown="onPointerDown"
   >
     <div v-if="effectiveShowHeader" class="ws-header" :data-title="props.title ? '1' : '0'">

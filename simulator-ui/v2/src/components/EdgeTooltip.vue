@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
 
+import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 import { renderOrDash } from '../utils/valueFormat'
 
 type HoveredEdge = {
@@ -24,10 +25,18 @@ type Props = {
 }
 
 defineProps<Props>()
+
+const edgeTooltipSurface = getOverlaySurfaceDescriptor('edge-tooltip')
 </script>
 
 <template>
-  <div v-if="edge.key" class="ds-ov-tooltip" :style="style" aria-label="Edge tooltip">
+  <div
+    v-if="edge.key"
+    class="ds-ov-tooltip"
+    :style="style"
+    :role="edgeTooltipSurface.a11y?.role"
+    :aria-label="edgeTooltipSurface.a11y?.ariaLabel"
+  >
     <div class="ds-ov-tooltip__title">
       {{ getNodeName(edge.fromId) ?? edge.fromId }} → {{ getNodeName(edge.toId) ?? edge.toId }}
     </div>

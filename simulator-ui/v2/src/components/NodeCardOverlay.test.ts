@@ -243,6 +243,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     expect(nodeCardOverlaySource).toContain("position: 'static'")
     expect(nodeCardOverlaySource).toContain('class="ds-ov-node-card"')
     expect(nodeCardOverlaySource).not.toContain('ds-inspector-row')
+    expect(nodeCardOverlaySource).not.toContain('role="dialog"')
   })
 
 })

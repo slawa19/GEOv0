@@ -23,6 +23,7 @@ type TestInteractState = {
   lastClearing: null
 }
 type MockUseSimulatorAppOpts = {
+  uiOpenOrUpdateEdgeDetail?: (o: { fromPid: string; toPid: string; anchor: TestAnchor }) => void
   uiOpenOrUpdateNodeCard?: (o: { nodeId: string; anchor: TestAnchor | null }) => void
   uiCloseTopmostInspectorWindow?: () => void
 }
@@ -54,11 +55,14 @@ type GeoTestGlobals = {
   __GEO_TEST_WM_GET_TOPMOST_IN_GROUP?: ReturnType<typeof vi.fn>
   __GEO_TEST_WM_SET_GEOMETRY?: ReturnType<typeof vi.fn>
   __GEO_TEST_WM_RECLAMP_ALL?: ReturnType<typeof vi.fn>
+  __GEO_TEST_CANVAS_POINTER_DOWN?: ReturnType<typeof vi.fn>
+  __GEO_TEST_CANVAS_WHEEL?: ReturnType<typeof vi.fn>
   __GEO_TEST_INTERACT_PHASE?: string
   __GEO_TEST_PHASE_REF?: Ref<string>
   __GEO_TEST_SELECTED_NODE?: TestSelectedNode
   __GEO_TEST_NODE_SCREEN_CENTER?: TestAnchor
   __GEO_TEST_NODE_SCREEN_CENTER_REF?: Ref<TestAnchor | null>
+  __GEO_TEST_UI_OPEN_OR_UPDATE_EDGE_DETAIL?: MockUseSimulatorAppOpts['uiOpenOrUpdateEdgeDetail']
   __GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD?: MockUseSimulatorAppOpts['uiOpenOrUpdateNodeCard']
   __GEO_TEST_NODE_CARD_OPEN?: boolean
   __GEO_TEST_INTERACT_CANCEL?: ReturnType<typeof vi.fn>
@@ -200,7 +204,8 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
        // Test helper: allow tests to simulate a node dblclick by calling the same
        // root callback that the real dblclick path uses.
-       setGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD', opts?.uiOpenOrUpdateNodeCard)
+      setGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_EDGE_DETAIL', opts?.uiOpenOrUpdateEdgeDetail)
+      setGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD', opts?.uiOpenOrUpdateNodeCard)
 
       // Test helper: allow tests to request an initial NodeCard window by setting globals.
       // WM-only runtime: NodeCard is opened via uiOpenOrUpdateNodeCard(), not via boolean flags.
@@ -557,10 +562,18 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           }
         }),
         onCanvasDblClick: vi.fn(),
-        onCanvasPointerDown: vi.fn(),
+        onCanvasPointerDown: (() => {
+          const fn = vi.fn()
+          setGeoTestGlobal('__GEO_TEST_CANVAS_POINTER_DOWN', fn)
+          return fn
+        })(),
         onCanvasPointerMove: vi.fn(),
         onCanvasPointerUp: vi.fn(),
-        onCanvasWheel: vi.fn(),
+        onCanvasWheel: (() => {
+          const fn = vi.fn()
+          setGeoTestGlobal('__GEO_TEST_CANVAS_WHEEL', fn)
+          return fn
+        })(),
 
         // labels
         labelNodes: computed(() => []),
@@ -594,7 +607,7 @@ function stubMissingResizeObserver() {
 }
 
 type ResizeObserverRecord = {
-  callback: ResizeObserverCallback
+  callback: ResizeObserverCallbackLike
   observed: Element[]
   instance: {
     observe: (target: Element) => void
@@ -602,6 +615,12 @@ type ResizeObserverRecord = {
     unobserve: (target: Element) => void
   }
 }
+
+type ResizeObserverEntryLike = {
+  borderBoxSize: Array<{ inlineSize: number; blockSize: number }>
+}
+
+type ResizeObserverCallbackLike = (entries: ResizeObserverEntryLike[], observer: ResizeObserver) => void
 
 function stubResizeObserverRecords() {
   const records: ResizeObserverRecord[] = []
@@ -611,7 +630,7 @@ function stubResizeObserverRecords() {
 
     constructor(callback: ResizeObserverCallback) {
       this.record = {
-        callback,
+        callback: callback as unknown as ResizeObserverCallbackLike,
         observed: [],
         instance: this,
       }
@@ -785,6 +804,61 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
+    }
+  })
+
+  it('keeps canvas pointer and wheel handlers bound to canvas while overlay shell pointer paths stay separate', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())
+    setGeoTestGlobal('__GEO_TEST_NODE_SCREEN_CENTER', { x: 111, y: 222 })
+    setUrl('/?mode=real&ui=interact')
+
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const pointerDown = getRequiredGeoTestGlobal('__GEO_TEST_CANVAS_POINTER_DOWN')
+      const wheel = getRequiredGeoTestGlobal('__GEO_TEST_CANVAS_WHEEL')
+      const uiOpenOrUpdateNodeCard = getRequiredGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD')
+
+      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
+      expect(canvas).toBeTruthy()
+
+      canvas?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      canvas?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 16 }))
+
+      expect(pointerDown).toHaveBeenCalledTimes(1)
+      expect(wheel).toHaveBeenCalledTimes(1)
+
+      uiOpenOrUpdateNodeCard?.({ nodeId: 'bob', anchor: { x: 111, y: 222 } })
+      await nextTick()
+      await nextTick()
+
+      const shell = host.querySelector('.ws-shell[data-win-type="node-card"]') as HTMLElement | null
+      expect(shell).toBeTruthy()
+
+      shell?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+
+      expect(pointerDown).toHaveBeenCalledTimes(1)
+      expect(wheel).toHaveBeenCalledTimes(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_SELECTED_NODE',
+        '__GEO_TEST_NODE_SCREEN_CENTER',
+        '__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD',
+        '__GEO_TEST_CANVAS_POINTER_DOWN',
+        '__GEO_TEST_CANVAS_WHEEL',
+      )
+      vi.unstubAllGlobals()
     }
   })
 
@@ -1033,6 +1107,134 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(root!.style.getPropertyValue('--ds-hud-bottom-stack-height')).toBe('88px')
       expect(setGeometry!.mock.calls.length).toBe(setGeometryCallsAfterMount + 1)
       expect(reclampAll!.mock.calls.length).toBe(reclampCallsAfterMount + 1)
+    } finally {
+      app.unmount()
+      host.remove()
+      rectSpy.mockRestore()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_WM_SET_GEOMETRY',
+        '__GEO_TEST_WM_RECLAMP_ALL',
+      )
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('keeps confirm-payment interact-panel on policy width after shell measurement and viewport resize reclamp', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
+    setUrl('/?mode=real&ui=interact')
+
+    const { records } = stubResizeObserverRecords()
+
+    let viewportWidth = 1280
+    let viewportHeight = 720
+    const topHeight = 144
+    const bottomHeight = 72
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('root')) {
+        return {
+          left: 0,
+          top: 0,
+          width: viewportWidth,
+          height: viewportHeight,
+          right: viewportWidth,
+          bottom: viewportHeight,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-top')) {
+        return {
+          left: 0,
+          top: 0,
+          width: viewportWidth,
+          height: topHeight,
+          right: viewportWidth,
+          bottom: topHeight,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      if (this.classList.contains('ds-ov-bottom') && !this.classList.contains('sar-interact-history-overlay')) {
+        return {
+          left: 0,
+          top: viewportHeight - bottomHeight,
+          width: viewportWidth,
+          height: bottomHeight,
+          right: viewportWidth,
+          bottom: viewportHeight,
+          x: 0,
+          y: viewportHeight - bottomHeight,
+          toJSON: () => ({}),
+        } as DOMRect
+      }
+
+      return {
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+        right: 0,
+        bottom: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect
+    })
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const root = host.querySelector('.root') as HTMLElement | null
+      const interactShell = host.querySelector('[data-win-type="interact-panel"]') as HTMLElement | null
+
+      expect(root).toBeTruthy()
+      expect(interactShell).toBeTruthy()
+      const initialLeft = Number.parseInt(interactShell!.style.left, 10)
+      expect(interactShell!.style.width).toBe('560px')
+      expect(Number.isFinite(initialLeft)).toBe(true)
+      expect(initialLeft).toBeGreaterThan(0)
+      expect(interactShell!.style.top).toBe('144px')
+
+      const viewportRecord = records.find((record) => record.observed.includes(root!))
+      const shellRecord = records.find((record) => record.observed.includes(interactShell!))
+
+      expect(viewportRecord).toBeTruthy()
+      expect(shellRecord).toBeTruthy()
+
+      shellRecord!.callback(
+        [
+          {
+            borderBoxSize: [{ inlineSize: 620, blockSize: 312 }],
+          },
+        ],
+        shellRecord!.instance as ResizeObserver,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await nextTick()
+
+      expect(interactShell!.style.width).toBe('560px')
+      expect(Number.parseInt(interactShell!.style.left, 10)).toBe(initialLeft)
+
+      viewportWidth = 920
+      viewportRecord!.callback([], viewportRecord!.instance as ResizeObserver)
+      await nextTick()
+
+      expect(interactShell!.style.width).toBe('560px')
+      expect(interactShell!.style.left).toBe('344px')
+      expect(Number.parseInt(interactShell!.style.left, 10)).toBeLessThan(initialLeft)
+      expect(interactShell!.style.top).toBe('144px')
     } finally {
       app.unmount()
       host.remove()
@@ -1296,6 +1498,56 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('keyboard-triggered clearing flow moves focus into interact-panel and traps Tab', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const opener = host.querySelector('[data-testid="actionbar-clearing"]') as HTMLButtonElement | null
+      expect(opener).toBeTruthy()
+
+      opener?.focus()
+      expect(document.activeElement).toBe(opener)
+
+      opener?.click()
+      await nextTick()
+      await nextTick()
+
+      const panel = host.querySelector('[data-testid="clearing-panel"]') as HTMLElement | null
+      const confirmBtn = panel?.querySelector('button.ds-btn--primary') as HTMLButtonElement | null
+      const cancelBtn = panel?.querySelector('button.ds-btn--ghost') as HTMLButtonElement | null
+
+      expect(panel).toBeTruthy()
+      expect(confirmBtn).toBeTruthy()
+      expect(cancelBtn).toBeTruthy()
+      expect(panel?.contains(document.activeElement)).toBe(true)
+      expect(document.activeElement).toBe(confirmBtn)
+
+      cancelBtn?.focus()
+      cancelBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+      await nextTick()
+      expect(document.activeElement).toBe(confirmBtn)
+
+      confirmBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+      await nextTick()
+      expect(document.activeElement).toBe(cancelBtn)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders EdgeDetailPopup through WindowLayer (WindowShell)', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
     setUrl('/?mode=real&ui=interact')
@@ -1316,6 +1568,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const popups = host.querySelectorAll('[data-testid="edge-detail-popup"]')
       expect(popups.length).toBe(1)
       expect((popups[0] as HTMLElement).closest('.ws-shell')).toBeTruthy()
+
+      const shell = host.querySelector('.ws-shell[data-win-type="edge-detail"]') as HTMLElement | null
+      expect(shell?.getAttribute('role')).toBe('region')
+      expect(shell?.getAttribute('aria-label')).toBe('Trustline details: alice to bob')
 
       // legacy render must be disabled (no duplicate absolute popup)
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
@@ -1349,6 +1605,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const cards = host.querySelectorAll('.ds-ov-node-card')
       expect(cards.length).toBe(1)
       expect((cards[0] as HTMLElement).closest('.ws-shell')).toBeTruthy()
+
+      const shell = host.querySelector('.ws-shell[data-win-type="node-card"]') as HTMLElement | null
+      expect(shell?.getAttribute('role')).toBe('region')
+      expect(shell?.getAttribute('aria-label')).toBe('Node details: Bob')
     } finally {
       app.unmount()
       host.remove()
@@ -1767,6 +2027,104 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
         '__GEO_TEST_SELECTED_NODE',
         '__GEO_TEST_INTERACT_CANCEL',
         '__GEO_TEST_WM_GET_TOPMOST_IN_GROUP',
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('outside-click restoreFocus returns to opener after node-card dismiss', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())
+    setGeoTestGlobal('__GEO_TEST_NODE_SCREEN_CENTER', { x: 111, y: 222 })
+    setUrl('/?mode=real&ui=interact')
+
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const opener = host.querySelector('[data-testid="actionbar-payment"]') as HTMLButtonElement | null
+      expect(opener).toBeTruthy()
+
+      const uiOpenOrUpdateNodeCard = getRequiredGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD')
+
+      opener?.focus()
+      expect(document.activeElement).toBe(opener)
+
+      uiOpenOrUpdateNodeCard?.({ nodeId: 'bob', anchor: { x: 111, y: 222 } })
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(1)
+
+      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
+      expect(canvas).toBeTruthy()
+      canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelectorAll('.ds-ov-node-card').length).toBe(0)
+      expect(document.activeElement).toBe(opener)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_SELECTED_NODE',
+        '__GEO_TEST_NODE_SCREEN_CENTER',
+        '__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD',
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('outside-click restoreFocus returns to opener after edge-detail dismiss', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const opener = host.querySelector('[data-testid="actionbar-payment"]') as HTMLButtonElement | null
+      expect(opener).toBeTruthy()
+
+      const uiOpenOrUpdateEdgeDetail = getRequiredGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_EDGE_DETAIL')
+
+      opener?.focus()
+      expect(document.activeElement).toBe(opener)
+
+      uiOpenOrUpdateEdgeDetail?.({ fromPid: 'alice', toPid: 'bob', anchor: { x: 10, y: 10 } })
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(1)
+
+      const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
+      expect(canvas).toBeTruthy()
+      canvas?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
+      expect(document.activeElement).toBe(opener)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_UI_OPEN_OR_UPDATE_EDGE_DETAIL',
       )
       vi.unstubAllGlobals()
     }

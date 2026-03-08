@@ -66,7 +66,7 @@ const rootStyle = computed(() => {
 })
 
 const rootClass = computed(() => {
-  return 'ds-ov-panel ds-panel ds-panel--elevated'
+  return 'ds-ov-panel ds-ov-panel--compact ds-panel ds-panel--elevated'
 })
 
 const amount = ref('')
@@ -364,7 +364,7 @@ function onToChange(v: string) {
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div v-if="participantsSorted.length" class="ds-controls__row">
+      <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
         <label class="ds-label" for="mp-from">From</label>
         <select
           id="mp-from"
@@ -379,7 +379,7 @@ function onToChange(v: string) {
         </select>
       </div>
 
-      <div v-if="participantsSorted.length" class="ds-controls__row">
+      <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
         <label class="ds-label" for="mp-to">
           To
           <span v-if="toListUpdating" class="ds-muted ds-mono"> (updating…)</span>
@@ -430,9 +430,9 @@ function onToChange(v: string) {
           Direct capacity is a 1-hop hint. Recipients list is backend-routed (multi-hop, max hops: {{ paymentTargetsMaxHopsLabel }}).
         </div>
 
-        <div class="ds-controls__row">
+        <div class="ds-controls__row ds-controls__row--compact">
           <label class="ds-label" for="mp-amount">Amount</label>
-          <div class="ds-row mp-amount-row">
+          <div class="ds-controls__suffix mp-amount-row">
             <input
               id="mp-amount"
               v-model="amount"
@@ -502,14 +502,6 @@ function onToChange(v: string) {
 
 .mp-to-help {
   margin: 4px 0 0;
-}
-
-.mp-amount-row {
-  flex-wrap: nowrap;
-}
-
-.mp-amount-input {
-  flex: 1;
 }
 
 .mp-actions {

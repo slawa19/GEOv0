@@ -10,6 +10,7 @@ function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
   return {
     id: 1,
     type: 'edge-detail',
+    lifecyclePhase: 'stable',
     data,
     rect: { left: 10, top: 10, width: 200, height: 120 },
     z: 1,

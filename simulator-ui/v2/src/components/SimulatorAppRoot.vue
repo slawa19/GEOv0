@@ -145,6 +145,7 @@ import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
  import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
  import { useWindowController } from '../composables/useWindowController'
+import { resolveWindowSurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 import {
   createMeasuredPublishedGeometryValue,
   DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX,
@@ -454,13 +455,10 @@ windowController = ctl
 
 const { wmEdgePopupAnchor, wmPanelOpenAnchor, uiCloseEdgeDetailWindow, onGlobalKeydown } = ctl
 
-function wmTitleFor(win: WindowInstance): string {
-  if (isInteractPanelWindow(win)) {
-    if (win.data.panel === 'payment') return 'Manual payment'
-    if (win.data.panel === 'trustline') return 'Trustline'
-    if (win.data.panel === 'clearing') return 'Clearing'
-  }
-  return ''
+function wmSurfaceDescriptorFor(win: WindowInstance) {
+  return resolveWindowSurfaceDescriptor(win, {
+    getNodeName: (nodeId) => getNodeById(nodeId)?.name ?? null,
+  })
 }
 
 // KeepAlive edge-detail: effective props (frozen when keepAlive, live otherwise).
@@ -1093,7 +1091,9 @@ watch(interactPhase, (phase) => {
         v-for="win in wm.windows.value"
         :key="win.id"
         :instance="win"
-        :title="wmTitleFor(win)"
+        :role="wmSurfaceDescriptorFor(win).role"
+        :aria-label="wmSurfaceDescriptorFor(win).ariaLabel"
+        :title="wmSurfaceDescriptorFor(win).title"
         :frameless="true"
         @close="win.type === 'edge-detail' ? uiCloseEdgeDetailWindow('action') : wm.close(win.id, 'action')"
         @focus="wm.focus(win.id)"

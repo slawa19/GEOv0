@@ -4,6 +4,26 @@ type SnapshotPayload = ReturnType<typeof makeSnapshot>
 interface ActionResult { status: number; body: unknown }
 interface PaymentRealReq { from_pid: string; to_pid: string; amount: string | number; [key: string]: unknown }
 interface TrustlineCloseReq { from_pid: string; to_pid: string; [key: string]: unknown }
+interface GeoSimCameraSnapshot { panX: number; panY: number; zoom: number }
+interface GeoSimTooltipInput {
+  key: string
+  fromId: string
+  toId: string
+  amountText: string
+  screenX: number
+  screenY: number
+  trustLimit?: string | number | null
+  used?: string | number | null
+  available?: string | number | null
+  edgeStatus?: string | null
+}
+interface GeoSimNodeCardInput { nodeId: string; anchor: { x: number; y: number } | null }
+interface GeoSimDevHook {
+  camera: GeoSimCameraSnapshot
+  showEdgeTooltip: (edge: GeoSimTooltipInput) => void
+  hideEdgeTooltip: () => void
+  openNodeCard: (o: GeoSimNodeCardInput) => void
+}
 
 type Participant = { pid: string; name: string }
 type Trustline = {
@@ -18,6 +38,8 @@ type Trustline = {
   available: string
   status: 'active' | string
 }
+
+type GeoSimWindow = Window & typeof globalThis & { __geoSim?: GeoSimDevHook }
 
 function makeSnapshot(opts: {
   eq: string
@@ -78,6 +100,55 @@ async function waitAppReady(page: Page) {
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
   // Also wait for ActionBar to be present (interact UI).
   await expect(page.locator('[data-testid="actionbar-payment"]')).toBeVisible({ timeout: 20_000 })
+}
+
+async function waitGeoSimHook(page: Page) {
+  await page.waitForFunction(() => {
+    const w = window as GeoSimWindow
+    return Boolean(w.__geoSim)
+  })
+}
+
+async function readGeoSimCamera(page: Page): Promise<GeoSimCameraSnapshot> {
+  return await page.evaluate(() => {
+    const w = window as GeoSimWindow
+    if (!w.__geoSim) throw new Error('window.__geoSim is not available')
+    return w.__geoSim.camera
+  })
+}
+
+async function showGeoSimEdgeTooltip(page: Page, edge: GeoSimTooltipInput) {
+  await page.evaluate(({ edge }) => {
+    const w = window as GeoSimWindow
+    if (!w.__geoSim) throw new Error('window.__geoSim is not available')
+    w.__geoSim.showEdgeTooltip(edge)
+  }, { edge })
+}
+
+async function hideGeoSimEdgeTooltip(page: Page) {
+  await page.evaluate(() => {
+    const w = window as GeoSimWindow
+    if (!w.__geoSim) throw new Error('window.__geoSim is not available')
+    w.__geoSim.hideEdgeTooltip()
+  })
+}
+
+async function openGeoSimNodeCard(page: Page, o: GeoSimNodeCardInput) {
+  await page.evaluate(({ payload }) => {
+    const w = window as GeoSimWindow
+    if (!w.__geoSim) throw new Error('window.__geoSim is not available')
+    w.__geoSim.openNodeCard(payload)
+  }, { payload: o })
+}
+
+async function hitTestAt(page: Page, point: { x: number; y: number }): Promise<{ tag: string | null; classes: string[] }> {
+  return await page.evaluate(({ point }) => {
+    const el = document.elementFromPoint(point.x, point.y)
+    return {
+      tag: el?.tagName ?? null,
+      classes: el instanceof HTMLElement ? Array.from(el.classList) : [],
+    }
+  }, { point })
 }
 
 async function getSelectValues(page: Page, css: string): Promise<string[]> {
@@ -273,6 +344,74 @@ async function mockRealInteractApp(page: Page, o: {
 }
 
 test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend)', () => {
+  test('C3: passive tooltip yields browser hit-testing to canvas while WM shell keeps hit-testing on itself', async ({ page }) => {
+    await mockRealInteractApp(page, {
+      snapshot: makeSnapshot({
+        eq: 'UAH',
+        nodes: [
+          { id: 'alice', name: 'Alice' },
+          { id: 'bob', name: 'Bob' },
+        ],
+        links: [
+          { source: 'alice', target: 'bob', trust_limit: '100', used: '25', available: '75', status: 'active' },
+        ],
+      }),
+      participants: [
+        { pid: 'alice', name: 'Alice' },
+        { pid: 'bob', name: 'Bob' },
+      ],
+      paymentTargetsByFromPid: {
+        alice: [{ to_pid: 'bob', hops: 1 }],
+        bob: [{ to_pid: 'alice', hops: 1 }],
+      },
+    })
+
+    await waitGeoSimHook(page)
+
+    await showGeoSimEdgeTooltip(page, {
+      key: 'alice→bob',
+      fromId: 'alice',
+      toId: 'bob',
+      amountText: '25 UAH',
+      screenX: 340,
+      screenY: 240,
+      trustLimit: '100',
+      used: '25',
+      available: '75',
+      edgeStatus: 'active',
+    })
+
+    const tooltip = page.locator('[aria-label="Edge tooltip"]')
+    await expect(tooltip).toBeVisible()
+    const tooltipBox = await tooltip.boundingBox()
+    expect(tooltipBox).not.toBeNull()
+
+    const tooltipCenter = {
+      x: (tooltipBox?.x ?? 0) + (tooltipBox?.width ?? 0) / 2,
+      y: (tooltipBox?.y ?? 0) + (tooltipBox?.height ?? 0) / 2,
+    }
+    const tooltipHit = await hitTestAt(page, tooltipCenter)
+    expect(tooltipHit.tag).toBe('CANVAS')
+
+    await openGeoSimNodeCard(page, { nodeId: 'alice', anchor: { x: 420, y: 260 } })
+
+    const nodeCardShell = page.locator('.ws-shell[data-win-type="node-card"]')
+    await expect(nodeCardShell).toBeVisible()
+    const shellBox = await nodeCardShell.boundingBox()
+    expect(shellBox).not.toBeNull()
+
+    const shellCenter = {
+      x: (shellBox?.x ?? 0) + (shellBox?.width ?? 0) / 2,
+      y: (shellBox?.y ?? 0) + (shellBox?.height ?? 0) / 2,
+    }
+    const shellHit = await hitTestAt(page, shellCenter)
+    expect(shellHit.tag).not.toBe('CANVAS')
+    expect(shellHit.classes.join(' ')).not.toContain('canvas')
+
+    await hideGeoSimEdgeTooltip(page)
+    await expect(tooltip).toBeHidden()
+  })
+
   test('E-1: greenfield-village-100 — FROM=shop, TO dropdown contains only participants with trustline to_pid=shop', async ({ page }) => {
     const participants: Participant[] = [
       { pid: 'shop', name: 'Shop' },

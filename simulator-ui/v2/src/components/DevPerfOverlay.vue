@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
+import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
+
 const props = defineProps<{
   enabled: boolean
   perf: {
@@ -17,6 +19,8 @@ const props = defineProps<{
     canvasDpr: number | null
   }
 }>()
+
+const devPerfSurface = getOverlaySurfaceDescriptor('dev-perf-overlay')
 
 type GpuInfo = { vendor: string | null; renderer: string | null }
 
@@ -127,7 +131,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="enabled" class="perf ds-ov-item ds-ov-surface ds-ov-dev-perf" role="region" aria-label="Performance diagnostics">
+  <div
+    v-if="enabled"
+    class="perf ds-ov-item ds-ov-surface ds-ov-dev-perf"
+    :role="devPerfSurface.a11y?.role"
+    :aria-label="devPerfSurface.a11y?.ariaLabel"
+  >
     <div class="row ds-ov-dev-perf__row">
       <div class="title ds-label ds-ov-dev-perf__title">Perf probe</div>
       <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>

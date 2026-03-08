@@ -261,9 +261,12 @@
 
   /* DS overlays (Interact panels) */
   --ds-controls-label-rail-w: 110px;
+  --ds-controls-field-max-w: 360px;
+  --ds-controls-suffix-max-w: 220px;
   --ds-ov-panel-minw: 320px;
   --ds-ov-panel-maxw: 560px;
   --ds-ov-panel-maxw-inset: calc(var(--ds-wm-clamp-pad, 12px) * 2);
+  --ds-ov-panel-compact-pad: 12px;
   --ds-ov-dropdown-default-minw: 320px;
   --ds-ov-dropdown-default-maxw: 520px;
   --ds-ov-dropdown-default-maxh: 520px;
@@ -333,7 +336,7 @@
   --ds-app-panel-slide-shift-y: 12px;
 
   /* Components */
-  --ds-mpp-min-h: 260px;
+  --ds-mpp-min-h: 188px;
 
   --ds-cp-min-h: 240px;
   --ds-cp-spinner-size: 12px;
@@ -343,11 +346,6 @@
   --ds-edp-minw: 260px;
   --ds-edp-warn-pad-y: 4px;
   --ds-edp-warn-pad-x: 6px;
-
-  --ds-tlmp-panel-pad: 12px;
-  --ds-tlmp-select-max-w: 180px;
-  --ds-tlmp-select-min-w: 120px;
-  --ds-tlmp-limit-input-w: 125px;
 
   --ds-toast-minw: 240px;
   --ds-toast-maxw: 480px;

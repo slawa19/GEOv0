@@ -3,12 +3,15 @@ import { watch } from 'vue'
 
 import { useWindowManager } from './useWindowManager'
 import type { WindowInstance } from './types'
+import { isWindowActiveEligible } from './types'
 import { isNodeCardWindow } from './types'
 import {
   createMeasuredPublishedGeometryValue,
   DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX,
   DEFAULT_HUD_STACK_HEIGHT_PX,
   DEFAULT_WM_CLAMP_PAD_PX,
+  DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX,
+  DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX,
   readOverlayGeometryPx,
 } from '../../ui-kit/overlayGeometry'
 
@@ -23,6 +26,40 @@ function fakeKeyEv(target: EventTarget | null = null): KeyboardEvent {
 }
 
 describe('useWindowManager (MVP)', () => {
+  it('uses safe fallback viewport and ignores invalid measured sizes with dev diagnostics', () => {
+    Reflect.set(globalThis, '__GEO_TEST_ENABLE_OVERLAY_DIAGNOSTICS__', true)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const wm = useWindowManager()
+    wm.setViewport({ width: Number.NaN, height: 0 })
+
+    const id = wm.open({
+      type: 'interact-panel',
+      data: { panel: 'payment', phase: 'confirm-payment' },
+      anchor: null,
+    })
+
+    const win = wm.windows.value.find((candidate) => candidate.id === id)!
+    expect(win.rect.left).toBe(DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX - win.rect.width - DEFAULT_WM_CLAMP_PAD_PX)
+    expect(win.rect.top).toBe(112)
+
+    wm.updateMeasuredSize(id, { width: 0, height: -1 })
+    expect(win.measured).toBeNull()
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[overlay] broken-clamp: Invalid viewport geometry would break WindowManager clamp; using safe fallback viewport.',
+      expect.objectContaining({
+        fallbackViewport: { width: DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX, height: DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX },
+      }),
+    )
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[overlay] invalid-measured-size: Ignoring invalid window measurement for WindowManager.',
+      expect.objectContaining({ windowId: id, windowType: 'interact-panel' }),
+    )
+
+    Reflect.deleteProperty(globalThis, '__GEO_TEST_ENABLE_OVERLAY_DIAGNOSTICS__')
+  })
+
   it('open() creates window with policy/group/constraints', () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
@@ -37,7 +74,80 @@ describe('useWindowManager (MVP)', () => {
     expect(w.type).toBe('interact-panel')
     expect(w.policy.group).toBe('interact')
     expect(w.policy.singleton).toBe('reuse')
+    expect(w.lifecyclePhase).toBe('mounting')
     expect(w.constraints.minWidth).toBeGreaterThan(0)
+  })
+
+  it('lifecyclePhase transitions mounting -> measuring -> stable -> closing', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+    const win = wm.windows.value.find((candidate) => candidate.id === id)!
+
+    expect(win.lifecyclePhase).toBe('mounting')
+
+    wm.updateMeasuredSize(id, { width: 420, height: 320 })
+    expect(win.lifecyclePhase).toBe('measuring')
+
+    wm.reclamp(id)
+    expect(win.lifecyclePhase).toBe('stable')
+
+    wm.close(id, 'action')
+    expect(win.lifecyclePhase).toBe('closing')
+  })
+
+  it('active is orthogonal to lifecyclePhase and tracks focus among eligible windows only', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const firstId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment' } })
+    const secondId = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
+
+    const first = wm.windows.value.find((candidate) => candidate.id === firstId)!
+    const second = wm.windows.value.find((candidate) => candidate.id === secondId)!
+
+    expect(first.lifecyclePhase).toBe('mounting')
+    expect(second.lifecyclePhase).toBe('mounting')
+    expect(first.active).toBe(false)
+    expect(second.active).toBe(true)
+    expect(isWindowActiveEligible(first)).toBe(true)
+    expect(isWindowActiveEligible(second)).toBe(true)
+
+    wm.updateMeasuredSize(firstId, { width: 420, height: 320 })
+    wm.reclamp(firstId)
+    expect(first.lifecyclePhase).toBe('stable')
+    expect(first.active).toBe(false)
+
+    wm.focus(firstId)
+    expect(first.active).toBe(true)
+    expect(second.active).toBe(false)
+    expect(second.lifecyclePhase).toBe('mounting')
+  })
+
+  it('closing windows lose active eligibility immediately and cannot be refocused', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const firstId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment' } })
+    const secondId = wm.open({ type: 'node-card', data: { nodeId: 'n1' } })
+
+    const first = wm.windows.value.find((candidate) => candidate.id === firstId)!
+    const second = wm.windows.value.find((candidate) => candidate.id === secondId)!
+
+    expect(second.active).toBe(true)
+
+    wm.close(secondId, 'action')
+
+    expect(second.lifecyclePhase).toBe('closing')
+    expect(second.active).toBe(false)
+    expect(isWindowActiveEligible(second)).toBe(false)
+    expect(first.active).toBe(true)
+
+    wm.focus(secondId)
+    expect(second.active).toBe(false)
+    expect(first.active).toBe(true)
+    expect(wm.getTopmostInGroup('interact')?.id).toBe(firstId)
   })
 
   it("singleton='reuse': повторный open того же type обновляет data/constraints, не создаёт новый id", () => {
@@ -1035,6 +1145,54 @@ describe('useWindowManager (MVP)', () => {
     // onClose should NOT be called for programmatic close
     // (avoids double-cancel when flow completes and watcher does closeGroup)
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('outside-click close restores focus to opener', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const opener = document.createElement('button')
+    const other = document.createElement('button')
+    document.body.append(opener, other)
+
+    try {
+      opener.focus()
+      const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+
+      other.focus()
+      expect(document.activeElement).toBe(other)
+
+      wm.close(id, 'outside-click')
+
+      expect(document.activeElement).toBe(opener)
+    } finally {
+      opener.remove()
+      other.remove()
+    }
+  })
+
+  it('programmatic close does not steal focus back to opener', () => {
+    const wm = useWindowManager()
+    wm.setViewport({ width: 1200, height: 800 })
+
+    const opener = document.createElement('button')
+    const other = document.createElement('button')
+    document.body.append(opener, other)
+
+    try {
+      opener.focus()
+      const id = wm.open({ type: 'edge-detail', data: { fromPid: 'a', toPid: 'b' } })
+
+      other.focus()
+      expect(document.activeElement).toBe(other)
+
+      wm.close(id, 'programmatic')
+
+      expect(document.activeElement).toBe(other)
+    } finally {
+      opener.remove()
+      other.remove()
+    }
   })
 
   it("handleEsc(): escBehavior='ignore' не закрывает окно", () => {

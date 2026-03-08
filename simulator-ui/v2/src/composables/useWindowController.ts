@@ -6,7 +6,7 @@ import type { Point } from '../types/layout'
 import type { InteractPhase, InteractState } from './useInteractMode'
 import { interactWindowOfPhase } from './windowManager/interactWindowOfPhase'
 import { isNodeCardWindow } from './windowManager/types'
-import type { FocusMode, WindowAnchor, WindowDataByType, WindowManagerApi, WindowOpenArgs } from './windowManager/types'
+import type { FocusMode, WindowAnchor, WindowCloseReason, WindowDataByType, WindowManagerApi, WindowOpenArgs } from './windowManager/types'
 
 import { useWmEdgeDetail, type EdgeDetailCloseReason } from './useWmEdgeDetail'
 
@@ -414,8 +414,8 @@ export function useWindowController(opts: {
 			anchor: toWmAnchor(o.anchor, 'node'),
 			data: {
 				nodeId: o.nodeId,
-				onClose: (reason: 'esc' | 'action' | 'programmatic') => {
-					if (reason === 'esc' || reason === 'action') {
+				onClose: (reason: WindowCloseReason) => {
+					if (reason === 'esc' || reason === 'action' || reason === 'outside-click') {
 						if (wmNodeCardId.value != null) wmNodeCardId.value = null
 					}
 				},
@@ -480,13 +480,13 @@ export function useWindowController(opts: {
 		// Outside-click is a UI-close. For edge-detail we must suppress auto-open
 		// until selection changes (otherwise the watcher will immediately reopen it).
 		if (topType === 'edge-detail') {
-			opts.wmEdgeDetail.close({ reason: 'programmatic', suppress: true })
-			opts.wmEdgeDetail.applyToWindowManager(opts.wm, { closeReason: 'programmatic' })
+			opts.wmEdgeDetail.close({ reason: 'outside-click', suppress: true })
+			opts.wmEdgeDetail.applyToWindowManager(opts.wm, { closeReason: 'outside-click' })
 			return 'edge-detail'
 		}
 
 		// node-card
-		opts.wm.close(top.id, 'programmatic')
+		opts.wm.close(top.id, 'outside-click')
 		if (wmNodeCardId.value === top.id) wmNodeCardId.value = null
 		return 'node-card'
 	}
@@ -518,8 +518,8 @@ export function useWindowController(opts: {
 			anchor: toWmAnchor(o.anchor, 'node'),
 			data: {
 				nodeId: reqNodeId,
-				onClose: (reason: 'esc' | 'action' | 'programmatic') => {
-					if (reason === 'esc' || reason === 'action') {
+				onClose: (reason: WindowCloseReason) => {
+					if (reason === 'esc' || reason === 'action' || reason === 'outside-click') {
 						if (wmNodeCardId.value === id) wmNodeCardId.value = null
 					}
 				},

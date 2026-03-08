@@ -11,6 +11,8 @@ export type WindowGroup = 'interact' | 'inspector'
  */
 export type FocusMode = 'auto' | 'always' | 'never'
 
+export type WindowCloseReason = 'esc' | 'action' | 'outside-click' | 'programmatic'
+
 export type WindowType = 'interact-panel' | 'node-card' | 'edge-detail'
 
 export type WindowSizingMode = 'fixed-width-auto-height' | 'bounded-intrinsic'
@@ -88,7 +90,7 @@ export type WindowPolicy = {
   /** Notify owner about UI-close vs programmatic close.
    * Useful for bridging WM window state with legacy open flags (e.g. node-card).
    */
-  onClose?: (reason: 'esc' | 'action' | 'programmatic') => void
+  onClose?: (reason: WindowCloseReason) => void
 }
 
 export type InteractPanelData =
@@ -98,7 +100,7 @@ export type InteractPanelData =
 
 export type WindowDataByType = {
   'interact-panel': InteractPanelData
-  'node-card': { nodeId: string; onClose?: (reason: 'esc' | 'action' | 'programmatic') => void }
+  'node-card': { nodeId: string; onClose?: (reason: WindowCloseReason) => void }
   /**
    * EdgeDetail UI context MUST be window-scoped.
    *
@@ -113,7 +115,7 @@ export type WindowDataByType = {
     edgeKey?: string
     /** Optional pre-rendered title for this window (best-effort; UI may recompute). */
     title?: string
-    onClose?: (reason: 'esc' | 'action' | 'programmatic') => void
+    onClose?: (reason: WindowCloseReason) => void
   }
 }
 
@@ -144,11 +146,22 @@ export type WindowOpenArgs =
 
 export type WindowLifecycleState = 'open' | 'closing'
 
+export type WindowLifecyclePhase = 'mounting' | 'measuring' | 'stable' | 'closing'
+
+export function isWindowActiveEligible(win: Pick<WindowInstance, 'state' | 'lifecyclePhase'>): boolean {
+  return win.state === 'open' && win.lifecyclePhase !== 'closing'
+}
+
 export type WindowInstance = {
   id: number
   type: WindowType
   /** P1-3: transition-aware close. 'closing' means leave-animation is in progress. */
   state: WindowLifecycleState
+  /**
+   * Explicit render/measurement lifecycle contract.
+   * IMPORTANT: focus ownership is NOT encoded here; it remains orthogonal in `active`.
+   */
+  lifecyclePhase: WindowLifecyclePhase
   policy: WindowPolicy
   anchor: WindowAnchor | null
   /**
@@ -156,6 +169,11 @@ export type WindowInstance = {
    * Used only while `measured` is null (before window exists in DOM).
    */
   anchorOffset: { x: number; y: number } | null
+  /**
+   * Focus-selection flag for WindowManager ordering.
+   * Valid only for focus-eligible windows (`state==='open'` and `lifecyclePhase!=='closing'`).
+   * Closing windows must never remain active.
+   */
   active: boolean
   /**
    * Z within the WM focus order (used for intra-group ordering).
@@ -210,16 +228,16 @@ export type WindowManagerApi = {
   getTopmostInGroup: (g: WindowGroup) => WindowInstance | null
 
   open: (o: WindowOpenArgs) => number
-  close: (id: number, reason: 'esc' | 'action' | 'programmatic') => void
+  close: (id: number, reason: WindowCloseReason) => void
   /**
    * P1-3: Finalize the removal of a closing window from the map.
    * Called from TransitionGroup @after-leave (or, as a fallback, by the safety timer).
    */
   finishClose: (id: number) => void
   /** Закрыть все окна данного типа (convenience helper). */
-  closeByType: (type: WindowType, reason: 'esc' | 'action' | 'programmatic') => number
+  closeByType: (type: WindowType, reason: WindowCloseReason) => number
   /** Закрыть все окна группы. */
-  closeGroup: (g: WindowGroup, reason: 'esc' | 'action' | 'programmatic') => void
+  closeGroup: (g: WindowGroup, reason: WindowCloseReason) => void
   focus: (id: number) => void
   setViewport: (vp: { width: number; height: number }) => void
   updateMeasuredSize: (id: number, size: { width: number; height: number }) => void

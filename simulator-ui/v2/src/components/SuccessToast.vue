@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, unref, watch, type Ref } from 'vue'
 
+import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
+
 const props = defineProps<{
   /**
    * Can be passed as a raw string (typical) or as a Ref (for direct state wiring).
@@ -21,6 +23,7 @@ const effectiveDismissMs = computed(() => {
 
 const visible = ref(false)
 let timerId: ReturnType<typeof setTimeout> | null = null
+const successToastSurface = getOverlaySurfaceDescriptor('success-toast')
 
 function clearTimer() {
   if (timerId !== null) {
@@ -59,8 +62,9 @@ onUnmounted(() => {
     <div
       v-if="visible && messageText"
       class="success-toast ds-alert ds-alert--ok ds-ov-surface ds-ov-toast ds-ov-toast--success"
-      role="status"
-      aria-live="polite"
+      :role="successToastSurface.a11y?.role"
+      :aria-live="successToastSurface.a11y?.ariaLive"
+      :aria-label="successToastSurface.a11y?.ariaLabel"
     >
       <span class="success-toast__icon ds-ov-toast__icon" aria-hidden="true">✓</span>
       <span class="success-toast__text ds-ov-toast__text">{{ messageText }}</span>

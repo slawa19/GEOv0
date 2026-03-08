@@ -112,7 +112,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 
 <template>
   <div class="ds-ov-node-card" :style="wrapperStyle">
-    <div class="ds-panel ds-panel--elevated" role="dialog" aria-label="Node details">
+    <div class="ds-panel ds-panel--elevated">
       <div class="ds-panel__body ds-ov-node-card__body">
 
         <!-- Identity + Balance (merged) ------------------------------------>

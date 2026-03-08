@@ -20,6 +20,7 @@ function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
   return {
     id: 1,
     type: 'interact-panel',
+    lifecyclePhase: 'stable',
     data: { panel: 'payment', phase: 'confirm-payment' },
     rect: { left: 100, top: 80, width: 400, height: 300 },
     z: 10,
@@ -236,6 +237,22 @@ describe('WindowShell', () => {
       const shell = host.querySelector('[data-win-id]') as HTMLElement
       expect(shell.getAttribute('role')).toBe('dialog')
       expect(shell.getAttribute('aria-label')).toBe('My Window')
+
+      cleanup(host, app)
+    })
+
+    it('uses explicit role and aria-label props when provided', async () => {
+      const { host, app } = mountShell({
+        instance: makeInstance({ type: 'edge-detail' }),
+        role: 'region',
+        ariaLabel: 'Trustline details: alice to bob',
+        frameless: true,
+      })
+      await nextTick()
+
+      const shell = host.querySelector('[data-win-id]') as HTMLElement
+      expect(shell.getAttribute('role')).toBe('region')
+      expect(shell.getAttribute('aria-label')).toBe('Trustline details: alice to bob')
 
       cleanup(host, app)
     })

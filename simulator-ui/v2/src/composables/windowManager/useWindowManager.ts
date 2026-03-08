@@ -3,6 +3,8 @@ import { computed, reactive, ref } from 'vue'
 import { clamp, estimateSizeFromConstraints, overlaps } from './geometry'
 import {
   DEFAULT_HUD_STACK_HEIGHT_PX,
+  DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX,
+  DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX,
   DEFAULT_WM_ANCHOR_OFFSET_X_PX,
   DEFAULT_WM_ANCHOR_OFFSET_Y_PX,
   DEFAULT_WM_CASCADE_STEP_PX,
@@ -25,9 +27,11 @@ import {
   DEFAULT_WM_GROUP_Z_INSPECTOR_BASE,
   DEFAULT_WM_GROUP_Z_INTERACT_BASE,
 } from '../../ui-kit/overlayGeometry'
+import { warnOverlayDiagnostics } from '../../ui-kit/overlayDiagnostics'
 import type {
   FocusMode,
   WindowAnchor,
+  WindowCloseReason,
   WindowData,
   WindowDataByType,
   WindowOpenArgs,
@@ -39,6 +43,7 @@ import type {
   WindowSizeConstraints,
   WindowType,
 } from './types'
+import { isWindowActiveEligible } from './types'
 
 const MAX = 100000
 
@@ -91,8 +96,7 @@ function cascadeShiftAvoidOverlaps(o: {
 function pickNextActiveId(windowsMap: Map<number, WindowInstance>): number | null {
   let best: { id: number; z: number } | null = null
   for (const [id, win] of windowsMap) {
-    // P1-3: skip windows in closing state — they're already animating out.
-    if (win.state === 'closing') continue
+    if (!isWindowActiveEligible(win)) continue
     if (!best || win.effectiveZ > best.z) best = { id, z: win.effectiveZ }
   }
   return best?.id ?? null
@@ -413,7 +417,7 @@ export function useWindowManager(): WindowManagerApi {
     return null
   }
 
-  function restoreFocusAfterClose(o: { winId: number; reason: 'esc' | 'action' | 'programmatic' }): void {
+  function restoreFocusAfterClose(o: { winId: number; reason: WindowCloseReason }): void {
     // Important: do NOT steal focus during WM-internal programmatic closes
     // (e.g. group-exclusivity close triggered by open()).
     const entry = takeFocusReturn(o.winId)
@@ -430,7 +434,7 @@ export function useWindowManager(): WindowManagerApi {
     return (win.policy.group === 'interact' ? geometry.value.groupZInteractBase : geometry.value.groupZInspectorBase) + win.z
   }
 
-  function closeGroupExcept(g: WindowGroup, exceptId: number, reason: 'esc' | 'action' | 'programmatic'): void {
+  function closeGroupExcept(g: WindowGroup, exceptId: number, reason: WindowCloseReason): void {
     const ids: number[] = []
     for (const [id, win] of windowsMap) {
       if (id === exceptId) continue
@@ -607,13 +611,18 @@ export function useWindowManager(): WindowManagerApi {
   }
 
   function setActive(next: number | null): void {
-    activeId.value = next
-    for (const [, win] of windowsMap) win.active = win.id === next
+    const resolved = next != null && isWindowActiveEligible(windowsMap.get(next) ?? { state: 'closing', lifecyclePhase: 'closing' })
+      ? next
+      : null
+
+    activeId.value = resolved
+    for (const [, win] of windowsMap) win.active = resolved != null && isWindowActiveEligible(win) && win.id === resolved
   }
 
   function focus(id: number): void {
     const win = windowsMap.get(id)
     if (!win) return
+    if (!isWindowActiveEligible(win)) return
     focusCounter.value += 1
     win.z = focusCounter.value
     win.effectiveZ = computeEffectiveZ(win)
@@ -621,28 +630,49 @@ export function useWindowManager(): WindowManagerApi {
   }
 
   function setViewport(vp: { width: number; height: number }): void {
-    viewport.value = { width: vp.width, height: vp.height }
+    const width = Number.isFinite(vp.width) && vp.width > 0 ? vp.width : DEFAULT_VIEWPORT_FALLBACK_WIDTH_PX
+    const height = Number.isFinite(vp.height) && vp.height > 0 ? vp.height : DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX
+
+    if (width !== vp.width || height !== vp.height) {
+      warnOverlayDiagnostics('broken-clamp', 'Invalid viewport geometry would break WindowManager clamp; using safe fallback viewport.', {
+        viewport: vp,
+        fallbackViewport: { width, height },
+      })
+    }
+
+    if (viewport.value.width === width && viewport.value.height === height) return
+    viewport.value = { width, height }
   }
 
   function updateMeasuredSize(id: number, size: { width: number; height: number }): void {
     const win = windowsMap.get(id)
     if (!win) return
+    if (win.state === 'closing') return
 
     // Safety: ignore invalid measurements (e.g. 0x0 in tests or during initial mount)
     // to avoid collapsing `rect` in reclamp().
-    if (!(size.width > 0) || !(size.height > 0)) return
+    if (!(size.width > 0) || !(size.height > 0)) {
+      warnOverlayDiagnostics('invalid-measured-size', 'Ignoring invalid window measurement for WindowManager.', {
+        windowId: id,
+        windowType: win.type,
+        size,
+      })
+      return
+    }
 
     // PERF-2: skip state updates if measurement is unchanged.
     // NOTE: we still allow the first measurement to set `measured` from null.
     const prev = win.measured
     if (prev && prev.width === size.width && prev.height === size.height) return
 
+    win.lifecyclePhase = 'measuring'
     win.measured = { width: size.width, height: size.height }
   }
 
   function reclamp(id: number): void {
     const win = windowsMap.get(id)
     if (!win) return
+    if (win.state === 'closing') return
     const vp = viewport.value
     const pad = geometry.value.clampPadPx
     const topBound = win.placement === 'docked-right' ? Math.max(pad, geometry.value.dockedRightTopPx) : pad
@@ -723,6 +753,7 @@ export function useWindowManager(): WindowManagerApi {
       nextWidth === before.width &&
       nextHeight === before.height
     ) {
+      if (win.measured && win.lifecyclePhase !== 'stable') win.lifecyclePhase = 'stable'
       return
     }
 
@@ -730,6 +761,7 @@ export function useWindowManager(): WindowManagerApi {
     if (nextTop !== before.top) win.rect.top = nextTop
     if (nextWidth !== before.width) win.rect.width = nextWidth
     if (nextHeight !== before.height) win.rect.height = nextHeight
+    if (win.measured) win.lifecyclePhase = 'stable'
   }
 
   function reclampAll(): void {
@@ -745,13 +777,14 @@ export function useWindowManager(): WindowManagerApi {
     takeFocusReturn(id)
   }
 
-  function close(id: number, _reason: 'esc' | 'action' | 'programmatic'): void {
+  function close(id: number, _reason: WindowCloseReason): void {
     const win = windowsMap.get(id)
     if (!win) return
     // P1-3: already in closing — don't process twice.
     if (win.state === 'closing') return
 
     win.state = 'closing'
+    win.lifecyclePhase = 'closing'
 
     try {
       win.policy?.onClose?.(_reason)
@@ -771,7 +804,7 @@ export function useWindowManager(): WindowManagerApi {
     setTimeout(() => finishClose(id), 350)
   }
 
-  function closeGroup(g: WindowGroup, reason: 'esc' | 'action' | 'programmatic'): void {
+  function closeGroup(g: WindowGroup, reason: WindowCloseReason): void {
     const ids: number[] = []
     for (const [id, win] of windowsMap) {
       if (win.state === 'closing') continue
@@ -780,7 +813,7 @@ export function useWindowManager(): WindowManagerApi {
     for (const id of ids) close(id, reason)
   }
 
-  function closeByType(type: WindowType, reason: 'esc' | 'action' | 'programmatic'): number {
+  function closeByType(type: WindowType, reason: WindowCloseReason): number {
     const ids: number[] = []
     for (const [id, win] of windowsMap) {
       if (win.state === 'closing') continue
@@ -1002,6 +1035,7 @@ export function useWindowManager(): WindowManagerApi {
       id,
       type,
       state: 'open',
+      lifecyclePhase: 'mounting',
       policy,
       anchor,
       anchorOffset,
@@ -1085,14 +1119,14 @@ export function useWindowManager(): WindowManagerApi {
   function getTopmostInGroup(g: WindowGroup): WindowInstance | null {
     // Prefer WM active window when it's in the requested group (P1-3: skip closing).
     for (const [, win] of windowsMap) {
-      if (win.state === 'closing') continue
+      if (!isWindowActiveEligible(win)) continue
       if (win.policy.group === g && win.active) return win
     }
 
     // Fallback: max effectiveZ within the group (P1-3: skip closing).
     let top: WindowInstance | null = null
     for (const [, win] of windowsMap) {
-      if (win.state === 'closing') continue
+      if (!isWindowActiveEligible(win)) continue
       if (win.policy.group !== g) continue
       if (!top || win.effectiveZ > top.effectiveZ) top = win
     }

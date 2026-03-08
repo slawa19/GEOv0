@@ -261,7 +261,7 @@ const rootStyle = computed(() => {
 })
 
 const rootClass = computed(() => {
-  return 'ds-ov-panel ds-panel ds-panel--elevated'
+  return 'ds-ov-panel ds-ov-panel--compact ds-panel ds-panel--elevated'
 })
 
 const newLimitInput = ref<HTMLInputElement | null>(null)
@@ -284,7 +284,7 @@ defineExpose({
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div v-if="participantsSorted.length && isPickFrom" class="ds-controls__row">
+      <div v-if="participantsSorted.length && isPickFrom" class="ds-controls__row ds-controls__row--compact">
         <label class="ds-label" for="tl-from">From</label>
         <select
           id="tl-from"
@@ -299,7 +299,7 @@ defineExpose({
         </select>
       </div>
 
-      <div v-if="participantsSorted.length && (isPickTo || isCreate)" class="ds-controls__row">
+      <div v-if="participantsSorted.length && (isPickTo || isCreate)" class="ds-controls__row ds-controls__row--compact">
         <label class="ds-label" for="tl-to">To</label>
         <select
           id="tl-to"
@@ -317,7 +317,7 @@ defineExpose({
         </select>
       </div>
 
-      <div v-if="(isCreate || isEdit) && trustlinesSorted.length" class="ds-controls__row">
+      <div v-if="(isCreate || isEdit) && trustlinesSorted.length" class="ds-controls__row ds-controls__row--compact">
         <label class="ds-label" for="tl-pick">Existing</label>
         <select
           id="tl-pick"
@@ -355,9 +355,9 @@ defineExpose({
         </div>
       </div>
 
-      <div v-if="isCreate" class="ds-controls__row">
+      <div v-if="isCreate" class="ds-controls__row ds-controls__row--compact">
         <label class="ds-label" for="tl-limit">Limit</label>
-        <div class="ds-row tl-input-row">
+        <div class="ds-controls__suffix tl-input-row">
           <input
             id="tl-limit"
             v-model="limit"
@@ -379,9 +379,9 @@ defineExpose({
         Invalid amount format. Use digits and '.' for decimals.
       </div>
 
-      <div v-if="isEdit" class="ds-controls__row">
+      <div v-if="isEdit" class="ds-controls__row ds-controls__row--compact">
         <label class="ds-label" for="tl-new-limit">New limit</label>
-        <div class="ds-row tl-input-row">
+        <div class="ds-controls__suffix tl-input-row">
           <input
             id="tl-new-limit"
             ref="newLimitInput"
@@ -451,39 +451,8 @@ defineExpose({
 </template>
 
 <style scoped>
-/* Compact panel padding override (global --ds-space-4 ≥ 18px is too wide here) */
-.ds-ov-panel :deep(.ds-panel__header),
-.ds-ov-panel :deep(.ds-panel__body) {
-  padding: var(--ds-tlmp-panel-pad);
-}
-
-/* Select fields: don't stretch to full 1fr column width */
-.ds-controls__row .ds-select {
-  max-width: var(--ds-tlmp-select-max-w);
-  min-width: var(--ds-tlmp-select-min-w);
-}
-
-/* Fix: input+suffix (.ds-row) must not overflow the 1fr grid column.
-   Without min-width:0, the flex/grid item keeps its intrinsic size
-   and the row becomes wider than the select rows above it. */
-.ds-controls__row .ds-row {
-  min-width: 0;
-}
-.ds-controls__row .ds-row .ds-input {
-  min-width: 0;
-}
-
 .tl-pick-help {
   margin-top: 6px;
-}
-
-.tl-input-row {
-  flex-wrap: nowrap;
-}
-
-.tl-limit-input {
-  width: var(--ds-tlmp-limit-input-w);
-  flex: none;
 }
 
 .tl-actions {

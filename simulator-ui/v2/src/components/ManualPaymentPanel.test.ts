@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { computed, createApp, h, nextTick, reactive, ref, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -1746,6 +1748,15 @@ describe('ManualPaymentPanel', () => {
 
       app.unmount()
       host.remove()
+    })
+
+    it('Batch 2b: uses shared compact form primitives instead of local width/stretch hacks', () => {
+      const source = readFileSync(resolve(process.cwd(), 'src/components/ManualPaymentPanel.vue'), 'utf8')
+
+      expect(source).toContain('ds-ov-panel ds-ov-panel--compact ds-panel ds-panel--elevated')
+      expect(source).toContain('class="ds-controls__row ds-controls__row--compact"')
+      expect(source).toContain('class="ds-controls__suffix mp-amount-row"')
+      expect(source).not.toContain('mp-amount-input {')
     })
   })
 })

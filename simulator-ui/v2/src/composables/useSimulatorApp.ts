@@ -1592,9 +1592,29 @@ export function useSimulatorApp(opts?: {
     isTestMode: () => isTestMode.value,
     isWebDriver: () => isWebDriver,
     getState: () => state,
+    getCamera: () => ({ panX: camera.panX, panY: camera.panY, zoom: camera.zoom }),
     fxState,
     runTxOnce: fxDebugTxOnce,
     runClearingOnce: fxDebugClearingOnce,
+    showEdgeTooltip: (edge) => {
+      hoveredEdge.key = edge.key
+      hoveredEdge.fromId = edge.fromId
+      hoveredEdge.toId = edge.toId
+      hoveredEdge.amountText = edge.amountText
+      hoveredEdge.screenX = edge.screenX
+      hoveredEdge.screenY = edge.screenY
+      hoveredEdge.trustLimit = edge.trustLimit ?? null
+      hoveredEdge.used = edge.used ?? null
+      hoveredEdge.available = edge.available ?? null
+      hoveredEdge.edgeStatus = edge.edgeStatus ?? null
+      wakeUp()
+    },
+    hideEdgeTooltip: () => {
+      clearHoveredEdge()
+      wakeUp()
+    },
+    openNodeCard: opts?.uiOpenOrUpdateNodeCard,
+    openEdgeDetail: opts?.uiOpenOrUpdateEdgeDetail,
   })
 
   useAppLifecycle({

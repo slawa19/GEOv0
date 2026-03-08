@@ -6,14 +6,49 @@ type GeoSimDevHookState = {
   snapshot: unknown | null
 }
 
+type GeoSimCameraSnapshot = {
+  panX: number
+  panY: number
+  zoom: number
+}
+
+type GeoSimTooltipInput = {
+  key: string
+  fromId: string
+  toId: string
+  amountText: string
+  screenX: number
+  screenY: number
+  trustLimit?: string | number | null
+  used?: string | number | null
+  available?: string | number | null
+  edgeStatus?: string | null
+}
+
+type GeoSimNodeCardInput = {
+  nodeId: string
+  anchor: { x: number; y: number } | null
+}
+
+type GeoSimEdgeDetailInput = {
+  fromPid: string
+  toPid: string
+  anchor: { x: number; y: number }
+}
+
 type InstallGeoSimDevHookDeps = {
   isDev: () => boolean
   isTestMode: () => boolean
   isWebDriver: () => boolean
   getState: () => GeoSimDevHookState
+  getCamera?: () => GeoSimCameraSnapshot
   fxState: FxState
   runTxOnce: () => Promise<void> | void
   runClearingOnce: () => Promise<void> | void
+  showEdgeTooltip?: (edge: GeoSimTooltipInput) => void
+  hideEdgeTooltip?: () => void
+  openNodeCard?: (o: GeoSimNodeCardInput) => void
+  openEdgeDetail?: (o: GeoSimEdgeDetailInput) => void
 }
 
 type GeoSimWindow = Window & typeof globalThis & { __geoSim?: unknown }
@@ -67,9 +102,16 @@ export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps): (() => voi
     get hasSnapshot() {
       return !!deps.getState().snapshot
     },
+    get camera() {
+      return deps.getCamera?.() ?? { panX: 0, panY: 0, zoom: 1 }
+    },
     fxState: deps.fxState,
     runTxOnce: deps.runTxOnce,
     runClearingOnce: deps.runClearingOnce,
+    showEdgeTooltip: (edge: GeoSimTooltipInput) => deps.showEdgeTooltip?.(edge),
+    hideEdgeTooltip: () => deps.hideEdgeTooltip?.(),
+    openNodeCard: (o: GeoSimNodeCardInput) => deps.openNodeCard?.(o),
+    openEdgeDetail: (o: GeoSimEdgeDetailInput) => deps.openEdgeDetail?.(o),
   }
 
   w.__geoSim = hook

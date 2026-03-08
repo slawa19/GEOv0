@@ -144,8 +144,12 @@ flowchart TD
 - `ds-ov-dropdown`: bounded-intrinsic dropdown shell для HUD/details меню.
 - `ds-ov-toast`: shared notification-toast shell; bottom offset и clamp читаются только из DS tokens.
 - `ds-ov-message`: message/info overlay shell.
+- `ds-ov-panel--compact`: compact interact-panel padding modifier for WM-managed panels.
+- `ds-controls__row--compact`: compact form-row modifier for interact-panel field rows.
+- `ds-controls__suffix`: shared bounded suffix/input row for compact interact-panel amount/limit controls.
 
 Правило: `HudBar`, `ds-ov-bar` и `ds-ov-metric` не заносятся в runtime surface catalog как отдельные surfaces. Это composition primitives, которыми пользуются runtime surfaces.
+Правило: `ds-ov-panel--compact`, `ds-controls__row--compact` и `ds-controls__suffix` относятся только к compact interact-form contract и не переиспользуются как generic HUD toolbar sizing fix.
 
 ## 5) Как добавить новый примитив (процедура)
 
@@ -199,10 +203,20 @@ HUD — это **не отдельный CSS зоопарк**, а:
 
 Validation outcome for current shipped scope:
 
+- Runtime code source of truth for the family matrix lives in `src/ui-kit/overlaySurfaceCatalog.ts`; this table must stay aligned with that file.
 - `EdgeTooltip` micro-layout lives in `designSystem.overlays.css`; the component only binds content and placement style.
 - `DevPerfOverlay` spacing/layout lives in `designSystem.overlays.css`; the component keeps only diagnostics/copy logic.
 - `InteractHistoryLog`, toasts, HUD dropdowns, `DevPerfOverlay`, `EdgeTooltip`, and canvas overlays all sit inside the current runtime family table and z-layer contract.
 - Inspector extraction remains deferred: `NodeCardOverlay` stays on the `ds-ov-node-card` + `ds-node-card` contract, while `EdgeDetailPopup` stays on the `ds-ov-edge-detail` quick-info/action contract. No shared `ds-inspector-row` primitive is introduced until a repeated rail contract appears.
+- Compact interact-form rail proof lives in `src/components/compactOverlayFormRails.test.ts`; if a future form change reintroduces local width clamps, that file must be updated together with the DS contract.
+- Browser-level overlap proof for passive tooltip vs interactive WM shell lives in `e2e/manual-operations-interact.spec.ts` (`C3:` test). If pointer/wheel routing changes, update that proof instead of relying only on DOM-level mocks.
+
+### 6.1a Geometry publishing and sizing notes
+
+- Top and bottom HUD stack geometry are measured/published at the root shell; `--ds-hud-stack-height` and `--ds-hud-bottom-stack-height` remain fallback tokens only.
+- `fixed-width-auto-height` WM families keep width policy-owned by WindowManager; shell measurement may update height, but must not widen interact windows.
+- `WindowShell` retains `queueMeasured()` plus `setTimeout(16)` as the approved ResizeObserver coalescing path; unmount must clear pending measurement publication.
+- `ds-ov-panel` is visual-first; legacy absolute positioning is isolated behind compatibility classes and must not leak back into WM-managed consumers.
 
 ### 6.2 Runtime z-layer map
 
@@ -218,6 +232,12 @@ Source of truth stays in `App.css`; composition consumers in `designSystem.overl
 | `--ds-z-tooltip` | tooltip surfaces |
 | `--ds-z-inset` | dropdown/inset overlays above bars but below alerts |
 | `--ds-z-alert` | notification toasts and alert-level overlays |
+
+### 6.3 Diagnostics and degraded behavior
+
+- Dev-only overlay diagnostics are expected for CSS-token fallback, invalid measured size, stale publish, broken clamp input, and z-layer mismatch.
+- Safe degraded behavior is mandatory: invalid geometry input must fall back or be ignored instead of crashing or silently corrupting runtime placement.
+- Diagnostics live in the shared overlay/window pipeline, not in per-panel business components.
 
 ## 7) Чеклист качества для PR от агента
 

@@ -1,3 +1,5 @@
+import { warnOverlayDiagnostics } from './overlayDiagnostics'
+
 export const DEFAULT_WM_CLAMP_PAD_PX = 12
 export const DEFAULT_HUD_STACK_HEIGHT_PX = 110
 export const DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX = 56
@@ -90,9 +92,22 @@ export function createMeasuredPublishedGeometryValue(
       return epoch
     },
     publish(measuredPx, publishEpoch) {
-      if (publishEpoch !== epoch) return false
+      if (publishEpoch !== epoch) {
+        warnOverlayDiagnostics('stale-publish', 'Ignoring stale overlay geometry publish.', {
+          publishEpoch,
+          currentEpoch: epoch,
+          measuredPx,
+        })
+        return false
+      }
 
       const nextPx = normalizeMeasuredPublishedGeometryPx(measuredPx, fallbackPx)
+      if (nextPx === fallbackPx && (measuredPx == null || !Number.isFinite(measuredPx) || !(measuredPx > 0))) {
+        warnOverlayDiagnostics('invalid-measured-size', 'Invalid measured overlay geometry; falling back to documented default.', {
+          measuredPx,
+          fallbackPx,
+        })
+      }
       if (nextPx === publishedPx) return false
 
       publishedPx = nextPx
@@ -138,6 +153,28 @@ function readCssVarPositivePx(el: Element, name: string): number | null {
   return value
 }
 
+function readCssVarPositivePxWithFallback(el: Element, name: string, fallback: number): number {
+  const value = readCssVarPositivePx(el, name)
+  if (value != null) return value
+
+  warnOverlayDiagnostics('css-var-fallback', 'Using fallback overlay geometry token value.', {
+    token: name,
+    fallbackPx: fallback,
+  })
+  return fallback
+}
+
+function readCssVarFiniteNumberWithFallback(el: Element, name: string, fallback: number): number {
+  const value = readCssVarFiniteNumber(el, name)
+  if (value != null) return value
+
+  warnOverlayDiagnostics('css-var-fallback', 'Using fallback overlay geometry numeric value.', {
+    token: name,
+    fallbackPx: fallback,
+  })
+  return fallback
+}
+
 /**
  * Read overlay/window geometry from DS CSS variables.
  * Safe in tests: falls back to defaults if CSS isn't loaded.
@@ -179,48 +216,109 @@ export function readOverlayGeometryPx(el?: Element | null): OverlayGeometryPx {
     }
   }
 
-  const wmClampPadPx = readCssVarPositivePx(target, '--ds-wm-clamp-pad') ?? DEFAULT_WM_CLAMP_PAD_PX
-  const hudStackHeightPx = readCssVarPositivePx(target, '--ds-hud-stack-height') ?? DEFAULT_HUD_STACK_HEIGHT_PX
-  const hudBottomStackHeightPx =
-    readCssVarPositivePx(target, '--ds-hud-bottom-stack-height') ?? DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX
+  const wmClampPadPx = readCssVarPositivePxWithFallback(target, '--ds-wm-clamp-pad', DEFAULT_WM_CLAMP_PAD_PX)
+  const hudStackHeightPx = readCssVarPositivePxWithFallback(target, '--ds-hud-stack-height', DEFAULT_HUD_STACK_HEIGHT_PX)
+  const hudBottomStackHeightPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-hud-bottom-stack-height',
+    DEFAULT_HUD_BOTTOM_STACK_HEIGHT_PX,
+  )
 
-  const wmAnchorOffsetXPx = readCssVarPositivePx(target, '--ds-wm-anchor-offset-x') ?? DEFAULT_WM_ANCHOR_OFFSET_X_PX
-  const wmAnchorOffsetYPx = readCssVarPositivePx(target, '--ds-wm-anchor-offset-y') ?? DEFAULT_WM_ANCHOR_OFFSET_Y_PX
-  const wmCascadeStepPx = readCssVarPositivePx(target, '--ds-wm-cascade-step') ?? DEFAULT_WM_CASCADE_STEP_PX
+  const wmAnchorOffsetXPx = readCssVarPositivePxWithFallback(target, '--ds-wm-anchor-offset-x', DEFAULT_WM_ANCHOR_OFFSET_X_PX)
+  const wmAnchorOffsetYPx = readCssVarPositivePxWithFallback(target, '--ds-wm-anchor-offset-y', DEFAULT_WM_ANCHOR_OFFSET_Y_PX)
+  const wmCascadeStepPx = readCssVarPositivePxWithFallback(target, '--ds-wm-cascade-step', DEFAULT_WM_CASCADE_STEP_PX)
 
-  const wmInteractMinWidthPx = readCssVarPositivePx(target, '--ds-wm-interact-minw') ?? DEFAULT_WM_INTERACT_MIN_WIDTH_PX
-  const wmInteractMinHeightPx = readCssVarPositivePx(target, '--ds-wm-interact-minh') ?? DEFAULT_WM_INTERACT_MIN_HEIGHT_PX
-  const wmInteractPreferredWidthTrustlinePx =
-    readCssVarPositivePx(target, '--ds-wm-interact-prefw-trustline') ?? DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX
-  const wmInteractPreferredWidthWidePx =
-    readCssVarPositivePx(target, '--ds-wm-interact-prefw-wide') ?? DEFAULT_WM_INTERACT_PREFERRED_WIDTH_WIDE_PX
-  const wmInteractPreferredHeightLoadingPx =
-    readCssVarPositivePx(target, '--ds-wm-interact-prefh-loading') ?? DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX
-  const wmInteractPreferredHeightConfirmPx =
-    readCssVarPositivePx(target, '--ds-wm-interact-prefh-confirm') ?? DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX
-  const wmInteractPreferredHeightPickingPx =
-    readCssVarPositivePx(target, '--ds-wm-interact-prefh-picking') ?? DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_PICKING_PX
+  const wmInteractMinWidthPx = readCssVarPositivePxWithFallback(target, '--ds-wm-interact-minw', DEFAULT_WM_INTERACT_MIN_WIDTH_PX)
+  const wmInteractMinHeightPx = readCssVarPositivePxWithFallback(target, '--ds-wm-interact-minh', DEFAULT_WM_INTERACT_MIN_HEIGHT_PX)
+  const wmInteractPreferredWidthTrustlinePx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-interact-prefw-trustline',
+    DEFAULT_WM_INTERACT_PREFERRED_WIDTH_TRUSTLINE_PX,
+  )
+  const wmInteractPreferredWidthWidePx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-interact-prefw-wide',
+    DEFAULT_WM_INTERACT_PREFERRED_WIDTH_WIDE_PX,
+  )
+  const wmInteractPreferredHeightLoadingPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-interact-prefh-loading',
+    DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_LOADING_PX,
+  )
+  const wmInteractPreferredHeightConfirmPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-interact-prefh-confirm',
+    DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_CONFIRM_PX,
+  )
+  const wmInteractPreferredHeightPickingPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-interact-prefh-picking',
+    DEFAULT_WM_INTERACT_PREFERRED_HEIGHT_PICKING_PX,
+  )
 
-  const wmEdgeDetailMinWidthPx =
-    readCssVarPositivePx(target, '--ds-wm-edge-detail-minw') ?? DEFAULT_WM_EDGE_DETAIL_MIN_WIDTH_PX
-  const wmEdgeDetailMinHeightPx =
-    readCssVarPositivePx(target, '--ds-wm-edge-detail-minh') ?? DEFAULT_WM_EDGE_DETAIL_MIN_HEIGHT_PX
-  const wmEdgeDetailPreferredWidthPx =
-    readCssVarPositivePx(target, '--ds-wm-edge-detail-prefw') ?? DEFAULT_WM_EDGE_DETAIL_PREFERRED_WIDTH_PX
-  const wmEdgeDetailPreferredHeightPx =
-    readCssVarPositivePx(target, '--ds-wm-edge-detail-prefh') ?? DEFAULT_WM_EDGE_DETAIL_PREFERRED_HEIGHT_PX
+  const wmEdgeDetailMinWidthPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-edge-detail-minw',
+    DEFAULT_WM_EDGE_DETAIL_MIN_WIDTH_PX,
+  )
+  const wmEdgeDetailMinHeightPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-edge-detail-minh',
+    DEFAULT_WM_EDGE_DETAIL_MIN_HEIGHT_PX,
+  )
+  const wmEdgeDetailPreferredWidthPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-edge-detail-prefw',
+    DEFAULT_WM_EDGE_DETAIL_PREFERRED_WIDTH_PX,
+  )
+  const wmEdgeDetailPreferredHeightPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-edge-detail-prefh',
+    DEFAULT_WM_EDGE_DETAIL_PREFERRED_HEIGHT_PX,
+  )
 
-  const wmNodeCardMinWidthPx = readCssVarPositivePx(target, '--ds-wm-node-card-minw') ?? DEFAULT_WM_NODE_CARD_MIN_WIDTH_PX
-  const wmNodeCardMinHeightPx = readCssVarPositivePx(target, '--ds-wm-node-card-minh') ?? DEFAULT_WM_NODE_CARD_MIN_HEIGHT_PX
-  const wmNodeCardPreferredWidthPx =
-    readCssVarPositivePx(target, '--ds-wm-node-card-prefw') ?? DEFAULT_WM_NODE_CARD_PREFERRED_WIDTH_PX
-  const wmNodeCardPreferredHeightPx =
-    readCssVarPositivePx(target, '--ds-wm-node-card-prefh') ?? DEFAULT_WM_NODE_CARD_PREFERRED_HEIGHT_PX
+  const wmNodeCardMinWidthPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-node-card-minw',
+    DEFAULT_WM_NODE_CARD_MIN_WIDTH_PX,
+  )
+  const wmNodeCardMinHeightPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-node-card-minh',
+    DEFAULT_WM_NODE_CARD_MIN_HEIGHT_PX,
+  )
+  const wmNodeCardPreferredWidthPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-node-card-prefw',
+    DEFAULT_WM_NODE_CARD_PREFERRED_WIDTH_PX,
+  )
+  const wmNodeCardPreferredHeightPx = readCssVarPositivePxWithFallback(
+    target,
+    '--ds-wm-node-card-prefh',
+    DEFAULT_WM_NODE_CARD_PREFERRED_HEIGHT_PX,
+  )
 
-  const wmGroupZInspectorBase =
-    readCssVarFiniteNumber(target, '--ds-wm-group-z-inspector-base') ?? DEFAULT_WM_GROUP_Z_INSPECTOR_BASE
-  const wmGroupZInteractBase =
-    readCssVarFiniteNumber(target, '--ds-wm-group-z-interact-base') ?? DEFAULT_WM_GROUP_Z_INTERACT_BASE
+  let wmGroupZInspectorBase = readCssVarFiniteNumberWithFallback(
+    target,
+    '--ds-wm-group-z-inspector-base',
+    DEFAULT_WM_GROUP_Z_INSPECTOR_BASE,
+  )
+  let wmGroupZInteractBase = readCssVarFiniteNumberWithFallback(
+    target,
+    '--ds-wm-group-z-interact-base',
+    DEFAULT_WM_GROUP_Z_INTERACT_BASE,
+  )
+
+  if (wmGroupZInteractBase <= wmGroupZInspectorBase) {
+    warnOverlayDiagnostics('z-layer-mismatch', 'Invalid WM z-base ordering; reverting to documented defaults.', {
+      wmGroupZInspectorBase,
+      wmGroupZInteractBase,
+      fallbackInspectorBase: DEFAULT_WM_GROUP_Z_INSPECTOR_BASE,
+      fallbackInteractBase: DEFAULT_WM_GROUP_Z_INTERACT_BASE,
+    })
+    wmGroupZInspectorBase = DEFAULT_WM_GROUP_Z_INSPECTOR_BASE
+    wmGroupZInteractBase = DEFAULT_WM_GROUP_Z_INTERACT_BASE
+  }
 
   return {
     wmClampPadPx,

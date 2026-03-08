@@ -8,7 +8,19 @@ type GeoSimHook = {
   loading: boolean
   error: string
   hasSnapshot: boolean
+  camera: { panX: number; panY: number; zoom: number }
   fxState: FxState
+  showEdgeTooltip: (edge: {
+    key: string
+    fromId: string
+    toId: string
+    amountText: string
+    screenX: number
+    screenY: number
+  }) => void
+  hideEdgeTooltip: () => void
+  openNodeCard: (o: { nodeId: string; anchor: { x: number; y: number } | null }) => void
+  openEdgeDetail: (o: { fromPid: string; toPid: string; anchor: { x: number; y: number } }) => void
 }
 
 type TestWindow = Window & typeof globalThis & { __geoSim?: GeoSimHook }
@@ -27,9 +39,14 @@ describe('dev/geoSimDevHook', () => {
       isTestMode: () => true,
       isWebDriver: () => false,
       getState: () => ({ loading: false, error: '', snapshot: null }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       fxState: { sparks: [], edgePulses: [], nodeBursts: [] } as FxState,
       runTxOnce: () => undefined,
       runClearingOnce: () => undefined,
+      showEdgeTooltip: () => undefined,
+      hideEdgeTooltip: () => undefined,
+      openNodeCard: () => undefined,
+      openEdgeDetail: () => undefined,
     })
 
     expect(cleanup).toBeUndefined()
@@ -44,15 +61,31 @@ describe('dev/geoSimDevHook', () => {
     globalThis.window = {} as TestWindow
 
     const fxState = { sparks: [], edgePulses: [], nodeBursts: [] } as FxState
+    let shownEdgeKey = ''
+    let nodeCardNodeId = ''
+    let edgeDetailKey = ''
 
     const cleanup = installGeoSimDevHook({
       isDev: () => true,
       isTestMode: () => false,
       isWebDriver: () => true,
       getState: () => ({ loading: true, error: 'oops', snapshot: { ok: 1 } }),
+      getCamera: () => ({ panX: 10, panY: 20, zoom: 1.5 }),
       fxState,
       runTxOnce: () => undefined,
       runClearingOnce: () => undefined,
+      showEdgeTooltip: (edge) => {
+        shownEdgeKey = edge.key
+      },
+      hideEdgeTooltip: () => {
+        shownEdgeKey = ''
+      },
+      openNodeCard: (o) => {
+        nodeCardNodeId = o.nodeId
+      },
+      openEdgeDetail: (o) => {
+        edgeDetailKey = `${o.fromPid}->${o.toPid}`
+      },
     })
 
     expect(cleanup).toBeTypeOf('function')
@@ -64,7 +97,19 @@ describe('dev/geoSimDevHook', () => {
     expect(hook?.loading).toBe(true)
     expect(hook?.error).toBe('oops')
     expect(hook?.hasSnapshot).toBe(true)
+    expect(hook?.camera).toEqual({ panX: 10, panY: 20, zoom: 1.5 })
     expect(hook?.fxState).toBe(fxState)
+
+    hook?.showEdgeTooltip({ key: 'A→B', fromId: 'A', toId: 'B', amountText: '1', screenX: 10, screenY: 20 })
+    expect(shownEdgeKey).toBe('A→B')
+    hook?.hideEdgeTooltip()
+    expect(shownEdgeKey).toBe('')
+
+    hook?.openNodeCard({ nodeId: 'alice', anchor: { x: 1, y: 2 } })
+    expect(nodeCardNodeId).toBe('alice')
+
+    hook?.openEdgeDetail({ fromPid: 'alice', toPid: 'bob', anchor: { x: 3, y: 4 } })
+    expect(edgeDetailKey).toBe('alice->bob')
 
     cleanup?.()
     expect(getTestWindow().__geoSim).toBeUndefined()
@@ -84,9 +129,14 @@ describe('dev/geoSimDevHook', () => {
       isTestMode: () => false,
       isWebDriver: () => false,
       getState: () => ({ loading: false, error: '', snapshot: null }),
+      getCamera: () => ({ panX: 0, panY: 0, zoom: 1 }),
       fxState: fx1,
       runTxOnce: () => undefined,
       runClearingOnce: () => undefined,
+      showEdgeTooltip: () => undefined,
+      hideEdgeTooltip: () => undefined,
+      openNodeCard: () => undefined,
+      openEdgeDetail: () => undefined,
     })
 
     const hook1 = getTestWindow().__geoSim
@@ -98,9 +148,14 @@ describe('dev/geoSimDevHook', () => {
       isTestMode: () => true,
       isWebDriver: () => true,
       getState: () => ({ loading: true, error: 'e', snapshot: { ok: 1 } }),
+      getCamera: () => ({ panX: 1, panY: 2, zoom: 3 }),
       fxState: fx2,
       runTxOnce: () => undefined,
       runClearingOnce: () => undefined,
+      showEdgeTooltip: () => undefined,
+      hideEdgeTooltip: () => undefined,
+      openNodeCard: () => undefined,
+      openEdgeDetail: () => undefined,
     })
 
     const hook2 = getTestWindow().__geoSim

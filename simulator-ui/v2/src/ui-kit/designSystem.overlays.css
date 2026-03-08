@@ -235,6 +235,11 @@ details[open].ds-ov-details > summary::after {
   max-width: min(var(--ds-ov-panel-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)));
 }
 
+.ds-ov-panel--compact .ds-panel__header,
+.ds-ov-panel--compact .ds-panel__body {
+  padding: var(--ds-ov-panel-compact-pad);
+}
+
 .ds-ov-panel--legacy-positioned {
   position: absolute;
   right: calc(var(--ds-ov-inset, 12px) + var(--ds-ov-safe-right, 0px));
