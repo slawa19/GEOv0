@@ -154,3 +154,13 @@ The renovation is complete only when all of the following have evidence linked f
   payment/clearing/admin UoW or PostgreSQL-concurrency scope; process-crash event
   delivery remains explicitly best-effort rather than introducing an unjustified
   outbox.
+- **2026-08-07:** The first external Claude Code review workflow was calibrated
+  on the frozen `710483f..e8d29e0` product range from a credential-free standalone
+  clone. Built-in `/code-review high` completed with exit `0` using resolved
+  `claude-opus-5` at max effort. Four findings were independently reproduced and
+  fixed through owning agents; one CSRF diagnostic finding was classified P3 and
+  did not expand the wave. Remediation added terminal cancellation-safe UoW
+  resolution, coherent idempotent simulator observations, atomic audited Admin
+  config publication and rebuild-stable graph selection. External-review failure
+  semantics, bounded admission and one-pass remediation rules now live in
+  `AGENTS.md` and `docs/codex-orchestrator-rule.md`.

@@ -403,13 +403,17 @@ used.
   simulator's implicit `commit=False` convention with an explicit staged payment
   result and ordered post-commit/rollback journal. Outer tick owners now resolve
   DB effects, cache invalidation, metrics and SSE only after the observed
-  transaction outcome; stop/timeout, commit failure and cancellation boundaries
-  have behavioral failure-injection coverage. The final combined selector passed
-  `19` tests and the real heartbeat threshold-1 reproduction passed separately;
-  independent adversarial re-review found no remaining P1/P2 in this slice.
-  Process-crash delivery remains intentionally best-effort (no outbox), and the
-  broader public payment/clearing/admin UoW map plus PostgreSQL locking/ambiguous
-  connection-loss evidence remain outstanding.
+  transaction outcome. Shared commit/rollback resolvers drain terminal DB
+  outcomes through repeated cancellation and classify commit, rollback or
+  unknown exactly once; idempotent replay and rollback-failure observations have
+  behavioral coverage. Runtime Admin config now validates a whole batch before
+  work, serializes overlapping writers, requires durable audit before publishing
+  values, and rejects coercive types. The final combined remediation selector
+  passed `44` tests; internal cross-review found no remaining P1 in these bounded
+  slices. Process-crash delivery remains intentionally best-effort (no outbox),
+  audit-before-publish retains a documented crash window, and the broader public
+  payment/clearing UoW map plus PostgreSQL locking/ambiguous connection-loss
+  evidence remain outstanding.
 - **Rationale / value:** Commits/rollbacks currently occur in API, services, and
   engine, while `commit: bool` asks callers to understand nested SQLAlchemy
   contexts. This is the highest-integrity refactor and must follow behavior locks.
@@ -456,10 +460,13 @@ used.
 - **Working-tree evidence (2026-08-07):** a narrow generation-token primitive is
   applied to confirmed overlapping page/graph loaders; debounce/throttle disposal
   and a single graph view-request owner prevent stale data/error/loading/rebuild
-  state. Reverse-resolution and mixed load/refresh/focus tests pass; Admin lint,
-  `71` unit tests and production build pass, and independent review found no
-  remaining P1/P2. The affected Playwright route/filter flow was not run because
-  the local Chromium executable is absent.
+  state. Graph selection is now visually independent of cycle-data request
+  ownership and is restored after Cytoscape rebuilds. Reverse-resolution,
+  mixed load/refresh/focus and both selection resolution orders pass; the final
+  graph selector passed `18` tests, Admin build passed and lint reported zero
+  errors (known warnings remain). Independent cross-review found no remaining
+  P1/P2. The affected Playwright route/filter flow was not run because the local
+  Chromium executable is absent.
 - **Rationale / value:** The API layer has timeout cancellation, but no repository-
   wide evidence that rapidly changing filters/routes prevent an older response
   from overwriting newer state. This is a common operator-visible race, not a

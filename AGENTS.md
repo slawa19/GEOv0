@@ -296,6 +296,49 @@ $taskSlug = "agent_payments_review"
 
 Не объявляйте волну завершённой, пока не сведены результаты slices, не разрешены contract conflicts, не выполнены заявленные milestone gates и не перечислено сознательно непроверенное.
 
+### Внешний review через Claude Code
+
+Для законченной высокорисковой пачки коммитов выполняйте дополнительный read-only
+review через локально установленный Claude Code. Это внешний, cloud-visible
+источник evidence, а не доверенный gate или автоматический автор исправлений.
+
+- Заморозьте один связный owner slice как точный `<BASE>..<HEAD>`. Число
+  коммитов само по себе не ограничивает diff; последующие коммиты не входят в уже
+  запущенный review.
+- Никогда не запускайте внешний reviewer из основного checkout, если его
+  `.git/config`, environment или untracked files содержат credential. Используйте
+  отдельный standalone local clone (не worktree) с credential-free filesystem
+  `origin`, чистым деревом и проверенным exact HEAD. Stdout/stderr храните только
+  во внешнем task output, не в репозитории.
+- Model-controlled команда для глубокого review:
+
+```powershell
+claude.exe -p --model opus --effort max `
+  "/code-review high <BASE>..<HEAD>" `
+  --permission-mode plan `
+  --disallowedTools "Edit,Write,NotebookEdit" `
+  --output-format json
+```
+
+  Записывайте CLI version, exact SHAs, exit code, полноту JSON и фактический
+  resolved model ID из `modelUsage`; alias нельзя выдавать за конкретную модель
+  без этого evidence. Успешная калибровка 2026-08-07 разрешила `opus` в
+  `claude-opus-5` при `--effort max`, но это не гарантируется навсегда.
+- `ultrareview` допустим как дополнительный model-uncontrolled cloud pipeline.
+  Он ограничивает branch diff (на момент калибровки: 500 files / 8000 changed
+  lines); используйте именованную base branch, а не недокументированный bare SHA.
+  Логические коммиты без близкой base branch лимит не уменьшают.
+- Exit `1`/`130`, timeout, malformed/truncated/empty JSON или отсутствие
+  подтверждённого model ID означают `UNVERIFIED`, а не «findings нет». Разрешён
+  один явно записанный fallback; после его сбоя slice остаётся непроверенным.
+- Запускайте reviewer параллельно только с непересекающейся работой. Frozen clone
+  и range не меняются до результата.
+- Оркестратор вручную воспроизводит каждый P1/P2. Подтверждённое замечание
+  исправляет агент owning slice; ложное отклоняется с path/test evidence. P3 не
+  расширяет волну. После remediation допускается один review только fix-delta и
+  нерешённых findings; оставшийся P1 блокирует/rescope batch вместо бесконечного
+  цикла.
+
 ---
 
 ## 13. Запрещено

@@ -77,12 +77,37 @@ Reviewer ищет false-green тесты, пропущенные sibling paths, 
 transaction и cache boundaries, скрытое изменение wire/API semantics и поломку
 активных callers. Он не занимается стилевыми мелочами без широкого эффекта.
 
+Для высокорисковой commit-пачки после внутреннего adversarial review применяется
+внешний Claude Code review по правилам `AGENTS.md`:
+
+1. Зафиксировать coherent exact `BASE..HEAD` и создать чистый standalone clone с
+   локальным credential-free origin; основной checkout и worktree не подходят,
+   если их общая `.git/config` содержит credential.
+2. Запустить встроенный `/code-review high` с `--model opus --effort max`, plan
+   permissions и запретом edit/write tools. Сохранить CLI version, resolved model
+   из JSON, SHAs, exit code и полный результат вне репозитория.
+3. Пока frozen clone проверяется, продолжать только непересекающиеся slices.
+4. Вручную воспроизвести P1/P2 и передать подтверждённые findings агентам; внешний
+   reviewer не меняет файлы и не принимает решения.
+5. Разрешить один remediation review по fix-delta. Повторный P1 блокирует или
+   пересматривает slice; P3 не создаёт новую работу автоматически.
+
+Сбой, timeout, exit `1/130`, пустой или повреждённый JSON — отсутствие evidence,
+а не чистый review. `ultrareview` не подтверждает конкретную модель и применяется
+только как опциональный дополнительный pipeline в пределах его diff-limit.
+
 ## 5. Решение и пределы среза
 
 Finding принимается, если есть воспроизводимый пользовательский, операционный,
 security, integrity или существенный maintenance effect. Предпочтение отдаётся
 минимальному общему правилу. Не вводятся новый framework, outbox, service layer
 или generalized abstraction только для гипотетической полноты.
+
+Набор задач выбранной волны замораживается перед реализацией. Same-slice
+регрессия или P1 возвращается владельцу этого slice; несвязанный P1 требует явно
+принятого follow-up, P2 сопоставляется существующей задаче или датированному
+accepted debt, P3 волну не расширяет. Review не используется как генератор
+неограниченного backlog.
 
 Если надёжное исправление требует нового полномочия, production mutation,
 необратимой миграции или продуктового выбора с разными последствиями, работа
