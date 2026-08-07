@@ -82,6 +82,11 @@ def assert_safe_test_database_url(
     test tier reject an otherwise safe URL for the wrong database backend.
     """
 
+    if required_backend not in (None, "postgresql"):
+        raise UnsafeTestDatabaseError(
+            f"Unsupported required test database backend: {required_backend}."
+        )
+
     url = _parse_url(database_url)
     backend = url.get_backend_name()
     database = url.database or ""
@@ -95,10 +100,6 @@ def assert_safe_test_database_url(
         if required_backend == "postgresql":
             raise UnsafeTestDatabaseError(
                 "This test tier requires the PostgreSQL database backend."
-            )
-        if required_backend is not None:
-            raise UnsafeTestDatabaseError(
-                f"Unsupported required test database backend: {required_backend}."
             )
         return url
 
@@ -115,10 +116,6 @@ def assert_safe_test_database_url(
     if allow_destructive_reset != "1":
         raise UnsafeTestDatabaseError(
             "PostgreSQL test schema reset requires GEO_TEST_ALLOW_DB_RESET=1."
-        )
-    if required_backend not in (None, "postgresql"):
-        raise UnsafeTestDatabaseError(
-            f"Unsupported required test database backend: {required_backend}."
         )
     return url
 

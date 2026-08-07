@@ -158,6 +158,29 @@ def test_rejects_safe_sqlite_when_postgresql_backend_is_required(
         )
 
 
+def test_rejects_unknown_required_backend_before_postgres_reset_guidance(
+    tmp_path: Path,
+) -> None:
+    database_url = (
+        "postgresql+asyncpg://geo:secret@localhost/geov0_test_agent_guard"
+    )
+
+    with pytest.raises(
+        UnsafeTestDatabaseError,
+        match="Unsupported required test database backend: postgres",
+    ) as exc_info:
+        assert_safe_test_database_url(
+            database_url,
+            allow_destructive_reset=None,
+            repo_root=tmp_path,
+            required_backend="postgres",
+        )
+
+    error_message = str(exc_info.value)
+    assert "GEO_TEST_ALLOW_DB_RESET" not in error_message
+    assert "secret" not in error_message
+
+
 def test_cli_accepts_required_postgresql_without_printing_credentials(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

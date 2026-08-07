@@ -114,8 +114,11 @@ try {
             if ($BackendMarker) {
                 $pytestArgs += @('-m', $BackendMarker)
             }
-            elseif (-not $IncludeExpensive) {
-                $pytestArgs += @('-m', 'not slow and not e2e')
+            elseif ($IncludeExpensive) {
+                $pytestArgs += @('-m', 'not postgres')
+            }
+            else {
+                $pytestArgs += @('-m', 'not slow and not e2e and not postgres')
             }
             if ($BackendSelector.Count -gt 0) {
                 $pytestArgs += '--'

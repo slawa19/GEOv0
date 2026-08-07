@@ -215,3 +215,13 @@ The renovation is complete only when all of the following have evidence linked f
   claim were removed. All `79` changed local links resolved, and a separate
   adversarial reviewer closed two README navigation/authority findings. Deeper
   document-body reconciliation and archive/translation classification remain.
+- **2026-08-07:** The one allowed external fix-delta review used a synthetic clean
+  three-file range `4eb31fe..3e4ab50`, excluding intervening docs/governance
+  commits. Claude Code `2.1.224` completed with exit `0`, complete JSON and
+  resolved `claude-opus-5` at high effort. It confirmed the PostgreSQL backend
+  preflight, then exposed two remaining P2s: default selectors still admitted
+  PostgreSQL-marked tests, and programmatic backend requirements were not
+  validated before reset guidance. Both were fixed; internal review additionally
+  closed the `IncludeExpensive` bypass. No third external loop was opened. The
+  final backend default tier passed (`687 passed`, `3 skipped`, `14`
+  PostgreSQL/expensive deselected); live PostgreSQL remains unverified.
