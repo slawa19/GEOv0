@@ -1,22 +1,28 @@
 from typing import AsyncGenerator
 import os
 import asyncio
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from fastapi.testclient import TestClient
 from httpx import AsyncClient
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
-from app.api.deps import get_db
-from app.config import settings
-from app.core.auth.canonical import canonical_json
-from app.core.auth.crypto import generate_keypair
-from app.db.base import Base
-from app.main import app
+# Tests must select their permissive environment explicitly before app.config
+# is imported. Override both names so a developer's legacy .env cannot conflict.
+os.environ["ENV"] = "test"
+os.environ["ENVIRONMENT"] = "test"
+
+from app.api.deps import get_db  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.core.auth.canonical import canonical_json  # noqa: E402
+from app.core.auth.crypto import generate_keypair  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.main import app  # noqa: E402
+from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 
 # --- Database Fixtures ---
 
@@ -28,12 +34,23 @@ TEST_DATABASE_URL = os.environ.get(
     "sqlite+aiosqlite:///./.pytest_geov0.db",
 )
 
+_validated_test_database_url = assert_safe_test_database_url(
+    TEST_DATABASE_URL,
+    allow_destructive_reset=os.environ.get("GEO_TEST_ALLOW_DB_RESET"),
+    repo_root=Path(__file__).resolve().parents[1],
+)
+
 # Tests should not start background jobs or best-effort throttling.
 settings.RATE_LIMIT_ENABLED = False
 settings.RECOVERY_ENABLED = False
 settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
-_is_sqlite = TEST_DATABASE_URL.startswith("sqlite")
+_is_sqlite = _validated_test_database_url.get_backend_name() == "sqlite"
+_use_migrated_schema = os.environ.get("GEO_TEST_USE_MIGRATED_SCHEMA") == "1"
+if _use_migrated_schema and _is_sqlite:
+    raise RuntimeError(
+        "GEO_TEST_USE_MIGRATED_SCHEMA=1 is supported only for PostgreSQL tests."
+    )
 
 # NOTE: For asyncpg on Windows, pooled connections can be bound to a previous
 # event loop between tests (pytest-asyncio uses per-test loops by default),
@@ -66,14 +83,11 @@ async def _ensure_schema_initialized() -> None:
         if _schema_ready:
             return
 
-        driver = engine.url.drivername
-        if driver != "sqlite+aiosqlite":
-            if os.environ.get("GEO_TEST_ALLOW_DB_RESET") != "1":
-                raise RuntimeError(
-                    "Refusing to reset a non-SQLite database for tests. "
-                    "Set GEO_TEST_ALLOW_DB_RESET=1 and ensure TEST_DATABASE_URL points to a dedicated test DB. "
-                    f"Got driver: {driver}."
-                )
+        if _use_migrated_schema:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            _schema_ready = True
+            return
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
@@ -222,43 +236,6 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         app.dependency_overrides.clear()
         app_db_session.AsyncSessionLocal = _orig_async_session_local
 
-
-# --- Sync E2E Example Fixtures ---
-
-
-@pytest.fixture
-def http_client():
-    """Synchronous client for placeholder e2e example tests."""
-    with TestClient(app) as tc:
-        yield tc
-
-
-@pytest.fixture
-def reset_state():
-    """Placeholder reset hook for example tests."""
-    yield
-
-
-@pytest.fixture
-def collect_artifacts(tmp_path):
-    """Placeholder artifact collector for example tests."""
-
-    def _collect(name: str, payload: object | None = None) -> None:
-        return None
-
-    return _collect
-
-
-@pytest.fixture
-def alice_keys():
-    public_key, private_key = generate_keypair()
-    return private_key, public_key, "alice"
-
-
-@pytest.fixture
-def bob_keys():
-    public_key, private_key = generate_keypair()
-    return private_key, public_key, "bob"
 
 # --- Auth Helpers ---
 

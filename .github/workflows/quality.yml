@@ -1,0 +1,243 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  required-quality:
+    name: Required local-equivalent gates
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Set up Node.js 22.12
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: |
+            admin-ui/package-lock.json
+            simulator-ui/v2/package-lock.json
+
+      - name: Install backend dependencies
+        shell: pwsh
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Install Admin UI dependencies
+        shell: pwsh
+        run: npm --prefix admin-ui ci
+
+      - name: Install Simulator UI v2 dependencies
+        shell: pwsh
+        run: npm --prefix simulator-ui/v2 ci
+
+      - name: Run canonical required gates
+        shell: pwsh
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-required
+
+  static-diagnostics:
+    name: Known-red Python static diagnostics (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Ruff diagnostics
+        continue-on-error: true
+        run: python -m ruff check app migrations --no-cache
+
+      - name: Black diagnostics
+        continue-on-error: true
+        run: python -m black --check app migrations
+
+  postgres:
+    name: PostgreSQL integration (scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geov0_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geo -d geov0_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ENV: test
+      DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
+      TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
+      GEO_TEST_ALLOW_DB_RESET: "1"
+      GEO_TEST_USE_MIGRATED_SCHEMA: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Upgrade empty PostgreSQL database to the single migration head
+        run: |
+          python scripts/check_alembic_heads.py
+          python -m alembic -c migrations/alembic.ini upgrade head
+
+      - name: Run PostgreSQL-specific integration selectors
+        run: |
+          mkdir -p .local-run/test-runs/ci-postgres
+          python -m pytest -q \
+            --basetemp=.local-run/test-runs/ci-postgres/pytest \
+            tests/integration/test_concurrent_clearing_payment_lost_update.py \
+            tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py \
+            tests/integration/test_payment_engine_uow_retry_postgres.py \
+            tests/integration/test_prepare_locks_tx_id_fk_postgres.py
+
+  simulator-super-smoke:
+    name: Simulator super-smoke (scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install backend dependencies
+        shell: pwsh
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run task-isolated expensive simulator selector
+        shell: pwsh
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-super-smoke
+          -BackendSelector tests/integration/test_simulator_super_smoke.py
+          -IncludeExpensive
+          -BackendOnly
+
+  admin-e2e:
+    name: Admin UI E2E (scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22.12
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+
+      - name: Install Admin UI dependencies
+        run: npm --prefix admin-ui ci
+
+      - name: Install Chromium
+        run: npm --prefix admin-ui exec -- playwright install --with-deps chromium
+
+      - name: Run Admin UI E2E
+        run: npm --prefix admin-ui run e2e
+
+  simulator-visual-e2e:
+    name: Simulator visual E2E on baseline platform (scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js 22.12
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: simulator-ui/v2/package-lock.json
+
+      - name: Install Simulator UI v2 dependencies
+        shell: pwsh
+        run: npm --prefix simulator-ui/v2 ci
+
+      - name: Install Chromium
+        shell: pwsh
+        run: npm --prefix simulator-ui/v2 exec -- playwright install chromium
+
+      - name: Run Simulator UI v2 E2E
+        shell: pwsh
+        run: npm --prefix simulator-ui/v2 run test:e2e

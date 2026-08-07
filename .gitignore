@@ -102,6 +102,10 @@ dist/
 tmp/
 .tmp*/
 
+# Root/runtime scratch files must never be versioned
+/.tmp*
+/simulator-ui/v2/test_output.txt
+
 # root-only local runtime artifacts
 /.local-*.pid
 /.tmp_events.ndjson
