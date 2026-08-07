@@ -164,3 +164,12 @@ The renovation is complete only when all of the following have evidence linked f
   config publication and rebuild-stable graph selection. External-review failure
   semantics, bounded admission and one-pass remediation rules now live in
   `AGENTS.md` and `docs/codex-orchestrator-rule.md`.
+- **2026-08-07:** The bounded remediation review completed on the frozen
+  `f839311..f068e72` range in a credential-free standalone clone with Claude Code
+  `2.1.224`, exit `0`, complete JSON (`is_error=false`) and resolved
+  `claude-opus-5` at high effort. Both findings were manually reproduced. A
+  cancelled child commit was accepted as a P2 ambiguous outcome and fixed in
+  `d05c27a`; independent adversarial review found no remaining P1/P2 in that
+  fix. The durable-audit/runtime-publication cancellation window was accepted as
+  P2 and mapped to REN-010's already recorded crash/ambiguous-commit residual;
+  it did not justify a new persistence framework or expand this bounded slice.

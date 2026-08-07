@@ -399,25 +399,36 @@ used.
   in `app/api/v1/admin.py`, `app/core/payments/`,
   `app/core/clearing/service.py`, `app/core/trustlines/service.py`
 - **Status:** IN PROGRESS (2026-08-07)
-- **Working-tree evidence (2026-08-07):** the first vertical slice replaces the
+- **Committed slice evidence (2026-08-07):** the first vertical slice replaces the
   simulator's implicit `commit=False` convention with an explicit staged payment
   result and ordered post-commit/rollback journal. Outer tick owners now resolve
   DB effects, cache invalidation, metrics and SSE only after the observed
   transaction outcome. Shared commit/rollback resolvers drain terminal DB
   outcomes through repeated cancellation and classify commit, rollback or
-  unknown exactly once; idempotent replay and rollback-failure observations have
-  behavioral coverage. Runtime Admin config now validates a whole batch before
-  work, serializes overlapping writers, requires durable audit before publishing
-  values, and rejects coercive types. The final combined remediation selector
-  passed `44` tests; internal cross-review found no remaining P1 in these bounded
-  slices. Process-crash delivery remains intentionally best-effort (no outbox),
-  audit-before-publish retains a documented crash window, and the broader public
-  payment/clearing UoW map plus PostgreSQL locking/ambiguous connection-loss
-  evidence remain outstanding.
+  unknown exactly once; idempotent replay, rollback-failure and cancelled-commit
+  observations have behavioral coverage. Runtime Admin config validates a whole
+  batch before work, serializes overlapping config/legacy-feature writers,
+  requires durable audit before publishing values, and rejects coercive types.
+  The final canonical six-file remediation selector passed `52` tests. Claude
+  Code `2.1.224` reviewed frozen `f839311..f068e72` with resolved
+  `claude-opus-5` at high effort and complete exit-`0` JSON; its cancelled-commit
+  P2 was fixed in `d05c27a`, then independently reviewed with no remaining P1/P2.
+  Its audit/publication P2 maps to the already accepted residual below rather
+  than a new task. Process-crash delivery remains intentionally best-effort (no
+  outbox), audit-before-publish retains a documented crash/ambiguous-commit
+  window, and the broader public payment/clearing UoW map plus PostgreSQL
+  locking/ambiguous connection-loss evidence remain outstanding.
 - **Rationale / value:** Commits/rollbacks currently occur in API, services, and
   engine, while `commit: bool` asks callers to understand nested SQLAlchemy
   contexts. This is the highest-integrity refactor and must follow behavior locks.
-- **Evidence paths:** `app/api/v1/admin.py:229-261,681-698,929-1084`;
+- **Evidence paths:** `app/api/v1/admin.py:255-400`;
+  `app/core/simulator/commit_resolution.py:9-159`;
+  `app/core/simulator/real_tick_clearing_coordinator.py:67-94`;
+  `app/core/simulator/real_tick_persistence.py:51-144`;
+  `app/core/simulator/real_tick_trust_drift_coordinator.py:28-87`;
+  `app/core/simulator/real_tick_orchestrator.py:341-382`;
+  `tests/unit/test_admin_config_patch_atomicity.py:182-523`;
+  `tests/unit/test_real_tick_commit_cancellation.py:183-480`;
   `app/core/payments/service.py:64-74,401-433,478-620`;
   `app/core/payments/engine.py:123-178,187-394,628-975,1113-1223`;
   `app/core/clearing/service.py:772-1060`;
