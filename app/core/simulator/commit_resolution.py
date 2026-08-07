@@ -108,23 +108,46 @@ async def resolve_commit_under_cancellation(
                 rollback,
                 cancellation,
             )
-            if rollback_error is None:
-                on_rollback()
-            else:
+            commit_cancelled = isinstance(commit_error, asyncio.CancelledError)
+            if commit_cancelled:
                 try:
                     logger.warning(
-                        "simulator.real.rollback_after_commit_failure_failed "
+                        "simulator.real.commit_outcome_unknown "
+                        "reason=commit_cancelled cleanup_outcome=%s "
                         "commit_error=%s rollback_error=%s",
+                        (
+                            "rollback_succeeded"
+                            if rollback_error is None
+                            else "rollback_failed"
+                        ),
                         type(commit_error).__name__,
-                        type(rollback_error).__name__,
-                        exc_info=(
-                            type(rollback_error),
-                            rollback_error,
-                            rollback_error.__traceback__,
+                        (
+                            type(rollback_error).__name__
+                            if rollback_error is not None
+                            else "None"
                         ),
                     )
                 except Exception:
                     pass
+
+            if rollback_error is None and not commit_cancelled:
+                on_rollback()
+            else:
+                if rollback_error is not None:
+                    try:
+                        logger.warning(
+                            "simulator.real.rollback_after_commit_failure_failed "
+                            "commit_error=%s rollback_error=%s",
+                            type(commit_error).__name__,
+                            type(rollback_error).__name__,
+                            exc_info=(
+                                type(rollback_error),
+                                rollback_error,
+                                rollback_error.__traceback__,
+                            ),
+                        )
+                    except Exception:
+                        pass
                 on_unknown()
     except Exception as exc:
         resolver_error = exc

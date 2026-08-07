@@ -412,3 +412,68 @@ async def test_commit_failure_resolves_terminal_rollback_outcome_and_propagates_
         ]
     else:
         assert rollback_failure_logs == []
+
+
+@pytest.mark.parametrize("boundary", ["clearing", "persistence", "trust"])
+@pytest.mark.parametrize(
+    "rollback_outcome",
+    [
+        "success",
+        "failure",
+        "cancelled",
+    ],
+)
+@pytest.mark.asyncio
+async def test_cancelled_commit_resolves_unknown_for_every_cleanup_outcome(
+    boundary: str,
+    rollback_outcome: str,
+    caplog,
+):
+    rollback_error: BaseException | None = None
+    if rollback_outcome == "failure":
+        rollback_error = RuntimeError("rollback failed")
+    elif rollback_outcome == "cancelled":
+        rollback_error = asyncio.CancelledError("rollback cancelled")
+
+    session = _ControlledSession(
+        commit_error=asyncio.CancelledError("commit response lost"),
+        rollback_error=rollback_error,
+    )
+    session.release_commit.set()
+    resolution = _Resolution()
+    caplog.set_level(logging.WARNING, logger=__name__)
+
+    with pytest.raises(asyncio.CancelledError, match="commit response lost"):
+        await _public_commit_path(boundary, session, resolution)
+
+    assert session.commits == 0
+    assert session.rollbacks == 1
+    assert resolution.commits == 0
+    assert resolution.rollbacks == 0
+    assert resolution.unknowns == 1
+
+    ambiguity_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "simulator.real.commit_outcome_unknown" in record.getMessage()
+    ]
+    assert ambiguity_logs == [
+        "simulator.real.commit_outcome_unknown reason=commit_cancelled "
+        f"cleanup_outcome={'rollback_succeeded' if rollback_error is None else 'rollback_failed'} "
+        "commit_error=CancelledError "
+        f"rollback_error={type(rollback_error).__name__ if rollback_error is not None else 'None'}"
+    ]
+
+    cleanup_failure_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "simulator.real.rollback_after_commit_failure_failed" in record.getMessage()
+    ]
+    if rollback_error is None:
+        assert cleanup_failure_logs == []
+    else:
+        assert cleanup_failure_logs == [
+            "simulator.real.rollback_after_commit_failure_failed "
+            "commit_error=CancelledError "
+            f"rollback_error={type(rollback_error).__name__}"
+        ]
