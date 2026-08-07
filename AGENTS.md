@@ -313,7 +313,7 @@ review через локально установленный Claude Code. Эт�
 - Model-controlled команда для глубокого review:
 
 ```powershell
-claude.exe -p --model opus --effort max `
+claude.exe -p --model opus --effort high `
   "/code-review high <BASE>..<HEAD>" `
   --permission-mode plan `
   --disallowedTools "Edit,Write,NotebookEdit" `
@@ -323,7 +323,8 @@ claude.exe -p --model opus --effort max `
   Записывайте CLI version, exact SHAs, exit code, полноту JSON и фактический
   resolved model ID из `modelUsage`; alias нельзя выдавать за конкретную модель
   без этого evidence. Успешная калибровка 2026-08-07 разрешила `opus` в
-  `claude-opus-5` при `--effort max`, но это не гарантируется навсегда.
+  `claude-opus-5`; policy этого репозитория требует `--effort high`, но resolved
+  model всё равно проверяется заново после каждого запуска.
 - `ultrareview` допустим как дополнительный model-uncontrolled cloud pipeline.
   Он ограничивает branch diff (на момент калибровки: 500 files / 8000 changed
   lines); используйте именованную base branch, а не недокументированный bare SHA.

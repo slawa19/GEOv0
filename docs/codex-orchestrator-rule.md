@@ -83,7 +83,7 @@ transaction и cache boundaries, скрытое изменение wire/API sema
 1. Зафиксировать coherent exact `BASE..HEAD` и создать чистый standalone clone с
    локальным credential-free origin; основной checkout и worktree не подходят,
    если их общая `.git/config` содержит credential.
-2. Запустить встроенный `/code-review high` с `--model opus --effort max`, plan
+2. Запустить встроенный `/code-review high` с `--model opus --effort high`, plan
    permissions и запретом edit/write tools. Сохранить CLI version, resolved model
    из JSON, SHAs, exit code и полный результат вне репозитория.
 3. Пока frozen clone проверяется, продолжать только непересекающиеся slices.
