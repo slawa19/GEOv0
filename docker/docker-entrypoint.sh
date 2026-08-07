@@ -7,8 +7,6 @@ set -e
 python - <<'PY'
 import asyncio
 import os
-import re
-
 import asyncpg
 
 
@@ -62,5 +60,10 @@ alembic -c migrations/alembic.ini upgrade head
 # Load seed data (if needed)
 # python scripts/seed_db.py
 
-# Start application
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+if [ "$#" -eq 0 ]; then
+  echo "docker-entrypoint.sh: no command supplied" >&2
+  exit 64
+fi
+
+# Preserve the image/Compose command after the migration preflight.
+exec "$@"

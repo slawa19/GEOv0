@@ -62,20 +62,25 @@ cd GEOv0-PROJECT
 
 ### 2.2. Environment setup
 
-This repository provides `.env.example` for reference (see also `app/config.py`).
+`.env.example` is a production-like template (see also `app/config.py`). Copy it
+to `.env` and fill `JWT_SECRET`, `ADMIN_TOKEN`, `SIMULATOR_SESSION_SECRET`, and
+`SIMULATOR_CSRF_ORIGIN_ALLOWLIST` before using base Compose.
 
-For Docker Compose, most defaults are already set in `docker-compose.yml` (including DB/Redis URLs),
-so copying `.env` is optional unless you want to override secrets or ports.
+Local development needs no `.env`: the dev override explicitly selects `ENV=dev`
+and contains intentional local-only defaults.
 
 ### 2.3. Launch
 
 ```bash
-# Start all services (DB, Redis, API)
-docker compose up -d --build
+# Local development: all services with hot reload
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+# Production-like check: fill .env first, then use base Compose
+# docker compose up -d --build
 
 # If localhost:8000 is already used by another service on your machine,
 # pick a different host port (container port stays 8000):
-# GEO_API_PORT=18000 docker compose up -d --build
+# GEO_API_PORT=18000 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # Check status
 docker compose ps
@@ -172,7 +177,11 @@ pip install -e ".[dev]"
 # Set environment variables (examples)
 export DATABASE_URL="postgresql+asyncpg://geo:geo@localhost:5432/geov0"
 export REDIS_URL="redis://localhost:6379/0"
-export JWT_SECRET="change-me-in-production"
+export ENV="prod"
+export JWT_SECRET="$(openssl rand -hex 32)"
+export ADMIN_TOKEN="$(openssl rand -hex 32)"
+export SIMULATOR_SESSION_SECRET="$(openssl rand -hex 32)"
+export SIMULATOR_CSRF_ORIGIN_ALLOWLIST="https://simulator.example.com"
 
 # Migrations
 alembic -c migrations/alembic.ini upgrade head
@@ -185,10 +194,10 @@ python scripts/seed_db.py
 
 ```bash
 # Development (manual run; local runner typically uses :18000)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+ENV=dev uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Production
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+ENV=prod gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
 ---
@@ -200,14 +209,19 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```bash
 # === Required (for local/manual run) ===
 
+ENV=prod
+
 # PostgreSQL database
 DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
 
 # Redis
 REDIS_URL=redis://localhost:6379/0
 
-# JWT secret
-JWT_SECRET=change-me-in-production
+# Required security values (intentionally blank in templates)
+JWT_SECRET=
+ADMIN_TOKEN=
+SIMULATOR_SESSION_SECRET=
+SIMULATOR_CSRF_ORIGIN_ALLOWLIST=
 
 # === Optional ===
 
@@ -221,9 +235,6 @@ JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # Feature flags / runtime toggles
 REDIS_ENABLED=true
-
-# Admin API (MVP)
-ADMIN_TOKEN=dev-admin-token-change-me
 
 # Limits
 MAX_PAYMENT_HOPS=6
@@ -242,9 +253,13 @@ CLEANUP_EXPIRED_LOCKS_SECONDS=60
 
 ```bash
 # .env
+ENV=prod
 DATABASE_URL=postgresql+asyncpg://geo_hub:password@localhost:5432/geo_hub
 REDIS_URL=redis://localhost:6379/0
-JWT_SECRET=change-this-to-a-very-long-random-string-at-least-32-chars
+JWT_SECRET=
+ADMIN_TOKEN=
+SIMULATOR_SESSION_SECRET=
+SIMULATOR_CSRF_ORIGIN_ALLOWLIST=
 
 DEBUG=false
 LOG_LEVEL=INFO

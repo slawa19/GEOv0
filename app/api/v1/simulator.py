@@ -9,14 +9,13 @@ import uuid
 from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
 
-from sqlalchemy import and_, func, or_, select
-from sqlalchemy.orm import aliased
+from sqlalchemy import and_, func, select
 
 from app.api import deps
 from app.config import settings
@@ -77,6 +76,7 @@ from app.schemas.simulator import (
     SimulatorPaymentTargetsResponse,
     SimulatorPaymentTargetsItem,
 )
+from app.schemas.common import ErrorEnvelope
 from app.utils.exceptions import (
     BadRequestException,
     ConflictException,
@@ -1684,13 +1684,11 @@ async def action_trustlines_list(
         return err
     assert eq is not None
 
-    participant_id: uuid.UUID | None = None
     if participant_pid is not None:
         p, p_err = await _resolve_participant_or_error(session=db, pid=participant_pid, field="participant_pid")
         if p_err is not None:
             return p_err
         assert p is not None
-        participant_id = p.id
 
     # Run/snapshot-scoped: build from current run snapshot (not global TrustLine table).
     try:
@@ -2412,7 +2410,19 @@ async def run_events_stream(
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
-@router.post("/runs/{run_id}/actions/tx-once", response_model=TxOnceResponseBody)
+@router.post(
+    "/runs/{run_id}/actions/tx-once",
+    response_model=TxOnceResponseBody,
+    responses={
+        400: {"model": SimulatorActionError},
+        403: {"model": ErrorEnvelope},
+        409: {"model": ErrorEnvelope},
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport",
+        },
+    },
+)
 async def action_tx_once(
     run_id: str,
     body: TxOnceRequestBody,
@@ -2432,7 +2442,19 @@ async def action_tx_once(
     )
     return TxOnceResponseBody(emitted_event_id=emitted, client_action_id=body.client_action_id)
 
-@router.post("/runs/{run_id}/actions/clearing-once", response_model=ClearingOnceResponseBody)
+@router.post(
+    "/runs/{run_id}/actions/clearing-once",
+    response_model=ClearingOnceResponseBody,
+    responses={
+        400: {"model": SimulatorActionError},
+        403: {"model": ErrorEnvelope},
+        409: {"model": ErrorEnvelope},
+        422: {
+            "model": ErrorEnvelope,
+            "description": "Invalid simulator identity transport",
+        },
+    },
+)
 async def action_clearing_once(
     run_id: str,
     body: ClearingOnceRequestBody,

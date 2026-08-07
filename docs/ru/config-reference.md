@@ -24,6 +24,24 @@
 - **Restart required**: изменение требует рестарта процесса/подов. Типично: `protocol.*` (таймауты протокола) и часть `security.*`.
 - **Migration required**: изменение требует миграций/проверки совместимости состояния. Типично: `database.*` и часть `integrity.*` (если влияет на формат/хранение).
 
+### 1.3. Окружение и fail-fast guardrails
+
+- Каноническая переменная — `ENV`; её нужно задать явно. Допустимые значения
+  после нормализации: `dev`, `test`, `staging`, `prod`.
+- Поддерживаются алиасы значений `development`, `testing`, `stage`,
+  `production`. Старое имя переменной `ENVIRONMENT` временно принимается для
+  совместимости. Если одновременно заданы конфликтующие `ENV` и `ENVIRONMENT`,
+  приложение отказывается стартовать.
+- Отсутствующее, неизвестное или пустое значение окружения — ошибка
+  конфигурации. Библиотека settings игнорирует неизвестные имена process env,
+  но опечатка вроде `env` не переводит процесс в permissive-режим: без точного
+  `ENV` или `ENVIRONMENT` startup завершается ошибкой.
+- Только `dev` и `test` разрешают встроенные локальные значения. В `staging` и
+  `prod` значения `JWT_SECRET`, `ADMIN_TOKEN` и `SIMULATOR_SESSION_SECRET`
+  должны иметь не менее 32 символов и не совпадать с exact/anchored placeholder.
+- `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` — comma-separated exact `http`/`https`
+  origins с host и без path, query, fragment, credentials или wildcard.
+
 ---
 
 ## 2. Таблица параметров (по секциям)
@@ -334,10 +352,13 @@
 | `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER` | int | `1` | Максимум активных run'ов на одного владельца (per-owner лимит). Поддерживает значения `>1`: если лимит достигнут, новый `POST /runs` возвращает `409 Conflict` с `conflict_kind: owner_active_exists`. Глобальный лимит: `409` с `conflict_kind: global_active_limit`. |
 | `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` | str | `""` (пусто) | Comma-separated список разрешённых Origin для cookie-auth POST. Пусто = разрешить всё (dev). При CSRF нарушении возвращается `ForbiddenException` с кодом `E006` и `details.reason=csrf_origin`. |
 
-> ⚠️ В non-dev окружении при пустом `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` выводится warning
-> на старте — все origins будут разрешены для cookie-based endpoints.
+> ⚠️ В `staging`/`prod` пустой или placeholder
+> `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` останавливает запуск. Разрешение всех origins
+> сохраняется только для явно выбранных `dev`/`test`.
 
-> ⚠️ **`SIMULATOR_SESSION_SECRET` guardrail:** при значении `change-me-in-production` в окружении с `ENV` не равным `dev` или `test` приложение **отказывается стартовать** с `RuntimeError`. Это fail-fast защита, а не просто предупреждение.
+> ⚠️ **Security guardrail:** в `staging`/`prod` три секрета должны иметь не
+> менее 32 символов и не быть placeholder. CSRF allowlist проверяется отдельно
+> как список exact HTTP(S) origins.
 
 ---
 

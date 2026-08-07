@@ -61,16 +61,16 @@ python -m pip install -r requirements.txt -r requirements-dev.txt
 ### 1.4. Запуск через Docker
 
 ```bash
-# Запустить БД и Redis
-docker compose up -d db redis
+# Локальная разработка всегда использует base + dev overlay
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis
 
 # Применить миграции (через конфиг из репозитория)
 # По умолчанию миграции применяются автоматически при старте контейнера приложения.
 # При необходимости можно выполнить вручную:
-docker compose exec app alembic -c migrations/alembic.ini upgrade head
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app alembic -c migrations/alembic.ini upgrade head
 
 # Запустить приложение
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 Запуск Admin UI (реальный режим, обращается к backend Admin API):
@@ -204,6 +204,8 @@ git checkout -b feature/my-feature
 ### 3.3. Запуск в режиме разработки
 
 ```bash
+export ENV=dev
+
 # Запустить с hot reload
 uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 

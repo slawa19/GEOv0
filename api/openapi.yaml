@@ -33,11 +33,21 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status]
+                required: [status, version, uptime_seconds, timestamp]
                 properties:
                   status:
                     type: string
-                    enum: [ok]
+                    enum: [ok, degraded]
+                  version:
+                    type: string
+                  environment:
+                    type: string
+                    nullable: true
+                  uptime_seconds:
+                    type: integer
+                    minimum: 0
+                  timestamp:
+                    type: string
 
   /healthz:
     get:
@@ -216,6 +226,11 @@ paths:
           name: status
           schema:
             type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [person, business, hub]
         - in: query
           name: page
           schema:
@@ -524,6 +539,16 @@ paths:
           required: true
           schema:
             $ref: '#/components/schemas/EquivalentCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
       responses:
         '200':
           description: Deleted
@@ -806,6 +831,11 @@ paths:
           schema:
             type: string
         - in: query
+          name: equivalent
+          required: false
+          schema:
+            type: string
+        - in: query
           name: include
           required: false
           schema:
@@ -938,6 +968,11 @@ paths:
           required: true
           schema:
             $ref: '#/components/schemas/EquivalentCode'
+        - in: query
+          name: stop_after_types
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: SSE stream
@@ -1321,6 +1356,16 @@ paths:
       summary: Stop simulator run (Real Mode control plane)
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
+        - in: query
+          name: source
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: reason
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: Run status
@@ -1388,6 +1433,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
         - $ref: '#/components/parameters/EquivalentQuery'
+        - in: query
+          name: stop_after_types
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: SSE stream
@@ -1411,18 +1461,34 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: '#/components/schemas/TxOnceRequestBody'
       responses:
         '200':
           description: Transaction emitted
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/TxOnceResponseBody'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Simulator action validation error (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+        '403':
+          description: Simulator actions disabled or access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Invalid simulator identity transport (for example, X-Simulator-Owner)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1439,18 +1505,34 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: '#/components/schemas/ClearingOnceRequestBody'
       responses:
         '200':
           description: Clearing emitted
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/ClearingOnceResponseBody'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Simulator action validation error (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+        '403':
+          description: Simulator actions disabled or access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Invalid simulator identity transport (for example, X-Simulator-Owner)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2080,6 +2162,14 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: max_depth
+          required: false
+          schema:
+            type: integer
+            minimum: 3
+            maximum: 10
+            default: 6
       responses:
         '200':
           description: Clearing result
@@ -2367,12 +2457,6 @@ paths:
     post:
       tags: [Integrity]
       summary: Repair net mutual debts
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
       responses:
         '200':
           description: Repair result
@@ -2387,12 +2471,6 @@ paths:
     post:
       tags: [Integrity]
       summary: Repair cap debts to trust limits
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
       responses:
         '200':
           description: Repair result
@@ -2509,6 +2587,97 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
 
   schemas:
+    SimulatorActionError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    TxOnceRequestBody:
+      type: object
+      required: [equivalent]
+      properties:
+        equivalent:
+          type: string
+        from:
+          type: string
+          nullable: true
+        to:
+          type: string
+          nullable: true
+        amount:
+          type: string
+          nullable: true
+        ttl_ms:
+          type: integer
+          nullable: true
+        intensity_key:
+          type: string
+          nullable: true
+        seed:
+          nullable: true
+        client_action_id:
+          type: string
+          nullable: true
+
+    TxOnceResponseBody:
+      type: object
+      required: [emitted_event_id]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        emitted_event_id:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    ClearingOnceRequestBody:
+      type: object
+      required: [equivalent]
+      properties:
+        equivalent:
+          type: string
+        cycle_edges:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        cleared_amount:
+          type: string
+          nullable: true
+        seed:
+          nullable: true
+        client_action_id:
+          type: string
+          nullable: true
+
+    ClearingOnceResponseBody:
+      type: object
+      required: [plan_id, done_event_id]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        plan_id:
+          type: string
+        done_event_id:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
     Equivalent:
       type: object
       required: [code, precision, is_active, created_at, updated_at]

@@ -72,6 +72,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# This entrypoint is explicitly for the permissive local-development profile.
+$env:ENV = 'dev'
+Remove-Item Env:ENVIRONMENT -ErrorAction SilentlyContinue
+
 # --- Configuration & Paths ---
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $StateDir = Join-Path $RepoRoot '.local-run'

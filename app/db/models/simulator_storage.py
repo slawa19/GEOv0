@@ -16,8 +16,9 @@ class SimulatorRun(Base):
     mode: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     state: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
-    # Per-owner tracking (Phase 2). Nullable until migration.
-    owner_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Migration 017 backfills legacy rows and enforces NOT NULL on PostgreSQL.
+    # Runtime persistence rejects empty owners before constructing this row.
+    owner_id: Mapped[str] = mapped_column(String(200), nullable=False)
     owner_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -50,6 +51,12 @@ class SimulatorRun(Base):
         CheckConstraint("queue_depth IS NULL OR queue_depth >= 0", name="chk_simulator_runs_queue_depth"),
         CheckConstraint("errors_total IS NULL OR errors_total >= 0", name="chk_simulator_runs_errors_total"),
         Index("ix_simulator_runs_scenario_created_at", "scenario_id", "created_at"),
+        Index(
+            "ix_simulator_runs_owner_state_created",
+            "owner_id",
+            "state",
+            "created_at",
+        ),
     )
 
 

@@ -18,7 +18,6 @@ import asyncio
 import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -323,6 +322,8 @@ def _make_lifecycle(
     max_active: int = 10,
     get_active_run_id_for_owner=None,
     existing_runs: dict | None = None,
+    set_active_run_id=None,
+    clear_active_run_id=None,
 ) -> RunLifecycle:
     """Создаёт минимальный RunLifecycle для тестирования conflict-ов.
 
@@ -337,7 +338,8 @@ def _make_lifecycle(
     return RunLifecycle(
         lock=threading.RLock(),
         runs=runs,
-        set_active_run_id=lambda run_id, owner_id: None,
+        set_active_run_id=set_active_run_id or (lambda run_id, owner_id: None),
+        clear_active_run_id=clear_active_run_id,
         utc_now=lambda: datetime.now(tz=timezone.utc),
         new_run_id=lambda: str(uuid.uuid4()),
         get_scenario_raw=lambda sid: {"equivalents": [], "edges": [], "scenario_id": sid},
@@ -364,6 +366,13 @@ def test_create_run_owner_active_exists_conflict() -> None:
     owner_id = "anon:abc123"
 
     lc = _make_lifecycle(
+        existing_runs={
+            existing_run_id: _make_run(
+                existing_run_id,
+                owner_id=owner_id,
+                state="running",
+            ),
+        },
         get_active_run_id_for_owner=lambda oid: existing_run_id if oid == owner_id else None,
     )
 
@@ -414,9 +423,13 @@ def test_create_run_owner_limit_checked_before_global() -> None:
     owner_id = "anon:owner-with-existing-run"
     existing_run_id = "run-owner-already-has"
 
-    # Глобальный лимит = 1, уже есть 1 running run → глобальный лимит тоже достигнут
+    # Этот же реальный active run одновременно заполняет owner и global slots.
     existing_runs = {
-        "run-other": _make_run("run-other", owner_id="userX", state="running"),
+        existing_run_id: _make_run(
+            existing_run_id,
+            owner_id=owner_id,
+            state="running",
+        ),
     }
     lc = _make_lifecycle(
         max_active=1,
@@ -441,6 +454,44 @@ def test_create_run_owner_limit_checked_before_global() -> None:
         f"Ожидалось 'owner_active_exists' (сначала per-owner check), "
         f"получено: {exc_info.value.details.get('conflict_kind')}"
     )
+
+
+def test_create_run_clears_missing_stale_owner_mapping() -> None:
+    """Missing mapped run is stale and must not consume the owner's active slot."""
+    owner_id = "anon:owner-with-stale-mapping"
+    stale_run_id = "run-missing-from-memory"
+    active_map = {owner_id: stale_run_id}
+    cleared: list[tuple[str, str]] = []
+
+    def _set_active(run_id: str, mapped_owner_id: str) -> None:
+        active_map[mapped_owner_id] = run_id
+
+    def _clear_active(*, owner_id: str = "", run_id: str = "") -> None:
+        cleared.append((owner_id, run_id))
+        if active_map.get(owner_id) == run_id:
+            active_map.pop(owner_id)
+
+    lc = _make_lifecycle(
+        get_active_run_id_for_owner=lambda oid: active_map.get(oid),
+        set_active_run_id=_set_active,
+        clear_active_run_id=_clear_active,
+    )
+
+    async def _run() -> str:
+        return await lc.create_run(
+            scenario_id="test-scenario",
+            mode="fixtures",
+            intensity_percent=100,
+            owner_id=owner_id,
+        )
+
+    with patch("app.core.simulator.run_lifecycle.simulator_storage") as mock_storage:
+        mock_storage.upsert_run = AsyncMock(return_value=None)
+        mock_storage.sync_artifacts = AsyncMock(return_value=None)
+        new_run_id = asyncio.run(_run())
+
+    assert cleared == [(owner_id, stale_run_id)]
+    assert active_map[owner_id] == new_run_id
 
 
 # ─── Тесты: AuthZ deny-by-default для пустого owner ──────────────────────────

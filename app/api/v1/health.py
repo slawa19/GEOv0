@@ -4,13 +4,15 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 
 from app.db.session import engine
 from app.config import settings
+from app.schemas.common import HealthResponse
+from app.utils.background_jobs import background_health_status
 
 
 router = APIRouter()
@@ -35,10 +37,10 @@ def _best_effort_environment() -> str:
     return (os.getenv("GEO_ENV") or os.getenv("ENV") or "dev").strip() or "dev"
 
 
-@router.get("/health")
-async def health_check():
+@router.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
+async def health_check(request: Request):
     return {
-        "status": "ok",
+        "status": background_health_status(request.app),
         "version": _best_effort_version(),
         "environment": _best_effort_environment(),
         "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),

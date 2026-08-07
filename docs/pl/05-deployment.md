@@ -62,20 +62,25 @@ cd GEOv0-PROJECT
 
 ### 2.2. Konfiguracja środowiska
 
-Repozytorium zawiera `.env.example` jako referencję (zob. też `app/config.py`).
+`.env.example` jest szablonem production-like (zob. też `app/config.py`). Skopiuj
+go do `.env` i uzupełnij `JWT_SECRET`, `ADMIN_TOKEN`,
+`SIMULATOR_SESSION_SECRET` i `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`.
 
-Dla Docker Compose kopiowanie `.env` jest opcjonalne: domyślne wartości (URL DB/Redis, ustawienia JWT itd.)
-są już ustawione w `docker-compose.yml`. `.env` potrzebujesz tylko, jeśli chcesz nadpisać sekrety/porty/flagi.
+Dla lokalnego developmentu `.env` nie jest wymagany: dev override jawnie ustawia
+`ENV=dev` i zawiera wyłącznie lokalne wartości domyślne.
 
 ### 2.3. Uruchomienie
 
 ```bash
-# Uruchom wszystkie serwisy (DB, Redis, API)
-docker compose up -d --build
+# Lokalny development: wszystkie serwisy z hot reload
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+# Test production-like: najpierw uzupełnij .env, potem użyj base Compose
+# docker compose up -d --build
 
 # Jeśli localhost:8000 jest zajęty przez inną usługę (częste w Windows+WSL2),
 # wybierz inny port hosta (port w kontenerze pozostaje 8000):
-# GEO_API_PORT=18000 docker compose up -d --build
+# GEO_API_PORT=18000 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # Sprawdź status
 docker compose ps
@@ -171,7 +176,11 @@ pip install -e ".[dev]"
 # Przykładowe zmienne środowiskowe
 export DATABASE_URL="postgresql+asyncpg://geo:geo@localhost:5432/geov0"
 export REDIS_URL="redis://localhost:6379/0"
-export JWT_SECRET="change-me-in-production"
+export ENV="prod"
+export JWT_SECRET="$(openssl rand -hex 32)"
+export ADMIN_TOKEN="$(openssl rand -hex 32)"
+export SIMULATOR_SESSION_SECRET="$(openssl rand -hex 32)"
+export SIMULATOR_CSRF_ORIGIN_ALLOWLIST="https://simulator.example.com"
 
 # Migracje
 alembic -c migrations/alembic.ini upgrade head
@@ -184,10 +193,10 @@ python scripts/seed_db.py
 
 ```bash
 # Development (manual run; lokalny runner zwykle używa :18000)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+ENV=dev uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Production
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+ENV=prod gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
 ---
@@ -199,9 +208,13 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```bash
 # === Wymagane (dla uruchomienia ręcznego) ===
 
+ENV=prod
 DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
 REDIS_URL=redis://localhost:6379/0
-JWT_SECRET=change-me-in-production
+JWT_SECRET=
+ADMIN_TOKEN=
+SIMULATOR_SESSION_SECRET=
+SIMULATOR_CSRF_ORIGIN_ALLOWLIST=
 
 # === Opcjonalne ===
 
@@ -214,17 +227,19 @@ JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
 REDIS_ENABLED=true
 
-# Admin API (MVP)
-ADMIN_TOKEN=dev-admin-token-change-me
 ```
 
 ### 4.2. Przykładowy plik .env
 
 ```bash
 # .env (przykład)
+ENV=prod
 DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0
 REDIS_URL=redis://localhost:6379/0
-JWT_SECRET=change-me-in-production
+JWT_SECRET=
+ADMIN_TOKEN=
+SIMULATOR_SESSION_SECRET=
+SIMULATOR_CSRF_ORIGIN_ALLOWLIST=
 
 DEBUG=false
 LOG_LEVEL=INFO
@@ -234,7 +249,6 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
 REDIS_ENABLED=true
-ADMIN_TOKEN=dev-admin-token-change-me
 ```
 
 ### 4.3. Konfiguracja logowania

@@ -18,7 +18,7 @@ This repository contains the **specification and architecture of GEO v0.1**, plu
 
 ---
 
-<!-- CI badge: add when GitHub Actions workflow is configured -->
+<!-- CI badge: add after the published workflow has reliable run evidence -->
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Spec](https://img.shields.io/badge/spec-GEO%20v0.1-informational)
 ![Docs](https://img.shields.io/badge/docs-EN%20%7C%20RU%20%7C%20PL-brightgreen)
@@ -258,18 +258,19 @@ cd GEOv0-PROJECT
 
 # 2. Start services (DB, Redis, API)
 #
+# Local development uses the base file plus the explicit dev overlay.
 # If localhost:8000 is already used by another service, pick a different host port:
-#   GEO_API_PORT=18000 docker compose up -d --build
+#   GEO_API_PORT=18000 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 #
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # 3. Migrations
 # Migrations are executed automatically on container start (see docker/docker-entrypoint.sh).
 # If you want to run them manually:
-docker compose exec app alembic -c migrations/alembic.ini upgrade head
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app alembic -c migrations/alembic.ini upgrade head
 
 # 4. Seed initial data (optional)
-docker compose exec app python scripts/seed_db.py
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py
 
 # 5. API is now available at:
 # - default: http://localhost:8000
@@ -280,6 +281,8 @@ docker compose exec app python scripts/seed_db.py
 If Docker is unavailable, you can run the backend locally using SQLite (development only):
 
 ```powershell
+$env:ENV = 'dev'
+
 # 1) Initialize SQLite schema (creates ./geov0.db)
 python scripts/init_sqlite_db.py
 
@@ -297,158 +300,104 @@ Health endpoints (also available as `/api/v1/*` aliases):
 
 ### Testing (single entry point)
 
-This section is the canonical “how to run tests” entry point for this repo.
-
-#### What tests exist
-
-- **Backend (pytest):** unit + integration tests under `tests/`.
-  - Contract test for OpenAPI: `tests/contract/test_openapi_contract.py`.
-  - Simulator-focused tests: `tests/unit/test_simulator_*.py`, `tests/integration/test_simulator_*.py`.
-- **Simulator UI v2:** unit tests (Vitest) + E2E screenshot tests (Playwright) under `simulator-ui/v2/`.
-- **Admin UI:** unit tests (Vitest) + E2E tests (Playwright) under `admin-ui/`.
-
-Test discovery/markers are configured in `pytest.ini`.
-
-#### Backend tests (pytest)
-
-Recommended on Windows:
+The canonical required local gate is the root PowerShell verifier. It runs the
+default backend pytest tier (excluding `slow`/`e2e`), asserts a single Alembic
+head, and runs Admin UI lint/unit/build plus Simulator UI v2
+typecheck/unit/build:
 
 ```powershell
-# 1) Create venv (once)
+# One-time setup
 py -m venv .venv
-
-# 2) Activate venv
 & .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt -r requirements-dev.txt
+npm --prefix admin-ui ci
+npm --prefix simulator-ui/v2 ci
 
-# 3) Install runtime + dev dependencies
-python -m pip install -r requirements.txt
-python -m pip install -r requirements-dev.txt
-
-# 4) Run all backend tests (includes OpenAPI contract test)
-python -m pytest -q
+# Required repository gates
+.\scripts\verify_local.ps1
 ```
 
-Focused runs:
+The verifier gives pytest a task-specific SQLite DB and basetemp by default. Parallel
+agents must pass a unique slug, for example
+`.\scripts\verify_local.ps1 -TaskSlug agent_contract_review`.
+
+GitHub Actions runs the same verifier with Python 3.11 and Node 22.12. PostgreSQL
+integration, simulator super-smoke, Admin E2E, and Windows Simulator visual E2E
+jobs run only on the weekly schedule or manual dispatch; see
+`.github/workflows/quality.yml`. The presence of the workflow is not evidence of a
+green CI run until the published job finishes successfully.
+
+Ruff and Black currently have known repository-wide debt and are not required green
+gates yet. To display that debt after the required checks, run:
 
 ```powershell
-# OpenAPI contract only
-python -m pytest -q tests/contract/test_openapi_contract.py
+.\scripts\verify_local.ps1 -StaticDiagnostics
+```
+
+Those diagnostics are explicitly non-blocking. Mypy is not configured. Do not report
+them or CI as green unless the named command/job actually reached a final successful
+state. CI reports Ruff and Black in separate non-blocking diagnostic steps; they are
+not part of `required-quality`.
+
+#### Focused backend tests
+
+Test discovery and markers live only in `pytest.ini`. Use the verifier for focused
+backend selectors so DB, basetemp, and failure artifacts stay task-local:
+
+```powershell
+$taskSlug = "agent_contract_review"
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py
 
 # Simulator SSE smoke (fixtures-mode)
-python -m pytest -q tests/integration/test_simulator_sse_smoke.py
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_simulator_sse_smoke.py
 
-# Simulator "super smoke" (fixtures HTTP + deterministic real-logic + real-mode HTTP startup)
-# Writes postmortem dumps to test-results/super-simulator/ on failure.
-python -m pytest -q tests/integration/test_simulator_super_smoke.py
-
-# Always write dumps (useful for scheduled diagnostics)
-$env:GEO_TEST_DUMP_SUPER_SIM = "1"; python -m pytest -q tests/integration/test_simulator_super_smoke.py
-
-What this "super smoke" checks (high-signal, fast):
-
-- Fixtures-mode HTTP run + SSE contract: `run_status`, `tx.updated|tx.failed`, `clearing.done`.
-- Visual contract: emitted edge refs must exist in the current snapshot topology.
-- Deterministic real-logic smoke (no HTTP): nested transaction payment + real clearing tick + patch shapes.
-- Real-mode HTTP startup: a real run emits `run_status` and at least one `tx.*` event.
-
-When to run it:
-
-- Before/after changes in simulator runtime (runner/orchestrator/tick loop), SSE schemas, graph snapshot APIs.
-- After changes in payments, clearing, trust-limit enforcement, or Pydantic event serialization.
-- After changes in UI normalization code that depends on event payload shape (even if backend code was not touched).
-- As a quick local regression check while debugging simulator UI issues.
-
-When to update it:
-
-- Whenever you intentionally change fields/shape in: `run_status`, `tx.updated`, `tx.failed`, `clearing.done`.
-- When the scenario used by the test changes/renames (currently realistic-v2) or its fixtures/topology assumptions change.
-- When patch payload keys change (`node_patch`, `edge_patch`, `viz_*`, `net_balance*`).
-- If the test becomes flaky due to expected timing changes: adjust only stop conditions/timeouts first; avoid weakening validations.
-
-# Simulator realistic-v2 smoke (real-mode) + artifacts/DB analysis
-# (requires backend running; recommended cap for realistic amounts: SIMULATOR_REAL_AMOUNT_CAP=500)
-python scripts/run_simulator_run_and_analyze.py --scenario-id greenfield-village-100-realistic-v2 --mode real --equivalent UAH --intensity 80 --run-seconds 20
-
-# Run only simulator-related tests
-python -m pytest -q tests/unit/test_simulator_*.py tests/integration/test_simulator_*.py
+# Expensive milestone: fixtures + deterministic real logic + real-mode HTTP startup
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
 
-Tip (VS Code Tasks): for realistic-v2 runs, prefer `Full Stack: restart (cap=500)` + `Simulator: run realistic-v2 smoke + analyze`.
-
-Troubleshooting:
-- If `pytest` is not found in PATH, use `python -m pytest` (it always uses the active interpreter).
-- If you see `ModuleNotFoundError: No module named 'pytest_asyncio'`, dev dependencies were not installed into the interpreter you are running.
-  Re-run `python -m pip install -r requirements-dev.txt` after activating `.venv`.
-- If venv creation fails with `ensurepip ... returned non-zero exit status 1`:
-  - delete the venv and retry: `rmdir /s /q .venv` (CMD) or `Remove-Item -Recurse -Force .venv` (PowerShell)
-  - ensure your base Python has bundled pip: `py -m ensurepip --upgrade`
-  - workaround: `py -m pip install virtualenv` then `py -m virtualenv .venv`
-- If installs fail with `No space left on device`, check where `%TEMP%` points. You can temporarily redirect temp to a drive with space:
-  - CMD: `set TEMP=D:\Temp` and `set TMP=D:\Temp`
-  - PowerShell: `$env:TEMP='D:\Temp'; $env:TMP='D:\Temp'`
+The super-smoke is not a debug loop. Run it after changes to simulator runtime/SSE
+schemas, payments/clearing behavior consumed by the simulator, or UI-facing event
+payloads. Through the verifier it writes ignored postmortem artifacts under the
+task-local `.local-run/test-runs/<TaskSlug>/artifacts/` root.
 
 #### Postgres-backed backend tests (when isolation/locking matters)
 
-SQLite cannot validate real locking/isolation behavior. Use Postgres for concurrency semantics (example: TS-23).
+SQLite cannot validate real locking/isolation behavior. Use a dedicated disposable
+PostgreSQL database and verify its name before enabling schema reset:
 
 ```powershell
-# 1) Start Postgres
+$taskSlug = "agent_contract_review"
 docker compose up -d db
-
-# 2) Create a dedicated test database inside the container (one-time)
-docker exec geov0-db createdb -U geo geov0_test 2>$null
-
-# 3) Point tests at the dedicated DB and explicitly allow schema reset
-$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test"
-$env:GEO_TEST_ALLOW_DB_RESET = "1"  # required: test harness will DROP/CREATE schema
-
-# 4) Run the test
-python -m pytest -q tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+docker exec geov0-db createdb -U geo "geov0_test_$taskSlug" 2>$null
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$taskSlug"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
 
-Safety note: when `TEST_DATABASE_URL` is non-SQLite, the test harness resets schema.
-Always use a dedicated test database (like `geov0_test`).
+The harness rejects non-SQLite databases unless both the database name matches
+`geov0_test_*` and `GEO_TEST_ALLOW_DB_RESET=1`. The opt-in flag cannot override
+an unsafe name. Never point it at developer, shared, staging, or production data.
 
-#### Simulator UI v2 tests
+#### UI commands and E2E
 
-From repo root:
+The aggregate verifier owns required UI checks. For a focused UI run:
 
 ```powershell
-# Unit tests (Vitest)
-cd simulator-ui/v2
-npm install
-npm run test:unit
+npm --prefix admin-ui run lint
+npm --prefix admin-ui run test
+npm --prefix admin-ui run build
 
-# E2E / screenshots (Playwright)
-npm run test:e2e
+npm --prefix simulator-ui/v2 run typecheck
+npm --prefix simulator-ui/v2 run test:unit
+npm --prefix simulator-ui/v2 run build
 
-# Update snapshots (only for intentional visual changes)
-npm run test:e2e:update
+# Expensive/manual or scheduled jobs (Simulator visual baselines are Windows-specific)
+npm --prefix admin-ui run e2e
+npm --prefix simulator-ui/v2 run test:e2e
 ```
 
-Docs for simulator UI and Real Mode:
-- `simulator-ui/README.md`
-- `simulator-ui/v2/README.md`
-- `docs/ru/simulator/frontend/docs/api.md`
-- `docs/ru/simulator/backend/simulator-domain-model.md`
-
-#### For AI assistants (repo rule-of-thumb)
-
-If you are an AI assistant operating in this repo, follow these rules:
-
-1) Prefer VS Code Tasks when available (they encode the correct env/ports). If you run commands manually, use PowerShell on Windows.
-2) Always run pytest as `python -m pytest ...` after activating `.venv`.
-3) Never point `TEST_DATABASE_URL` at a developer DB. If it is non-SQLite, set `GEO_TEST_ALLOW_DB_RESET=1` only when you are sure it targets a dedicated disposable test DB.
-4) For simulator Real Mode contract changes, run at least:
-   - `python -m pytest -q tests/contract/test_openapi_contract.py`
-   - `python -m pytest -q tests/integration/test_simulator_sse_smoke.py`
-  - `python -m pytest -q tests/integration/test_simulator_super_smoke.py`
-5) Do not paste multi-line Python into PowerShell as if it were a script; run Python via `python ...` (or via the configured interpreter/tools).
-
-When to run the simulator super smoke:
-- After changes in `app/core/simulator/*`, `app/schemas/simulator.py`, `app/core/simulator/sse_broadcast.py`.
-- After changes in real-mode payments/clearing (`app/core/payments/*`, clearing engines) that can affect `tx.*`, `clearing.*`, `run_status`, or patches.
-- Before merging any PR that touches simulator SSE contracts or UI-facing payload formats.
+Update Playwright screenshots only after intentional visual review. Agent isolation,
+protected-contract and evidence rules are in `AGENTS.md`; do not duplicate them here.
 
 ---
 
@@ -517,10 +466,10 @@ Manual (Docker):
 
 ```powershell
 # 1) Start backend + DB
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # Optional seed
-docker compose exec app python scripts/seed_db.py
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py
 
 # 2) Run Admin UI
 npm --prefix admin-ui install
@@ -532,6 +481,8 @@ npm --prefix admin-ui run dev
 No-Docker quickstart (SQLite):
 
 ```powershell
+$env:ENV = 'dev'
+
 python scripts/init_sqlite_db.py
 # Recommended: seed from canonical admin fixtures datasets (richer demo data, like fixtures-mode UI)
 python scripts/seed_db.py --source fixtures

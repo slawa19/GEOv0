@@ -1,5 +1,6 @@
-# GEO Hub — Dockerfile
-# Multi-stage build for smaller production image
+# GEO Hub — development image
+# Used only by docker-compose.dev.yml for bind mounts and uvicorn reload.
+# The canonical base/production image is docker/Dockerfile.
 
 # =============================================================================
 # Stage 1: Builder
@@ -38,6 +39,7 @@ RUN pip install --no-cache /wheels/*
 
 # Copy application code
 COPY --chown=app:app . .
+RUN chmod +x docker/docker-entrypoint.sh
 
 # Switch to non-root user
 USER app
@@ -50,4 +52,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command
+ENTRYPOINT ["./docker/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

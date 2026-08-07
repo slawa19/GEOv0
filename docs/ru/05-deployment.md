@@ -61,20 +61,26 @@ cd GEOv0-PROJECT
 
 ### 2.2. Настройка окружения
 
-` .env.example` в репозитории дан как справочник (см. также `app/config.py`).
+`.env.example` в репозитории задаёт production-like шаблон (см. также
+`app/config.py`). Скопируйте его в `.env` и заполните четыре пустых security-поля
+перед базовым запуском: `JWT_SECRET`, `ADMIN_TOKEN`,
+`SIMULATOR_SESSION_SECRET`, `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`.
 
-Для Docker Compose копировать `.env` не обязательно: дефолтные значения (DB/Redis URL, JWT настройки и т.п.)
-уже заданы в `docker-compose.yml`. `.env` нужен только если вы хотите переопределить секреты/порты/флаги.
+Для локальной разработки копировать `.env` не обязательно: dev override явно
+выбирает `ENV=dev` и содержит только локальные permissive-дефолты.
 
 ### 2.3. Запуск
 
 ```bash
-# Запустить все сервисы (DB, Redis, API)
-docker compose up -d --build
+# Локальная разработка: все сервисы + hot reload, без .env
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+# Production-like проверка: сначала заполните .env, затем используйте base Compose
+# docker compose up -d --build
 
 # Если localhost:8000 занят другим сервисом (часто в Windows+WSL2),
 # выберите другой host-port (порт внутри контейнера остаётся 8000):
-# GEO_API_PORT=18000 docker compose up -d --build
+# GEO_API_PORT=18000 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # Проверить статус
 docker compose ps
@@ -193,7 +199,11 @@ python -m pip install -r requirements.txt -r requirements-dev.txt
 # Пример переменных окружения
 export DATABASE_URL="postgresql+asyncpg://geo:geo@localhost:5432/geov0"
 export REDIS_URL="redis://localhost:6379/0"
-export JWT_SECRET="change-me-in-production"
+export ENV="prod"
+export JWT_SECRET="$(openssl rand -hex 32)"
+export ADMIN_TOKEN="$(openssl rand -hex 32)"
+export SIMULATOR_SESSION_SECRET="$(openssl rand -hex 32)"
+export SIMULATOR_CSRF_ORIGIN_ALLOWLIST="https://simulator.example.com"
 
 # Миграции
 alembic -c migrations/alembic.ini upgrade head
@@ -206,10 +216,10 @@ python scripts/seed_db.py
 
 ```bash
 # Development (manual run; локальный runner обычно использует :18000)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+ENV=dev uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Production
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+ENV=prod gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
 ---
@@ -234,9 +244,13 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```bash
 # === Обязательные (для manual run) ===
 
+ENV=prod
 DATABASE_URL=postgresql+asyncpg://user:password@host:5432/database
 REDIS_URL=redis://localhost:6379/0
-JWT_SECRET=change-me-in-production
+JWT_SECRET=
+ADMIN_TOKEN=
+SIMULATOR_SESSION_SECRET=
+SIMULATOR_CSRF_ORIGIN_ALLOWLIST=
 
 # === Опциональные ===
 
@@ -249,17 +263,20 @@ JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
 REDIS_ENABLED=true
 
-# Admin API (MVP)
-ADMIN_TOKEN=dev-admin-token-change-me
+# В dev/test пустой CSRF allowlist разрешён; в staging/prod запуск будет отклонён.
 ```
 
 ### 4.2. Пример .env файла
 
 ```bash
 # .env (пример)
+ENV=prod
 DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0
 REDIS_URL=redis://localhost:6379/0
-JWT_SECRET=change-me-in-production
+JWT_SECRET=
+ADMIN_TOKEN=
+SIMULATOR_SESSION_SECRET=
+SIMULATOR_CSRF_ORIGIN_ALLOWLIST=
 
 DEBUG=false
 LOG_LEVEL=INFO
@@ -269,7 +286,6 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
 REDIS_ENABLED=true
-ADMIN_TOKEN=dev-admin-token-change-me
 ```
 
 ### 4.3. Конфигурация логирования

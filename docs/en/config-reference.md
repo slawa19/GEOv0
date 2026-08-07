@@ -24,6 +24,22 @@ In current documents some parameters may appear as env variables (e.g., limits/t
 - **Restart required**: change requires process/pod restart. Typically: `protocol.*` (protocol timeouts) and some `security.*`.
 - **Migration required**: change requires migrations/state compatibility check. Typically: `database.*` and some `integrity.*` (if affects format/storage).
 
+### 1.3. Environment and startup guardrails
+
+- `ENV` is canonical, must be supplied explicitly, and normalizes to `dev`,
+  `test`, `staging`, or `prod`. Value aliases `development`, `testing`, `stage`,
+  and `production` are accepted.
+- Legacy `ENVIRONMENT` is accepted for compatibility. Conflicting `ENV` and
+  `ENVIRONMENT`, or a missing, unknown, or empty selector, fail startup.
+- Unknown process-environment names are ignored by the settings library. A typo
+  such as lowercase `env` still cannot select permissive mode because neither
+  canonical `ENV` nor legacy `ENVIRONMENT` was supplied, so startup fails.
+- Only `dev` and `test` permit built-in local values. In `staging` and `prod`,
+  `JWT_SECRET`, `ADMIN_TOKEN`, and `SIMULATOR_SESSION_SECRET` must each contain
+  at least 32 characters and must not be a known/anchored placeholder.
+- `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` must contain comma-separated exact `http` or
+  `https` origins with a host and no path, query, fragment, credentials, or wildcard.
+
 ---
 
 ## 2. Parameter Table (by section)

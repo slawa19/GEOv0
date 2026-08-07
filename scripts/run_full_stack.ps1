@@ -55,6 +55,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# This entrypoint is explicitly for the permissive local-development profile.
+$env:ENV = 'dev'
+Remove-Item Env:ENVIRONMENT -ErrorAction SilentlyContinue
+
 function Set-EnvOverrides {
     param([string[]]$Pairs)
     if (-not $Pairs -or $Pairs.Count -eq 0) { return }

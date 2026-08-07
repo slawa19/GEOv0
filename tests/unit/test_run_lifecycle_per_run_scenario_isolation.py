@@ -27,6 +27,7 @@ class _NoopSse:  # pragma: no cover
 async def test_create_run_deep_copies_scenario_raw_per_run() -> None:
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
+    active_calls: list[tuple[str, str]] = []
 
     scenario_template = {
         "participants": [{"id": "A", "name": "A"}],
@@ -44,7 +45,9 @@ async def test_create_run_deep_copies_scenario_raw_per_run() -> None:
     lifecycle = RunLifecycle(
         lock=lock,
         runs=runs,
-        set_active_run_id=lambda _: None,
+        set_active_run_id=lambda run_id, owner_id: active_calls.append(
+            (run_id, owner_id)
+        ),
         utc_now=lambda: datetime.now(timezone.utc),
         new_run_id=(lambda it=iter(["run1", "run2"]): next(it)),
         get_scenario_raw=get_scenario_raw,
@@ -73,6 +76,7 @@ async def test_create_run_deep_copies_scenario_raw_per_run() -> None:
     assert r1._scenario_raw is not scenario_template
     assert r2._scenario_raw is not scenario_template
     assert r1._scenario_raw is not r2._scenario_raw
+    assert active_calls == [("run1", ""), ("run2", "")]
 
     # Deep copy: nested lists must not be shared.
     r1._scenario_raw["participants"].append({"id": "X"})
