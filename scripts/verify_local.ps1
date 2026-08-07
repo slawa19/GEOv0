@@ -139,6 +139,9 @@ try {
             Invoke-RequiredStep -Name 'Admin UI production build' -Command {
                 & npm --prefix admin-ui run build
             }
+            Invoke-RequiredStep -Name 'Simulator UI v2 correctness lint' -Command {
+                & npm --prefix simulator-ui/v2 run lint
+            }
             Invoke-RequiredStep -Name 'Simulator UI v2 typecheck' -Command {
                 & npm --prefix simulator-ui/v2 run typecheck
             }

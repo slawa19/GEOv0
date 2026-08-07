@@ -20,7 +20,8 @@
     "lint:fix": "eslint src --ext .ts,.vue --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "test:e2e:smoke": "playwright test participants --grep \"participants page loads and shows table\" --reporter=list"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
