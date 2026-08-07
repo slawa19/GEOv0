@@ -432,9 +432,11 @@ used.
   machine before globally sorted segment locks, uses one strict persisted-flow
   representation for commit keys/effects, keeps recovery abort compatible with
   malformed legacy locks, and prevents duplicate prepare/commit/abort terminal
-  transitions. Its final local selector passed `36` tests and discovered `7`
+  transitions. Follow-ups `151b48e` and `758bb31` preserve invariant-abort lock
+  ownership in both public and staged modes. The final local selector passed `36`
+  tests and discovered `7`
   PostgreSQL-only scenarios, all skipped without a live PostgreSQL runtime;
-  the post-remediation canonical backend milestone passed `680` tests with `13`
+  the post-remediation canonical backend milestone passed `681` tests with `13`
   skipped and `4` expensive tests deselected. Independent review found no
   remaining P1/P2 in the frozen fix. Normal API contention against
   simulator-held transaction locks remains an accepted P2:
