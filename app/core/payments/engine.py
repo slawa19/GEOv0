@@ -257,6 +257,12 @@ class PaymentEngine:
                     f"Transaction {tx_id} already has locks but state={tx.state}"
                 )
 
+            await self._acquire_segment_advisory_locks(
+                equivalent_id=equivalent_id,
+                routes=[(path, amount)],
+                participant_map=participant_map,
+            )
+
             expires_at = datetime.now(timezone.utc) + timedelta(
                 seconds=self.lock_ttl_seconds
             )
