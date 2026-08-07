@@ -572,10 +572,10 @@ class PaymentService:
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:
-                    logger.info(
-                        "event=payment.prepare_failed tx_id=%s error=%s",
+                    logger.error(
+                        "event=payment.prepare_failed tx_id=%s error_type=%s",
                         tx_id_str,
-                        str(e),
+                        type(e).__name__,
                     )
                     try:
                         from app.utils.metrics import PAYMENT_EVENTS_TOTAL
@@ -585,25 +585,61 @@ class PaymentService:
                         ).inc()
                     except Exception:
                         pass
+
+                    is_client_error = isinstance(e, GeoException) and 400 <= int(
+                        getattr(e, "status_code", 500) or 500
+                    ) < 500
+                    public_error = e if is_client_error else GeoException()
+                    abort_reason = str(public_error.message)
+                    abort_code = getattr(public_error, "code", ErrorCode.E010)
+                    abort_details = getattr(public_error, "details", None) or {}
+
                     # Abort is idempotent and also cleans up any partial locks.
                     if commit:
-                        await self.engine.abort(
-                            tx_id_str,
-                            reason=f"Prepare failed: {str(e)}",
-                            error_code=ErrorCode.E010,
-                            commit=True,
-                        )
+                        try:
+                            await self.session.rollback()
+                        except Exception as rollback_error:
+                            logger.error(
+                                "event=payment.prepare_rollback_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(rollback_error).__name__,
+                            )
+                            raise GeoException() from rollback_error
+
+                        try:
+                            await self.engine.abort(
+                                tx_id_str,
+                                reason=abort_reason,
+                                error_code=abort_code,
+                                details=abort_details,
+                                commit=True,
+                            )
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.prepare_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+                            raise GeoException() from abort_error
                     else:
                         try:
                             await self.engine.abort(
                                 tx_id_str,
-                                reason=f"Prepare failed: {str(e)}",
-                                error_code=ErrorCode.E010,
+                                reason=abort_reason,
+                                error_code=abort_code,
+                                details=abort_details,
                                 commit=False,
                             )
-                        except Exception:
-                            pass
-                    raise BadRequestException(f"Payment preparation failed: {str(e)}")
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.prepare_nested_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+
+                    if is_client_error:
+                        raise
+                    raise public_error from e
 
                 # 5. Engine Commit
                 # In MVP we commit immediately. In real system, we might wait for receiver ACK.
@@ -619,10 +655,10 @@ class PaymentService:
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:
-                    logger.info(
-                        "event=payment.commit_failed tx_id=%s error=%s",
+                    logger.error(
+                        "event=payment.commit_failed tx_id=%s error_type=%s",
                         tx_id_str,
-                        str(e),
+                        type(e).__name__,
                     )
                     try:
                         from app.utils.metrics import PAYMENT_EVENTS_TOTAL
@@ -635,69 +671,117 @@ class PaymentService:
 
                     # If the engine raised a user-level GeoException (4xx), preserve it so
                     # simulator real-mode can classify it as REJECTED instead of INTERNAL_ERROR.
-                    if isinstance(e, GeoException) and 400 <= int(getattr(e, "status_code", 500) or 500) < 500:
+                    if isinstance(e, GeoException) and 400 <= int(
+                        getattr(e, "status_code", 500) or 500
+                    ) < 500:
                         if commit:
                             try:
                                 await self.session.rollback()
-                            except Exception:
-                                pass
+                            except Exception as rollback_error:
+                                logger.error(
+                                    "event=payment.commit_rollback_failed tx_id=%s error_type=%s",
+                                    tx_id_str,
+                                    type(rollback_error).__name__,
+                                )
+                                raise GeoException() from rollback_error
 
-                        if commit:
-                            await self.engine.abort(
-                                tx_id_str,
-                                reason=str(getattr(e, "message", None) or str(e)),
-                                error_code=getattr(e, "code", ErrorCode.E010),
-                                details=getattr(e, "details", None),
-                                commit=True,
-                            )
+                            try:
+                                await self.engine.abort(
+                                    tx_id_str,
+                                    reason=str(e.message),
+                                    error_code=e.code,
+                                    details=e.details or {},
+                                    commit=True,
+                                )
+                            except Exception as abort_error:
+                                logger.error(
+                                    "event=payment.commit_abort_failed tx_id=%s error_type=%s",
+                                    tx_id_str,
+                                    type(abort_error).__name__,
+                                )
+                                raise GeoException() from abort_error
                         else:
                             try:
                                 await self.engine.abort(
                                     tx_id_str,
-                                    reason=str(getattr(e, "message", None) or str(e)),
-                                    error_code=getattr(e, "code", ErrorCode.E010),
-                                    details=getattr(e, "details", None),
+                                    reason=str(e.message),
+                                    error_code=e.code,
+                                    details=e.details or {},
                                     commit=False,
                                 )
-                            except Exception:
-                                pass
+                            except Exception as abort_error:
+                                logger.error(
+                                    "event=payment.commit_nested_abort_failed tx_id=%s error_type=%s",
+                                    tx_id_str,
+                                    type(abort_error).__name__,
+                                )
                         raise
 
                     # Under uncertainty (e.g. DB/network errors), commit may have succeeded even if
                     # the caller sees an exception. Read-before-abort to avoid COMMITTED -> ABORTED.
+                    public_error = GeoException()
                     if commit:
                         try:
                             await self.session.rollback()
-                        except Exception:
-                            pass
-
-                        tx_latest = (
-                            await self.session.execute(
-                                select(Transaction).where(Transaction.tx_id == tx_id_str)
+                        except Exception as rollback_error:
+                            logger.error(
+                                "event=payment.commit_rollback_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(rollback_error).__name__,
                             )
-                        ).scalar_one_or_none()
+                            raise public_error from rollback_error
+
+                        try:
+                            tx_latest = (
+                                await self.session.execute(
+                                    select(Transaction).where(
+                                        Transaction.tx_id == tx_id_str
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                        except Exception as read_error:
+                            logger.error(
+                                "event=payment.commit_recovery_read_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(read_error).__name__,
+                            )
+                            raise public_error from read_error
                         if tx_latest is not None and tx_latest.state == "COMMITTED":
                             return self._tx_to_payment_result(tx_latest)
 
                     # Abort is idempotent; if commit failed before applying changes, this releases locks.
                     if commit:
-                        await self.engine.abort(
-                            tx_id_str,
-                            reason=f"Commit failed: {str(e)}",
-                            error_code=ErrorCode.E010,
-                            commit=True,
-                        )
+                        try:
+                            await self.engine.abort(
+                                tx_id_str,
+                                reason=public_error.message,
+                                error_code=ErrorCode.E010,
+                                details={},
+                                commit=True,
+                            )
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.commit_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+                            raise public_error from abort_error
                     else:
                         try:
                             await self.engine.abort(
                                 tx_id_str,
-                                reason=f"Commit failed: {str(e)}",
+                                reason=public_error.message,
                                 error_code=ErrorCode.E010,
+                                details={},
                                 commit=False,
                             )
-                        except Exception:
-                            pass
-                    raise GeoException(f"Payment commit failed: {str(e)}")
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.commit_nested_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+                    raise public_error from e
         except asyncio.TimeoutError:
             if tx_persisted:
                 # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
@@ -705,27 +789,50 @@ class PaymentService:
                 if commit:
                     try:
                         await self.session.rollback()
-                    except Exception:
-                        pass
-
-                    tx_latest = (
-                        await self.session.execute(
-                            select(Transaction).where(Transaction.tx_id == tx_id_str)
+                    except Exception as rollback_error:
+                        logger.error(
+                            "event=payment.timeout_rollback_failed tx_id=%s error_type=%s",
+                            tx_id_str,
+                            type(rollback_error).__name__,
                         )
-                    ).scalar_one_or_none()
+                        raise GeoException() from rollback_error
+
+                    try:
+                        tx_latest = (
+                            await self.session.execute(
+                                select(Transaction).where(
+                                    Transaction.tx_id == tx_id_str
+                                )
+                            )
+                        ).scalar_one_or_none()
+                    except Exception as read_error:
+                        logger.error(
+                            "event=payment.timeout_recovery_read_failed tx_id=%s error_type=%s",
+                            tx_id_str,
+                            type(read_error).__name__,
+                        )
+                        raise GeoException() from read_error
                     if tx_latest is not None and tx_latest.state == "COMMITTED":
                         return self._tx_to_payment_result(tx_latest)
 
                 # Ensure abort isn't cancelled due to the timeout cancellation context.
                 if commit:
-                    await asyncio.shield(
-                        self.engine.abort(
-                            tx_id_str,
-                            reason="Payment timeout",
-                            commit=True,
-                            error_code=ErrorCode.E007,
+                    try:
+                        await asyncio.shield(
+                            self.engine.abort(
+                                tx_id_str,
+                                reason="Payment timeout",
+                                commit=True,
+                                error_code=ErrorCode.E007,
+                            )
                         )
-                    )
+                    except Exception as abort_error:
+                        logger.error(
+                            "event=payment.timeout_abort_failed tx_id=%s error_type=%s",
+                            tx_id_str,
+                            type(abort_error).__name__,
+                        )
+                        raise GeoException() from abort_error
                 else:
                     try:
                         await asyncio.shield(

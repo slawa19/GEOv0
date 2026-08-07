@@ -44,7 +44,7 @@ SUCCESS_SCHEMA_DRIFT_SHA256 = (
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 74
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "6d73791f43babeb589c71a5b051b121d5af203e23aa95e34bd67da9e23b0afbe"
+    "0d173514d6e6d80197dad8f700ba5388c4e6909e7f40262641dc76bf8c6442bc"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 84
 SECURITY_DRIFT_SHA256 = (
@@ -308,6 +308,43 @@ def test_openapi_yaml_is_well_formed() -> None:
     assert isinstance(spec.get("info"), dict)
     assert isinstance(spec.get("paths"), dict)
     assert spec["paths"], "OpenAPI spec has no paths"
+
+
+def test_payment_create_declares_exact_response_statuses_and_error_envelopes() -> None:
+    spec = _load_openapi_yaml()
+    operation = spec["paths"]["/payments"]["post"]
+    responses = _normalized_responses(operation, spec)
+
+    assert set(responses) == {
+        "200",
+        "400",
+        "401",
+        "403",
+        "404",
+        "409",
+        "422",
+        "429",
+        "500",
+        "504",
+    }
+    error_envelope = _normalize_schema(
+        {"$ref": "#/components/schemas/ErrorEnvelope"},
+        spec,
+    )
+    for status in {"400", "403", "404", "409", "422", "429", "500", "504"}:
+        assert responses[status]["content"]["application/json"] == error_envelope
+
+    unauthorized = responses["401"]["content"]["application/json"]
+    assert unauthorized == {
+        "oneOf": [
+            error_envelope,
+            {
+                "properties": {"detail": {"type": "string"}},
+                "required": ["detail"],
+                "type": "object",
+            },
+        ]
+    }
 
 
 def test_security_normalization_preserves_anonymous_or_and_scopes() -> None:

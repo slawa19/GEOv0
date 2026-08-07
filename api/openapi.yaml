@@ -2274,9 +2274,51 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Missing or invalid bearer authentication
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ErrorEnvelope'
+                  - type: object
+                    required: [detail]
+                    properties:
+                      detail:
+                        type: string
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Participant is not allowed to create payments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Request validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Payment rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Payment processing failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '504':
+          description: Payment operation timed out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
     get:
       tags: [Payments]
