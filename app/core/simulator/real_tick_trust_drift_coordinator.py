@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable
 
+from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
 
@@ -24,20 +25,6 @@ class RealTickTrustDriftCoordinator:
                 exc_info=True,
             )
 
-    async def _rollback_after_commit_failure(
-        self,
-        session: Any,
-        on_rollback: Callable[[], Any] | None,
-    ) -> None:
-        try:
-            await asyncio.shield(session.rollback())
-        except Exception:
-            self._logger.warning(
-                "simulator.real.rollback_after_commit_failure_failed",
-                exc_info=True,
-            )
-        self._apply_callback(on_rollback, kind="rollback")
-
     async def _commit_and_resolve(
         self,
         session: Any,
@@ -45,22 +32,13 @@ class RealTickTrustDriftCoordinator:
         on_commit: Callable[[], Any] | None,
         on_rollback: Callable[[], Any] | None,
     ) -> None:
-        commit_task = asyncio.create_task(session.commit())
-        try:
-            await asyncio.shield(commit_task)
-        except asyncio.CancelledError:
-            try:
-                await asyncio.shield(commit_task)
-            except (asyncio.CancelledError, Exception):
-                await self._rollback_after_commit_failure(session, on_rollback)
-            else:
-                self._apply_callback(on_commit, kind="post_commit")
-            raise
-        except Exception:
-            await self._rollback_after_commit_failure(session, on_rollback)
-            raise
-        else:
-            self._apply_callback(on_commit, kind="post_commit")
+        await resolve_commit_under_cancellation(
+            commit=session.commit,
+            rollback=session.rollback,
+            on_commit=lambda: self._apply_callback(on_commit, kind="post_commit"),
+            on_rollback=lambda: self._apply_callback(on_rollback, kind="rollback"),
+            logger=self._logger,
+        )
 
     async def apply_trust_decay_and_broadcast(
         self,

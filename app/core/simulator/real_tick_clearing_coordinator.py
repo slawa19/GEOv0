@@ -11,6 +11,7 @@ from app.core.simulator.adaptive_clearing_policy import (
     AdaptiveClearingState,
     TickSignals,
 )
+from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 
 
@@ -63,41 +64,18 @@ class RealTickClearingCoordinator:
                     exc_info=True,
                 )
 
-    async def _rollback_after_commit_failure(
-        self,
-        session: Any,
-        payments_result: Any | None,
-    ) -> None:
-        try:
-            await asyncio.shield(session.rollback())
-        except Exception:
-            self._logger.warning(
-                "simulator.real.rollback_after_commit_failure_failed",
-                exc_info=True,
-            )
-        self._apply_rollback_observations(payments_result)
-
     async def _commit_and_resolve(
         self,
         session: Any,
         payments_result: Any | None,
     ) -> None:
-        commit_task = asyncio.create_task(session.commit())
-        try:
-            await asyncio.shield(commit_task)
-        except asyncio.CancelledError:
-            try:
-                await asyncio.shield(commit_task)
-            except (asyncio.CancelledError, Exception):
-                await self._rollback_after_commit_failure(session, payments_result)
-            else:
-                self._apply_payment_effects(payments_result)
-            raise
-        except Exception:
-            await self._rollback_after_commit_failure(session, payments_result)
-            raise
-        else:
-            self._apply_payment_effects(payments_result)
+        await resolve_commit_under_cancellation(
+            commit=session.commit,
+            rollback=session.rollback,
+            on_commit=lambda: self._apply_payment_effects(payments_result),
+            on_rollback=lambda: self._apply_rollback_observations(payments_result),
+            logger=self._logger,
+        )
 
     async def maybe_run_clearing(
         self,

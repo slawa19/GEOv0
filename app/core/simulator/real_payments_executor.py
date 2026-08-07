@@ -47,7 +47,7 @@ class DeferredRealPaymentEffects:
     run_id: str
     run: RunRecord
     items: list[_PaymentObservation] = field(default_factory=list)
-    _resolution: Literal["commit", "rollback"] | None = field(
+    _resolution: Literal["commit", "rollback", "unknown"] | None = field(
         default=None,
         init=False,
         repr=False,
@@ -62,13 +62,19 @@ class DeferredRealPaymentEffects:
     def apply_after_rollback(self) -> bool:
         return self._resolve("rollback")
 
-    def _resolve(self, resolution: Literal["commit", "rollback"]) -> bool:
+    def apply_after_unknown_transaction_outcome(self) -> bool:
+        return self._resolve("unknown")
+
+    def _resolve(
+        self,
+        resolution: Literal["commit", "rollback", "unknown"],
+    ) -> bool:
         if self._resolution is not None:
             return False
         self._resolution = resolution
 
         for item in sorted(self.items, key=lambda observation: observation.seq):
-            if resolution == "rollback" and item.outcome == "committed":
+            if resolution != "commit" and item.outcome == "committed":
                 continue
             try:
                 self._apply_observation(item)
@@ -85,17 +91,16 @@ class DeferredRealPaymentEffects:
 
     def _apply_observation(self, item: _PaymentObservation) -> None:
         if item.outcome == "committed":
-            if item.payment_effects is None:
-                return
-            try:
-                item.payment_effects.apply_once()
-            except Exception:
-                self.logger.warning(
-                    "simulator.real.payment_post_commit_effect_failed run_id=%s seq=%s",
-                    self.run_id,
-                    item.seq,
-                    exc_info=True,
-                )
+            if item.payment_effects is not None:
+                try:
+                    item.payment_effects.apply_once()
+                except Exception:
+                    self.logger.warning(
+                        "simulator.real.payment_post_commit_effect_failed run_id=%s seq=%s",
+                        self.run_id,
+                        item.seq,
+                        exc_info=True,
+                    )
 
             try:
                 self.emitter.emit_tx_updated(
@@ -535,23 +540,22 @@ class RealPaymentsExecutor:
                         if float(avg_route_len) > 0:
                             _route_add(eq, float(avg_route_len))
 
-                        if payment_effects is not None:
-                            deferred_effects.items.append(
-                                _PaymentObservation(
-                                    seq=next_seq,
-                                    outcome="committed",
-                                    payment_effects=payment_effects,
-                                    equivalent=eq,
-                                    sender_pid=sender_pid,
-                                    receiver_pid=receiver_pid,
-                                    amount=amount,
-                                    edges=[
-                                        {"from": a, "to": b} for a, b in edges_pairs
-                                    ],
-                                    edge_patch=edge_patch,
-                                    node_patch=node_patch,
-                                )
+                        deferred_effects.items.append(
+                            _PaymentObservation(
+                                seq=next_seq,
+                                outcome="committed",
+                                payment_effects=payment_effects,
+                                equivalent=eq,
+                                sender_pid=sender_pid,
+                                receiver_pid=receiver_pid,
+                                amount=amount,
+                                edges=[
+                                    {"from": a, "to": b} for a, b in edges_pairs
+                                ],
+                                edge_patch=edge_patch,
+                                node_patch=node_patch,
                             )
+                        )
                     else:
                         rejected += 1
                         _inc(eq, "rejected")

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
+from app.core.simulator.commit_resolution import resolve_rollback_under_cancellation
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_payments_executor import (
     DeferredRealPaymentEffects,
@@ -45,6 +46,11 @@ class RealTickPaymentsPhaseResult:
         if self.deferred_effects is None:
             return False
         return self.deferred_effects.apply_after_rollback()
+
+    def apply_unknown_transaction_observations(self) -> bool:
+        if self.deferred_effects is None:
+            return False
+        return self.deferred_effects.apply_after_unknown_transaction_outcome()
 
 
 class RealTickPaymentsCoordinator:
@@ -165,7 +171,10 @@ class RealTickPaymentsCoordinator:
         )
 
         if should_stop:
-            await session.rollback()
-            res.apply_rollback_observations()
+            await resolve_rollback_under_cancellation(
+                rollback=session.rollback,
+                on_rollback=res.apply_rollback_observations,
+                on_unknown=res.apply_unknown_transaction_observations,
+            )
 
         return res, should_stop

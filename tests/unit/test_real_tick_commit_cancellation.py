@@ -17,9 +17,18 @@ from app.core.simulator.real_tick_trust_drift_coordinator import (
 
 
 class _ControlledSession:
-    def __init__(self, *, commit_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        commit_error: Exception | None = None,
+        block_rollback: bool = False,
+    ) -> None:
         self.commit_started = asyncio.Event()
         self.release_commit = asyncio.Event()
+        self.rollback_started = asyncio.Event()
+        self.release_rollback = asyncio.Event()
+        if not block_rollback:
+            self.release_rollback.set()
         self.commit_error = commit_error
         self.commits = 0
         self.rollbacks = 0
@@ -32,6 +41,8 @@ class _ControlledSession:
         self.commits += 1
 
     async def rollback(self) -> None:
+        self.rollback_started.set()
+        await self.release_rollback.wait()
         self.rollbacks += 1
 
 
@@ -76,12 +87,143 @@ def _run() -> RunRecord:
     return run
 
 
+def _public_commit_path(
+    boundary: str,
+    session: _ControlledSession,
+    resolution: _Resolution,
+):
+    if boundary == "clearing":
+        coordinator = RealTickClearingCoordinator(
+            lock=threading.RLock(),
+            logger=logging.getLogger(__name__),
+            clearing_every_n_ticks=1,
+            real_clearing_time_budget_ms=250,
+        )
+        return coordinator.maybe_run_clearing(
+            session=session,
+            run_id="commit-cancellation",
+            run=_run(),
+            equivalents=["UAH"],
+            planned_len=1,
+            tick_t0=0.0,
+            clearing_enabled=True,
+            safe_int_env=lambda _key, default: default,
+            run_clearing=_unexpected_clearing,
+            payments_result=resolution,
+        )
+    if boundary == "persistence":
+        persistence = RealTickPersistence(
+            lock=threading.RLock(),
+            artifacts=_Artifacts(),
+            utc_now=lambda: datetime.now(timezone.utc),
+            db_enabled=lambda: False,
+            logger=logging.getLogger(__name__),
+            real_db_metrics_every_n_ticks=100,
+            real_db_bottlenecks_every_n_ticks=100,
+            real_last_tick_write_every_ms=0,
+            real_artifacts_sync_every_ms=0,
+        )
+        return persistence.persist_tick_tail(
+            session=session,
+            run=_run(),
+            equivalents=["UAH"],
+            tick_t0=0.0,
+            planned_len=1,
+            committed=1,
+            rejected=0,
+            errors=0,
+            timeouts=0,
+            per_eq={"UAH": {"committed": 1}},
+            per_eq_metric_values={"UAH": {}},
+            per_eq_edge_stats={"UAH": {}},
+            on_commit=resolution.apply_deferred_effects,
+            on_rollback=resolution.apply_rollback_observations,
+        )
+    if boundary == "trust":
+        coordinator = RealTickTrustDriftCoordinator(logger=logging.getLogger(__name__))
+        return coordinator.apply_trust_decay_and_broadcast(
+            session=session,
+            run_id="commit-cancellation",
+            run=_run(),
+            tick_index=1,
+            debt_snapshot={},
+            scenario={},
+            trust_drift_engine=_DecayEngine(),  # type: ignore[arg-type]
+            build_edge_patch_for_equivalent=_unexpected_edge_patch,
+            broadcast_topology_edge_patch=lambda **_kwargs: None,
+            on_commit=resolution.apply_deferred_effects,
+            on_rollback=resolution.apply_rollback_observations,
+        )
+    raise AssertionError(f"unknown boundary: {boundary}")
+
+
+async def _unexpected_clearing():
+    raise AssertionError("clearing must not run after cancellation")
+
+
 async def _cancel_during_commit(task, session: _ControlledSession) -> None:
     await session.commit_started.wait()
     task.cancel()
     session.release_commit.set()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.parametrize("boundary", ["clearing", "persistence", "trust"])
+@pytest.mark.asyncio
+async def test_repeated_cancellation_waits_for_successful_commit_outcome(boundary: str):
+    session = _ControlledSession()
+    resolution = _Resolution()
+    task = asyncio.create_task(_public_commit_path(boundary, session, resolution))
+
+    await session.commit_started.wait()
+    task.cancel("first cancellation")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task.cancel("second cancellation")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert not task.done()
+    session.release_commit.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert session.commits == 1
+    assert session.rollbacks == 0
+    assert resolution.commits == 1
+    assert resolution.rollbacks == 0
+
+
+@pytest.mark.parametrize("boundary", ["clearing", "persistence", "trust"])
+@pytest.mark.asyncio
+async def test_commit_failure_drains_rollback_under_repeated_cancellation(boundary: str):
+    session = _ControlledSession(
+        commit_error=RuntimeError("commit failed"),
+        block_rollback=True,
+    )
+    resolution = _Resolution()
+    task = asyncio.create_task(_public_commit_path(boundary, session, resolution))
+
+    await session.commit_started.wait()
+    task.cancel("cancel during commit")
+    await asyncio.sleep(0)
+    session.release_commit.set()
+    await session.rollback_started.wait()
+
+    task.cancel("cancel during rollback")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert not task.done()
+
+    session.release_rollback.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert session.commits == 0
+    assert session.rollbacks == 1
+    assert resolution.commits == 0
+    assert resolution.rollbacks == 1
 
 
 @pytest.mark.asyncio

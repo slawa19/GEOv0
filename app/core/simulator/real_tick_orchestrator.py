@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 import app.db.session as db_session
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
+from app.core.simulator.commit_resolution import resolve_rollback_under_cancellation
 from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.models import RunRecord
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
@@ -485,18 +486,49 @@ class RealTickOrchestrator:
                             int(run.tick_index or 0),
                             exc_info=True,
                         )
-                except Exception:
-                    # CRITICAL: always rollback on tick failure.
+                except Exception as tick_error:
+                    # CRITICAL: always attempt rollback on tick failure.
                     # Otherwise the underlying pooled connection can be returned
                     # in an invalid transaction state, and subsequent ticks may
                     # fail with "Can't reconnect until invalid transaction is rolled back".
+                    original_tick_error = tick_error
+
+                    def _log_rollback_failure(
+                        rollback_error: Exception | asyncio.CancelledError,
+                    ) -> None:
+                        rr._logger.error(
+                            "simulator.real.rollback_failed run_id=%s tick=%s "
+                            "original_error=%s rollback_error=%s",
+                            str(run.run_id),
+                            int(run.tick_index or 0),
+                            type(original_tick_error).__name__,
+                            type(rollback_error).__name__,
+                            exc_info=(
+                                type(rollback_error),
+                                rollback_error,
+                                rollback_error.__traceback__,
+                            ),
+                        )
+
                     try:
-                        await session.rollback()
+                        await resolve_rollback_under_cancellation(
+                            rollback=session.rollback,
+                            on_rollback=(
+                                payments_phase.apply_rollback_observations
+                                if payments_phase is not None
+                                else lambda: None
+                            ),
+                            on_unknown=(
+                                payments_phase.apply_unknown_transaction_observations
+                                if payments_phase is not None
+                                else lambda: None
+                            ),
+                            on_failure=_log_rollback_failure,
+                        )
+                    except asyncio.CancelledError:
+                        raise
                     except Exception:
                         pass
-                    else:
-                        if payments_phase is not None:
-                            payments_phase.apply_rollback_observations()
                     raise
         except Exception as e:
             rr._logger.warning(
