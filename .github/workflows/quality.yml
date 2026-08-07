@@ -149,6 +149,409 @@ jobs:
           -BackendMarker postgres
           -BackendSelector tests/integration
 
+  container-smoke:
+    name: Production-like container and schema smoke (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create task-local names and ephemeral secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          db_password="$(openssl rand -hex 32)"
+          jwt_secret="$(openssl rand -hex 32)"
+          admin_token="$(openssl rand -hex 32)"
+          simulator_secret="$(openssl rand -hex 32)"
+          printf '::add-mask::%s\n' \
+            "$db_password" "$jwt_secret" "$admin_token" "$simulator_secret"
+
+          {
+            echo "PHASE1_NETWORK=geov0-phase1-${suffix}"
+            echo "PHASE1_POSTGRES=geov0-phase1-postgres-${suffix}"
+            echo "PHASE1_APP=geov0-phase1-app-${suffix}"
+            echo "PHASE1_IMAGE=geov0-phase1-container-smoke:${GITHUB_SHA}"
+            echo "PHASE1_DB_PASSWORD=${db_password}"
+            echo "PHASE1_JWT_SECRET=${jwt_secret}"
+            echo "PHASE1_ADMIN_TOKEN=${admin_token}"
+            echo "PHASE1_SIMULATOR_SECRET=${simulator_secret}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build canonical production-like image
+        shell: bash
+        run: docker build --file docker/Dockerfile --tag "$PHASE1_IMAGE" .
+
+      - name: Start disposable PostgreSQL and prepare revision 016 fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create "$PHASE1_NETWORK"
+          docker run --detach \
+            --name "$PHASE1_POSTGRES" \
+            --network "$PHASE1_NETWORK" \
+            --env POSTGRES_USER=geo \
+            --env "POSTGRES_PASSWORD=${PHASE1_DB_PASSWORD}" \
+            --env POSTGRES_DB=geov0_test_phase1_empty \
+            postgres:16-alpine
+
+          for attempt in $(seq 1 30); do
+            if docker exec "$PHASE1_POSTGRES" \
+              pg_isready --username geo --dbname geov0_test_phase1_empty; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs "$PHASE1_POSTGRES"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker exec "$PHASE1_POSTGRES" \
+            psql --set ON_ERROR_STOP=1 --username geo --dbname postgres \
+            --command 'CREATE DATABASE geov0_test_phase1_from_016'
+          docker exec "$PHASE1_POSTGRES" \
+            psql --set ON_ERROR_STOP=1 --username geo \
+            --dbname geov0_test_phase1_from_016 \
+            --command 'CREATE TABLE alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY)'
+
+          database_url="postgresql+asyncpg://geo:${PHASE1_DB_PASSWORD}@${PHASE1_POSTGRES}:5432/geov0_test_phase1_from_016"
+          docker run --rm \
+            --network "$PHASE1_NETWORK" \
+            --entrypoint alembic \
+            --env ENV=test \
+            --env "DATABASE_URL=${database_url}" \
+            "$PHASE1_IMAGE" \
+            -c migrations/alembic.ini upgrade 016_debts_equivalent_debtor_index_and_no_self_loop
+
+          revision="$(docker exec "$PHASE1_POSTGRES" \
+            psql --tuples-only --no-align --username geo \
+            --dbname geov0_test_phase1_from_016 \
+            --command 'SELECT version_num FROM alembic_version')"
+          test "$revision" = '016_debts_equivalent_debtor_index_and_no_self_loop'
+
+          owner_columns="$(docker exec "$PHASE1_POSTGRES" \
+            psql --tuples-only --no-align --username geo \
+            --dbname geov0_test_phase1_from_016 \
+            --command "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'simulator_runs' AND column_name IN ('owner_id', 'owner_kind')")"
+          test "$owner_columns" = '0'
+          echo "revision_016_fixture=${revision} owner_columns_before_017=${owner_columns}"
+
+          docker exec "$PHASE1_POSTGRES" \
+            psql --set ON_ERROR_STOP=1 --username geo \
+            --dbname geov0_test_phase1_from_016 \
+            --command "INSERT INTO simulator_runs (run_id, scenario_id, mode, state) VALUES ('phase1-legacy-run', 'phase1-fixture', 'fixtures', 'stopped')"
+
+      - name: Boot empty database, verify health and schema, then stop gracefully
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          database_url="postgresql+asyncpg://geo:${PHASE1_DB_PASSWORD}@${PHASE1_POSTGRES}:5432/geov0_test_phase1_empty"
+          docker run --detach \
+            --name "$PHASE1_APP" \
+            --network "$PHASE1_NETWORK" \
+            --publish 127.0.0.1:18080:8000 \
+            --env ENV=prod \
+            --env "DATABASE_URL=${database_url}" \
+            --env REDIS_ENABLED=false \
+            --env "JWT_SECRET=${PHASE1_JWT_SECRET}" \
+            --env "ADMIN_TOKEN=${PHASE1_ADMIN_TOKEN}" \
+            --env "SIMULATOR_SESSION_SECRET=${PHASE1_SIMULATOR_SECRET}" \
+            --env SIMULATOR_CSRF_ORIGIN_ALLOWLIST=https://simulator.phase1.invalid \
+            --env "GEO_APP_VERSION=${GITHUB_SHA}" \
+            "$PHASE1_IMAGE"
+
+          for attempt in $(seq 1 60); do
+            if liveness="$(curl --silent --show-error --fail http://127.0.0.1:18080/healthz)" && \
+              readiness="$(curl --silent --show-error --fail http://127.0.0.1:18080/health)" && \
+              database_health="$(curl --silent --show-error --fail http://127.0.0.1:18080/health/db)" && \
+              LIVENESS_JSON="$liveness" READINESS_JSON="$readiness" DB_HEALTH_JSON="$database_health" \
+              python -c 'import json, os; assert json.loads(os.environ["LIVENESS_JSON"])["status"] == "ok"; assert json.loads(os.environ["READINESS_JSON"])["status"] == "ok"; db = json.loads(os.environ["DB_HEALTH_JSON"]); assert db["status"] == "ok" and db["db"]["reachable"] is True'; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs "$PHASE1_APP"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker exec -i "$PHASE1_APP" python - <<'PY'
+          import asyncio
+
+          from sqlalchemy import inspect, text
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          from app.db.models.simulator_storage import SimulatorRun
+          from app.config import settings
+
+
+          async def main() -> None:
+              engine = create_async_engine(settings.DATABASE_URL)
+              try:
+                  async with engine.connect() as connection:
+                      revision = (await connection.execute(text(
+                          "SELECT version_num FROM alembic_version"
+                      ))).scalar_one()
+                      columns = await connection.run_sync(
+                          lambda sync_connection: inspect(sync_connection).get_columns(
+                              "simulator_runs"
+                          )
+                      )
+                      indexes = await connection.run_sync(
+                          lambda sync_connection: inspect(sync_connection).get_indexes(
+                              "simulator_runs"
+                          )
+                      )
+              finally:
+                  await engine.dispose()
+
+              assert revision == "017_add_owner_to_simulator_runs"
+              actual_columns = {column["name"]: column for column in columns}
+              model = SimulatorRun.__table__
+              assert actual_columns["owner_id"]["nullable"] is model.c.owner_id.nullable is False
+              assert actual_columns["owner_kind"]["nullable"] is model.c.owner_kind.nullable is True
+
+              actual_index = next(
+                  index
+                  for index in indexes
+                  if index["name"] == "ix_simulator_runs_owner_state_created"
+              )
+              expected_index = next(
+                  index
+                  for index in model.indexes
+                  if index.name == "ix_simulator_runs_owner_state_created"
+              )
+              assert actual_index["column_names"] == [
+                  column.name for column in expected_index.columns
+              ]
+              print(
+                  "empty_database_schema=ok "
+                  f"revision={revision} "
+                  f"owner_id_nullable={actual_columns['owner_id']['nullable']} "
+                  f"owner_kind_nullable={actual_columns['owner_kind']['nullable']} "
+                  f"owner_index={actual_index['column_names']}"
+              )
+
+
+          asyncio.run(main())
+          PY
+
+          docker stop --time 30 "$PHASE1_APP"
+          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$PHASE1_APP")"
+          docker logs "$PHASE1_APP"
+          test "$exit_code" = '0'
+          echo "empty_database_graceful_exit=${exit_code}"
+          docker rm "$PHASE1_APP"
+
+      - name: Restart the migrated empty-database topology and stop gracefully
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          database_url="postgresql+asyncpg://geo:${PHASE1_DB_PASSWORD}@${PHASE1_POSTGRES}:5432/geov0_test_phase1_empty"
+          docker run --detach \
+            --name "$PHASE1_APP" \
+            --network "$PHASE1_NETWORK" \
+            --publish 127.0.0.1:18080:8000 \
+            --env ENV=prod \
+            --env "DATABASE_URL=${database_url}" \
+            --env REDIS_ENABLED=false \
+            --env "JWT_SECRET=${PHASE1_JWT_SECRET}" \
+            --env "ADMIN_TOKEN=${PHASE1_ADMIN_TOKEN}" \
+            --env "SIMULATOR_SESSION_SECRET=${PHASE1_SIMULATOR_SECRET}" \
+            --env SIMULATOR_CSRF_ORIGIN_ALLOWLIST=https://simulator.phase1.invalid \
+            --env "GEO_APP_VERSION=${GITHUB_SHA}" \
+            "$PHASE1_IMAGE"
+
+          for attempt in $(seq 1 60); do
+            if readiness="$(curl --silent --show-error --fail http://127.0.0.1:18080/health)" && \
+              READINESS_JSON="$readiness" \
+              python -c 'import json, os; assert json.loads(os.environ["READINESS_JSON"])["status"] == "ok"'; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs "$PHASE1_APP"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker stop --time 30 "$PHASE1_APP"
+          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$PHASE1_APP")"
+          docker logs "$PHASE1_APP"
+          test "$exit_code" = '0'
+          echo "repeat_start_graceful_exit=${exit_code}"
+          docker rm "$PHASE1_APP"
+
+      - name: Upgrade revision 016 fixture through the canonical entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          database_url="postgresql+asyncpg://geo:${PHASE1_DB_PASSWORD}@${PHASE1_POSTGRES}:5432/geov0_test_phase1_from_016"
+          docker run --detach \
+            --name "$PHASE1_APP" \
+            --network "$PHASE1_NETWORK" \
+            --publish 127.0.0.1:18080:8000 \
+            --env ENV=prod \
+            --env "DATABASE_URL=${database_url}" \
+            --env REDIS_ENABLED=false \
+            --env "JWT_SECRET=${PHASE1_JWT_SECRET}" \
+            --env "ADMIN_TOKEN=${PHASE1_ADMIN_TOKEN}" \
+            --env "SIMULATOR_SESSION_SECRET=${PHASE1_SIMULATOR_SECRET}" \
+            --env SIMULATOR_CSRF_ORIGIN_ALLOWLIST=https://simulator.phase1.invalid \
+            --env "GEO_APP_VERSION=${GITHUB_SHA}" \
+            "$PHASE1_IMAGE"
+
+          for attempt in $(seq 1 60); do
+            if readiness="$(curl --silent --show-error --fail http://127.0.0.1:18080/health)" && \
+              database_health="$(curl --silent --show-error --fail http://127.0.0.1:18080/health/db)" && \
+              READINESS_JSON="$readiness" DB_HEALTH_JSON="$database_health" \
+              python -c 'import json, os; assert json.loads(os.environ["READINESS_JSON"])["status"] == "ok"; db = json.loads(os.environ["DB_HEALTH_JSON"]); assert db["status"] == "ok" and db["db"]["reachable"] is True'; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs "$PHASE1_APP"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker exec -i "$PHASE1_APP" python - <<'PY'
+          import asyncio
+
+          from sqlalchemy import inspect, text
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          from app.db.models.simulator_storage import SimulatorRun
+          from app.config import settings
+
+
+          async def main() -> None:
+              engine = create_async_engine(settings.DATABASE_URL)
+              try:
+                  async with engine.connect() as connection:
+                      revision = (await connection.execute(text(
+                          "SELECT version_num FROM alembic_version"
+                      ))).scalar_one()
+                      columns = await connection.run_sync(
+                          lambda sync_connection: inspect(sync_connection).get_columns(
+                              "simulator_runs"
+                          )
+                      )
+                      indexes = await connection.run_sync(
+                          lambda sync_connection: inspect(sync_connection).get_indexes(
+                              "simulator_runs"
+                          )
+                      )
+                      legacy = (await connection.execute(text(
+                          "SELECT owner_id, owner_kind FROM simulator_runs "
+                          "WHERE run_id = 'phase1-legacy-run'"
+                      ))).one()
+              finally:
+                  await engine.dispose()
+
+              assert revision == "017_add_owner_to_simulator_runs"
+              actual_columns = {column["name"]: column for column in columns}
+              model = SimulatorRun.__table__
+              assert actual_columns["owner_id"]["nullable"] is model.c.owner_id.nullable is False
+              assert actual_columns["owner_kind"]["nullable"] is model.c.owner_kind.nullable is True
+
+              actual_index = next(
+                  index
+                  for index in indexes
+                  if index["name"] == "ix_simulator_runs_owner_state_created"
+              )
+              expected_index = next(
+                  index
+                  for index in model.indexes
+                  if index.name == "ix_simulator_runs_owner_state_created"
+              )
+              assert actual_index["column_names"] == [
+                  column.name for column in expected_index.columns
+              ]
+              assert legacy.owner_id == "legacy:unknown"
+              assert legacy.owner_kind is None
+              print(
+                  "upgrade_016_to_head_schema=ok "
+                  f"revision={revision} "
+                  f"owner_id_nullable={actual_columns['owner_id']['nullable']} "
+                  f"owner_kind_nullable={actual_columns['owner_kind']['nullable']} "
+                  f"owner_index={actual_index['column_names']} "
+                  f"legacy_owner_id={legacy.owner_id} "
+                  f"legacy_owner_kind={legacy.owner_kind}"
+              )
+
+
+          asyncio.run(main())
+          PY
+
+          docker stop --time 30 "$PHASE1_APP"
+          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$PHASE1_APP")"
+          docker logs "$PHASE1_APP"
+          test "$exit_code" = '0'
+          echo "upgrade_016_graceful_exit=${exit_code}"
+          docker rm "$PHASE1_APP"
+
+      - name: Show container logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          docker logs "$PHASE1_APP" 2>&1 || true
+          docker logs "$PHASE1_POSTGRES" 2>&1 || true
+
+      - name: Remove disposable containers and network
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force "$PHASE1_APP" 2>/dev/null || true
+          docker rm --force "$PHASE1_POSTGRES" 2>/dev/null || true
+          docker network rm "$PHASE1_NETWORK" 2>/dev/null || true
+
+  ui-smoke:
+    name: Active UI Chromium smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22.12
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: |
+            admin-ui/package-lock.json
+            simulator-ui/v2/package-lock.json
+
+      - name: Install Admin UI dependencies
+        run: npm --prefix admin-ui ci
+
+      - name: Install Simulator UI v2 dependencies
+        run: npm --prefix simulator-ui/v2 ci
+
+      - name: Install Chromium
+        run: npm --prefix admin-ui exec -- playwright install --with-deps chromium
+
+      - name: Run Admin UI smoke on its isolated port
+        env:
+          PW_E2E_PORT: "41731"
+        run: npm --prefix admin-ui run test:e2e:smoke
+
+      - name: Run Simulator UI v2 smoke on its isolated port
+        env:
+          PW_E2E_PORT: "41732"
+        run: npm --prefix simulator-ui/v2 run test:e2e:smoke
+
   simulator-super-smoke:
     name: Simulator super-smoke (scheduled/manual)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
