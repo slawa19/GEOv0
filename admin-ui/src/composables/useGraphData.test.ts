@@ -232,6 +232,47 @@ describe('useGraphData', () => {
     expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
   })
 
+  it.each(['participant-first', 'load-first'] as const)(
+    'invalidates a participant cycle refresh when a full load resolves %s',
+    async (resolutionOrder) => {
+      const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      const loadSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+      const loadCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      apiMock.graphSnapshot.mockReturnValueOnce(loadSnapshot.promise)
+      apiMock.clearingCycles
+        .mockReturnValueOnce(participantCycles.promise)
+        .mockReturnValueOnce(loadCycles.promise)
+
+      const g = useGraphData({
+        eq: ref('EUR'),
+        isRealMode: ref(true),
+        focusMode: ref(false),
+        focusRootPid: ref(''),
+        focusDepth: ref(1),
+        statusFilter: ref<string[]>([]),
+      })
+
+      const participantRefresh = g.refreshClearingCyclesForParticipant('PID_A')
+      const fullLoad = g.loadData()
+
+      if (resolutionOrder === 'participant-first') {
+        participantCycles.resolve(cyclesEnvelope('PARTICIPANT'))
+        expect(await participantRefresh).toBe(false)
+        loadSnapshot.resolve(snapshotEnvelope('LOAD'))
+        loadCycles.resolve(cyclesEnvelope('LOAD'))
+        await fullLoad
+      } else {
+        loadSnapshot.resolve(snapshotEnvelope('LOAD'))
+        loadCycles.resolve(cyclesEnvelope('LOAD'))
+        await fullLoad
+        participantCycles.resolve(cyclesEnvelope('PARTICIPANT'))
+        expect(await participantRefresh).toBe(false)
+      }
+
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD').data)
+    },
+  )
+
   it('keeps a failed equivalent refresh visible when an older full load resolves last', async () => {
     const olderSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
     const olderCycles = deferred<ReturnType<typeof cyclesEnvelope>>()

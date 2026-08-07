@@ -91,4 +91,89 @@ describe('useGraphPageWatchers', () => {
 
     scope.stop()
   })
+
+  it.each(['older-first', 'latest-first'] as const)(
+    'keeps the latest visual selection when cycle refreshes resolve %s',
+    async (resolutionOrder) => {
+      const older = deferred<boolean>()
+      const latest = deferred<boolean>()
+      const refreshClearingCyclesForParticipant = vi.fn()
+        .mockReturnValueOnce(older.promise)
+        .mockReturnValueOnce(latest.promise)
+      const applySelectedHighlight = vi.fn()
+      const clearCycleHighlight = vi.fn()
+      const clearConnectionHighlight = vi.fn()
+      const selected = ref<SelectedInfo | null>(null)
+      const scope = effectScope()
+
+      scope.run(() => {
+        useGraphPageWatchers({
+          isRealMode: computed(() => true),
+          eq: ref('USD'),
+          statusFilter: ref<string[]>(['active']),
+          threshold: ref('0.10'),
+          showIncidents: ref(true),
+          hideIsolates: ref(true),
+          typeFilter: ref<string[]>([]),
+          minDegree: ref(0),
+          focusMode: ref(false),
+          focusDepth: ref<1 | 2>(1),
+          focusRootPid: ref(''),
+          ensureFocusRootPid: vi.fn(),
+          refreshForFocusMode: vi.fn().mockResolvedValue(true),
+          refreshSnapshotForEq: vi.fn().mockResolvedValue(true),
+          refreshClearingCyclesForParticipant,
+          selected,
+          showLabels: ref(true),
+          labelModeBusiness: ref('name'),
+          labelModePerson: ref('name'),
+          autoLabelsByZoom: ref(true),
+          minZoomLabelsAll: ref(1),
+          minZoomLabelsPerson: ref(1),
+          searchQuery: ref(''),
+          focusPid: ref(''),
+          zoom: ref(1),
+          layoutName: ref('fcose'),
+          layoutSpacing: ref(1),
+          graphViz: {
+            rebuildGraph: vi.fn(),
+            runLayout: vi.fn(),
+            clearCycleHighlight,
+            clearConnectionHighlight,
+            applySelectedHighlight,
+            applyStyle: vi.fn(),
+            updateLabelsForZoom: vi.fn(),
+            updateSearchHighlights: vi.fn(),
+            syncZoomFromControl: vi.fn(),
+          },
+        })
+      })
+
+      selected.value = { kind: 'node', pid: 'PID_A', degree: 1, inDegree: 1, outDegree: 0 }
+      await nextTick()
+      selected.value = { kind: 'node', pid: 'PID_B', degree: 1, inDegree: 0, outDegree: 1 }
+      await nextTick()
+
+      expect(refreshClearingCyclesForParticipant.mock.calls).toEqual([['PID_A'], ['PID_B']])
+      expect(applySelectedHighlight.mock.calls).toEqual([['PID_A'], ['PID_B']])
+      expect(clearCycleHighlight).toHaveBeenCalledTimes(2)
+      expect(clearConnectionHighlight).toHaveBeenCalledTimes(2)
+
+      if (resolutionOrder === 'older-first') {
+        older.resolve(false)
+        await older.promise
+        latest.resolve(true)
+        await latest.promise
+      } else {
+        latest.resolve(true)
+        await latest.promise
+        older.resolve(false)
+        await older.promise
+      }
+      await nextTick()
+
+      expect(applySelectedHighlight.mock.calls).toEqual([['PID_A'], ['PID_B']])
+      scope.stop()
+    },
+  )
 })

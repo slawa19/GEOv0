@@ -119,31 +119,19 @@ export function useGraphPageWatchers(opts: {
     },
   )
 
-  const selectedCycleRequests = useLatestRequest()
-
   watch(
     () => (opts.selected.value && opts.selected.value.kind === 'node' ? opts.selected.value.pid : ''),
     (pid) => {
-      const request = selectedCycleRequests.begin()
       opts.graphViz.clearCycleHighlight()
       opts.graphViz.clearConnectionHighlight()
-      void (async () => {
-        if (opts.isRealMode.value && !opts.focusMode.value) {
-          const p = String(pid || '').trim()
-          if (p) {
-            try {
-              const applied = await opts.refreshClearingCyclesForParticipant(p)
-              if (!applied || !request.isCurrent()) return
-            } catch {
-              // keep previous
-            }
-          } else {
-            await opts.refreshClearingCyclesForParticipant('')
-          }
-        }
-        if (!request.isCurrent()) return
-        opts.graphViz.applySelectedHighlight(pid)
-      })()
+      opts.graphViz.applySelectedHighlight(pid)
+
+      if (opts.isRealMode.value && !opts.focusMode.value) {
+        const p = String(pid || '').trim()
+        void opts.refreshClearingCyclesForParticipant(p).catch(() => {
+          // Keep the current cycle data; visual selection is independent of this fetch.
+        })
+      }
     },
   )
 
