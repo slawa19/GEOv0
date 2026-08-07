@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
@@ -10,6 +10,7 @@ import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { debounce } from '../utils/debounce'
 import { t } from '../i18n'
 import type { AuditLogEntry } from '../types/domain'
+import { useLatestRequest } from '../composables/useLatestRequest'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -21,32 +22,38 @@ const page = ref(1)
 const perPage = ref(20)
 const total = ref(0)
 const items = ref<AuditLogEntry[]>([])
+const loadRequests = useLatestRequest()
 
 const drawerOpen = ref(false)
 const selected = ref<AuditLogEntry | null>(null)
 
 async function load() {
+  const request = loadRequests.begin()
+  const requestPage = page.value
+  const requestPerPage = perPage.value
   loading.value = true
   error.value = null
   try {
     // NOTE: audit-log search must be server-side. Client-side filtering of a single loaded page is misleading.
     const data = assertSuccess(await api.listAuditLog({
-      page: page.value,
-      per_page: perPage.value,
+      page: requestPage,
+      per_page: requestPerPage,
       q: q.value || undefined,
     }))
+    if (!request.isCurrent()) return
     total.value = data.total
-    const maxPage = Math.max(1, Math.ceil(total.value / perPage.value))
-    if (page.value > maxPage) {
+    const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
+    if (requestPage > maxPage) {
       page.value = maxPage
       return
     }
     items.value = data.items
   } catch (e: unknown) {
+    if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('auditLog.loadFailed')
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 
@@ -66,6 +73,8 @@ const debouncedReload = debounce(() => {
   page.value = 1
   void load()
 }, 250)
+
+onBeforeUnmount(() => debouncedReload.cancel())
 
 watch(
   () => route.query.q,

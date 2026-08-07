@@ -193,6 +193,7 @@ const {
   loadData,
   refreshSnapshotForEq,
   refreshForFocusMode,
+  refreshClearingCyclesForParticipant,
 } = useGraphData({
   eq,
   isRealMode,
@@ -392,8 +393,8 @@ useGraphPageWatchers({
   ensureFocusRootPid,
   refreshForFocusMode,
   refreshSnapshotForEq,
+  refreshClearingCyclesForParticipant,
   selected,
-  clearingCycles,
   showLabels,
   labelModeBusiness,
   labelModePerson,

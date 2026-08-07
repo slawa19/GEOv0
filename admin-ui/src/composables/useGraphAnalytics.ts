@@ -16,6 +16,7 @@ import type {
   Trustline,
 } from '../pages/graph/graphTypes'
 import type { SelectedInfo } from './useGraphVisualization'
+import { useLatestRequest } from './useLatestRequest'
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n))
@@ -108,6 +109,7 @@ export function useGraphAnalytics(opts: {
   const metricsCache = ref(new Map<string, ParticipantMetrics>())
   const metricsLoading = ref(false)
   const metricsError = ref<string | null>(null)
+  const metricsRequests = useLatestRequest()
 
   const selectedPid = computed(() => (opts.selected.value && opts.selected.value.kind === 'node' ? opts.selected.value.pid : ''))
   const selectedEqCode = computed(() => opts.analyticsEq.value)
@@ -120,26 +122,41 @@ export function useGraphAnalytics(opts: {
   })
 
   async function loadSelectedMetrics() {
-    if (!opts.isRealMode.value) return
+    const request = metricsRequests.begin()
+    if (!opts.isRealMode.value) {
+      metricsLoading.value = false
+      metricsError.value = null
+      return
+    }
     const pid = selectedPid.value
-    if (!pid) return
+    if (!pid) {
+      metricsLoading.value = false
+      metricsError.value = null
+      return
+    }
 
     const eqCode = selectedEqCode.value
     const thr = String(opts.threshold.value || '')
     const key = makeMetricsKey(pid, eqCode, thr)
-    if (metricsCache.value.has(key)) return
+    if (metricsCache.value.has(key)) {
+      metricsLoading.value = false
+      metricsError.value = null
+      return
+    }
 
     metricsLoading.value = true
     metricsError.value = null
     try {
       const res = await api.participantMetrics(pid, { equivalent: eqCode, threshold: thr })
+      if (!request.isCurrent()) return
       const m = assertSuccess(res) as ParticipantMetrics
       metricsCache.value.set(key, m)
     } catch (e: unknown) {
+      if (!request.isCurrent()) return
       const msg = e instanceof Error ? e.message : String(e)
       metricsError.value = msg || t('graph.analytics.metricsLoadFailed')
     } finally {
-      metricsLoading.value = false
+      if (request.isCurrent()) metricsLoading.value = false
     }
   }
 

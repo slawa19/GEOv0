@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
@@ -19,6 +19,7 @@ import type { Trustline } from '../types/domain'
 import { buildTrustlinesAdvice } from '../advice/operatorAdvice'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import { useLatestRequest } from '../composables/useLatestRequest'
 
 const router = useRouter()
 const route = useRoute()
@@ -36,6 +37,7 @@ const page = ref(1)
 const perPage = ref(20)
 const total = ref(0)
 const items = ref<Trustline[]>([])
+const loadRequests = useLatestRequest()
 
 const drawerOpen = ref(false)
 const selected = ref<Trustline | null>(null)
@@ -128,31 +130,36 @@ function fmtTs(iso: string): string {
 }
 
 async function load() {
+  const request = loadRequests.begin()
+  const requestPage = page.value
+  const requestPerPage = perPage.value
   loading.value = true
   error.value = null
   try {
     const data = assertSuccess(
       await api.listTrustlines({
-        page: page.value,
-        per_page: perPage.value,
+        page: requestPage,
+        per_page: requestPerPage,
         equivalent: equivalent.value || undefined,
         creditor: creditor.value || undefined,
         debtor: debtor.value || undefined,
         status: status.value || undefined,
       }),
     )
+    if (!request.isCurrent()) return
     total.value = data.total
-    const maxPage = Math.max(1, Math.ceil(total.value / perPage.value))
-    if (page.value > maxPage) {
+    const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
+    if (requestPage > maxPage) {
       page.value = maxPage
       return
     }
     items.value = data.items
   } catch (e: unknown) {
+    if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('trustlines.loadFailed')
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 
@@ -194,6 +201,8 @@ const debouncedReload = debounce(() => {
   page.value = 1
   void load()
 }, DEBOUNCE_FILTER_MS)
+
+onBeforeUnmount(() => debouncedReload.cancel())
 
 // NOTE: threshold is a UI-only highlight knob; do not reload the list when it changes.
 watch([equivalent, creditor, debtor, status], () => {

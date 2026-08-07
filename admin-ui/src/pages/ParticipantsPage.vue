@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
@@ -16,6 +16,7 @@ import { labelParticipantType } from '../i18n/labels'
 import type { Participant } from '../types/domain'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import { useLatestRequest } from '../composables/useLatestRequest'
 import {
   isLockedParticipantStatus,
   labelParticipantStatus,
@@ -39,6 +40,7 @@ const page = ref(1)
 const perPage = ref(20)
 const total = ref(0)
 const items = ref<Participant[]>([])
+const loadRequests = useLatestRequest()
 
 const drawerOpen = ref(false)
 const selected = ref<Participant | null>(null)
@@ -98,30 +100,35 @@ function syncFiltersToRouteQuery() {
 }
 
 async function load() {
+  const request = loadRequests.begin()
+  const requestPage = page.value
+  const requestPerPage = perPage.value
   loading.value = true
   error.value = null
   try {
     const data = assertSuccess(
       await api.listParticipants({
-        page: page.value,
-        per_page: perPage.value,
+        page: requestPage,
+        per_page: requestPerPage,
         status: status.value || undefined,
         type: type.value || undefined,
         q: q.value || undefined,
       }),
     )
+    if (!request.isCurrent()) return
     total.value = data.total
-    const maxPage = Math.max(1, Math.ceil(total.value / perPage.value))
-    if (page.value > maxPage) {
+    const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
+    if (requestPage > maxPage) {
       page.value = maxPage
       return
     }
     items.value = data.items
   } catch (e: unknown) {
+    if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('participant.loadFailed')
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 
@@ -215,6 +222,8 @@ const debouncedReload = debounce(() => {
   page.value = 1
   void load()
 }, DEBOUNCE_SEARCH_MS)
+
+onBeforeUnmount(() => debouncedReload.cancel())
 
 watch([q, status, type], () => {
   if (applyingRouteQuery.value) return

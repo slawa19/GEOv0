@@ -1,11 +1,50 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref } from 'vue'
+
+const apiMock = vi.hoisted(() => ({
+  participantMetrics: vi.fn(),
+}))
+
+vi.mock('../api', () => ({ api: apiMock }))
 
 import { useGraphAnalytics } from './useGraphAnalytics'
 import type { SelectedInfo } from './useGraphVisualization'
 import type { AuditLogEntry, ClearingCycles, Debt, Incident, Participant, Transaction, Trustline } from '../pages/graph/graphTypes'
+import type { ParticipantMetrics } from '../types/domain'
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function metricsEnvelope(net: string) {
+  const metrics: ParticipantMetrics = {
+    pid: 'PID_A',
+    equivalent: 'EUR',
+    balance_rows: [
+      {
+        equivalent: 'EUR',
+        outgoing_limit: '0.00',
+        outgoing_used: '0.00',
+        incoming_limit: '0.00',
+        incoming_used: '0.00',
+        total_debt: '0.00',
+        total_credit: '0.00',
+        net,
+      },
+    ],
+  }
+  return { success: true as const, data: metrics }
+}
 
 describe('useGraphAnalytics (fixtures-first)', () => {
+  beforeEach(() => vi.resetAllMocks())
+
   it('computes selectedBalanceRows from trustlines + debts', () => {
     const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
 
@@ -178,5 +217,44 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     if (!first) throw new Error('Expected bottlenecks[0] to be present')
     expect(first.dir).toBe('out')
     expect(first.other).toBe('PID_B')
+  })
+
+  it('does not let an older metrics rejection replace the latest metrics state', async () => {
+    const older = deferred<ReturnType<typeof metricsEnvelope>>()
+    const latest = deferred<ReturnType<typeof metricsEnvelope>>()
+    apiMock.participantMetrics.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise)
+
+    const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
+    const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => true),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map([['EUR', 2]])),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected,
+    })
+
+    const olderLoad = graph.loadSelectedMetrics()
+    const latestLoad = graph.loadSelectedMetrics()
+    latest.resolve(metricsEnvelope('2.00'))
+    await latestLoad
+    expect(graph.selectedBalanceRows.value[0]?.net).toBe('2.00')
+    expect(graph.metricsError.value).toBeNull()
+    expect(graph.metricsLoading.value).toBe(false)
+
+    older.reject(new Error('stale metrics failure'))
+    await olderLoad
+    expect(graph.selectedBalanceRows.value[0]?.net).toBe('2.00')
+    expect(graph.metricsError.value).toBeNull()
+    expect(graph.metricsLoading.value).toBe(false)
   })
 })
