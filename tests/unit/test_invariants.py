@@ -117,7 +117,7 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
 
     engine = PaymentEngine(db_session)
 
-    abort_called = {"called": False}
+    abort_called = {"called": False, "tx_lock_already_held": False}
 
     async def _abort_noop(
         _tx_id: str,
@@ -126,8 +126,10 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
         commit: bool = True,
         error_code: str | None = None,
         details: dict | None = None,
+        _tx_lock_already_held: bool = False,
     ):
         abort_called["called"] = True
+        abort_called["tx_lock_already_held"] = _tx_lock_already_held
         return True
 
     async def _rollback_noop():
@@ -151,6 +153,7 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
     assert exc_info.value.code == "E008"
     assert exc_info.value.details.get("invariant") == "TRUST_LIMIT_VIOLATION"
     assert abort_called["called"] is True
+    assert abort_called["tx_lock_already_held"] is True
 
 
 @pytest.mark.asyncio
