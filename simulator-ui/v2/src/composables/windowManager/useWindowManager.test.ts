@@ -362,14 +362,14 @@ describe('useWindowManager (MVP)', () => {
     expect(w.rect.width).toBe(380)
   })
 
-  it('Interact panels: payment/clearing preferredWidth=560 (matches .ds-ov-panel max-width) and estimate uses 560', () => {
+  it('Interact panels: payment uses its 440px policy while clearing stays on the 560px wide contract', () => {
     const wm = useWindowManager()
     wm.setViewport({ width: 1200, height: 800 })
 
     const paymentId = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'x' } })
     const payment = wm.windows.value.find((x) => x.id === paymentId)!
-    expect(payment.constraints.preferredWidth).toBe(560)
-    expect(payment.rect.width).toBe(560)
+    expect(payment.constraints.preferredWidth).toBe(440)
+    expect(payment.rect.width).toBe(440)
 
     const clearingId = wm.open({ type: 'interact-panel', data: { panel: 'clearing', phase: 'x' } })
     const clearing = wm.windows.value.find((x) => x.id === clearingId)!
@@ -451,21 +451,21 @@ describe('useWindowManager (MVP)', () => {
     const leftBeforeConfirm = picking.rect.left
     const topBeforeConfirm = picking.rect.top
 
-    expect(picking.rect.width).toBe(560)
+    expect(picking.rect.width).toBe(440)
     expect(picking.rect.height).toBe(420)
 
     const idConfirm = wm.open({ type: 'interact-panel', data: { panel: 'payment', phase: 'confirm-payment' } })
     expect(idConfirm).toBe(idPicking)
 
     const confirm = wm.windows.value.find((x) => x.id === idConfirm)!
-    expect(confirm.rect.width).toBe(560)
+    expect(confirm.rect.width).toBe(440)
 
     wm.updateMeasuredSize(idConfirm, { width: 940, height: 360 })
     wm.reclamp(idConfirm)
 
     expect(confirm.rect.left).toBe(leftBeforeConfirm)
     expect(confirm.rect.top).toBe(topBeforeConfirm)
-    expect(confirm.rect.width).toBe(560)
+    expect(confirm.rect.width).toBe(440)
     expect(confirm.rect.height).toBe(360)
   })
 
@@ -569,7 +569,7 @@ describe('useWindowManager (MVP)', () => {
     expect(win.rect.top).toBe(topAfterFirstMeasure)
 
     // Width stays policy-owned; only height tracks measured content.
-    expect(win.rect.width).toBe(560)
+    expect(win.rect.width).toBe(440)
     expect(win.rect.height).toBe(280)
   })
 
@@ -648,8 +648,8 @@ describe('useWindowManager (MVP)', () => {
     wm.reclampAll()
 
     expect(win.rect.top).toBe(224)
-    expect(win.rect.left).toBe(704)
-    expect(win.rect.width).toBe(560)
+    expect(win.rect.left).toBe(824)
+    expect(win.rect.width).toBe(440)
     expect(win.rect.height).toBe(280)
   })
 
@@ -680,7 +680,7 @@ describe('useWindowManager (MVP)', () => {
     const loading = wm.windows.value.find((w) => w.id === idLoading)!
     expect(loading.rect.left).toBe(leftSnapshot)
     expect(loading.rect.top).toBe(topSnapshot)
-    expect(loading.rect.width).toBe(560)
+    expect(loading.rect.width).toBe(440)
     expect(loading.rect.height).toBe(360)
 
     wm.updateMeasuredSize(idLoading, { width: 420, height: 260 })
@@ -688,7 +688,7 @@ describe('useWindowManager (MVP)', () => {
 
     expect(loading.rect.left).toBe(leftSnapshot)
     expect(loading.rect.top).toBe(topSnapshot)
-    expect(loading.rect.width).toBe(560)
+    expect(loading.rect.width).toBe(440)
     expect(loading.rect.height).toBe(260)
   })
 
@@ -713,9 +713,9 @@ describe('useWindowManager (MVP)', () => {
       wm.reclampAll()
     }
 
-    expect(win.rect.left).toBe(704)
+    expect(win.rect.left).toBe(824)
     expect(win.rect.top).toBe(216)
-    expect(win.rect.width).toBe(560)
+    expect(win.rect.width).toBe(440)
     expect(win.rect.height).toBe(312)
   })
 

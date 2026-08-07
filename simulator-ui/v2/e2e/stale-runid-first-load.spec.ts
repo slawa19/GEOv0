@@ -38,7 +38,17 @@ async function waitReady(page: Page) {
   await page.waitForTimeout(250)
 }
 
+async function readMetricValue(page: Page, label: string): Promise<string> {
+  const bar = page.locator('[aria-label="System balance"]')
+  await expect(bar).toBeVisible()
+  const labelEl = bar.getByText(label, { exact: true })
+  await expect(labelEl).toBeVisible()
+  return String(await labelEl.locator('xpath=following-sibling::*[1]').innerText()).trim()
+}
+
 test('real mode: stale persisted runId does not block first preview load', async ({ page }) => {
+  let previewRequestCount = 0
+
   await page.addInitScript(() => {
     try {
       localStorage.clear()
@@ -75,6 +85,7 @@ test('real mode: stale persisted runId does not block first preview load', async
   })
 
   await page.route(/\/simulator\/scenarios\/[^/]+\/graph\/preview/i, async (route) => {
+    previewRequestCount += 1
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -85,7 +96,10 @@ test('real mode: stale persisted runId does not block first preview load', async
   await page.goto('/?mode=real&e2eReal=1')
   await waitReady(page)
 
+  await expect.poll(() => previewRequestCount).toBeGreaterThan(0)
   await expect(page.locator('[data-ready="1"]')).toBeVisible()
-
   await expect(page.getByText('Loading…', { exact: true })).toBeHidden()
+  // The empty product fallback is also "ready"; this proves our sentinel snapshot
+  // was applied rather than merely observing the fallback state.
+  expect(await readMetricValue(page, 'Participants')).toBe('1')
 })
