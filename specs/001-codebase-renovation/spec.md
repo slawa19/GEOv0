@@ -218,6 +218,24 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-07:** Phase 1 local gate work was accepted in commits
+  `67d02c5c3e354e561392215a9652341d95aa97a9` (local gates) and
+  `889f6f945687a733cdb4e64cfa4f69ef0c5b1644` (published-job definitions only).
+  The canonical local command `.\scripts\verify_local.ps1 -TaskSlug
+  orchestrator_phase1_acceptance` exited `0`: backend reported `687 passed`, `3
+  skipped`, `14 deselected`; Admin reported lint with `0` errors and `133`
+  registered baseline warnings, `76` unit tests and a passing build; Simulator
+  lint/typecheck, `637` unit tests and build passed. Parallel canonical runs with
+  task slugs `orchestrator_phase1_iso_final_one` and
+  `orchestrator_phase1_iso_final_two` each reported `11 passed` and used distinct
+  DB, basetemp and artifact roots. Independent internal adversarial
+  review found no P1/P2 in the accepted Phase 1 diff. npm audit diagnostics still
+  report the pre-existing direct dev/test dependency baseline of `2` critical and
+  `4` high findings; none was introduced by the three added lint dependencies,
+  and no audit-fix expansion was accepted. Phase 1 remains open: Docker,
+  disposable PostgreSQL, actual Chromium and a published `workflow_dispatch`
+  URL/log are absent. Push/dispatch authorization has not been granted, and this
+  entry does not claim CI green.
 - **2026-08-07:** The repository owner explicitly approved the frozen renovation
   plan at exact commit `8f271693e7b763856d86fb3c2f579a56938d6fcb` and
   authorized the transition from Phase 0 to Phase 1. Phase 1 is now the current

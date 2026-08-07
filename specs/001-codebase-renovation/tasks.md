@@ -20,6 +20,28 @@ listed below; later phases remain paused until the Phase 1 exit criteria pass.
 This approval does not authorize a Git push or `workflow_dispatch`; those require
 a separate recorded owner authorization naming the remote, branch and trigger.
 
+### Phase 1 evidence ledger (2026-08-07)
+
+- Accepted commits:
+  `67d02c5c3e354e561392215a9652341d95aa97a9` owns the local gates;
+  `889f6f945687a733cdb4e64cfa4f69ef0c5b1644` owns published-job definitions.
+  The latter is configuration evidence only, not evidence that a job ran.
+- `.\scripts\verify_local.ps1 -TaskSlug orchestrator_phase1_acceptance` exited `0`:
+  backend `687 passed`, `3 skipped`, `14 deselected`; Admin lint `0` errors with
+  `133` registered baseline warnings, `76` unit tests and build pass; Simulator
+  lint/typecheck, `637` unit tests and build pass.
+- Two parallel canonical runs with task slugs
+  `orchestrator_phase1_iso_final_one` and `orchestrator_phase1_iso_final_two`
+  each reported `11 passed`; their DB, basetemp and artifact roots were distinct.
+- Independent internal adversarial review of the accepted implementation diff
+  found no P1/P2.
+- npm audit remains a diagnostic: the `2` critical and `4` high findings are in
+  pre-existing direct dev/test packages, and none was introduced by the three new
+  lint dependencies. `npm audit fix` is outside the frozen slice and was not run.
+- **Phase 1 remains OPEN.** Docker, disposable PostgreSQL, actual Chromium and a
+  published `workflow_dispatch` URL/log remain unverified. Push and dispatch are
+  still unauthorized; no CI-green claim is made.
+
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:
 
