@@ -434,8 +434,10 @@ used.
   malformed legacy locks, and prevents duplicate prepare/commit/abort terminal
   transitions. Its final local selector passed `36` tests and discovered `7`
   PostgreSQL-only scenarios, all skipped without a live PostgreSQL runtime;
-  independent review found no remaining P1/P2 in the frozen fix. Normal API
-  contention against simulator-held transaction locks remains an accepted P2:
+  the post-remediation canonical backend milestone passed `680` tests with `13`
+  skipped and `4` expensive tests deselected. Independent review found no
+  remaining P1/P2 in the frozen fix. Normal API contention against
+  simulator-held transaction locks remains an accepted P2:
   requests are bounded by the existing prepare timeout, while skipping locks or
   moving the simulator commit boundary would weaken integrity or expand tick UoW
   semantics. Process-crash delivery remains intentionally best-effort (no
