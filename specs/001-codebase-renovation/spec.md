@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PLANNED
+- **Status:** PLAN REVIEW — IMPLEMENTATION PAUSED PENDING OWNER APPROVAL
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -24,6 +24,33 @@ Generated environments, local databases, logs, caches and test output are cleanu
 ## Problem
 
 The repository was developed through many incremental model-driven changes. It contains valuable tests and defensive code, but its intended architecture, executable architecture, contracts, verification gates and documentation are not consistently aligned. The problem is therefore not simply large files or style: ownership and invariants are difficult to trace across modules, while some current checks provide weaker guarantees than their names imply.
+
+## Project profile and proportionality boundary
+
+This renovation is calibrated for the actual GEOv0 product, not for a regulated
+banking platform or a high-availability distributed service:
+
+- GEOv0 is a v0.1-alpha/MVP community hub and simulator; the documented MVP scale
+  is approximately 10–500 participants in one community.
+- The hub coordinates and records mutual-credit operations but is not a bank or
+  custodian. Payment, trustline, clearing, ownership and audit invariants still
+  matter because silent double application or contradictory state would destroy
+  the usefulness of the MVP.
+- The required production-like proof is one documented application topology with
+  PostgreSQL, not multi-region, active-active or formal disaster-recovery proof.
+- SQLite remains useful for local and fast tests, while a small, selected
+  PostgreSQL suite proves the semantics that SQLite cannot: row/advisory locking,
+  concurrent writes and schema migrations.
+- Frontend acceptance targets the supported Chromium path and keyboard access to
+  critical workflows. It is not a WCAG certification, multi-browser matrix or
+  visual redesign.
+- Refactoring is justified by a reproduced defect, a protected invariant, a
+  recurring ownership problem or a clearly cheaper maintenance boundary. File
+  size, style preference and hypothetical future scale are not sufficient.
+
+The plan and backlog are frozen after review. New P3 findings do not expand the
+program. A new P1 must be tied to a supported user flow or data/security risk; a
+new P2 is mapped to an existing slice or recorded as residual debt.
 
 The findings below are the dated baseline captured when this specification was
 created. Their current disposition is tracked in `tasks.md`; a path removed or a
@@ -72,6 +99,16 @@ The orchestrated audit found no tracked or historical credential requiring remov
 - Do not update visual snapshots without intentional visual review.
 - Do not change public API, event, persistence or fixture contracts without compatibility and rollback decisions.
 - Do not rotate credentials, rewrite Git history, deploy, or mutate production/external systems under this specification.
+- Do not design multi-region, active-active, automatic failover, formal RPO/RTO,
+  bank-grade settlement or exhaustive fault-injection machinery for this MVP.
+- Do not add RBAC/SSO, a new frontend state framework, an outbox/event-sourcing
+  platform, generalized repository/UoW frameworks or generated API clients unless
+  a separate product decision establishes that need.
+- Do not require Firefox/WebKit/mobile matrices, full WCAG certification, formal
+  performance benchmarking or full translation parity without a reproduced
+  product need.
+- Do not split large files to meet a line-count target. Extract only a boundary
+  needed by an accepted behavioral or maintenance slice.
 
 ## Decision principles and value filter
 
@@ -95,37 +132,72 @@ Every proposed change is a hypothesis until its wave review records evidence and
 - Establish a baseline manifest before edits: commit, environment/tool versions, commands, pass/fail/skip counts, known flaky tests, DB dialects and fixture hashes.
 - Keep every wave independently reviewable and revertible; avoid combining cleanup, contract changes and behavior changes in one commit.
 - Add characterization tests before modifying high-risk payment, clearing, simulator replay, auth or persistence behavior.
-- Exercise both SQLite and PostgreSQL for persistence/concurrency claims; SQLite success is not evidence of PostgreSQL schema/locking correctness and vice versa.
-- Verify migrations from empty DB and supported previous revision; verify downgrade only where the project promises downgrade support.
+- Exercise PostgreSQL only for selected persistence/concurrency claims that depend
+  on its semantics; SQLite success is not evidence for those claims. Do not build
+  an exhaustive database/dialect matrix.
+- Verify migrations from an empty PostgreSQL DB and the immediately supported
+  previous revision. A formal downgrade rehearsal is required only if the project
+  promises downgrade; otherwise document a forward-fix path.
 - Verify OpenAPI payloads, errors and security declarations, not only path/method inventory.
 - Preserve idempotency, accounting invariants, owner isolation, event ordering/replay and COMMITTED-terminal semantics.
 - For async UI work, only the current request owner may apply data, error and loading state; timers/listeners/RAF/observers must be disposed.
-- Preserve a keyboard-accessible route through every supported critical UI flow.
+- Preserve a keyboard-accessible route through the critical Admin graph and
+  Simulator inspect/payment/trustline/clearing flows that are included in the
+  frozen functional matrix; this is not a claim of complete accessibility.
 - Preserve fixture determinism and use synchronization scripts; do not hand-edit generated public fixture copies.
 - Maintain an explicit flaky/quarantine register. A quarantine needs owner, reason, issue and expiry; skipped/placeholder tests do not count as coverage.
-- Treat secret scan, dependency audit and production-config preflight as gates; do not print sensitive values in logs/artifacts.
+- Treat secret scan and production-config preflight as gates; dependency
+  vulnerability checks are a bounded diagnostic unless a supported manifest has a
+  known critical advisory. Do not print sensitive values in logs/artifacts.
 - Roll back by reverting the wave, restoring compatibility adapters and re-running the pre-wave gates. Database changes require a tested forward-fix or downgrade plan before execution.
 
 ## Success criteria
 
-The renovation is complete only when all of the following have evidence linked from the plan:
+The renovation is complete only when all of the following bounded criteria have
+linked evidence. A required PostgreSQL, published-CI, production-like-container or
+scoped-Chromium result cannot be waived as `UNVERIFIED`; if it is unavailable, the
+program remains incomplete until the owner explicitly changes this specification's
+scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
-1. Active, legacy, generated and disposable surfaces are catalogued; every deletion has reachability/history evidence.
-2. Canonical local and CI commands exist for backend, Admin UI and Simulator UI; clean checkouts reproduce them with pinned toolchains.
-3. CI enforces formatting/lint, type/static checks, unit, contract, migration, build and scoped e2e gates. No placeholder/pass-only test is counted.
-4. Production-like config rejects insecure defaults and unknown/mistyped deployment variables; base and dev Compose semantics are explicit and tested.
-5. ORM metadata, migrations and runtime expectations agree for every supported dialect, including simulator owner nullability/indexes.
-6. OpenAPI and SSE contracts validate schemas, errors and security; backend/frontend fixtures and consumers have contract parity tests.
-7. Required background jobs expose startup/readiness/runtime failure signals; intentional drops and retries are observable.
-8. Payment/clearing/simulator transaction boundaries and concurrency semantics are documented and proven by contention, idempotency and failure-injection tests.
-9. API route modules, domain services and simulator orchestration have explicit dependency direction and materially smaller responsibility sets; no target is accepted on LOC alone.
-10. Admin UI stale-response races and delayed-work cleanup are covered by deterministic tests and fixed without URL/filter regressions.
-11. Simulator transport, event validation/reduction, rendering/FX and UI orchestration have testable boundaries; unknown events and reconnect/replay semantics are explicit.
-12. Critical Admin graph and Simulator interaction flows are keyboard usable and have accessible status/error/dialog semantics.
-13. Test DBs/temp paths are worker-isolated; supported parallel runs do not share mutable fixed files.
-14. Repository contains no tracked runtime/test output or unexplained starter/duplicate artifact; legacy v1 has an explicit disposition.
-15. Canonical architecture, configuration, API, testing, deployment and UI documentation matches the verified result; archives/translations are clearly subordinate.
-16. An independent adversarial review finds no unresolved P1, and each accepted P2 has an owner and dated follow-up or documented risk acceptance.
+1. One canonical local verifier and one published CI workflow complete for the
+   backend, Admin UI and Simulator UI; required versus scheduled diagnostics are
+   explicit and no placeholder test counts as success.
+2. The supported dev path and one production-like Compose/image path have explicit
+   configuration, secret guardrails, startup, readiness and shutdown behavior.
+3. A disposable PostgreSQL run proves empty-schema migration, upgrade from the
+   immediately supported revision and the small concurrency matrix named in the
+   plan. No HA/failover claim is required.
+4. Current payment, clearing, trustline, destructive Admin and Integrity-repair
+   write paths have a recorded transaction-owner map. Only confirmed ambiguous/
+   high-risk boundaries are changed, and their success/rejection/rollback/
+   cancellation behavior is covered at the appropriate layer.
+5. The maintained OpenAPI operations and the Simulator events used by the frozen
+   functional matrix have backend-to-consumer validation. Unknown/malformed input
+   is deterministic and cannot silently mutate trusted state.
+6. Required background jobs and event-bus overload expose actionable readiness,
+   logging or metrics without requiring a new durable messaging architecture.
+7. Confirmed Admin overlapping loaders cannot apply stale data/error/loading after
+   a newer request or unmount; critical Admin mutations use validated contracts and
+   observable success/failure/audit behavior.
+8. Simulator real-mode ingress, replay/dedup and state/effect ordering for the
+   selected lifecycle/topology/payment/clearing event families are testable behind
+   the existing facade. Full decomposition of all composables is not required.
+9. The critical Admin graph and Simulator inspect/payment/trustline/clearing paths
+   have a practical keyboard route, focus/status/error semantics and one scoped
+   Chromium smoke. This is not a certification claim.
+10. Canonical run/test commands write mutable DB/log/PID/test output below the
+    designated ignored runtime root. Tracked garbage and proven starter remnants
+    are removed; `simulator-ui/v1` receives an explicit read-only/archive decision
+    without mandatory deletion.
+11. Current front-door, testing, deployment, contract and affected UI architecture
+    documents describe the verified result. Archives and untranslated copies are
+    labelled; exhaustive documentation/translation rewriting is not required.
+12. Internal adversarial review plus Claude Code Opus 5 / High review of each
+    high-risk product batch leave no confirmed unresolved P1/P2 inside the frozen
+    scope. High-risk means a change to payment/clearing/integrity transaction
+    semantics, persistence/migration/security behavior or a protected REST/SSE
+    contract. Other UI/cleanup/docs batches require independent internal review.
+    Remaining lower-value debt is recorded without reopening the program.
 
 ## Risks
 
@@ -142,6 +214,16 @@ The renovation is complete only when all of the following have evidence linked f
 
 ## Changelog
 
+- **2026-08-07:** The remaining program was recalibrated to the documented GEOv0
+  MVP (approximately 10–500 participants, one supported community-hub topology).
+  The plan now freezes seven post-approval phases, makes product code changes wait
+  for owner approval, requires evidence before refactoring, and explicitly rejects
+  HA/bank-grade, framework, LOC-driven, full-WCAG/browser and exhaustive cleanup
+  scope. An independent read-only reviewer found four P1/P2 plan defects: required
+  gates could close as `UNVERIFIED`, Integrity repair was absent from the owner
+  map, parent tasks lacked unique owning sub-slices, and Claude review triggers
+  were ambiguous. All four were corrected and the remediation re-review found no
+  unresolved P1/P2. Claude plan review and owner approval remain pending.
 - **2026-08-07:** Initial PLANNED specification created from orchestrated read-only audits. Recorded confirmed P1/P2 evidence, decision constraints, anti-regression requirements and completion criteria. No target architecture or implementation solution is approved by this entry.
 - **2026-08-07:** REN-003/REN-004 implementation began in the working tree. Added task-isolated validation, fail-closed test-DB naming, explicit required versus diagnostic gate semantics, scheduled PostgreSQL/super-smoke/E2E tiers, and proven cleanup. No CI-green claim was made by this intermediate entry.
 - **2026-08-07:** Foundational implementation and adversarial-review wave completed locally. The canonical default backend tier passed (`510 passed`, `5 skipped`, `4` expensive deselected); Admin lint/unit/build and Simulator typecheck/unit/build passed (`637` Simulator unit tests). REN-004 and REN-007 reached `DONE`; REN-003, REN-006, REN-008, REN-011 and REN-013 remain `IN PROGRESS` for the explicitly recorded GitHub Actions, disposable PostgreSQL, container-smoke or Playwright evidence. This entry does not claim repository-wide renovation completion.

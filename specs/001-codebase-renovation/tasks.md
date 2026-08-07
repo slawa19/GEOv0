@@ -11,6 +11,52 @@ reviewable slices. A task is not complete because code moved or a metric became
 green: its acceptance criteria and named gates must demonstrate the intended
 effect on every reachable path in scope.
 
+## Execution freeze and authoritative remaining order
+
+**Implementation is paused.** Existing `DONE`/`IN PROGRESS` entries below record
+work already delivered; they do not authorize the next code change. The remaining
+program starts only after the owner approves `plan.md` following internal and
+Claude Code Opus 5 / High review.
+
+GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
+banking or HA platform. The authoritative remaining sequence is:
+
+| Order | Plan phase | Existing tasks | Required result before advancing |
+|---:|---|---|---|
+| 0 | Plan approval | REN-002 governance | Three planning files agree; independent reviews complete; owner approves |
+| 1 | Truthful gates/runtime | REN-003, 005, 006, 008, REN-013A | Published workflow; one production-like boot; empty and 016→head PostgreSQL migration |
+| 2 | Backend ownership/integrity | REN-010A, conditional REN-012A | Write-path owner map; only confirmed defects fixed; bounded live-PG concurrency matrix |
+| 3 | REST/SSE contracts | REN-009, REN-012B1 | Selected Admin and Simulator consumers reject malformed/unknown input deterministically |
+| 4 | Admin operator paths | REN-011, REN-010B | Async proof, selected mutations, practical graph keyboard path, Chromium smoke |
+| 5 | Simulator v2 paths | REN-012B2, REN-012C | Selected event families separated at decoder/state/effect seam; critical browser paths |
+| 6 | Test/repository/docs cleanup | REN-004 follow-up, REN-013B, REN-014 | Root artifact producers fixed; evidence-based cleanup; current docs reconciled |
+| 7 | Closure | REN-015 | Bounded evidence matrix, internal reviews and Claude product-batch reviews |
+
+Detailed work, dependencies, gates and stop criteria are authoritative in
+`plan.md`. If an older task paragraph below asks for a broader matrix, full module
+decomposition or platform-wide proof, the proportional scope and stop rule in the
+current plan take precedence.
+
+Parent status rule: REN-010 closes after REN-010A backend ownership plus REN-010B
+Admin integration; REN-012 closes after conditional REN-012A is either completed
+or explicitly not triggered and REN-012B1/B2/C complete; REN-013 closes after
+REN-013A gate isolation and REN-013B touched-suite cleanup.
+
+### Program-wide ACCEPTED-NOT-DOING
+
+- multi-replica/HA/multi-region, automatic failover and formal RPO/RTO;
+- bank-grade ledger redesign, outbox/exactly-once events and exhaustive fault
+  interleavings;
+- RBAC/SSO/MFA or a complete auth-platform redesign;
+- full migration-history/downgrade matrix;
+- new repository/UoW/state/data-fetching frameworks;
+- LOC-driven decomposition of all large backend/frontend modules;
+- all-browser/mobile/WCAG certification and visual redesign;
+- formal performance/load program without a failed representative MVP smoke;
+- coverage-percentage goals and wholesale test/source-text rewrites;
+- mandatory deletion of Simulator v1, archives or duplicate Dockerfiles;
+- exhaustive translation/document rewrite.
+
 ## Value filter and execution rules
 
 Apply this filter before starting a task and again before accepting review
@@ -51,8 +97,13 @@ findings:
 - `OPENAPI`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task> -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`
 - `ALEMBIC-HEADS`: `.\.venv\Scripts\python.exe scripts/check_alembic_heads.py`
 - `ADMIN-UNIT`: `npm --prefix admin-ui run test`
+- `ADMIN-LINT`: `npm --prefix admin-ui run lint`
 - `ADMIN-BUILD`: `npm --prefix admin-ui run build`
+- `ADMIN-E2E`: `npm --prefix admin-ui run e2e`
+- `SIM-TYPECHECK`: `npm --prefix simulator-ui/v2 run typecheck`
 - `SIM-UNIT`: `npm --prefix simulator-ui/v2 run test:unit`
+- `SIM-BUILD`: `npm --prefix simulator-ui/v2 run build`
+- `SIM-E2E`: `npm --prefix simulator-ui/v2 run test:e2e`
 - `REPO-FULL`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task>`; Ruff/Black
   remain separately reported diagnostics and are not described as enforced.
 - `POSTGRES-CONCURRENCY`: the named selector against a dedicated disposable
@@ -475,27 +526,38 @@ used.
   `api/openapi.yaml:2246-2321`;
   `app/core/clearing/service.py:772-1060`;
   `app/core/trustlines/service.py:108-139,200-243,288-330`.
-- **Exact scope:** First map every write call-site and transaction state transition;
-  characterize idempotency/retry/abort/timeout behavior with tests; select one UoW
-  boundary per public operation; move commit/rollback responsibility without
-  changing domain semantics; make nested simulator execution an explicit adapter
-  or transaction context rather than a boolean convention.
+- **Owning sub-slices:** REN-010A (Phase 2) owns backend owner maps and any
+  confirmed transaction/cache/audit remediation. REN-010B (Phase 4) owns only the
+  integration evidence that selected Admin operator flows expose the accepted
+  durable result; it does not duplicate backend transaction tests.
+- **Remaining exact scope after plan calibration (REN-010A):** map only the
+  supported public payment, clearing, trustline, destructive Admin, destructive
+  Integrity-repair and Simulator-nested write paths.
+  Assign `FIX` or `KEEP`; change only a reproduced split owner, pre-commit visible
+  effect, stale cache/lost update, misleading swallowed failure or promised audit
+  that is not durable. Preserve current facades and use-case-local transaction
+  ownership; no generalized UoW/repository layer.
 - **Non-scope:** Replacing SQLAlchemy, changing routing/clearing algorithms,
   relaxing invariants, combining independent failures, or optimizing before
   correctness is locked.
 - **Dependencies:** REN-006 and REN-009; REN-003 required before the first behavior
   change.
 - **Acceptance criteria:**
-  - Every write operation has one named UoW owner; lower layers do not commit
-    unexpectedly and API handlers do not repair internal transaction state.
-  - Success, validation failure, DB failure, serialization/deadlock retry, timeout,
-    cancellation, duplicate tx ID, abort, and simulator nested-call paths have
-    observable-effect tests.
+  - Each listed supported write path has a compact owner/effect map and a `FIX` or
+    `KEEP` decision; unrelated writes are not pulled into the slice.
+  - Each changed path covers normal success, one meaningful rejection, pre-commit
+    DB/internal failure, applicable cancellation/rollback, and no visible
+    cache/event/audit side effect after rollback.
+  - Payment retains duplicate `tx_id`/terminal-state evidence; other paths do not
+    receive speculative idempotency machinery.
   - No raw internal exception is converted to a client 4xx solely by broad catch.
-  - PostgreSQL lost-update/advisory/row-lock tests pass; SQLite tests are not cited
-    as proof of locking semantics.
+  - The bounded PostgreSQL matrix passes: same-capacity payments, payment versus
+    clearing, duplicate payment `tx_id`, plus one Admin lost-update case only if the
+    owner map confirms it. No HA/network-partition claim is made.
   - Cache invalidation and audit/integrity writes occur at the correct post-commit
     boundary.
+  - Both maintained Integrity repair operations have a `FIX` or `KEEP` decision
+    backed by success, pre-commit rollback and audit/cache/publication evidence.
 - **Targeted gates:** payment/clearing/trustline unit and integration selectors;
   `POSTGRES-CONCURRENCY` for
   `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py`,
@@ -545,50 +607,74 @@ used.
 - **Full gates:** `ADMIN-UNIT`; `ADMIN-BUILD`; relevant Playwright route/filter
   smoke if behavior crosses routing.
 
-## REN-012 — Create simulator boundaries and close accessibility gaps
+## REN-012 — Make the selected Simulator v2 paths testable and keyboard usable
 
-- **Priority:** P1
-- **Owner surface:** `app/api/v1/simulator.py`, `app/core/simulator/`,
-  `app/schemas/simulator.py`, `simulator-ui/v2/src/components/`,
-  simulator API/client normalization
-- **Status:** PLANNED
-- **Rationale / value:** Simulator API and runtime remain the largest coupled
-  backend surface, while accessible keyboard/focus semantics must survive any UI
-  boundary extraction. Treat this as two reviewable sub-slices under one protected
-  simulator contract, not a rewrite.
-- **Evidence paths:** `app/api/v1/simulator.py:1-2620`;
-  `app/core/simulator/runtime.py:1-15`;
-  `app/core/simulator/runtime_impl.py:81-983`;
-  `app/core/simulator/real_runner_impl.py:41-551`;
-  `app/schemas/simulator.py`; `simulator-ui/v2/src/components/BottomBar.vue:130-299`;
-  `simulator-ui/v2/src/components/common/OverlaySelect.vue:199-254`;
-  existing focus/Escape tests.
-- **Exact scope:** (A) extract cohesive HTTP action/query/SSE adapters from the
-  2620-line router while preserving the public runtime facade and owner/CSRF
-  checks; make task/session/storage dependencies explicit where evidence supports
-  it. (B) audit interactive simulator overlays/windows for semantic role/name,
-  keyboard open/close/navigation, focus entry/trap/restore, disabled/busy
-  announcement, and reduced-motion behavior; fix shared primitives before
-  one-off panels.
-- **Non-scope:** Rewriting the simulator engine, merging fixtures and real modes,
-  changing event schemas or visual design without a product decision, enforcing
-  arbitrary file-size limits, or broad WCAG claims beyond tested flows.
-- **Dependencies:** REN-009 before router movement; REN-010 before moving write
-  transaction boundaries; REN-003 for frontend/backend gates.
-- **Acceptance criteria:**
-  - Router handlers are transport adapters; domain mutation, DB transaction, run
-    lifecycle, and SSE broadcasting have named owners with no new import cycle.
-  - Public paths, payloads, aliases, owner isolation, CSRF, strict replay, and
-    restart/stop/error state transitions remain contract-tested.
-  - Each changed interactive primitive works by keyboard, has an accessible name
-    and correct role/state, moves focus intentionally, and restores focus on close.
-  - Automated accessibility tests are paired with a short manual keyboard/screen-
-    reader checklist; claims are limited to audited flows.
-  - Each sub-slice is mergeable and reversible independently.
-- **Targeted gates:** simulator action/owner/CSRF/SSE/runtime selectors; affected
-  component Vitest focus tests; API normalization tests.
-- **Full gates:** `BACKEND-DEFAULT`; `BACKEND-LINT-DIAGNOSTIC`; `OPENAPI`; `SIM-UNIT`; simulator
-  super-smoke only at milestone completion; relevant Playwright keyboard smoke.
+- **Priority:** P1 for trusted ingress/state ordering and supported keyboard paths;
+  P2/accepted debt for all other decomposition.
+- **Owner surface:** Simulator HTTP/SSE normalization, real-mode replay/state/effect
+  path, existing frontend facades, selected UI/window primitives; backend router
+  only when a confirmed transaction/contract fix needs an extraction seam.
+- **Status:** PLANNED — split into REN-012A/B/C below.
+- **Rationale / value:** The material risk is not file length. It is that unchecked
+  input, replay logic, state mutation and visual effects are difficult to verify
+  independently, while canvas-only selection blocks keyboard use. The target is a
+  narrow trusted-event seam and practical access to current MVP workflows.
+- **Dependencies:** truthful Simulator gates from REN-003; selected contracts from
+  REN-009; backend transaction ownership from REN-010 before moving write behavior.
+
+### REN-012A — Conditional backend adapter
+
+- **Status:** PLANNED / execute only if triggered.
+- **Exact scope:** when REN-009/010 work repeatedly crosses the same router-owned
+  lifecycle/action boundary, extract one route-independent adapter behind the
+  existing public runtime facade. Preserve owner/CSRF, paths, payloads and SSE.
+- **Acceptance:** affected handlers become thin enough to test the confirmed
+  behavior once; all callers stay on the existing facade; no import cycle.
+- **Stop:** no 2,600-line router rewrite, no target architecture by LOC, and no
+  extraction if the confirmed fix remains clearer locally.
+
+### REN-012B — Frontend ingress, replay, state and effect seam
+
+- **Status:** PLANNED. REN-012B1 contract/ingress is owned by Phase 3;
+  REN-012B2 replay/state/effect migration is owned by Phase 5.
+- **Exact sequence:**
+  1. Characterize scenario/run-status/snapshot HTTP responses and lifecycle,
+     topology, payment and clearing SSE families.
+  2. Validate those HTTP responses at endpoint ingress.
+  3. Make malformed known and unknown SSE events diagnostic and non-mutating.
+  4. Isolate replay cursor/dedup, stale-run and `410` refresh decisions.
+  5. Make accepted-event state application testable without canvas/time.
+  6. Produce small effect intents after accepted state change; never run FX for a
+     stale, duplicate, malformed or rejected event.
+  7. Migrate event families one at a time through the existing facade:
+     lifecycle → topology → payment → clearing.
+- **Acceptance sequences:** start/stop/restart/error; duplicate; reconnect; stale
+  run; `410`; malformed/unknown; topology patch; payment success/failure/cancel;
+  clearing patch/completion; state-before-effect ordering.
+- **Stop:** the four families are deterministic behind the facade. Remaining large
+  composables may stay large. No new state framework, immutable-state doctrine or
+  wire-schema redesign.
+
+### REN-012C — Critical Simulator functionality and accessibility
+
+- **Status:** PLANNED.
+- **Functional paths:** fixture bootstrap/switch; real preview/stale recovery;
+  start/stop/restart/error; payment success plus one rejection/cancel; trustline
+  create/edit/blocked close; clearing preview/confirm/result; node/edge inspect.
+- **Exact scope:** provide a DOM-based node/edge navigator over existing data;
+  keyboard entry to current payment/trustline/clearing forms; focus entry/restore
+  for changed windows; busy/error/success announcements; decorative FX canvas
+  hidden from assistive technology; reduced motion disables optional FX.
+- **Acceptance:** unit/component behavior plus a short non-visual Chromium keyboard
+  smoke proves the named paths. Claims are limited to those paths.
+- **Stop:** no full WCAG/screen-reader/browser certification, no complex ARIA canvas
+  model, no visual redesign and no manual audit of every overlay.
+
+- **Targeted gates:** selected HTTP/event normalizer, replay/state/effect and
+  component/focus tests; affected backend simulator selectors only for REN-012A.
+- **Full gates:** `SIM-TYPECHECK`; `SIM-UNIT`; `SIM-BUILD`; correctness-focused
+  Simulator lint ratchet; `SIM-E2E` scoped to the named flows; `OPENAPI` and
+  `BACKEND-DEFAULT` only when the backend/wire contract changes.
 
 ## REN-013 — Make test taxonomy and database isolation truthful
 
@@ -596,6 +682,9 @@ used.
 - **Owner surface:** `tests/`, `pytest.ini`, test fixtures, simulator/admin test
   configs, README testing section
 - **Status:** IN PROGRESS (2026-08-07)
+- **Owning sub-slices:** REN-013A (Phase 1) owns truthful marker/gate selection and
+  two-task-slug resource isolation. REN-013B (Phase 6) owns cleanup of false-signal
+  or leaked-state tests touched by the accepted product slices.
 - **Partial evidence (2026-08-07):** destructive DB URLs and pytest option/path
   injection are rejected before collection; SQLite DB, basetemp and artifact
   roots are task-local; super-smoke is marked `slow` and scheduled separately.
@@ -616,11 +705,12 @@ used.
   historical `tests/test_e2e_example.py`; `tests/unit/`; `tests/integration/`;
   PostgreSQL selectors in `tests/integration/*postgres*.py`;
   `README.md:298-410`.
-- **Exact scope:** Classify tests by external resources and semantic ownership;
-  mark fast/dialect/Postgres/slow/e2e explicitly; isolate DB, module singletons,
-  event loops, runtime tasks, caches, files, and env overrides; make selectors
-  deterministic and collection-safe; retire duplicate tests only after behavior
-  coverage mapping.
+- **Remaining exact scope:** keep the existing marker/DB guardrails; prove two
+  canonical runs with different task slugs do not share DB/temp/artifact state;
+  repair leaked singleton/event-loop/timer/file state only in suites touched by the
+  remaining plan; retire a duplicate/source-text test only when the changed
+  behavior has stronger coverage. Full-suite taxonomy and `xdist` migration are
+  not required.
 - **Non-scope:** Chasing a coverage percentage, converting all tests to one style,
   deleting slow tests because they are slow, or making production code expose
   internals solely for tests.
@@ -630,14 +720,15 @@ used.
   - Each marker has an executable definition and CI tier; unknown markers fail.
   - Fast suite performs no network access and no nondisposable external DB writes.
   - PostgreSQL locking claims appear only in the disposable PostgreSQL tier.
-  - Repeated and reordered runs leave no simulator tasks, subscriptions, cache,
-    files, env, or DB state for the next test.
-  - Test names describe observable behavior and owner surface, not implementation
-    wiring.
+  - Repeated and reordered changed selectors leave no simulator tasks,
+    subscriptions, cache, files, env, or DB state for the next test.
+  - New behavior tests describe observable behavior; existing architecture guards
+    may keep source/import assertions when explicitly labelled.
 - **Targeted gates:** collect-only per marker; repeat selected singleton/DB suites
   in different orders; dedicated Postgres safety-guard negative test.
-- **Full gates:** all CI tiers; `BACKEND-DEFAULT`; frontend unit/build gates; scheduled
-  PostgreSQL and expensive simulator milestones.
+- **Full gates:** required published workflow; `BACKEND-DEFAULT`; affected frontend
+  unit/build gates; selected scheduled PostgreSQL and scoped Simulator milestones
+  from the frozen plan.
 
 ## REN-014 — Rebuild documentation source-of-truth, archive, and translation flow
 
@@ -667,11 +758,11 @@ used.
   `docs/ru/03-architecture.md`; `docs/ru/config-reference.md:331-340`;
   `docs/ru/simulator/backend/`; `docs/**/archive/`;
   `docs/ru/documentation-rules.md`; `README.md:571-640`.
-- **Exact scope:** Declare current implementation docs, target/concept docs, and
-  historical/archive docs; add status/date/owner-surface and successor links;
-  update current architecture, configuration, deployment, API, testing, and
-  simulator boundaries from accepted code; define a primary-language and
-  translation synchronization policy with explicit lag markers.
+- **Remaining exact scope:** update only current front-door, testing, deployment,
+  affected contract and affected Admin/Simulator architecture documents after the
+  owning behavior is accepted. Correct the known Vitest/canonical-verifier drift;
+  label translation lag and archives. Do not reconcile every historical body or
+  translate stable-but-unchanged content during this renovation.
 - **Non-scope:** Translating all archives, deleting history, making wording tests,
   presenting future architecture as implemented, or changing code solely to match
   stale diagrams.
@@ -702,11 +793,12 @@ used.
 - **Evidence paths:** diffs and acceptance evidence for REN-001 through REN-014;
   `git log` for each owner surface; CI artifacts; spec changelog and known-open
   decisions.
-- **Exact scope:** Independent reviewers re-check architecture direction,
-  transactions, concurrency/cancellation, security/config, API compatibility,
-  accessibility flows, test isolation, repository inventory, and documentation
-  claims; reproduce every actionable finding before fixing; run final gates on a
-  clean checkout; record accepted ceilings and remaining work with owner decision.
+- **Exact scope:** review only the frozen plan's changed product surfaces and their
+  direct callers/contracts, then run the bounded evidence matrix in Phase 7 of
+  `plan.md`. This is a falsification pass for shipped changes, not a second
+  repository-wide redesign. Each changed slice receives internal review; each
+  high-risk range defined in `spec.md` additionally receives Claude Code Opus 5 /
+  High review with manual finding disposition.
 - **Non-scope:** Starting a second broad redesign, fixing unrelated rare edge cases,
   reopening explicitly accepted ceilings without new evidence, or treating a green
   aggregate metric as sufficient review.
@@ -717,29 +809,30 @@ used.
     reproducible-test evidence for each finding.
   - Every finding is verified, fixed in its owner slice, rejected with evidence, or
     recorded as accepted debt by the owner.
-  - All canonical gates pass on a clean checkout; CI reaches a final state.
+  - The bounded canonical/CI/PostgreSQL/Chromium/container matrix passes. An
+    unavailable required environment leaves REN-015 open; removing it requires an
+    explicit owner-approved spec revision.
   - Current docs and spec changelog reference the actual merge SHAs and fresh gate
     results.
   - No secret, user artifact, temporary database, test output, or generated bundle
     is newly tracked.
 - **Targeted gates:** rerun each changed task's targeted gates and adversarial
   reproductions.
-- **Full gates:** `REPO-FULL`; all CI tiers; disposable PostgreSQL concurrency and
-  migration jobs; simulator super-smoke; relevant Admin/Simulator Playwright
-  flows; clean-tree and tracked-artifact audit.
+- **Full gates:** `REPO-FULL`; published required workflow; selected disposable
+  PostgreSQL concurrency/migration jobs; one production-like container smoke;
+  scoped Admin/Simulator Chromium flows; clean-tree and tracked-artifact audit.
 
 ## Dependency summary
 
 ```text
-REN-001 → REN-002 → REN-003
-                  ├─ REN-004
-                  ├─ REN-005
-                  ├─ REN-007 → REN-008
-                  ├─ REN-009 ─┐
-REN-002 → REN-006 ─────────────┼→ REN-010 ─┐
-REN-003 → REN-011              │           ├→ REN-012
-REN-003 + REN-004 ─────────────┴→ REN-013 ─┘
-accepted implementation slices → REN-014 → REN-015
+owner-approved plan
+  → REN-003/005/006/008/013 runtime evidence
+  → REN-010 backend ownership and bounded PostgreSQL proof
+  → REN-009 selected REST/SSE contracts
+  → REN-011 Admin operator paths
+  → REN-012B/012C Simulator v2 paths (REN-012A only if triggered)
+  → REN-004/013/014 bounded cleanup and current docs
+  → REN-015 closure
 ```
 
 The diagram is sequencing guidance, not authority to bundle all predecessors into
