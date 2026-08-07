@@ -414,10 +414,34 @@ used.
   `claude-opus-5` at high effort and complete exit-`0` JSON; its cancelled-commit
   P2 was fixed in `d05c27a`, then independently reviewed with no remaining P1/P2.
   Its audit/publication P2 maps to the already accepted residual below rather
-  than a new task. Process-crash delivery remains intentionally best-effort (no
+  than a new task. The next payment slice reuses the sorted transaction advisory
+  locks for single-route capacity reads and adds a mutation-sensitive two-session
+  PostgreSQL concurrency test. Its design passed independent review, while the
+  PostgreSQL execution remains unverified because no disposable PostgreSQL or
+  Docker runtime is available locally. Payment prepare/commit/timeout failures
+  now preserve typed 4xx codes, sanitize internal failures to `E010/500` across
+  HTTP, the committed abort path, GET/list/retry and service log messages. The
+  changed prepare/commit/timeout service cleanup paths stop recovery reads and
+  abort attempts after their rollback fails, while staged calls retain outer-UoW
+  ownership. The combined payment taxonomy-and-regression selector passed `48`
+  tests across the taxonomy, timeout, abort-code, insufficient-capacity, ordered
+  simulator journal and OpenAPI contract files; independent remediation review
+  found no remaining P1/P2 in that slice. External review of the frozen payment
+  range `f45b8bb..d35bc02` confirmed the taxonomy work and exposed an incomplete
+  prepare/commit lock protocol. Remediation `a334c46` now serializes each tx state
+  machine before globally sorted segment locks, uses one strict persisted-flow
+  representation for commit keys/effects, keeps recovery abort compatible with
+  malformed legacy locks, and prevents duplicate prepare/commit/abort terminal
+  transitions. Its final local selector passed `36` tests and discovered `7`
+  PostgreSQL-only scenarios, all skipped without a live PostgreSQL runtime;
+  independent review found no remaining P1/P2 in the frozen fix. Normal API
+  contention against simulator-held transaction locks remains an accepted P2:
+  requests are bounded by the existing prepare timeout, while skipping locks or
+  moving the simulator commit boundary would weaken integrity or expand tick UoW
+  semantics. Process-crash delivery remains intentionally best-effort (no
   outbox), audit-before-publish retains a documented crash/ambiguous-commit
   window, and the broader public payment/clearing UoW map plus PostgreSQL
-  locking/ambiguous connection-loss evidence remain outstanding.
+  execution/ambiguous connection-loss evidence remain outstanding.
 - **Rationale / value:** Commits/rollbacks currently occur in API, services, and
   engine, while `commit: bool` asks callers to understand nested SQLAlchemy
   contexts. This is the highest-integrity refactor and must follow behavior locks.
@@ -429,8 +453,20 @@ used.
   `app/core/simulator/real_tick_orchestrator.py:341-382`;
   `tests/unit/test_admin_config_patch_atomicity.py:182-523`;
   `tests/unit/test_real_tick_commit_cancellation.py:183-480`;
-  `app/core/payments/service.py:64-74,401-433,478-620`;
-  `app/core/payments/engine.py:123-178,187-394,628-975,1113-1223`;
+  `app/core/payments/service.py:545-848`;
+  `app/core/payments/engine.py:75-180,299-737,764-1114,1342-1540`;
+  `tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py`;
+  `tests/integration/test_payment_commit_advisory_locks_postgres.py`;
+  `tests/integration/test_payment_prepare_error_taxonomy.py`;
+  `tests/unit/test_payment_engine_advisory_locks_execute.py`;
+  `tests/unit/test_payments_2pc.py:185-380`;
+  `tests/unit/test_recovery_cleanup.py`;
+  `tests/unit/test_payment_timeouts.py`;
+  `tests/integration/test_payment_abort_has_error_code.py`;
+  `tests/integration/test_payments_insufficient_capacity.py`;
+  `tests/unit/test_real_payments_ordered_journal.py`;
+  `tests/contract/test_openapi_contract.py:313-349`;
+  `api/openapi.yaml:2246-2321`;
   `app/core/clearing/service.py:772-1060`;
   `app/core/trustlines/service.py:108-139,200-243,288-330`.
 - **Exact scope:** First map every write call-site and transaction state transition;

@@ -173,3 +173,15 @@ The renovation is complete only when all of the following have evidence linked f
   fix. The durable-audit/runtime-publication cancellation window was accepted as
   P2 and mapped to REN-010's already recorded crash/ambiguous-commit residual;
   it did not justify a new persistence framework or expand this bounded slice.
+- **2026-08-07:** A second high-risk payment batch was reviewed from a
+  credential-free standalone clone over frozen `f45b8bb..d35bc02`. Claude Code
+  `2.1.224` completed with exit `0`, complete JSON (`is_error=false`) and resolved
+  `claude-opus-5` at high effort. The error-taxonomy/redaction change was found
+  sound. Manual triage accepted the prepare-versus-commit lock gap as P1 and
+  fixed the full same-transaction prepare/commit/abort protocol in `a334c46`;
+  internal adversarial review also preserved malformed-lock recovery and removed
+  false-green PostgreSQL barriers. Simulator-held transaction-lock contention
+  was accepted as P2 residual: the API wait is already bounded, while unlocking
+  staged work or moving the tick commit boundary was not justified in this
+  remediation. PostgreSQL test design is present but runtime execution remains
+  unverified locally.
