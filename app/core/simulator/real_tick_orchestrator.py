@@ -350,6 +350,7 @@ class RealTickOrchestrator:
                         broadcast_topology_edge_patch=rr._broadcast_topology_edge_patch,
                         on_commit=payments_phase.apply_deferred_effects,
                         on_rollback=payments_phase.apply_rollback_observations,
+                        on_unknown=payments_phase.apply_unknown_transaction_observations,
                     )
 
                     await rr._real_tick_metrics.populate_per_eq_metric_values(
@@ -378,6 +379,7 @@ class RealTickOrchestrator:
                         per_eq_edge_stats=per_eq_edge_stats,
                         on_commit=payments_phase.apply_deferred_effects,
                         on_rollback=payments_phase.apply_rollback_observations,
+                        on_unknown=payments_phase.apply_unknown_transaction_observations,
                     )
 
                     # ── Post-tick audit (best-effort): detect participant drift ──

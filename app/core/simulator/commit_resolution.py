@@ -16,7 +16,8 @@ async def _drain_task(
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError as exc:
-            if cancellation is None:
+            current = asyncio.current_task()
+            if cancellation is None and current is not None and current.cancelling():
                 cancellation = exc
         except Exception:
             # The child has reached a failed terminal state. Its exception is
@@ -36,8 +37,6 @@ async def _run_to_terminal(
     try:
         task.result()
     except asyncio.CancelledError as exc:
-        if cancellation is None:
-            cancellation = exc
         error = exc
     except Exception as exc:
         error = exc
@@ -85,6 +84,7 @@ async def resolve_commit_under_cancellation(
     rollback: Callable[[], Awaitable[Any]],
     on_commit: Callable[[], Any],
     on_rollback: Callable[[], Any],
+    on_unknown: Callable[[], Any],
     logger: logging.Logger,
 ) -> None:
     """Resolve a commit from its terminal result, then restore cancellation.
@@ -92,28 +92,46 @@ async def resolve_commit_under_cancellation(
     ``asyncio.shield`` keeps the database operation alive, but a second caller
     cancellation can still interrupt the surrounding await. Drain both commit
     and failure-cleanup rollback to a terminal result before invoking exactly
-    one resolver callback.
+    one resolver callback. A failed cleanup selects the unknown outcome but
+    never masks the original commit error; caller cancellation keeps priority.
     """
 
     cancellation: asyncio.CancelledError | None = None
     commit_error, cancellation = await _run_to_terminal(commit, cancellation)
 
-    if commit_error is None:
-        on_commit()
-    else:
-        rollback_error, cancellation = await _run_to_terminal(rollback, cancellation)
-        if rollback_error is not None:
-            logger.warning(
-                "simulator.real.rollback_after_commit_failure_failed",
-                exc_info=(
-                    type(rollback_error),
-                    rollback_error,
-                    rollback_error.__traceback__,
-                ),
+    resolver_error: Exception | None = None
+    try:
+        if commit_error is None:
+            on_commit()
+        else:
+            rollback_error, cancellation = await _run_to_terminal(
+                rollback,
+                cancellation,
             )
-        on_rollback()
+            if rollback_error is None:
+                on_rollback()
+            else:
+                try:
+                    logger.warning(
+                        "simulator.real.rollback_after_commit_failure_failed "
+                        "commit_error=%s rollback_error=%s",
+                        type(commit_error).__name__,
+                        type(rollback_error).__name__,
+                        exc_info=(
+                            type(rollback_error),
+                            rollback_error,
+                            rollback_error.__traceback__,
+                        ),
+                    )
+                except Exception:
+                    pass
+                on_unknown()
+    except Exception as exc:
+        resolver_error = exc
 
     if cancellation is not None:
         raise cancellation
     if commit_error is not None:
         raise commit_error
+    if resolver_error is not None:
+        raise resolver_error

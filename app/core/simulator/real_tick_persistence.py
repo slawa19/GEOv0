@@ -54,12 +54,14 @@ class RealTickPersistence:
         *,
         on_commit: Callable[[], Any] | None,
         on_rollback: Callable[[], Any] | None,
+        on_unknown: Callable[[], Any] | None,
     ) -> None:
         await resolve_commit_under_cancellation(
             commit=session.commit,
             rollback=session.rollback,
             on_commit=lambda: self._apply_callback(on_commit, kind="post_commit"),
             on_rollback=lambda: self._apply_callback(on_rollback, kind="rollback"),
+            on_unknown=lambda: self._apply_callback(on_unknown, kind="unknown"),
             logger=self._logger,
         )
 
@@ -80,6 +82,7 @@ class RealTickPersistence:
         per_eq_edge_stats: dict[str, Any],
         on_commit: Callable[[], Any] | None = None,
         on_rollback: Callable[[], Any] | None = None,
+        on_unknown: Callable[[], Any] | None = None,
     ) -> None:
         computed_at = self._utc_now()
         with self._lock:
@@ -137,6 +140,7 @@ class RealTickPersistence:
             session,
             on_commit=on_commit,
             on_rollback=on_rollback,
+            on_unknown=on_unknown,
         )
         commit_ms = (time.monotonic() - commit_t0) * 1000.0
         if commit_ms > 500.0:

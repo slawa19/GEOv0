@@ -31,12 +31,14 @@ class RealTickTrustDriftCoordinator:
         *,
         on_commit: Callable[[], Any] | None,
         on_rollback: Callable[[], Any] | None,
+        on_unknown: Callable[[], Any] | None,
     ) -> None:
         await resolve_commit_under_cancellation(
             commit=session.commit,
             rollback=session.rollback,
             on_commit=lambda: self._apply_callback(on_commit, kind="post_commit"),
             on_rollback=lambda: self._apply_callback(on_rollback, kind="rollback"),
+            on_unknown=lambda: self._apply_callback(on_unknown, kind="unknown"),
             logger=self._logger,
         )
 
@@ -54,6 +56,7 @@ class RealTickTrustDriftCoordinator:
         broadcast_topology_edge_patch: Callable[..., None],
         on_commit: Callable[[], Any] | None = None,
         on_rollback: Callable[[], Any] | None = None,
+        on_unknown: Callable[[], Any] | None = None,
     ) -> None:
         try:
             decay_res = await trust_drift_engine.apply_trust_decay(
@@ -81,6 +84,7 @@ class RealTickTrustDriftCoordinator:
             session,
             on_commit=on_commit,
             on_rollback=on_rollback,
+            on_unknown=on_unknown,
         )
 
         # Notify frontend about changed limits via edge_patch (no full refresh).

@@ -64,6 +64,21 @@ class RealTickClearingCoordinator:
                     exc_info=True,
                 )
 
+    def _apply_unknown_observations(self, payments_result: Any | None) -> None:
+        apply_effects = getattr(
+            payments_result,
+            "apply_unknown_transaction_observations",
+            None,
+        )
+        if callable(apply_effects):
+            try:
+                apply_effects()
+            except Exception:
+                self._logger.warning(
+                    "simulator.real.payment_unknown_callback_failed",
+                    exc_info=True,
+                )
+
     async def _commit_and_resolve(
         self,
         session: Any,
@@ -74,6 +89,7 @@ class RealTickClearingCoordinator:
             rollback=session.rollback,
             on_commit=lambda: self._apply_payment_effects(payments_result),
             on_rollback=lambda: self._apply_rollback_observations(payments_result),
+            on_unknown=lambda: self._apply_unknown_observations(payments_result),
             logger=self._logger,
         )
 
