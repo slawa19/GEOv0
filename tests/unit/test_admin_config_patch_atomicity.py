@@ -82,6 +82,20 @@ def _config_request() -> Request:
     )
 
 
+def _feature_flags_request(*, request_id: str | None = None) -> Request:
+    headers = []
+    if request_id is not None:
+        headers.append((b"x-request-id", request_id.encode("ascii")))
+    return Request(
+        {
+            "type": "http",
+            "method": "PATCH",
+            "path": "/api/v1/admin/feature-flags",
+            "headers": headers,
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_config_patch_rejects_entire_batch_when_later_key_is_not_mutable(
     client,
@@ -304,6 +318,155 @@ async def test_config_patch_audit_cancellation_never_publishes_values(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_feature_flags_patch_keeps_both_readers_old_until_audit_is_durable(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", False)
+    monkeypatch.setattr(settings, "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED", False)
+    monkeypatch.setattr(settings, "CLEARING_ENABLED", True)
+    monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
+    commit_started = asyncio.Event()
+    release_commit = asyncio.Event()
+    controlled_db = ControlledAuditDB(
+        commit_started=commit_started,
+        release_commit=release_commit,
+        observe_commit=lambda: {
+            "FEATURE_FLAGS_MULTIPATH_ENABLED": settings.FEATURE_FLAGS_MULTIPATH_ENABLED
+        },
+    )
+
+    patch = asyncio.create_task(
+        admin_api.patch_feature_flags(
+            AdminFeatureFlagsPatchRequest(
+                multipath_enabled=True,
+                reason="required-feature-audit-success",
+            ),
+            _feature_flags_request(request_id="feature-audit-test"),
+            controlled_db,
+        )
+    )
+    await asyncio.wait_for(commit_started.wait(), timeout=1.0)
+
+    feature_reader = await admin_api.get_feature_flags()
+    config_reader = {
+        item.key: item.value for item in (await admin_api.get_admin_config()).items
+    }
+    assert feature_reader.multipath_enabled is False
+    assert config_reader["FEATURE_FLAGS_MULTIPATH_ENABLED"] is False
+    assert controlled_db.durable == []
+
+    release_commit.set()
+    response = await asyncio.wait_for(patch, timeout=1.0)
+
+    assert response == admin_api.AdminFeatureFlags(
+        multipath_enabled=True,
+        full_multipath_enabled=False,
+        clearing_enabled=True,
+    )
+    assert controlled_db.observed_at_commit == {
+        "FEATURE_FLAGS_MULTIPATH_ENABLED": False
+    }
+    assert len(controlled_db.durable) == 1
+    audit = controlled_db.durable[0]
+    assert audit.action == "admin.feature_flags.patch"
+    assert audit.object_type == "feature_flags"
+    assert audit.reason == "required-feature-audit-success"
+    assert audit.before_state == {
+        "multipath_enabled": False,
+        "full_multipath_enabled": False,
+        "clearing_enabled": True,
+    }
+    assert audit.after_state == {
+        "multipath_enabled": True,
+        "full_multipath_enabled": False,
+        "clearing_enabled": True,
+    }
+    assert audit.request_id == "feature-audit-test"
+    assert settings.FEATURE_FLAGS_MULTIPATH_ENABLED is True
+
+
+@pytest.mark.asyncio
+async def test_feature_flags_patch_audit_failure_never_publishes_values(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", False)
+    monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
+    commit_started = asyncio.Event()
+    release_commit = asyncio.Event()
+    controlled_db = ControlledAuditDB(
+        fail_commit=True,
+        commit_started=commit_started,
+        release_commit=release_commit,
+    )
+
+    patch = asyncio.create_task(
+        admin_api.patch_feature_flags(
+            AdminFeatureFlagsPatchRequest(multipath_enabled=True),
+            _feature_flags_request(),
+            controlled_db,
+        )
+    )
+    await asyncio.wait_for(commit_started.wait(), timeout=1.0)
+    assert (await admin_api.get_feature_flags()).multipath_enabled is False
+    config_reader = {
+        item.key: item.value for item in (await admin_api.get_admin_config()).items
+    }
+    assert config_reader["FEATURE_FLAGS_MULTIPATH_ENABLED"] is False
+
+    release_commit.set()
+    with pytest.raises(RuntimeError, match="audit commit failed"):
+        await patch
+
+    assert settings.FEATURE_FLAGS_MULTIPATH_ENABLED is False
+    assert (await admin_api.get_feature_flags()).multipath_enabled is False
+    config_reader = {
+        item.key: item.value for item in (await admin_api.get_admin_config()).items
+    }
+    assert config_reader["FEATURE_FLAGS_MULTIPATH_ENABLED"] is False
+    assert controlled_db.rollback_calls == 1
+    assert controlled_db.pending == []
+    assert controlled_db.durable == []
+
+
+@pytest.mark.asyncio
+async def test_feature_flags_patch_audit_cancellation_never_publishes_values(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", False)
+    monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
+    commit_started = asyncio.Event()
+    never_release_commit = asyncio.Event()
+    controlled_db = ControlledAuditDB(
+        commit_started=commit_started,
+        release_commit=never_release_commit,
+    )
+
+    patch = asyncio.create_task(
+        admin_api.patch_feature_flags(
+            AdminFeatureFlagsPatchRequest(multipath_enabled=True),
+            _feature_flags_request(),
+            controlled_db,
+        )
+    )
+    await asyncio.wait_for(commit_started.wait(), timeout=1.0)
+    assert (await admin_api.get_feature_flags()).multipath_enabled is False
+
+    patch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await patch
+
+    assert settings.FEATURE_FLAGS_MULTIPATH_ENABLED is False
+    assert (await admin_api.get_feature_flags()).multipath_enabled is False
+    config_reader = {
+        item.key: item.value for item in (await admin_api.get_admin_config()).items
+    }
+    assert config_reader["FEATURE_FLAGS_MULTIPATH_ENABLED"] is False
+    assert controlled_db.rollback_calls == 1
+    assert controlled_db.pending == []
+    assert controlled_db.durable == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("setting_key", "request_key"),
     [
@@ -312,41 +475,36 @@ async def test_config_patch_audit_cancellation_never_publishes_values(monkeypatc
         ("CLEARING_ENABLED", "clearing_enabled"),
     ],
 )
-async def test_cancelled_config_audit_does_not_block_feature_flags_patch(
+async def test_cancelled_config_audit_releases_feature_flags_required_writer(
     monkeypatch,
     setting_key: str,
     request_key: str,
 ) -> None:
     monkeypatch.setattr(settings, setting_key, False)
     monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
-    config_in_audit = asyncio.Event()
+    config_commit_started = asyncio.Event()
     never_release_config = asyncio.Event()
-    audit_actions: list[tuple[str, bool]] = []
-
-    async def barrier_audit(*args, **kwargs) -> None:
-        action = str(kwargs["action"])
-        audit_actions.append((action, bool(kwargs.get("required", False))))
-        if action == "admin.config.patch":
-            config_in_audit.set()
-            await never_release_config.wait()
-
-    monkeypatch.setattr(admin_api, "_audit", barrier_audit)
+    config_db = ControlledAuditDB(
+        commit_started=config_commit_started,
+        release_commit=never_release_config,
+    )
+    feature_db = ControlledAuditDB()
 
     config_patch = asyncio.create_task(
         admin_api.patch_admin_config(
             AdminConfigPatchRequest(updates={setting_key: True}),
             _config_request(),
-            None,
+            config_db,
         )
     )
-    await asyncio.wait_for(config_in_audit.wait(), timeout=1.0)
+    await asyncio.wait_for(config_commit_started.wait(), timeout=1.0)
     assert getattr(settings, setting_key) is False
 
     feature_flags_patch = asyncio.create_task(
         admin_api.patch_feature_flags(
             AdminFeatureFlagsPatchRequest(**{request_key: True}),
-            _config_request(),
-            None,
+            _feature_flags_request(),
+            feature_db,
         )
     )
     await asyncio.sleep(0)
@@ -359,7 +517,7 @@ async def test_cancelled_config_audit_does_not_block_feature_flags_patch(
     response = await asyncio.wait_for(feature_flags_patch, timeout=1.0)
     assert getattr(response, request_key) is True
     assert getattr(settings, setting_key) is True
-    assert audit_actions == [
-        ("admin.config.patch", True),
-        ("admin.feature_flags.patch", False),
-    ]
+    assert config_db.rollback_calls == 1
+    assert config_db.durable == []
+    assert len(feature_db.durable) == 1
+    assert feature_db.durable[0].action == "admin.feature_flags.patch"

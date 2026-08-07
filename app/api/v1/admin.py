@@ -362,19 +362,13 @@ async def patch_feature_flags(
             "full_multipath_enabled": settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
             "clearing_enabled": settings.CLEARING_ENABLED,
         }
-
+        after = dict(before)
         if body.multipath_enabled is not None:
-            settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
+            after["multipath_enabled"] = body.multipath_enabled
         if body.full_multipath_enabled is not None:
-            settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
+            after["full_multipath_enabled"] = body.full_multipath_enabled
         if body.clearing_enabled is not None:
-            settings.CLEARING_ENABLED = body.clearing_enabled
-
-        after = {
-            "multipath_enabled": settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
-            "full_multipath_enabled": settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
-            "clearing_enabled": settings.CLEARING_ENABLED,
-        }
+            after["clearing_enabled"] = body.clearing_enabled
 
         await _audit(
             db,
@@ -385,7 +379,23 @@ async def patch_feature_flags(
             reason=body.reason,
             before_state=before,
             after_state=after,
+            required=True,
         )
+
+        try:
+            if body.multipath_enabled is not None:
+                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
+            if body.full_multipath_enabled is not None:
+                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
+            if body.clearing_enabled is not None:
+                settings.CLEARING_ENABLED = body.clearing_enabled
+        except BaseException:
+            settings.FEATURE_FLAGS_MULTIPATH_ENABLED = before["multipath_enabled"]
+            settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = before[
+                "full_multipath_enabled"
+            ]
+            settings.CLEARING_ENABLED = before["clearing_enabled"]
+            raise
 
         return AdminFeatureFlags(**after)
 
