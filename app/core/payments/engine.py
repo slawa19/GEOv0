@@ -1015,7 +1015,7 @@ class PaymentEngine:
                     error_code=getattr(exc, "code", None),
                     details=getattr(exc, "details", None),
                     commit=commit,
-                    _tx_lock_already_held=True,
+                    _tx_lock_already_held=not commit,
                 )
                 raise
 

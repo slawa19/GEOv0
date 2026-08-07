@@ -66,7 +66,16 @@ async def test_trust_limit_violation_detected(db_session):
 
 
 @pytest.mark.asyncio
-async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkeypatch):
+@pytest.mark.parametrize(
+    ("commit_changes", "expected_tx_lock_already_held"),
+    [(True, False), (False, True)],
+)
+async def test_payment_commit_aborts_on_trust_limit_violation(
+    db_session,
+    monkeypatch,
+    commit_changes,
+    expected_tx_lock_already_held,
+):
     nonce = uuid.uuid4().hex[:10]
     eq = Equivalent(code=("T" + nonce[:15]).upper(), symbol="T", description=None, precision=2, metadata_={}, is_active=True)
     a = Participant(pid="A" + nonce, display_name="A", public_key="pkA-" + nonce, type="person", status="active", profile={})
@@ -140,7 +149,7 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
 
     # P0.1: commit-only retry was removed; keep the test deterministic by
     # bypassing the whole-uow retry wrapper.
-    async def _run_uow_no_retry(*, op: str, fn):
+    async def _run_uow_no_retry(*, op: str, fn, use_savepoint: bool = False):
         return await fn()
 
     monkeypatch.setattr(engine, "_run_uow_with_retry", _run_uow_no_retry)
@@ -148,12 +157,14 @@ async def test_payment_commit_aborts_on_trust_limit_violation(db_session, monkey
     monkeypatch.setattr(db_session, "rollback", _rollback_noop)
 
     with pytest.raises(IntegrityViolationException) as exc_info:
-        await engine.commit(tx_id)
+        await engine.commit(tx_id, commit=commit_changes)
 
     assert exc_info.value.code == "E008"
     assert exc_info.value.details.get("invariant") == "TRUST_LIMIT_VIOLATION"
     assert abort_called["called"] is True
-    assert abort_called["tx_lock_already_held"] is True
+    assert (
+        abort_called["tx_lock_already_held"] is expected_tx_lock_already_held
+    )
 
 
 @pytest.mark.asyncio
