@@ -23,7 +23,7 @@ class RunLifecycle:
         *,
         lock,
         runs: dict[str, RunRecord],
-        set_active_run_id: Callable,  # (run_id: str, owner_id: str = "") -> None
+        set_active_run_id: Callable[[str, str], None],
         clear_active_run_id: Optional[Callable] = None,  # (owner_id: str = "", run_id: str = "") -> None
         utc_now,
         new_run_id: Callable[[], str],

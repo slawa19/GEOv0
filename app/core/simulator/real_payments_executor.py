@@ -5,12 +5,12 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentPostCommitEffects, PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.rejection_codes import map_rejection_code
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
@@ -18,6 +18,188 @@ from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.db.models.participant import Participant
 from app.utils.exceptions import GeoException, TimeoutException
+
+
+@dataclass(frozen=True)
+class _PaymentObservation:
+    seq: int
+    outcome: Literal["committed", "rejected", "error"]
+    equivalent: str
+    sender_pid: str
+    receiver_pid: str
+    amount: str
+    edges: list[dict[str, str]]
+    payment_effects: PaymentPostCommitEffects | None = None
+    edge_patch: list[dict[str, Any]] | None = None
+    node_patch: list[dict[str, Any]] | None = None
+    error_code: str | None = None
+    error_details: dict[str, Any] | None = None
+
+
+@dataclass
+class DeferredRealPaymentEffects:
+    """Ordered observations resolved after the enclosing transaction outcome."""
+
+    lock: Any
+    emitter: SseEventEmitter
+    logger: logging.Logger
+    utc_now: Callable[[], Any]
+    run_id: str
+    run: RunRecord
+    items: list[_PaymentObservation] = field(default_factory=list)
+    _resolution: Literal["commit", "rollback"] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+
+    def apply_once(self) -> bool:
+        return self.apply_after_commit()
+
+    def apply_after_commit(self) -> bool:
+        return self._resolve("commit")
+
+    def apply_after_rollback(self) -> bool:
+        return self._resolve("rollback")
+
+    def _resolve(self, resolution: Literal["commit", "rollback"]) -> bool:
+        if self._resolution is not None:
+            return False
+        self._resolution = resolution
+
+        for item in sorted(self.items, key=lambda observation: observation.seq):
+            if resolution == "rollback" and item.outcome == "committed":
+                continue
+            try:
+                self._apply_observation(item)
+            except Exception:
+                # One malformed/broken observation must not suppress later seq items.
+                self.logger.warning(
+                    "simulator.real.payment_observation_failed run_id=%s seq=%s outcome=%s",
+                    self.run_id,
+                    item.seq,
+                    item.outcome,
+                    exc_info=True,
+                )
+        return True
+
+    def _apply_observation(self, item: _PaymentObservation) -> None:
+        if item.outcome == "committed":
+            if item.payment_effects is None:
+                return
+            try:
+                item.payment_effects.apply_once()
+            except Exception:
+                self.logger.warning(
+                    "simulator.real.payment_post_commit_effect_failed run_id=%s seq=%s",
+                    self.run_id,
+                    item.seq,
+                    exc_info=True,
+                )
+
+            try:
+                self.emitter.emit_tx_updated(
+                    run_id=self.run_id,
+                    run=self.run,
+                    equivalent=item.equivalent,
+                    from_pid=item.sender_pid,
+                    to_pid=item.receiver_pid,
+                    amount=item.amount,
+                    amount_flyout=True,
+                    ttl_ms=1200,
+                    edges=[dict(edge) for edge in item.edges],
+                    node_badges=None,
+                    edge_patch=item.edge_patch,
+                    node_patch=item.node_patch,
+                )
+            except Exception:
+                self.logger.warning(
+                    "simulator.real.post_commit_tx_updated_failed run_id=%s tx_from=%s tx_to=%s",
+                    self.run_id,
+                    item.sender_pid,
+                    item.receiver_pid,
+                    exc_info=True,
+                )
+            with self.lock:
+                self.run.last_event_type = "tx.updated"
+                self.run.attempts_total += 1
+                self.run.committed_total += 1
+            return
+
+        if item.outcome == "rejected":
+            details = (item.error_details or {}).get("details")
+            if (
+                isinstance(details, dict)
+                and str(details.get("invariant") or "") == "PAYMENT_DELTA_DRIFT"
+            ):
+                try:
+                    self.emitter.emit_audit_drift(
+                        run_id=self.run_id,
+                        run=self.run,
+                        equivalent=item.equivalent,
+                        tick_index=int(self.run.tick_index or 0),
+                        severity="critical",
+                        total_drift=str(details.get("total_drift") or "0"),
+                        drifts=list(details.get("drifts") or []),
+                        source="delta_check",
+                    )
+                except Exception:
+                    self.logger.warning(
+                        "simulator.real.audit_drift_observation_failed run_id=%s seq=%s",
+                        self.run_id,
+                        item.seq,
+                        exc_info=True,
+                    )
+
+            with self.lock:
+                self.run.last_event_type = "tx.failed"
+                self.run.attempts_total += 1
+                self.run.rejected_total += 1
+        else:
+            with self.lock:
+                self.run.attempts_total += 1
+                self.run.errors_total += 1
+                if item.error_code == "PAYMENT_TIMEOUT":
+                    self.run.timeouts_total += 1
+                self.run._error_timestamps.append(time.time())
+                cutoff = time.time() - 60.0
+                while (
+                    self.run._error_timestamps
+                    and self.run._error_timestamps[0] < cutoff
+                ):
+                    self.run._error_timestamps.popleft()
+                self.run.last_error = {
+                    "code": str(item.error_code or "INTERNAL_ERROR"),
+                    "message": str(
+                        (item.error_details or {}).get("message")
+                        or item.error_code
+                        or "INTERNAL_ERROR"
+                    ),
+                    "at": self.utc_now().isoformat(),
+                }
+                self.run.last_event_type = "tx.failed"
+
+        error_code = str(item.error_code or "PAYMENT_REJECTED")
+        try:
+            self.emitter.emit_tx_failed(
+                run_id=self.run_id,
+                run=self.run,
+                equivalent=item.equivalent,
+                from_pid=item.sender_pid,
+                to_pid=item.receiver_pid,
+                error_code=error_code,
+                error_message=str(
+                    (item.error_details or {}).get("message") or error_code
+                ),
+                error_details=item.error_details,
+            )
+        except Exception:
+            self.logger.warning(
+                "simulator.real.tx_failed_observation_failed run_id=%s seq=%s",
+                self.run_id,
+                item.seq,
+                exc_info=True,
+            )
 
 
 @dataclass(frozen=True)
@@ -33,6 +215,8 @@ class RealPaymentsResult:
     # Per-eq rejection codes breakdown.
     # Contract: always a dict (never None) for downstream consumers (adaptive policy).
     rejection_codes_by_eq: dict[str, dict[str, int]] = field(default_factory=dict)
+    deferred_effects: DeferredRealPaymentEffects | None = None
+    stop_requested: bool = False
 
 
 class RealPaymentsExecutor:
@@ -74,6 +258,14 @@ class RealPaymentsExecutor:
         timeouts = 0
 
         emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
+        deferred_effects = DeferredRealPaymentEffects(
+            lock=self._lock,
+            emitter=emitter,
+            logger=self._logger,
+            utc_now=self._utc_now,
+            run_id=str(run_id),
+            run=run,
+        )
 
         sem = asyncio.Semaphore(max(1, int(max_in_flight)))
         action_db_lock = asyncio.Lock()
@@ -120,8 +312,9 @@ class RealPaymentsExecutor:
             dict[str, Any] | None,
             float,
             list[tuple[str, str]],
+            PaymentPostCommitEffects | None,
         ]:
-            """Returns (seq, eq, sender_pid, receiver_pid, amount, status, error_code, error_details, avg_route_len, route_edges)."""
+            """Execute one action under a SAVEPOINT and return its staged result."""
 
             sender_id = sender_id_by_pid.get(str(action.sender_pid))
             if sender_id is None:
@@ -136,6 +329,7 @@ class RealPaymentsExecutor:
                     {"reason": "SENDER_NOT_FOUND"},
                     0.0,
                     [],
+                    None,
                 )
 
             idem = self._sim_idempotency_key(
@@ -156,14 +350,15 @@ class RealPaymentsExecutor:
                     async with action_db_lock:
                         async with session.begin_nested():
                             service = PaymentService(session)
-                            res = await service.create_payment_internal(
+                            staged = await service.create_payment_internal_staged(
                                 sender_id,
                                 to_pid=str(action.receiver_pid),
                                 equivalent=str(action.equivalent),
                                 amount=str(action.amount),
                                 idempotency_key=idem,
-                                commit=False,
                             )
+
+                    res = staged.result
 
                     status = str(res.status or "")
 
@@ -194,6 +389,7 @@ class RealPaymentsExecutor:
                         None,
                         float(avg_route_len),
                         route_edges,
+                        staged.post_commit_effects,
                     )
                 except Exception as e:
                     code = "INTERNAL_ERROR"
@@ -235,6 +431,7 @@ class RealPaymentsExecutor:
                         err_details,
                         0.0,
                         [],
+                        None,
                     )
                 finally:
                     with self._lock:
@@ -257,6 +454,7 @@ class RealPaymentsExecutor:
                 list[tuple[str, str]],
                 list[dict[str, Any]] | None,
                 list[dict[str, Any]] | None,
+                PaymentPostCommitEffects | None,
             ],
         ] = {}
 
@@ -271,7 +469,7 @@ class RealPaymentsExecutor:
             d["route_len_sum"] = float(d.get("route_len_sum", 0.0)) + float(route_len)
             d["route_len_n"] = float(d.get("route_len_n", 0.0)) + 1.0
 
-        def _emit_if_ready() -> None:
+        def _record_if_ready() -> None:
             nonlocal next_seq, committed, rejected, errors, timeouts
             while True:
                 item = ready.get(next_seq)
@@ -291,6 +489,7 @@ class RealPaymentsExecutor:
                     route_edges,
                     edge_patch,
                     node_patch,
+                    payment_effects,
                 ) = item
 
                 edges_pairs = route_edges or [(sender_pid, receiver_pid)]
@@ -311,33 +510,18 @@ class RealPaymentsExecutor:
                         for a, b in edges_pairs:
                             _edge_inc(eq, a, b, "rejected")
 
-                    with self._lock:
-                        run.attempts_total += 1
-                        run.errors_total += 1
-                        if err_code == "PAYMENT_TIMEOUT":
-                            run.timeouts_total += 1
-                        run._error_timestamps.append(time.time())
-                        cutoff = time.time() - 60.0
-                        while run._error_timestamps and run._error_timestamps[0] < cutoff:
-                            run._error_timestamps.popleft()
-                        run.last_error = {
-                            "code": err_code,
-                            "message": str((err_details or {}).get("message") or err_code),
-                            "at": self._utc_now().isoformat(),
-                        }
-                        run.last_event_type = "tx.failed"
-
-                    emitter.emit_tx_failed(
-                        run_id=run_id,
-                        run=run,
-                        equivalent=eq,
-                        from_pid=sender_pid,
-                        to_pid=receiver_pid,
-                        error_code=str(err_code),
-                        error_message=str(
-                            (err_details or {}).get("message") or err_code
-                        ),
-                        error_details=err_details,
+                    deferred_effects.items.append(
+                        _PaymentObservation(
+                            seq=next_seq,
+                            outcome="error",
+                            equivalent=eq,
+                            sender_pid=sender_pid,
+                            receiver_pid=receiver_pid,
+                            amount=amount,
+                            edges=[{"from": a, "to": b} for a, b in edges_pairs],
+                            error_code=str(err_code),
+                            error_details=err_details,
+                        )
                     )
                 else:
                     for a, b in edges_pairs:
@@ -351,55 +535,35 @@ class RealPaymentsExecutor:
                         if float(avg_route_len) > 0:
                             _route_add(eq, float(avg_route_len))
 
-                        emitter.emit_tx_updated(
-                            run_id=run_id,
-                            run=run,
-                            equivalent=eq,
-                            from_pid=sender_pid,
-                            to_pid=receiver_pid,
-                            amount=amount,
-                            amount_flyout=True,
-                            ttl_ms=1200,
-                            edges=[{"from": a, "to": b} for a, b in edges_pairs],
-                            node_badges=None,
-                            edge_patch=edge_patch,
-                            node_patch=node_patch,
-                        )
-                        with self._lock:
-                            run.last_event_type = "tx.updated"
-                            run.attempts_total += 1
-                            run.committed_total += 1
+                        if payment_effects is not None:
+                            deferred_effects.items.append(
+                                _PaymentObservation(
+                                    seq=next_seq,
+                                    outcome="committed",
+                                    payment_effects=payment_effects,
+                                    equivalent=eq,
+                                    sender_pid=sender_pid,
+                                    receiver_pid=receiver_pid,
+                                    amount=amount,
+                                    edges=[
+                                        {"from": a, "to": b} for a, b in edges_pairs
+                                    ],
+                                    edge_patch=edge_patch,
+                                    node_patch=node_patch,
+                                )
+                            )
                     else:
                         rejected += 1
                         _inc(eq, "rejected")
                         for a, b in edges_pairs:
                             _edge_inc(eq, a, b, "rejected")
 
-                        # Level 3 (delta check): emit a system-level audit drift event.
-                        try:
-                            details = (err_details or {}).get("details")
-                            if (
-                                isinstance(details, dict)
-                                and str(details.get("invariant") or "")
-                                == "PAYMENT_DELTA_DRIFT"
-                            ):
-                                emitter.emit_audit_drift(
-                                    run_id=run_id,
-                                    run=run,
-                                    equivalent=eq,
-                                    tick_index=int(run.tick_index or 0),
-                                    severity="critical",
-                                    total_drift=str(details.get("total_drift") or "0"),
-                                    drifts=list(details.get("drifts") or []),
-                                    source="delta_check",
-                                )
-                        except Exception:
-                            pass
-
                         try:
                             rejection_code = map_rejection_code(err_details)
                         except Exception:
-                            if self._should_warn_this_tick(run, key="map_rejection_code_failed"):
+                            if self._should_warn_this_tick(
+                                run, key="map_rejection_code_failed"
+                            ):
                                 self._logger.debug(
                                     "simulator.real.map_rejection_code_failed run_id=%s tick=%s",
                                     str(run.run_id),
@@ -409,27 +573,27 @@ class RealPaymentsExecutor:
                             rejection_code = "PAYMENT_REJECTED"
 
                         _rejection_code_inc(eq, rejection_code)
-
-                        with self._lock:
-                            run.last_event_type = "tx.failed"
-                            run.attempts_total += 1
-                            run.rejected_total += 1
-
-                        emitter.emit_tx_failed(
-                            run_id=run_id,
-                            run=run,
-                            equivalent=eq,
-                            from_pid=sender_pid,
-                            to_pid=receiver_pid,
-                            error_code=str(rejection_code),
-                            error_message=str(rejection_code),
-                            error_details=err_details,
+                        deferred_effects.items.append(
+                            _PaymentObservation(
+                                seq=next_seq,
+                                outcome="rejected",
+                                equivalent=eq,
+                                sender_pid=sender_pid,
+                                receiver_pid=receiver_pid,
+                                amount=amount,
+                                edges=[{"from": a, "to": b} for a, b in edges_pairs],
+                                error_code=str(rejection_code),
+                                error_details=err_details,
+                            )
                         )
 
                 with self._lock:
                     run.queue_depth = max(0, run.queue_depth - 1)
 
                 next_seq += 1
+
+        stop_requested = False
+        timeout_stop_triggered = False
 
         try:
             if tasks:
@@ -455,17 +619,18 @@ class RealPaymentsExecutor:
                         err_details,
                         avg_route_len,
                         route_edges,
+                        payment_effects,
                     ) = await t
 
                     if run.state != "running":
-                        break
+                        stop_requested = True
 
                     edge_patch_list: list[dict[str, Any]] | None = None
                     node_patch_list: list[dict[str, Any]] | None = None
 
                     async with action_db_lock:
                         try:
-                            if status == "COMMITTED":
+                            if status == "COMMITTED" and not stop_requested:
                                 edges_pairs = route_edges or [(sender_pid, receiver_pid)]
 
                                 helper: VizPatchHelper | None
@@ -565,27 +730,42 @@ class RealPaymentsExecutor:
                         route_edges,
                         edge_patch_list,
                         node_patch_list,
+                        payment_effects,
                     )
-                    _emit_if_ready()
+                    _record_if_ready()
 
                     emitted_since_yield += 1
                     if emitted_since_yield % 5 == 0:
                         await asyncio.sleep(0)
 
-                    if max_timeouts_per_tick > 0 and timeouts >= max_timeouts_per_tick:
-                        await fail_run(
-                            run_id,
-                            "REAL_MODE_TOO_MANY_TIMEOUTS",
-                            f"Too many payment timeouts in one tick: {timeouts}",
-                        )
-                        break
+                    if (
+                        max_timeouts_per_tick > 0
+                        and timeouts >= max_timeouts_per_tick
+                        and not timeout_stop_triggered
+                    ):
+                        timeout_stop_triggered = True
+                        try:
+                            await fail_run(
+                                run_id,
+                                "REAL_MODE_TOO_MANY_TIMEOUTS",
+                                f"Too many payment timeouts in one tick: {timeouts}",
+                            )
+                        except Exception:
+                            self._logger.warning(
+                                "simulator.real.fail_run_after_timeout_failed run_id=%s",
+                                str(run_id),
+                                exc_info=True,
+                            )
+                        stop_requested = True
         finally:
             for task in tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-        _emit_if_ready()
+        _record_if_ready()
+        if run.state != "running":
+            stop_requested = True
 
         with self._lock:
             run._real_in_flight = 0
@@ -610,4 +790,6 @@ class RealPaymentsExecutor:
             per_eq_route=per_eq_route,
             per_eq_edge_stats=per_eq_edge_stats,
             rejection_codes_by_eq=rejection_codes_by_eq,
+            deferred_effects=deferred_effects,
+            stop_requested=stop_requested,
         )

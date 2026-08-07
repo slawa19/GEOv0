@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, List, Tuple, Awaitable, Callable, TypeVar
 from uuid import UUID
 
-from sqlalchemy import select, and_, delete, update, func, or_, text
+from sqlalchemy import select, and_, delete, update, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm.exc import StaleDataError
@@ -381,10 +381,11 @@ class PaymentEngine:
                 await self.session.flush()
 
             logger.info("event=payment.prepared tx_id=%s", tx_id)
-            try:
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
-            except Exception:
-                pass
+            if commit:
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
+                except Exception:
+                    pass
             return True
 
         if not commit:
@@ -615,10 +616,11 @@ class PaymentEngine:
             else:
                 await self.session.flush()
             logger.info("event=payment.prepared tx_id=%s multipath=true", tx_id)
-            try:
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
-            except Exception:
-                pass
+            if commit:
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
+                except Exception:
+                    pass
             return True
 
         if not commit:
@@ -873,10 +875,11 @@ class PaymentEngine:
             else:
                 await self.session.flush()
             logger.info("event=payment.committed tx_id=%s", tx_id)
-            try:
-                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
-            except Exception:
-                pass
+            if commit:
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
+                except Exception:
+                    pass
             return True
 
         if not commit:

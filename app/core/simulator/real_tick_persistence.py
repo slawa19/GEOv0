@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Callable
@@ -35,6 +36,56 @@ class RealTickPersistence:
         self._real_last_tick_write_every_ms = int(real_last_tick_write_every_ms)
         self._real_artifacts_sync_every_ms = int(real_artifacts_sync_every_ms)
 
+    def _apply_callback(self, callback: Callable[[], Any] | None, *, kind: str) -> None:
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            self._logger.warning(
+                "simulator.real.payment_%s_callback_failed",
+                kind,
+                exc_info=True,
+            )
+
+    async def _rollback_after_commit_failure(
+        self,
+        session: Any,
+        on_rollback: Callable[[], Any] | None,
+    ) -> None:
+        try:
+            await asyncio.shield(session.rollback())
+        except Exception:
+            self._logger.warning(
+                "simulator.real.rollback_after_commit_failure_failed",
+                exc_info=True,
+            )
+        self._apply_callback(on_rollback, kind="rollback")
+
+    async def _commit_and_resolve(
+        self,
+        session: Any,
+        *,
+        on_commit: Callable[[], Any] | None,
+        on_rollback: Callable[[], Any] | None,
+    ) -> None:
+        commit_task = asyncio.create_task(session.commit())
+        try:
+            await asyncio.shield(commit_task)
+        except asyncio.CancelledError:
+            try:
+                await asyncio.shield(commit_task)
+            except (asyncio.CancelledError, Exception):
+                await self._rollback_after_commit_failure(session, on_rollback)
+            else:
+                self._apply_callback(on_commit, kind="post_commit")
+            raise
+        except Exception:
+            await self._rollback_after_commit_failure(session, on_rollback)
+            raise
+        else:
+            self._apply_callback(on_commit, kind="post_commit")
+
     async def persist_tick_tail(
         self,
         *,
@@ -50,6 +101,8 @@ class RealTickPersistence:
         per_eq: dict[str, Any],
         per_eq_metric_values: dict[str, dict[str, float]],
         per_eq_edge_stats: dict[str, Any],
+        on_commit: Callable[[], Any] | None = None,
+        on_rollback: Callable[[], Any] | None = None,
     ) -> None:
         computed_at = self._utc_now()
         with self._lock:
@@ -102,21 +155,21 @@ class RealTickPersistence:
             with self._lock:
                 run._real_last_tick_storage_flushed_tick = int(run.tick_index)
 
-        try:
-            commit_t0 = time.monotonic()
-            await session.commit()
-            commit_ms = (time.monotonic() - commit_t0) * 1000.0
-            if commit_ms > 500.0:
-                self._logger.warning(
-                    "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
-                    str(run.run_id),
-                    int(run.tick_index),
-                    int(commit_ms),
-                    int((time.monotonic() - tick_t0) * 1000.0),
-                )
-        except Exception:
-            await session.rollback()
-            raise
+        commit_t0 = time.monotonic()
+        await self._commit_and_resolve(
+            session,
+            on_commit=on_commit,
+            on_rollback=on_rollback,
+        )
+        commit_ms = (time.monotonic() - commit_t0) * 1000.0
+        if commit_ms > 500.0:
+            self._logger.warning(
+                "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
+                str(run.run_id),
+                int(run.tick_index),
+                int(commit_ms),
+                int((time.monotonic() - tick_t0) * 1000.0),
+            )
 
         now_ms = int(time.time() * 1000)
         tick_write_every_ms = int(self._real_last_tick_write_every_ms)

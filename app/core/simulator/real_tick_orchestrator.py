@@ -189,7 +189,7 @@ class RealTickOrchestrator:
                 str(run_id),
                 exc_info=True,
             )
-        if task is not None:
+        if task is not None and task is not asyncio.current_task():
             task.cancel()
 
         if clearing_task is not None:
@@ -230,6 +230,7 @@ class RealTickOrchestrator:
 
         try:
             async with db_session.AsyncSessionLocal() as session:
+                payments_phase = None
                 try:
                     if not run._real_seeded:
                         with rr._lock:
@@ -346,6 +347,8 @@ class RealTickOrchestrator:
                         trust_drift_engine=rr._trust_drift_engine,
                         build_edge_patch_for_equivalent=rr._build_edge_patch_for_equivalent,
                         broadcast_topology_edge_patch=rr._broadcast_topology_edge_patch,
+                        on_commit=payments_phase.apply_deferred_effects,
+                        on_rollback=payments_phase.apply_rollback_observations,
                     )
 
                     await rr._real_tick_metrics.populate_per_eq_metric_values(
@@ -372,6 +375,8 @@ class RealTickOrchestrator:
                         per_eq=per_eq,
                         per_eq_metric_values=per_eq_metric_values,
                         per_eq_edge_stats=per_eq_edge_stats,
+                        on_commit=payments_phase.apply_deferred_effects,
+                        on_rollback=payments_phase.apply_rollback_observations,
                     )
 
                     # ── Post-tick audit (best-effort): detect participant drift ──
@@ -489,6 +494,9 @@ class RealTickOrchestrator:
                         await session.rollback()
                     except Exception:
                         pass
+                    else:
+                        if payments_phase is not None:
+                            payments_phase.apply_rollback_observations()
                     raise
         except Exception as e:
             rr._logger.warning(

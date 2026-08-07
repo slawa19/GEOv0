@@ -7,7 +7,11 @@ from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_payments_executor import RealPaymentsExecutor, RealPaymentsResult
+from app.core.simulator.real_payments_executor import (
+    DeferredRealPaymentEffects,
+    RealPaymentsExecutor,
+    RealPaymentsResult,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,17 @@ class RealTickPaymentsPhaseResult:
     # Rejection codes breakdown per equivalent (for adaptive clearing policy).
     # Contract: always a dict (never None).
     rejection_codes_by_eq: dict[str, dict[str, int]]
+    deferred_effects: DeferredRealPaymentEffects | None = None
+
+    def apply_deferred_effects(self) -> bool:
+        if self.deferred_effects is None:
+            return False
+        return self.deferred_effects.apply_after_commit()
+
+    def apply_rollback_observations(self) -> bool:
+        if self.deferred_effects is None:
+            return False
+        return self.deferred_effects.apply_after_rollback()
 
 
 class RealTickPaymentsCoordinator:
@@ -119,15 +134,19 @@ class RealTickPaymentsCoordinator:
                 rejected,
             )
 
-        if int(max_errors_total) > 0 and run.errors_total >= int(max_errors_total):
+        should_stop = bool(payments_res.stop_requested)
+        projected_errors_total = int(run.errors_total) + int(errors)
+        if (
+            int(max_errors_total) > 0
+            and projected_errors_total >= int(max_errors_total)
+            and not should_stop
+        ):
             await fail_run(
                 run_id,
                 "REAL_MODE_TOO_MANY_ERRORS",
-                f"Too many total errors: {run.errors_total}",
+                f"Too many total errors: {projected_errors_total}",
             )
             should_stop = True
-        else:
-            should_stop = False
 
         res = RealTickPaymentsPhaseResult(
             debt_snapshot=debt_snapshot,
@@ -142,6 +161,11 @@ class RealTickPaymentsCoordinator:
             per_eq_edge_stats=dict(payments_res.per_eq_edge_stats),
             stall_ticks=stall_ticks,
             rejection_codes_by_eq=dict(getattr(payments_res, "rejection_codes_by_eq", {}) or {}),
+            deferred_effects=payments_res.deferred_effects,
         )
+
+        if should_stop:
+            await session.rollback()
+            res.apply_rollback_observations()
 
         return res, should_stop

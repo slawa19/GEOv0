@@ -2,7 +2,7 @@ import uuid
 import hashlib
 import logging
 import asyncio
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Literal
 
@@ -38,6 +38,63 @@ from app.utils.error_codes import ErrorCode
 from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_amount_decimal
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PaymentPostCommitEffects:
+    """Best-effort effects that are only valid after the DB transaction commits."""
+
+    equivalent: str
+    recipient_pid: str
+    event_payload: dict[str, str]
+    invalidate_routing_cache: bool = True
+    include_engine_success_metrics: bool = False
+    _applied: bool = field(default=False, init=False, repr=False)
+
+    def apply_once(self) -> bool:
+        if self._applied:
+            return False
+        # Mark first: these effects are process-local and cannot be made exactly-once
+        # across a crash without a transactional outbox.
+        self._applied = True
+
+        if self.invalidate_routing_cache:
+            try:
+                PaymentRouter.invalidate_cache(self.equivalent)
+            except Exception:
+                logger.warning(
+                    "event=payment.post_commit.cache_invalidation_failed equivalent=%s",
+                    self.equivalent,
+                    exc_info=True,
+                )
+
+        try:
+            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+            PAYMENT_EVENTS_TOTAL.labels(event="create", result="success").inc()
+            if self.include_engine_success_metrics:
+                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
+                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
+        except Exception:
+            pass
+
+        try:
+            from app.utils.event_bus import event_bus
+
+            event_bus.publish(
+                recipient_pid=self.recipient_pid,
+                event="payment.received",
+                payload=dict(self.event_payload),
+            )
+        except Exception:
+            pass
+        return True
+
+
+@dataclass(frozen=True)
+class StagedPaymentResult:
+    result: PaymentResult
+    post_commit_effects: PaymentPostCommitEffects | None
 
 
 class PaymentService:
@@ -81,6 +138,12 @@ class PaymentService:
           in-process code.
         """
 
+        if not commit:
+            raise ValueError(
+                "commit=False is staged work; use create_payment_internal_staged() "
+                "and apply its post-commit effects after the caller commits"
+            )
+
         # Internal-only path: tx_id is generated in-process (or derived from idempotency_key)
         # because no external caller is responsible for retries here.
         tx_id = (idempotency_key or "").strip() or str(uuid.uuid4())
@@ -101,6 +164,43 @@ class PaymentService:
             commit=commit,
         )
 
+    async def create_payment_internal_staged(
+        self,
+        sender_id: uuid.UUID,
+        *,
+        to_pid: str,
+        equivalent: str,
+        amount: str,
+        description: str | None = None,
+        constraints: PaymentConstraints | None = None,
+        idempotency_key: str | None = None,
+    ) -> StagedPaymentResult:
+        """Flush an internal payment into the caller transaction without publishing it."""
+
+        tx_id = (idempotency_key or "").strip() or str(uuid.uuid4())
+        req = PaymentCreateRequest(
+            tx_id=tx_id,
+            to=to_pid,
+            equivalent=equivalent,
+            amount=amount,
+            description=description,
+            constraints=constraints,
+            signature="__internal__",
+        )
+        deferred_effects: list[PaymentPostCommitEffects] = []
+        result = await self._create_payment_impl(
+            sender_id,
+            req,
+            idempotency_key=idempotency_key,
+            require_signature=False,
+            commit=False,
+            deferred_effects=deferred_effects,
+        )
+        return StagedPaymentResult(
+            result=result,
+            post_commit_effects=(deferred_effects[0] if deferred_effects else None),
+        )
+
     async def _create_payment_impl(
         self,
         sender_id: uuid.UUID,
@@ -109,6 +209,7 @@ class PaymentService:
         idempotency_key: str | None = None,
         require_signature: bool,
         commit: bool,
+        deferred_effects: list[PaymentPostCommitEffects] | None = None,
     ) -> PaymentResult:
         """
         Create and execute a payment.
@@ -329,8 +430,16 @@ class PaymentService:
             async with asyncio.timeout(total_timeout_s):
                 # Build routing graph + compute routes under spec-aligned timeout budget.
                 try:
+                    if deferred_effects is None:
+                        build_graph = self.router.build_graph(equivalent.code)
+                    else:
+                        build_graph = self.router.build_graph(
+                            equivalent.code,
+                            use_shared_cache=False,
+                        )
                     await asyncio.wait_for(
-                        self.router.build_graph(equivalent.code), timeout=routing_timeout_s
+                        build_graph,
+                        timeout=routing_timeout_s,
                     )
                 except asyncio.TimeoutError:
                     raise TimeoutException("Routing timed out")
@@ -458,7 +567,8 @@ class PaymentService:
                         )
 
                     # Routing graph may incorporate debts/locks; invalidate any TTL cache.
-                    PaymentRouter.invalidate_cache(str(request.equivalent))
+                    if deferred_effects is None:
+                        PaymentRouter.invalidate_cache(str(request.equivalent))
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:
@@ -504,7 +614,8 @@ class PaymentService:
                     )
 
                     # Debts/locks changed — never serve stale routing graphs.
-                    PaymentRouter.invalidate_cache(str(request.equivalent))
+                    if deferred_effects is None:
+                        PaymentRouter.invalidate_cache(str(request.equivalent))
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:
@@ -651,33 +762,7 @@ class PaymentService:
             PaymentRoute(path=path, amount=str(route_amount))
             for path, route_amount in routes_found
         ]
-        try:
-            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-            PAYMENT_EVENTS_TOTAL.labels(event="create", result="success").inc()
-            PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
-            PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
-        except Exception:
-            pass
-
-        # Best-effort real-time event for receivers.
-        try:
-            from app.utils.event_bus import event_bus
-
-            event_bus.publish(
-                recipient_pid=receiver.pid,
-                event="payment.received",
-                payload={
-                    "tx_id": tx_id_str,
-                    "from": sender.pid,
-                    "to": receiver.pid,
-                    "equivalent": equivalent.code,
-                    "amount": str(amount),
-                },
-            )
-        except Exception:
-            pass
-        return PaymentResult(
+        result = PaymentResult(
             tx_id=tx_id_str,
             status="COMMITTED",
             **{"from": sender.pid},
@@ -688,6 +773,24 @@ class PaymentService:
             created_at=created_at,
             committed_at=committed_at,
         )
+        effects = PaymentPostCommitEffects(
+            equivalent=str(equivalent.code),
+            recipient_pid=str(receiver.pid),
+            event_payload={
+                "tx_id": tx_id_str,
+                "from": str(sender.pid),
+                "to": str(receiver.pid),
+                "equivalent": str(equivalent.code),
+                "amount": str(amount),
+            },
+            invalidate_routing_cache=deferred_effects is not None,
+            include_engine_success_metrics=deferred_effects is not None,
+        )
+        if deferred_effects is None:
+            effects.apply_once()
+        else:
+            deferred_effects.append(effects)
+        return result
 
     async def get_payment(self, tx_id: str) -> PaymentResult:
         tx = (
