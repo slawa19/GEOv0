@@ -3,8 +3,8 @@
 - **Date:** 2026-08-07
 - **Specification:** `specs/001-codebase-renovation/spec.md`
 - **Executable backlog:** `specs/001-codebase-renovation/tasks.md`
-- **State:** internally and externally reviewed; Claude remediation check and
-  repository-owner approval remain. Product implementation remains paused.
+- **State:** internally and externally reviewed; ready for repository-owner
+  approval. Product implementation remains paused.
 
 ## 1. Objective and project fit
 

@@ -841,7 +841,8 @@ used.
 - **Status:** PLANNED
 - **Rationale / value:** Verify effects across sibling paths and catch regressions
   introduced by the renovation itself before declaring the old-code cleanup done.
-- **Evidence paths:** diffs and acceptance evidence for REN-001 through REN-014;
+- **Evidence paths:** diffs and acceptance evidence for REN-001 through REN-014 and
+  REN-016;
   `git log` for each owner surface; CI artifacts; spec changelog and known-open
   decisions.
 - **Exact scope:** review only the frozen plan's changed product surfaces and their
@@ -878,9 +879,9 @@ used.
 ```text
 owner-approved plan
   → REN-003/005/006/008/013A runtime evidence
-  → REN-010 backend ownership and bounded PostgreSQL proof
+  → REN-010A backend ownership and bounded PostgreSQL proof
   → REN-009 selected REST/SSE contracts
-  → REN-011 Admin operator paths
+  → REN-011 + REN-010B Admin operator paths
   → REN-012B/012C Simulator v2 paths (REN-012A only if triggered)
   → REN-013B/014/016 bounded cleanup and current docs
   → REN-015 closure

@@ -218,6 +218,15 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-07:** The single allowed Claude remediation review checked exact
+  plan-only delta `fec834f..c0611e7` in a second credential-free clone. Claude Code
+  `2.1.224` exited `0` with complete JSON and resolved `claude-opus-5` at high
+  effort. It confirmed all eight original findings resolved, found no new P1 or
+  overengineering, and identified one residual P2 in the dependency diagram:
+  parent `REN-010` obscured the Phase 2/4 `REN-010A/B` split. The diagram and the
+  adjacent stale REN-015 evidence enumeration were corrected without a third
+  external cycle. The plan is ready for owner review; implementation remains
+  paused until approval is recorded with the exact plan commit SHA.
 - **2026-08-07:** Claude Code `2.1.224` reviewed the exact plan-only range
   `69acb2a..fec834f` from a credential-free standalone clone. The read-only run
   exited `0` with complete JSON and resolved `claude-opus-5` at high effort. Its
