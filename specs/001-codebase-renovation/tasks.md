@@ -130,8 +130,9 @@ used.
   PostgreSQL tier now uses the registered `postgres` marker through
   `verify_local.ps1 -BackendMarker postgres` instead of a per-file CI allowlist;
   collect-only selected `10` tests, and the final local backend tier passed
-  (`683 passed`, `13 skipped`, `4` expensive deselected). SQLite skips and local
-  collection are not PostgreSQL runtime evidence. Disposable PostgreSQL,
+  (`683 passed`, `13 skipped`, `4` expensive deselected). The marker tier now
+  rejects a missing or SQLite test URL before pytest instead of succeeding through
+  dialect skips. Local collection is not PostgreSQL runtime evidence. Disposable PostgreSQL,
   Playwright jobs, and a published GitHub Actions run remain unverified.
 - **Rationale / value:** A workflow and aggregate runner now exist in the working
   tree, but they are not accepted until clean-checkout jobs and every required
@@ -602,8 +603,8 @@ used.
   `test_*_postgres.py` + module-marker policy, and the scheduled/manual job calls
   the canonical runner with `-BackendMarker postgres -BackendSelector
   tests/integration`. Collect-only selected all `10` current PostgreSQL tests;
-  the same canonical command produced `10 skipped`, `86 deselected` on SQLite,
-  which proves selection/fail-safe behavior but not PostgreSQL semantics. The
+  the same canonical command now fails before pytest when its URL is missing or
+  SQLite, preventing a skip-only false-green PostgreSQL job. The
   final local backend tier passed (`683 passed`, `13 skipped`, `4` expensive
   deselected); sequential `SIM-UNIT` previously passed `637` tests and Simulator
   build exited `0`. Parallel-worker, live PostgreSQL and E2E evidence remain.

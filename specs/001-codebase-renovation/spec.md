@@ -198,6 +198,16 @@ The renovation is complete only when all of the following have evidence linked f
   WSL. The result is `UNVERIFIED`, not a no-findings review; temporary clone and
   bundle artifacts were removed. Internal adversarial review and local gates are
   recorded separately in REN-003/REN-013 evidence.
+- **2026-08-07:** Correction to the preceding environment diagnosis: Claude Code
+  `2.1.224` remained available in the newest VS Code extension and was missed
+  because only PATH, standalone locations and WSL were probed. Dynamic extension
+  resolution reran frozen `feef4a2..4eb31fe`; the local `/code-review` completed
+  with exit `0`, complete JSON (`is_error=false`) and resolved `claude-opus-5` at
+  high effort. Two findings were reproduced as P2: a skip-only SQLite false-green
+  for the PostgreSQL marker tier and a non-portable PowerShell output path. Both
+  were fixed with fail-closed backend validation and separator-neutral path
+  construction. Three hypothetical guard/naming variants did not expose a current
+  omitted test or broken gate and did not expand the slice.
 - **2026-08-07:** REN-014 entered `IN PROGRESS` with a bounded authority/front-door
   slice. Root and RU Simulator indexes now distinguish observed behavior,
   accepted intent, OpenAPI, translations, target/concept material and archives;

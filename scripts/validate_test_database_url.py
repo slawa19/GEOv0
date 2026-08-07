@@ -7,10 +7,12 @@ copied into process arguments or logs.  Importers can use
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
 from pathlib import Path, PurePosixPath
+from typing import Sequence
 
 from sqlalchemy.engine import URL, make_url
 
@@ -69,13 +71,15 @@ def assert_safe_test_database_url(
     *,
     allow_destructive_reset: str | None,
     repo_root: Path,
+    required_backend: str | None = None,
 ) -> URL:
     """Validate that a test URL cannot silently target developer data.
 
     SQLite is accepted only for an in-memory DB, the legacy explicitly pytest
     DB, or the canonical task-local ``.../test.db`` layout.  PostgreSQL also
     requires the destructive-reset opt-in, but the opt-in alone is never enough:
-    the database name must match ``geov0_test_*``.
+    the database name must match ``geov0_test_*``.  ``required_backend`` lets a
+    test tier reject an otherwise safe URL for the wrong database backend.
     """
 
     url = _parse_url(database_url)
@@ -87,6 +91,14 @@ def assert_safe_test_database_url(
             raise UnsafeTestDatabaseError(
                 "SQLite test DB must be :memory: or resolve inside the repository "
                 "to .pytest_geov0.db or .local-run/test-runs/<task>/test.db."
+            )
+        if required_backend == "postgresql":
+            raise UnsafeTestDatabaseError(
+                "This test tier requires the PostgreSQL database backend."
+            )
+        if required_backend is not None:
+            raise UnsafeTestDatabaseError(
+                f"Unsupported required test database backend: {required_backend}."
             )
         return url
 
@@ -104,16 +116,28 @@ def assert_safe_test_database_url(
         raise UnsafeTestDatabaseError(
             "PostgreSQL test schema reset requires GEO_TEST_ALLOW_DB_RESET=1."
         )
+    if required_backend not in (None, "postgresql"):
+        raise UnsafeTestDatabaseError(
+            f"Unsupported required test database backend: {required_backend}."
+        )
     return url
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--require-backend",
+        choices=("postgresql",),
+        help="Reject a safe test URL unless it uses this database backend.",
+    )
+    args = parser.parse_args(argv)
     repo_root = Path(__file__).resolve().parents[1]
     try:
         url = assert_safe_test_database_url(
             os.environ.get("TEST_DATABASE_URL", ""),
             allow_destructive_reset=os.environ.get("GEO_TEST_ALLOW_DB_RESET"),
             repo_root=repo_root,
+            required_backend=args.require_backend,
         )
     except UnsafeTestDatabaseError as exc:
         print(f"Unsafe test database configuration: {exc}", file=sys.stderr)

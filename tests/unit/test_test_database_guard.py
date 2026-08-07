@@ -5,6 +5,7 @@ import pytest
 from scripts.validate_test_database_url import (
     UnsafeTestDatabaseError,
     assert_safe_test_database_url,
+    main,
 )
 
 
@@ -128,6 +129,51 @@ def test_accepts_explicit_postgres_test_database_with_reset_opt_in(
     )
 
     assert parsed.database == "geov0_test_agent_guard"
+
+
+def test_accepts_safe_postgres_when_postgresql_backend_is_required(
+    tmp_path: Path,
+) -> None:
+    parsed = assert_safe_test_database_url(
+        "postgresql+asyncpg://geo:secret@localhost/geov0_test_agent_guard",
+        allow_destructive_reset="1",
+        repo_root=tmp_path,
+        required_backend="postgresql",
+    )
+
+    assert parsed.get_backend_name() == "postgresql"
+
+
+def test_rejects_safe_sqlite_when_postgresql_backend_is_required(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        UnsafeTestDatabaseError, match="requires the PostgreSQL database backend"
+    ):
+        assert_safe_test_database_url(
+            "sqlite+aiosqlite:///:memory:",
+            allow_destructive_reset=None,
+            repo_root=tmp_path,
+            required_backend="postgresql",
+        )
+
+
+def test_cli_accepts_required_postgresql_without_printing_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv(
+        "TEST_DATABASE_URL",
+        "postgresql+asyncpg://geo:secret@localhost/geov0_test_agent_guard",
+    )
+    monkeypatch.setenv("GEO_TEST_ALLOW_DB_RESET", "1")
+
+    assert main(["--require-backend", "postgresql"]) == 0
+
+    captured = capsys.readouterr()
+    assert "backend=postgresql" in captured.out
+    assert "secret" not in captured.out
+    assert "secret" not in captured.err
 
 
 def test_rejects_postgres_test_database_without_reset_opt_in(
