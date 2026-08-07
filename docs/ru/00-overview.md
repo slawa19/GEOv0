@@ -3,6 +3,8 @@
 **Версия:** 0.1  
 **Дата:** Ноябрь 2025
 
+> **Классификация:** vision/target overview. Документ объясняет замысел GEO v0.1 и целевое состояние, но не подтверждает, что каждая перечисленная возможность или метрика реализована сейчас. Текущее поведение проверяется по коду, runtime и тестам; wire-контракт — по [`api/openapi.yaml`](../../api/openapi.yaml); принятые решения — по [`09-decisions-and-defaults.md`](09-decisions-and-defaults.md). Правила приоритета описаны в [`documentation-rules.md`](documentation-rules.md).
+
 ---
 
 ## Что такое GEO

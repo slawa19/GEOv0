@@ -192,3 +192,16 @@ The renovation is complete only when all of the following have evidence linked f
   reproducibility. The final local backend tier passed (`683 passed`, `13
   skipped`, `4` expensive deselected); live disposable PostgreSQL and a published
   workflow run remain unverified, so neither task is marked complete.
+- **2026-08-07:** The planned external Claude review of frozen
+  `feef4a2..4eb31fe` did not start: the prepared standalone clone was clean and
+  credential-free, but Claude Code was absent from both the Windows user PATH and
+  WSL. The result is `UNVERIFIED`, not a no-findings review; temporary clone and
+  bundle artifacts were removed. Internal adversarial review and local gates are
+  recorded separately in REN-003/REN-013 evidence.
+- **2026-08-07:** REN-014 entered `IN PROGRESS` with a bounded authority/front-door
+  slice. Root and RU Simulator indexes now distinguish observed behavior,
+  accepted intent, OpenAPI, translations, target/concept material and archives;
+  confirmed broken front-door links and the repository-wide translation parity
+  claim were removed. All `79` changed local links resolved, and a separate
+  adversarial reviewer closed two README navigation/authority findings. Deeper
+  document-body reconciliation and archive/translation classification remain.

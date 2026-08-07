@@ -1,31 +1,20 @@
 # Simulator (RU)
 
-Входная точка для документации симулятора: **backend (runner + SSE + интеграция с core)** и **frontend (UI/визуализация)**.
+Текущая входная точка документации симулятора. Реализация разделена на backend (runner, REST/SSE, интеграция с core) и frontend (`simulator-ui/v2`).
 
-## Быстрые ссылки (актуальные)
+## Авторитетность
 
-- Сценарии и движок запуска (обзор + техподробности): [scenarios-and-engine.md](scenarios-and-engine.md)
-- Реалистичные сценарии (realistic-v2): правила входных данных + чек-лист: [realistic-scenarios.md](realistic-scenarios.md)
-- Online-анализ проблем экономики сети (insights/уведомления): [network-economy-analyzer-spec.md](network-economy-analyzer-spec.md)
-- Поведенческая модель экономики (real mode: behaviorProfiles/events): [backend/behavior-model-spec.md](backend/behavior-model-spec.md)
+- REST paths и wire schema: [`api/openapi.yaml`](../../../api/openapi.yaml).
+- Фактическое поведение: [`app/api/v1/simulator.py`](../../../app/api/v1/simulator.py), код runner/UI, runtime-наблюдение и сфокусированные тесты.
+- Принятые объяснения и решения: текущие документы из индексов ниже.
+- `archive/`, `concept/` и датированные design/spec-файлы не доказывают текущую реализацию без сверки с кодом и тестами.
 
-- Контракт API симулятора (snapshot + events + `viz_*`): [frontend/docs/api.md](frontend/docs/api.md)
-- Инструкция пользователя по HUD (элементы + поведение): [frontend/docs/hud-user-guide.md](frontend/docs/hud-user-guide.md)
-- Backend: интеграция с платежами/клирингом и каноничные контракты: [backend/payment-integration.md](backend/payment-integration.md)
-- Backend: протокол realtime (SSE/WS payload): [backend/ws-protocol.md](backend/ws-protocol.md)
-- Backend: алгоритм runner: [backend/runner-algorithm.md](backend/runner-algorithm.md)
-- Backend: адаптивная политика клиринга (feedback-control): [backend/adaptive-clearing-policy.md](backend/adaptive-clearing-policy.md)
-- Backend/UI: backend-driven demo mode (one pipeline) + Clearing Viz v2: [backend/backend-driven-demo-mode-spec.md](backend/backend-driven-demo-mode-spec.md)
-- **Interact Mode** ✅ — интерактивный режим (`?ui=interact`): ручные платежи, управление trustlines, клиринг, SystemBalance. 7 backend action endpoints + frontend UI. Руководство пользователя: [frontend/docs/interact-mode-user-guide.md](frontend/docs/interact-mode-user-guide.md)
-- **Anonymous visitors** ✅ — cookie-based сессии (`geo_sim_sid`, HMAC-SHA256) позволяют анонимным посетителям запускать свои simulator run'ы без регистрации. Per-owner изоляция, admin control plane, CSRF защита. **Полностью реализовано** (backend unit + frontend vitest — green). См. [спецификацию](backend/anonymous-visitors-cookie-runs-spec.md) и [acceptance criteria](backend/acceptance-criteria.md).
-- Спеки UI/визуала:
-  - [frontend/docs/specs/GEO-game-interface-spec.md](frontend/docs/specs/GEO-game-interface-spec.md)
-  - [frontend/docs/specs/GEO-visual-demo-fast-mock.md](frontend/docs/specs/GEO-visual-demo-fast-mock.md)
-- UI perf/quality policy (software-only / low FPS): [frontend/docs/performance-and-quality-policy.md](frontend/docs/performance-and-quality-policy.md)
-- Референсы экранов: [frontend/screen-prototypes/](frontend/screen-prototypes/)
+## Текущие входные точки
 
-## Навигация
+- [Backend index](backend/README.md) — API/runner/SSE, сценарии, storage, observability и runbook.
+- [Frontend index](frontend/README.md) — current UI v2, API consumption, UX guides и активные правила разработки.
+- [Scenarios and engine](scenarios-and-engine.md) — обзор сценариев и движка.
+- [Realistic scenarios](realistic-scenarios.md) — формат и проверка realistic-v2 сценариев.
+- [Network economy analyzer](network-economy-analyzer-spec.md) — design contract анализатора; реализацию проверять отдельно.
 
-- Backend: [backend/](backend/)
-- Frontend: [frontend/README.md](frontend/README.md)
-
+Исторические документы доступны из `archive/` внутри соответствующего домена и не являются current entrypoints.

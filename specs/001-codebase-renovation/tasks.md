@@ -643,12 +643,26 @@ used.
 - **Priority:** P1
 - **Owner surface:** `README.md`, `docs/en/`, `docs/ru/`, `docs/pl/`, archive
   indexes, config/deployment/API/simulator architecture docs
-- **Status:** PLANNED
+- **Status:** IN PROGRESS (2026-08-07)
+- **Partial evidence (2026-08-07):** Root and documentation indexes now expose a
+  single classified path to runtime, architecture intent, OpenAPI,
+  configuration, canonical testing and Simulator domains. Current RU decision
+  documents, EN/PL translations, target/concept material and archives have an
+  explicit precedence policy; the RU overview is labelled vision/target rather
+  than current implementation evidence. Simulator backend/frontend indexes
+  replace confirmed broken or archive-promoting front-door links. A focused scan
+  resolved all `79` local links in the changed front doors, and independent
+  adversarial review closed two stale README navigation/authority links. Broader
+  architecture/config body reconciliation, archive successor mapping and
+  per-document translation status remain; this entry does not complete REN-014.
 - **Rationale / value:** Current architecture prose describes planned modules that
   do not exist, current and archived simulator specs coexist, and translations can
   drift independently. Operators and agents need navigation and status, not a
   mechanical rewrite of every historical document.
-- **Evidence paths:** `docs/en/03-architecture.md:123-216`;
+- **Evidence paths:** `docs/README.md`; `docs/ru/documentation-rules.md`;
+  `docs/ru/simulator/README.md`; `docs/ru/simulator/backend/README.md`;
+  `docs/ru/simulator/frontend/README.md`;
+  `docs/en/03-architecture.md:123-216`;
   `docs/ru/03-architecture.md`; `docs/ru/config-reference.md:331-340`;
   `docs/ru/simulator/backend/`; `docs/**/archive/`;
   `docs/ru/documentation-rules.md`; `README.md:571-640`.

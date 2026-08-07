@@ -14,20 +14,38 @@ GEO is:
 - **not a blockchain** — no global ledger of all transactions
 - **not a bank** — hubs coordinate, but cannot spend on behalf of users
 
-This repository contains the **specification and architecture of GEO v0.1**, plus multilingual documentation (EN/RU/PL) for the first implementation targeting local communities and cooperatives.
+This repository contains the GEO v0.1 implementation, its API contract, and documentation. Russian documents carry the current accepted project decisions; English and Polish documents are dated translations or historical context unless a document explicitly says otherwise.
 
 ---
 
 <!-- CI badge: add after the published workflow has reliable run evidence -->
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Spec](https://img.shields.io/badge/spec-GEO%20v0.1-informational)
-![Docs](https://img.shields.io/badge/docs-EN%20%7C%20RU%20%7C%20PL-brightgreen)
+![Docs](https://img.shields.io/badge/docs-RU%20current%20%7C%20EN%2FPL%20translations-informational)
 ![License](https://img.shields.io/badge/license-TODO-lightgrey)
+
+---
+
+## Current entrypoints
+
+Use these front doors instead of inferring current behavior from similarly named or translated documents:
+
+| Need | Current entrypoint |
+|---|---|
+| Run the local stack | [Getting Started](#getting-started) (`scripts/run_local.ps1`) |
+| System architecture | [RU architecture](docs/ru/03-architecture.md) |
+| REST wire schema | [OpenAPI](api/openapi.yaml) |
+| Configuration | [RU configuration reference](docs/ru/config-reference.md) |
+| Required local tests | [Testing](#testing-single-entry-point) (`scripts/verify_local.ps1`) |
+| Simulator | [Simulator documentation](docs/ru/simulator/README.md) |
+
+The [documentation index](docs/README.md) defines authority and precedence when code, runtime evidence, tests, OpenAPI, or prose disagree.
 
 ---
 
 ## Table of Contents
 
+- [Current entrypoints](#current-entrypoints)
 - [Project Vision](#project-vision)
 - [Key Concepts](#key-concepts)
 - [Repository Layout](#repository-layout)
@@ -35,11 +53,8 @@ This repository contains the **specification and architecture of GEO v0.1**, plu
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Running the Hub](#running-the-hub)
-  - [Testing & Development](#testing--development)
+  - [Testing (single entry point)](#testing-single-entry-point)
 - [Documentation](#documentation)
-  - [English](#english)
-  - [Russian](#russian)
-  - [Polish](#polish)
 - [Contributing](#contributing)
   - [How to Contribute](#how-to-contribute)
   - [Translations](#translations)
@@ -174,18 +189,13 @@ GEOv0-PROJECT/
 ├── tests/                    # Tests
 ├── requirements.txt          # Python dependencies
 └── docs/
-    ├── en/                   # Main English docs
-    ├── ru/                   # Russian docs (source/original context)
-    └── pl/                   # Polish translations
+    ├── README.md             # Documentation authority and navigation
+    ├── en/                   # Dated translations / historical context
+    ├── ru/                   # Current accepted decisions and domain docs
+    └── pl/                   # Dated translations / historical context
 ```
 
-Key conceptual files (English):
-
-- `docs/en/00-overview.md` — short project overview
-- `docs/en/01-concepts.md` — key ideas, why GEO, why mutual credit
-- `docs/en/02-protocol-spec.md` — core protocol specification (GEO v0.1)
-- `docs/en/03-architecture.md` — architecture of the v0.1 community hub
-- `docs/en/concept/` — long‑form design notes and essays
+Start at [docs/README.md](docs/README.md). Do not assume filename parity across languages means semantic or date parity.
 
 ---
 
@@ -521,47 +531,9 @@ Docs:
 
 ## Documentation
 
-### English
+Start with the [documentation index](docs/README.md). It links to current RU project and domain front doors, identifies the OpenAPI contract, and classifies EN/PL translations, concepts, and archives.
 
-Core docs:
-
-- [00 — Overview](docs/en/00-overview.md)
-- [01 — Concepts](docs/en/01-concepts.md)
-- [02 — Protocol Specification](docs/en/02-protocol-spec.md)
-- [03 — Architecture](docs/en/03-architecture.md)
-- [04 — API Reference](docs/en/04-api-reference.md)
-- [05 — Deployment](docs/en/05-deployment.md)
-- [06 — Contributing](docs/en/06-contributing.md)
-
-Conceptual deep dives (`docs/en/concept/`):
-
-- [00 — Main context, concept & requirements](docs/en/concept/00-main-context-concept-requirements.md)
-- [01 — Discussion & Q&A](docs/en/concept/01-discussion-and-qa.md)
-- [02 — Protocol core ideas](docs/en/concept/02-protocol-core-ideas.md)
-- [03 — Existing GEO Protocol (overview)](docs/en/concept/03-existing-geo-protocol-overview.md)
-- [04 — Architecture ideas](docs/en/concept/04-architecture-ideas.md)
-- [05 — Architecture B (community‑hub)](docs/en/concept/05-architecture-b-community-hub.md)
-- [06 — Architecture revision v0.1](docs/en/concept/06-architecture-revision-v0.1.md)
-- [07 — GEO v0.1 basic credit network protocol](docs/en/concept/07-geo-v0.1-basic-credit-network-protocol.md)
-- [08 — Technology stack requirements](docs/en/concept/08-technology-stack-requirements.md)
-- [09 — Behavior simulator application](docs/en/concept/09-behavior-simulator-application.md)
-- [10 — Target community & marketing strategy](docs/en/concept/10-target-community-marketing-strategy.md)
-- [Article 1 — Fixing money without a revolution](docs/en/concept/article1-fixing-money-without-revolution.md)
-- [Article 2 — Fixing money without a revolution (v2)](docs/en/concept/article2-fixing-money-without-revolution.md)
-
-### Russian
-
-- `docs/ru/00-overview.md`
-- `docs/ru/01-concepts.md`
-- …
-- `docs/ru/concept/` — original long‑form materials.
-
-### Polish
-
-- `docs/pl/00-overview.md`
-- `docs/pl/01-concepts.md`
-- …
-- `docs/pl/concept/` — full translations of all major conceptual documents.
+Same-named EN, RU, and PL files are not guaranteed to be synchronized. A translation is informative unless it carries an explicit date and synchronization statement against a current authoritative source.
 
 ---
 
@@ -573,7 +545,9 @@ The project is **early‑stage** and contributions are welcome both on the **tec
 
 See:
 
-- [`docs/en/06-contributing.md`](docs/en/06-contributing.md)
+- [`docs/ru/06-contributing.md`](docs/ru/06-contributing.md)
+
+Test commands remain in [Testing (single entry point)](#testing-single-entry-point) and run through `scripts/verify_local.ps1`.
 
 High‑level areas where help is needed:
 
@@ -590,15 +564,15 @@ High‑level areas where help is needed:
 
 ### Translations
 
-Documentation is actively maintained in **EN**, **RU** and **PL**.
+Current accepted project decisions are maintained in **RU**. EN and PL are useful translations and historical context, but repository-wide parity is not claimed.
 
 If you want to help:
 
 - Fix wording / clarity in any language
 - Add missing translations
-- Keep conceptual docs in sync across languages
+- Record the source document and synchronization date when updating a translation
 
-Please follow the guidelines in `docs/en/06-contributing.md` and existing file naming conventions.
+Please follow [`docs/ru/06-contributing.md`](docs/ru/06-contributing.md) and existing file naming conventions.
 
 ---
 
