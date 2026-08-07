@@ -13,10 +13,12 @@ effect on every reachable path in scope.
 
 ## Execution freeze and authoritative remaining order
 
-**Implementation is paused.** Existing `DONE`/`IN PROGRESS` entries below record
-work already delivered; they do not authorize the next code change. The remaining
-program starts only after the owner approves `plan.md` following internal and
-Claude Code Opus 5 / High review.
+**Phase 1 is current.** On 2026-08-07 the repository owner approved the frozen
+plan at exact commit `8f271693e7b763856d86fb3c2f579a56938d6fcb`.
+Implementation is authorized only for the Phase 1 owner surfaces and results
+listed below; later phases remain paused until the Phase 1 exit criteria pass.
+This approval does not authorize a Git push or `workflow_dispatch`; those require
+a separate recorded owner authorization naming the remote, branch and trigger.
 
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:

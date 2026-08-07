@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PLAN REVIEW — IMPLEMENTATION PAUSED PENDING OWNER APPROVAL
+- **Status:** PHASE 1 IN PROGRESS — OWNER-APPROVED FROZEN PLAN; EXIT CRITERIA OPEN
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -218,6 +218,13 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-07:** The repository owner explicitly approved the frozen renovation
+  plan at exact commit `8f271693e7b763856d86fb3c2f579a56938d6fcb` and
+  authorized the transition from Phase 0 to Phase 1. Phase 1 is now the current
+  phase; its exit criteria remain open, and no later phase is authorized. This
+  plan approval does not authorize a Git push or a `workflow_dispatch`; publishing
+  requires a separate recorded owner authorization naming the remote, branch and
+  trigger.
 - **2026-08-07:** The single allowed Claude remediation review checked exact
   plan-only delta `fec834f..c0611e7` in a second credential-free clone. Claude Code
   `2.1.224` exited `0` with complete JSON and resolved `claude-opus-5` at high

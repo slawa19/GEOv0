@@ -3,8 +3,9 @@
 - **Date:** 2026-08-07
 - **Specification:** `specs/001-codebase-renovation/spec.md`
 - **Executable backlog:** `specs/001-codebase-renovation/tasks.md`
-- **State:** internally and externally reviewed; ready for repository-owner
-  approval. Product implementation remains paused.
+- **State:** owner-approved at exact commit
+  `8f271693e7b763856d86fb3c2f579a56938d6fcb`; Phase 1 is current and its exit
+  criteria remain open. Later phases remain paused.
 
 ## 1. Objective and project fit
 
@@ -130,7 +131,9 @@ contract decision is unresolved.
 
 ### Phase 0 — Finalize and approve the plan
 
-**Status:** current phase; plan/documentation edits only.
+**Status:** COMPLETE (2026-08-07). The repository owner approved exact commit
+`8f271693e7b763856d86fb3c2f579a56938d6fcb`; the approval is recorded in
+`spec.md`.
 
 #### MUST
 
@@ -158,6 +161,10 @@ contract decision is unresolved.
   commit SHA; a status label or chat inference alone is not sufficient.
 
 ### Phase 1 — Make the existing gates and supported runtime truthful
+
+**Status:** current phase; exit criteria open. Work is limited to the frozen
+Phase 1 scope below. Git push and `workflow_dispatch` remain unauthorized until
+the separate owner authorization required by Phase 0 item 8 is recorded.
 
 **Purpose:** establish reliable evidence before further behavioral refactoring.
 
