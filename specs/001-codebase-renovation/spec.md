@@ -98,7 +98,11 @@ The orchestrated audit found no tracked or historical credential requiring remov
 - Do not weaken, mass-update or delete tests to obtain a green run.
 - Do not update visual snapshots without intentional visual review.
 - Do not change public API, event, persistence or fixture contracts without compatibility and rollback decisions.
-- Do not rotate credentials, rewrite Git history, deploy, or mutate production/external systems under this specification.
+- Do not rotate credentials, rewrite Git history, deploy, or mutate production/
+  external data under this specification. Publishing the approved branch and
+  triggering GitHub Actions is allowed only after a separate recorded owner
+  authorization naming the remote, branch and trigger; that authorization does not
+  permit deployment or broader credential use.
 - Do not design multi-region, active-active, automatic failover, formal RPO/RTO,
   bank-grade settlement or exhaustive fault-injection machinery for this MVP.
 - Do not add RBAC/SSO, a new frontend state framework, an outbox/event-sourcing
@@ -214,6 +218,17 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-07:** Claude Code `2.1.224` reviewed the exact plan-only range
+  `69acb2a..fec834f` from a credential-free standalone clone. The read-only run
+  exited `0` with complete JSON and resolved `claude-opus-5` at high effort. Its
+  two P1 and six P2 findings were manually checked. The plan now names the missing
+  published container-smoke/016-upgrade path, requires separate branch/CI
+  publication authorization, accepts matching published jobs as PostgreSQL/
+  Chromium evidence, resolves REN-009/010 order, assigns runtime-artifact cleanup
+  to REN-016, removes duplicate isolation ownership, uses exact owning sub-slices
+  and records owner approval by commit SHA. One below-P2 selector suggestion did
+  not expand the frozen program. A single plan fix-delta review remains before
+  owner presentation.
 - **2026-08-07:** The remaining program was recalibrated to the documented GEOv0
   MVP (approximately 10–500 participants, one supported community-hub topology).
   The plan now freezes seven post-approval phases, makes product code changes wait

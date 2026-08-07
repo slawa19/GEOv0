@@ -29,7 +29,7 @@ banking or HA platform. The authoritative remaining sequence is:
 | 3 | REST/SSE contracts | REN-009, REN-012B1 | Selected Admin and Simulator consumers reject malformed/unknown input deterministically |
 | 4 | Admin operator paths | REN-011, REN-010B | Async proof, selected mutations, practical graph keyboard path, Chromium smoke |
 | 5 | Simulator v2 paths | REN-012B2, REN-012C | Selected event families separated at decoder/state/effect seam; critical browser paths |
-| 6 | Test/repository/docs cleanup | REN-004 follow-up, REN-013B, REN-014 | Root artifact producers fixed; evidence-based cleanup; current docs reconciled |
+| 6 | Test/repository/docs cleanup | REN-013B, REN-014, REN-016 | Root artifact producers fixed; evidence-based cleanup; current docs reconciled |
 | 7 | Closure | REN-015 | Bounded evidence matrix, internal reviews and Claude product-batch reviews |
 
 Detailed work, dependencies, gates and stop criteria are authoritative in
@@ -108,6 +108,11 @@ findings:
   remain separately reported diagnostics and are not described as enforced.
 - `POSTGRES-CONCURRENCY`: the named selector against a dedicated disposable
   PostgreSQL database only; never point `TEST_DATABASE_URL` at developer data.
+
+A completed published `workflow_dispatch` job with retained run URL/logs is equal
+evidence to a local disposable run when it executes the same frozen selector.
+Configured, skipped or cancelled jobs are not evidence. Phase 1 owns adding the
+missing container-smoke job and the 016→head PostgreSQL step.
 
 Commands above describe repository intent. REN-003 owns making them unambiguous
 and CI-reproducible; until it lands, record the exact executable and environment
@@ -432,8 +437,10 @@ used.
 - **Non-scope:** Rewriting every schema for stylistic parity, changing public API
   semantics to match stale prose, requiring byte-identical generated YAML, or
   testing descriptions/examples as behavior.
-- **Dependencies:** REN-002; REN-003 for CI; land before API-moving portions of
-  REN-010 and REN-012.
+- **Dependencies:** REN-002; REN-003 for CI. Semantic parity has already landed;
+  REN-010A may proceed, but any change to a maintained REST payload must extend the
+  REN-009 contract test in the same commit. REN-012B1 remains the selected
+  frontend-ingress continuation.
 - **Acceptance criteria:**
   - A deliberate mutation of a required parameter, response model/status,
     security declaration, or `from` alias makes the contract test fail with an
@@ -540,8 +547,9 @@ used.
 - **Non-scope:** Replacing SQLAlchemy, changing routing/clearing algorithms,
   relaxing invariants, combining independent failures, or optimizing before
   correctness is locked.
-- **Dependencies:** REN-006 and REN-009; REN-003 required before the first behavior
-  change.
+- **Dependencies:** REN-006 and REN-003. Existing REN-009 semantic parity is
+  sufficient to begin REN-010A; any maintained REST payload change extends the
+  REN-009 contract test in the same commit.
 - **Acceptance criteria:**
   - Each listed supported write path has a compact owner/effect map and a `FIX` or
     `KEEP` decision; unrelated writes are not pulled into the slice.
@@ -783,6 +791,49 @@ used.
 - **Full gates:** documentation review by backend, frontend, and operator owners;
   product gates only when examples execute code.
 
+## REN-016 — Move runtime artifacts out of the root and classify remaining surfaces
+
+- **Priority:** P2, required for reproducible normal workflows; cleanup cosmetics
+  are SHOULD.
+- **Owner surface:** `app/config.py`, local run scripts, `scripts/verify_local.ps1`,
+  `pytest.ini`, `tests/conftest.py`, `.gitignore`, current runtime/testing docs,
+  `simulator-ui/v1/`, generated fixture entrypoints and proven Admin starter files.
+- **Status:** PLANNED (Phase 6).
+- **Rationale / value:** Canonical commands and defaults still create or reference
+  mutable DB/log/PID/test output in the repository root, contradicting the current
+  repository policy and making parallel/repeated work less predictable. The same
+  slice records legacy/generated boundaries without deleting history.
+- **Exact scope:**
+  1. Inventory each canonical producer of root DB, log, PID, NDJSON and test output.
+  2. Move defaults below one documented ignored runtime root such as `.local-run/`,
+     preserving explicit path overrides.
+  3. Document a manual path override/migration for an existing `geov0.db`; never
+     move or delete a user DB automatically.
+  4. Re-run REN-013A's two-task-slug isolation proof after relocation.
+  5. Mark `simulator-ui/v1` read-only historical/reference and exclude it from
+     normal gates; physical deletion is not required.
+  6. Validate canonical generated fixture sync with no unexplained diff.
+  7. In separate SHOULD micro-commits, remove only reference-proven Admin starter
+     remnants (`HelloWorld.vue`, `vue.svg`, favicon/title) or newly proven tracked
+     runtime artifacts.
+- **Non-scope:** deleting a user DB, deleting v1/archives, consolidating Dockerfiles,
+  changing fixture schemas, broad top-level reorganization or aesthetic cleanup.
+- **Dependencies:** REN-013A resource isolation; product behavior Phases 2–5 must be
+  stable before changing their canonical output locations.
+- **Acceptance criteria:**
+  - A clean canonical run/test/build writes mutable runtime/test artifacts only
+    below the documented ignored runtime root.
+  - Explicit DB/output overrides still work; existing root `geov0.db` is untouched.
+  - REN-013A isolation proof still passes after relocation.
+  - v1, generated sources/copies and active v2 have unambiguous classifications.
+  - Every deletion has import/runtime/docs/history evidence and an independent
+    reversible commit.
+- **Targeted gates:** PowerShell/script syntax; affected config/path tests; fixture
+  sync/validate no-diff; reference scan; two-task-slug isolation rerun.
+- **Full gates:** `BACKEND-DEFAULT`; `ADMIN-UNIT`; `ADMIN-BUILD` when Admin starter
+  files change; `SIM-TYPECHECK`/`SIM-UNIT`/`SIM-BUILD` when Simulator path or
+  fixture entrypoints change; `git diff --check` and clean normal-workflow status.
+
 ## REN-015 — Final adversarial review and renovation closeout
 
 - **Priority:** P1
@@ -826,12 +877,12 @@ used.
 
 ```text
 owner-approved plan
-  → REN-003/005/006/008/013 runtime evidence
+  → REN-003/005/006/008/013A runtime evidence
   → REN-010 backend ownership and bounded PostgreSQL proof
   → REN-009 selected REST/SSE contracts
   → REN-011 Admin operator paths
   → REN-012B/012C Simulator v2 paths (REN-012A only if triggered)
-  → REN-004/013/014 bounded cleanup and current docs
+  → REN-013B/014/016 bounded cleanup and current docs
   → REN-015 closure
 ```
 

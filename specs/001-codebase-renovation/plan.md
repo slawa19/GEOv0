@@ -3,8 +3,8 @@
 - **Date:** 2026-08-07
 - **Specification:** `specs/001-codebase-renovation/spec.md`
 - **Executable backlog:** `specs/001-codebase-renovation/tasks.md`
-- **State:** internally reviewed; awaiting Claude Code review and repository-owner
-  approval. Product implementation remains paused.
+- **State:** internally and externally reviewed; Claude remediation check and
+  repository-owner approval remain. Product implementation remains paused.
 
 ## 1. Objective and project fit
 
@@ -144,19 +144,24 @@ contract decision is unresolved.
 6. Review that exact batch through Claude Code with `--model opus --effort high`;
    verify the resolved Opus 5 model in JSON and manually assess every finding.
 7. Present the corrected sequence to the owner and wait for explicit approval.
+8. Before Phase 1 needs published evidence, obtain a separate authorization naming
+   the Git remote, branch and `workflow_dispatch` trigger. Plan approval alone does
+   not authorize a push, deployment or mutation of external data.
 
 #### Exit
 
 - The three planning files agree.
 - No product/runtime/test implementation file changed in this phase.
 - Internal and Claude findings are either incorporated or rejected with evidence.
-- Owner approval is the only transition to Phase 1.
+- Owner approval is the only transition to Phase 1. It is recorded as a dated
+  `spec.md` changelog entry naming the approving owner and exact approved plan
+  commit SHA; a status label or chat inference alone is not sufficient.
 
 ### Phase 1 — Make the existing gates and supported runtime truthful
 
 **Purpose:** establish reliable evidence before further behavioral refactoring.
 
-**Maps to:** remaining parts of REN-003, REN-005, REN-006, REN-008 and REN-013.
+**Maps to:** remaining parts of REN-003, REN-005, REN-006, REN-008 and REN-013A.
 
 #### 1A. Canonical gate completion — MUST
 
@@ -179,6 +184,12 @@ Work:
 5. Prove task slugs isolate DB, basetemp and artifacts for two verifier invocations;
    full `xdist` adoption is not required.
 
+Accepted published evidence is a completed `workflow_dispatch` run with retained
+run URL and logs. The existing `postgres`, `admin-e2e` and relevant Simulator jobs
+may satisfy PostgreSQL/Chromium milestones when they execute the exact frozen
+selectors; local absence of PostgreSQL or Chromium is not a substitute and not a
+blocker if the published job completes.
+
 Gates:
 
 - canonical backend default selector;
@@ -197,21 +208,27 @@ Stop:
 
 Owner surfaces:
 
+- `.github/workflows/quality.yml`;
 - `Dockerfile`, `docker/Dockerfile`, Compose files and entrypoint;
 - `app/config.py`, `app/main.py`, health/readiness;
 - Alembic and Simulator owner migration/model.
 
 Work:
 
-1. Document which current image/entrypoint is production-like and which is the dev
+1. Add a `workflow_dispatch` container-smoke job that builds the selected image,
+   starts it against disposable PostgreSQL with non-placeholder secrets, checks
+   readiness, and verifies graceful stop. This published job is the canonical path
+   while local Docker is unavailable.
+2. Document which current image/entrypoint is production-like and which is the dev
    path. Consolidate files only if runtime evidence shows conflicting behavior;
    duplication alone is not a rewrite mandate.
-2. Boot the selected image against an empty disposable PostgreSQL DB with explicit
+3. Boot the selected image against an empty disposable PostgreSQL DB with explicit
    non-dev secrets and verify migration, liveness, readiness and graceful stop.
-3. Upgrade one disposable DB from revision 016 to head and compare the affected
-   Simulator owner nullability/index metadata.
-4. Start the same topology again and prove migrations/startup are repeatable.
-5. Record a forward-fix procedure; do not build formal rollback automation unless
+4. Extend the published PostgreSQL/container path with a 016→head fixture/step (or
+   name an owner-provisioned local Docker/PostgreSQL environment) and compare the
+   affected Simulator owner nullability/index metadata.
+5. Start the same topology again and prove migrations/startup are repeatable.
+6. Record a forward-fix procedure; do not build formal rollback automation unless
    the current deployment contract promises downgrade.
 
 Gates:
@@ -238,7 +255,7 @@ Stop:
 **Purpose:** finish the domain review that has broad correctness value without
 turning the MVP into a distributed transaction research project.
 
-**Maps to:** REN-010 and the remaining backend portion of REN-012.
+**Maps to:** REN-010A and conditional REN-012A.
 
 #### 2A. Current transaction-owner map — MUST, review first
 
@@ -350,7 +367,7 @@ counts and the existing integrity check. For local/demo use this is
 
 **Purpose:** validate only the contracts used by the frozen functional matrix.
 
-**Maps to:** remaining REN-009 and Simulator ingress portion of REN-012.
+**Maps to:** remaining REN-009 and REN-012B1.
 
 #### 3A. REST/Admin contracts — MUST
 
@@ -390,7 +407,7 @@ do not need exhaustive schemas unless they control a mutation or readiness decis
 **Purpose:** close the async and operator correctness already started, without UI
 redesign or a new data-fetching architecture.
 
-**Maps to:** REN-011 plus the Admin portion of REN-010.
+**Maps to:** REN-011 plus REN-010B.
 
 #### 4A. Async ownership proof — MUST
 
@@ -463,7 +480,7 @@ fixture already exists. Firefox/WebKit and visual redesign are not required.
 **Purpose:** separate trusted event/state handling from visual effects only as far
 as needed for current real/fixture/interact workflows.
 
-**Maps to:** revised REN-012 frontend pipeline and accessibility slices.
+**Maps to:** REN-012B2 and REN-012C.
 
 #### 5A. Characterize the event pipeline — MUST
 
@@ -533,7 +550,8 @@ This is a critical-path improvement, not complete WCAG certification.
 
 **Purpose:** remove false signals and routine dirt after behavior has stabilized.
 
-**Maps to:** remaining REN-004, REN-013 and REN-014.
+**Maps to:** REN-013B, REN-014 and REN-016. REN-004 remains complete historical
+cleanup evidence and is not reopened.
 
 #### 6A. Test-value cleanup — MUST only where proven
 
@@ -544,7 +562,8 @@ This is a critical-path improvement, not complete WCAG certification.
 3. Split giant test files only while adding changed behavior and only when it makes
    ownership materially clearer.
 4. Keep visual baselines platform-scoped; no mass snapshot regeneration.
-5. Prove two task-slug verifier runs do not share mutable DB/temp/artifact paths.
+5. After REN-016 relocates runtime producers, re-run the REN-013A two-task-slug
+   isolation check. REN-013A remains the owner of that proof.
 
 #### 6B. Runtime artifact producers — MUST
 
@@ -614,6 +633,10 @@ command scans for changed current documents, not all historical prose.
     are payment/clearing/integrity transaction semantics, persistence/migration/
     security behavior and protected REST/SSE contracts. Other UI/cleanup/docs
     batches receive independent internal review.
+
+Published `workflow_dispatch` job URLs/logs are canonical evidence for required
+PostgreSQL, Chromium and container milestones when their selectors match this
+matrix. Configured-but-unrun jobs and skipped jobs are not evidence.
 
 #### Finding policy
 
