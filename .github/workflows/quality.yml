@@ -139,15 +139,15 @@ jobs:
           python scripts/check_alembic_heads.py
           python -m alembic -c migrations/alembic.ini upgrade head
 
-      - name: Run PostgreSQL-specific integration selectors
-        run: |
-          mkdir -p .local-run/test-runs/ci-postgres
-          python -m pytest -q \
-            --basetemp=.local-run/test-runs/ci-postgres/pytest \
-            tests/integration/test_concurrent_clearing_payment_lost_update.py \
-            tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py \
-            tests/integration/test_payment_engine_uow_retry_postgres.py \
-            tests/integration/test_prepare_locks_tx_id_fk_postgres.py
+      - name: Run PostgreSQL marker tier
+        shell: pwsh
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-postgres
+          -BackendOnly
+          -BackendMarker postgres
+          -BackendSelector tests/integration
 
   simulator-super-smoke:
     name: Simulator super-smoke (scheduled/manual)

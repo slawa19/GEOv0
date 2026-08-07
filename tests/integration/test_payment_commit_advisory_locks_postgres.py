@@ -16,6 +16,9 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 
 
+pytestmark = pytest.mark.postgres
+
+
 def _require_postgres(db_session) -> None:
     dialect = None
     try:

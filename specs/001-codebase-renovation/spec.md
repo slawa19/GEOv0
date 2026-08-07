@@ -185,3 +185,10 @@ The renovation is complete only when all of the following have evidence linked f
   staged work or moving the tick commit boundary was not justified in this
   remediation. PostgreSQL test design is present but runtime execution remains
   unverified locally.
+- **2026-08-07:** REN-003/REN-013 replaced the PostgreSQL CI file allowlist with
+  a registered, suffix-owned `postgres` marker tier invoked through the canonical
+  local runner. Independent adversarial review found and closed three false-green
+  gaps in taxonomy discovery, workflow-command validation and local
+  reproducibility. The final local backend tier passed (`683 passed`, `13
+  skipped`, `4` expensive deselected); live disposable PostgreSQL and a published
+  workflow run remain unverified, so neither task is marked complete.

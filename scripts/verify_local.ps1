@@ -5,6 +5,8 @@ param(
     [string]$TaskSlug = 'verify-local',
     [switch]$StaticDiagnostics,
     [string[]]$BackendSelector = @(),
+    [ValidatePattern('^[A-Za-z_][A-Za-z0-9_]*$')]
+    [string]$BackendMarker,
     [switch]$IncludeExpensive,
     [switch]$BackendOnly
 )
@@ -104,7 +106,10 @@ try {
         }
         Invoke-RequiredStep -Name 'Backend tests (pytest)' -Command {
             $pytestArgs = @('-m', 'pytest', '--basetemp', $baseTemp, '-q')
-            if (-not $IncludeExpensive) {
+            if ($BackendMarker) {
+                $pytestArgs += @('-m', $BackendMarker)
+            }
+            elseif (-not $IncludeExpensive) {
                 $pytestArgs += @('-m', 'not slow and not e2e')
             }
             if ($BackendSelector.Count -gt 0) {

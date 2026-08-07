@@ -6,6 +6,9 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
 
+pytestmark = pytest.mark.postgres
+
+
 @pytest.mark.asyncio
 async def test_prepare_locks_tx_id_fk_exists_and_blocks_orphans_postgres(db_session):
     dialect = None

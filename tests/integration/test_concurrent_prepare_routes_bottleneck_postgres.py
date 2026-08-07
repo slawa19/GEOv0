@@ -7,6 +7,9 @@ import pytest
 from sqlalchemy import select
 
 
+pytestmark = pytest.mark.postgres
+
+
 @pytest.mark.asyncio
 async def test_concurrent_single_route_prepare_shared_bottleneck_serializes_on_postgres(
     db_session,

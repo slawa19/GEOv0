@@ -126,12 +126,13 @@ used.
 - **Status:** IN PROGRESS (2026-08-07)
 - **Working-tree evidence (2026-08-07):** PowerShell AST and workflow YAML checks
   passed; fail-closed DB guard selector passed `12` tests; sequential Simulator
-  unit tier passed `637` tests and production build exited `0`. The task-local
-  aggregate completed the backend default tier (`510 passed`, `5 skipped`, `4`
-  expensive deselected), the single-head check, Admin lint/unit/build, and
-  Simulator typecheck/unit/build. Disposable PostgreSQL migration, Playwright
-  jobs, and a published GitHub Actions run are not established by this evidence
-  entry.
+  unit tier passed `637` tests and production build exited `0`. The canonical
+  PostgreSQL tier now uses the registered `postgres` marker through
+  `verify_local.ps1 -BackendMarker postgres` instead of a per-file CI allowlist;
+  collect-only selected `10` tests, and the final local backend tier passed
+  (`683 passed`, `13 skipped`, `4` expensive deselected). SQLite skips and local
+  collection are not PostgreSQL runtime evidence. Disposable PostgreSQL,
+  Playwright jobs, and a published GitHub Actions run remain unverified.
 - **Rationale / value:** A workflow and aggregate runner now exist in the working
   tree, but they are not accepted until clean-checkout jobs and every required
   surface complete. Ruff/Black debt is visible diagnostic evidence, not an
@@ -496,7 +497,7 @@ used.
     boundary.
 - **Targeted gates:** payment/clearing/trustline unit and integration selectors;
   `POSTGRES-CONCURRENCY` for
-  `tests/integration/test_concurrent_clearing_payment_lost_update.py`,
+  `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py`,
   `test_concurrent_prepare_routes_bottleneck_postgres.py`, and
   `test_payment_engine_uow_retry_postgres.py`.
 - **Full gates:** `BACKEND-DEFAULT`; `BACKEND-LINT-DIAGNOSTIC`; `OPENAPI`; scheduled PostgreSQL
@@ -597,11 +598,15 @@ used.
 - **Partial evidence (2026-08-07):** destructive DB URLs and pytest option/path
   injection are rejected before collection; SQLite DB, basetemp and artifact
   roots are task-local; super-smoke is marked `slow` and scheduled separately.
-  Eight proven-stale Simulator assertions were aligned to the already-shipped
-  `payment=440px` and `OverlaySelect` contracts. The default backend tier passed
-  (`510 passed`, `5 skipped`, `4` expensive deselected), sequential `SIM-UNIT`
-  passed `637` tests, and Simulator build exited `0`. This does not complete the
-  broader taxonomy, parallel-worker, PostgreSQL and E2E scope below.
+  PostgreSQL-only integration modules now follow the guarded
+  `test_*_postgres.py` + module-marker policy, and the scheduled/manual job calls
+  the canonical runner with `-BackendMarker postgres -BackendSelector
+  tests/integration`. Collect-only selected all `10` current PostgreSQL tests;
+  the same canonical command produced `10 skipped`, `86 deselected` on SQLite,
+  which proves selection/fail-safe behavior but not PostgreSQL semantics. The
+  final local backend tier passed (`683 passed`, `13 skipped`, `4` expensive
+  deselected); sequential `SIM-UNIT` previously passed `637` tests and Simulator
+  build exited `0`. Parallel-worker, live PostgreSQL and E2E evidence remain.
 - **Rationale / value:** Tests named unit/integration/e2e currently mix TestClient,
   DB setup, placeholders, and dialect-specific semantics. A truthful taxonomy
   makes gates fast and prevents SQLite success from being reported as concurrency

@@ -1,3 +1,5 @@
+"""PostgreSQL clearing/payment lost-update contention regression."""
+
 from __future__ import annotations
 
 import uuid
@@ -5,6 +7,9 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete
+
+
+pytestmark = pytest.mark.postgres
 
 
 @pytest.mark.asyncio
