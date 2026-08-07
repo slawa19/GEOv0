@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import String, cast, desc, func, select, and_, case, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.api import deps
-from app.config import settings
+from app.config import Settings, settings
 from app.db.models.audit_log import AuditLog
 from app.db.models.equivalent import Equivalent as EquivalentModel
 from app.db.models.debt import Debt
@@ -21,7 +23,6 @@ from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 from app.schemas.admin import (
     AdminAuditLogItem,
-    AdminAuditLogResponse,
     AdminAuditLogListResponse,
     AdminAbortTxRequest,
     AdminAbortTxResponse,
@@ -69,6 +70,8 @@ from app.schemas.metrics import AdminParticipantMetricsResponse
 
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
+
+_runtime_config_lock = asyncio.Lock()
 
 
 _ACTIVE_PAYMENT_TX_STATES: set[str] = {
@@ -226,6 +229,29 @@ def _runtime_config_items() -> list[tuple[str, bool]]:
     ]
 
 
+def _validate_runtime_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
+    allowed = {key for key, mutable in _runtime_config_items() if mutable}
+    validated: dict[str, Any] = {}
+
+    for key, value in updates.items():
+        if key not in allowed:
+            raise BadRequestException(f"Config key not mutable: {key}")
+
+        field = Settings.model_fields[key]
+        try:
+            validated[key] = TypeAdapter(field.annotation).validate_python(
+                value,
+                strict=True,
+            )
+        except ValidationError as exc:
+            raise BadRequestException(
+                f"Invalid value for config key: {key}",
+                details={"key": key},
+            ) from exc
+
+    return validated
+
+
 async def _audit(
     db: AsyncSession,
     *,
@@ -236,6 +262,7 @@ async def _audit(
     reason: str | None = None,
     before_state: dict[str, Any] | None = None,
     after_state: dict[str, Any] | None = None,
+    required: bool = False,
 ) -> None:
     try:
         rid = request.headers.get("X-Request-ID")
@@ -257,8 +284,13 @@ async def _audit(
             )
         )
         await db.commit()
+    except asyncio.CancelledError:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
+        if required:
+            raise
 
 
 @router.get("/config", response_model=AdminConfigResponse, dependencies=[])
@@ -275,30 +307,32 @@ async def patch_admin_config(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminConfigPatchResponse:
-    allowed = {k for k, mutable in _runtime_config_items() if mutable}
-    updated: list[str] = []
-    before: dict[str, Any] = {}
-    after: dict[str, Any] = {}
+    async with _runtime_config_lock:
+        validated = _validate_runtime_config_updates(body.updates or {})
+        before = {key: getattr(settings, key) for key in validated}
+        after = dict(validated)
 
-    for key, value in (body.updates or {}).items():
-        if key not in allowed:
-            raise BadRequestException(f"Config key not mutable: {key}")
-        before[key] = getattr(settings, key)
-        setattr(settings, key, value)
-        after[key] = getattr(settings, key)
-        updated.append(key)
+        await _audit(
+            db,
+            request=request,
+            action="admin.config.patch",
+            object_type="config",
+            object_id=None,
+            reason=body.reason,
+            before_state=before or None,
+            after_state=after or None,
+            required=True,
+        )
 
-    await _audit(
-        db,
-        request=request,
-        action="admin.config.patch",
-        object_type="config",
-        object_id=None,
-        reason=body.reason,
-        before_state=before or None,
-        after_state=after or None,
-    )
-    return AdminConfigPatchResponse(updated=updated)
+        try:
+            for key, value in validated.items():
+                setattr(settings, key, value)
+        except BaseException:
+            for key, value in before.items():
+                setattr(settings, key, value)
+            raise
+
+        return AdminConfigPatchResponse(updated=list(validated))
 
 
 @router.get("/whoami", response_model=AdminWhoAmIResponse, dependencies=[])
@@ -322,37 +356,38 @@ async def patch_feature_flags(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminFeatureFlags:
-    before = {
-        "multipath_enabled": settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
-        "full_multipath_enabled": settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
-        "clearing_enabled": settings.CLEARING_ENABLED,
-    }
+    async with _runtime_config_lock:
+        before = {
+            "multipath_enabled": settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
+            "full_multipath_enabled": settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
+            "clearing_enabled": settings.CLEARING_ENABLED,
+        }
 
-    if body.multipath_enabled is not None:
-        settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
-    if body.full_multipath_enabled is not None:
-        settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
-    if body.clearing_enabled is not None:
-        settings.CLEARING_ENABLED = body.clearing_enabled
+        if body.multipath_enabled is not None:
+            settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
+        if body.full_multipath_enabled is not None:
+            settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
+        if body.clearing_enabled is not None:
+            settings.CLEARING_ENABLED = body.clearing_enabled
 
-    after = {
-        "multipath_enabled": settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
-        "full_multipath_enabled": settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
-        "clearing_enabled": settings.CLEARING_ENABLED,
-    }
+        after = {
+            "multipath_enabled": settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
+            "full_multipath_enabled": settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
+            "clearing_enabled": settings.CLEARING_ENABLED,
+        }
 
-    await _audit(
-        db,
-        request=request,
-        action="admin.feature_flags.patch",
-        object_type="feature_flags",
-        object_id=None,
-        reason=body.reason,
-        before_state=before,
-        after_state=after,
-    )
+        await _audit(
+            db,
+            request=request,
+            action="admin.feature_flags.patch",
+            object_type="feature_flags",
+            object_id=None,
+            reason=body.reason,
+            before_state=before,
+            after_state=after,
+        )
 
-    return AdminFeatureFlags(**after)
+        return AdminFeatureFlags(**after)
 
 
 @router.get("/participants")
