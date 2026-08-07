@@ -302,6 +302,55 @@ $taskSlug = "agent_payments_review"
 review через локально установленный Claude Code. Это внешний, cloud-visible
 источник evidence, а не доверенный gate или автоматический автор исправлений.
 
+- До вывода «Claude Code отсутствует» разрешите бинарник и проверьте
+  `--version`. Сначала используйте `Get-Command claude.exe`/`claude`; для
+  устойчивой установки предпочтителен отдельный бинарник через
+  `claude install stable`. Если PATH пуст, динамически найдите новейший
+  `anthropic.claude-code-*-win32-x64` под VS Code/Cursor extension roots и его
+  `resources/native-binary/claude.exe`. Не хардкодьте версию расширения или
+  абсолютный пользовательский путь в скриптах/документах и не делайте вывод по
+  одному PATH/WSL probe.
+
+```powershell
+$claudeCommand = Get-Command claude.exe -ErrorAction SilentlyContinue
+if (-not $claudeCommand) {
+    $claudeCommand = Get-Command claude -ErrorAction SilentlyContinue
+}
+$claudeExe = if ($claudeCommand) { $claudeCommand.Source } else { $null }
+if (-not $claudeExe) {
+    $extensionRoots = @(
+        (Join-Path $env:USERPROFILE '.vscode\extensions'),
+        (Join-Path $env:USERPROFILE '.vscode-insiders\extensions'),
+        (Join-Path $env:USERPROFILE '.cursor\extensions')
+    )
+    $extensions = foreach ($root in $extensionRoots) {
+        if (Test-Path -LiteralPath $root) {
+            Get-ChildItem -LiteralPath $root -Directory `
+                -Filter 'anthropic.claude-code-*-win32-*'
+        }
+    }
+    $latest = $extensions | Sort-Object {
+        [version](($_.Name -replace '^anthropic\.claude-code-', '') `
+            -replace '-win32-.*$', '')
+    } -Descending | Select-Object -First 1
+    if ($latest) {
+        $claudeExe = Join-Path $latest.FullName `
+            'resources\native-binary\claude.exe'
+    }
+}
+if (-not $claudeExe -or -not (Test-Path -LiteralPath $claudeExe -PathType Leaf)) {
+    throw 'Claude Code binary not found'
+}
+& $claudeExe --version
+if ($LASTEXITCODE -ne 0) { throw 'Claude Code --version failed' }
+$reviewId = [guid]::NewGuid().ToString('N')
+$reviewOutputRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+    "geov0-claude-review-$reviewId"
+New-Item -ItemType Directory -Path $reviewOutputRoot -Force | Out-Null
+$progressLog = Join-Path $reviewOutputRoot 'progress.log'
+$resultJson = Join-Path $reviewOutputRoot 'review.json'
+```
+
 - Заморозьте один связный owner slice как точный `<BASE>..<HEAD>`. Число
   коммитов само по себе не ограничивает diff; последующие коммиты не входят в уже
   запущенный review.
@@ -313,11 +362,12 @@ review через локально установленный Claude Code. Эт�
 - Model-controlled команда для глубокого review:
 
 ```powershell
-claude.exe -p --model opus --effort high `
+& $claudeExe -p --model opus --effort high `
   "/code-review high <BASE>..<HEAD>" `
   --permission-mode plan `
   --disallowedTools "Edit,Write,NotebookEdit" `
-  --output-format json
+  --output-format json `
+  1> $resultJson 2> $progressLog
 ```
 
   Записывайте CLI version, exact SHAs, exit code, полноту JSON и фактический
@@ -325,13 +375,39 @@ claude.exe -p --model opus --effort high `
   без этого evidence. Успешная калибровка 2026-08-07 разрешила `opus` в
   `claude-opus-5`; policy этого репозитория требует `--effort high`, но resolved
   model всё равно проверяется заново после каждого запуска.
-- `ultrareview` допустим как дополнительный model-uncontrolled cloud pipeline.
-  Он ограничивает branch diff (на момент калибровки: 500 files / 8000 changed
-  lines); используйте именованную base branch, а не недокументированный bare SHA.
-  Логические коммиты без близкой base branch лимит не уменьшают.
-- Exit `1`/`130`, timeout, malformed/truncated/empty JSON или отсутствие
-  подтверждённого model ID означают `UNVERIFIED`, а не «findings нет». Разрешён
-  один явно записанный fallback; после его сбоя slice остаётся непроверенным.
+- `/code-review` — forked subagent и наследует модель сессии; поэтому модель для
+  fallback задаётся на верхнем `claude -p` через `--model`, а reasoning — через
+  `--effort`. Микроправки и fix-delta проверяются этим путём, не `ultrareview`.
+  Если появится кастомный `.claude/agents/*.md`, его `model:` разрешается после
+  `CLAUDE_CODE_SUBAGENT_MODEL` и модели конкретного вызова, но до модели основной
+  сессии.
+- `ultrareview` допустим как дополнительный model-uncontrolled cloud pipeline
+  только для завершённого product batch меньше `500` файлов и `8000` changed
+  lines. Сам review target должен исключать governance/spec documents, generated
+  files и deleted-artifact cleanup; смешанную пачку проверяйте локальным
+  `/code-review`. Без target он сравнивает текущую ветку с default branch, включая
+  uncommitted changes; в frozen clone используйте документированный PR number или
+  именованную base branch, а не bare SHA:
+
+```powershell
+git branch review-base <BASE>
+& $claudeExe ultrareview review-base --timeout 30 --json `
+  1> $resultJson 2> $progressLog
+```
+
+  Stdout хранит result/JSON, stderr — progress и tracking URL; сохраняйте оба вне
+  репозитория. Требуется авторизация через claude.ai account; pipeline недоступен
+  на Bedrock, Vertex, Foundry и для ZDR-организаций. На Team/Enterprise также
+  проверьте `/usage-credits`/billing, потому что отсутствие credits блокирует
+  запуск даже при валидном auth. `ultrareview` не принимает пользовательский выбор
+  модели. Exit `0` + полный result/JSON означает завершённый review (с findings
+  или без), `1` — ошибка/не стартовал/timeout, `130` — прервано. Логические
+  коммиты без близкой base branch лимит diff не уменьшают.
+- Для локального `/code-review` exit `1`/`130`, timeout, malformed/truncated/empty
+  JSON или отсутствие подтверждённого model ID означают `UNVERIFIED`, а не
+  «findings нет». Для `ultrareview` model ID не ожидается; обязательны exit `0` и
+  полный result/JSON. Разрешён один явно записанный fallback; после его сбоя slice
+  остаётся непроверенным.
 - Запускайте reviewer параллельно только с непересекающейся работой. Frozen clone
   и range не меняются до результата.
 - Оркестратор вручную воспроизводит каждый P1/P2. Подтверждённое замечание

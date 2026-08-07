@@ -80,16 +80,18 @@ transaction и cache boundaries, скрытое изменение wire/API sema
 Для высокорисковой commit-пачки после внутреннего adversarial review применяется
 внешний Claude Code review по правилам `AGENTS.md`:
 
-1. Зафиксировать coherent exact `BASE..HEAD` и создать чистый standalone clone с
+1. Разрешить бинарник по preflight из `AGENTS.md`, проверить `--version` и не
+   объявлять Claude Code отсутствующим только из-за пустого PATH или WSL.
+2. Зафиксировать coherent exact `BASE..HEAD` и создать чистый standalone clone с
    локальным credential-free origin; основной checkout и worktree не подходят,
    если их общая `.git/config` содержит credential.
-2. Запустить встроенный `/code-review high` с `--model opus --effort high`, plan
+3. Запустить встроенный `/code-review high` с `--model opus --effort high`, plan
    permissions и запретом edit/write tools. Сохранить CLI version, resolved model
    из JSON, SHAs, exit code и полный результат вне репозитория.
-3. Пока frozen clone проверяется, продолжать только непересекающиеся slices.
-4. Вручную воспроизвести P1/P2 и передать подтверждённые findings агентам; внешний
+4. Пока frozen clone проверяется, продолжать только непересекающиеся slices.
+5. Вручную воспроизвести P1/P2 и передать подтверждённые findings агентам; внешний
    reviewer не меняет файлы и не принимает решения.
-5. Разрешить один remediation review по fix-delta. Повторный P1 блокирует или
+6. Разрешить один remediation review по fix-delta. Повторный P1 блокирует или
    пересматривает slice; P3 не создаёт новую работу автоматически.
 
 Сбой, timeout, exit `1/130`, пустой или повреждённый JSON — отсутствие evidence,
