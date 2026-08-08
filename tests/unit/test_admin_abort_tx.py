@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import event
 
 from app.config import settings
 from app.db.models.audit_log import AuditLog
@@ -71,3 +72,136 @@ async def test_admin_abort_tx_aborts_and_audits(client, db_session):
         )
     ).first()
     assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_rejects_committed_transaction_without_audit(
+    client,
+    db_session,
+):
+    alice = Participant(pid='committed-alice', display_name='Alice', public_key='C' * 64, type='person', status='active')
+    db_session.add(alice)
+    await db_session.flush()
+
+    tx = Transaction(
+        tx_id='TX_ALREADY_COMMITTED',
+        type='PAYMENT',
+        initiator_id=alice.id,
+        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
+        state='COMMITTED',
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    response = await client.post(
+        '/api/v1/admin/transactions/TX_ALREADY_COMMITTED/abort',
+        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+        json={'reason': 'cannot abort committed'},
+    )
+
+    assert response.status_code == 409
+    await db_session.refresh(tx)
+    assert tx.state == 'COMMITTED'
+    row = (
+        await db_session.execute(
+            AuditLog.__table__.select().where(
+                AuditLog.action == 'admin.transactions.abort',
+                AuditLog.object_id == 'TX_ALREADY_COMMITTED',
+            )
+        )
+    ).first()
+    assert row is None
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_rolls_back_when_audit_flush_fails(
+    client,
+    db_session,
+):
+    alice = Participant(pid='abort-audit-alice', display_name='Alice', public_key='D' * 64, type='person', status='active')
+    db_session.add(alice)
+    await db_session.flush()
+
+    tx = Transaction(
+        tx_id='TX_ABORT_AUDIT_FAILURE',
+        type='PAYMENT',
+        initiator_id=alice.id,
+        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
+        state='WAITING',
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    def fail_when_audit_is_flushed(session, _flush_context, _instances):
+        if any(isinstance(item, AuditLog) for item in session.new):
+            raise RuntimeError('required abort audit flush failed')
+
+    event.listen(db_session.sync_session, 'before_flush', fail_when_audit_is_flushed)
+    try:
+        with pytest.raises(RuntimeError, match='required abort audit flush failed'):
+            await client.post(
+                '/api/v1/admin/transactions/TX_ABORT_AUDIT_FAILURE/abort',
+                headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+                json={'reason': 'must rollback abort'},
+            )
+    finally:
+        event.remove(db_session.sync_session, 'before_flush', fail_when_audit_is_flushed)
+
+    await db_session.refresh(tx)
+    assert tx.state == 'WAITING'
+    assert tx.error is None
+    row = (
+        await db_session.execute(
+            AuditLog.__table__.select().where(
+                AuditLog.action == 'admin.transactions.abort',
+                AuditLog.object_id == 'TX_ABORT_AUDIT_FAILURE',
+            )
+        )
+    ).first()
+    assert row is None
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_rolls_back_when_outer_commit_fails(
+    client,
+    db_session,
+    monkeypatch,
+):
+    alice = Participant(pid='abort-commit-alice', display_name='Alice', public_key='E' * 64, type='person', status='active')
+    db_session.add(alice)
+    await db_session.flush()
+
+    tx = Transaction(
+        tx_id='TX_ABORT_COMMIT_FAILURE',
+        type='PAYMENT',
+        initiator_id=alice.id,
+        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
+        state='WAITING',
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    async def fail_commit():
+        raise RuntimeError('required abort commit failed')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db_session, 'commit', fail_commit)
+        with pytest.raises(RuntimeError, match='required abort commit failed'):
+            await client.post(
+                '/api/v1/admin/transactions/TX_ABORT_COMMIT_FAILURE/abort',
+                headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+                json={'reason': 'must rollback outer commit'},
+            )
+
+    await db_session.refresh(tx)
+    assert tx.state == 'WAITING'
+    assert tx.error is None
+    row = (
+        await db_session.execute(
+            AuditLog.__table__.select().where(
+                AuditLog.action == 'admin.transactions.abort',
+                AuditLog.object_id == 'TX_ABORT_COMMIT_FAILURE',
+            )
+        )
+    ).first()
+    assert row is None

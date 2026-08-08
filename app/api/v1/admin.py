@@ -252,6 +252,37 @@ def _validate_runtime_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
     return validated
 
 
+def _add_audit_entry(
+    db: AsyncSession,
+    *,
+    request: Request,
+    action: str,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    reason: str | None = None,
+    before_state: dict[str, Any] | None = None,
+    after_state: dict[str, Any] | None = None,
+) -> AuditLog:
+    rid = request.headers.get("X-Request-ID")
+    ip = (request.client.host if request.client else None) or None
+    ua = request.headers.get("user-agent")
+    entry = AuditLog(
+        actor_id=None,
+        actor_role="admin",
+        action=action,
+        object_type=object_type,
+        object_id=object_id,
+        reason=reason,
+        before_state=before_state,
+        after_state=after_state,
+        request_id=rid,
+        ip_address=ip,
+        user_agent=ua,
+    )
+    db.add(entry)
+    return entry
+
+
 async def _audit(
     db: AsyncSession,
     *,
@@ -265,23 +296,15 @@ async def _audit(
     required: bool = False,
 ) -> None:
     try:
-        rid = request.headers.get("X-Request-ID")
-        ip = (request.client.host if request.client else None) or None
-        ua = request.headers.get("user-agent")
-        db.add(
-            AuditLog(
-                actor_id=None,
-                actor_role="admin",
-                action=action,
-                object_type=object_type,
-                object_id=object_id,
-                reason=reason,
-                before_state=before_state,
-                after_state=after_state,
-                request_id=rid,
-                ip_address=ip,
-                user_agent=ua,
-            )
+        _add_audit_entry(
+            db,
+            request=request,
+            action=action,
+            object_type=object_type,
+            object_id=object_id,
+            reason=reason,
+            before_state=before_state,
+            after_state=after_state,
         )
         await db.commit()
     except asyncio.CancelledError:
@@ -740,21 +763,24 @@ async def _set_participant_status(
 
     before = {"status": participant.status}
     participant.status = status_value
-    await db.commit()
-    await db.refresh(participant)
+    result = {"pid": participant.pid, "status": participant.status}
+    try:
+        _add_audit_entry(
+            db,
+            request=request,
+            action=audit_action,
+            object_type="participant",
+            object_id=pid,
+            reason=body.reason,
+            before_state=before,
+            after_state={"status": participant.status},
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
-    await _audit(
-        db,
-        request=request,
-        action=audit_action,
-        object_type="participant",
-        object_id=pid,
-        reason=body.reason,
-        before_state=before,
-        after_state={"status": participant.status},
-    )
-
-    return {"pid": participant.pid, "status": participant.status}
+    return result
 
 
 @router.post("/participants/{pid}/freeze")
@@ -934,26 +960,44 @@ async def abort_transaction(
     ).scalar_one_or_none()
     if tx is None:
         raise NotFoundException(f"Transaction {tx_id} not found")
+    if tx.state == "COMMITTED":
+        await db.rollback()
+        raise ConflictException("Transaction is already committed")
 
     before = {"state": tx.state, "error": tx.error}
 
     engine = PaymentEngine(db)
-    await engine.abort(tx_id, reason=body.reason)
+    try:
+        audit_entry = _add_audit_entry(
+            db,
+            request=request,
+            action="admin.transactions.abort",
+            object_type="transaction",
+            object_id=tx_id,
+            reason=body.reason,
+            before_state=before,
+            after_state=None,
+        )
+        # Establish the outer transaction before PaymentEngine opens its retry
+        # savepoint; neither the staged abort nor this audit is durable yet.
+        await db.flush()
+        await engine.abort(tx_id, reason=body.reason, commit=False)
 
-    tx2 = (
-        await db.execute(select(Transaction).where(Transaction.tx_id == tx_id))
-    ).scalar_one()
+        tx2 = (
+            await db.execute(
+                select(Transaction)
+                .where(Transaction.tx_id == tx_id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+        if tx2.state == "COMMITTED":
+            raise ConflictException("Transaction is already committed")
 
-    await _audit(
-        db,
-        request=request,
-        action="admin.transactions.abort",
-        object_type="transaction",
-        object_id=tx_id,
-        reason=body.reason,
-        before_state=before,
-        after_state={"state": tx2.state, "error": tx2.error},
-    )
+        audit_entry.after_state = {"state": tx2.state, "error": tx2.error}
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
     return AdminAbortTxResponse(tx_id=tx_id, status="aborted")
 
@@ -985,19 +1029,25 @@ async def admin_create_equivalent(
         is_active=body.is_active,
     )
     db.add(eq)
-    await db.commit()
-    await db.refresh(eq)
-    await _audit(
-        db,
-        request=request,
-        action="admin.equivalents.create",
-        object_type="equivalent",
-        object_id=eq.code,
-        reason=body.reason,
-        before_state=None,
-        after_state={"code": eq.code, "is_active": eq.is_active},
-    )
-    return EquivalentSchema.model_validate(eq)
+    try:
+        await db.flush()
+        await db.refresh(eq)
+        result = EquivalentSchema.model_validate(eq)
+        _add_audit_entry(
+            db,
+            request=request,
+            action="admin.equivalents.create",
+            object_type="equivalent",
+            object_id=eq.code,
+            reason=body.reason,
+            before_state=None,
+            after_state={"code": eq.code, "is_active": eq.is_active},
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    return result
 
 
 @router.patch("/equivalents/{code}", response_model=EquivalentSchema)
@@ -1031,28 +1081,33 @@ async def admin_update_equivalent(
     if body.is_active is not None:
         eq.is_active = body.is_active
 
-    await db.commit()
-    await db.refresh(eq)
+    try:
+        await db.flush()
+        await db.refresh(eq)
+        after = {
+            "symbol": eq.symbol,
+            "description": eq.description,
+            "precision": eq.precision,
+            "metadata": eq.metadata_,
+            "is_active": eq.is_active,
+        }
+        result = EquivalentSchema.model_validate(eq)
+        _add_audit_entry(
+            db,
+            request=request,
+            action="admin.equivalents.patch",
+            object_type="equivalent",
+            object_id=eq.code,
+            reason=body.reason,
+            before_state=before,
+            after_state=after,
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
-    after = {
-        "symbol": eq.symbol,
-        "description": eq.description,
-        "precision": eq.precision,
-        "metadata": eq.metadata_,
-        "is_active": eq.is_active,
-    }
-    await _audit(
-        db,
-        request=request,
-        action="admin.equivalents.patch",
-        object_type="equivalent",
-        object_id=eq.code,
-        reason=body.reason,
-        before_state=before,
-        after_state=after,
-    )
-
-    return EquivalentSchema.model_validate(eq)
+    return result
 
 
 async def _equivalent_usage_counts(db: AsyncSession, *, equivalent_id) -> dict[str, int]:
@@ -1125,19 +1180,22 @@ async def admin_delete_equivalent(
         "is_active": eq.is_active,
     }
 
-    await db.delete(eq)
-    await db.commit()
-
-    await _audit(
-        db,
-        request=request,
-        action="admin.equivalents.delete",
-        object_type="equivalent",
-        object_id=normalized,
-        reason=body.reason,
-        before_state=before,
-        after_state=None,
-    )
+    try:
+        await db.delete(eq)
+        _add_audit_entry(
+            db,
+            request=request,
+            action="admin.equivalents.delete",
+            object_type="equivalent",
+            object_id=normalized,
+            reason=body.reason,
+            before_state=before,
+            after_state=None,
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
     return AdminDeleteResponse(deleted=normalized)
 
