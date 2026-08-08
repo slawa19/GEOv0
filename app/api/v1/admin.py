@@ -64,6 +64,7 @@ from app.core.admin.metrics import compute_participant_metrics
 from app.core.trustlines.service import TrustLineService
 from app.core.payments.engine import PaymentEngine
 from app.utils.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.utils.request_id import new_request_id, request_id_var, validate_request_id
 from app.utils.validation import validate_equivalent_code
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
@@ -263,7 +264,9 @@ def _add_audit_entry(
     before_state: dict[str, Any] | None = None,
     after_state: dict[str, Any] | None = None,
 ) -> AuditLog:
-    rid = request.headers.get("X-Request-ID")
+    rid = validate_request_id(request_id_var.get())
+    if rid is None:
+        rid = validate_request_id(request.headers.get("X-Request-ID")) or new_request_id()
     ip = (request.client.host if request.client else None) or None
     ua = request.headers.get("user-agent")
     entry = AuditLog(

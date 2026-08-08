@@ -9,6 +9,7 @@ from app.config import settings
 from app.db.models.audit_log import AuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.utils.request_id import validate_request_id
 
 
 def _admin_headers() -> dict[str, str]:
@@ -120,6 +121,47 @@ async def test_admin_participant_status_and_equivalent_mutations_commit_with_aud
         action="admin.equivalents.delete",
         object_id="ATM",
     ) == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_mutation_uses_canonical_request_id_for_mandatory_audit(
+    client,
+    db_session,
+) -> None:
+    participant = Participant(
+        pid="canonical-request-id-admin",
+        display_name="Canonical Request ID Admin",
+        public_key="R" * 64,
+        type="person",
+        status="active",
+    )
+    db_session.add(participant)
+    await db_session.commit()
+
+    headers = _admin_headers()
+    headers["X-Request-ID"] = "x" * 65
+    response = await client.post(
+        "/api/v1/admin/participants/canonical-request-id-admin/freeze",
+        headers=headers,
+        json={"reason": "canonical-request-id"},
+    )
+
+    assert response.status_code == 200, response.text
+    response_request_id = response.headers["X-Request-ID"]
+    assert validate_request_id(response_request_id) == response_request_id
+    assert len(response_request_id) <= 64
+    await db_session.refresh(participant)
+    assert participant.status == "suspended"
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "admin.participants.freeze",
+                AuditLog.object_id == "canonical-request-id-admin",
+            )
+        )
+    ).scalar_one()
+    assert audit.request_id == response_request_id
 
 
 @pytest.mark.asyncio
