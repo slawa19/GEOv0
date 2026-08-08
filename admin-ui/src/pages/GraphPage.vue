@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGraphData } from '../composables/useGraphData'
 import { useGraphAnalytics } from '../composables/useGraphAnalytics'
 import { graphSelectionAnnouncement, useGraphVisualization } from '../composables/useGraphVisualization'
-import type { DrawerTab, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
+import type { DrawerTab, GraphElementOption, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
 import {
   DEFAULT_FOCUS_DEPTH,
   DEFAULT_LAYOUT_SPACING,
@@ -28,6 +28,7 @@ import {
 import {
   atomsToDecimal,
   computeSeedLabel,
+  createDebouncedGraphElementSearch,
   extractPidFromText,
   graphElementOptionsForSearch,
   labelPartsToMode,
@@ -418,18 +419,64 @@ const keyboardElementKey = ref('')
 const keyboardElementQuery = ref('')
 const GUARDED_KEYBOARD_QUERY_MIN = 2
 const GUARDED_KEYBOARD_OPTION_LIMIT = 100
+const GUARDED_KEYBOARD_DEBOUNCE_MS = 200
+const guardedKeyboardElementOptions = ref<GraphElementOption[]>([])
+const guardedKeyboardSearch = createDebouncedGraphElementSearch({
+  delayMs: GUARDED_KEYBOARD_DEBOUNCE_MS,
+  guardedQueryMin: GUARDED_KEYBOARD_QUERY_MIN,
+  guardedLimit: GUARDED_KEYBOARD_OPTION_LIMIT,
+  buildOptions: graphViz.graphElementOptions,
+  publish: (options) => { guardedKeyboardElementOptions.value = options },
+})
 const keyboardElementOptions = computed(() => graphElementOptionsForSearch({
-  guarded: graphRenderGuardActive.value,
+  guarded: false,
   query: keyboardElementQuery.value,
   guardedQueryMin: GUARDED_KEYBOARD_QUERY_MIN,
   guardedLimit: GUARDED_KEYBOARD_OPTION_LIMIT,
   buildOptions: graphViz.graphElementOptions,
 }))
+const visibleKeyboardElementOptions = computed(() => (
+  graphRenderGuardActive.value ? guardedKeyboardElementOptions.value : keyboardElementOptions.value
+))
 let drawerReturnFocus: HTMLElement | null = null
 
 function searchKeyboardElements(query: string) {
   keyboardElementQuery.value = query
+  if (graphRenderGuardActive.value) {
+    guardedKeyboardSearch.search(query)
+    return
+  }
+  guardedKeyboardSearch.cancel()
+  guardedKeyboardElementOptions.value = []
 }
+
+watch(graphRenderGuardActive, (guarded) => {
+  guardedKeyboardSearch.cancel()
+  guardedKeyboardElementOptions.value = []
+  if (guarded) guardedKeyboardSearch.search(keyboardElementQuery.value)
+})
+
+watch(
+  [
+    participants,
+    filteredTrustlines,
+    incidentRatioByPid,
+    threshold,
+    typeFilter,
+    minDegree,
+    hideIsolates,
+    showIncidents,
+    focusMode,
+    focusRootPid,
+    focusDepth,
+    focusPid,
+  ],
+  () => {
+    if (graphRenderGuardActive.value) guardedKeyboardSearch.search(keyboardElementQuery.value)
+  },
+)
+
+onBeforeUnmount(guardedKeyboardSearch.cancel)
 
 function openKeyboardElement() {
   const active = document.activeElement
@@ -579,7 +626,7 @@ const graphLiveAnnouncement = computed(() => {
 
     <GraphKeyboardNavigator
       v-model="keyboardElementKey"
-      :options="keyboardElementOptions"
+      :options="visibleKeyboardElementOptions"
       :busy="loading"
       :hint-id="graphRenderGuardActive ? 'graph-keyboard-guard-hint' : undefined"
       @open="openKeyboardElement"

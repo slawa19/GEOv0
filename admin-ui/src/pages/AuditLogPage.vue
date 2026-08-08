@@ -47,9 +47,8 @@ function applyRouteQueryToFilter(): boolean {
 function syncFilterToRouteQuery() {
   if (!isAuditRoute.value) return
   const query: Record<string, unknown> = { ...route.query }
-  const typedQ = q.value
-  const nextQ = typedQ.trim() ? typedQ : ''
-  if (nextQ) query.q = nextQ
+  const nextQ = q.value
+  if (nextQ !== '') query.q = nextQ
   else delete query.q
   if (readQueryString(route.query.q) !== nextQ) {
     void router.replace({ query: toLocationQueryRaw(query) })
@@ -95,7 +94,6 @@ function openRow(row: AuditLogEntry) {
 onMounted(() => {
   applyRouteQueryToFilter()
   scheduledSearchQ = q.value.trim()
-  syncFilterToRouteQuery()
   void load()
 })
 watch(page, () => void load())

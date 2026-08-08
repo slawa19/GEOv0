@@ -4,6 +4,7 @@ import {
   atomsToDecimal,
   buildFocusModeQuery,
   computeSeedLabel,
+  createDebouncedGraphElementSearch,
   extractPidFromText,
   graphElementOptionsForSearch,
   labelPartsToMode,
@@ -77,6 +78,53 @@ describe('graphPageHelpers', () => {
     expect(buildOptions).toHaveBeenCalledTimes(1)
     expect(options).toHaveLength(100)
     expect(options.every((option) => option.label.toLowerCase().includes('match'))).toBe(true)
+  })
+
+  it('debounces rapid guarded queries to one bounded builder scan and cancels pending work', () => {
+    vi.useFakeTimers()
+    try {
+      let built = Array.from({ length: 150 }, (_, index) => ({
+        key: `node:PID_A_${index}`,
+        label: `Node: PID_A ${index}`,
+      }))
+      const buildOptions = vi.fn(() => built)
+      const publish = vi.fn<(options: typeof built) => void>()
+      const search = createDebouncedGraphElementSearch({
+        delayMs: 200,
+        guardedQueryMin: 2,
+        guardedLimit: 100,
+        buildOptions,
+        publish,
+      })
+
+      search.search('P')
+      search.search('PI')
+      search.search('PID')
+      search.search('PID_A')
+
+      expect(buildOptions).not.toHaveBeenCalled()
+      expect(publish).toHaveBeenLastCalledWith([])
+      vi.advanceTimersByTime(199)
+      expect(buildOptions).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      expect(buildOptions).toHaveBeenCalledTimes(1)
+      expect(publish.mock.calls[publish.mock.calls.length - 1]?.[0]).toHaveLength(100)
+
+      built = [{ key: 'node:PID_A_NEW', label: 'Node: PID_A new source' }]
+      search.search('PID_A')
+      expect(publish).toHaveBeenLastCalledWith([])
+      expect(buildOptions).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(200)
+      expect(buildOptions).toHaveBeenCalledTimes(2)
+      expect(publish).toHaveBeenLastCalledWith(built)
+
+      search.search('PID_A_1')
+      search.cancel()
+      vi.runAllTimers()
+      expect(buildOptions).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it.each([

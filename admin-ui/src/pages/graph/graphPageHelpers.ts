@@ -90,6 +90,40 @@ export function graphElementOptionsForSearch<T extends { key: string; label: str
   return options.guarded ? matches.slice(0, options.guardedLimit) : matches
 }
 
+export function createDebouncedGraphElementSearch<T extends { key: string; label: string }>(options: {
+  delayMs: number
+  guardedQueryMin: number
+  guardedLimit: number
+  buildOptions: () => T[]
+  publish: (options: T[]) => void
+}) {
+  let timer: number | null = null
+
+  function cancel() {
+    if (timer === null) return
+    window.clearTimeout(timer)
+    timer = null
+  }
+
+  function search(query: string) {
+    cancel()
+    options.publish([])
+    if (String(query || '').trim().length < options.guardedQueryMin) return
+    timer = window.setTimeout(() => {
+      timer = null
+      options.publish(graphElementOptionsForSearch({
+        guarded: true,
+        query,
+        guardedQueryMin: options.guardedQueryMin,
+        guardedLimit: options.guardedLimit,
+        buildOptions: options.buildOptions,
+      }))
+    }, options.delayMs)
+  }
+
+  return { search, cancel }
+}
+
 export async function reloadGraphView(options: {
   loadData: () => Promise<void>
   isCurrent: () => boolean

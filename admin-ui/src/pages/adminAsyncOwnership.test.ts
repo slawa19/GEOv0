@@ -522,17 +522,52 @@ describe('selected non-Graph operator and navigation paths', () => {
     expect(apiMock.listAuditLog).toHaveBeenCalledTimes(callsBeforeTyping + 1)
     expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 1, per_page: 20, q: 'admin config' })
 
-    state.q = '   '
+    apiMock.listAuditLog.mockResolvedValue(ok({ items: [auditNew], page: 2, per_page: 20, total: 40 }))
+    state.page = 2
+    await nextTick()
+    await settle()
+    const callsBeforePageReset = apiMock.listAuditLog.mock.calls.length
+
+    state.q = 'admin config next '
+    await nextTick()
+    await vi.runAllTimersAsync()
+    await settle()
+    expect(state.page).toBe(1)
+    expect(apiMock.listAuditLog).toHaveBeenCalledTimes(callsBeforePageReset + 1)
+    expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 1, per_page: 20, q: 'admin config next' })
+
+    wrapper.unmount()
+  })
+
+  it('round-trips whitespace-only Audit q exactly without a normalized reload', async () => {
+    vi.useFakeTimers()
+    apiMock.listAuditLog.mockResolvedValue(paginated([auditNew]))
+    const wrapper = mountPage(AuditLogPage, '/audit-log', { scenario: 'slow', q: ' \t ' })
+    await settle()
+    const state = setupState(wrapper)
+    const initialCalls = apiMock.listAuditLog.mock.calls.length
+    expect(state.q).toBe(' \t ')
+    expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 1, per_page: 20, q: undefined })
+    expect(routing.replace).not.toHaveBeenCalled()
+
+    state.q = '  \t '
+    await nextTick()
+    expect(routing.replace).toHaveBeenLastCalledWith({ query: { scenario: 'slow', q: '  \t ' } })
+    await vi.runAllTimersAsync()
+    await settle()
+    expect(apiMock.listAuditLog).toHaveBeenCalledTimes(initialCalls)
+
+    routing.route.query = { scenario: 'slow', q: '  \t ' }
+    await nextTick()
+    expect(state.q).toBe('  \t ')
+
+    state.q = ''
     await nextTick()
     expect(routing.replace).toHaveBeenLastCalledWith({ query: { scenario: 'slow' } })
     await vi.runAllTimersAsync()
     await settle()
-    expect(apiMock.listAuditLog).toHaveBeenCalledTimes(callsBeforeTyping + 2)
-    expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 1, per_page: 20, q: undefined })
+    expect(apiMock.listAuditLog).toHaveBeenCalledTimes(initialCalls)
 
-    routing.route.query = { scenario: 'slow' }
-    await nextTick()
-    expect(state.q).toBe('')
     wrapper.unmount()
   })
 

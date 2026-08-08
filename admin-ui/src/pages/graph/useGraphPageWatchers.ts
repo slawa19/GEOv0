@@ -4,7 +4,7 @@ import { THROTTLE_GRAPH_REBUILD_MS, THROTTLE_LAYOUT_SPACING_MS } from '../../con
 import { throttle } from '../../utils/throttle'
 import { useLatestRequest } from '../../composables/useLatestRequest'
 
-import type { LabelMode, SelectedInfo } from '../../composables/useGraphVisualization'
+import type { GraphRebuildOptions, LabelMode, SelectedInfo } from '../../composables/useGraphVisualization'
 
 export function useGraphPageWatchers(opts: {
   isRealMode: ComputedRef<boolean>
@@ -43,7 +43,7 @@ export function useGraphPageWatchers(opts: {
   layoutSpacing: Ref<number>
 
   graphViz: {
-    rebuildGraph: (opts?: { fit?: boolean }) => void
+    rebuildGraph: (opts?: GraphRebuildOptions) => void
     runLayout: () => void
 
     clearCycleHighlight: () => void
