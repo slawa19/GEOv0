@@ -347,6 +347,14 @@ class PaymentService:
                 pass
             raise NotFoundException(f"Equivalent {request.equivalent} not found")
 
+        # Payment engine retries may expire the session identity map after an
+        # optimistic-lock conflict. Keep the validated wire identifiers as plain
+        # values so result construction never triggers implicit async ORM IO.
+        sender_pid = str(sender.pid)
+        receiver_pid = str(receiver.pid)
+        equivalent_id = equivalent.id
+        equivalent_code = str(equivalent.code)
+
         # Signature payload (canonical JSON) is part of the API contract for MVP.
         # IMPORTANT: it must include tx_id and must exclude the `signature` field itself.
         payload: dict = {
@@ -445,10 +453,10 @@ class PaymentService:
                 # Build routing graph + compute routes under spec-aligned timeout budget.
                 try:
                     if deferred_effects is None:
-                        build_graph = self.router.build_graph(equivalent.code)
+                        build_graph = self.router.build_graph(equivalent_code)
                     else:
                         build_graph = self.router.build_graph(
-                            equivalent.code,
+                            equivalent_code,
                             use_shared_cache=False,
                         )
                     await asyncio.wait_for(
@@ -462,8 +470,8 @@ class PaymentService:
                     routes_found = await asyncio.wait_for(
                         asyncio.to_thread(
                             self.router.find_flow_routes,
-                            sender.pid,
-                            receiver.pid,
+                            sender_pid,
+                            receiver_pid,
                             amount,
                             max_hops=effective_max_hops,
                             max_paths=effective_max_paths,
@@ -507,12 +515,12 @@ class PaymentService:
                     # Legacy header is ignored for new requests; tx_id is the single source of truth.
                     idempotency_key=None,
                     type="PAYMENT",
-                    initiator_id=sender.id,
+                    initiator_id=sender_id,
                     payload={
-                        "from": sender.pid,
-                        "to": receiver.pid,
+                        "from": sender_pid,
+                        "to": receiver_pid,
                         "amount": str(amount),
-                        "equivalent": equivalent.code,
+                        "equivalent": equivalent_code,
                         "routes": routes_payload,
                         "idempotency": {
                             "key": tx_id_str,
@@ -558,7 +566,7 @@ class PaymentService:
                                 tx_id_str,
                                 routes_found[0][0],
                                 amount,
-                                equivalent.id,
+                                equivalent_id,
                                 commit=commit,
                             ),
                             timeout=prepare_timeout_s,
@@ -568,7 +576,7 @@ class PaymentService:
                             self.engine.prepare_routes(
                                 tx_id_str,
                                 routes_found,
-                                equivalent.id,
+                                equivalent_id,
                                 commit=commit,
                             ),
                             timeout=prepare_timeout_s,
@@ -880,22 +888,22 @@ class PaymentService:
         result = PaymentResult(
             tx_id=tx_id_str,
             status="COMMITTED",
-            **{"from": sender.pid},
-            to=receiver.pid,
-            equivalent=equivalent.code,
+            **{"from": sender_pid},
+            to=receiver_pid,
+            equivalent=equivalent_code,
             amount=str(amount),
             routes=routes,
             created_at=created_at,
             committed_at=committed_at,
         )
         effects = PaymentPostCommitEffects(
-            equivalent=str(equivalent.code),
-            recipient_pid=str(receiver.pid),
+            equivalent=equivalent_code,
+            recipient_pid=receiver_pid,
             event_payload={
                 "tx_id": tx_id_str,
-                "from": str(sender.pid),
-                "to": str(receiver.pid),
-                "equivalent": str(equivalent.code),
+                "from": sender_pid,
+                "to": receiver_pid,
+                "equivalent": equivalent_code,
                 "amount": str(amount),
             },
             invalidate_routing_cache=deferred_effects is not None,
