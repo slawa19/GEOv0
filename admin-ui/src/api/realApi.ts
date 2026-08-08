@@ -511,17 +511,6 @@ export async function requestJson<T>(
   }
 }
 
-let featureFlagsPatchQueue: Promise<unknown> = Promise.resolve()
-
-function enqueueFeatureFlagsPatch<T>(job: () => Promise<T>): Promise<T> {
-  const run = featureFlagsPatchQueue.then(job, job)
-  featureFlagsPatchQueue = run.then(
-    () => undefined,
-    () => undefined,
-  )
-  return run
-}
-
 function bestEffortTotal(page: number, perPage: number, itemsLen: number): number {
   const p = Math.max(1, page || 1)
   const pp = Math.max(1, perPage || 1)
@@ -591,15 +580,8 @@ export const realApi = {
     return requestJson('/api/v1/admin/feature-flags', { admin: true })
   },
 
-  async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<Record<string, unknown>>> {
-    // Backend expects full payload: { multipath_enabled, full_multipath_enabled, clearing_enabled, reason? }
-    // Serialize calls within the same UI instance to reduce local lost-updates.
-    return enqueueFeatureFlagsPatch(async () => {
-      const current =
-        assertSuccess(await requestJson<Record<string, unknown>>('/api/v1/admin/feature-flags', { admin: true })) || {}
-      const body = { ...current, ...patch }
-      return requestJson('/api/v1/admin/feature-flags', { method: 'PATCH', body, admin: true })
-    })
+  patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<Record<string, unknown>>> {
+    return requestJson('/api/v1/admin/feature-flags', { method: 'PATCH', body: patch, admin: true })
   },
 
   integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {
