@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.simulator import (
     SimulatorActionClearingCycle,
+    SimulatorActionClearingRealRequest,
     SimulatorActionEdgeRef,
     SimulatorGraphLink,
     SimulatorGraphNode,
@@ -1124,7 +1126,10 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_kind", ["geo", "unexpected"])
+@pytest.mark.parametrize(
+    "failure_kind",
+    ["geo", "unexpected", "cancelled_execute", "cancelled_finalize"],
+)
 async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_failure(
     client,
     db_session,
@@ -1174,6 +1179,10 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
             raise GeoException(details={"safe_context": "retry_exhausted"}) from RuntimeError(
                 "raw clearing failure secret"
             )
+        if failure_kind == "cancelled_execute":
+            raise asyncio.CancelledError
+        if failure_kind == "cancelled_finalize":
+            return None
         raise RuntimeError("raw clearing failure secret")
 
     monkeypatch.setattr(
@@ -1187,7 +1196,13 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
         _execute_clearing,
     )
 
+    patch_calls = 0
+
     async def _no_patches(**_kwargs):
+        nonlocal patch_calls
+        patch_calls += 1
+        if failure_kind == "cancelled_finalize" and patch_calls == 1:
+            raise asyncio.CancelledError
         return None, None
 
     monkeypatch.setattr(
@@ -1207,13 +1222,25 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
 
     monkeypatch.setattr(interact_actions_enabled, "SseEventEmitter", _FakeEmitter)
 
-    response = await client.post(
-        "/api/v1/simulator/runs/test-run/actions/clearing-real",
-        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-        json={"equivalent": "UAH", "max_depth": 6},
-    )
+    if failure_kind.startswith("cancelled"):
+        with pytest.raises(asyncio.CancelledError):
+            await interact_actions_enabled.action_clearing_real(
+                "test-run",
+                SimulatorActionClearingRealRequest(
+                    equivalent="UAH",
+                    max_depth=6,
+                ),
+                SimpleNamespace(is_admin=True, owner_id="admin"),
+                db_session,
+            )
+        response = None
+    else:
+        response = await client.post(
+            "/api/v1/simulator/runs/test-run/actions/clearing-real",
+            headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+            json={"equivalent": "UAH", "max_depth": 6},
+        )
 
-    assert response.status_code == 500
     expected_details = {
         "partial_cleared_cycles": 1,
         "partial_cleared_amount": "2.5",
@@ -1223,14 +1250,14 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
             "safe_context": "retry_exhausted",
             **expected_details,
         }
-    assert response.json() == {
-        "error": {
+    if response is not None:
+        assert response.status_code == 500
+        assert response.json() == {
             "code": "E010",
             "message": "Internal server error",
             "details": expected_details,
         }
-    }
-    assert "raw clearing failure secret" not in response.text
+        assert "raw clearing failure secret" not in response.text
     assert execute_calls == 2
     assert len(emitted) == 1
     assert emitted[0]["type"] == "clearing.done"

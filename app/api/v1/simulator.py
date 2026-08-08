@@ -77,6 +77,7 @@ from app.schemas.simulator import (
     SimulatorPaymentTargetsItem,
 )
 from app.schemas.common import ErrorEnvelope
+from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import (
     BadRequestException,
     ConflictException,
@@ -1571,6 +1572,32 @@ async def action_clearing_real(
     total = Decimal("0")
     cleared_count = 0
 
+    async def _emit_known_progress() -> None:
+        try:
+            await _emit_interact_clearing_done_best_effort(
+                run_id=run_id,
+                run=run,
+                db=db,
+                equivalent_code=eq.code,
+                executed=executed,
+                cleared_count=cleared_count,
+                total=total,
+            )
+        except asyncio.CancelledError:
+            # Cancellation may arrive while patches are being computed, before
+            # the synchronous broadcast. Retry once so already-durable progress
+            # is published, then preserve cancellation for the caller.
+            await _emit_interact_clearing_done_best_effort(
+                run_id=run_id,
+                run=run,
+                db=db,
+                equivalent_code=eq.code,
+                executed=executed,
+                cleared_count=cleared_count,
+                total=total,
+            )
+            raise
+
     try:
         # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
         for _ in range(0, 100):
@@ -1611,36 +1638,39 @@ async def action_clearing_real(
 
             if not executed_this_round:
                 break
+    except asyncio.CancelledError:
+        if cleared_count > 0:
+            await _emit_known_progress()
+        raise
     except Exception as exc:
         if cleared_count > 0:
             partial_details = {
                 "partial_cleared_cycles": int(cleared_count),
                 "partial_cleared_amount": _fmt_decimal_for_api(total),
             }
-            await _emit_interact_clearing_done_best_effort(
-                run_id=run_id,
-                run=run,
-                db=db,
-                equivalent_code=eq.code,
-                executed=executed,
-                cleared_count=cleared_count,
-                total=total,
-            )
+            await _emit_known_progress()
             if isinstance(exc, GeoException):
-                exc.details = {**(exc.details or {}), **partial_details}
-                raise
-            raise GeoException(details=partial_details) from exc
+                details = {**(exc.details or {}), **partial_details}
+                message = (
+                    GeoException().message
+                    if exc.code == ErrorCode.E010.value
+                    else str(exc.message)
+                )
+                return _action_error(
+                    status_code=int(exc.status_code),
+                    code=str(exc.code),
+                    message=message,
+                    details=details,
+                )
+            return _action_error(
+                status_code=500,
+                code=ErrorCode.E010.value,
+                message=GeoException().message,
+                details=partial_details,
+            )
         raise
 
-    await _emit_interact_clearing_done_best_effort(
-        run_id=run_id,
-        run=run,
-        db=db,
-        equivalent_code=eq.code,
-        executed=executed,
-        cleared_count=cleared_count,
-        total=total,
-    )
+    await _emit_known_progress()
 
     return SimulatorActionClearingRealResponse(
         equivalent=eq.code,
