@@ -903,7 +903,8 @@ class PaymentEngine:
             # Preserve the audit input as plain data before those retries so a
             # successful payment cannot silently lose its integrity audit row to
             # an implicit async ORM refresh (MissingGreenlet).
-            tx_payload = dict(tx.payload or {})
+            raw_tx_payload = tx.payload
+            tx_payload = dict(raw_tx_payload) if isinstance(raw_tx_payload, dict) else {}
 
             # FIX-014: capture integrity checksums before applying flows.
             checkpoints_before: dict[UUID, object] = {}
