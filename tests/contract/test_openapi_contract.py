@@ -14,7 +14,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 import yaml
@@ -40,7 +40,7 @@ REQUEST_SCHEMA_DRIFT_SHA256 = (
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "09e4088707989a7692418443ca17e298f8f683c7f04ccf07d980b04595be3598"
+    "e97d788a675120695e999da1e8b4c9324e12d124e3d3adf851461eb991a1781f"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 74
 ERROR_RESPONSE_DRIFT_SHA256 = (
@@ -331,6 +331,303 @@ def test_admin_equivalent_mutation_inputs_preserve_canonical_bounds() -> None:
         precision = _normalize_schema(properties["precision"], generated)
         assert precision["minimum"] == equivalent_precision["minimum"]
         assert precision["maximum"] == equivalent_precision["maximum"]
+
+
+def _assert_exact_object_schema(
+    schema: dict[str, Any],
+    *,
+    properties: set[str],
+    required: set[str],
+) -> None:
+    assert schema["type"] == "object"
+    assert set(schema["properties"]) == properties
+    assert set(schema["required"]) == required
+    assert schema.get("additionalProperties") is False
+
+
+def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
+    canonical = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+    schemas = canonical["components"]["schemas"]
+    generated_schemas = generated["components"]["schemas"]
+
+    operation_refs = {
+        ("post", "/admin/participants/{pid}/freeze"): "AdminParticipantStatusResponse",
+        ("post", "/admin/participants/{pid}/unfreeze"): "AdminParticipantStatusResponse",
+        ("post", "/admin/transactions/{tx_id}/abort"): "AdminAbortTxResponse",
+        ("post", "/admin/equivalents"): "Equivalent",
+        ("patch", "/admin/equivalents/{code}"): "Equivalent",
+        ("delete", "/admin/equivalents/{code}"): "AdminDeleteResponse",
+        ("get", "/admin/equivalents/{code}/usage"): "AdminEquivalentUsageResponse",
+        ("get", "/integrity/status"): "IntegrityStatusResponse",
+        ("post", "/integrity/verify"): "IntegrityVerifyResponse",
+        (
+            "post",
+            "/integrity/repair/net-mutual-debts",
+        ): "IntegrityNetMutualDebtsRepairResponse",
+        (
+            "post",
+            "/integrity/repair/cap-debts-to-trust-limits",
+        ): "IntegrityCapDebtsRepairResponse",
+    }
+    for (method, path), component in operation_refs.items():
+        expected_ref = f"#/components/schemas/{component}"
+        canonical_schema = canonical["paths"][path][method]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]
+        generated_schema = generated["paths"][f"/api/v1{path}"][method]["responses"][
+            "200"
+        ]["content"]["application/json"]["schema"]
+        assert canonical_schema == {"$ref": expected_ref}
+        assert generated_schema == {"$ref": expected_ref}
+
+    exact_shapes = {
+        "AdminParticipantStatusResponse": (
+            {"pid", "status"},
+            {"pid", "status"},
+        ),
+        "AdminAbortTxResponse": ({"tx_id", "status"}, {"tx_id", "status"}),
+        "AdminDeleteResponse": ({"deleted"}, {"deleted"}),
+        "AdminEquivalentUsageResponse": (
+            {"code", "trustlines", "debts", "integrity_checkpoints"},
+            {"code", "trustlines", "debts", "integrity_checkpoints"},
+        ),
+        "IntegrityStatusResponse": (
+            {"status", "last_check", "equivalents", "alerts"},
+            {"status", "last_check", "equivalents", "alerts"},
+        ),
+        "IntegrityVerifyResponse": (
+            {"status", "checked_at", "equivalents", "alerts"},
+            {"status", "checked_at", "equivalents", "alerts"},
+        ),
+        "IntegrityNetMutualDebtsRepairResponse": (
+            {"ok", "action", "netted_pairs", "updated", "deleted"},
+            {"ok", "action", "netted_pairs", "updated", "deleted"},
+        ),
+        "IntegrityCapDebtsRepairResponse": (
+            {"ok", "action", "scanned", "updated", "deleted"},
+            {"ok", "action", "scanned", "updated", "deleted"},
+        ),
+    }
+    for component, (properties, required) in exact_shapes.items():
+        _assert_exact_object_schema(
+            schemas[component],
+            properties=properties,
+            required=required,
+        )
+        assert set(generated_schemas[component]["properties"]) == properties
+
+    assert schemas["AdminParticipantStatusResponse"]["properties"]["status"][
+        "enum"
+    ] == ["active", "suspended"]
+    assert schemas["AdminAbortTxResponse"]["properties"]["status"]["pattern"] == (
+        "^aborted$"
+    )
+    assert schemas["Equivalent"]["properties"]["code"] == {
+        "$ref": "#/components/schemas/EquivalentCode"
+    }
+    assert set(schemas["Equivalent"]["properties"]) == {
+        "code",
+        "symbol",
+        "description",
+        "precision",
+        "metadata",
+        "is_active",
+        "created_at",
+        "updated_at",
+    }
+    assert set(schemas["Equivalent"]["required"]) == {
+        "code",
+        "precision",
+        "is_active",
+        "created_at",
+        "updated_at",
+    }
+    assert "additionalProperties" not in schemas["Equivalent"]
+    assert set(generated_schemas["Equivalent"]["properties"]) == set(
+        schemas["Equivalent"]["properties"]
+    )
+    assert set(generated_schemas["Equivalent"]["required"]) == set(
+        schemas["Equivalent"]["required"]
+    )
+    assert schemas["Equivalent"]["properties"]["precision"]["minimum"] == 0
+    assert schemas["Equivalent"]["properties"]["precision"]["maximum"] == 18
+
+    health_values = ["healthy", "warning", "critical"]
+    assert schemas["IntegrityStatusResponse"]["properties"]["status"]["enum"] == (
+        health_values
+    )
+    assert schemas["IntegrityVerifyResponse"]["properties"]["status"]["enum"] == (
+        health_values
+    )
+    assert schemas["IntegrityNetMutualDebtsRepairResponse"]["properties"]["action"][
+        "enum"
+    ] == ["net-mutual-debts"]
+    assert schemas["IntegrityCapDebtsRepairResponse"]["properties"]["action"][
+        "enum"
+    ] == ["cap-debts-to-trust-limits"]
+
+
+def test_run_status_schema_preserves_stop_and_counter_fields() -> None:
+    canonical = _load_openapi_yaml()
+    schema = canonical["components"]["schemas"]["RunStatus"]
+    generated = _load_fastapi_openapi()["components"]["schemas"]["RunStatus"]
+
+    _assert_exact_object_schema(
+        schema,
+        properties={
+            "api_version",
+            "run_id",
+            "scenario_id",
+            "mode",
+            "state",
+            "started_at",
+            "stopped_at",
+            "stop_requested_at",
+            "stop_source",
+            "stop_reason",
+            "stop_client",
+            "sim_time_ms",
+            "intensity_percent",
+            "ops_sec",
+            "queue_depth",
+            "errors_total",
+            "committed_total",
+            "rejected_total",
+            "attempts_total",
+            "timeouts_total",
+            "errors_last_1m",
+            "consec_all_rejected_ticks",
+            "last_error",
+            "last_event_type",
+            "current_phase",
+        },
+        required={"api_version", "run_id", "scenario_id", "mode", "state"},
+    )
+    assert set(generated["properties"]) == set(schema["properties"])
+    assert set(generated["required"]) == {"run_id", "scenario_id", "mode", "state"}
+
+    for name in {
+        "sim_time_ms",
+        "intensity_percent",
+        "ops_sec",
+        "queue_depth",
+        "errors_total",
+        "committed_total",
+        "rejected_total",
+        "attempts_total",
+        "timeouts_total",
+        "errors_last_1m",
+        "consec_all_rejected_ticks",
+    }:
+        assert schema["properties"][name]["nullable"] is True
+        assert schema["properties"][name]["minimum"] == 0
+
+    for name in {"started_at", "stopped_at", "stop_requested_at"}:
+        assert schema["properties"][name]["nullable"] is True
+        assert schema["properties"][name]["format"] == "date-time"
+    for name in {"stop_source", "stop_reason", "stop_client"}:
+        assert schema["properties"][name] == {"type": "string", "nullable": True}
+
+
+def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> None:
+    from app.schemas.simulator import (
+        SimulatorAuditDriftEvent,
+        SimulatorEvent,
+        SimulatorRunStatusEvent,
+        SimulatorTxFailedEvent,
+        SimulatorTxUpdatedEvent,
+    )
+
+    canonical = _load_openapi_yaml()
+    schemas = canonical["components"]["schemas"]
+    expected_refs = [
+        f"#/components/schemas/{event_type.__name__}"
+        for event_type in get_args(SimulatorEvent)
+    ]
+
+    assert [item["$ref"] for item in schemas["SimulatorEvent"]["oneOf"]] == (
+        expected_refs
+    )
+    assert expected_refs == [
+        "#/components/schemas/SimulatorTxUpdatedEvent",
+        "#/components/schemas/SimulatorTxFailedEvent",
+        "#/components/schemas/SimulatorClearingDoneEvent",
+        "#/components/schemas/SimulatorAuditDriftEvent",
+        "#/components/schemas/SimulatorTopologyChangedEvent",
+        "#/components/schemas/SimulatorRunStatusEvent",
+    ]
+
+    for model in (SimulatorTxUpdatedEvent, SimulatorTxFailedEvent):
+        model_properties = model.model_json_schema(by_alias=True)["properties"]
+        assert "from" in model_properties
+        assert "from_" not in model_properties
+    for component in ("SimulatorTxUpdatedEvent", "SimulatorTxFailedEvent"):
+        assert "from" in schemas[component]["properties"]
+        assert "from_" not in schemas[component]["properties"]
+    assert schemas["SimulatorEventEdgeRef"]["required"] == ["from", "to"]
+    assert "from_" not in schemas["SimulatorEventEdgeRef"]["properties"]
+
+    assert set(schemas["SimulatorAuditDriftEvent"]["properties"]) == {
+        "event_id",
+        "ts",
+        "type",
+        "equivalent",
+        "tick_index",
+        "severity",
+        "total_drift",
+        "drifts",
+        "source",
+    }
+    assert set(SimulatorAuditDriftEvent.model_json_schema()["properties"]) == set(
+        schemas["SimulatorAuditDriftEvent"]["properties"]
+    )
+    assert set(schemas["SimulatorTopologyChangedEvent"]["properties"]) == {
+        "event_id",
+        "ts",
+        "type",
+        "equivalent",
+        "payload",
+        "reason",
+    }
+    assert set(schemas["TopologyChangedPayload"]["properties"]) == {
+        "added_nodes",
+        "removed_nodes",
+        "frozen_nodes",
+        "added_edges",
+        "removed_edges",
+        "frozen_edges",
+        "node_patch",
+        "edge_patch",
+    }
+    assert schemas["SimulatorTxUpdatedEvent"]["properties"]["amount_flyout"] == {
+        "type": "boolean",
+        "nullable": True,
+    }
+    assert set(schemas["SimulatorRunStatusEvent"]["properties"]) == {
+        "event_id",
+        "ts",
+        "type",
+        "run_id",
+        "scenario_id",
+        "state",
+        "sim_time_ms",
+        "intensity_percent",
+        "ops_sec",
+        "queue_depth",
+        "attempts_total",
+        "committed_total",
+        "rejected_total",
+        "errors_total",
+        "timeouts_total",
+        "consec_all_rejected_ticks",
+        "last_event_type",
+        "current_phase",
+        "last_error",
+    }
+    assert set(SimulatorRunStatusEvent.model_json_schema()["properties"]) == set(
+        schemas["SimulatorRunStatusEvent"]["properties"]
+    )
 
 
 def test_payment_create_declares_exact_response_statuses_and_error_envelopes() -> None:

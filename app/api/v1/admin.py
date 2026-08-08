@@ -38,6 +38,7 @@ from app.schemas.admin import (
     AdminFeatureFlagsPatchRequest,
     AdminMigrationsStatus,
     AdminParticipantActionRequest,
+    AdminParticipantStatusResponse,
     AdminParticipantsListResponse,
     AdminIncidentsListResponse,
     AdminLiquiditySummaryResponse,
@@ -787,7 +788,10 @@ async def _set_participant_status(
     return result
 
 
-@router.post("/participants/{pid}/freeze")
+@router.post(
+    "/participants/{pid}/freeze",
+    response_model=AdminParticipantStatusResponse,
+)
 async def freeze_participant(
     pid: str,
     body: AdminParticipantActionRequest,
@@ -804,7 +808,10 @@ async def freeze_participant(
     )
 
 
-@router.post("/participants/{pid}/unfreeze")
+@router.post(
+    "/participants/{pid}/unfreeze",
+    response_model=AdminParticipantStatusResponse,
+)
 async def unfreeze_participant(
     pid: str,
     body: AdminParticipantActionRequest,

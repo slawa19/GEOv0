@@ -303,8 +303,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantStatusResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -332,8 +331,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantStatusResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -555,8 +553,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminDeleteResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -582,8 +579,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminEquivalentUsageResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -814,8 +810,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminAbortTxResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -2505,7 +2500,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/IntegrityNetMutualDebtsRepairResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -2519,7 +2514,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/IntegrityCapDebtsRepairResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -2861,6 +2856,28 @@ components:
         reason:
           type: string
 
+    AdminParticipantStatusResponse:
+      type: object
+      required: [pid, status]
+      properties:
+        pid:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended]
+      additionalProperties: false
+
+    AdminAbortTxResponse:
+      type: object
+      required: [tx_id, status]
+      properties:
+        tx_id:
+          type: string
+        status:
+          type: string
+          pattern: '^aborted$'
+      additionalProperties: false
+
     AdminAuditLogItem:
       type: object
       required: [id, timestamp, action]
@@ -2975,6 +2992,28 @@ components:
         reason:
           type: string
           nullable: true
+
+    AdminEquivalentUsageResponse:
+      type: object
+      required: [code, trustlines, debts, integrity_checkpoints]
+      properties:
+        code:
+          type: string
+        trustlines:
+          type: integer
+        debts:
+          type: integer
+        integrity_checkpoints:
+          type: integer
+      additionalProperties: false
+
+    AdminDeleteResponse:
+      type: object
+      required: [deleted]
+      properties:
+        deleted:
+          type: string
+      additionalProperties: false
 
     SignedRequest:
       type: object
@@ -3584,6 +3623,7 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+      additionalProperties: false
 
     EquivalentIntegrityStatus:
       type: object
@@ -3602,6 +3642,7 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/InvariantResult'
+      additionalProperties: false
 
     IntegrityStatusResponse:
       type: object
@@ -3621,6 +3662,7 @@ components:
           type: array
           items:
             type: string
+      additionalProperties: false
 
     IntegrityChecksumResponse:
       type: object
@@ -3662,6 +3704,49 @@ components:
           type: array
           items:
             type: string
+      additionalProperties: false
+
+    IntegrityNetMutualDebtsRepairResponse:
+      type: object
+      required: [ok, action, netted_pairs, updated, deleted]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        action:
+          type: string
+          enum: [net-mutual-debts]
+        netted_pairs:
+          type: integer
+          minimum: 0
+        updated:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    IntegrityCapDebtsRepairResponse:
+      type: object
+      required: [ok, action, scanned, updated, deleted]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        action:
+          type: string
+          enum: [cap-debts-to-trust-limits]
+        scanned:
+          type: integer
+          minimum: 0
+        updated:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+      additionalProperties: false
 
     IntegrityAuditLogItem:
       type: object
@@ -3947,6 +4032,9 @@ components:
         amount:
           type: string
           nullable: true
+        amount_flyout:
+          type: boolean
+          nullable: true
         ttl_ms:
           type: integer
           nullable: true
@@ -4023,6 +4111,10 @@ components:
             at:
               type: string
               format: date-time
+            details:
+              type: object
+              nullable: true
+              additionalProperties: true
           additionalProperties: true
       additionalProperties: true
 
@@ -4065,11 +4157,135 @@ components:
             $ref: '#/components/schemas/SimulatorGraphLinkPatch'
       additionalProperties: true
 
+    SimulatorAuditDriftEvent:
+      type: object
+      required: [event_id, ts, type, equivalent, tick_index, severity, total_drift, drifts, source]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [audit.drift]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        tick_index:
+          type: integer
+        severity:
+          type: string
+          enum: [warning, critical]
+        total_drift:
+          type: string
+        drifts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        source:
+          type: string
+          enum: [post_tick_audit, delta_check]
+      additionalProperties: true
+
+    TopologyChangedNodeRef:
+      type: object
+      required: [pid]
+      properties:
+        pid:
+          type: string
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    TopologyChangedEdgeRef:
+      type: object
+      required: [from_pid, to_pid, equivalent_code]
+      properties:
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent_code:
+          $ref: '#/components/schemas/EquivalentCode'
+        limit:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    TopologyChangedPayload:
+      type: object
+      properties:
+        added_nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedNodeRef'
+        removed_nodes:
+          type: array
+          items:
+            type: string
+        frozen_nodes:
+          type: array
+          items:
+            type: string
+        added_edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedEdgeRef'
+        removed_edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedEdgeRef'
+        frozen_edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedEdgeRef'
+        node_patch:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+        edge_patch:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: false
+
+    SimulatorTopologyChangedEvent:
+      type: object
+      required: [event_id, ts, type, equivalent, payload]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [topology.changed]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        payload:
+          $ref: '#/components/schemas/TopologyChangedPayload'
+        reason:
+          type: string
+          nullable: true
+      additionalProperties: true
+
     SimulatorEvent:
       oneOf:
         - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
         - $ref: '#/components/schemas/SimulatorTxFailedEvent'
         - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
+        - $ref: '#/components/schemas/SimulatorAuditDriftEvent'
+        - $ref: '#/components/schemas/SimulatorTopologyChangedEvent'
         - $ref: '#/components/schemas/SimulatorRunStatusEvent'
 
     SimulatorRunStatusEvent:
@@ -4104,6 +4320,30 @@ components:
           nullable: true
           minimum: 0
         queue_depth:
+          type: integer
+          nullable: true
+          minimum: 0
+        attempts_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        committed_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        rejected_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        errors_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        timeouts_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        consec_all_rejected_ticks:
           type: integer
           nullable: true
           minimum: 0
@@ -4244,6 +4484,19 @@ components:
           type: string
           format: date-time
           nullable: true
+        stop_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        stop_source:
+          type: string
+          nullable: true
+        stop_reason:
+          type: string
+          nullable: true
+        stop_client:
+          type: string
+          nullable: true
         sim_time_ms:
           type: integer
           nullable: true
@@ -4265,7 +4518,27 @@ components:
           type: integer
           nullable: true
           minimum: 0
+        committed_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        rejected_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        attempts_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        timeouts_total:
+          type: integer
+          nullable: true
+          minimum: 0
         errors_last_1m:
+          type: integer
+          nullable: true
+          minimum: 0
+        consec_all_rejected_ticks:
           type: integer
           nullable: true
           minimum: 0

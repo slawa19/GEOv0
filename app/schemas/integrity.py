@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvariantResult(BaseModel):
@@ -43,6 +43,26 @@ class IntegrityVerifyResponse(BaseModel):
     checked_at: datetime
     equivalents: Dict[str, EquivalentIntegrityStatus]
     alerts: List[str] = Field(default_factory=list)
+
+
+class IntegrityNetMutualDebtsRepairResponse(BaseModel):
+    ok: Literal[True]
+    action: Literal["net-mutual-debts"]
+    netted_pairs: int = Field(ge=0)
+    updated: int = Field(ge=0)
+    deleted: int = Field(ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IntegrityCapDebtsRepairResponse(BaseModel):
+    ok: Literal[True]
+    action: Literal["cap-debts-to-trust-limits"]
+    scanned: int = Field(ge=0)
+    updated: int = Field(ge=0)
+    deleted: int = Field(ge=0)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class IntegrityAuditLogItem(BaseModel):

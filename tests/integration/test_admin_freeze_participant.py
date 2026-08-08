@@ -26,7 +26,7 @@ async def test_admin_freeze_blocks_participant_and_unfreeze_restores_access(clie
         json={"reason": "test-freeze"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "suspended"
+    assert resp.json() == {"pid": bob["pid"], "status": "suspended"}
 
     # Any authenticated action should now be rejected.
     resp = await client.get("/api/v1/participants/me", headers=bob["headers"])
@@ -58,7 +58,7 @@ async def test_admin_freeze_blocks_participant_and_unfreeze_restores_access(clie
         json={"reason": "test-unfreeze"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "active"
+    assert resp.json() == {"pid": bob["pid"], "status": "active"}
 
     resp = await client.get("/api/v1/participants/me", headers=bob["headers"])
     assert resp.status_code == 200, resp.text

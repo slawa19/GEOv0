@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,6 +50,13 @@ class AdminWhoAmIResponse(BaseModel):
 
 class AdminParticipantActionRequest(BaseModel):
     reason: str
+
+
+class AdminParticipantStatusResponse(BaseModel):
+    pid: str
+    status: Literal["active", "suspended"]
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class AdminAbortTxRequest(BaseModel):

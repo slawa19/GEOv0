@@ -21,6 +21,8 @@ from app.schemas.integrity import (
     IntegrityAuditLogItem,
     IntegrityAuditLogResponse,
     IntegrityChecksumResponse,
+    IntegrityCapDebtsRepairResponse,
+    IntegrityNetMutualDebtsRepairResponse,
     IntegrityStatusResponse,
     IntegrityVerifyRequest,
     IntegrityVerifyResponse,
@@ -292,7 +294,10 @@ async def verify_integrity(
     )
 
 
-@router.post("/repair/net-mutual-debts")
+@router.post(
+    "/repair/net-mutual-debts",
+    response_model=IntegrityNetMutualDebtsRepairResponse,
+)
 async def repair_net_mutual_debts(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
@@ -381,7 +386,10 @@ async def repair_net_mutual_debts(
     }
 
 
-@router.post("/repair/cap-debts-to-trust-limits")
+@router.post(
+    "/repair/cap-debts-to-trust-limits",
+    response_model=IntegrityCapDebtsRepairResponse,
+)
 async def repair_cap_debts_to_trust_limits(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
