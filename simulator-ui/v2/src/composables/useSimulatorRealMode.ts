@@ -86,6 +86,20 @@ type RealModeDiag = {
 
 type GeoRealModeGlobal = typeof globalThis & { __geo_real_mode_diag?: RealModeDiag }
 
+const DIAGNOSTIC_EVENT_TYPE_BUCKETS = new Set([
+  'run_status',
+  'tx.updated',
+  'tx.failed',
+  'clearing.done',
+  'topology.changed',
+  'audit.drift',
+])
+
+function diagnosticEventTypeBucket(eventType: string | undefined): string {
+  if (!eventType) return 'untyped'
+  return DIAGNOSTIC_EVENT_TYPE_BUCKETS.has(eventType) ? eventType : 'other'
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -531,7 +545,7 @@ export function useSimulatorRealMode(opts: {
               diag.normalize_dropped += 1
               incDiag(
                 diag.rejected_by_reason,
-                `${normalized.kind}:${normalized.eventType ?? 'untyped'}:${normalized.diagnostic}`,
+                `${normalized.kind}:${diagnosticEventTypeBucket(normalized.eventType)}:${normalized.diagnostic}`,
               )
               return
             }

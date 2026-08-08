@@ -765,6 +765,13 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
         edges: [{ from: 'A', to: 'B' }],
         node_patch: [{ id: 'A', net_balance: '5.00' }],
       })
+      for (let index = 0; index < 64; index += 1) {
+        emitSsePayload(opts, {
+          event_id: `evt_hostile_${index}`,
+          ts: '2026-01-01T00:00:05Z',
+          type: `hostile.${index}.${'x'.repeat(index)}`,
+        })
+      }
       await waitForAbort(opts.signal)
     })
 
@@ -837,17 +844,21 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
         }
       }
     ).__geo_real_mode_diag
-    expect(diag?.normalize_dropped).toBeGreaterThanOrEqual(5)
+    expect(diag?.normalize_dropped).toBeGreaterThanOrEqual(69)
     expect(diag?.frame_id_mismatches).toBeGreaterThanOrEqual(1)
-    expect(Object.keys(diag?.rejected_by_reason ?? {})).toEqual(
+    const rejectedByReason = diag?.rejected_by_reason ?? {}
+    expect(Object.keys(rejectedByReason)).toEqual(
       expect.arrayContaining([
-        'unknown:future.event:unknown_event_type',
+        'unknown:other:unknown_event_type',
         'malformed:tx.updated:invalid_tx_updated_collection',
         'malformed:tx.updated:frame_id_mismatch',
         'context:run_status:run_id_mismatch',
         'context:tx.updated:equivalent_mismatch',
       ]),
     )
+    expect(rejectedByReason['unknown:other:unknown_event_type']).toBeGreaterThanOrEqual(65)
+    expect(Object.keys(rejectedByReason)).toHaveLength(5)
+    expect(Object.keys(rejectedByReason).some((key) => key.includes('hostile.'))).toBe(false)
 
     h.stopSse()
     restoreConnectSseImplementation(prevImpl)
