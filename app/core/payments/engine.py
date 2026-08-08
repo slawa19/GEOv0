@@ -899,6 +899,12 @@ class PaymentEngine:
                 raise GeoException()
             validated_locks = refreshed_validated_locks
 
+            # Optimistic-lock retries in _apply_flow may expire the identity map.
+            # Preserve the audit input as plain data before those retries so a
+            # successful payment cannot silently lose its integrity audit row to
+            # an implicit async ORM refresh (MissingGreenlet).
+            tx_payload = dict(tx.payload or {})
+
             # FIX-014: capture integrity checksums before applying flows.
             checkpoints_before: dict[UUID, object] = {}
             try:
@@ -1021,7 +1027,7 @@ class PaymentEngine:
 
             # FIX-014: write integrity audit trail per equivalent (best-effort).
             try:
-                payload = tx.payload or {}
+                payload = tx_payload
                 participant_pids: set[str] = set()
                 for key in ("from", "to"):
                     value = payload.get(key)

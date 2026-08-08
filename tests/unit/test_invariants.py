@@ -364,7 +364,10 @@ async def test_integrity_checkpoint_status_warning_for_debt_symmetry(db_session)
 
 
 @pytest.mark.asyncio
-async def test_payment_commit_writes_integrity_audit_log_on_success(db_session):
+async def test_payment_commit_writes_integrity_audit_log_on_success(
+    db_session,
+    monkeypatch,
+):
     nonce = uuid.uuid4().hex[:10]
     eq = Equivalent(
         code=("T" + nonce[:15]).upper(),
@@ -439,8 +442,16 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(db_session):
         )
     )
     await db_session.commit()
+    expected_audit_participants = sorted([a.pid, b.pid])
 
     engine = PaymentEngine(db_session)
+    original_apply_flow = engine._apply_flow
+
+    async def _apply_flow_and_expire(*args, **kwargs):
+        await original_apply_flow(*args, **kwargs)
+        db_session.expire_all()
+
+    monkeypatch.setattr(engine, "_apply_flow", _apply_flow_and_expire)
     assert await engine.commit(tx_id) is True
 
     log = (
@@ -452,6 +463,9 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(db_session):
         )
     ).scalar_one()
     assert log.verification_passed is True
+    assert log.affected_participants == {
+        "participants": expected_audit_participants,
+    }
 
     locks = (
         (await db_session.execute(select(PrepareLock).where(PrepareLock.tx_id == tx_id)))
