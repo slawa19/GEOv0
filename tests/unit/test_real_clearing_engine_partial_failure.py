@@ -90,6 +90,8 @@ class _SuccessThenE010Service:
         self.execute_calls += 1
         if self.execute_calls == 1:
             return True
+        if self.failure_kind == "cancelled_execute":
+            raise asyncio.CancelledError
         failure = GeoException("private clearing failure detail")
         assert failure.code == "E010"
         raise failure
@@ -98,7 +100,7 @@ class _SuccessThenE010Service:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure_kind",
-    ["geo", "cancelled_find", "cancelled_finalize"],
+    ["geo", "cancelled_find", "cancelled_execute", "cancelled_finalize"],
 )
 async def test_partial_clearing_is_finalized_before_failure_propagates(
     failure_kind: str,
@@ -126,7 +128,11 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
     )
     _SuccessThenE010Service.failure_kind = failure_kind
 
+    trust_growth_calls = 0
+
     async def _apply_trust_growth(**_kwargs):
+        nonlocal trust_growth_calls
+        trust_growth_calls += 1
         if failure_kind == "cancelled_finalize":
             raise asyncio.CancelledError
         return SimpleNamespace(updated_count=0)
@@ -156,8 +162,16 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
         assert cleared == {"USD": 5.0}
 
     assert _SuccessThenE010Service.instance is not None
-    expected_execute_calls = 1 if failure_kind.startswith("cancelled") else 2
+    expected_execute_calls = 1 if failure_kind in {
+        "cancelled_find",
+        "cancelled_finalize",
+    } else 2
     assert _SuccessThenE010Service.instance.execute_calls == expected_execute_calls
+    expected_growth_calls = 0 if failure_kind in {
+        "cancelled_find",
+        "cancelled_execute",
+    } else 1
+    assert trust_growth_calls == expected_growth_calls
     if failure_kind.startswith("cancelled"):
         assert run.errors_total == 0
         assert run.last_error is None

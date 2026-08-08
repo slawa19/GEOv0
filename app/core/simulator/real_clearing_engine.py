@@ -186,7 +186,7 @@ class RealClearingEngine:
 
                     clearing_started = time.monotonic()
                     progress_last_log = 0.0
-                    execution_error: BaseException | None = None
+                    execution_error: Exception | None = None
 
                     while True:
                         now = time.monotonic()
@@ -232,7 +232,9 @@ class RealClearingEngine:
                         _loop_fc_t0 = time.monotonic()
                         try:
                             cycles = await service.find_cycles(eq, max_depth=max_depth)
-                        except (Exception, asyncio.CancelledError) as exc:
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
                             if cleared_cycles <= 0:
                                 raise
                             execution_error = exc
@@ -286,7 +288,9 @@ class RealClearingEngine:
                             _exec_t0 = time.monotonic()
                             try:
                                 success = await service.execute_clearing(cycle)
-                            except (Exception, asyncio.CancelledError) as exc:
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as exc:
                                 if cleared_cycles <= 0:
                                     raise
                                 execution_error = exc
