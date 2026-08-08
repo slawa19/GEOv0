@@ -449,6 +449,38 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
 
 
 @pytest.mark.asyncio
+async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
+    db_session,
+    monkeypatch,
+):
+    service = ClearingService(db_session)
+    cycle = [{"debt_id": str(uuid.uuid4())}]
+    execute_calls = 0
+
+    async def _find_cycles(*_args, **_kwargs):
+        return [cycle]
+
+    async def _execute_clearing(_cycle):
+        nonlocal execute_calls
+        execute_calls += 1
+        if execute_calls == 1:
+            return True
+        raise GeoException("private database detail")
+
+    monkeypatch.setattr(service, "find_cycles", _find_cycles)
+    monkeypatch.setattr(service, "execute_clearing", _execute_clearing)
+
+    with pytest.raises(GeoException) as exc_info:
+        await service.auto_clear("USD")
+
+    assert execute_calls == 2
+    assert exc_info.value.code == "E010"
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.details == {"cleared_cycles": 1, "partial": True}
+    assert "private database detail" not in str(exc_info.value.to_dict())
+
+
+@pytest.mark.asyncio
 async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanitized_error(
     db_session,
     monkeypatch,

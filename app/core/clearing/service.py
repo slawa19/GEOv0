@@ -13,6 +13,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.audit_log import IntegrityAuditLog
+from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import GeoException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.core.payments.router import PaymentRouter
@@ -1087,7 +1088,17 @@ class ClearingService:
             # Try cycles until one succeeds. If all candidates fail (e.g. due to locks/concurrency), stop.
             executed = False
             for cycle in cycles:
-                success = await self.execute_clearing(cycle)
+                try:
+                    success = await self.execute_clearing(cycle)
+                except GeoException as exc:
+                    if exc.code != ErrorCode.E010.value:
+                        raise
+                    raise GeoException(
+                        details={
+                            "cleared_cycles": count,
+                            "partial": count > 0,
+                        }
+                    ) from exc
                 if success:
                     count += 1
                     executed = True
