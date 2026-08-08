@@ -169,9 +169,12 @@ async def test_prepare_reservation_blocks_concurrent_commit_on_same_segment_post
     from tests.conftest import TestingSessionLocal
 
     seed = await _seed_prepared_payment(include_waiter=True)
-    reservation_read_ready = asyncio.Event()
-    release_reservation_read = asyncio.Event()
-    commit_lock_attempted = asyncio.Event()
+    waiter_segment_acquired = asyncio.Event()
+    release_waiter_segment = asyncio.Event()
+    commit_segment_attempted = asyncio.Event()
+    commit_segment_acquired = asyncio.Event()
+    waiter_keys: set[int] = set()
+    commit_keys: set[int] = set()
     waiter_task = None
     commit_task = None
     exercise_completed = False
@@ -179,31 +182,37 @@ async def test_prepare_reservation_blocks_concurrent_commit_on_same_segment_post
     async with TestingSessionLocal() as waiter_session, TestingSessionLocal() as commit_session:
         await _use_read_committed(waiter_session)
         await _use_read_committed(commit_session)
-        waiter_execute = waiter_session.execute
-        commit_execute = commit_session.execute
+        waiter_engine = PaymentEngine(waiter_session)
+        commit_engine = PaymentEngine(commit_session)
+        waiter_segment_acquire = waiter_engine._acquire_segment_advisory_lock_keys
+        commit_segment_acquire = commit_engine._acquire_segment_advisory_lock_keys
 
-        async def _waiter_execute(statement, *args, **kwargs):
-            sql = str(statement).lower()
-            if (
-                "from prepare_locks" in sql
-                and "prepare_locks.participant_id" in sql
-                and "prepare_locks.expires_at" in sql
-            ):
-                reservation_read_ready.set()
-                await release_reservation_read.wait()
-            return await waiter_execute(statement, *args, **kwargs)
+        async def _hold_waiter_segment(keys):
+            waiter_keys.update(keys)
+            await waiter_segment_acquire(keys)
+            waiter_segment_acquired.set()
+            await release_waiter_segment.wait()
 
-        async def _commit_execute(statement, *args, **kwargs):
-            if "pg_advisory_xact_lock" in str(statement).lower():
-                commit_lock_attempted.set()
-            return await commit_execute(statement, *args, **kwargs)
+        async def _observe_commit_segment(keys):
+            commit_keys.update(keys)
+            commit_segment_attempted.set()
+            await commit_segment_acquire(keys)
+            commit_segment_acquired.set()
 
-        monkeypatch.setattr(waiter_session, "execute", _waiter_execute)
-        monkeypatch.setattr(commit_session, "execute", _commit_execute)
+        monkeypatch.setattr(
+            waiter_engine,
+            "_acquire_segment_advisory_lock_keys",
+            _hold_waiter_segment,
+        )
+        monkeypatch.setattr(
+            commit_engine,
+            "_acquire_segment_advisory_lock_keys",
+            _observe_commit_segment,
+        )
 
         async def _prepare_waiter():
             try:
-                await PaymentEngine(waiter_session).prepare(
+                await waiter_engine.prepare(
                     seed["waiter_tx_id"],
                     [seed["sender_pid"], seed["receiver_pid"]],
                     Decimal("8.00"),
@@ -216,16 +225,19 @@ async def test_prepare_reservation_blocks_concurrent_commit_on_same_segment_post
 
         try:
             waiter_task = asyncio.create_task(_prepare_waiter())
-            await asyncio.wait_for(reservation_read_ready.wait(), timeout=5.0)
+            await asyncio.wait_for(waiter_segment_acquired.wait(), timeout=5.0)
 
             commit_task = asyncio.create_task(
-                PaymentEngine(commit_session).commit(seed["holder_tx_id"])
+                commit_engine.commit(seed["holder_tx_id"])
             )
-            await asyncio.wait_for(commit_lock_attempted.wait(), timeout=5.0)
+            await asyncio.wait_for(commit_segment_attempted.wait(), timeout=5.0)
+            assert waiter_keys == commit_keys
+            assert waiter_keys
             with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.shield(commit_task), timeout=0.25)
+                await asyncio.wait_for(commit_segment_acquired.wait(), timeout=0.25)
+            assert not commit_task.done()
 
-            release_reservation_read.set()
+            release_waiter_segment.set()
             waiter_result, commit_result = await asyncio.wait_for(
                 asyncio.gather(waiter_task, commit_task),
                 timeout=10.0,
@@ -234,9 +246,10 @@ async def test_prepare_reservation_blocks_concurrent_commit_on_same_segment_post
             assert isinstance(waiter_result, RoutingException)
             assert waiter_result.code == "E002"
             assert commit_result is True
+            assert commit_segment_acquired.is_set()
             exercise_completed = True
         finally:
-            release_reservation_read.set()
+            release_waiter_segment.set()
             tasks = [task for task in (waiter_task, commit_task) if task is not None]
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
@@ -520,9 +533,10 @@ async def test_duplicate_prepare_cannot_resurrect_transaction_during_commit_post
     from tests.conftest import TestingSessionLocal
 
     seed = await _seed_prepared_payment(include_waiter=False)
-    duplicate_lock_read_ready = asyncio.Event()
-    release_duplicate_lock_read = asyncio.Event()
+    duplicate_tx_lock_acquired = asyncio.Event()
+    release_duplicate_tx_lock = asyncio.Event()
     commit_tx_lock_attempted = asyncio.Event()
+    commit_tx_lock_acquired = asyncio.Event()
     duplicate_task = None
     commit_task = None
     exercise_completed = False
@@ -530,57 +544,62 @@ async def test_duplicate_prepare_cannot_resurrect_transaction_during_commit_post
     async with TestingSessionLocal() as duplicate_session, TestingSessionLocal() as commit_session:
         await _use_read_committed(duplicate_session)
         await _use_read_committed(commit_session)
-        duplicate_execute = duplicate_session.execute
-        commit_execute = commit_session.execute
+        duplicate_engine = PaymentEngine(duplicate_session)
+        commit_engine = PaymentEngine(commit_session)
+        duplicate_tx_lock = duplicate_engine._acquire_tx_advisory_lock
+        commit_tx_lock = commit_engine._acquire_tx_advisory_lock
 
-        async def _duplicate_execute(statement, *args, **kwargs):
-            sql = str(statement).lower()
-            if (
-                "from prepare_locks" in sql
-                and "prepare_locks.tx_id" in sql
-                and "prepare_locks.participant_id" not in sql
-            ):
-                duplicate_lock_read_ready.set()
-                await release_duplicate_lock_read.wait()
-            return await duplicate_execute(statement, *args, **kwargs)
+        async def _hold_duplicate_tx_lock(tx_id):
+            await duplicate_tx_lock(tx_id)
+            duplicate_tx_lock_acquired.set()
+            await release_duplicate_tx_lock.wait()
 
-        async def _commit_execute(statement, *args, **kwargs):
-            sql = str(statement).lower()
-            if "pg_advisory_xact_lock" in sql and "namespace" in sql:
-                commit_tx_lock_attempted.set()
-            return await commit_execute(statement, *args, **kwargs)
+        async def _observe_commit_tx_lock(tx_id):
+            commit_tx_lock_attempted.set()
+            await commit_tx_lock(tx_id)
+            commit_tx_lock_acquired.set()
 
-        monkeypatch.setattr(duplicate_session, "execute", _duplicate_execute)
-        monkeypatch.setattr(commit_session, "execute", _commit_execute)
+        monkeypatch.setattr(
+            duplicate_engine,
+            "_acquire_tx_advisory_lock",
+            _hold_duplicate_tx_lock,
+        )
+        monkeypatch.setattr(
+            commit_engine,
+            "_acquire_tx_advisory_lock",
+            _observe_commit_tx_lock,
+        )
 
         try:
             duplicate_task = asyncio.create_task(
-                PaymentEngine(duplicate_session).prepare(
+                duplicate_engine.prepare(
                     seed["holder_tx_id"],
                     [seed["sender_pid"], seed["receiver_pid"]],
                     Decimal("8.00"),
                     seed["equivalent_id"],
                 )
             )
-            await asyncio.wait_for(duplicate_lock_read_ready.wait(), timeout=5.0)
+            await asyncio.wait_for(duplicate_tx_lock_acquired.wait(), timeout=5.0)
 
             commit_task = asyncio.create_task(
-                PaymentEngine(commit_session).commit(seed["holder_tx_id"])
+                commit_engine.commit(seed["holder_tx_id"])
             )
             await asyncio.wait_for(commit_tx_lock_attempted.wait(), timeout=5.0)
             with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.shield(commit_task), timeout=0.25)
+                await asyncio.wait_for(commit_tx_lock_acquired.wait(), timeout=0.25)
+            assert not commit_task.done()
 
-            release_duplicate_lock_read.set()
+            release_duplicate_tx_lock.set()
             duplicate_result, commit_result = await asyncio.wait_for(
                 asyncio.gather(duplicate_task, commit_task),
                 timeout=15.0,
             )
             assert duplicate_result is True
             assert commit_result is True
+            assert commit_tx_lock_acquired.is_set()
             exercise_completed = True
         finally:
-            release_duplicate_lock_read.set()
+            release_duplicate_tx_lock.set()
             tasks = [task for task in (duplicate_task, commit_task) if task is not None]
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
