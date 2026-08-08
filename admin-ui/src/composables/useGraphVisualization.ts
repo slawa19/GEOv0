@@ -994,7 +994,7 @@ export function useGraphVisualization(options: {
     updateZoomStyles()
   }
 
-  function runLayout() {
+  function runLayoutWithFit(fit: boolean) {
     const cy = getCy()
     if (!cy) return
 
@@ -1002,12 +1002,13 @@ export function useGraphVisualization(options: {
     const spacing = Math.max(1, Math.min(3, Number(options.layoutSpacing.value) || 1))
     const layout =
       name === 'grid'
-        ? cy.layout({ name: 'grid', padding: 30 })
+        ? cy.layout({ name: 'grid', padding: 30, fit })
         : name === 'circle'
-          ? cy.layout({ name: 'circle', padding: 30 })
+          ? cy.layout({ name: 'circle', padding: 30, fit })
           : cy.layout(
               {
               name: 'fcose',
+              fit,
               animate: false,
               randomize: true,
               randomSeed: 42,
@@ -1026,6 +1027,10 @@ export function useGraphVisualization(options: {
             )
 
     layout.run()
+  }
+
+  function runLayout() {
+    runLayoutWithFit(true)
   }
 
   let layoutRunId = 0
@@ -1051,7 +1056,7 @@ export function useGraphVisualization(options: {
       })
     }
 
-    runLayout()
+    runLayoutWithFit(fitOnStop)
   }
 
   function rebuildGraph(opts?: { fit?: boolean }) {

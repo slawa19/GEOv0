@@ -73,6 +73,27 @@ export function computeSeedLabel(participants: SeedParticipantLike[] | null | un
   return `Seed: ${n} participants${prefix}`
 }
 
+export function graphElementOptionsWhenAvailable<T>(unavailable: boolean, buildOptions: () => T[]): T[] {
+  return unavailable ? [] : buildOptions()
+}
+
+export async function reloadGraphView(options: {
+  loadData: () => Promise<void>
+  isCurrent: () => boolean
+  afterLoad: () => Promise<void>
+  ensureInitialized: () => void
+  rebuild: (options: { fit: boolean }) => void
+  fit: boolean
+}): Promise<boolean> {
+  await options.loadData()
+  if (!options.isCurrent()) return false
+  await options.afterLoad()
+  if (!options.isCurrent()) return false
+  options.ensureInitialized()
+  options.rebuild({ fit: options.fit })
+  return true
+}
+
 export type FocusModeQuery = {
   pid: string
   depth: 1 | 2

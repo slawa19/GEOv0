@@ -1,14 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   atomsToDecimal,
   buildFocusModeQuery,
   computeSeedLabel,
   extractPidFromText,
+  graphElementOptionsWhenAvailable,
   labelPartsToMode,
   makeMetricsKey,
   modeToLabelParts,
   pct,
+  reloadGraphView,
 } from './graphPageHelpers'
 
 describe('graphPageHelpers', () => {
@@ -35,6 +37,35 @@ describe('graphPageHelpers', () => {
 
     const greenfield = Array.from({ length: 100 }, (_, i) => ({ display_name: i === 0 ? 'Greenfield Village (Test)' : 'X' }))
     expect(computeSeedLabel(greenfield)).toBe('Seed: Greenfield (100)')
+  })
+
+  it('does not build keyboard options while graph rendering is guarded', () => {
+    const buildOptions = vi.fn(() => ['node'])
+
+    expect(graphElementOptionsWhenAvailable(true, buildOptions)).toEqual([])
+    expect(buildOptions).not.toHaveBeenCalled()
+    expect(graphElementOptionsWhenAvailable(false, buildOptions)).toEqual(['node'])
+    expect(buildOptions).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['normal reload', true],
+    ['drawer refresh', false],
+  ] as const)('preserves fit semantics for %s', async (_label, fit) => {
+    const ensureInitialized = vi.fn()
+    const rebuild = vi.fn()
+
+    await expect(reloadGraphView({
+      loadData: vi.fn().mockResolvedValue(undefined),
+      isCurrent: () => true,
+      afterLoad: vi.fn().mockResolvedValue(undefined),
+      ensureInitialized,
+      rebuild,
+      fit,
+    })).resolves.toBe(true)
+
+    expect(ensureInitialized).toHaveBeenCalledTimes(1)
+    expect(rebuild).toHaveBeenCalledWith({ fit })
   })
 
   it('extractPidFromText finds PID tokens', () => {

@@ -35,7 +35,7 @@ const { isApplying: applyingRouteQuery, isActive: isAuditRoute, run: withRouteHy
 
 function applyRouteQueryToFilter(): boolean {
   const changed = withRouteHydration(() => {
-    const nextQ = readQueryString(route.query.q).trim()
+    const nextQ = readQueryString(route.query.q)
     if (q.value === nextQ) return false
     q.value = nextQ
     return true
@@ -46,10 +46,10 @@ function applyRouteQueryToFilter(): boolean {
 function syncFilterToRouteQuery() {
   if (!isAuditRoute.value) return
   const query: Record<string, unknown> = { ...route.query }
-  const nextQ = q.value.trim()
+  const nextQ = q.value
   if (nextQ) query.q = nextQ
   else delete query.q
-  if (readQueryString(route.query.q).trim() !== nextQ) {
+  if (readQueryString(route.query.q) !== nextQ) {
     void router.replace({ query: toLocationQueryRaw(query) })
   }
 }
@@ -62,10 +62,11 @@ async function load() {
   error.value = null
   try {
     // NOTE: audit-log search must be server-side. Client-side filtering of a single loaded page is misleading.
+    const searchQ = q.value.trim()
     const data = assertSuccess(await api.listAuditLog({
       page: requestPage,
       per_page: requestPerPage,
-      q: q.value || undefined,
+      q: searchQ || undefined,
     }))
     if (!request.isCurrent()) return
     total.value = data.total

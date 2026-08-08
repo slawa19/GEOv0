@@ -29,10 +29,12 @@ import {
   atomsToDecimal,
   computeSeedLabel,
   extractPidFromText,
+  graphElementOptionsWhenAvailable,
   labelPartsToMode,
   money,
   modeToLabelParts,
   pct,
+  reloadGraphView,
   type LabelPart,
 } from './graph/graphPageHelpers'
 import { useGraphConnections } from './graph/useGraphConnections'
@@ -339,10 +341,11 @@ const rawEdgesCount = computed(() => (filteredTrustlines.value || []).length)
 const isTooLargeToAutoRender = computed(() => {
   return rawNodesCount.value > MAX_AUTO_RENDER_NODES || rawEdgesCount.value > MAX_AUTO_RENDER_EDGES
 })
+const graphRenderGuardActive = computed(() => isTooLargeToAutoRender.value && !renderOverride.value)
 
 function ensureCyInitialized() {
   if (graphViz.getCy()) return
-  if (isTooLargeToAutoRender.value && !renderOverride.value) return
+  if (graphRenderGuardActive.value) return
   graphViz.initCy()
 }
 
@@ -351,16 +354,24 @@ function renderAnyway() {
   ensureCyInitialized()
 }
 
-async function reloadAll() {
+async function reloadGraph(fit: boolean) {
   const request = reloadRequests.begin()
-  await loadData()
-  if (!request.isCurrent()) return
-  await nextTick()
-  if (!request.isCurrent()) return
-  // If data got smaller after filters/focus changes, auto-init.
-  ensureCyInitialized()
-  // If graph is already initialized, just rebuild it.
-  graphViz.rebuildGraph({ fit: true })
+  await reloadGraphView({
+    loadData,
+    isCurrent: request.isCurrent,
+    afterLoad: async () => { await nextTick() },
+    ensureInitialized: ensureCyInitialized,
+    rebuild: graphViz.rebuildGraph,
+    fit,
+  })
+}
+
+function reloadAll() {
+  return reloadGraph(true)
+}
+
+function reloadDrawer() {
+  return reloadGraph(false)
 }
 
 useGraphPageWatchers({
@@ -395,7 +406,7 @@ useGraphPageWatchers({
 })
 
 const stats = computed(() => {
-  if (isTooLargeToAutoRender.value && !renderOverride.value) {
+  if (graphRenderGuardActive.value) {
     return { nodes: rawNodesCount.value, edges: rawEdgesCount.value, bottlenecks: 0 }
   }
   const { nodes, edges } = graphViz.buildElements()
@@ -404,10 +415,14 @@ const stats = computed(() => {
 })
 
 const keyboardElementKey = ref('')
-const keyboardElementOptions = computed(() => graphViz.graphElementOptions())
+const keyboardElementOptions = computed(() => graphElementOptionsWhenAvailable(
+  graphRenderGuardActive.value,
+  graphViz.graphElementOptions,
+))
 let drawerReturnFocus: HTMLElement | null = null
 
 function openKeyboardElement() {
+  if (graphRenderGuardActive.value) return
   const active = document.activeElement
   drawerReturnFocus = active instanceof HTMLElement ? active : null
   if (!graphViz.openElementDetails(keyboardElementKey.value)) drawerReturnFocus = null
@@ -498,7 +513,7 @@ const graphLiveAnnouncement = computed(() => {
     />
 
     <el-alert
-      v-else-if="isTooLargeToAutoRender && !renderOverride"
+      v-else-if="graphRenderGuardActive"
       type="warning"
       show-icon
       :closable="false"
@@ -557,6 +572,7 @@ const graphLiveAnnouncement = computed(() => {
       v-model="keyboardElementKey"
       :options="keyboardElementOptions"
       :busy="loading"
+      :unavailable="graphRenderGuardActive"
       @open="openKeyboardElement"
     />
 
@@ -617,7 +633,7 @@ const graphLiveAnnouncement = computed(() => {
     :threshold="threshold"
     :precision-by-eq="precisionByEq"
     :atoms-to-decimal="atomsToDecimal"
-    :load-data="reloadAll"
+    :load-data="reloadDrawer"
     :money="money"
     :pct="pct"
     :selected-rank="selectedRank"

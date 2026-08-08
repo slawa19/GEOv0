@@ -422,15 +422,19 @@ describe('selected non-Graph operator and navigation paths', () => {
     expect(ui.success).toHaveBeenCalledTimes(1)
   })
 
-  it('reloads an aborted Incident away and leaves no false success after failure', async () => {
-    apiMock.listIncidents.mockResolvedValueOnce(paginated([incidentNew])).mockResolvedValueOnce(paginated([incidentNew]))
+  it('trusts the backend Incident reload after abort and leaves no false success after failure', async () => {
+    apiMock.listIncidents
+      .mockResolvedValueOnce(paginated([incidentNew]))
+      .mockResolvedValueOnce(paginated([incidentNew, incidentOld]))
     apiMock.abortTx.mockResolvedValueOnce(ok({ tx_id: incidentNew.tx_id, status: 'aborted' }))
     const wrapper = mountPage(IncidentsPage, '/incidents')
     await settle()
     const state = setupState(wrapper)
     await state.forceAbort(incidentNew)
-    expect(state.items).toEqual([])
+    expect(state.items.map((item: typeof incidentNew) => item.tx_id)).toEqual([incidentNew.tx_id, incidentOld.tx_id])
+    expect(state.total).toBe(2)
     expect(state.lastAbortTxId).toBe(incidentNew.tx_id)
+    expect(apiMock.listIncidents).toHaveBeenCalledTimes(2)
     expect(ui.success).toHaveBeenCalledTimes(1)
 
     apiMock.abortTx.mockRejectedValueOnce(new Error('abort rejected'))
@@ -486,14 +490,29 @@ describe('selected non-Graph operator and navigation paths', () => {
   it('keeps Audit q synchronized both ways while preserving scenario', async () => {
     vi.useFakeTimers()
     apiMock.listAuditLog.mockResolvedValue(paginated([auditNew]))
-    const wrapper = mountPage(AuditLogPage, '/audit-log', { scenario: 'slow', q: 'initial' })
+    const wrapper = mountPage(AuditLogPage, '/audit-log', { scenario: 'slow', q: ' initial query ' })
     await settle()
     const state = setupState(wrapper)
-    expect(state.q).toBe('initial')
+    expect(state.q).toBe(' initial query ')
+    const callsBeforeTyping = apiMock.listAuditLog.mock.calls.length
 
-    state.q = 'typed'
+    state.q = 'admin '
     await nextTick()
-    expect(routing.replace).toHaveBeenLastCalledWith({ query: { scenario: 'slow', q: 'typed' } })
+    expect(routing.replace).toHaveBeenLastCalledWith({ query: { scenario: 'slow', q: 'admin ' } })
+
+    routing.route.query = { scenario: 'slow', q: 'admin ' }
+    await nextTick()
+    expect(state.q).toBe('admin ')
+
+    state.q = 'admin config '
+    await nextTick()
+    expect(routing.replace).toHaveBeenLastCalledWith({ query: { scenario: 'slow', q: 'admin config ' } })
+    routing.route.query = { scenario: 'slow', q: 'admin config ' }
+    await nextTick()
+    await vi.runAllTimersAsync()
+    await settle()
+    expect(apiMock.listAuditLog).toHaveBeenCalledTimes(callsBeforeTyping + 1)
+    expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 1, per_page: 20, q: 'admin config' })
 
     routing.route.query = { scenario: 'slow' }
     await nextTick()

@@ -61,16 +61,13 @@ async function load() {
   try {
     const data = assertSuccess(await api.listIncidents({ page: requestPage, per_page: requestPerPage }))
     if (!request.isCurrent()) return
-    const visibleItems = lastAbortTxId.value
-      ? data.items.filter((item) => item.tx_id !== lastAbortTxId.value)
-      : data.items
-    total.value = Math.max(0, data.total - (data.items.length - visibleItems.length))
+    total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
     if (requestPage > maxPage) {
       page.value = maxPage
       return
     }
-    items.value = visibleItems
+    items.value = data.items
   } catch (e: unknown) {
     if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)

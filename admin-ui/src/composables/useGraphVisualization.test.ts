@@ -1,4 +1,4 @@
-import cytoscape, { type Core } from 'cytoscape'
+import cytoscape, { type Core, type LayoutOptions } from 'cytoscape'
 import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,11 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Participant, Trustline } from '../pages/graph/graphTypes'
 import { graphSelectionAnnouncement, useGraphVisualization, type SelectedInfo } from './useGraphVisualization'
 
-function mountGraph(input?: { trustlines?: Trustline[]; selected?: SelectedInfo | null }) {
+function mountGraph(input?: {
+  trustlines?: Trustline[]
+  selected?: SelectedInfo | null
+  layoutName?: 'fcose' | 'grid' | 'circle'
+}) {
   const selected = ref<SelectedInfo | null>(input?.selected ?? null)
   const drawerOpen = ref(false)
   const participants = ref<Participant[]>([
@@ -14,8 +18,14 @@ function mountGraph(input?: { trustlines?: Trustline[]; selected?: SelectedInfo 
     { pid: 'PID_B', display_name: 'Bob', type: 'person', status: 'active' },
   ])
   let createdCy: Core | null = null
+  const observedLayouts: LayoutOptions[] = []
   const createCy = vi.fn(() => {
     createdCy = cytoscape({ headless: true, styleEnabled: true, elements: [] })
+    const originalLayout = createdCy.layout.bind(createdCy)
+    vi.spyOn(createdCy, 'layout').mockImplementation((layoutOptions) => {
+      observedLayouts.push(layoutOptions)
+      return originalLayout(layoutOptions)
+    })
     return createdCy
   })
   let graph!: ReturnType<typeof useGraphVisualization>
@@ -49,7 +59,7 @@ function mountGraph(input?: { trustlines?: Trustline[]; selected?: SelectedInfo 
           minZoomLabelsAll: ref(1),
           minZoomLabelsPerson: ref(1),
           zoom: ref(1),
-          layoutName: ref('grid'),
+          layoutName: ref(input?.layoutName ?? 'grid'),
           layoutSpacing: ref(1),
           activeCycleKey: ref(''),
           activeConnectionKey: ref(''),
@@ -59,7 +69,7 @@ function mountGraph(input?: { trustlines?: Trustline[]; selected?: SelectedInfo 
       },
     }),
   )
-  return { wrapper, graph, selected, drawerOpen, createCy, getCreatedCy: () => createdCy }
+  return { wrapper, graph, selected, drawerOpen, createCy, observedLayouts, getCreatedCy: () => createdCy }
 }
 
 describe('useGraphVisualization', () => {
@@ -100,6 +110,25 @@ describe('useGraphVisualization', () => {
     expect(destroy).toHaveBeenCalledTimes(1)
     expect(mounted.graph.getCy()).toBeNull()
   })
+
+  it.each(['grid', 'circle', 'fcose'] as const)(
+    'propagates requested viewport fitting into the %s Core layout',
+    (layoutName) => {
+      const mounted = mountGraph({ layoutName })
+      const lastLayout = () => mounted.observedLayouts[mounted.observedLayouts.length - 1]
+
+      expect(mounted.graph.initCy()).toBe(true)
+      expect(lastLayout()).toMatchObject({ name: layoutName, fit: true })
+
+      mounted.graph.rebuildGraph({ fit: false })
+      expect(lastLayout()).toMatchObject({ name: layoutName, fit: false })
+
+      mounted.graph.runLayout()
+      expect(lastLayout()).toMatchObject({ name: layoutName, fit: true })
+
+      mounted.wrapper.unmount()
+    },
+  )
 
   it('opens node and edge details through DOM option keys without a Core', () => {
     const trustline: Trustline = {

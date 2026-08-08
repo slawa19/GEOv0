@@ -5,6 +5,7 @@ import type { GraphElementOption } from '../../composables/useGraphVisualization
 defineProps<{
   options: GraphElementOption[]
   busy: boolean
+  unavailable: boolean
 }>()
 
 const selectedKey = defineModel<string>({ required: true })
@@ -23,7 +24,7 @@ const emit = defineEmits<{ open: [] }>()
       id="graph-element-select"
       v-model="selectedKey"
       filterable
-      :disabled="busy"
+      :disabled="busy || unavailable"
       :placeholder="t('graph.keyboard.placeholder')"
       :aria-label="t('graph.keyboard.label')"
       data-testid="graph-element-select"
@@ -37,7 +38,7 @@ const emit = defineEmits<{ open: [] }>()
       />
     </el-select>
     <el-button
-      :disabled="busy || !selectedKey"
+      :disabled="busy || unavailable || !selectedKey"
       data-testid="graph-element-open"
       @click="emit('open')"
     >
