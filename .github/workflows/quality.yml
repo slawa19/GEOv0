@@ -107,7 +107,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U geo -d geov0_test_ci"
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U geo -d geov0_test_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -159,6 +159,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Create task-local names and ephemeral secrets
         shell: bash
         run: |
@@ -187,6 +192,30 @@ jobs:
         shell: bash
         run: docker build --file docker/Dockerfile --tag "$PHASE1_IMAGE" .
 
+      - name: Resolve the repository single Alembic head
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_revision="$(docker run --rm --interactive \
+            --entrypoint python \
+            "$PHASE1_IMAGE" - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          heads = ScriptDirectory.from_config(
+              Config("migrations/alembic.ini")
+          ).get_heads()
+          if len(heads) != 1:
+              raise SystemExit(
+                  f"Expected exactly one Alembic head, found {len(heads)}: {heads}"
+              )
+          print(heads[0])
+          PY
+          )"
+          test -n "$head_revision"
+          echo "PHASE1_ALEMBIC_HEAD=${head_revision}" >> "$GITHUB_ENV"
+          echo "repository_alembic_head=${head_revision}"
+
       - name: Start disposable PostgreSQL and prepare revision 016 fixture
         shell: bash
         run: |
@@ -202,7 +231,8 @@ jobs:
 
           for attempt in $(seq 1 30); do
             if docker exec "$PHASE1_POSTGRES" \
-              pg_isready --username geo --dbname geov0_test_phase1_empty; then
+              pg_isready --host 127.0.0.1 --port 5432 \
+              --username geo --dbname geov0_test_phase1_empty; then
               break
             fi
             if [ "$attempt" -eq 30 ]; then
@@ -265,6 +295,7 @@ jobs:
             --env "SIMULATOR_SESSION_SECRET=${PHASE1_SIMULATOR_SECRET}" \
             --env SIMULATOR_CSRF_ORIGIN_ALLOWLIST=https://simulator.phase1.invalid \
             --env "GEO_APP_VERSION=${GITHUB_SHA}" \
+            --env "PHASE1_ALEMBIC_HEAD=${PHASE1_ALEMBIC_HEAD}" \
             "$PHASE1_IMAGE"
 
           for attempt in $(seq 1 60); do
@@ -284,6 +315,7 @@ jobs:
 
           docker exec -i "$PHASE1_APP" python - <<'PY'
           import asyncio
+          import os
 
           from sqlalchemy import inspect, text
           from sqlalchemy.ext.asyncio import create_async_engine
@@ -312,7 +344,11 @@ jobs:
               finally:
                   await engine.dispose()
 
-              assert revision == "017_add_owner_to_simulator_runs"
+              expected_head = os.environ["PHASE1_ALEMBIC_HEAD"]
+              assert revision == expected_head, (
+                  f"empty database revision {revision!r} != repository head "
+                  f"{expected_head!r}"
+              )
               actual_columns = {column["name"]: column for column in columns}
               model = SimulatorRun.__table__
               assert actual_columns["owner_id"]["nullable"] is model.c.owner_id.nullable is False
@@ -368,6 +404,7 @@ jobs:
             --env "SIMULATOR_SESSION_SECRET=${PHASE1_SIMULATOR_SECRET}" \
             --env SIMULATOR_CSRF_ORIGIN_ALLOWLIST=https://simulator.phase1.invalid \
             --env "GEO_APP_VERSION=${GITHUB_SHA}" \
+            --env "PHASE1_ALEMBIC_HEAD=${PHASE1_ALEMBIC_HEAD}" \
             "$PHASE1_IMAGE"
 
           for attempt in $(seq 1 60); do
@@ -408,6 +445,7 @@ jobs:
             --env "SIMULATOR_SESSION_SECRET=${PHASE1_SIMULATOR_SECRET}" \
             --env SIMULATOR_CSRF_ORIGIN_ALLOWLIST=https://simulator.phase1.invalid \
             --env "GEO_APP_VERSION=${GITHUB_SHA}" \
+            --env "PHASE1_ALEMBIC_HEAD=${PHASE1_ALEMBIC_HEAD}" \
             "$PHASE1_IMAGE"
 
           for attempt in $(seq 1 60); do
@@ -426,6 +464,7 @@ jobs:
 
           docker exec -i "$PHASE1_APP" python - <<'PY'
           import asyncio
+          import os
 
           from sqlalchemy import inspect, text
           from sqlalchemy.ext.asyncio import create_async_engine
@@ -458,7 +497,11 @@ jobs:
               finally:
                   await engine.dispose()
 
-              assert revision == "017_add_owner_to_simulator_runs"
+              expected_head = os.environ["PHASE1_ALEMBIC_HEAD"]
+              assert revision == expected_head, (
+                  f"016 upgrade revision {revision!r} != repository head "
+                  f"{expected_head!r}"
+              )
               actual_columns = {column["name"]: column for column in columns}
               model = SimulatorRun.__table__
               assert actual_columns["owner_id"]["nullable"] is model.c.owner_id.nullable is False
@@ -539,8 +582,11 @@ jobs:
       - name: Install Simulator UI v2 dependencies
         run: npm --prefix simulator-ui/v2 ci
 
-      - name: Install Chromium
+      - name: Install Admin UI pinned Chromium and OS dependencies
         run: npm --prefix admin-ui exec -- playwright install --with-deps chromium
+
+      - name: Install Simulator UI v2 pinned Chromium
+        run: npm --prefix simulator-ui/v2 exec -- playwright install chromium
 
       - name: Run Admin UI smoke on its isolated port
         env:

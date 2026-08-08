@@ -24,19 +24,29 @@ const correctnessRules = {
   'valid-typeof': 'error',
 }
 
+const tsLanguageOptions = {
+  parser: tsParser,
+  parserOptions: {
+    ecmaVersion: 'latest',
+    sourceType: 'module',
+  },
+}
+
 export default [
   {
-    ignores: ['src/**/*.test.ts'],
+    ignores: [
+      'src/**/*.test.ts',
+      '!src/composables/windowManager/**/*.test.ts',
+    ],
+  },
+  {
+    files: ['src/composables/windowManager/**/*.ts'],
+    languageOptions: tsLanguageOptions,
   },
   {
     files: ['src/**/*.ts'],
-    languageOptions: {
-      parser: tsParser,
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      },
-    },
+    ignores: ['src/**/*.test.ts'],
+    languageOptions: tsLanguageOptions,
     rules: correctnessRules,
   },
   {
