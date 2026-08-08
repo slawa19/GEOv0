@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import threading
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import pytest
+
+from app.core.simulator.models import RunRecord
+from app.core.simulator.real_clearing_engine import RealClearingEngine
+from app.utils.exceptions import GeoException
+
+
+class _ScalarResult:
+    def scalars(self):
+        return self
+
+    def all(self) -> list:
+        return []
+
+
+class _Session:
+    async def execute(self, _statement) -> _ScalarResult:
+        return _ScalarResult()
+
+
+class _SessionContext:
+    async def __aenter__(self) -> _Session:
+        return _Session()
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+
+class _SseCapture:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def next_event_id(self, run: RunRecord) -> str:
+        run._event_seq += 1
+        return f"event-{run._event_seq}"
+
+    def broadcast(self, _run_id: str, payload: dict) -> None:
+        self.events.append(payload)
+
+
+class _VizHelper:
+    precision = 2
+
+    async def maybe_refresh_quantiles(self, *_args, **_kwargs) -> None:
+        return None
+
+    async def compute_node_patches(self, *_args, **_kwargs) -> list:
+        return []
+
+
+class _EdgePatchBuilder:
+    async def build_edge_patch_for_pairs(self, **_kwargs) -> list:
+        return []
+
+
+class _SuccessThenE010Service:
+    instance: "_SuccessThenE010Service | None" = None
+    failure_kind = "geo"
+
+    def __init__(self, _session) -> None:
+        self.execute_calls = 0
+        self.find_calls = 0
+        self.cycle = [
+            {
+                "debtor": "alice",
+                "creditor": "bob",
+                "amount": "5.00",
+            }
+        ]
+        type(self).instance = self
+
+    async def find_cycles(self, _equivalent: str, *, max_depth: int) -> list:
+        assert max_depth >= 1
+        self.find_calls += 1
+        if self.failure_kind == "cancelled_find" and self.find_calls > 2:
+            raise asyncio.CancelledError
+        if self.failure_kind == "cancelled_finalize" and self.find_calls > 2:
+            return []
+        return [self.cycle]
+
+    async def execute_clearing(self, _cycle) -> bool:
+        self.execute_calls += 1
+        if self.execute_calls == 1:
+            return True
+        failure = GeoException("private clearing failure detail")
+        assert failure.code == "E010"
+        raise failure
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_kind",
+    ["geo", "cancelled_find", "cancelled_finalize"],
+)
+async def test_partial_clearing_is_finalized_before_failure_propagates(
+    failure_kind: str,
+) -> None:
+    sse = _SseCapture()
+    run = RunRecord(
+        run_id="partial-clearing-run",
+        scenario_id="scenario",
+        mode="real",
+        state="running",
+    )
+    run.tick_index = 7
+    run._real_viz_by_eq["USD"] = _VizHelper()
+    run._edges_by_equivalent = {"USD": [("bob", "alice")]}
+
+    engine = RealClearingEngine(
+        lock=threading.RLock(),
+        sse=sse,
+        utc_now=lambda: datetime(2026, 8, 8, tzinfo=timezone.utc),
+        logger=logging.getLogger(__name__),
+        edge_patch_builder=_EdgePatchBuilder(),
+        clearing_max_depth_limit=6,
+        clearing_max_fx_edges_limit=8,
+        real_clearing_time_budget_ms=10_000,
+    )
+    _SuccessThenE010Service.failure_kind = failure_kind
+
+    async def _apply_trust_growth(**_kwargs):
+        if failure_kind == "cancelled_finalize":
+            raise asyncio.CancelledError
+        return SimpleNamespace(updated_count=0)
+
+    async def _unexpected_edge_patch(**_kwargs):
+        raise AssertionError("trust-growth edge patch must not run")
+
+    def _unexpected_broadcast(**_kwargs) -> None:
+        raise AssertionError("trust-growth broadcast must not run")
+
+    call = engine.tick_real_mode_clearing(
+        None,
+        run_id=run.run_id,
+        run=run,
+        equivalents=["USD"],
+        apply_trust_growth=_apply_trust_growth,
+        build_edge_patch_for_equivalent=_unexpected_edge_patch,
+        broadcast_topology_edge_patch=_unexpected_broadcast,
+        async_session_local=lambda: _SessionContext(),
+        clearing_service_cls=_SuccessThenE010Service,
+    )
+    if failure_kind.startswith("cancelled"):
+        with pytest.raises(asyncio.CancelledError):
+            await call
+    else:
+        cleared = await call
+        assert cleared == {"USD": 5.0}
+
+    assert _SuccessThenE010Service.instance is not None
+    expected_execute_calls = 1 if failure_kind.startswith("cancelled") else 2
+    assert _SuccessThenE010Service.instance.execute_calls == expected_execute_calls
+    if failure_kind.startswith("cancelled"):
+        assert run.errors_total == 0
+        assert run.last_error is None
+    else:
+        assert run.errors_total == 1
+        assert run.last_error is not None
+        assert run.last_error["code"] == "CLEARING_ERROR"
+        assert run.last_error["message"] == "Internal server error"
+        assert "private clearing failure detail" not in str(run.last_error)
+
+    done_events = [event for event in sse.events if event["type"] == "clearing.done"]
+    assert len(done_events) == 1
+    assert done_events[0]["equivalent"] == "USD"
+    assert done_events[0]["cleared_cycles"] == 1
+    assert done_events[0]["cleared_amount"] == "5.00"
+    assert done_events[0]["cycle_edges"] == [{"from": "bob", "to": "alice"}]

@@ -19,6 +19,7 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.participant import Participant
+from app.utils.exceptions import GeoException
 
 
 class RealClearingEngine:
@@ -113,6 +114,13 @@ class RealClearingEngine:
         service_cls = clearing_service_cls or ClearingService
 
         for eq in equivalents:
+            plan_id = ""
+            cleared_cycles = 0
+            cleared_amount_dec = Decimal("0")
+            touched_nodes: set[str] = set()
+            touched_edges: set[tuple[str, str]] = set()
+            cleared_amount_per_edge: dict[tuple[str, str], float] = {}
+            partial_done_emitted = False
             try:
                 async with session_local() as clearing_session:
                     service = service_cls(clearing_session)
@@ -176,13 +184,9 @@ class RealClearingEngine:
                     with self._lock:
                         run.current_phase = "clearing"
 
-                    cleared_cycles = 0
-                    cleared_amount_dec = Decimal("0")
-                    touched_nodes: set[str] = set()
-                    touched_edges: set[tuple[str, str]] = set()
-                    cleared_amount_per_edge: dict[tuple[str, str], float] = {}
                     clearing_started = time.monotonic()
                     progress_last_log = 0.0
+                    execution_error: BaseException | None = None
 
                     while True:
                         now = time.monotonic()
@@ -226,7 +230,13 @@ class RealClearingEngine:
                             int(cleared_cycles),
                         )
                         _loop_fc_t0 = time.monotonic()
-                        cycles = await service.find_cycles(eq, max_depth=max_depth)
+                        try:
+                            cycles = await service.find_cycles(eq, max_depth=max_depth)
+                        except (Exception, asyncio.CancelledError) as exc:
+                            if cleared_cycles <= 0:
+                                raise
+                            execution_error = exc
+                            break
                         _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
                         if _loop_fc_ms > 500:
                             self._logger.warning(
@@ -274,7 +284,13 @@ class RealClearingEngine:
                                 int(len(cycle or [])),
                             )
                             _exec_t0 = time.monotonic()
-                            success = await service.execute_clearing(cycle)
+                            try:
+                                success = await service.execute_clearing(cycle)
+                            except (Exception, asyncio.CancelledError) as exc:
+                                if cleared_cycles <= 0:
+                                    raise
+                                execution_error = exc
+                                break
                             _exec_ms = int((time.monotonic() - _exec_t0) * 1000.0)
                             self._logger.warning(
                                 "simulator.real.clearing_execute_done run_id=%s tick=%s eq=%s success=%s elapsed_ms=%s",
@@ -544,6 +560,7 @@ class RealClearingEngine:
                         node_patch=node_patch_list,
                         edge_patch=edge_patch_list,
                     )
+                    partial_done_emitted = True
 
                     self._logger.warning(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
@@ -553,7 +570,57 @@ class RealClearingEngine:
                         int((time.monotonic() - eq_t0) * 1000.0),
                         int(cleared_cycles),
                     )
-            except Exception as e:
+                    if execution_error is not None:
+                        raise execution_error
+            except asyncio.CancelledError:
+                if cleared_cycles > 0 and not partial_done_emitted:
+                    cleared_amount_by_eq[str(eq)] = float(cleared_amount_dec)
+                    with self._lock:
+                        run.last_event_type = "clearing.done"
+                        run.current_phase = None
+                        topology_edges = set(
+                            ((run._edges_by_equivalent or {}).get(str(eq)) or [])
+                        )
+
+                    fallback_edges: list[dict[str, str]] = []
+                    for from_pid, to_pid in sorted(touched_edges):
+                        if topology_edges and (from_pid, to_pid) not in topology_edges:
+                            if (to_pid, from_pid) in topology_edges:
+                                from_pid, to_pid = to_pid, from_pid
+                            else:
+                                continue
+                        fallback_edges.append({"from": from_pid, "to": to_pid})
+                        if len(fallback_edges) >= max(1, max_fx_edges):
+                            break
+
+                    try:
+                        emitter.emit_clearing_done(
+                            run_id=run_id,
+                            run=run,
+                            equivalent=eq,
+                            plan_id=plan_id or f"plan_{secrets.token_hex(6)}",
+                            cleared_cycles=cleared_cycles,
+                            cleared_amount=format(
+                                cleared_amount_dec.quantize(
+                                    Decimal("0.01"), rounding=ROUND_DOWN
+                                ),
+                                "f",
+                            ),
+                            cycle_edges=fallback_edges or None,
+                            node_patch=None,
+                            edge_patch=None,
+                        )
+                    except Exception:
+                        self._logger.warning(
+                            "simulator.real.clearing_cancel_partial_emit_failed "
+                            "run_id=%s tick=%s eq=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            str(eq),
+                            exc_info=True,
+                        )
+                raise
+            except Exception:
                 if self._should_warn_this_tick(run, f"clearing_failed:{eq}"):
                     self._logger.warning(
                         "simulator.real.clearing_failed run_id=%s tick=%s eq=%s",
@@ -570,7 +637,7 @@ class RealClearingEngine:
                         run._error_timestamps.popleft()
                     run.last_error = {
                         "code": "CLEARING_ERROR",
-                        "message": str(e),
+                        "message": GeoException().message,
                         "at": self._utc_now().isoformat(),
                     }
                 continue
