@@ -105,9 +105,13 @@ export function createDebouncedGraphElementSearch<T extends { key: string; label
     timer = null
   }
 
-  function search(query: string) {
+  function invalidate() {
     cancel()
     options.publish([])
+  }
+
+  function search(query: string) {
+    invalidate()
     if (String(query || '').trim().length < options.guardedQueryMin) return
     timer = window.setTimeout(() => {
       timer = null
@@ -121,7 +125,7 @@ export function createDebouncedGraphElementSearch<T extends { key: string; label
     }, options.delayMs)
   }
 
-  return { search, cancel }
+  return { search, cancel, invalidate }
 }
 
 export async function reloadGraphView(options: {

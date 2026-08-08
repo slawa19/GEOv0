@@ -14,7 +14,7 @@ import {
 } from '../constants/graph'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
-import { t } from '../i18n'
+import { locale, t } from '../i18n'
 import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
 import GraphLegend from './graph/GraphLegend.vue'
 import GraphFiltersToolbar from './graph/GraphFiltersToolbar.vue'
@@ -451,9 +451,8 @@ function searchKeyboardElements(query: string) {
 }
 
 watch(graphRenderGuardActive, (guarded) => {
-  guardedKeyboardSearch.cancel()
-  guardedKeyboardElementOptions.value = []
   if (guarded) guardedKeyboardSearch.search(keyboardElementQuery.value)
+  else guardedKeyboardSearch.invalidate()
 })
 
 watch(
@@ -470,9 +469,10 @@ watch(
     focusRootPid,
     focusDepth,
     focusPid,
+    locale,
   ],
   () => {
-    if (graphRenderGuardActive.value) guardedKeyboardSearch.search(keyboardElementQuery.value)
+    if (graphRenderGuardActive.value) guardedKeyboardSearch.invalidate()
   },
 )
 

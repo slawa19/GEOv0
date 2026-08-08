@@ -127,6 +127,42 @@ describe('graphPageHelpers', () => {
     }
   })
 
+  it('invalidates source or locale changes without a retained-query rescan', () => {
+    vi.useFakeTimers()
+    try {
+      let built = [{ key: 'node:PID_A', label: 'Node: Alice — PID_A' }]
+      const buildOptions = vi.fn(() => built)
+      const publish = vi.fn<(options: typeof built) => void>()
+      const search = createDebouncedGraphElementSearch({
+        delayMs: 200,
+        guardedQueryMin: 2,
+        guardedLimit: 100,
+        buildOptions,
+        publish,
+      })
+
+      search.search('PID_A')
+      built = [{ key: 'node:PID_A', label: 'Узел: Алиса — PID_A' }]
+      search.invalidate()
+      vi.runAllTimers()
+
+      expect(publish).toHaveBeenLastCalledWith([])
+      expect(buildOptions).not.toHaveBeenCalled()
+
+      search.search('PID_A')
+      vi.advanceTimersByTime(200)
+      expect(buildOptions).toHaveBeenCalledTimes(1)
+      expect(publish).toHaveBeenLastCalledWith(built)
+
+      search.invalidate()
+      vi.runAllTimers()
+      expect(publish).toHaveBeenLastCalledWith([])
+      expect(buildOptions).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each([
     ['normal reload', { fit: true }],
     ['drawer refresh', { fit: false, preserveViewport: true }],
