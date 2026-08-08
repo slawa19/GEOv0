@@ -43,9 +43,39 @@ function stringAt(value: unknown, path: string): string {
   return value
 }
 
+const CANONICAL_ISO_DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/
+
+export function isCanonicalIsoDateTime(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const match = CANONICAL_ISO_DATE_TIME.exec(value)
+  if (!match) return false
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= (daysInMonth[month - 1] ?? 0) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    !Number.isNaN(Date.parse(value))
+  )
+}
+
 function dateTimeAt(value: unknown, path: string): string {
   const text = stringAt(value, path)
-  if (!text || Number.isNaN(Date.parse(text))) fail(path, 'expected date-time string')
+  if (!isCanonicalIsoDateTime(text)) fail(path, 'expected canonical ISO date-time string')
   return text
 }
 

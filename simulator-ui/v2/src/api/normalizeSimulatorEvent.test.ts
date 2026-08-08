@@ -228,6 +228,43 @@ describe('normalizeSimulatorEvent', () => {
 
   it.each([
     {
+      label: 'event envelope date-time',
+      payload: {
+        event_id: 'evt_bad_ts',
+        ts: '2026-01-01',
+        type: 'tx.updated',
+        equivalent: 'UAH',
+        edges: [],
+      },
+      diagnostic: 'invalid_event_envelope',
+    },
+    {
+      label: 'run_status error date-time',
+      payload: {
+        event_id: 'evt_bad_run_error_at',
+        ts: '2026-01-01T00:00:05Z',
+        type: 'run_status',
+        run_id: 'run_1',
+        scenario_id: 'sc_1',
+        state: 'error',
+        last_error: { code: 'FAILED', message: 'bad', at: 'yesterday' },
+      },
+      diagnostic: 'invalid_run_status_error',
+    },
+    {
+      label: 'run_status stop request date-time',
+      payload: {
+        event_id: 'evt_bad_stop_at',
+        ts: '2026-01-01T00:00:05Z',
+        type: 'run_status',
+        run_id: 'run_1',
+        scenario_id: 'sc_1',
+        state: 'stopping',
+        stop_requested_at: '2026-01-01 00:00:05Z',
+      },
+      diagnostic: 'invalid_run_status_optional_field',
+    },
+    {
       label: 'tx.updated edge',
       payload: {
         event_id: 'evt_bad_tx_edge',
@@ -258,6 +295,17 @@ describe('normalizeSimulatorEvent', () => {
         type: 'tx.failed',
         equivalent: 'UAH',
         error: { code: 42, message: 'bad' },
+      },
+      diagnostic: 'invalid_tx_failed_error',
+    },
+    {
+      label: 'tx.failed error date-time',
+      payload: {
+        event_id: 'evt_bad_failed_at',
+        ts: '2026-01-01T00:00:05Z',
+        type: 'tx.failed',
+        equivalent: 'UAH',
+        error: { code: 'FAILED', message: 'bad', at: '2026-02-30T00:00:05Z' },
       },
       diagnostic: 'invalid_tx_failed_error',
     },
@@ -294,6 +342,41 @@ describe('normalizeSimulatorEvent', () => {
         payload: { edge_patch: [{ source: 'A' }] },
       },
       diagnostic: 'invalid_topology_changed_collection',
+    },
+    {
+      label: 'topology.changed payload extra',
+      payload: {
+        event_id: 'evt_bad_topology_payload_extra',
+        ts: '2026-01-01T00:00:05Z',
+        type: 'topology.changed',
+        equivalent: 'UAH',
+        payload: { unexpected: true },
+      },
+      diagnostic: 'invalid_topology_changed_payload_extra',
+    },
+    {
+      label: 'topology.changed node extra',
+      payload: {
+        event_id: 'evt_bad_topology_node_extra',
+        ts: '2026-01-01T00:00:05Z',
+        type: 'topology.changed',
+        equivalent: 'UAH',
+        payload: { added_nodes: [{ pid: 'A', unexpected: true }] },
+      },
+      diagnostic: 'invalid_topology_changed_node',
+    },
+    {
+      label: 'topology.changed edge extra',
+      payload: {
+        event_id: 'evt_bad_topology_edge_extra',
+        ts: '2026-01-01T00:00:05Z',
+        type: 'topology.changed',
+        equivalent: 'UAH',
+        payload: {
+          added_edges: [{ from_pid: 'A', to_pid: 'B', equivalent_code: 'UAH', unexpected: true }],
+        },
+      },
+      diagnostic: 'invalid_topology_changed_edge',
     },
   ])('rejects a malformed $label instead of partially applying it', ({ payload, diagnostic }) => {
     requireIgnored(normalizeSimulatorEvent(payload), 'malformed', diagnostic)

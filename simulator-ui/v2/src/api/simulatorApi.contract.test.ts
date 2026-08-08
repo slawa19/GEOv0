@@ -106,6 +106,10 @@ describe('Simulator critical REST response contracts', () => {
 
     respondWith(scenario)
     await expect(getScenario(cfg, 'scenario-1')).resolves.toEqual(scenario)
+
+    const offsetScenario = { ...scenario, created_at: '2026-08-08T12:00:00.123456+02:00' }
+    respondWith(offsetScenario)
+    await expect(getScenario(cfg, 'scenario-1')).resolves.toEqual(offsetScenario)
   })
 
   it('accepts nullable run metrics from the canonical RunStatus response', async () => {
@@ -146,11 +150,32 @@ describe('Simulator critical REST response contracts', () => {
       diagnostic: '$.label',
     },
     {
+      label: 'scenario detail non-date-time date',
+      payload: { ...scenario, created_at: '2026-08-08' },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.created_at',
+    },
+    {
       label: 'run status metric',
       payload: { ...runStatus, sim_time_ms: '0' },
       call: () => getRun(cfg, 'run-1'),
       contract: 'run-status',
       diagnostic: '$.sim_time_ms',
+    },
+    {
+      label: 'run status invalid error date-time',
+      payload: { ...runStatus, last_error: { code: 'FAILED', message: 'bad', at: '2026-02-30T10:00:00Z' } },
+      call: () => getRun(cfg, 'run-1'),
+      contract: 'run-status',
+      diagnostic: '$.last_error.at',
+    },
+    {
+      label: 'snapshot invalid generated date-time',
+      payload: { ...snapshot, generated_at: '2026-08-08 10:00:00Z' },
+      call: () => getSnapshot(cfg, 'run-1', 'UAH'),
+      contract: 'graph-snapshot',
+      diagnostic: '$.generated_at',
     },
     {
       label: 'snapshot link aliases',

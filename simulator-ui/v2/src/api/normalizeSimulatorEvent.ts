@@ -6,6 +6,7 @@ import type {
   TopologyChangedNodeRef,
   TxFailedEvent,
 } from './simulatorTypes'
+import { isCanonicalIsoDateTime } from './simulatorContracts'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -25,6 +26,11 @@ function asBoolean(v: unknown): boolean | null {
 
 function asArray(v: unknown): unknown[] | null {
   return Array.isArray(v) ? v : null
+}
+
+function hasOnlyKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const allowedSet = new Set(allowed)
+  return Object.keys(raw).every((key) => allowedSet.has(key))
 }
 
 type ParseResult<T> = { ok: true; value: T } | { ok: false }
@@ -249,7 +255,9 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
   const event_id = asString(raw.event_id)
   const ts = asString(raw.ts)
 
-  if (!type || !event_id || !ts) return ignored('malformed', 'invalid_event_envelope', type ?? undefined)
+  if (!type || !event_id || !isCanonicalIsoDateTime(ts)) {
+    return ignored('malformed', 'invalid_event_envelope', type ?? undefined)
+  }
 
   if (type === 'run_status') {
     const run_id = asString(raw.run_id)
@@ -274,7 +282,9 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
       const code = asString(raw.last_error.code)
       const message = asString(raw.last_error.message)
       const at = asString(raw.last_error.at)
-      if (!code || !message || !at) return ignored('malformed', 'invalid_run_status_error', type)
+      if (!code || !message || !isCanonicalIsoDateTime(at)) {
+        return ignored('malformed', 'invalid_run_status_error', type)
+      }
       last_error = { code, message, at }
     }
 
@@ -292,6 +302,9 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
       !stopReason.ok ||
       !stopClient.ok
     ) {
+      return ignored('malformed', 'invalid_run_status_optional_field', type)
+    }
+    if (stopRequestedAt.value !== undefined && !isCanonicalIsoDateTime(stopRequestedAt.value)) {
       return ignored('malformed', 'invalid_run_status_optional_field', type)
     }
 
@@ -398,7 +411,9 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
     const code = asString(raw.error.code)
     const message = asString(raw.error.message)
     const at = optionalString(raw.error, 'at')
-    if (!code || !message || !at.ok || !at.value) return ignored('malformed', 'invalid_tx_failed_error', type)
+    if (!code || !message || !at.ok || !isCanonicalIsoDateTime(at.value)) {
+      return ignored('malformed', 'invalid_tx_failed_error', type)
+    }
 
     const evt: NormalizedTxFailedEvent = {
       event_id,
@@ -447,6 +462,20 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
     }
 
     const payloadRaw = raw.payload
+    if (
+      !hasOnlyKeys(payloadRaw, [
+        'added_nodes',
+        'removed_nodes',
+        'frozen_nodes',
+        'added_edges',
+        'removed_edges',
+        'frozen_edges',
+        'node_patch',
+        'edge_patch',
+      ])
+    ) {
+      return ignored('malformed', 'invalid_topology_changed_payload_extra', type)
+    }
     const addedNodesRaw = topologyArray(payloadRaw.added_nodes)
     const removedNodesRaw = topologyArray(payloadRaw.removed_nodes)
     const frozenNodesRaw = topologyArray(payloadRaw.frozen_nodes)
@@ -471,6 +500,9 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
     const added_nodes: TopologyChangedNodeRef[] = []
     for (const node of addedNodesRaw.value) {
       if (!isRecord(node)) return ignored('malformed', 'invalid_topology_changed_node', type)
+      if (!hasOnlyKeys(node, ['pid', 'name', 'type'])) {
+        return ignored('malformed', 'invalid_topology_changed_node', type)
+      }
       const pid = asString(node.pid)
       const name = optionalString(node, 'name')
       const nodeType = optionalString(node, 'type')
@@ -494,6 +526,7 @@ export function normalizeSimulatorEvent(raw: unknown): SimulatorEventNormalizati
       const edges: TopologyChangedEdgeRef[] = []
       for (const edge of values) {
         if (!isRecord(edge)) return null
+        if (!hasOnlyKeys(edge, ['from_pid', 'to_pid', 'equivalent_code', 'limit'])) return null
         const from_pid = asString(edge.from_pid)
         const to_pid = asString(edge.to_pid)
         const equivalent_code = asString(edge.equivalent_code)

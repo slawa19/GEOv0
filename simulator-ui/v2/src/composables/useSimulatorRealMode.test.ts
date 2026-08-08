@@ -744,6 +744,27 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
           edges: [{ from: 'A', to: 'B' }],
         }),
       })
+      emitSsePayload(opts, {
+        event_id: 'evt_wrong_run',
+        ts: '2026-01-01T00:00:03Z',
+        type: 'run_status',
+        run_id: 'r_other',
+        scenario_id: 'sc1',
+        state: 'running',
+        attempts_total: 99,
+        committed_total: 99,
+      })
+      emitSsePayload(opts, {
+        event_id: 'evt_wrong_equivalent',
+        ts: '2026-01-01T00:00:04Z',
+        type: 'tx.updated',
+        equivalent: 'UAH',
+        from: 'A',
+        to: 'B',
+        amount: '5.00',
+        edges: [{ from: 'A', to: 'B' }],
+        node_patch: [{ id: 'A', net_balance: '5.00' }],
+      })
       await waitForAbort(opts.signal)
     })
 
@@ -797,6 +818,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
     await h.startRun({ mode: 'real', intensityPercent: 0 })
 
     expect(real.lastEventId).toBeNull()
+    expect(real.runStatus?.run_id).not.toBe('r_other')
     expect(real.runStats).toMatchObject({ attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0 })
     expect(applyNodePatches).not.toHaveBeenCalled()
     expect(applyEdgePatches).not.toHaveBeenCalled()
@@ -815,13 +837,15 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
         }
       }
     ).__geo_real_mode_diag
-    expect(diag?.normalize_dropped).toBeGreaterThanOrEqual(3)
+    expect(diag?.normalize_dropped).toBeGreaterThanOrEqual(5)
     expect(diag?.frame_id_mismatches).toBeGreaterThanOrEqual(1)
     expect(Object.keys(diag?.rejected_by_reason ?? {})).toEqual(
       expect.arrayContaining([
         'unknown:future.event:unknown_event_type',
         'malformed:tx.updated:invalid_tx_updated_collection',
         'malformed:tx.updated:frame_id_mismatch',
+        'context:run_status:run_id_mismatch',
+        'context:tx.updated:equivalent_mismatch',
       ]),
     )
 

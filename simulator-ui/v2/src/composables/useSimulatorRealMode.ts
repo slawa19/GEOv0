@@ -547,6 +547,25 @@ export function useSimulatorRealMode(opts: {
               return
             }
 
+            // Bind a normalized frame to the connection context before it can
+            // advance replay state, enter dedup, or trigger observable effects.
+            if (real.runId !== runId) {
+              diag.normalize_dropped += 1
+              incDiag(diag.rejected_by_reason, `context:${evt.type}:active_run_changed`)
+              return
+            }
+            if (isRunStatusEvent(evt)) {
+              if (evt.run_id !== runId) {
+                diag.normalize_dropped += 1
+                incDiag(diag.rejected_by_reason, `context:${evt.type}:run_id_mismatch`)
+                return
+              }
+            } else if (evt.equivalent.trim().toUpperCase() !== eqNow.trim().toUpperCase()) {
+              diag.normalize_dropped += 1
+              incDiag(diag.rejected_by_reason, `context:${evt.type}:equivalent_mismatch`)
+              return
+            }
+
             incDiag(diag.events_by_type, String(evt.type ?? 'unknown'))
 
             // Prefer payload event_id when present.

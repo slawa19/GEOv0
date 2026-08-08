@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
 
 from sqlalchemy import and_, func, select
@@ -2505,16 +2505,23 @@ async def set_run_intensity(
     return await runtime.set_intensity(run_id, intensity_percent=body.intensity_percent)
 
 
-@router.get("/runs/{run_id}/events")
+@router.get(
+    "/runs/{run_id}/events",
+    responses={
+        410: {
+            "model": ErrorEnvelope,
+            "description": "Replay cursor is older than the retained SSE buffer",
+        }
+    },
+)
 async def run_events_stream(
     run_id: str,
-    request: Request,
     equivalent: str = Query(...),
     stop_after_types: Optional[str] = Query(None),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
-    last_event_id = request.headers.get("Last-Event-ID")
     if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
         run_id=run_id, after_event_id=last_event_id
     ):

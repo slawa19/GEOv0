@@ -1433,6 +1433,14 @@ paths:
           required: false
           schema:
             type: string
+        - in: header
+          name: Last-Event-ID
+          required: false
+          description: |
+            Resume after this previously observed SSE event ID. If the cursor is
+            older than the retained replay buffer, the server returns `410`.
+          schema:
+            type: string
       responses:
         '200':
           description: SSE stream
@@ -1444,6 +1452,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '410':
+          description: Replay cursor is older than the retained SSE buffer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /simulator/runs/{run_id}/actions/tx-once:
     post:

@@ -44,7 +44,7 @@ SUCCESS_SCHEMA_DRIFT_SHA256 = (
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "0d173514d6e6d80197dad8f700ba5388c4e6909e7f40262641dc76bf8c6442bc"
+    "85f7bffa9f29806531b71732e8fbe05c9ddbff6c70ccc2be01bf7779bd231441"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 84
 SECURITY_DRIFT_SHA256 = (
@@ -688,6 +688,44 @@ def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> No
     assert set(SimulatorRunStatusEvent.model_json_schema()["properties"]) == set(
         schemas["SimulatorRunStatusEvent"]["properties"]
     )
+
+
+def test_simulator_events_documents_replay_cursor_and_gone_response() -> None:
+    spec = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+    path_item = spec["paths"]["/simulator/runs/{run_id}/events"]
+    operation = path_item["get"]
+    generated_item = generated["paths"]["/api/v1/simulator/runs/{run_id}/events"]
+    generated_operation = generated_item["get"]
+
+    parameters = _normalized_parameters(operation, path_item, spec)
+    assert parameters[("header", "Last-Event-ID")] == {
+        "required": False,
+        "schema": {"type": "string"},
+    }
+    assert _normalized_parameters(
+        generated_operation, generated_item, generated
+    )[("header", "Last-Event-ID")] == parameters[("header", "Last-Event-ID")]
+
+    responses = _normalized_responses(operation, spec)
+    assert responses["410"]["content"]["application/json"] == _normalize_schema(
+        {"$ref": "#/components/schemas/ErrorEnvelope"}, spec
+    )
+    assert generated_operation["responses"]["410"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ErrorEnvelope"}
+
+    without_cursor = copy.deepcopy(operation)
+    without_cursor["parameters"] = [
+        parameter
+        for parameter in without_cursor["parameters"]
+        if parameter.get("name") != "Last-Event-ID"
+    ]
+    assert parameters != _normalized_parameters(without_cursor, path_item, spec)
+
+    without_gone = copy.deepcopy(operation)
+    del without_gone["responses"]["410"]
+    assert responses != _normalized_responses(without_gone, spec)
 
 
 def test_payment_create_declares_exact_response_statuses_and_error_envelopes() -> None:
