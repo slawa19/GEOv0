@@ -10,7 +10,7 @@ from alembic.script import ScriptDirectory
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
-    config = Config(str(repo_root / "migrations" / "alembic.ini"))
+    config = Config()
     config.set_main_option("script_location", str(repo_root / "migrations"))
     heads = ScriptDirectory.from_config(config).get_heads()
 
