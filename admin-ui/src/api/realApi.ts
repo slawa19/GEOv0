@@ -4,11 +4,28 @@ import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
 import {
   AdminConfigPatchResponseSchema,
   AdminConfigResponseSchema,
+  AdminAbortTxResponseSchema,
+  AdminEquivalentDeleteResponseSchema,
+  AdminEquivalentMutationResponseSchema,
+  AdminEquivalentUsageResponseSchema,
   AdminFeatureFlagsSchema,
+  AdminParticipantActionResponseSchema,
+  IntegrityRepairCapDebtsResponseSchema,
+  IntegrityRepairNetMutualDebtsResponseSchema,
+  IntegrityStatusResponseSchema,
+  IntegrityVerifyResponseSchema,
   flattenAdminConfig,
+  type AdminAbortTxResponse,
   type AdminConfigPatchResponse,
   type AdminConfigResponse,
+  type AdminEquivalentDeleteResponse,
+  type AdminEquivalentUsageResponse,
   type AdminFeatureFlags,
+  type AdminParticipantActionResponse,
+  type IntegrityRepairCapDebtsResponse,
+  type IntegrityRepairNetMutualDebtsResponse,
+  type IntegrityStatusResponse,
+  type IntegrityVerifyResponse,
 } from './adminContracts'
 import { z, type ZodTypeAny } from 'zod'
 import type {
@@ -600,20 +617,35 @@ export const realApi = {
     })
   },
 
-  integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/status', { admin: true })
+  integrityStatus(): Promise<ApiEnvelope<IntegrityStatusResponse>> {
+    return requestJson('/api/v1/integrity/status', { admin: true, schema: IntegrityStatusResponseSchema })
   },
 
-  integrityVerify(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/verify', { method: 'POST', body: {}, admin: true })
+  integrityVerify(): Promise<ApiEnvelope<IntegrityVerifyResponse>> {
+    return requestJson('/api/v1/integrity/verify', {
+      method: 'POST',
+      body: {},
+      admin: true,
+      schema: IntegrityVerifyResponseSchema,
+    })
   },
 
-  integrityRepairNetMutualDebts(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/repair/net-mutual-debts', { method: 'POST', body: {}, admin: true })
+  integrityRepairNetMutualDebts(): Promise<ApiEnvelope<IntegrityRepairNetMutualDebtsResponse>> {
+    return requestJson('/api/v1/integrity/repair/net-mutual-debts', {
+      method: 'POST',
+      body: {},
+      admin: true,
+      schema: IntegrityRepairNetMutualDebtsResponseSchema,
+    })
   },
 
-  integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/repair/cap-debts-to-trust-limits', { method: 'POST', body: {}, admin: true })
+  integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<IntegrityRepairCapDebtsResponse>> {
+    return requestJson('/api/v1/integrity/repair/cap-debts-to-trust-limits', {
+      method: 'POST',
+      body: {},
+      admin: true,
+      schema: IntegrityRepairCapDebtsResponseSchema,
+    })
   },
 
   // The endpoints below should be aligned to OpenAPI; adjust pathname/query as backend stabilizes.
@@ -676,31 +708,33 @@ export const realApi = {
   },
 
   async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    const r = await requestJson<{ pid: string; status: string }>(
+    const r = await requestJson<AdminParticipantActionResponse>(
       `/api/v1/admin/participants/${encodeURIComponent(pid)}/freeze`,
       {
-      method: 'POST',
-      body: { reason },
-      admin: true,
+        method: 'POST',
+        body: { reason },
+        admin: true,
+        schema: AdminParticipantActionResponseSchema,
       },
     )
 
     if (!r.success) return r
-    return { success: true, data: { pid: r.data?.pid || pid, status: normalizeAdminStatusToUi(r.data?.status) } }
+    return { success: true, data: { pid: r.data.pid, status: normalizeAdminStatusToUi(r.data.status) } }
   },
 
   async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    const r = await requestJson<{ pid: string; status: string }>(
+    const r = await requestJson<AdminParticipantActionResponse>(
       `/api/v1/admin/participants/${encodeURIComponent(pid)}/unfreeze`,
       {
-      method: 'POST',
-      body: { reason },
-      admin: true,
+        method: 'POST',
+        body: { reason },
+        admin: true,
+        schema: AdminParticipantActionResponseSchema,
       },
     )
 
     if (!r.success) return r
-    return { success: true, data: { pid: r.data?.pid || pid, status: normalizeAdminStatusToUi(r.data?.status) } }
+    return { success: true, data: { pid: r.data.pid, status: normalizeAdminStatusToUi(r.data.status) } }
   },
 
   async listTrustlines(params: {
@@ -784,6 +818,7 @@ export const realApi = {
         is_active: input.is_active ?? true,
       },
       admin: true,
+      schema: AdminEquivalentMutationResponseSchema,
     })
     return { success: true, data: { created: assertSuccess(created) } }
   },
@@ -796,6 +831,7 @@ export const realApi = {
       method: 'PATCH',
       body: patch,
       admin: true,
+      schema: AdminEquivalentMutationResponseSchema,
     })
     return { success: true, data: { updated: assertSuccess(updated) } }
   },
@@ -805,19 +841,24 @@ export const realApi = {
       method: 'PATCH',
       body: { is_active: isActive, reason },
       admin: true,
+      schema: AdminEquivalentMutationResponseSchema,
     })
     return { success: true, data: { updated: assertSuccess(updated) } }
   },
 
-  getEquivalentUsage(code: string): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}/usage`, { admin: true })
+  getEquivalentUsage(code: string): Promise<ApiEnvelope<AdminEquivalentUsageResponse>> {
+    return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}/usage`, {
+      admin: true,
+      schema: AdminEquivalentUsageResponseSchema,
+    })
   },
 
-  deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<{ deleted: string }>> {
+  deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<AdminEquivalentDeleteResponse>> {
     return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
       method: 'DELETE',
       body: { reason },
       admin: true,
+      schema: AdminEquivalentDeleteResponseSchema,
     })
   },
 
@@ -833,10 +874,10 @@ export const realApi = {
     )
   },
 
-  abortTx(txId: string, reason: string): Promise<ApiEnvelope<{ tx_id: string; status: 'aborted' }>> {
-    return requestJson<{ tx_id: string; status: 'aborted' }>(
+  abortTx(txId: string, reason: string): Promise<ApiEnvelope<AdminAbortTxResponse>> {
+    return requestJson<AdminAbortTxResponse>(
       `/api/v1/admin/transactions/${encodeURIComponent(txId)}/abort`,
-      { method: 'POST', body: { reason }, admin: true },
+      { method: 'POST', body: { reason }, admin: true, schema: AdminAbortTxResponseSchema },
     )
   },
 

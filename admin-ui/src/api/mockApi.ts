@@ -1,11 +1,28 @@
 import { ApiException, type ApiEnvelope } from './envelope'
 import {
+  AdminAbortTxResponseSchema,
   AdminConfigPatchResponseSchema,
   AdminConfigSchema,
+  AdminEquivalentDeleteResponseSchema,
+  AdminEquivalentMutationResponseSchema,
+  AdminEquivalentUsageResponseSchema,
   AdminFeatureFlagsSchema,
+  AdminParticipantActionResponseSchema,
+  IntegrityRepairCapDebtsResponseSchema,
+  IntegrityRepairNetMutualDebtsResponseSchema,
+  IntegrityStatusResponseSchema,
+  IntegrityVerifyResponseSchema,
   decodeAdminResponse,
+  type AdminAbortTxResponse,
   type AdminConfigPatchResponse,
+  type AdminEquivalentDeleteResponse,
+  type AdminEquivalentUsageResponse,
   type AdminFeatureFlags,
+  type AdminParticipantActionResponse,
+  type IntegrityRepairCapDebtsResponse,
+  type IntegrityRepairNetMutualDebtsResponse,
+  type IntegrityStatusResponse,
+  type IntegrityVerifyResponse,
 } from './adminContracts'
 import { TOAST_DEDUPE_MS } from '../constants/timing'
 import { absDecimalString, addDecimalStrings, compareDecimalStrings, isRatioBelowThreshold } from '../utils/decimal'
@@ -40,6 +57,20 @@ type Scenario = {
 }
 
 const FIXTURES_BASE = '/admin-fixtures/v1'
+const MOCK_EQUIVALENT_TIMESTAMP = '2025-01-01T00:00:00.000Z'
+
+function toMockEquivalentWire(value: Equivalent) {
+  return {
+    code: value.code,
+    symbol: null,
+    description: value.description,
+    precision: value.precision,
+    metadata: null,
+    is_active: value.is_active,
+    created_at: MOCK_EQUIVALENT_TIMESTAMP,
+    updated_at: MOCK_EQUIVALENT_TIMESTAMP,
+  }
+}
 
 const cache = new Map<string, unknown>()
 
@@ -271,20 +302,29 @@ function topShares(shares: number[]): { top1: number; top5: number; hhi: number 
   return { top1, top5, hhi }
 }
 
-async function getIncidentsDataset(): Promise<Incident[]> {
-  const ds = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
-  return ds.items
-}
-
-async function getEquivalentUsageCounts(code: string): Promise<{ trustlines: number; incidents: number }> {
+async function getEquivalentUsageCounts(
+  code: string,
+): Promise<{ trustlines: number; debts: number; integrity_checkpoints: number }> {
   const key = normalizeEqCode(code)
-  if (!key) return { trustlines: 0, incidents: 0 }
+  if (!key) return { trustlines: 0, debts: 0, integrity_checkpoints: 0 }
 
-  const [trustlines, incidents] = await Promise.all([getTrustlinesDataset(), getIncidentsDataset()])
+  const [trustlines, debts] = await Promise.all([
+    getTrustlinesDataset(),
+    loadJson<Debt[]>('datasets/debts.json'),
+  ])
   return {
     trustlines: trustlines.filter((t) => normalizeEqCode(t.equivalent) === key).length,
-    incidents: incidents.filter((i) => normalizeEqCode(i.equivalent) === key).length,
+    debts: debts.filter((d) => normalizeEqCode(d.equivalent) === key).length,
+    integrity_checkpoints: 0,
   }
+}
+
+async function getIntegrityStatusDataset(): Promise<IntegrityStatusResponse> {
+  return decodeAdminResponse(
+    IntegrityStatusResponseSchema,
+    await loadJson<unknown>('datasets/integrity-status.json'),
+    'mock GET /api/v1/integrity/status',
+  )
 }
 
 async function appendAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp' | 'actor_role'> & { actor_role?: string }) {
@@ -747,31 +787,51 @@ export const mockApi = {
     })
   },
 
-  async integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return withScenario('/api/v1/integrity/status', async () => ({ success: true, data: await loadJson('datasets/integrity-status.json') }))
-  },
-
-  async integrityVerify(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return withScenario('/api/v1/integrity/verify', async () => ({
+  async integrityStatus(): Promise<ApiEnvelope<IntegrityStatusResponse>> {
+    return withScenario('/api/v1/integrity/status', async () => ({
       success: true,
-      data: {
-        status: 'finished',
-        checked_at: new Date().toISOString(),
-      },
+      data: await getIntegrityStatusDataset(),
     }))
   },
 
-  async integrityRepairNetMutualDebts(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  async integrityVerify(): Promise<ApiEnvelope<IntegrityVerifyResponse>> {
+    return withScenario('/api/v1/integrity/verify', async () => {
+      const status = await getIntegrityStatusDataset()
+      return {
+        success: true,
+        data: decodeAdminResponse(
+          IntegrityVerifyResponseSchema,
+          {
+            status: status.status,
+            checked_at: new Date().toISOString(),
+            equivalents: status.equivalents,
+            alerts: status.alerts,
+          },
+          'mock POST /api/v1/integrity/verify',
+        ),
+      }
+    })
+  },
+
+  async integrityRepairNetMutualDebts(): Promise<ApiEnvelope<IntegrityRepairNetMutualDebtsResponse>> {
     return withScenario('/api/v1/integrity/repair/net-mutual-debts', async () => ({
       success: true,
-      data: { status: 'finished', repaired: true },
+      data: decodeAdminResponse(
+        IntegrityRepairNetMutualDebtsResponseSchema,
+        { ok: true, action: 'net-mutual-debts', netted_pairs: 0, updated: 0, deleted: 0 },
+        'mock POST /api/v1/integrity/repair/net-mutual-debts',
+      ),
     }))
   },
 
-  async integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  async integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<IntegrityRepairCapDebtsResponse>> {
     return withScenario('/api/v1/integrity/repair/cap-debts-to-trust-limits', async () => ({
       success: true,
-      data: { status: 'finished', repaired: true },
+      data: decodeAdminResponse(
+        IntegrityRepairCapDebtsResponseSchema,
+        { ok: true, action: 'cap-debts-to-trust-limits', scanned: 0, updated: 0, deleted: 0 },
+        'mock POST /api/v1/integrity/repair/cap-debts-to-trust-limits',
+      ),
     }))
   },
 
@@ -935,14 +995,19 @@ export const mockApi = {
     })
   },
 
-  async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
+  async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<AdminParticipantActionResponse>> {
     return withScenario('/api/v1/admin/participants/freeze', async () => {
       if (!reason.trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
       const all = await getParticipantsDataset()
       const p = all.find((x) => x.pid === pid)
       if (!p) return { success: false, error: { code: 'NOT_FOUND', message: 'participant not found' } }
       const before = { ...p }
-      p.status = 'suspended'
+      const response = decodeAdminResponse(
+        AdminParticipantActionResponseSchema,
+        { pid, status: 'suspended' },
+        'mock POST /api/v1/admin/participants/{pid}/freeze',
+      )
+      p.status = response.status
       await appendAuditLog({
         actor_id: 'admin-ui',
         action: 'participant.freeze',
@@ -952,18 +1017,23 @@ export const mockApi = {
         before_state: before,
         after_state: { ...p },
       })
-      return { success: true, data: { pid, status: p.status } }
+      return { success: true, data: response }
     })
   },
 
-  async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
+  async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<AdminParticipantActionResponse>> {
     return withScenario('/api/v1/admin/participants/unfreeze', async () => {
       if (!reason.trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
       const all = await getParticipantsDataset()
       const p = all.find((x) => x.pid === pid)
       if (!p) return { success: false, error: { code: 'NOT_FOUND', message: 'participant not found' } }
       const before = { ...p }
-      p.status = 'active'
+      const response = decodeAdminResponse(
+        AdminParticipantActionResponseSchema,
+        { pid, status: 'active' },
+        'mock POST /api/v1/admin/participants/{pid}/unfreeze',
+      )
+      p.status = response.status
       await appendAuditLog({
         actor_id: 'admin-ui',
         action: 'participant.unfreeze',
@@ -973,7 +1043,7 @@ export const mockApi = {
         before_state: before,
         after_state: { ...p },
       })
-      return { success: true, data: { pid, status: p.status } }
+      return { success: true, data: response }
     })
   },
 
@@ -1069,12 +1139,16 @@ export const mockApi = {
       const all = await getEquivalentsDataset()
       if (all.some((e) => e.code === code)) return { success: false, error: { code: 'CONFLICT', message: 'code already exists' } }
 
-      const created: Equivalent = {
-        code,
-        precision: Math.max(0, Math.min(18, Math.floor(Number(input.precision ?? 2)))),
-        description: String(input.description || '').trim() || code,
-        is_active: Boolean(input.is_active ?? true),
-      }
+      const created = decodeAdminResponse(
+        AdminEquivalentMutationResponseSchema,
+        toMockEquivalentWire({
+          code,
+          precision: Math.max(0, Math.min(18, Math.floor(Number(input.precision ?? 2)))),
+          description: String(input.description || '').trim() || code,
+          is_active: Boolean(input.is_active ?? true),
+        }),
+        'mock POST /api/v1/admin/equivalents',
+      )
       all.unshift(created)
       await appendAuditLog({
         actor_id: 'admin-ui',
@@ -1096,8 +1170,20 @@ export const mockApi = {
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
       const before = { ...eq }
-      if (patch.precision !== undefined) eq.precision = Math.max(0, Math.min(18, Math.floor(Number(patch.precision))))
-      if (patch.description !== undefined) eq.description = String(patch.description || '').trim() || eq.description
+      const updated = decodeAdminResponse(
+        AdminEquivalentMutationResponseSchema,
+        toMockEquivalentWire({
+          ...eq,
+          precision:
+            patch.precision === undefined
+              ? eq.precision
+              : Math.max(0, Math.min(18, Math.floor(Number(patch.precision)))),
+          description:
+            patch.description === undefined ? eq.description : String(patch.description || '').trim() || eq.description,
+        }),
+        'mock PATCH /api/v1/admin/equivalents/{code}',
+      )
+      Object.assign(eq, updated)
       await appendAuditLog({
         actor_id: 'admin-ui',
         action: 'equivalent.update',
@@ -1107,7 +1193,7 @@ export const mockApi = {
         before_state: before,
         after_state: { ...eq },
       })
-      return { success: true, data: { updated: eq } }
+      return { success: true, data: { updated } }
     })
   },
 
@@ -1119,7 +1205,12 @@ export const mockApi = {
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
       const before = { ...eq }
-      eq.is_active = Boolean(isActive)
+      const updated = decodeAdminResponse(
+        AdminEquivalentMutationResponseSchema,
+        toMockEquivalentWire({ ...eq, is_active: Boolean(isActive) }),
+        'mock PATCH /api/v1/admin/equivalents/{code}',
+      )
+      Object.assign(eq, updated)
       await appendAuditLog({
         actor_id: 'admin-ui',
         action: isActive ? 'equivalent.activate' : 'equivalent.deactivate',
@@ -1129,20 +1220,27 @@ export const mockApi = {
         before_state: before,
         after_state: { ...eq },
       })
-      return { success: true, data: { updated: eq } }
+      return { success: true, data: { updated } }
     })
   },
 
-  async getEquivalentUsage(code: string): Promise<ApiEnvelope<{ code: string; trustlines: number; incidents: number }>> {
+  async getEquivalentUsage(code: string): Promise<ApiEnvelope<AdminEquivalentUsageResponse>> {
     return withScenario('/api/v1/admin/equivalents/usage', async () => {
       const key = normalizeEqCode(code)
       if (!key) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'code is required' } }
       const counts = await getEquivalentUsageCounts(key)
-      return { success: true, data: { code: key, ...counts } }
+      return {
+        success: true,
+        data: decodeAdminResponse(
+          AdminEquivalentUsageResponseSchema,
+          { code: key, ...counts },
+          'mock GET /api/v1/admin/equivalents/{code}/usage',
+        ),
+      }
     })
   },
 
-  async deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<{ deleted: string }>> {
+  async deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<AdminEquivalentDeleteResponse>> {
     return withScenario('/api/v1/admin/equivalents/delete', async () => {
       if (roleFromLocalStorage() === 'auditor') return { success: false, error: { code: 'FORBIDDEN', message: 'read-only' } }
       if (!String(reason || '').trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
@@ -1158,10 +1256,15 @@ export const mockApi = {
       if (before.is_active) return { success: false, error: { code: 'CONFLICT', message: 'Deactivate before delete' } }
 
       const usage = await getEquivalentUsageCounts(key)
-      if (usage.trustlines > 0 || usage.incidents > 0) {
+      if (usage.trustlines > 0 || usage.debts > 0 || usage.integrity_checkpoints > 0) {
         return { success: false, error: { code: 'CONFLICT', message: 'Equivalent is in use', details: usage } }
       }
 
+      const response = decodeAdminResponse(
+        AdminEquivalentDeleteResponseSchema,
+        { deleted: key },
+        'mock DELETE /api/v1/admin/equivalents/{code}',
+      )
       all.splice(idx, 1)
 
       await appendAuditLog({
@@ -1174,11 +1277,11 @@ export const mockApi = {
         after_state: null,
       })
 
-      return { success: true, data: { deleted: key } }
+      return { success: true, data: response }
     })
   },
 
-  async abortTx(txId: string, reason: string): Promise<ApiEnvelope<{ tx_id: string; status: 'aborted' }>> {
+  async abortTx(txId: string, reason: string): Promise<ApiEnvelope<AdminAbortTxResponse>> {
     return withScenario('/api/v1/admin/transactions/abort', async () => {
       if (!reason.trim()) {
         return {
@@ -1186,6 +1289,11 @@ export const mockApi = {
           error: { code: 'VALIDATION_ERROR', message: 'reason is required' },
         }
       }
+      const response = decodeAdminResponse(
+        AdminAbortTxResponseSchema,
+        { tx_id: txId, status: 'aborted' },
+        'mock POST /api/v1/admin/transactions/{tx_id}/abort',
+      )
       await appendAuditLog({
         actor_id: 'admin-ui',
         action: 'transaction.abort',
@@ -1195,7 +1303,7 @@ export const mockApi = {
         before_state: { state: 'stuck' },
         after_state: { state: 'aborted' },
       })
-      return { success: true, data: { tx_id: txId, status: 'aborted' } }
+      return { success: true, data: response }
     })
   },
 
