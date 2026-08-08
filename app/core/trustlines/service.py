@@ -22,6 +22,7 @@ from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest,
 from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import validate_equivalent_code, validate_trustline_policy
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.payments.router import PaymentRouter
 
 class TrustLineService:
     def __init__(self, session: AsyncSession):
@@ -137,6 +138,7 @@ class TrustLineService:
             pass
 
         await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent.code)
         await self.session.refresh(trustline)
         
         # Hydrate extra fields for response
@@ -240,7 +242,13 @@ class TrustLineService:
         except Exception:
             pass
 
+        equivalent_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
+            )
+        ).scalar_one()
         await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent_code)
         await self.session.refresh(trustline)
         return await self._hydrate_trustline(trustline)
 
@@ -327,7 +335,13 @@ class TrustLineService:
         except Exception:
             pass
 
+        equivalent_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
+            )
+        ).scalar_one()
         await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent_code)
 
     async def get_by_participant(
         self,
