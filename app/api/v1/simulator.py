@@ -164,6 +164,60 @@ def _build_clearing_done_cycle_edges_payload(
     return out
 
 
+async def _emit_interact_clearing_done_best_effort(
+    *,
+    run_id: str,
+    run,
+    db,
+    equivalent_code: str,
+    executed: list[SimulatorActionClearingCycle],
+    cleared_count: int,
+    total: Decimal,
+) -> None:
+    if cleared_count <= 0:
+        return
+
+    try:
+        emitter = SseEventEmitter(
+            sse=runtime._sse,  # type: ignore[attr-defined]
+            utc_now=_utc_now,
+            logger=logger,
+        )
+        cycle_edges_payload = _build_clearing_done_cycle_edges_payload(executed)
+
+        edges_pairs: list[tuple[str, str]] = []
+        for edge in cycle_edges_payload or []:
+            from_pid = str(edge.get("from") or "").strip()
+            to_pid = str(edge.get("to") or "").strip()
+            if from_pid and to_pid:
+                edges_pairs.append((from_pid, to_pid))
+
+        edge_patch, node_patch = await _compute_viz_patches_best_effort(
+            session=db,
+            run=run,
+            equivalent_code=equivalent_code,
+            edges_pairs=edges_pairs,
+        )
+
+        emitter.emit_clearing_done(
+            run_id=run_id,
+            run=run,
+            equivalent=equivalent_code,
+            plan_id=f"plan_interact_{secrets.token_hex(6)}",
+            cleared_cycles=int(cleared_count),
+            cleared_amount=_fmt_decimal_for_api(total),
+            cycle_edges=cycle_edges_payload,
+            node_patch=node_patch,
+            edge_patch=edge_patch,
+        )
+    except Exception:
+        logger.warning(
+            "Best-effort SSE emission failed: interact.clearing_real run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+
 async def _compute_viz_patches_best_effort(
     *,
     session,
@@ -1517,79 +1571,76 @@ async def action_clearing_real(
     total = Decimal("0")
     cleared_count = 0
 
-    # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
-    for _ in range(0, 100):
-        cycles = await service.find_cycles(eq.code, max_depth=int(req.max_depth))
-        if not cycles:
-            break
-
-        executed_this_round = False
-        for cycle in cycles:
-            clear_amt = await service.execute_clearing_with_amount(cycle)
-            if clear_amt is None:
-                continue
-
-            edges: list[SimulatorActionEdgeRef] = []
-            for e in (cycle or []):
-                debtor = str(e.get("debtor") or "").strip()
-                creditor = str(e.get("creditor") or "").strip()
-                if debtor and creditor and debtor != creditor:
-                    # Trustline direction is creditor -> debtor (see project guardrails).
-                    edges.append(SimulatorActionEdgeRef(from_=creditor, to=debtor))
-
-            executed.append(
-                SimulatorActionClearingCycle(
-                    cleared_amount=_fmt_decimal_for_api(clear_amt),
-                    edges=edges,
-                )
-            )
-            total += clear_amt
-            cleared_count += 1
-            executed_this_round = True
-            break
-
-        if not executed_this_round:
-            break
-
-    # Best-effort SSE emission (clearing.done). `run` already fetched by _get_run_checked above.
     try:
+        # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
+        for _ in range(0, 100):
+            cycles = await service.find_cycles(eq.code, max_depth=int(req.max_depth))
+            if not cycles:
+                break
+
+            executed_this_round = False
+            for cycle in cycles:
+                clear_amt = await service.execute_clearing_with_amount(cycle)
+                if clear_amt is None:
+                    continue
+
+                # The clearing transaction is already durable when the service
+                # returns an amount. Record it before response/SSE shaping so a
+                # later formatting failure cannot hide committed progress.
+                total += clear_amt
+                cleared_count += 1
+                executed_this_round = True
+
+                edges: list[SimulatorActionEdgeRef] = []
+                for edge in cycle or []:
+                    debtor = str(edge.get("debtor") or "").strip()
+                    creditor = str(edge.get("creditor") or "").strip()
+                    if debtor and creditor and debtor != creditor:
+                        # Trustline direction is creditor -> debtor (see project guardrails).
+                        edges.append(
+                            SimulatorActionEdgeRef(from_=creditor, to=debtor)
+                        )
+
+                executed.append(
+                    SimulatorActionClearingCycle(
+                        cleared_amount=_fmt_decimal_for_api(clear_amt),
+                        edges=edges,
+                    )
+                )
+                break
+
+            if not executed_this_round:
+                break
+    except Exception as exc:
         if cleared_count > 0:
-            emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-
-            cycle_edges_payload = _build_clearing_done_cycle_edges_payload(executed)
-
-            edges_pairs: list[tuple[str, str]] = []
-            for e in (cycle_edges_payload or []):
-                a = str(e.get("from") or "").strip()
-                b = str(e.get("to") or "").strip()
-                if a and b:
-                    edges_pairs.append((a, b))
-
-            edge_patch, node_patch = await _compute_viz_patches_best_effort(
-                session=db,
-                run=run,
-                equivalent_code=eq.code,
-                edges_pairs=edges_pairs,
-            )
-
-            emitter.emit_clearing_done(
+            partial_details = {
+                "partial_cleared_cycles": int(cleared_count),
+                "partial_cleared_amount": _fmt_decimal_for_api(total),
+            }
+            await _emit_interact_clearing_done_best_effort(
                 run_id=run_id,
                 run=run,
-                equivalent=eq.code,
-                plan_id=f"plan_interact_{secrets.token_hex(6)}",
-                cleared_cycles=int(cleared_count),
-                cleared_amount=_fmt_decimal_for_api(total),
-                cycle_edges=cycle_edges_payload,
-                node_patch=node_patch,
-                edge_patch=edge_patch,
+                db=db,
+                equivalent_code=eq.code,
+                executed=executed,
+                cleared_count=cleared_count,
+                total=total,
             )
-    except Exception:
-        # TODO(interact): compute node_patch/edge_patch via VizPatchHelper for clearing.done.
-        logger.warning(
-            "Best-effort SSE emission failed: interact.clearing_real run_id=%s",
-            run_id,
-            exc_info=True,
-        )
+            if isinstance(exc, GeoException):
+                exc.details = {**(exc.details or {}), **partial_details}
+                raise
+            raise GeoException(details=partial_details) from exc
+        raise
+
+    await _emit_interact_clearing_done_best_effort(
+        run_id=run_id,
+        run=run,
+        db=db,
+        equivalent_code=eq.code,
+        executed=executed,
+        cleared_count=cleared_count,
+        total=total,
+    )
 
     return SimulatorActionClearingRealResponse(
         equivalent=eq.code,

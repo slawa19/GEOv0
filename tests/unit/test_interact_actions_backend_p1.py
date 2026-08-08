@@ -20,7 +20,7 @@ from app.schemas.simulator import (
     SimulatorGraphNode,
     SimulatorGraphSnapshot,
 )
-from app.utils.exceptions import RoutingException
+from app.utils.exceptions import GeoException, RoutingException
 
 
 @pytest.fixture
@@ -1121,6 +1121,123 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     assert Decimal(str(payload["total_cleared_amount"])) == Decimal("5")
     assert isinstance(payload.get("cycles"), list)
     assert Decimal(str(payload["cycles"][0]["cleared_amount"])) == Decimal("5")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["geo", "unexpected"])
+async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_failure(
+    client,
+    db_session,
+    interact_actions_enabled,
+    monkeypatch,
+    failure_kind,
+):
+    await _seed_alice_bob_uah(db_session)
+
+    cycles = [
+        [
+            {
+                "debt_id": str(uuid.uuid4()),
+                "debtor": "alice",
+                "creditor": "bob",
+                "amount": "2.5",
+            }
+        ],
+        [
+            {
+                "debt_id": str(uuid.uuid4()),
+                "debtor": "bob",
+                "creditor": "alice",
+                "amount": "1",
+            }
+        ],
+    ]
+    find_calls = 0
+    execute_calls = 0
+
+    async def _find_cycles(self, equivalent_code: str, max_depth: int = 6):
+        nonlocal find_calls
+        assert equivalent_code == "UAH"
+        assert max_depth == 6
+        cycle = cycles[min(find_calls, len(cycles) - 1)]
+        find_calls += 1
+        return [cycle]
+
+    async def _execute_clearing(self, cycle):
+        nonlocal execute_calls
+        execute_calls += 1
+        if execute_calls == 1:
+            assert cycle is cycles[0]
+            return Decimal("2.5")
+        assert cycle is cycles[1]
+        if failure_kind == "geo":
+            raise GeoException(details={"safe_context": "retry_exhausted"}) from RuntimeError(
+                "raw clearing failure secret"
+            )
+        raise RuntimeError("raw clearing failure secret")
+
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "find_cycles",
+        _find_cycles,
+    )
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "execute_clearing_with_amount",
+        _execute_clearing,
+    )
+
+    async def _no_patches(**_kwargs):
+        return None, None
+
+    monkeypatch.setattr(
+        interact_actions_enabled,
+        "_compute_viz_patches_best_effort",
+        _no_patches,
+    )
+
+    emitted: list[dict] = []
+
+    class _FakeEmitter:
+        def __init__(self, *, sse, utc_now, logger):
+            return None
+
+        def emit_clearing_done(self, **kwargs) -> None:
+            emitted.append({"type": "clearing.done", **kwargs})
+
+    monkeypatch.setattr(interact_actions_enabled, "SseEventEmitter", _FakeEmitter)
+
+    response = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/clearing-real",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json={"equivalent": "UAH", "max_depth": 6},
+    )
+
+    assert response.status_code == 500
+    expected_details = {
+        "partial_cleared_cycles": 1,
+        "partial_cleared_amount": "2.5",
+    }
+    if failure_kind == "geo":
+        expected_details = {
+            "safe_context": "retry_exhausted",
+            **expected_details,
+        }
+    assert response.json() == {
+        "error": {
+            "code": "E010",
+            "message": "Internal server error",
+            "details": expected_details,
+        }
+    }
+    assert "raw clearing failure secret" not in response.text
+    assert execute_calls == 2
+    assert len(emitted) == 1
+    assert emitted[0]["type"] == "clearing.done"
+    assert emitted[0]["equivalent"] == "UAH"
+    assert emitted[0]["cleared_cycles"] == 1
+    assert emitted[0]["cleared_amount"] == "2.5"
+    assert "raw clearing failure secret" not in str(emitted[0])
 
 
 @pytest.mark.asyncio
