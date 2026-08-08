@@ -627,6 +627,121 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
     h.stopSse()
   })
 
+  it('does not mutate cursor, dedup, state or effects for rejected SSE input', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      emitSsePayload(opts, {
+        event_id: 'evt_unknown',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'future.event',
+      })
+      emitSsePayload(opts, {
+        event_id: 'evt_malformed',
+        ts: '2026-01-01T00:00:01Z',
+        type: 'tx.updated',
+        equivalent: 'EUR',
+        edges: [{ from: 'A' }],
+      })
+      opts.onMessage({
+        id: 'frame_id_does_not_match',
+        data: JSON.stringify({
+          event_id: 'evt_valid_payload',
+          ts: '2026-01-01T00:00:02Z',
+          type: 'tx.updated',
+          equivalent: 'EUR',
+          from: 'A',
+          to: 'B',
+          amount: '1.00',
+          ttl_ms: 1200,
+          edges: [{ from: 'A', to: 'B' }],
+        }),
+      })
+      await waitForAbort(opts.signal)
+    })
+
+    const real = createRealState()
+    real.apiBase = 'http://x'
+    real.accessToken = 't'
+    real.selectedScenarioId = 'sc1'
+
+    const applyNodePatches = vi.fn(() => undefined)
+    const applyEdgePatches = vi.fn(() => undefined)
+    const pushTxAmountLabel = vi.fn(() => undefined)
+    const scheduleTimeout = vi.fn(() => undefined)
+    const runRealTxFx = vi.fn(() => undefined)
+    const runRealClearingDoneFx = vi.fn(() => undefined)
+    const onAnySseEvent = vi.fn(() => undefined)
+
+    const h = useSimulatorRealMode({
+      isRealMode: computed(() => true),
+      isLocalhost: true,
+      effectiveEq: computed(() => 'EUR'),
+      state: {
+        loading: false,
+        error: '',
+        sourcePath: '',
+        snapshot: null,
+        selectedNodeId: null,
+        flash: 0,
+      },
+      real,
+
+      ensureScenarioSelectionValid: () => undefined,
+      resetRunStats: () => undefined,
+      cleanupRealRunFxAndTimers: () => undefined,
+
+      isUserFacingRunError: () => false,
+      inc: () => undefined,
+
+      loadScene: vi.fn(async () => undefined),
+
+      realPatchApplier: { applyNodePatches, applyEdgePatches },
+      pushTxAmountLabel,
+      clampRealTxTtlMs: () => 1200,
+
+      scheduleTimeout,
+      runRealTxFx,
+      runRealClearingDoneFx,
+      wakeUp: () => undefined,
+      onAnySseEvent,
+    })
+
+    await h.startRun({ mode: 'real', intensityPercent: 0 })
+
+    expect(real.lastEventId).toBeNull()
+    expect(real.runStats).toMatchObject({ attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0 })
+    expect(applyNodePatches).not.toHaveBeenCalled()
+    expect(applyEdgePatches).not.toHaveBeenCalled()
+    expect(pushTxAmountLabel).not.toHaveBeenCalled()
+    expect(scheduleTimeout).not.toHaveBeenCalled()
+    expect(runRealTxFx).not.toHaveBeenCalled()
+    expect(runRealClearingDoneFx).not.toHaveBeenCalled()
+    expect(onAnySseEvent).not.toHaveBeenCalled()
+
+    const diag = (
+      globalThis as typeof globalThis & {
+        __geo_real_mode_diag?: {
+          normalize_dropped: number
+          frame_id_mismatches: number
+          rejected_by_reason: Record<string, number>
+        }
+      }
+    ).__geo_real_mode_diag
+    expect(diag?.normalize_dropped).toBeGreaterThanOrEqual(3)
+    expect(diag?.frame_id_mismatches).toBeGreaterThanOrEqual(1)
+    expect(Object.keys(diag?.rejected_by_reason ?? {})).toEqual(
+      expect.arrayContaining([
+        'unknown:future.event:unknown_event_type',
+        'malformed:tx.updated:invalid_tx_updated_collection',
+        'malformed:tx.updated:frame_id_mismatch',
+      ]),
+    )
+
+    h.stopSse()
+    restoreConnectSseImplementation(prevImpl)
+  })
+
   it('amount_flyout=false suppresses amount labels but keeps tx FX', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()

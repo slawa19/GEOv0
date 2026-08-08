@@ -17,15 +17,17 @@ import type {
   ActiveRunResponse,
   ArtifactIndexItem,
   RunStatus,
-  RunStatusEvent,
   ScenarioSummary,
-  SimulatorEvent,
   SimulatorMode,
   TopologyChangedEvent,
-  TxFailedEvent,
 } from '../api/simulatorTypes'
 import { connectSse } from '../api/sse'
-import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
+import {
+  normalizeSimulatorEvent,
+  type AcceptedSimulatorEvent,
+  type NormalizedRunStatusEvent,
+  type NormalizedTxFailedEvent,
+} from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 
 import type { ClearingDoneEvent, EdgePatch, GraphLink, GraphNode, NodePatch, TxUpdatedEvent } from '../types'
@@ -70,6 +72,8 @@ type RealModeDiag = {
   rx_messages: number
   json_parse_errors: number
   normalize_dropped: number
+  rejected_by_reason: Record<string, number>
+  frame_id_mismatches: number
   events_by_type: Record<string, number>
   tx_sender_labels: number
   tx_receiver_labels: number
@@ -92,41 +96,24 @@ function getErrorMessage(e: unknown): string {
   return String(e)
 }
 
-function readString(v: unknown): string | null {
-  return typeof v === 'string' ? v : null
-}
-
-function readNumber(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-}
-
 function extractRunId(v: ActiveRunResponse | null | undefined): string {
   return String(v?.run_id ?? '').trim()
 }
 
-function isRunStatusEvent(evt: unknown): evt is RunStatusEvent {
-  if (!isRecord(evt)) return false
-  return (
-    evt.type === 'run_status' &&
-    readString(evt.run_id) !== null &&
-    readString(evt.scenario_id) !== null &&
-    readNumber(evt.sim_time_ms) !== null &&
-    readNumber(evt.intensity_percent) !== null &&
-    readNumber(evt.ops_sec) !== null &&
-    readNumber(evt.queue_depth) !== null
-  )
+function isRunStatusEvent(evt: AcceptedSimulatorEvent): evt is NormalizedRunStatusEvent {
+  return evt.type === 'run_status'
 }
 
-function isTxUpdatedEvent(evt: unknown): evt is TxUpdatedEvent {
-  return isRecord(evt) && evt.type === 'tx.updated' && typeof evt.equivalent === 'string'
+function isTxUpdatedEvent(evt: AcceptedSimulatorEvent): evt is TxUpdatedEvent {
+  return evt.type === 'tx.updated'
 }
 
-function isTxFailedEvent(evt: unknown): evt is TxFailedEvent {
-  return isRecord(evt) && evt.type === 'tx.failed' && typeof evt.equivalent === 'string'
+function isTxFailedEvent(evt: AcceptedSimulatorEvent): evt is NormalizedTxFailedEvent {
+  return evt.type === 'tx.failed'
 }
 
-function isTopologyChangedEvent(evt: SimulatorEvent): evt is TopologyChangedEvent {
-  return evt.type === 'topology.changed' && isRecord(evt.payload)
+function isTopologyChangedEvent(evt: AcceptedSimulatorEvent): evt is TopologyChangedEvent {
+  return evt.type === 'topology.changed'
 }
 
 export function useSimulatorRealMode(opts: {
@@ -212,6 +199,8 @@ export function useSimulatorRealMode(opts: {
     rx_messages: 0,
     json_parse_errors: 0,
     normalize_dropped: 0,
+    rejected_by_reason: {},
+    frame_id_mismatches: 0,
     events_by_type: {},
     tx_sender_labels: 0,
     tx_receiver_labels: 0,
@@ -524,7 +513,6 @@ export function useSimulatorRealMode(opts: {
           signal: ctrl.signal,
           onMessage: (msg) => {
             if (ctrl.signal.aborted) return
-            if (msg.id) real.lastEventId = msg.id
             if (!msg.data) return
 
             let parsed: unknown
@@ -538,9 +526,24 @@ export function useSimulatorRealMode(opts: {
 
             diag.rx_messages += 1
 
-            const evt = normalizeSimulatorEvent(parsed)
-            if (!evt) {
+            const normalized = normalizeSimulatorEvent(parsed)
+            if (normalized.status === 'ignored') {
               diag.normalize_dropped += 1
+              incDiag(
+                diag.rejected_by_reason,
+                `${normalized.kind}:${normalized.eventType ?? 'untyped'}:${normalized.diagnostic}`,
+              )
+              return
+            }
+
+            const evt = normalized.event
+
+            // The wire protocol requires the SSE frame id to match payload.event_id.
+            // A mismatch is not an accepted event and must not advance cursor/dedup or run effects.
+            if (msg.id !== undefined && msg.id !== evt.event_id) {
+              diag.normalize_dropped += 1
+              diag.frame_id_mismatches += 1
+              incDiag(diag.rejected_by_reason, `malformed:${evt.type}:frame_id_mismatch`)
               return
             }
 
@@ -555,7 +558,16 @@ export function useSimulatorRealMode(opts: {
             onAnySseEvent?.()
 
             if (isRunStatusEvent(evt)) {
-              const st = evt
+              // Metrics are nullable/optional in the canonical producer contract. Preserve
+              // the latest accepted value when a heartbeat omits one; first-frame fallback
+              // remains deterministic for the existing concrete RunStatus state shape.
+              const st: RunStatus = {
+                ...evt,
+                sim_time_ms: evt.sim_time_ms ?? real.runStatus?.sim_time_ms ?? 0,
+                intensity_percent: evt.intensity_percent ?? real.runStatus?.intensity_percent ?? 0,
+                ops_sec: evt.ops_sec ?? real.runStatus?.ops_sec ?? 0,
+                queue_depth: evt.queue_depth ?? real.runStatus?.queue_depth ?? 0,
+              }
               real.runStatus = st
               const le = st.last_error
               real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
