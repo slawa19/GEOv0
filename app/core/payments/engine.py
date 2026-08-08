@@ -1491,12 +1491,13 @@ class PaymentEngine:
                     await self.session.commit()
                 else:
                     await self.session.flush()
-                try:
-                    PAYMENT_EVENTS_TOTAL.labels(
-                        event="abort", result="already_aborted"
-                    ).inc()
-                except Exception:
-                    pass
+                if commit:
+                    try:
+                        PAYMENT_EVENTS_TOTAL.labels(
+                            event="abort", result="already_aborted"
+                        ).inc()
+                    except Exception:
+                        pass
                 return True
 
             refreshed_validated_locks: tuple[_ValidatedPrepareLock, ...] = ()
@@ -1538,10 +1539,11 @@ class PaymentEngine:
                 await self.session.commit()
             else:
                 await self.session.flush()
-            try:
-                PAYMENT_EVENTS_TOTAL.labels(event="abort", result="success").inc()
-            except Exception:
-                pass
+            if commit:
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(event="abort", result="success").inc()
+                except Exception:
+                    pass
             return True
 
         if not commit:

@@ -9,6 +9,11 @@ from app.config import settings
 from app.db.models.audit_log import AuditLog
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
+from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+
+def _abort_metric_value(result: str) -> float:
+    return PAYMENT_EVENTS_TOTAL.labels(event='abort', result=result)._value.get()
 
 
 @pytest.mark.asyncio
@@ -44,6 +49,8 @@ async def test_admin_abort_tx_aborts_and_audits(client, db_session):
     await db_session.commit()
 
     headers = {'X-Admin-Token': settings.ADMIN_TOKEN}
+    success_before = _abort_metric_value('success')
+    already_aborted_before = _abort_metric_value('already_aborted')
 
     reason = 'manual abort in test'
     r = await client.post(
@@ -54,6 +61,8 @@ async def test_admin_abort_tx_aborts_and_audits(client, db_session):
     assert r.status_code == 200
     payload = r.json()
     assert payload == {'tx_id': 'TX_ABORT_ME', 'status': 'aborted'}
+    assert _abort_metric_value('success') - success_before == 1
+    assert _abort_metric_value('already_aborted') == already_aborted_before
 
     # Transaction is aborted
     await db_session.refresh(tx)
@@ -72,6 +81,46 @@ async def test_admin_abort_tx_aborts_and_audits(client, db_session):
         )
     ).first()
     assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_repeats_aborted_transaction_idempotently(
+    client,
+    db_session,
+):
+    alice = Participant(pid='aborted-alice', display_name='Alice', public_key='B' * 64, type='person', status='active')
+    db_session.add(alice)
+    await db_session.flush()
+
+    tx = Transaction(
+        tx_id='TX_ALREADY_ABORTED',
+        type='PAYMENT',
+        initiator_id=alice.id,
+        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
+        state='ABORTED',
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    success_before = _abort_metric_value('success')
+    already_aborted_before = _abort_metric_value('already_aborted')
+    response = await client.post(
+        '/api/v1/admin/transactions/TX_ALREADY_ABORTED/abort',
+        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+        json={'reason': 'repeat abort'},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {'tx_id': 'TX_ALREADY_ABORTED', 'status': 'aborted'}
+    assert _abort_metric_value('success') == success_before
+    assert _abort_metric_value('already_aborted') - already_aborted_before == 1
+    await db_session.refresh(tx)
+    assert tx.state == 'ABORTED'
+    assert tx.error == {
+        'code': 'E010',
+        'message': 'repeat abort',
+        'details': {},
+    }
 
 
 @pytest.mark.asyncio
@@ -162,24 +211,35 @@ async def test_admin_abort_tx_rolls_back_when_audit_flush_fails(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('initial_state', 'tx_id'),
+    [
+        ('WAITING', 'TX_ABORT_COMMIT_FAILURE'),
+        ('ABORTED', 'TX_ABORTED_COMMIT_FAILURE'),
+    ],
+)
 async def test_admin_abort_tx_rolls_back_when_outer_commit_fails(
     client,
     db_session,
     monkeypatch,
+    initial_state,
+    tx_id,
 ):
     alice = Participant(pid='abort-commit-alice', display_name='Alice', public_key='E' * 64, type='person', status='active')
     db_session.add(alice)
     await db_session.flush()
 
     tx = Transaction(
-        tx_id='TX_ABORT_COMMIT_FAILURE',
+        tx_id=tx_id,
         type='PAYMENT',
         initiator_id=alice.id,
         payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
-        state='WAITING',
+        state=initial_state,
     )
     db_session.add(tx)
     await db_session.commit()
+    success_before = _abort_metric_value('success')
+    already_aborted_before = _abort_metric_value('already_aborted')
 
     async def fail_commit():
         raise RuntimeError('required abort commit failed')
@@ -188,19 +248,21 @@ async def test_admin_abort_tx_rolls_back_when_outer_commit_fails(
         patch.setattr(db_session, 'commit', fail_commit)
         with pytest.raises(RuntimeError, match='required abort commit failed'):
             await client.post(
-                '/api/v1/admin/transactions/TX_ABORT_COMMIT_FAILURE/abort',
+                f'/api/v1/admin/transactions/{tx_id}/abort',
                 headers={'X-Admin-Token': settings.ADMIN_TOKEN},
                 json={'reason': 'must rollback outer commit'},
             )
 
     await db_session.refresh(tx)
-    assert tx.state == 'WAITING'
+    assert tx.state == initial_state
     assert tx.error is None
+    assert _abort_metric_value('success') == success_before
+    assert _abort_metric_value('already_aborted') == already_aborted_before
     row = (
         await db_session.execute(
             AuditLog.__table__.select().where(
                 AuditLog.action == 'admin.transactions.abort',
-                AuditLog.object_id == 'TX_ABORT_COMMIT_FAILURE',
+                AuditLog.object_id == tx_id,
             )
         )
     ).first()

@@ -64,6 +64,7 @@ from app.core.admin.metrics import compute_participant_metrics
 from app.core.trustlines.service import TrustLineService
 from app.core.payments.engine import PaymentEngine
 from app.utils.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 from app.utils.request_id import new_request_id, request_id_var, validate_request_id
 from app.utils.validation import validate_equivalent_code
 
@@ -968,6 +969,7 @@ async def abort_transaction(
         raise ConflictException("Transaction is already committed")
 
     before = {"state": tx.state, "error": tx.error}
+    abort_metric_result = "already_aborted" if tx.state == "ABORTED" else "success"
 
     engine = PaymentEngine(db)
     try:
@@ -1001,6 +1003,11 @@ async def abort_transaction(
     except BaseException:
         await db.rollback()
         raise
+
+    try:
+        PAYMENT_EVENTS_TOTAL.labels(event="abort", result=abort_metric_result).inc()
+    except Exception:
+        pass
 
     return AdminAbortTxResponse(tx_id=tx_id, status="aborted")
 
