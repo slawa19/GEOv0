@@ -5,25 +5,27 @@ import { describe, expect, it } from 'vitest'
 import GraphKeyboardNavigator from './GraphKeyboardNavigator.vue'
 
 describe('GraphKeyboardNavigator', () => {
-  it('keeps selection and opening unavailable until guarded rendering is enabled', async () => {
+  it('remains searchable with no pre-mounted options and exposes the guard hint', async () => {
     const wrapper = mount(GraphKeyboardNavigator, {
       props: {
-        modelValue: 'node:PID_A',
+        modelValue: '',
         options: [],
         busy: false,
-        unavailable: true,
+        hintId: 'graph-keyboard-guard-hint',
       },
       global: {
         components: { ElButton, ElOption, ElSelect },
       },
     })
 
-    expect(wrapper.get('[data-testid="graph-element-select"] input').attributes('disabled')).toBeDefined()
+    const input = wrapper.get('[data-testid="graph-element-select"] input')
+    expect(input.attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[role="group"]').attributes('aria-describedby')).toBe('graph-keyboard-guard-hint')
     expect(wrapper.get('[data-testid="graph-element-open"]').attributes('disabled')).toBeDefined()
 
-    await wrapper.setProps({ unavailable: false })
+    const remoteMethod = wrapper.getComponent(ElSelect).props('remoteMethod') as (query: string) => void
+    remoteMethod('PI')
 
-    expect(wrapper.get('[data-testid="graph-element-select"] input').attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('[data-testid="graph-element-open"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.emitted('search')).toContainEqual(['PI'])
   })
 })

@@ -1,4 +1,4 @@
-import type { LabelMode } from '../../composables/useGraphVisualization'
+import type { GraphRebuildOptions, LabelMode } from '../../composables/useGraphVisualization'
 import { formatDecimalFixed } from '../../utils/decimal'
 
 export function makeMetricsKey(pid: string, eqCode: string | null, threshold: string): string {
@@ -73,8 +73,21 @@ export function computeSeedLabel(participants: SeedParticipantLike[] | null | un
   return `Seed: ${n} participants${prefix}`
 }
 
-export function graphElementOptionsWhenAvailable<T>(unavailable: boolean, buildOptions: () => T[]): T[] {
-  return unavailable ? [] : buildOptions()
+export function graphElementOptionsForSearch<T extends { key: string; label: string }>(options: {
+  guarded: boolean
+  query: string
+  guardedQueryMin: number
+  guardedLimit: number
+  buildOptions: () => T[]
+}): T[] {
+  const query = String(options.query || '').trim().toLocaleLowerCase()
+  if (options.guarded && query.length < options.guardedQueryMin) return []
+
+  const built = options.buildOptions()
+  const matches = query
+    ? built.filter((option) => `${option.label}\n${option.key}`.toLocaleLowerCase().includes(query))
+    : built
+  return options.guarded ? matches.slice(0, options.guardedLimit) : matches
 }
 
 export async function reloadGraphView(options: {
@@ -82,15 +95,15 @@ export async function reloadGraphView(options: {
   isCurrent: () => boolean
   afterLoad: () => Promise<void>
   ensureInitialized: () => void
-  rebuild: (options: { fit: boolean }) => void
-  fit: boolean
+  rebuild: (options: GraphRebuildOptions) => void
+  rebuildOptions: GraphRebuildOptions
 }): Promise<boolean> {
   await options.loadData()
   if (!options.isCurrent()) return false
   await options.afterLoad()
   if (!options.isCurrent()) return false
   options.ensureInitialized()
-  options.rebuild({ fit: options.fit })
+  options.rebuild(options.rebuildOptions)
   return true
 }
 

@@ -49,6 +49,11 @@ export type GraphElementOption = {
   kind: 'node' | 'edge'
 }
 
+export type GraphRebuildOptions = {
+  fit?: boolean
+  preserveViewport?: boolean
+}
+
 export function graphSelectionAnnouncement(selected: SelectedInfo | null, drawerOpen: boolean): string | null {
   if (selected?.kind === 'node') {
     return t(drawerOpen ? 'graph.a11y.nodeDetailsOpened' : 'graph.a11y.nodeSelected', {
@@ -139,7 +144,7 @@ export function useGraphVisualization(options: {
   applyStyle: () => void
   updateZoomStyles: () => void
   runLayout: () => void
-  rebuildGraph: (opts?: { fit?: boolean }) => void
+  rebuildGraph: (opts?: GraphRebuildOptions) => void
   updateLabelsForZoom: () => void
   updateSearchHighlights: () => void
 
@@ -1035,7 +1040,7 @@ export function useGraphVisualization(options: {
 
   let layoutRunId = 0
 
-  function runLayoutAndMaybeFit({ fitOnStop }: { fitOnStop: boolean }) {
+  function runLayoutAndMaybeFit({ fitOnStop, layoutFit }: { fitOnStop: boolean; layoutFit: boolean }) {
     const cy = getCy()
     if (!cy) return
 
@@ -1056,14 +1061,15 @@ export function useGraphVisualization(options: {
       })
     }
 
-    runLayoutWithFit(fitOnStop)
+    runLayoutWithFit(layoutFit)
   }
 
-  function rebuildGraph(opts?: { fit?: boolean }) {
+  function rebuildGraph(opts?: GraphRebuildOptions) {
     const cy = getCy()
     if (!cy) return
 
     const fit = opts?.fit ?? false
+    const layoutFit = !opts?.preserveViewport
 
     const { nodes, edges } = buildElements()
     clearCycleHighlight()
@@ -1078,7 +1084,7 @@ export function useGraphVisualization(options: {
     applySelectedHighlight(
       options.selected.value && options.selected.value.kind === 'node' ? options.selected.value.pid : '',
     )
-    runLayoutAndMaybeFit({ fitOnStop: fit })
+    runLayoutAndMaybeFit({ fitOnStop: fit, layoutFit })
   }
 
   function labelFor(mode: LabelMode, displayName: string, pid: string): string {

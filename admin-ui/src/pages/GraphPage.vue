@@ -29,7 +29,7 @@ import {
   atomsToDecimal,
   computeSeedLabel,
   extractPidFromText,
-  graphElementOptionsWhenAvailable,
+  graphElementOptionsForSearch,
   labelPartsToMode,
   money,
   modeToLabelParts,
@@ -354,7 +354,7 @@ function renderAnyway() {
   ensureCyInitialized()
 }
 
-async function reloadGraph(fit: boolean) {
+async function reloadGraph(rebuildOptions: { fit: boolean; preserveViewport?: boolean }) {
   const request = reloadRequests.begin()
   await reloadGraphView({
     loadData,
@@ -362,16 +362,16 @@ async function reloadGraph(fit: boolean) {
     afterLoad: async () => { await nextTick() },
     ensureInitialized: ensureCyInitialized,
     rebuild: graphViz.rebuildGraph,
-    fit,
+    rebuildOptions,
   })
 }
 
 function reloadAll() {
-  return reloadGraph(true)
+  return reloadGraph({ fit: true })
 }
 
 function reloadDrawer() {
-  return reloadGraph(false)
+  return reloadGraph({ fit: false, preserveViewport: true })
 }
 
 useGraphPageWatchers({
@@ -415,14 +415,23 @@ const stats = computed(() => {
 })
 
 const keyboardElementKey = ref('')
-const keyboardElementOptions = computed(() => graphElementOptionsWhenAvailable(
-  graphRenderGuardActive.value,
-  graphViz.graphElementOptions,
-))
+const keyboardElementQuery = ref('')
+const GUARDED_KEYBOARD_QUERY_MIN = 2
+const GUARDED_KEYBOARD_OPTION_LIMIT = 100
+const keyboardElementOptions = computed(() => graphElementOptionsForSearch({
+  guarded: graphRenderGuardActive.value,
+  query: keyboardElementQuery.value,
+  guardedQueryMin: GUARDED_KEYBOARD_QUERY_MIN,
+  guardedLimit: GUARDED_KEYBOARD_OPTION_LIMIT,
+  buildOptions: graphViz.graphElementOptions,
+}))
 let drawerReturnFocus: HTMLElement | null = null
 
+function searchKeyboardElements(query: string) {
+  keyboardElementQuery.value = query
+}
+
 function openKeyboardElement() {
-  if (graphRenderGuardActive.value) return
   const active = document.activeElement
   drawerReturnFocus = active instanceof HTMLElement ? active : null
   if (!graphViz.openElementDetails(keyboardElementKey.value)) drawerReturnFocus = null
@@ -572,9 +581,20 @@ const graphLiveAnnouncement = computed(() => {
       v-model="keyboardElementKey"
       :options="keyboardElementOptions"
       :busy="loading"
-      :unavailable="graphRenderGuardActive"
+      :hint-id="graphRenderGuardActive ? 'graph-keyboard-guard-hint' : undefined"
       @open="openKeyboardElement"
+      @search="searchKeyboardElements"
     />
+    <p
+      v-if="graphRenderGuardActive"
+      id="graph-keyboard-guard-hint"
+      class="keyboardGuardHint"
+    >
+      {{ t('graph.keyboard.largeGraphHint', {
+        min: GUARDED_KEYBOARD_QUERY_MIN,
+        limit: GUARDED_KEYBOARD_OPTION_LIMIT,
+      }) }}
+    </p>
 
     <div
       id="graph-keyboard-alternative"
@@ -736,6 +756,12 @@ const graphLiveAnnouncement = computed(() => {
   z-index: 2;
   padding: 16px;
   background: var(--el-bg-color-overlay);
+}
+
+.keyboardGuardHint {
+  margin: -4px 0 12px;
+  color: var(--el-text-color-secondary);
+  font-size: var(--geo-font-size-label);
 }
 
 .cy {

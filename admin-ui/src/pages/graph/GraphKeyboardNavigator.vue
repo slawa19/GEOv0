@@ -5,15 +5,23 @@ import type { GraphElementOption } from '../../composables/useGraphVisualization
 defineProps<{
   options: GraphElementOption[]
   busy: boolean
-  unavailable: boolean
+  hintId?: string
 }>()
 
 const selectedKey = defineModel<string>({ required: true })
-const emit = defineEmits<{ open: [] }>()
+const emit = defineEmits<{ open: []; search: [query: string] }>()
+
+function search(query: string) {
+  emit('search', query)
+}
 </script>
 
 <template>
-  <div class="keyboardNavigator">
+  <div
+    class="keyboardNavigator"
+    role="group"
+    :aria-describedby="hintId"
+  >
     <label
       class="keyboardNavigator__label"
       for="graph-element-select"
@@ -24,7 +32,9 @@ const emit = defineEmits<{ open: [] }>()
       id="graph-element-select"
       v-model="selectedKey"
       filterable
-      :disabled="busy || unavailable"
+      remote
+      :remote-method="search"
+      :disabled="busy"
       :placeholder="t('graph.keyboard.placeholder')"
       :aria-label="t('graph.keyboard.label')"
       data-testid="graph-element-select"
@@ -38,7 +48,7 @@ const emit = defineEmits<{ open: [] }>()
       />
     </el-select>
     <el-button
-      :disabled="busy || unavailable || !selectedKey"
+      :disabled="busy || !selectedKey"
       data-testid="graph-element-open"
       @click="emit('open')"
     >

@@ -488,6 +488,7 @@ export const RU: Record<string, string> = {
   'graph.keyboard.openDetails': 'Открыть детали',
   'graph.keyboard.nodeOption': 'Узел: {name} — {pid}',
   'graph.keyboard.edgeOption': 'Ребро: {from} → {to} ({equivalent})',
+  'graph.keyboard.largeGraphHint': 'Большой граф: введите минимум {min} символа для поиска. Показаны до {limit} совпадающих элементов.',
   'graph.a11y.canvasLabel': 'Визуализация графа сети',
   'graph.a11y.alternativeHint': 'Используйте поле «Открыть элемент графа», чтобы с клавиатуры изучить любой видимый узел или ребро.',
   'graph.a11y.loading': 'Граф сети загружается.',

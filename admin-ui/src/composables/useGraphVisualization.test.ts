@@ -121,6 +121,9 @@ describe('useGraphVisualization', () => {
       expect(lastLayout()).toMatchObject({ name: layoutName, fit: true })
 
       mounted.graph.rebuildGraph({ fit: false })
+      expect(lastLayout()).toMatchObject({ name: layoutName, fit: true })
+
+      mounted.graph.rebuildGraph({ fit: false, preserveViewport: true })
       expect(lastLayout()).toMatchObject({ name: layoutName, fit: false })
 
       mounted.graph.runLayout()

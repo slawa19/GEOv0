@@ -5,7 +5,7 @@ import {
   buildFocusModeQuery,
   computeSeedLabel,
   extractPidFromText,
-  graphElementOptionsWhenAvailable,
+  graphElementOptionsForSearch,
   labelPartsToMode,
   makeMetricsKey,
   modeToLabelParts,
@@ -39,19 +39,50 @@ describe('graphPageHelpers', () => {
     expect(computeSeedLabel(greenfield)).toBe('Seed: Greenfield (100)')
   })
 
-  it('does not build keyboard options while graph rendering is guarded', () => {
-    const buildOptions = vi.fn(() => ['node'])
+  it('does not build guarded keyboard options before a meaningful query', () => {
+    const buildOptions = vi.fn(() => [{ key: 'node:PID_A', label: 'Node: Alice — PID_A' }])
 
-    expect(graphElementOptionsWhenAvailable(true, buildOptions)).toEqual([])
+    expect(graphElementOptionsForSearch({
+      guarded: true,
+      query: 'P',
+      guardedQueryMin: 2,
+      guardedLimit: 100,
+      buildOptions,
+    })).toEqual([])
     expect(buildOptions).not.toHaveBeenCalled()
-    expect(graphElementOptionsWhenAvailable(false, buildOptions)).toEqual(['node'])
+    expect(graphElementOptionsForSearch({
+      guarded: false,
+      query: '',
+      guardedQueryMin: 2,
+      guardedLimit: 100,
+      buildOptions,
+    })).toHaveLength(1)
     expect(buildOptions).toHaveBeenCalledTimes(1)
   })
 
+  it('filters and bounds guarded keyboard matches', () => {
+    const buildOptions = vi.fn(() => Array.from({ length: 150 }, (_, index) => ({
+      key: `node:PID_MATCH_${index}`,
+      label: `Node: Match ${index} — PID_MATCH_${index}`,
+    })))
+
+    const options = graphElementOptionsForSearch({
+      guarded: true,
+      query: 'match',
+      guardedQueryMin: 2,
+      guardedLimit: 100,
+      buildOptions,
+    })
+
+    expect(buildOptions).toHaveBeenCalledTimes(1)
+    expect(options).toHaveLength(100)
+    expect(options.every((option) => option.label.toLowerCase().includes('match'))).toBe(true)
+  })
+
   it.each([
-    ['normal reload', true],
-    ['drawer refresh', false],
-  ] as const)('preserves fit semantics for %s', async (_label, fit) => {
+    ['normal reload', { fit: true }],
+    ['drawer refresh', { fit: false, preserveViewport: true }],
+  ] as const)('preserves fit semantics for %s', async (_label, rebuildOptions) => {
     const ensureInitialized = vi.fn()
     const rebuild = vi.fn()
 
@@ -61,11 +92,11 @@ describe('graphPageHelpers', () => {
       afterLoad: vi.fn().mockResolvedValue(undefined),
       ensureInitialized,
       rebuild,
-      fit,
+      rebuildOptions,
     })).resolves.toBe(true)
 
     expect(ensureInitialized).toHaveBeenCalledTimes(1)
-    expect(rebuild).toHaveBeenCalledWith({ fit })
+    expect(rebuild).toHaveBeenCalledWith(rebuildOptions)
   })
 
   it('extractPidFromText finds PID tokens', () => {

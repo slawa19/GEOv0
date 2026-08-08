@@ -488,6 +488,7 @@ export const EN: Record<string, string> = {
   'graph.keyboard.openDetails': 'Open details',
   'graph.keyboard.nodeOption': 'Node: {name} — {pid}',
   'graph.keyboard.edgeOption': 'Edge: {from} → {to} ({equivalent})',
+  'graph.keyboard.largeGraphHint': 'Large graph: type at least {min} characters to search. Up to {limit} matching elements are shown.',
   'graph.a11y.canvasLabel': 'Network graph visualization',
   'graph.a11y.alternativeHint': 'Use Open graph element to inspect any visible node or edge with the keyboard.',
   'graph.a11y.loading': 'Loading network graph.',

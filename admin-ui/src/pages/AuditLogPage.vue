@@ -20,6 +20,7 @@ const error = ref<string | null>(null)
 const route = useRoute()
 const router = useRouter()
 const q = ref('')
+let scheduledSearchQ = ''
 
 const page = ref(1)
 const perPage = ref(20)
@@ -46,7 +47,8 @@ function applyRouteQueryToFilter(): boolean {
 function syncFilterToRouteQuery() {
   if (!isAuditRoute.value) return
   const query: Record<string, unknown> = { ...route.query }
-  const nextQ = q.value
+  const typedQ = q.value
+  const nextQ = typedQ.trim() ? typedQ : ''
   if (nextQ) query.q = nextQ
   else delete query.q
   if (readQueryString(route.query.q) !== nextQ) {
@@ -92,6 +94,8 @@ function openRow(row: AuditLogEntry) {
 
 onMounted(() => {
   applyRouteQueryToFilter()
+  scheduledSearchQ = q.value.trim()
+  syncFilterToRouteQuery()
   void load()
 })
 watch(page, () => void load())
@@ -101,9 +105,16 @@ watch(perPage, () => {
 })
 
 const debouncedReload = debounce(() => {
-  page.value = 1
-  void load()
+  if (page.value !== 1) page.value = 1
+  else void load()
 }, 250)
+
+function scheduleReloadIfNormalizedSearchChanged() {
+  const nextSearchQ = q.value.trim()
+  if (nextSearchQ === scheduledSearchQ) return
+  scheduledSearchQ = nextSearchQ
+  debouncedReload()
+}
 
 onBeforeUnmount(() => debouncedReload.cancel())
 
@@ -112,8 +123,7 @@ watch(
   () => {
     const changed = applyRouteQueryToFilter()
     if (changed) {
-      page.value = 1
-      debouncedReload()
+      scheduleReloadIfNormalizedSearchChanged()
     }
   },
 )
@@ -121,7 +131,7 @@ watch(
 watch(q, () => {
   if (applyingRouteQuery.value) return
   syncFilterToRouteQuery()
-  debouncedReload()
+  scheduleReloadIfNormalizedSearchChanged()
 })
 </script>
 

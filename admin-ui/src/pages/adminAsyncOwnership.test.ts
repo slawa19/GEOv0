@@ -490,15 +490,23 @@ describe('selected non-Graph operator and navigation paths', () => {
   it('keeps Audit q synchronized both ways while preserving scenario', async () => {
     vi.useFakeTimers()
     apiMock.listAuditLog.mockResolvedValue(paginated([auditNew]))
-    const wrapper = mountPage(AuditLogPage, '/audit-log', { scenario: 'slow', q: ' initial query ' })
+    const wrapper = mountPage(AuditLogPage, '/audit-log', { scenario: 'slow', q: 'admin' })
     await settle()
     const state = setupState(wrapper)
-    expect(state.q).toBe(' initial query ')
+    expect(state.q).toBe('admin')
+    apiMock.listAuditLog.mockResolvedValue(ok({ items: [auditNew], page: 2, per_page: 20, total: 40 }))
+    state.page = 2
+    await nextTick()
+    await settle()
+    expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 2, per_page: 20, q: 'admin' })
     const callsBeforeTyping = apiMock.listAuditLog.mock.calls.length
 
     state.q = 'admin '
     await nextTick()
     expect(routing.replace).toHaveBeenLastCalledWith({ query: { scenario: 'slow', q: 'admin ' } })
+    await vi.runAllTimersAsync()
+    await settle()
+    expect(apiMock.listAuditLog).toHaveBeenCalledTimes(callsBeforeTyping)
 
     routing.route.query = { scenario: 'slow', q: 'admin ' }
     await nextTick()
@@ -513,6 +521,14 @@ describe('selected non-Graph operator and navigation paths', () => {
     await settle()
     expect(apiMock.listAuditLog).toHaveBeenCalledTimes(callsBeforeTyping + 1)
     expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 1, per_page: 20, q: 'admin config' })
+
+    state.q = '   '
+    await nextTick()
+    expect(routing.replace).toHaveBeenLastCalledWith({ query: { scenario: 'slow' } })
+    await vi.runAllTimersAsync()
+    await settle()
+    expect(apiMock.listAuditLog).toHaveBeenCalledTimes(callsBeforeTyping + 2)
+    expect(apiMock.listAuditLog).toHaveBeenLastCalledWith({ page: 1, per_page: 20, q: undefined })
 
     routing.route.query = { scenario: 'slow' }
     await nextTick()
