@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 1 IN PROGRESS — OWNER-APPROVED FROZEN PLAN; EXIT CRITERIA OPEN
+- **Status:** PHASE 2 COMPLETE — PHASES 3–7 PAUSED
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -217,6 +217,35 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 - **Documentation churn:** translating unstable documents multiplies drift. Mitigation: update canonical source first; translate only after acceptance and mark generated/lagging copies.
 
 ## Changelog
+
+- **2026-08-08:** Phase 2 completed at exact product commit
+  `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`; Phase 3 was not started. The
+  bounded range from base `0635a651f0ae6f970d82d7d71b7a18071069262d`
+  produced the compact owner/effect and actor maps in
+  `phase2-owner-map.md`, assigned every frozen path `FIX` or `KEEP`, and left the
+  conditional REN-012A adapter `NO TRIGGER`. Confirmed changes stayed on existing
+  payment, clearing, trustline, Admin, Integrity and Simulator seams; no new
+  repository/UoW framework or broad module rewrite was introduced. Published
+  [workflow run 31256289008](https://github.com/slawa19/GEOv0/actions/runs/31256289008)
+  executed on that exact product SHA. Its guarded disposable PostgreSQL Phase 2
+  matrix passed all three mandatory cases (`3 passed`), while the conditional
+  Admin lost-update row remained `NOT TRIGGERED`; the complete registered
+  PostgreSQL tier passed `11` tests with `105` deselected. Required
+  local-equivalent gates passed with backend `735 passed`, `2 skipped`, `15
+  deselected`, Admin `76 passed` plus build, and Simulator `637 passed` plus
+  build. The overall workflow conclusion remains `failure`, not “CI green”:
+  scheduled Admin and Simulator visual E2E retain known failures assigned to
+  later frozen phases. Local final backend validation separately passed `734`
+  tests with `3` skipped and `15` deselected. Final internal adversarial findings
+  were fixed in `8936031`, `8a1601f`, `c9a34cc`, and `7d0a8a9`, then
+  independently re-reviewed with no remaining P1/P2. Claude Code `2.1.226`
+  reviewed the full `0635a651..7d0a8a9` range from a clean credential-free
+  standalone clone using `/code-review high`, `--model opus --effort high` and
+  read-only tools. Exit was `0`, JSON complete, `is_error=false`, and
+  `modelUsage` resolved `claude-opus-5`. Its five findings were manually checked;
+  none remained a P1/P2 after verifying staged rollback ownership, the approved
+  clearing taxonomy and sanitization, nested viz fallback, and multi-layer error
+  logging.
 
 - **2026-08-08:** Phase 1 completed at merged main commit
   `31e887fc904ef8060b0c1c9f233957b235ee1aeb`; Phase 2 was not started. The

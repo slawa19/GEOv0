@@ -5,8 +5,9 @@
 - **Executable backlog:** `specs/001-codebase-renovation/tasks.md`
 - **State:** owner-approved at exact commit
   `8f271693e7b763856d86fb3c2f579a56938d6fcb`; Phase 1 completed on 2026-08-08
-  at main commit `31e887fc904ef8060b0c1c9f233957b235ee1aeb`. Phase 2 has not
-  started; Phases 2–7 remain paused.
+  at main commit `31e887fc904ef8060b0c1c9f233957b235ee1aeb`. Phase 2 completed on
+  2026-08-08 at product commit `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`;
+  Phases 3–7 remain paused.
 
 ## 1. Objective and project fit
 
@@ -117,12 +118,15 @@ as evidence but does not authorize more implementation.
   parity, background-job supervision, semantic OpenAPI, Admin async ownership,
   payment locking/state/error handling and Simulator transaction-outcome work are
   implemented in bounded slices.
-- Local backend, Admin and Simulator gates have substantial passing evidence.
-- Published CI, Docker runtime, live PostgreSQL, browser E2E and full frontend
-  architecture/functionality evidence are still absent.
-- Claude Code reviewed frozen product diffs, not the full repository or this final
-  plan. Its confirmed product findings were remediated; the plan itself receives a
-  separate review before owner presentation.
+- Local and published backend, Admin and Simulator required gates have passing
+  evidence. Phase 1 also established the production-like container, disposable
+  PostgreSQL, short Chromium and Simulator super-smoke paths.
+- Phase 2's bounded live PostgreSQL concurrency matrix and complete registered
+  marker tier passed on its exact accepted product SHA. Broader scheduled Admin
+  and Simulator visual E2E remain truthfully red and owned by later phases.
+- Claude Code reviewed the complete Phase 2 product range as well as earlier
+  frozen product and planning diffs. Confirmed findings were remediated; rejected
+  findings retain manual call-site and contract triage evidence.
 
 ## 6. Frozen remaining sequence
 
@@ -268,6 +272,11 @@ described as green Phase 1 gates.
 
 ### Phase 2 — Close only confirmed backend ownership and integrity gaps
 
+**Status:** completed 2026-08-08 at product commit
+`7d0a8a9ca48cec34cc62e0965cdd6d28825370de`. The compact owner/effect and actor
+maps, bounded remediations, final reviews and published evidence are recorded in
+`phase2-owner-map.md`. Phase 3 was not started by this closeout.
+
 **Purpose:** finish the domain review that has broad correctness value without
 turning the MVP into a distributed transaction research project.
 
@@ -371,6 +380,19 @@ the changed behavior is independently testable.
   unavailable, Phase 2 remains open; changing that requirement needs an explicit
   owner-approved spec revision.
 - No new framework or broad module rewrite was introduced.
+
+Exit was accepted for exact product SHA
+`7d0a8a9ca48cec34cc62e0965cdd6d28825370de` using published
+[workflow run 31256289008](https://github.com/slawa19/GEOv0/actions/runs/31256289008).
+The three mandatory live PostgreSQL selectors passed; the fourth Admin row was
+conditional and remained `NOT TRIGGERED` after the owner map found no qualifying
+lost-update risk. The complete PostgreSQL marker tier and required
+local-equivalent job also passed. Internal adversarial findings were fixed and
+independently re-reviewed; Claude Code `2.1.226` reviewed the full
+`0635a651..7d0a8a9` product range with resolved `claude-opus-5`, high effort,
+exit `0`, complete JSON and no manually sustained P1/P2. Process-crash delivery,
+network partitions, generalized retry/UoW frameworks and the later-phase UI/E2E
+owners remain outside this phase.
 
 #### Conditional operational follow-up — not a renovation blocker by default
 

@@ -1,8 +1,9 @@
 # Phase 2 backend owner/effect map
 
-Status: **IN PROGRESS** (2026-08-08). This is a dated evidence ledger for
-REN-010A at base `0635a651f0ae6f970d82d7d71b7a18071069262d`; it does not replace
-the REST schema, domain documentation, code, or current gate results.
+Status: **COMPLETE** (2026-08-08). This is a dated evidence ledger for
+REN-010A at base `0635a651f0ae6f970d82d7d71b7a18071069262d`; the accepted product
+HEAD is `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`. It does not replace the
+REST schema, domain documentation, code, or current gate results.
 
 ## Confirmed hypotheses
 
@@ -48,10 +49,34 @@ backend adapter.
 
 | Required case | Exact selector | Required observations | Status |
 |---|---|---|---|
-| Two payments, one constrained capacity | `tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py::test_concurrent_payments_shared_bottleneck_commit_once_postgres` | One commit and one terminal rejection; debt within capacity; no locks; one payment audit/publication. | **PENDING live PostgreSQL** |
-| Payment versus clearing, same trustline | `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres` | Both durable effects preserved; debt within limit; terminal transactions, audits, no locks, one payment publication. | **PENDING live PostgreSQL** |
-| Concurrent duplicate payment `tx_id` | `tests/integration/test_payment_idempotency_postgres.py::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres` | One transaction/effect/audit/publication; loser receives `E008/409`; terminal state never regresses. | **PENDING live PostgreSQL** |
+| Two payments, one constrained capacity | `tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py::test_concurrent_payments_shared_bottleneck_commit_once_postgres` | One commit and one terminal rejection; debt within capacity; no locks; one payment audit/publication. | **PASSED live PostgreSQL** — run `31256289008`, job `93100006720` |
+| Payment versus clearing, same trustline | `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres` | Both durable effects preserved; debt within limit; terminal transactions, audits, no locks, one payment publication. | **PASSED live PostgreSQL** — run `31256289008`, job `93100006720` |
+| Concurrent duplicate payment `tx_id` | `tests/integration/test_payment_idempotency_postgres.py::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres` | One transaction/effect/audit/publication; loser receives `E008/409`; terminal state never regresses. | **PASSED live PostgreSQL** — run `31256289008`, job `93100006720` |
 | Admin lost update | Conditional only when reproduced. | No qualifying race was confirmed by the owner map. | **NOT TRIGGERED** |
 
 Collect-only and SQLite regression are not substitutes for this live matrix.
-Phase 2 remains open until a disposable PostgreSQL run completes these selectors.
+
+## Exit evidence
+
+The published [workflow run
+31256289008](https://github.com/slawa19/GEOv0/actions/runs/31256289008)
+executed on exact product SHA `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`.
+Its guarded disposable PostgreSQL job passed the three-case Phase 2 matrix (`3
+passed`) and the complete registered PostgreSQL marker tier (`11 passed, 105
+deselected`). The conditional Admin lost-update matrix case remained **NOT
+TRIGGERED** because the owner map found no qualifying lost-update boundary.
+
+The same run's required local-equivalent job passed backend (`735 passed, 2
+skipped, 15 deselected`), Admin (`76 passed` plus build), and Simulator (`637
+passed` plus build) gates. The overall workflow conclusion is still `failure`,
+not “CI green”, because the scheduled Admin and Simulator visual E2E jobs retain
+known failures owned by later frozen phases.
+
+Final internal adversarial review findings were fixed in bounded commits
+`8936031`, `8a1601f`, `c9a34cc`, and `7d0a8a9`; independent re-reviews found no
+remaining P1/P2. Claude Code `2.1.226` reviewed the full
+`0635a651..7d0a8a9` range read-only at high effort with exit `0`, complete JSON,
+`is_error=false`, and resolved `claude-opus-5`. Its five findings were manually
+triaged; none survived as a P1/P2 after call-site, sanitization, nested-transaction,
+and logging-boundary verification. No generalized UoW framework or broad module
+rewrite was introduced, and Phase 3 has not started.

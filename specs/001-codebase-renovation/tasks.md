@@ -18,7 +18,8 @@ plan at exact commit `8f271693e7b763856d86fb3c2f579a56938d6fcb`, then separately
 authorized publication and `workflow_dispatch`. Exit was accepted at main commit
 `31e887fc904ef8060b0c1c9f233957b235ee1aeb` using
 [workflow run 31246985920](https://github.com/slawa19/GEOv0/actions/runs/31246985920).
-Phase 2 has not started; Phases 2–7 remain paused.
+Phase 2 completed on 2026-08-08 at product commit
+`7d0a8a9ca48cec34cc62e0965cdd6d28825370de`; Phases 3–7 remain paused.
 
 ### Phase 1 evidence ledger
 
@@ -47,6 +48,39 @@ Local evidence recorded on 2026-08-07, before publication:
   Its overall conclusion remains `failure` because the broader scheduled/manual
   Admin and Simulator E2E suites retain known failures assigned to Phases 4–6;
   no CI-green claim is made.
+
+### Phase 2 evidence ledger
+
+- Accepted product range:
+  `0635a651f0ae6f970d82d7d71b7a18071069262d..7d0a8a9ca48cec34cc62e0965cdd6d28825370de`.
+  `phase2-owner-map.md` records every frozen public payment, clearing,
+  trustline, destructive Admin/Integrity and Simulator-nested write path with a
+  `FIX` or `KEEP` decision, plus the actor/owner matrix. Conditional REN-012A was
+  not triggered.
+- Confirmed remediations stayed on existing service/route seams: clearing failure
+  taxonomy and partial progress, trustline cache invalidation, atomic Admin and
+  Integrity audit boundaries, payment insert-race/idempotency and retry-safe audit
+  reads, and Simulator clearing failure/cancellation publication. No generalized
+  repository/UoW framework or broad router rewrite was introduced.
+- Local final backend validation exited `0` with `734 passed`, `3 skipped`, `15
+  deselected`; the combined final adversarial-remediation selector passed `53`
+  tests. Targeted OpenAPI, actor/owner, payment, clearing, trustline, Admin,
+  Integrity and Simulator selectors passed during their owning slices.
+- Published [workflow run
+  31256289008](https://github.com/slawa19/GEOv0/actions/runs/31256289008)
+  executed on the exact product HEAD. Its guarded disposable PostgreSQL Phase 2
+  matrix passed `3` tests; the complete marker tier passed `11` tests with `105`
+  deselected. The conditional Admin lost-update case remained `NOT TRIGGERED`.
+  Required local-equivalent gates also passed: backend `735 passed`, `2 skipped`,
+  `15 deselected`; Admin `76 passed` plus build; Simulator `637 passed` plus
+  build. The overall workflow remains `failure`, not “CI green”, because broader
+  Admin and Simulator visual E2E failures are assigned to later frozen phases.
+- Final internal adversarial findings were fixed in `8936031`, `8a1601f`,
+  `c9a34cc`, and `7d0a8a9`, then independently re-reviewed with no remaining
+  P1/P2. Claude Code `2.1.226` reviewed the full accepted product range read-only
+  at high effort; exit `0`, complete JSON, `is_error=false`, resolved
+  `claude-opus-5`. Its five findings were manually triaged and none survived as a
+  P1/P2. Phase 3 has not started.
 
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:
@@ -488,7 +522,16 @@ used.
 - **Owner surface:** `app/api/v1/payments.py`, `app/api/v1/clearing.py`, write paths
   in `app/api/v1/admin.py`, `app/core/payments/`,
   `app/core/clearing/service.py`, `app/core/trustlines/service.py`
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** IN PROGRESS — REN-010A DONE (2026-08-08); REN-010B remains Phase 4.
+- **REN-010A completion evidence (2026-08-08):** the compact owner/effect map and
+  actor matrix are complete at `phase2-owner-map.md`. Only reproduced ownership,
+  cache, audit, idempotency and error-boundary defects were fixed. The final
+  product SHA `7d0a8a9ca48cec34cc62e0965cdd6d28825370de` passed the local backend
+  milestone (`734 passed`, `3 skipped`, `15 deselected`) and published run
+  `31256289008`: the three-case live PostgreSQL matrix passed, as did all `11`
+  registered PostgreSQL tests. The conditional Admin lost-update matrix case and
+  REN-012A adapter were not triggered. Internal and Claude full-range reviews
+  have no sustained P1/P2; parent REN-010 remains open only for Phase 4 REN-010B.
 - **Committed slice evidence (2026-08-07):** the first vertical slice replaces the
   simulator's implicit `commit=False` convention with an explicit staged payment
   result and ordered post-commit/rollback journal. Outer tick owners now resolve
@@ -600,7 +643,8 @@ used.
   `POSTGRES-CONCURRENCY` for
   `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py`,
   `test_concurrent_prepare_routes_bottleneck_postgres.py`, and
-  `test_payment_engine_uow_retry_postgres.py`.
+  `test_payment_idempotency_postgres.py`. The broader registered PostgreSQL
+  marker tier separately retains `test_payment_engine_uow_retry_postgres.py`.
 - **Full gates:** `BACKEND-DEFAULT`; `BACKEND-LINT-DIAGNOSTIC`; `OPENAPI`; scheduled PostgreSQL
   suite; independent adversarial review before merge.
 
@@ -662,7 +706,7 @@ used.
 
 ### REN-012A — Conditional backend adapter
 
-- **Status:** PLANNED / execute only if triggered.
+- **Status:** ACCEPTED-NOT-DOING / NO TRIGGER (2026-08-08).
 - **Exact scope:** when REN-009/010 work repeatedly crosses the same router-owned
   lifecycle/action boundary, extract one route-independent adapter behind the
   existing public runtime facade. Preserve owner/CSRF, paths, payloads and SSE.
