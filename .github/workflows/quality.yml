@@ -139,15 +139,20 @@ jobs:
           python scripts/check_alembic_heads.py
           bash docker/docker-entrypoint.sh true
 
-      - name: Run PostgreSQL marker tier
+      - name: Run Phase 2 PostgreSQL concurrency matrix
         shell: pwsh
-        run: >-
-          ./scripts/verify_local.ps1
-          -Python ((Get-Command python).Source)
-          -TaskSlug ci-postgres
-          -BackendOnly
-          -BackendMarker postgres
-          -BackendSelector tests/integration
+        run: |
+          $selectors = @(
+            'tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py::test_concurrent_payments_shared_bottleneck_commit_once_postgres'
+            'tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres'
+            'tests/integration/test_payment_idempotency_postgres.py::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres'
+          )
+          ./scripts/verify_local.ps1 `
+            -Python ((Get-Command python).Source) `
+            -TaskSlug ci-postgres-phase2 `
+            -BackendOnly `
+            -BackendMarker postgres `
+            -BackendSelector $selectors
 
   container-smoke:
     name: Production-like container and schema smoke (manual)
