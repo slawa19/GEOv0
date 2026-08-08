@@ -31,6 +31,7 @@ import {
   createDebouncedGraphElementSearch,
   extractPidFromText,
   graphElementOptionsForSearch,
+  guardedGraphSearchCacheAction,
   labelPartsToMode,
   money,
   modeToLabelParts,
@@ -450,13 +451,9 @@ function searchKeyboardElements(query: string) {
   guardedKeyboardElementOptions.value = []
 }
 
-watch(graphRenderGuardActive, (guarded) => {
-  if (guarded) guardedKeyboardSearch.search(keyboardElementQuery.value)
-  else guardedKeyboardSearch.invalidate()
-})
-
 watch(
   [
+    graphRenderGuardActive,
     participants,
     filteredTrustlines,
     incidentRatioByPid,
@@ -471,8 +468,10 @@ watch(
     focusPid,
     locale,
   ],
-  () => {
-    if (graphRenderGuardActive.value) guardedKeyboardSearch.invalidate()
+  ([guarded], [wasGuarded]) => {
+    const action = guardedGraphSearchCacheAction(guarded, wasGuarded)
+    if (action === 'search') guardedKeyboardSearch.search(keyboardElementQuery.value)
+    if (action === 'invalidate') guardedKeyboardSearch.invalidate()
   },
 )
 

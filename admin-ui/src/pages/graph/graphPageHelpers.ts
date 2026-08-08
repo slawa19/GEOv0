@@ -128,6 +128,17 @@ export function createDebouncedGraphElementSearch<T extends { key: string; label
   return { search, cancel, invalidate }
 }
 
+export type GuardedGraphSearchCacheAction = 'search' | 'invalidate' | 'none'
+
+export function guardedGraphSearchCacheAction(
+  guarded: boolean,
+  wasGuarded: boolean,
+): GuardedGraphSearchCacheAction {
+  if (guarded && !wasGuarded) return 'search'
+  if (wasGuarded) return 'invalidate'
+  return 'none'
+}
+
 export async function reloadGraphView(options: {
   loadData: () => Promise<void>
   isCurrent: () => boolean

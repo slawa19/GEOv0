@@ -7,6 +7,7 @@ import {
   createDebouncedGraphElementSearch,
   extractPidFromText,
   graphElementOptionsForSearch,
+  guardedGraphSearchCacheAction,
   labelPartsToMode,
   makeMetricsKey,
   modeToLabelParts,
@@ -161,6 +162,15 @@ describe('graphPageHelpers', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it.each([
+    ['coalesced guard activation wins over dependency changes', true, false, 'search'],
+    ['guarded dependency change invalidates', true, true, 'invalidate'],
+    ['guard deactivation invalidates', false, true, 'invalidate'],
+    ['unguarded dependency change is a no-op', false, false, 'none'],
+  ] as const)('%s', (_label, guarded, wasGuarded, action) => {
+    expect(guardedGraphSearchCacheAction(guarded, wasGuarded)).toBe(action)
   })
 
   it.each([
