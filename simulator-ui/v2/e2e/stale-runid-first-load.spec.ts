@@ -4,14 +4,7 @@ function makeSnapshot() {
   return {
     equivalent: 'UAH',
     generated_at: new Date('2026-02-01T00:00:00Z').toISOString(),
-    palette: {
-      node_colors: {},
-      edge_colors: {},
-      node_badges: {},
-      node_shapes: {},
-      edge_widths: {},
-      edge_alphas: {},
-    },
+    palette: { default: { color: '#64748b', label: 'Default' } },
     limits: { max_particles: 120 },
     nodes: [
       {
@@ -80,7 +73,19 @@ test('real mode: stale persisted runId does not block first preview load', async
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ items: [{ scenario_id: 'S1', label: 'Scenario 1' }] }),
+      body: JSON.stringify({
+        api_version: 'simulator-api/1',
+        items: [
+          {
+            api_version: 'simulator-api/1',
+            scenario_id: 'S1',
+            name: 'Scenario 1',
+            participants_count: 1,
+            trustlines_count: 0,
+            equivalents: ['UAH'],
+          },
+        ],
+      }),
     })
   })
 

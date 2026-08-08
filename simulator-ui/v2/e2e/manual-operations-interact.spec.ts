@@ -58,14 +58,7 @@ function makeSnapshot(opts: {
   return {
     equivalent: opts.eq,
     generated_at: new Date('2026-02-01T00:00:00Z').toISOString(),
-    palette: {
-      node_colors: {},
-      edge_colors: {},
-      node_badges: {},
-      node_shapes: {},
-      edge_widths: {},
-      edge_alphas: {},
-    },
+    palette: { default: { color: '#64748b', label: 'Default' } },
     limits: { max_particles: 120 },
     nodes: opts.nodes.map((n) => ({
       id: n.id,
@@ -219,7 +212,17 @@ async function mockRealInteractApp(page: Page, o: {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        items: [{ scenario_id: scenarioId, label: 'Greenfield-village-100' }],
+        api_version: 'simulator-api/1',
+        items: [
+          {
+            api_version: 'simulator-api/1',
+            scenario_id: scenarioId,
+            name: 'Greenfield-village-100',
+            participants_count: o.snapshot.nodes.length,
+            trustlines_count: o.snapshot.links.length,
+            equivalents: [eq],
+          },
+        ],
       }),
     })
   })
@@ -238,8 +241,10 @@ async function mockRealInteractApp(page: Page, o: {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        api_version: 'simulator-api/1',
         run_id: runId,
         scenario_id: scenarioId,
+        mode: 'real',
         state: 'paused',
         sim_time_ms: 0,
         intensity_percent: 0,
@@ -254,8 +259,10 @@ async function mockRealInteractApp(page: Page, o: {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        api_version: 'simulator-api/1',
         run_id: runId,
         scenario_id: scenarioId,
+        mode: 'real',
         state: 'paused',
         sim_time_ms: 0,
         intensity_percent: 0,

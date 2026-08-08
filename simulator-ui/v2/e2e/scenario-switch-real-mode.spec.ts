@@ -13,14 +13,7 @@ function makeSnapshot(opts: {
   return {
     equivalent: opts.eq,
     generated_at: new Date('2026-02-01T00:00:00Z').toISOString(),
-    palette: {
-      node_colors: {},
-      edge_colors: {},
-      node_badges: {},
-      node_shapes: {},
-      edge_widths: {},
-      edge_alphas: {},
-    },
+    palette: { default: { color: '#64748b', label: 'Default' } },
     limits: { max_particles: 120 },
     nodes: opts.nodes.map((n) => ({
       id: n.id,
@@ -125,9 +118,24 @@ test('real mode: switching scenario changes loaded snapshot', async ({ page }) =
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        api_version: 'simulator-api/1',
         items: [
-          { scenario_id: 'S1', label: 'Scenario 1' },
-          { scenario_id: 'S2', label: 'Scenario 2' },
+          {
+            api_version: 'simulator-api/1',
+            scenario_id: 'S1',
+            name: 'Scenario 1',
+            participants_count: 2,
+            trustlines_count: 1,
+            equivalents: ['UAH'],
+          },
+          {
+            api_version: 'simulator-api/1',
+            scenario_id: 'S2',
+            name: 'Scenario 2',
+            participants_count: 2,
+            trustlines_count: 2,
+            equivalents: ['UAH'],
+          },
         ],
       }),
     })
