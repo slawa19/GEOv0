@@ -598,6 +598,76 @@ async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanit
 
 
 @pytest.mark.asyncio
+async def test_execute_clearing_policy_lookup_failure_rolls_back_without_effects(
+    db_session,
+    monkeypatch,
+):
+    eq, _ = await _setup_committed_triangle(db_session, code_prefix="F")
+    service = ClearingService(db_session)
+    cycles = await service.find_cycles(eq.code, max_depth=3)
+    assert cycles
+    eq_code = eq.code
+    eq_id = eq.id
+    original_rollback = db_session.rollback
+    rollback_calls = 0
+
+    async def _fail_policy_lookup(*_args, **_kwargs):
+        raise RuntimeError("private policy database detail")
+
+    async def _track_rollback():
+        nonlocal rollback_calls
+        rollback_calls += 1
+        await original_rollback()
+
+    monkeypatch.setattr(service, "_cycle_respects_auto_clearing", _fail_policy_lookup)
+    monkeypatch.setattr(db_session, "rollback", _track_rollback)
+    stale_graph_entry = (0.0, {}, {}, {}, {}, {})
+    stale_topology_entry = {"sentinel": {"neighbor"}}
+    PaymentRouter._graph_cache[eq_code] = stale_graph_entry
+    PaymentRouter._topology_cache[eq_code] = stale_topology_entry
+
+    try:
+        with pytest.raises(GeoException) as exc_info:
+            await service.execute_clearing_with_amount(cycles[0])
+
+        assert rollback_calls == 1
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.code == "E010"
+        assert "private policy database detail" not in exc_info.value.message
+
+        amounts = (
+            await db_session.execute(
+                select(Debt.amount).where(Debt.equivalent_id == eq_id)
+            )
+        ).scalars().all()
+        assert sorted(Decimal(str(amount)) for amount in amounts) == [
+            Decimal("10"),
+            Decimal("10"),
+            Decimal("10"),
+        ]
+        assert (
+            await db_session.scalar(
+                select(func.count())
+                .select_from(Transaction)
+                .where(Transaction.type == "CLEARING")
+            )
+            == 0
+        )
+        assert (
+            await db_session.scalar(
+                select(func.count())
+                .select_from(IntegrityAuditLog)
+                .where(IntegrityAuditLog.operation_type == "CLEARING")
+            )
+            == 0
+        )
+        assert PaymentRouter._graph_cache[eq_code] is stale_graph_entry
+        assert PaymentRouter._topology_cache[eq_code] is stale_topology_entry
+    finally:
+        PaymentRouter.invalidate_cache(eq_code)
+
+
+@pytest.mark.asyncio
 async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
     eq = _mk_eq("K")
     a, b, c = _mk_participant("A"), _mk_participant("B"), _mk_participant("C")

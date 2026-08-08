@@ -27,6 +27,19 @@ class ClearingService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def _raise_unexpected_execution(self, exc: Exception) -> None:
+        """Rollback and surface one sanitized unexpected clearing failure."""
+        logger.exception("event=clearing.failed")
+        try:
+            CLEARING_EVENTS_TOTAL.labels(event="execute", result="error").inc()
+        except Exception:
+            pass
+        try:
+            await self.session.rollback()
+        except Exception:
+            logger.exception("event=clearing.rollback_failed")
+        raise GeoException() from exc
+
     def _dialect_name(self) -> str | None:
         try:
             return self.session.get_bind().dialect.name
@@ -811,15 +824,18 @@ class ClearingService:
                 )
             return None
 
-        debts = (
-            (
-                await self.session.execute(
-                    select(Debt).where(Debt.id.in_(debt_ids)).with_for_update()
+        try:
+            debts = (
+                (
+                    await self.session.execute(
+                        select(Debt).where(Debt.id.in_(debt_ids)).with_for_update()
+                    )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
 
         if len(debts) != len(debt_ids):
             return None
@@ -837,7 +853,12 @@ class ClearingService:
         )
 
         # Reject cycles that touch any edge reserved by active PrepareLocks.
-        locked_pairs = await self._locked_pairs_for_equivalent(debts[0].equivalent_id)
+        try:
+            locked_pairs = await self._locked_pairs_for_equivalent(
+                debts[0].equivalent_id
+            )
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
         if locked_pairs:
             for d in debts:
                 pair = frozenset({d.debtor_id, d.creditor_id})
@@ -855,7 +876,11 @@ class ClearingService:
                     return None
 
         # FIX-017: enforce auto_clearing policy on every edge in the cycle.
-        if not await self._cycle_respects_auto_clearing(debts):
+        try:
+            respects_auto_clearing = await self._cycle_respects_auto_clearing(debts)
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+        if not respects_auto_clearing:
             logger.info("event=clearing.skip_policy cycle_len=%s", len(cycle))
             try:
                 CLEARING_EVENTS_TOTAL.labels(
@@ -876,26 +901,29 @@ class ClearingService:
             participant_ids.add(d.creditor_id)
 
         # FIX-025: enrich CLEARING transaction payload for traceability.
-        equivalent = (
-            await self.session.execute(
-                select(Equivalent).where(Equivalent.id == debts[0].equivalent_id)
-            )
-        ).scalar_one_or_none()
+        try:
+            equivalent = (
+                await self.session.execute(
+                    select(Equivalent).where(Equivalent.id == debts[0].equivalent_id)
+                )
+            ).scalar_one_or_none()
 
-        pid_by_id: Dict[uuid.UUID, str] = {}
-        if participant_ids:
-            participants = (
-                (
-                    await self.session.execute(
-                        select(Participant).where(
-                            Participant.id.in_(list(participant_ids))
+            pid_by_id: Dict[uuid.UUID, str] = {}
+            if participant_ids:
+                participants = (
+                    (
+                        await self.session.execute(
+                            select(Participant).where(
+                                Participant.id.in_(list(participant_ids))
+                            )
                         )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            pid_by_id = {p.id: p.pid for p in participants}
+                pid_by_id = {p.id: p.pid for p in participants}
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
 
         debts_by_id: Dict[uuid.UUID, Debt] = {d.id: d for d in debts}
         edges_payload: List[Dict[str, str]] = []
@@ -918,11 +946,14 @@ class ClearingService:
                 }
             )
 
-        positions_before: Dict[uuid.UUID, Decimal] = {}
-        for pid in participant_ids:
-            positions_before[pid] = await checker._calculate_net_position(
-                pid, debts[0].equivalent_id
-            )
+        try:
+            positions_before: Dict[uuid.UUID, Decimal] = {}
+            for pid in participant_ids:
+                positions_before[pid] = await checker._calculate_net_position(
+                    pid, debts[0].equivalent_id
+                )
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
 
         checkpoint_before = None
         try:
@@ -1063,16 +1094,7 @@ class ClearingService:
             return clear_amount
 
         except Exception as exc:
-            logger.exception("event=clearing.failed")
-            try:
-                CLEARING_EVENTS_TOTAL.labels(event="execute", result="error").inc()
-            except Exception:
-                pass
-            try:
-                await self.session.rollback()
-            except Exception:
-                logger.exception("event=clearing.rollback_failed")
-            raise GeoException() from exc
+            await self._raise_unexpected_execution(exc)
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
         """
