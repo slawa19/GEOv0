@@ -218,6 +218,39 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-08:** Phase 1 completed at merged main commit
+  `31e887fc904ef8060b0c1c9f233957b235ee1aeb`; Phase 2 was not started. The
+  owner authorized publication, and PRs
+  [#1](https://github.com/slawa19/GEOv0/pull/1),
+  [#2](https://github.com/slawa19/GEOv0/pull/2), and
+  [#3](https://github.com/slawa19/GEOv0/pull/3) preserved the bootstrap, migration
+  caller, and test-harness remediations as separate mergeable slices. The final
+  [workflow_dispatch run](https://github.com/slawa19/GEOv0/actions/runs/31246985920)
+  executed on that exact SHA. Required local-equivalent gates passed with backend
+  `690 passed`, `2 skipped`, `14 deselected`; Admin lint retained `0` errors and
+  its registered warnings, `76` unit tests and build passed; Simulator lint,
+  typecheck, `637` unit tests and build passed. The disposable PostgreSQL tier
+  passed all `10` selected tests (`86` deselected). The production-like image
+  passed empty-schema and `016→head` migration to
+  `017_add_owner_to_simulator_runs`, ORM/index/nullability checks, readiness,
+  repeat startup and three graceful exits with code `0`; short Admin/Simulator
+  Chromium smoke and the three-test Simulator super-smoke also passed. The run's
+  overall conclusion remains `failure`, not “CI green”: scheduled/manual Admin
+  E2E reported `2 failed, 2 passed`, and Simulator E2E reported `6 failed, 13
+  passed`. Their dev-hook, hidden-select, stale-real-backend and fixture-sync
+  findings remain visible and are deferred to the already frozen Phase 4/5/6
+  owners; Phase 1 did not weaken them or change product behavior.
+- **2026-08-08:** Claude Code `2.1.224` reviewed the finished Phase 1 range
+  `8f27169..6b8832b` from a clean credential-free standalone clone using
+  `/code-review high`, `--model opus --effort high`, read-only tools and complete
+  JSON. Exit was `0`, `is_error=false`, and `modelUsage` resolved
+  `claude-opus-5`. Five reproduced workflow/runtime findings were fixed in
+  `115d045`. The single remediation review of `6b8832b..115d045` used the same
+  constraints and resolved model; its three suggestions were manually disposed
+  as an intentional test-debt exclusion, a dynamic-head requirement, and a
+  below-P2 future Playwright-version drift risk. Later published-run portability
+  and test-harness corrections received independent internal adversarial review;
+  no further Claude loop was opened.
 - **2026-08-07:** Phase 1 local gate work was accepted in commits
   `67d02c5c3e354e561392215a9652341d95aa97a9` (local gates) and
   `889f6f945687a733cdb4e64cfa4f69ef0c5b1644` (published-job definitions only).
