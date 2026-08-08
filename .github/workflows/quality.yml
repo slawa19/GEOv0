@@ -137,7 +137,7 @@ jobs:
       - name: Upgrade empty PostgreSQL database to the single migration head
         run: |
           python scripts/check_alembic_heads.py
-          python -m alembic -c migrations/alembic.ini upgrade head
+          bash docker/docker-entrypoint.sh true
 
       - name: Run PostgreSQL marker tier
         shell: pwsh

@@ -179,3 +179,31 @@ def test_postgres_ci_job_selects_marker_tier_without_file_allowlist() -> None:
     assert "-BackendMarker postgres" in command
     assert "-BackendSelector tests/integration" in command
     assert ".py" not in command
+
+
+def test_postgres_ci_job_uses_production_migration_entrypoint() -> None:
+    """Architecture guard: keep the long-revision preflight on the CI path."""
+    workflow = (_ROOT / ".github" / "workflows" / "quality.yml").read_text(
+        encoding="utf-8"
+    )
+    postgres_jobs = _indented_blocks(workflow, key="postgres", indent=2)
+
+    assert len(postgres_jobs) == 1
+    run_blocks = _indented_blocks(postgres_jobs[0], key="run", indent=8)
+    commands = [_executable_command(block) for block in run_blocks]
+    migration_blocks = [
+        block for block in run_blocks if "scripts/check_alembic_heads.py" in block
+    ]
+
+    assert len(migration_blocks) == 1
+    migration_lines = [
+        line.strip()
+        for line in migration_blocks[0].splitlines()[1:]
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert migration_lines == [
+        "python scripts/check_alembic_heads.py",
+        "bash docker/docker-entrypoint.sh true",
+    ]
+    direct_upgrade = re.compile(r"(?:^|\s)(?:python\s+-m\s+)?alembic\b.*\bupgrade\b")
+    assert not any(direct_upgrade.search(command) for command in commands)
