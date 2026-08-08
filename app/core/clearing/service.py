@@ -778,7 +778,10 @@ class ClearingService:
 
         Returns:
         - Decimal amount on success (the min debt amount among the locked cycle edges at execution time)
-        - None on failure / skipped.
+        - None when the candidate is invalid or skipped by lock/policy checks.
+
+        Unexpected execution failures are rolled back and surfaced through the
+        application's sanitized internal-error path.
         """
         if not cycle:
             return None
@@ -927,6 +930,10 @@ class ClearingService:
                 equivalent_id=debts[0].equivalent_id,
             )
         except Exception:
+            logger.warning(
+                "event=clearing.checkpoint_before_failed",
+                exc_info=True,
+            )
             checkpoint_before = None
 
         # 2. Create Transaction (CLEARING)
@@ -981,6 +988,10 @@ class ClearingService:
                     equivalent_id=debts[0].equivalent_id,
                 )
             except Exception:
+                logger.warning(
+                    "event=clearing.checkpoint_after_failed",
+                    exc_info=True,
+                )
                 checkpoint_after = None
 
             try:
@@ -1018,7 +1029,10 @@ class ClearingService:
                 )
             except Exception:
                 # Best-effort; clearing must not fail due to audit logging.
-                pass
+                logger.warning(
+                    "event=clearing.audit_build_failed",
+                    exc_info=True,
+                )
 
             # Verify neutrality AFTER applying changes (must be within the same DB transaction).
             await checker.verify_clearing_neutrality(
@@ -1047,15 +1061,17 @@ class ClearingService:
                 pass
             return clear_amount
 
-        except Exception as e:
-            logger.error("event=clearing.failed error=%s", str(e))
+        except Exception as exc:
+            logger.exception("event=clearing.failed")
             try:
                 CLEARING_EVENTS_TOTAL.labels(event="execute", result="error").inc()
             except Exception:
                 pass
-            await self.session.rollback()
-            # Log failed tx?
-            return None
+            try:
+                await self.session.rollback()
+            except Exception:
+                logger.exception("event=clearing.rollback_failed")
+            raise GeoException() from exc
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
         """

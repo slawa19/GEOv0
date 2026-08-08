@@ -2,14 +2,19 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.clearing.service import ClearingService
+from app.core.invariants import InvariantChecker
+from app.core.payments.router import PaymentRouter
+from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
+from app.utils.exceptions import GeoException
 
 
 def _mk_eq(code_prefix: str) -> Equivalent:
@@ -61,6 +66,37 @@ async def _add_controlling_trustlines(
                 status=status,
             )
         )
+
+
+async def _setup_committed_triangle(
+    db_session,
+    *,
+    code_prefix: str,
+    amount: Decimal = Decimal("10"),
+    auto_clearing: bool = True,
+) -> tuple[Equivalent, list[Debt]]:
+    eq = _mk_eq(code_prefix)
+    a, b, c = _mk_participant("A"), _mk_participant("B"), _mk_participant("C")
+    db_session.add_all([eq, a, b, c])
+    await db_session.flush()
+    debts = [
+        Debt(
+            debtor_id=debtor.id,
+            creditor_id=creditor.id,
+            equivalent_id=eq.id,
+            amount=amount,
+        )
+        for debtor, creditor in [(a, b), (b, c), (c, a)]
+    ]
+    db_session.add_all(debts)
+    await _add_controlling_trustlines(
+        db_session,
+        eq_id=eq.id,
+        edges=[(a, b), (b, c), (c, a)],
+        policy={"auto_clearing": auto_clearing},
+    )
+    await db_session.commit()
+    return eq, debts
 
 
 @pytest.mark.asyncio
@@ -410,3 +446,262 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
         .all()
     )
     assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanitized_error(
+    db_session,
+    monkeypatch,
+):
+    eq = _mk_eq("U")
+    a, b, c = _mk_participant("A"), _mk_participant("B"), _mk_participant("C")
+    db_session.add_all([eq, a, b, c])
+    await db_session.flush()
+
+    debts = [
+        Debt(
+            debtor_id=a.id,
+            creditor_id=b.id,
+            equivalent_id=eq.id,
+            amount=Decimal("10"),
+        ),
+        Debt(
+            debtor_id=b.id,
+            creditor_id=c.id,
+            equivalent_id=eq.id,
+            amount=Decimal("10"),
+        ),
+        Debt(
+            debtor_id=c.id,
+            creditor_id=a.id,
+            equivalent_id=eq.id,
+            amount=Decimal("10"),
+        ),
+    ]
+    db_session.add_all(debts)
+    await _add_controlling_trustlines(
+        db_session,
+        eq_id=eq.id,
+        edges=[(a, b), (b, c), (c, a)],
+        policy={"auto_clearing": True},
+    )
+    await db_session.commit()
+
+    service = ClearingService(db_session)
+    cycles = await service.find_cycles(eq.code, max_depth=3)
+    assert cycles
+    eq_code = eq.code
+    eq_id = eq.id
+
+    async def _unexpected_failure(*_args, **_kwargs):
+        raise RuntimeError("private database detail")
+
+    monkeypatch.setattr(
+        InvariantChecker,
+        "verify_clearing_neutrality",
+        _unexpected_failure,
+    )
+    stale_cache_entry = (0.0, {}, {}, {}, {}, {})
+    PaymentRouter._graph_cache[eq_code] = stale_cache_entry
+
+    try:
+        with pytest.raises(GeoException) as exc_info:
+            await service.execute_clearing_with_amount(cycles[0])
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.code == "E010"
+        assert "private database detail" not in exc_info.value.message
+
+        amounts = (
+            await db_session.execute(
+                select(Debt.amount).where(Debt.equivalent_id == eq_id)
+            )
+        ).scalars().all()
+        assert sorted(Decimal(str(amount)) for amount in amounts) == [
+            Decimal("10"),
+            Decimal("10"),
+            Decimal("10"),
+        ]
+        assert (
+            await db_session.scalar(
+                select(func.count())
+                .select_from(Transaction)
+                .where(Transaction.type == "CLEARING")
+            )
+            == 0
+        )
+        assert (
+            await db_session.scalar(
+                select(func.count())
+                .select_from(IntegrityAuditLog)
+                .where(IntegrityAuditLog.operation_type == "CLEARING")
+            )
+            == 0
+        )
+        assert PaymentRouter._graph_cache[eq_code] is stale_cache_entry
+    finally:
+        PaymentRouter.invalidate_cache(eq_code)
+
+
+@pytest.mark.asyncio
+async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
+    eq = _mk_eq("K")
+    a, b, c = _mk_participant("A"), _mk_participant("B"), _mk_participant("C")
+    db_session.add_all([eq, a, b, c])
+    await db_session.flush()
+
+    debts = [
+        Debt(
+            debtor_id=a.id,
+            creditor_id=b.id,
+            equivalent_id=eq.id,
+            amount=Decimal("4"),
+        ),
+        Debt(
+            debtor_id=b.id,
+            creditor_id=c.id,
+            equivalent_id=eq.id,
+            amount=Decimal("4"),
+        ),
+        Debt(
+            debtor_id=c.id,
+            creditor_id=a.id,
+            equivalent_id=eq.id,
+            amount=Decimal("4"),
+        ),
+    ]
+    db_session.add_all(debts)
+    await _add_controlling_trustlines(
+        db_session,
+        eq_id=eq.id,
+        edges=[(a, b), (b, c), (c, a)],
+        policy={"auto_clearing": False},
+    )
+    await db_session.commit()
+
+    cycle = [
+        {"debt_id": str(debt.id)}
+        for debt in debts
+    ]
+    result = await ClearingService(db_session).execute_clearing_with_amount(cycle)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_execute_clearing_commit_failure_rolls_back_without_visible_effects(
+    db_session,
+    monkeypatch,
+):
+    eq, _ = await _setup_committed_triangle(db_session, code_prefix="C")
+    service = ClearingService(db_session)
+    cycles = await service.find_cycles(eq.code, max_depth=3)
+    assert cycles
+    eq_id = eq.id
+
+    async def _fail_commit():
+        raise RuntimeError("commit failed with private detail")
+
+    monkeypatch.setattr(db_session, "commit", _fail_commit)
+
+    with pytest.raises(GeoException) as exc_info:
+        await service.execute_clearing_with_amount(cycles[0])
+
+    assert exc_info.value.code == "E010"
+    assert "private detail" not in exc_info.value.message
+    amounts = (
+        await db_session.execute(
+            select(Debt.amount).where(Debt.equivalent_id == eq_id)
+        )
+    ).scalars().all()
+    assert sorted(Decimal(str(amount)) for amount in amounts) == [
+        Decimal("10"),
+        Decimal("10"),
+        Decimal("10"),
+    ]
+    assert await db_session.scalar(select(func.count()).select_from(Transaction)) == 0
+    assert (
+        await db_session.scalar(select(func.count()).select_from(IntegrityAuditLog))
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_clearing_rollback_failure_keeps_original_error_sanitized(
+    db_session,
+    monkeypatch,
+    caplog,
+):
+    eq, _ = await _setup_committed_triangle(db_session, code_prefix="R")
+    service = ClearingService(db_session)
+    cycles = await service.find_cycles(eq.code, max_depth=3)
+    assert cycles
+    original_rollback = db_session.rollback
+
+    async def _fail_execution(*_args, **_kwargs):
+        raise RuntimeError("execution private detail")
+
+    async def _fail_rollback():
+        raise RuntimeError("rollback private detail")
+
+    monkeypatch.setattr(
+        InvariantChecker,
+        "verify_clearing_neutrality",
+        _fail_execution,
+    )
+    monkeypatch.setattr(db_session, "rollback", _fail_rollback)
+
+    try:
+        with pytest.raises(GeoException) as exc_info:
+            await service.execute_clearing_with_amount(cycles[0])
+
+        assert exc_info.value.code == "E010"
+        assert "private detail" not in exc_info.value.message
+        assert any(
+            "event=clearing.rollback_failed" in record.getMessage()
+            for record in caplog.records
+        )
+    finally:
+        await original_rollback()
+
+
+@pytest.mark.asyncio
+async def test_execute_clearing_checkpoint_failure_is_explicitly_best_effort(
+    db_session,
+    monkeypatch,
+    caplog,
+):
+    eq, _ = await _setup_committed_triangle(db_session, code_prefix="B")
+    service = ClearingService(db_session)
+    cycles = await service.find_cycles(eq.code, max_depth=3)
+    assert cycles
+    calls = 0
+
+    async def _fail_second_checkpoint(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("checkpoint unavailable")
+        return None
+
+    monkeypatch.setattr(
+        "app.core.clearing.service.compute_integrity_checkpoint_for_equivalent",
+        _fail_second_checkpoint,
+    )
+
+    result = await service.execute_clearing_with_amount(cycles[0])
+
+    assert result == Decimal("10")
+    assert calls == 2
+    assert any(
+        "event=clearing.checkpoint_after_failed" in record.getMessage()
+        for record in caplog.records
+    )
+    assert (
+        await db_session.scalar(
+            select(func.count())
+            .select_from(Transaction)
+            .where(Transaction.state == "COMMITTED")
+        )
+        == 1
+    )
