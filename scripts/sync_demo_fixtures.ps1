@@ -15,8 +15,8 @@ $previousEnvironment = [Environment]::GetEnvironmentVariable('ENVIRONMENT', 'Pro
 
 $pythonCandidates = @(
     (Join-Path $repoRoot '.venv\Scripts\python.exe'),
-    'py -3',
-    'python'
+    'python',
+    'py -3'
 )
 
 function Resolve-Python {
