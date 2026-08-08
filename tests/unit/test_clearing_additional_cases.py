@@ -449,10 +449,14 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_site", ["execute", "execute_raw", "find"])
+@pytest.mark.parametrize(
+    "failure_site",
+    ["execute", "execute_raw", "find", "find_raw"],
+)
 async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
     db_session,
     monkeypatch,
+    caplog,
     failure_site,
 ):
     service = ClearingService(db_session)
@@ -463,14 +467,16 @@ async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
     async def _find_cycles(*_args, **_kwargs):
         nonlocal find_calls
         find_calls += 1
-        if failure_site == "find" and find_calls == 2:
+        if failure_site in {"find", "find_raw"} and find_calls == 2:
+            if failure_site == "find_raw":
+                raise RuntimeError("private raw discovery detail")
             raise GeoException("private discovery detail")
         return [cycle]
 
     async def _execute_clearing(_cycle):
         nonlocal execute_calls
         execute_calls += 1
-        if execute_calls == 1 or failure_site == "find":
+        if execute_calls == 1 or failure_site in {"find", "find_raw"}:
             return True
         if failure_site == "execute_raw":
             raise RuntimeError("private raw lock detail")
@@ -482,13 +488,18 @@ async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
     with pytest.raises(GeoException) as exc_info:
         await service.auto_clear("USD")
 
-    assert execute_calls == (1 if failure_site == "find" else 2)
+    assert execute_calls == (1 if failure_site in {"find", "find_raw"} else 2)
     assert exc_info.value.code == "E010"
     assert exc_info.value.status_code == 500
     assert exc_info.value.details == {"cleared_cycles": 1, "partial": True}
     assert "private database detail" not in str(exc_info.value.to_dict())
     assert "private discovery detail" not in str(exc_info.value.to_dict())
     assert "private raw lock detail" not in str(exc_info.value.to_dict())
+    assert "private raw discovery detail" not in str(exc_info.value.to_dict())
+    if failure_site == "execute_raw":
+        assert "event=clearing.auto_clear_execute_failed" in caplog.text
+    if failure_site == "find_raw":
+        assert "event=clearing.auto_clear_find_failed" in caplog.text
 
 
 @pytest.mark.asyncio
