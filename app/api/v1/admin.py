@@ -969,7 +969,6 @@ async def abort_transaction(
         raise ConflictException("Transaction is already committed")
 
     before = {"state": tx.state, "error": tx.error}
-    abort_metric_result = "already_aborted" if tx.state == "ABORTED" else "success"
 
     engine = PaymentEngine(db)
     try:
@@ -986,7 +985,12 @@ async def abort_transaction(
         # Establish the outer transaction before PaymentEngine opens its retry
         # savepoint; neither the staged abort nor this audit is durable yet.
         await db.flush()
-        await engine.abort(tx_id, reason=body.reason, commit=False)
+        abort_outcome = await engine.abort(
+            tx_id,
+            reason=body.reason,
+            commit=False,
+            return_outcome=True,
+        )
 
         tx2 = (
             await db.execute(
@@ -1005,7 +1009,7 @@ async def abort_transaction(
         raise
 
     try:
-        PAYMENT_EVENTS_TOTAL.labels(event="abort", result=abort_metric_result).inc()
+        PAYMENT_EVENTS_TOTAL.labels(event="abort", result=abort_outcome).inc()
     except Exception:
         pass
 

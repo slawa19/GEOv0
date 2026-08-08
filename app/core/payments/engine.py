@@ -1352,12 +1352,17 @@ class PaymentEngine:
         reason: str = "Aborted",
         *,
         commit: bool = True,
+        return_outcome: bool = False,
         error_code: ErrorCode | str | None = None,
         details: dict[str, Any] | None = None,
         _tx_lock_already_held: bool = False,
     ):
         """
         Abort transaction: Delete locks, set state to ABORTED.
+
+        By default the return value remains the legacy ``True``. Staged owners may
+        request the lock-protected terminal outcome so they can publish effects
+        only after their outer transaction becomes durable.
         """
 
         def _normalize_code(value: ErrorCode | str | None) -> ErrorCode:
@@ -1390,7 +1395,7 @@ class PaymentEngine:
                     ).inc()
                 except Exception:
                     pass
-                return True
+                return "already_committed" if return_outcome else True
 
             initial_locks = (
                 (
@@ -1452,7 +1457,7 @@ class PaymentEngine:
                     ).inc()
                 except Exception:
                     pass
-                return True
+                return "already_committed" if return_outcome else True
 
             existing_error: dict[str, Any] = (
                 tx.error if tx and isinstance(tx.error, dict) else {}
@@ -1498,7 +1503,7 @@ class PaymentEngine:
                         ).inc()
                     except Exception:
                         pass
-                return True
+                return "already_aborted" if return_outcome else True
 
             refreshed_validated_locks: tuple[_ValidatedPrepareLock, ...] = ()
             refreshed_segment_keys: set[int] = set()
@@ -1544,7 +1549,7 @@ class PaymentEngine:
                     PAYMENT_EVENTS_TOTAL.labels(event="abort", result="success").inc()
                 except Exception:
                     pass
-            return True
+            return "success" if return_outcome else True
 
         if not commit:
             return await self._run_uow_with_retry(op="abort_nocommit", fn=_uow, use_savepoint=True)

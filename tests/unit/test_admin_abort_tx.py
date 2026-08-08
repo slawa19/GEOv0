@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, update
 
 from app.config import settings
 from app.db.models.audit_log import AuditLog
@@ -121,6 +121,59 @@ async def test_admin_abort_tx_repeats_aborted_transaction_idempotently(
         'message': 'repeat abort',
         'details': {},
     }
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_uses_lock_protected_already_aborted_metric(
+    client,
+    db_session,
+    monkeypatch,
+):
+    alice = Participant(pid='abort-race-alice', display_name='Alice', public_key='R' * 64, type='person', status='active')
+    db_session.add(alice)
+    await db_session.flush()
+
+    tx = Transaction(
+        tx_id='TX_ABORT_RACE',
+        type='PAYMENT',
+        initiator_id=alice.id,
+        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
+        state='WAITING',
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    pre_lock_states = []
+
+    async def _concurrent_abort_wins(engine, tx_id):
+        pre_lock_states.append(tx.state)
+        await engine.session.execute(
+            update(Transaction)
+            .where(Transaction.tx_id == tx_id)
+            .values(state='ABORTED')
+        )
+        await engine.session.flush()
+
+    monkeypatch.setattr(
+        'app.core.payments.engine.PaymentEngine._acquire_tx_advisory_lock',
+        _concurrent_abort_wins,
+    )
+    success_before = _abort_metric_value('success')
+    already_aborted_before = _abort_metric_value('already_aborted')
+
+    response = await client.post(
+        '/api/v1/admin/transactions/TX_ABORT_RACE/abort',
+        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+        json={'reason': 'race loser observes abort'},
+    )
+
+    assert pre_lock_states == ['WAITING']
+    assert response.status_code == 200
+    assert response.json() == {'tx_id': 'TX_ABORT_RACE', 'status': 'aborted'}
+    assert _abort_metric_value('success') == success_before
+    assert _abort_metric_value('already_aborted') - already_aborted_before == 1
+    await db_session.refresh(tx)
+    assert tx.state == 'ABORTED'
 
 
 @pytest.mark.asyncio
