@@ -36,7 +36,7 @@ TRANSPORT_HEADER_DRIFT_SHA256 = (
 )
 TRANSPORT_HEADER_DRIFT_COUNT = 59
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "82aaef73df69de4979b0a58ed9d0aba0a4d928ff83cdf2d713e3ec70a238a422"
+    "193ce41074115384d5bf7bff6f132a2bf52706e649a0653447e10700ade456e6"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
@@ -308,6 +308,29 @@ def test_openapi_yaml_is_well_formed() -> None:
     assert isinstance(spec.get("info"), dict)
     assert isinstance(spec.get("paths"), dict)
     assert spec["paths"], "OpenAPI spec has no paths"
+
+
+def test_admin_equivalent_mutation_inputs_preserve_canonical_bounds() -> None:
+    canonical = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+
+    canonical_schemas = canonical["components"]["schemas"]
+    equivalent_code = canonical_schemas["EquivalentCode"]
+    equivalent_precision = canonical_schemas["Equivalent"]["properties"]["precision"]
+
+    assert equivalent_code["pattern"] == r"^[A-Z0-9_]{1,16}$"
+    assert equivalent_precision["minimum"] == 0
+    assert equivalent_precision["maximum"] == 18
+
+    generated_schemas = generated["components"]["schemas"]
+    create_properties = generated_schemas["AdminEquivalentCreateRequest"]["properties"]
+    update_properties = generated_schemas["AdminEquivalentUpdateRequest"]["properties"]
+
+    assert create_properties["code"]["pattern"] == equivalent_code["pattern"]
+    for properties in (create_properties, update_properties):
+        precision = _normalize_schema(properties["precision"], generated)
+        assert precision["minimum"] == equivalent_precision["minimum"]
+        assert precision["maximum"] == equivalent_precision["maximum"]
 
 
 def test_payment_create_declares_exact_response_statuses_and_error_envelopes() -> None:

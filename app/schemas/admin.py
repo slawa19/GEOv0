@@ -167,10 +167,10 @@ class AdminMigrationsStatus(BaseModel):
 
 
 class AdminEquivalentCreateRequest(BaseModel):
-    code: str
+    code: str = Field(..., pattern=r"^[A-Z0-9_]{1,16}$")
     symbol: Optional[str] = None
     description: Optional[str] = None
-    precision: int = 2
+    precision: int = Field(default=2, ge=0, le=18)
     metadata: Optional[dict[str, Any]] = None
     is_active: bool = True
     reason: Optional[str] = None
@@ -179,7 +179,7 @@ class AdminEquivalentCreateRequest(BaseModel):
 class AdminEquivalentUpdateRequest(BaseModel):
     symbol: Optional[str] = None
     description: Optional[str] = None
-    precision: Optional[int] = None
+    precision: Optional[int] = Field(default=None, ge=0, le=18)
     metadata: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
     reason: Optional[str] = None
