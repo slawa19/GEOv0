@@ -51,25 +51,25 @@ async def test_prepare_locks_tx_id_fk_exists_and_blocks_orphans_postgres(db_sess
         await db_session.commit()
     await db_session.rollback()
 
-    async with db_session.connection() as conn:
+    conn = await db_session.connection()
 
-        def _inspect_schema(sync_conn):
-            insp = inspect(sync_conn)
+    def _inspect_schema(sync_conn):
+        insp = inspect(sync_conn)
 
-            fks = insp.get_foreign_keys("prepare_locks")
-            assert any(
-                fk.get("referred_table") == "transactions"
-                and fk.get("constrained_columns") == ["tx_id"]
-                and fk.get("referred_columns") == ["tx_id"]
-                for fk in fks
-            )
+        fks = insp.get_foreign_keys("prepare_locks")
+        assert any(
+            fk.get("referred_table") == "transactions"
+            and fk.get("constrained_columns") == ["tx_id"]
+            and fk.get("referred_columns") == ["tx_id"]
+            for fk in fks
+        )
 
-            indexes = insp.get_indexes("prepare_locks")
-            assert any(
-                ix.get("name") == "ix_prepare_locks_participant_expires_at"
-                and ix.get("column_names") == ["participant_id", "expires_at"]
-                for ix in indexes
-            )
+        indexes = insp.get_indexes("prepare_locks")
+        assert any(
+            ix.get("name") == "ix_prepare_locks_participant_expires_at"
+            and ix.get("column_names") == ["participant_id", "expires_at"]
+            for ix in indexes
+        )
 
-        await conn.run_sync(_inspect_schema)
+    await conn.run_sync(_inspect_schema)
 

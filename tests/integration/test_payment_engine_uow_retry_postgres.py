@@ -80,16 +80,16 @@ async def test_payment_engine_commit_retries_whole_uow_on_serialization_failure_
             )
         )
 
-        setup.add(
-            Transaction(
-                id=uuid.uuid4(),
-                tx_id=tx_id,
-                type="PAYMENT",
-                initiator_id=a.id,
-                payload={"from": a.pid, "to": b.pid},
-                state="PREPARED",
-            )
+        transaction = Transaction(
+            id=uuid.uuid4(),
+            tx_id=tx_id,
+            type="PAYMENT",
+            initiator_id=a.id,
+            payload={"from": a.pid, "to": b.pid},
+            state="PREPARED",
         )
+        setup.add(transaction)
+        await setup.flush()
 
         setup.add(
             PrepareLock(
