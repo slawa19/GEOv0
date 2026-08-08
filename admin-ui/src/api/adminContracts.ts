@@ -35,7 +35,7 @@ export const AdminFeatureFlagsSchema = z
 export const AdminParticipantActionResponseSchema = z
   .object({
     pid: z.string(),
-    status: z.enum(['active', 'suspended', 'deleted']),
+    status: z.enum(['active', 'suspended']),
   })
   .strict()
 

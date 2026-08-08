@@ -170,8 +170,8 @@ describe('real Admin mutation and integrity response contracts', () => {
 
   it.each([
     {
-      name: 'participant action status',
-      data: { pid: 'PID_A', status: 'unknown' },
+      name: 'participant action status outside freeze/unfreeze contract',
+      data: { pid: 'PID_A', status: 'deleted' },
       call: () => realApi.freezeParticipant('PID_A', 'reason'),
     },
     {
