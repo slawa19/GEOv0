@@ -154,6 +154,16 @@ jobs:
             -BackendMarker postgres `
             -BackendSelector $selectors
 
+      - name: Run PostgreSQL marker tier
+        shell: pwsh
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-postgres
+          -BackendOnly
+          -BackendMarker postgres
+          -BackendSelector tests/integration
+
   container-smoke:
     name: Production-like container and schema smoke (manual)
     if: github.event_name == 'workflow_dispatch'
