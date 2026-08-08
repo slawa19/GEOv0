@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, ref } from 'vue'
+import { computed, effectScope, ref } from 'vue'
 
 const apiMock = vi.hoisted(() => ({
   participantMetrics: vi.fn(),
@@ -256,5 +256,37 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     expect(graph.selectedBalanceRows.value[0]?.net).toBe('2.00')
     expect(graph.metricsError.value).toBeNull()
     expect(graph.metricsLoading.value).toBe(false)
+  })
+
+  it('does not publish pending metrics after scope disposal', async () => {
+    const pendingMetrics = deferred<ReturnType<typeof metricsEnvelope>>()
+    apiMock.participantMetrics.mockReturnValueOnce(pendingMetrics.promise)
+    const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
+    const scope = effectScope()
+    const graph = scope.run(() => useGraphAnalytics({
+      isRealMode: computed(() => true),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map([['EUR', 2]])),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    }))
+    if (!graph) throw new Error('Expected graph analytics owner')
+
+    const pending = graph.loadSelectedMetrics()
+    scope.stop()
+    pendingMetrics.resolve(metricsEnvelope('9.00'))
+    await pending
+
+    expect(graph.selectedBalanceRows.value[0]?.net).not.toBe('9.00')
+    expect(graph.metricsError.value).toBeNull()
   })
 })

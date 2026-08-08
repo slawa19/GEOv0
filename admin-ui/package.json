@@ -21,7 +21,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "test:e2e:smoke": "playwright test participants --grep \"participants page loads and shows table\" --reporter=list"
+    "test:e2e:smoke": "playwright test participants --grep \"participants page loads and shows table\" --reporter=list",
+    "test:e2e:phase4": "playwright test phase4-operator.spec.ts graph.spec.ts --project=chromium --workers=1",
+    "test:e2e:phase4-real": "playwright test --config playwright.phase4-real.config.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

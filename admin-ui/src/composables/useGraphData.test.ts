@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 
 const apiMock = vi.hoisted(() => ({
   graphSnapshot: vi.fn(),
@@ -407,5 +407,64 @@ describe('useGraphData', () => {
     expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
     expect(g.error.value).toBeNull()
     expect(g.loading.value).toBe(false)
+  })
+
+  it('does not apply a pending full snapshot or cycles after scope disposal', async () => {
+    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
+    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
+    const scope = effectScope()
+    const graph = scope.run(() => useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    }))
+    if (!graph) throw new Error('Expected graph data owner')
+
+    const pending = graph.loadData()
+    scope.stop()
+    snapshot.resolve(snapshotEnvelope('LATE'))
+    cycles.resolve(cyclesEnvelope('LATE'))
+    await pending
+
+    expect(graph.participants.value).toEqual([])
+    expect(graph.clearingCycles.value).toBeNull()
+    expect(graph.error.value).toBeNull()
+  })
+
+  it('does not apply pending focus or participant-cycle results after scope disposal', async () => {
+    const ego = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const focusCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphEgo.mockReturnValueOnce(ego.promise)
+    apiMock.clearingCycles
+      .mockReturnValueOnce(focusCycles.promise)
+      .mockReturnValueOnce(participantCycles.promise)
+    const scope = effectScope()
+    const graph = scope.run(() => useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(true),
+      focusRootPid: ref('PID_A'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>(['active']),
+    }))
+    if (!graph) throw new Error('Expected graph data owner')
+
+    const pendingFocus = graph.refreshForFocusMode()
+    const pendingCycles = graph.refreshClearingCyclesForParticipant('PID_A')
+    scope.stop()
+    ego.resolve(snapshotEnvelope('LATE_FOCUS'))
+    focusCycles.resolve(cyclesEnvelope('LATE_FOCUS'))
+    participantCycles.resolve(cyclesEnvelope('LATE_PARTICIPANT'))
+    await Promise.all([pendingFocus, pendingCycles])
+
+    expect(graph.participants.value).toEqual([])
+    expect(graph.clearingCycles.value).toBeNull()
+    expect(graph.error.value).toBeNull()
   })
 })

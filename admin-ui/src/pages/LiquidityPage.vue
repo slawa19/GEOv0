@@ -79,7 +79,6 @@ watch(
       void load()
       return
     }
-    if (applyingRouteQuery.value) return
     debouncedLoad()
   },
   { immediate: true },
@@ -185,6 +184,17 @@ function goTrustlinesEdge(row: Trustline) {
 
 function goParticipant(pid: string) {
   void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
+}
+
+function goGraph() {
+  void router.push({
+    path: '/graph',
+    query: toLocationQueryRaw({
+      ...carryScenarioQuery(route.query),
+      ...(selectedEq.value ? { equivalent: selectedEq.value } : {}),
+      threshold: threshold.value,
+    }),
+  })
 }
 
 const lastUpdatedLabel = computed(() => {
@@ -446,7 +456,7 @@ function money(v: string): string {
               <div class="hdr__right">
                 <el-button
                   size="small"
-                  @click="router.push({ path: '/graph', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(selectedEq ? { equivalent: selectedEq } : {}) }) })"
+                  @click="goGraph"
                 >
                   {{ t('liquidity.actions.openGraph') }}
                 </el-button>

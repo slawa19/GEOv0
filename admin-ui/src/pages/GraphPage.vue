@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Core } from 'cytoscape'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGraphData } from '../composables/useGraphData'
 import { useGraphAnalytics } from '../composables/useGraphAnalytics'
-import { useGraphVisualization } from '../composables/useGraphVisualization'
+import { graphSelectionAnnouncement, useGraphVisualization } from '../composables/useGraphVisualization'
 import type { DrawerTab, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
 import {
   DEFAULT_FOCUS_DEPTH,
@@ -39,12 +38,12 @@ import {
 import { useGraphConnections } from './graph/useGraphConnections'
 import { useGraphFocusMode } from './graph/useGraphFocusMode'
 import { useGraphPageStorage } from './graph/useGraphPageStorage'
-import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS } from '../constants/timing'
-import { installGraphDevHooks } from './graph/graphDevHooks'
 import { useGraphPageOptions } from './graph/useGraphPageOptions'
 import { useGraphPageWatchers } from './graph/useGraphPageWatchers'
+import GraphKeyboardNavigator from './graph/GraphKeyboardNavigator.vue'
 import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import { useLatestRequest } from '../composables/useLatestRequest'
 import { effectiveApiMode } from '../api/apiMode'
 
 const route = useRoute()
@@ -66,19 +65,8 @@ function updateRouteQuery(patch: Record<string, unknown>) {
 }
 
 const cyRoot = ref<HTMLElement | null>(null)
-let cy: Core | null = null
-const getCy = () => cy
 
 const { statuses, layoutOptions } = useGraphPageOptions()
-
-const setCy = (next: Core | null) => {
-  cy = next
-
-  // Dev-only E2E hook: lets Playwright tap a node deterministically.
-  if (import.meta.env.DEV) {
-    installGraphDevHooks(next, DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
-  }
-}
 
 const drawerTab = ref<DrawerTab>('summary')
 const drawerEq = ref<string>('ALL')
@@ -150,8 +138,6 @@ const MAX_AUTO_RENDER_NODES = 1500
 const MAX_AUTO_RENDER_EDGES = 8000
 
 const renderOverride = ref(false)
-const cyInitialized = ref(false)
-
 const zoom = ref<number>(1)
 
 const businessLabelParts = computed<LabelPart[]>({
@@ -268,8 +254,6 @@ const { restore: restoreStorage } = useGraphPageStorage({
 
 const graphViz = useGraphVisualization({
   cyRoot,
-  getCy,
-  setCy,
 
   threshold,
 
@@ -324,7 +308,7 @@ const {
 
   onConnectionRowClick,
 } = useGraphConnections({
-  getCy,
+  getCy: graphViz.getCy,
   participantByPid,
   selected,
   threshold,
@@ -341,14 +325,12 @@ const {
  * The in-file implementation has been removed to keep `GraphPage.vue` focused.
  */
 
+const reloadRequests = useLatestRequest()
+
 onMounted(async () => {
   restoreStorage()
 
   await reloadAll()
-})
-
-onBeforeUnmount(() => {
-  graphViz.destroyCy()
 })
 
 const rawNodesCount = computed(() => (participants.value || []).length)
@@ -359,10 +341,9 @@ const isTooLargeToAutoRender = computed(() => {
 })
 
 function ensureCyInitialized() {
-  if (cyInitialized.value) return
+  if (graphViz.getCy()) return
   if (isTooLargeToAutoRender.value && !renderOverride.value) return
   graphViz.initCy()
-  cyInitialized.value = true
 }
 
 function renderAnyway() {
@@ -371,7 +352,11 @@ function renderAnyway() {
 }
 
 async function reloadAll() {
+  const request = reloadRequests.begin()
   await loadData()
+  if (!request.isCurrent()) return
+  await nextTick()
+  if (!request.isCurrent()) return
   // If data got smaller after filters/focus changes, auto-init.
   ensureCyInitialized()
   // If graph is already initialized, just rebuild it.
@@ -417,6 +402,32 @@ const stats = computed(() => {
   const bottlenecks = edges.filter((e) => e.data?.bottleneck === 1).length
   return { nodes: nodes.length, edges: edges.length, bottlenecks }
 })
+
+const keyboardElementKey = ref('')
+const keyboardElementOptions = computed(() => graphViz.graphElementOptions())
+let drawerReturnFocus: HTMLElement | null = null
+
+function openKeyboardElement() {
+  const active = document.activeElement
+  drawerReturnFocus = active instanceof HTMLElement ? active : null
+  if (!graphViz.openElementDetails(keyboardElementKey.value)) drawerReturnFocus = null
+}
+
+watch(drawerOpen, async (open, wasOpen) => {
+  if (open || !wasOpen || !drawerReturnFocus) return
+  const target = drawerReturnFocus
+  drawerReturnFocus = null
+  await nextTick()
+  if (target.isConnected) target.focus()
+})
+
+const graphLiveAnnouncement = computed(() => {
+  if (loading.value) return t('graph.a11y.loading')
+  if (error.value) return t('graph.a11y.error', { error: error.value })
+  const selection = graphSelectionAnnouncement(selected.value, drawerOpen.value)
+  if (selection) return selection
+  return t('graph.a11y.ready', { nodes: stats.value.nodes, edges: stats.value.edges })
+})
 </script>
 
 <template>
@@ -459,21 +470,21 @@ const stats = computed(() => {
           </div>
 
           <div class="hdr__stats">
-          <el-tag type="info">
-            {{ seedLabel }}
-          </el-tag>
-          <el-tag type="info">
-            {{ t('graph.stats.nodes') }}: {{ stats.nodes }}
-          </el-tag>
-          <el-tag type="info">
-            {{ t('graph.stats.edges') }}: {{ stats.edges }}
-          </el-tag>
-          <el-tag
-            v-if="stats.bottlenecks"
-            type="danger"
-          >
-            {{ t('graph.stats.bottlenecks') }}: {{ stats.bottlenecks }}
-          </el-tag>
+            <el-tag type="info">
+              {{ seedLabel }}
+            </el-tag>
+            <el-tag type="info">
+              {{ t('graph.stats.nodes') }}: {{ stats.nodes }}
+            </el-tag>
+            <el-tag type="info">
+              {{ t('graph.stats.edges') }}: {{ stats.edges }}
+            </el-tag>
+            <el-tag
+              v-if="stats.bottlenecks"
+              type="danger"
+            >
+              {{ t('graph.stats.bottlenecks') }}: {{ stats.bottlenecks }}
+            </el-tag>
           </div>
         </div>
       </div>
@@ -496,7 +507,9 @@ const stats = computed(() => {
     >
       <template #default>
         <div class="guardRow">
-          <div class="guardHint">{{ t('graph.guard.hint', { maxNodes: MAX_AUTO_RENDER_NODES, maxEdges: MAX_AUTO_RENDER_EDGES }) }}</div>
+          <div class="guardHint">
+            {{ t('graph.guard.hint', { maxNodes: MAX_AUTO_RENDER_NODES, maxEdges: MAX_AUTO_RENDER_EDGES }) }}
+          </div>
           <el-button
             size="small"
             type="primary"
@@ -540,20 +553,50 @@ const stats = computed(() => {
       :on-clear-focus-mode="clearFocusMode"
     />
 
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="6"
+    <GraphKeyboardNavigator
+      v-model="keyboardElementKey"
+      :options="keyboardElementOptions"
+      :busy="loading"
+      @open="openKeyboardElement"
     />
 
     <div
-      v-else
+      id="graph-keyboard-alternative"
+      class="visuallyHidden"
+    >
+      {{ t('graph.a11y.alternativeHint') }}
+    </div>
+    <div
+      class="visuallyHidden"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-testid="graph-live-status"
+    >
+      {{ graphLiveAnnouncement }}
+    </div>
+
+    <div
       class="cy-wrap"
     >
+      <div
+        v-if="loading"
+        class="cy-loading"
+        aria-hidden="true"
+      >
+        <el-skeleton
+          animated
+          :rows="6"
+        />
+      </div>
       <GraphLegend :open="showLegend" />
       <div
         ref="cyRoot"
         class="cy"
+        role="img"
+        :aria-label="t('graph.a11y.canvasLabel')"
+        :aria-busy="loading"
+        aria-describedby="graph-keyboard-alternative"
         data-testid="graph-cy"
       />
     </div>
@@ -574,7 +617,7 @@ const stats = computed(() => {
     :threshold="threshold"
     :precision-by-eq="precisionByEq"
     :atoms-to-decimal="atomsToDecimal"
-    :load-data="loadData"
+    :load-data="reloadAll"
     :money="money"
     :pct="pct"
     :selected-rank="selectedRank"
@@ -671,11 +714,31 @@ const stats = computed(() => {
   min-height: 520px;
 }
 
+.cy-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 16px;
+  background: var(--el-bg-color-overlay);
+}
+
 .cy {
   height: 100%;
   width: 100%;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   background: var(--el-bg-color-overlay);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

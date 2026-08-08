@@ -110,10 +110,11 @@ const visibleRows = computed(() => {
 })
 
 const dirtyKeys = computed(() => {
-  const now = toObject(rows.value)
   const dirty: string[] = []
-  for (const [k, v] of Object.entries(now)) {
-    if (original.value[k] !== v) dirty.push(k)
+  for (const row of rows.value) {
+    const originalValue = original.value[row.key]
+    const comparableOriginal = row.kind === 'json' ? JSON.stringify(originalValue, null, 2) : originalValue
+    if (comparableOriginal !== row.value) dirty.push(row.key)
   }
   return dirty
 })

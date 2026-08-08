@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
@@ -33,6 +33,7 @@ const abortingTxId = ref<string | null>(null)
 
 const drawerOpen = ref(false)
 const selected = ref<Incident | null>(null)
+let pageActive = true
 
 const configStore = useConfigStore()
 const authStore = useAuthStore()
@@ -60,13 +61,16 @@ async function load() {
   try {
     const data = assertSuccess(await api.listIncidents({ page: requestPage, per_page: requestPerPage }))
     if (!request.isCurrent()) return
-    total.value = data.total
+    const visibleItems = lastAbortTxId.value
+      ? data.items.filter((item) => item.tx_id !== lastAbortTxId.value)
+      : data.items
+    total.value = Math.max(0, data.total - (data.items.length - visibleItems.length))
     const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
     if (requestPage > maxPage) {
       page.value = maxPage
       return
     }
-    items.value = data.items
+    items.value = visibleItems
   } catch (e: unknown) {
     if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)
@@ -98,17 +102,22 @@ async function forceAbort(row: Incident) {
     return
   }
 
+  if (!pageActive) return
+  lastAbortTxId.value = null
   abortingTxId.value = row.tx_id
   try {
     assertSuccess(await api.abortTx(row.tx_id, reason))
+    if (!pageActive) return
     ElMessage.success(t('incidents.aborted', { txId: row.tx_id }))
     lastAbortTxId.value = row.tx_id
     drawerOpen.value = false
+    await load()
   } catch (e: unknown) {
+    if (!pageActive) return
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(msg || t('incidents.abortFailed'))
   } finally {
-    abortingTxId.value = null
+    if (pageActive) abortingTxId.value = null
   }
 }
 
@@ -134,6 +143,10 @@ watch(page, () => void load())
 watch(perPage, () => {
   page.value = 1
   void load()
+})
+
+onBeforeUnmount(() => {
+  pageActive = false
 })
 
 const overSlaCount = computed(() => items.value.filter(isOverSla).length)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
@@ -11,11 +11,14 @@ import { debounce } from '../utils/debounce'
 import { t } from '../i18n'
 import type { AuditLogEntry } from '../types/domain'
 import { useLatestRequest } from '../composables/useLatestRequest'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
+import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 
 const route = useRoute()
+const router = useRouter()
 const q = ref('')
 
 const page = ref(1)
@@ -26,6 +29,30 @@ const loadRequests = useLatestRequest()
 
 const drawerOpen = ref(false)
 const selected = ref<AuditLogEntry | null>(null)
+
+const { isApplying: applyingRouteQuery, isActive: isAuditRoute, run: withRouteHydration } =
+  useRouteHydrationGuard(route, '/audit-log')
+
+function applyRouteQueryToFilter(): boolean {
+  const changed = withRouteHydration(() => {
+    const nextQ = readQueryString(route.query.q).trim()
+    if (q.value === nextQ) return false
+    q.value = nextQ
+    return true
+  })
+  return Boolean(changed)
+}
+
+function syncFilterToRouteQuery() {
+  if (!isAuditRoute.value) return
+  const query: Record<string, unknown> = { ...route.query }
+  const nextQ = q.value.trim()
+  if (nextQ) query.q = nextQ
+  else delete query.q
+  if (readQueryString(route.query.q).trim() !== nextQ) {
+    void router.replace({ query: toLocationQueryRaw(query) })
+  }
+}
 
 async function load() {
   const request = loadRequests.begin()
@@ -62,7 +89,10 @@ function openRow(row: AuditLogEntry) {
   drawerOpen.value = true
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  applyRouteQueryToFilter()
+  void load()
+})
 watch(page, () => void load())
 watch(perPage, () => {
   page.value = 1
@@ -78,13 +108,18 @@ onBeforeUnmount(() => debouncedReload.cancel())
 
 watch(
   () => route.query.q,
-  (v) => {
-    if (typeof v === 'string') q.value = v
+  () => {
+    const changed = applyRouteQueryToFilter()
+    if (changed) {
+      page.value = 1
+      debouncedReload()
+    }
   },
-  { immediate: true },
 )
 
 watch(q, () => {
+  if (applyingRouteQuery.value) return
+  syncFilterToRouteQuery()
   debouncedReload()
 })
 </script>

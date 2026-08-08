@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.types import StrictInt
 
 from app.schemas.trustline import TrustLine as TrustLineSchema
@@ -86,6 +86,13 @@ class AdminAuditLogItem(BaseModel):
     request_id: Optional[str] = None
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
+
+    @field_validator("timestamp")
+    @classmethod
+    def attach_utc_to_naive_database_timestamp(cls, value: datetime) -> datetime:
+        if value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
     model_config = ConfigDict(from_attributes=True)
 

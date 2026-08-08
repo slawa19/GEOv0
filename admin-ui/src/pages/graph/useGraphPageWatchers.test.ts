@@ -176,4 +176,65 @@ describe('useGraphPageWatchers', () => {
       scope.stop()
     },
   )
+
+  it('does not rebuild after a pending refresh resolves following scope disposal', async () => {
+    const pending = deferred<boolean>()
+    const refreshSnapshotForEq = vi.fn().mockReturnValue(pending.promise)
+    const rebuildGraph = vi.fn()
+    const eq = ref('EUR')
+    const scope = effectScope()
+
+    scope.run(() => {
+      useGraphPageWatchers({
+        isRealMode: computed(() => true),
+        eq,
+        statusFilter: ref<string[]>(['active']),
+        threshold: ref('0.10'),
+        showIncidents: ref(true),
+        hideIsolates: ref(true),
+        typeFilter: ref<string[]>([]),
+        minDegree: ref(0),
+        focusMode: ref(false),
+        focusDepth: ref<1 | 2>(1),
+        focusRootPid: ref(''),
+        ensureFocusRootPid: vi.fn(),
+        refreshForFocusMode: vi.fn().mockResolvedValue(true),
+        refreshSnapshotForEq,
+        refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        selected: ref<SelectedInfo | null>(null),
+        showLabels: ref(true),
+        labelModeBusiness: ref('name'),
+        labelModePerson: ref('name'),
+        autoLabelsByZoom: ref(true),
+        minZoomLabelsAll: ref(1),
+        minZoomLabelsPerson: ref(1),
+        searchQuery: ref(''),
+        focusPid: ref(''),
+        zoom: ref(1),
+        layoutName: ref('fcose'),
+        layoutSpacing: ref(1),
+        graphViz: {
+          rebuildGraph,
+          runLayout: vi.fn(),
+          clearCycleHighlight: vi.fn(),
+          clearConnectionHighlight: vi.fn(),
+          applySelectedHighlight: vi.fn(),
+          applyStyle: vi.fn(),
+          updateLabelsForZoom: vi.fn(),
+          updateSearchHighlights: vi.fn(),
+          syncZoomFromControl: vi.fn(),
+        },
+      })
+    })
+
+    eq.value = 'USD'
+    await nextTick()
+    expect(refreshSnapshotForEq).toHaveBeenCalledTimes(1)
+    scope.stop()
+    pending.resolve(true)
+    await pending.promise
+    await nextTick()
+
+    expect(rebuildGraph).not.toHaveBeenCalled()
+  })
 })
