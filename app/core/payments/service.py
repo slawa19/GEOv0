@@ -103,6 +103,50 @@ class PaymentService:
         self.engine = PaymentEngine(session)
         self.router = PaymentRouter(session)
 
+    def _resolve_existing_payment(
+        self,
+        existing_tx: Transaction,
+        *,
+        sender_id: uuid.UUID,
+        request_fingerprint: str,
+    ) -> PaymentResult:
+        """Apply one idempotency policy to both lookup and insert-race rows."""
+        if existing_tx.type != "PAYMENT":
+            raise ConflictException("tx_id already used")
+        if existing_tx.initiator_id != sender_id:
+            raise ConflictException("tx_id already used")
+
+        existing_payload = existing_tx.payload or {}
+        existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
+        if existing_fp is not None and existing_fp != request_fingerprint:
+            raise ConflictException("tx_id already used for a different request")
+
+        if existing_tx.state in {
+            "NEW",
+            "ROUTED",
+            "PREPARE_IN_PROGRESS",
+            "PREPARED",
+            "PROPOSED",
+            "WAITING",
+        }:
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(
+                    event="create", result="conflict_in_progress"
+                ).inc()
+            except Exception:
+                pass
+            raise ConflictException("Payment with same tx_id is in progress")
+
+        try:
+            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+            PAYMENT_EVENTS_TOTAL.labels(event="create", result="idempotent_hit").inc()
+        except Exception:
+            pass
+        return self._tx_to_payment_result(existing_tx)
+
     async def create_payment(
         self,
         sender_id: uuid.UUID,
@@ -342,41 +386,11 @@ class PaymentService:
             )
         ).scalar_one_or_none()
         if existing_tx is not None:
-            if existing_tx.type != "PAYMENT":
-                raise ConflictException("tx_id already used")
-            if existing_tx.initiator_id != sender_id:
-                raise ConflictException("tx_id already used")
-
-            existing_payload = existing_tx.payload or {}
-            existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
-            if existing_fp is not None and existing_fp != request_fingerprint:
-                raise ConflictException("tx_id already used for a different request")
-
-            if existing_tx.state in {
-                "NEW",
-                "ROUTED",
-                "PREPARE_IN_PROGRESS",
-                "PREPARED",
-                "PROPOSED",
-                "WAITING",
-            }:
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(
-                        event="create", result="conflict_in_progress"
-                    ).inc()
-                except Exception:
-                    pass
-                raise ConflictException("Payment with same tx_id is in progress")
-
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="idempotent_hit").inc()
-            except Exception:
-                pass
-            return self._tx_to_payment_result(existing_tx)
+            return self._resolve_existing_payment(
+                existing_tx,
+                sender_id=sender_id,
+                request_fingerprint=request_fingerprint,
+            )
 
         # 2. Routing
         tx_uuid = uuid.uuid4()
@@ -528,17 +542,11 @@ class PaymentService:
                         )
                     ).scalar_one_or_none()
                     if existing_tx is not None:
-                        if existing_tx.type != "PAYMENT":
-                            raise ConflictException("tx_id already used")
-                        existing_payload = existing_tx.payload or {}
-                        existing_fp = (existing_payload.get("idempotency") or {}).get(
-                            "fingerprint"
+                        return self._resolve_existing_payment(
+                            existing_tx,
+                            sender_id=sender_id,
+                            request_fingerprint=request_fingerprint,
                         )
-                        if existing_fp is not None and existing_fp != request_fingerprint:
-                            raise ConflictException(
-                                "tx_id already used for a different request"
-                            )
-                        return self._tx_to_payment_result(existing_tx)
                     raise
                 tx_persisted = True
 
