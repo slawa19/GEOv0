@@ -496,9 +496,9 @@ async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
     assert "private discovery detail" not in str(exc_info.value.to_dict())
     assert "private raw lock detail" not in str(exc_info.value.to_dict())
     assert "private raw discovery detail" not in str(exc_info.value.to_dict())
-    if failure_site == "execute_raw":
+    if failure_site in {"execute", "execute_raw"}:
         assert "event=clearing.auto_clear_execute_failed" in caplog.text
-    if failure_site == "find_raw":
+    if failure_site in {"find", "find_raw"}:
         assert "event=clearing.auto_clear_find_failed" in caplog.text
 
 

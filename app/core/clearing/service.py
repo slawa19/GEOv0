@@ -1089,6 +1089,12 @@ class ClearingService:
             except GeoException as exc:
                 if exc.code != ErrorCode.E010.value:
                     raise
+                logger.exception(
+                    "event=clearing.auto_clear_find_failed equivalent=%s "
+                    "cleared_cycles=%s",
+                    equivalent_code,
+                    count,
+                )
                 raise GeoException(
                     details={
                         "cleared_cycles": count,
@@ -1119,6 +1125,12 @@ class ClearingService:
                 except GeoException as exc:
                     if exc.code != ErrorCode.E010.value:
                         raise
+                    logger.exception(
+                        "event=clearing.auto_clear_execute_failed equivalent=%s "
+                        "cleared_cycles=%s",
+                        equivalent_code,
+                        count,
+                    )
                     raise GeoException(
                         details={
                             "cleared_cycles": count,
