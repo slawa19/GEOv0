@@ -6,11 +6,13 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class Equivalent(BaseModel):
-    code: str = Field(pattern=r"^[A-Z0-9_]{1,16}$")
+class StoredEquivalent(BaseModel):
+    """Read projection that keeps pre-contract rows visible to operators."""
+
+    code: str
     symbol: Optional[str] = None
     description: Optional[str] = None
-    precision: int = Field(ge=0, le=18)
+    precision: int
     metadata: Optional[dict[str, Any]] = Field(
         default=None, validation_alias="metadata_", serialization_alias="metadata"
     )
@@ -30,5 +32,12 @@ class Equivalent(BaseModel):
         return value
 
 
+class Equivalent(StoredEquivalent):
+    """Strict response for successful mutations that enforce current bounds."""
+
+    code: str = Field(pattern=r"^[A-Z0-9_]{1,16}$")
+    precision: int = Field(ge=0, le=18)
+
+
 class EquivalentsList(BaseModel):
-    items: list[Equivalent]
+    items: list[StoredEquivalent]

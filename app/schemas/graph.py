@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.equivalents import Equivalent as EquivalentSchema
+from app.schemas.equivalents import StoredEquivalent
 from app.schemas.trustline import TrustLine as TrustLineSchema
 
 
@@ -33,7 +33,7 @@ class AdminGraphDebt(BaseModel):
 class AdminGraphSnapshotResponse(BaseModel):
     participants: list[AdminGraphParticipant]
     trustlines: list[TrustLineSchema]
-    equivalents: list[EquivalentSchema]
+    equivalents: list[StoredEquivalent]
     debts: list[AdminGraphDebt]
 
     # Present for UI compatibility (GraphPage reads these keys).

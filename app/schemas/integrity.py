@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class InvariantResult(BaseModel):
@@ -18,6 +18,16 @@ class EquivalentIntegrityStatus(BaseModel):
     checksum: str = ""
     last_verified: Optional[datetime] = None
     invariants: Dict[str, InvariantResult] = Field(default_factory=dict)
+
+    @field_validator("last_verified")
+    @classmethod
+    def attach_utc_to_naive_database_timestamp(
+        cls,
+        value: Optional[datetime],
+    ) -> Optional[datetime]:
+        if value is not None and value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class IntegrityStatusResponse(BaseModel):

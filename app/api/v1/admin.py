@@ -49,7 +49,7 @@ from app.schemas.admin import (
     AdminWhoAmIResponse,
 )
 from app.schemas.equivalents import Equivalent as EquivalentSchema
-from app.schemas.equivalents import EquivalentsList
+from app.schemas.equivalents import EquivalentsList, StoredEquivalent
 from app.schemas.graph import (
     AdminClearingCycleEdge,
     AdminClearingCyclesForEquivalent,
@@ -1032,7 +1032,7 @@ async def admin_list_equivalents(
     if not include_inactive:
         stmt = stmt.where(EquivalentModel.is_active.is_(True))
     items = (await db.execute(stmt.order_by(EquivalentModel.code.asc()))).scalars().all()
-    return EquivalentsList(items=[EquivalentSchema.model_validate(x) for x in items])
+    return EquivalentsList(items=[StoredEquivalent.model_validate(x) for x in items])
 
 
 @router.post("/equivalents", response_model=EquivalentSchema)
@@ -1325,7 +1325,7 @@ async def admin_graph_snapshot(
     eq_models = (
         await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
     ).scalars().all()
-    equivalents = [EquivalentSchema.model_validate(e) for e in eq_models]
+    equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
 
     def _eq_precision(code: str) -> int:
         c = str(code or "").strip().upper()
@@ -1700,7 +1700,7 @@ async def admin_graph_ego(
     eq_models = (
         await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
     ).scalars().all()
-    equivalents = [EquivalentSchema.model_validate(e) for e in eq_models]
+    equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
 
     def _eq_precision_ego(code: str) -> int:
         c = str(code or "").strip().upper()

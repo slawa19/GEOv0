@@ -2758,6 +2758,34 @@ components:
           type: string
           format: date-time
 
+    StoredEquivalent:
+      description: Read projection that keeps pre-contract rows visible to operators.
+      type: object
+      required: [code, precision, is_active, created_at, updated_at]
+      properties:
+        code:
+          type: string
+        symbol:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        precision:
+          type: integer
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     EquivalentsList:
       type: object
       required: [items]
@@ -2765,7 +2793,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/Equivalent'
+            $ref: '#/components/schemas/StoredEquivalent'
 
     EquivalentCode:
       type: string

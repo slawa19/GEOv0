@@ -40,7 +40,7 @@ REQUEST_SCHEMA_DRIFT_SHA256 = (
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "5b119776a364e5c78c65bb122cc35afdaade6beaf7bea2212f9e413310d45840"
+    "a3645ea4ab2e8502738119175566c4b591b516b33e4a2b0e7dac155466af6e44"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
 ERROR_RESPONSE_DRIFT_SHA256 = (
@@ -337,6 +337,37 @@ def test_admin_equivalent_mutation_inputs_preserve_canonical_bounds() -> None:
         precision = _normalize_schema(properties["precision"], generated)
         assert precision["minimum"] == equivalent_precision["minimum"]
         assert precision["maximum"] == equivalent_precision["maximum"]
+
+
+def test_equivalent_reads_preserve_legacy_visibility_without_weakening_mutations() -> None:
+    canonical = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+    canonical_schemas = canonical["components"]["schemas"]
+    generated_schemas = generated["components"]["schemas"]
+
+    list_item_ref = {"$ref": "#/components/schemas/StoredEquivalent"}
+    assert canonical_schemas["EquivalentsList"]["properties"]["items"]["items"] == (
+        list_item_ref
+    )
+    assert generated_schemas["EquivalentsList"]["properties"]["items"]["items"] == (
+        list_item_ref
+    )
+
+    strict = canonical_schemas["Equivalent"]
+    stored = canonical_schemas["StoredEquivalent"]
+    assert set(stored["properties"]) == set(strict["properties"])
+    assert set(stored["required"]) == set(strict["required"])
+    assert stored["properties"]["code"] == {"type": "string"}
+    assert stored["properties"]["precision"] == {"type": "integer"}
+
+    generated_stored = generated_schemas["StoredEquivalent"]
+    assert set(generated_stored["properties"]) == set(strict["properties"])
+    assert set(generated_stored["required"]) == set(strict["required"])
+    assert generated_stored["properties"]["code"]["type"] == "string"
+    assert "pattern" not in generated_stored["properties"]["code"]
+    assert generated_stored["properties"]["precision"]["type"] == "integer"
+    assert "minimum" not in generated_stored["properties"]["precision"]
+    assert "maximum" not in generated_stored["properties"]["precision"]
 
 
 def _assert_exact_object_schema(

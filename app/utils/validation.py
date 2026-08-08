@@ -14,6 +14,17 @@ def validate_equivalent_code(code: str) -> None:
         raise BadRequestException("Invalid equivalent code")
 
 
+def validate_equivalent_precision(precision: int) -> int:
+    if (
+        not isinstance(precision, int)
+        or isinstance(precision, bool)
+        or precision < 0
+        or precision > 18
+    ):
+        raise BadRequestException("Invalid equivalent precision")
+    return precision
+
+
 def validate_equivalent_metadata(metadata: Any) -> dict | None:
     """Validate and normalize Equivalent.metadata.
 

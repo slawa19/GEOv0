@@ -1,9 +1,12 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.db.models.equivalent import Equivalent
 from app.core.integrity import compute_and_store_integrity_checkpoints
+from app.db.models.equivalent import Equivalent
+from app.schemas.integrity import EquivalentIntegrityStatus
 from tests.integration.test_scenarios import register_and_login
 
 
@@ -66,3 +69,45 @@ async def test_integrity_checksum_returns_404_until_checkpoint_exists(client: As
     assert checks["zero_sum"]["passed"] is True
     assert checks["trust_limits"]["passed"] is True
     assert checks["debt_symmetry"]["passed"] is True
+
+
+def _assert_datetime_has_offset(value: str) -> None:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    assert parsed.utcoffset() is not None
+
+
+def test_equivalent_integrity_status_preserves_aware_timestamp_offset() -> None:
+    source = datetime(2026, 8, 8, 12, 0, tzinfo=timezone(timedelta(hours=3)))
+
+    parsed = EquivalentIntegrityStatus(
+        status="healthy",
+        last_verified=source,
+    ).last_verified
+
+    assert parsed == source
+    assert parsed is not None
+    assert parsed.utcoffset() == timedelta(hours=3)
+
+
+@pytest.mark.asyncio
+async def test_integrity_status_and_verify_serialize_sqlite_checkpoint_as_utc(
+    client: AsyncClient,
+    db_session,
+):
+    await _seed_equivalent(db_session, "TZCHK")
+    user = await register_and_login(client, "IntegrityTimezoneUser")
+    await compute_and_store_integrity_checkpoints(db_session)
+
+    status = await client.get("/api/v1/integrity/status", headers=user["headers"])
+    assert status.status_code == 200, status.text
+    status_last_verified = status.json()["equivalents"]["TZCHK"]["last_verified"]
+    _assert_datetime_has_offset(status_last_verified)
+
+    verify = await client.post(
+        "/api/v1/integrity/verify",
+        json={"equivalent": "TZCHK"},
+        headers=user["headers"],
+    )
+    assert verify.status_code == 200, verify.text
+    verify_last_verified = verify.json()["equivalents"]["TZCHK"]["last_verified"]
+    _assert_datetime_has_offset(verify_last_verified)
