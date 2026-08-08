@@ -218,6 +218,45 @@ async def _emit_interact_clearing_done_best_effort(
         )
 
 
+def _emit_interact_clearing_done_without_patches_best_effort(
+    *,
+    run_id: str,
+    run,
+    equivalent_code: str,
+    executed: list[SimulatorActionClearingCycle],
+    cleared_count: int,
+    total: Decimal,
+) -> None:
+    """Publish durable clearing progress without entering another await."""
+    if cleared_count <= 0:
+        return
+
+    try:
+        emitter = SseEventEmitter(
+            sse=runtime._sse,  # type: ignore[attr-defined]
+            utc_now=_utc_now,
+            logger=logger,
+        )
+        emitter.emit_clearing_done(
+            run_id=run_id,
+            run=run,
+            equivalent=equivalent_code,
+            plan_id=f"plan_interact_{secrets.token_hex(6)}",
+            cleared_cycles=int(cleared_count),
+            cleared_amount=_fmt_decimal_for_api(total),
+            cycle_edges=_build_clearing_done_cycle_edges_payload(executed),
+            node_patch=None,
+            edge_patch=None,
+        )
+    except Exception:
+        logger.warning(
+            "Best-effort cancellation SSE emission failed: "
+            "interact.clearing_real run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+
 async def _compute_viz_patches_best_effort(
     *,
     session,
@@ -1584,12 +1623,11 @@ async def action_clearing_real(
             )
         except asyncio.CancelledError:
             # Cancellation may arrive while patches are being computed, before
-            # the synchronous broadcast. Retry once so already-durable progress
-            # is published, then preserve cancellation for the caller.
-            await _emit_interact_clearing_done_best_effort(
+            # the synchronous broadcast. Publish already-durable progress
+            # without entering another await, then preserve cancellation.
+            _emit_interact_clearing_done_without_patches_best_effort(
                 run_id=run_id,
                 run=run,
-                db=db,
                 equivalent_code=eq.code,
                 executed=executed,
                 cleared_count=cleared_count,
@@ -1639,7 +1677,14 @@ async def action_clearing_real(
                 break
     except asyncio.CancelledError:
         if cleared_count > 0:
-            await _emit_known_progress()
+            _emit_interact_clearing_done_without_patches_best_effort(
+                run_id=run_id,
+                run=run,
+                equivalent_code=eq.code,
+                executed=executed,
+                cleared_count=cleared_count,
+                total=total,
+            )
         raise
     except Exception as exc:
         logger.exception(

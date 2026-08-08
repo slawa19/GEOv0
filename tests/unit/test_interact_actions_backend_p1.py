@@ -1265,6 +1265,13 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
     assert emitted[0]["cleared_cycles"] == 1
     assert emitted[0]["cleared_amount"] == "2.5"
     assert "raw clearing failure secret" not in str(emitted[0])
+    if failure_kind.startswith("cancelled"):
+        assert emitted[0]["node_patch"] is None
+        assert emitted[0]["edge_patch"] is None
+    if failure_kind == "cancelled_execute":
+        assert patch_calls == 0
+    else:
+        assert patch_calls == 1
 
 
 @pytest.mark.asyncio
