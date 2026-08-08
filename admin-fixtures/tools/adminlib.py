@@ -47,8 +47,8 @@ def generate_migrations(*, base_ts: datetime) -> dict[str, Any]:
 def generate_feature_flags() -> dict[str, Any]:
     return {
         "multipath_enabled": True,
+        "full_multipath_enabled": False,
         "clearing_enabled": True,
-        "audit_log_enabled": True,
     }
 
 

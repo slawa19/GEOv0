@@ -1,4 +1,12 @@
 import { ApiException, type ApiEnvelope } from './envelope'
+import {
+  AdminConfigPatchResponseSchema,
+  AdminConfigSchema,
+  AdminFeatureFlagsSchema,
+  decodeAdminResponse,
+  type AdminConfigPatchResponse,
+  type AdminFeatureFlags,
+} from './adminContracts'
 import { TOAST_DEDUPE_MS } from '../constants/timing'
 import { absDecimalString, addDecimalStrings, compareDecimalStrings, isRatioBelowThreshold } from '../utils/decimal'
 import { t } from '../i18n'
@@ -163,7 +171,7 @@ function paginate<T>(items: T[], page: number, perPage: number): Paginated<T> {
 }
 
 let mockConfig: Record<string, unknown> | null = null
-let mockFlags: Record<string, unknown> | null = null
+let mockFlags: AdminFeatureFlags | null = null
 let mockParticipants: Participant[] | null = null
 let mockEquivalents: Equivalent[] | null = null
 let mockAuditLog: AuditLogEntry[] | null = null
@@ -342,7 +350,13 @@ export const mockApi = {
 
   async getConfig(): Promise<ApiEnvelope<Record<string, unknown>>> {
     return withScenario('/api/v1/admin/config', async () => {
-      const cfg = mockConfig ?? (mockConfig = await loadJson<Record<string, unknown>>('datasets/config.json'))
+      const cfg =
+        mockConfig ??
+        (mockConfig = decodeAdminResponse(
+          AdminConfigSchema,
+          await loadJson<unknown>('datasets/config.json'),
+          'mock GET /api/v1/admin/config',
+        ))
       return { success: true, data: cfg }
     })
   },
@@ -671,28 +685,65 @@ export const mockApi = {
     })
   },
 
-  async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
+  async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminConfigPatchResponse>> {
     return withScenario('/api/v1/admin/config', async () => {
-      if (!mockConfig) mockConfig = await loadJson('datasets/config.json')
+      if (!mockConfig) {
+        mockConfig = decodeAdminResponse(
+          AdminConfigSchema,
+          await loadJson<unknown>('datasets/config.json'),
+          'mock GET /api/v1/admin/config',
+        )
+      }
       const updated = Object.keys(patch)
-      mockConfig = { ...mockConfig, ...patch }
-      return { success: true, data: { updated } }
+      mockConfig = decodeAdminResponse(
+        AdminConfigSchema,
+        { ...mockConfig, ...patch },
+        'mock PATCH /api/v1/admin/config',
+      )
+      return {
+        success: true,
+        data: decodeAdminResponse(
+          AdminConfigPatchResponseSchema,
+          { updated },
+          'mock PATCH /api/v1/admin/config',
+        ),
+      }
     })
   },
 
-  async getFeatureFlags(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  async getFeatureFlags(): Promise<ApiEnvelope<AdminFeatureFlags>> {
     return withScenario('/api/v1/admin/feature-flags', async () => {
-      const flags = mockFlags ?? (mockFlags = await loadJson<Record<string, unknown>>('datasets/feature-flags.json'))
+      const flags =
+        mockFlags ??
+        (mockFlags = decodeAdminResponse(
+          AdminFeatureFlagsSchema,
+          await loadJson<unknown>('datasets/feature-flags.json'),
+          'mock GET /api/v1/admin/feature-flags',
+        ))
       return { success: true, data: flags }
     })
   },
 
-  async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
+  async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminFeatureFlags>> {
     return withScenario('/api/v1/admin/feature-flags', async () => {
-      if (!mockFlags) mockFlags = await loadJson('datasets/feature-flags.json')
-      const updated = Object.keys(patch)
-      mockFlags = { ...mockFlags, ...patch }
-      return { success: true, data: { updated } }
+      if (!mockFlags) {
+        mockFlags = decodeAdminResponse(
+          AdminFeatureFlagsSchema,
+          await loadJson<unknown>('datasets/feature-flags.json'),
+          'mock GET /api/v1/admin/feature-flags',
+        )
+      }
+
+      const next = { ...mockFlags }
+      for (const key of ['multipath_enabled', 'full_multipath_enabled', 'clearing_enabled'] as const) {
+        if (typeof patch[key] === 'boolean') next[key] = patch[key]
+      }
+      mockFlags = decodeAdminResponse(
+        AdminFeatureFlagsSchema,
+        next,
+        'mock PATCH /api/v1/admin/feature-flags',
+      )
+      return { success: true, data: mockFlags }
     })
   },
 

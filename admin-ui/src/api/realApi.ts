@@ -1,6 +1,15 @@
 import { assertSuccess, type ApiEnvelope, ApiException } from './envelope'
 import { toastApiError } from './errorToast'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
+import {
+  AdminConfigPatchResponseSchema,
+  AdminConfigResponseSchema,
+  AdminFeatureFlagsSchema,
+  flattenAdminConfig,
+  type AdminConfigPatchResponse,
+  type AdminConfigResponse,
+  type AdminFeatureFlags,
+} from './adminContracts'
 import { z, type ZodTypeAny } from 'zod'
 import type {
   AuditLogEntry,
@@ -562,26 +571,33 @@ export const realApi = {
 
   async getConfig(): Promise<ApiEnvelope<Record<string, unknown>>> {
     // Backend returns { items: [{ key, value, mutable }] }. UI currently expects a flat object.
-    const raw = await requestJson<{ items: Array<{ key: string; value: unknown; mutable?: boolean }> }>(
-      '/api/v1/admin/config',
-      { admin: true },
-    )
-    const data = assertSuccess(raw).items || []
-    const mapped: Record<string, unknown> = {}
-    for (const it of data) mapped[it.key] = it.value
-    return { success: true, data: mapped }
+    const raw = await requestJson<AdminConfigResponse>('/api/v1/admin/config', {
+      admin: true,
+      schema: AdminConfigResponseSchema,
+    })
+    return { success: true, data: flattenAdminConfig(assertSuccess(raw)) }
   },
 
-  patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
-    return requestJson('/api/v1/admin/config', { method: 'PATCH', body: { updates: patch }, admin: true })
+  patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminConfigPatchResponse>> {
+    return requestJson('/api/v1/admin/config', {
+      method: 'PATCH',
+      body: { updates: patch },
+      admin: true,
+      schema: AdminConfigPatchResponseSchema,
+    })
   },
 
-  getFeatureFlags(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/admin/feature-flags', { admin: true })
+  getFeatureFlags(): Promise<ApiEnvelope<AdminFeatureFlags>> {
+    return requestJson('/api/v1/admin/feature-flags', { admin: true, schema: AdminFeatureFlagsSchema })
   },
 
-  patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/admin/feature-flags', { method: 'PATCH', body: patch, admin: true })
+  patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminFeatureFlags>> {
+    return requestJson('/api/v1/admin/feature-flags', {
+      method: 'PATCH',
+      body: patch,
+      admin: true,
+      schema: AdminFeatureFlagsSchema,
+    })
   },
 
   integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {
