@@ -1119,6 +1119,13 @@ class ClearingService:
                             "partial": count > 0,
                         }
                     ) from exc
+                except Exception as exc:
+                    raise GeoException(
+                        details={
+                            "cleared_cycles": count,
+                            "partial": count > 0,
+                        }
+                    ) from exc
                 if success:
                     count += 1
                     executed = True
