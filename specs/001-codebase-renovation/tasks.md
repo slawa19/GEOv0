@@ -13,14 +13,16 @@ effect on every reachable path in scope.
 
 ## Execution freeze and authoritative remaining order
 
-**Phase 1 is current.** On 2026-08-07 the repository owner approved the frozen
-plan at exact commit `8f271693e7b763856d86fb3c2f579a56938d6fcb`.
-Implementation is authorized only for the Phase 1 owner surfaces and results
-listed below; later phases remain paused until the Phase 1 exit criteria pass.
-This approval does not authorize a Git push or `workflow_dispatch`; those require
-a separate recorded owner authorization naming the remote, branch and trigger.
+**Phase 1 completed on 2026-08-08.** The repository owner approved the frozen
+plan at exact commit `8f271693e7b763856d86fb3c2f579a56938d6fcb`, then separately
+authorized publication and `workflow_dispatch`. Exit was accepted at main commit
+`31e887fc904ef8060b0c1c9f233957b235ee1aeb` using
+[workflow run 31246985920](https://github.com/slawa19/GEOv0/actions/runs/31246985920).
+Phase 2 has not started; Phases 2–7 remain paused.
 
-### Phase 1 evidence ledger (2026-08-07)
+### Phase 1 evidence ledger
+
+Local evidence recorded on 2026-08-07, before publication:
 
 - Accepted commits:
   `67d02c5c3e354e561392215a9652341d95aa97a9` owns the local gates;
@@ -38,9 +40,13 @@ a separate recorded owner authorization naming the remote, branch and trigger.
 - npm audit remains a diagnostic: the `2` critical and `4` high findings are in
   pre-existing direct dev/test packages, and none was introduced by the three new
   lint dependencies. `npm audit fix` is outside the frozen slice and was not run.
-- **Phase 1 remains OPEN.** Docker, disposable PostgreSQL, actual Chromium and a
-  published `workflow_dispatch` URL/log remain unverified. Push and dispatch are
-  still unauthorized; no CI-green claim is made.
+- At that point Docker, disposable PostgreSQL, actual Chromium and a published
+  workflow run were still unverified. The accepted 2026-08-08 run closed those
+  Phase 1 gaps: required local-equivalent, production-like container/schema,
+  disposable PostgreSQL, short Chromium and Simulator super-smoke jobs passed.
+  Its overall conclusion remains `failure` because the broader scheduled/manual
+  Admin and Simulator E2E suites retain known failures assigned to Phases 4–6;
+  no CI-green claim is made.
 
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:
@@ -203,17 +209,15 @@ used.
 - **Priority:** P1
 - **Owner surface:** `.github/workflows/`, `scripts/verify_local.ps1`,
   `pyproject.toml`, `pytest.ini`, dependency manifests
-- **Status:** IN PROGRESS (2026-08-07)
-- **Working-tree evidence (2026-08-07):** PowerShell AST and workflow YAML checks
-  passed; fail-closed DB guard selector passed `12` tests; sequential Simulator
-  unit tier passed `637` tests and production build exited `0`. The canonical
-  PostgreSQL tier now uses the registered `postgres` marker through
-  `verify_local.ps1 -BackendMarker postgres` instead of a per-file CI allowlist;
-  collect-only selected `10` tests, and the final local backend tier passed
-  (`687 passed`, `3 skipped`, `14` PostgreSQL/expensive deselected). The marker tier now
-  rejects a missing or SQLite test URL before pytest instead of succeeding through
-  dialect skips. Local collection is not PostgreSQL runtime evidence. Disposable PostgreSQL,
-  Playwright jobs, and a published GitHub Actions run remain unverified.
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** published run `31246985920` on exact main
+  SHA `31e887fc904ef8060b0c1c9f233957b235ee1aeb` passed the required aggregate,
+  short Admin/Simulator Chromium smoke and the registered PostgreSQL marker tier.
+  The aggregate reported backend `690 passed`, `2 skipped`, `14 deselected`,
+  Admin `76 passed`, Simulator `637 passed`, and successful builds. PostgreSQL
+  reported `10 passed`, `86 deselected`. Ruff/Black remain visible non-blocking
+  diagnostics; the completed workflow is not called green because the broader
+  scheduled/manual E2E jobs retain known failures assigned to later phases.
 - **Rationale / value:** A workflow and aggregate runner now exist in the working
   tree, but they are not accepted until clean-checkout jobs and every required
   surface complete. Ruff/Black debt is visible diagnostic evidence, not an
@@ -287,15 +291,15 @@ used.
 - **Owner surface:** `app/config.py`, `docker-compose.yml`,
   `docker-compose.dev.yml`, `Dockerfile`, `docker/Dockerfile`, `.env.example`,
   deployment/config docs
-- **Status:** IN PROGRESS (2026-08-07)
-- **Working-tree evidence (2026-08-07):** startup now requires an explicit
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** startup requires an explicit
   canonical `ENV` (with a conflict-checked legacy alias); non-dev secrets,
   canonical HTTP origins and repeated placeholders fail closed. Base Compose is
   production-like, the dev overlay and active local callers select `ENV=dev`, and
-  both images share a migration-first command-preserving entrypoint. The final
-  targeted selector passed `86` tests with `2` platform skips and independent
-  adversarial review found no remaining P1/P2. Docker/Compose build and runtime
-  smoke were not run because Docker CLI is absent, so the task is not `DONE`.
+  both images share a migration-first command-preserving entrypoint. Published
+  container job `93077122840` built the canonical image with runtime-generated
+  secrets, passed liveness/readiness, repeat startup and graceful exit `0` for
+  empty and incremental schemas. Independent review found no remaining P1/P2.
 - **Rationale / value:** Compose currently leaves `Settings.ENV` at `dev`, uses an
   insecure JWT placeholder, omits admin/simulator secrets, and dev compose sets
   `ENVIRONMENT` although the application reads `ENV`.
@@ -329,13 +333,14 @@ used.
 - **Priority:** P1
 - **Owner surface:** `app/db/models/simulator_storage.py`,
   `migrations/versions/017_add_owner_to_simulator_runs.py`, migration tests
-- **Status:** IN PROGRESS (2026-08-07)
-- **Working-tree evidence (2026-08-07):** ORM metadata now requires `owner_id`
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** ORM metadata requires `owner_id`
   and declares `ix_simulator_runs_owner_state_created`; focused schema/owner tests,
-  the backend default tier, and the single-head check pass. Migration 017 retains
-  an intentional weaker SQLite nullability path, while fresh and 016-upgrade
-  disposable PostgreSQL evidence remains outstanding; therefore parity is not
-  claimed complete.
+  the backend default tier, and the single-head check pass. Published container
+  job `93077122840` proved both an empty PostgreSQL schema and a seeded
+  `016→head` upgrade reach `017_add_owner_to_simulator_runs`, with non-null
+  `owner_id`, nullable `owner_kind`, the expected owner/state/created index and
+  the documented `legacy:unknown` backfill.
 - **Rationale / value:** PostgreSQL schema makes `owner_id` non-null and creates an
   owner/state/time index, while ORM metadata says nullable and omits the index.
   Drift makes autogenerate and schema reasoning unsafe.
@@ -402,14 +407,15 @@ used.
 - **Priority:** P1
 - **Owner surface:** `app/main.py`, `app/core/recovery.py`,
   `app/core/integrity.py`, lifespan/metrics tests
-- **Status:** IN PROGRESS (2026-08-07)
-- **Working-tree evidence (2026-08-07):** recovery and integrity tasks are
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** recovery and integrity tasks are
   supervised; start/iteration/exit failures update bounded state, logs and
   metrics; both health aliases expose degraded readiness while both healthz
   aliases remain liveness. Deterministic tests cover start failure, periodic
   failure/recovery, cancellation, unexpected exit and resource-safe lifespan
-  shutdown; the backend default tier passes. A production-like container
-  startup/shutdown smoke remains outstanding.
+  shutdown; the backend default tier passes. Published container job
+  `93077122840` passed liveness/readiness and graceful stop for initial, repeated
+  and incremental-schema startups.
 - **Rationale / value:** Recovery and integrity task creation can currently fail
   under broad `except Exception: pass`, leaving a healthy-looking process without
   required maintenance work.
@@ -713,11 +719,11 @@ used.
 - **Priority:** P1
 - **Owner surface:** `tests/`, `pytest.ini`, test fixtures, simulator/admin test
   configs, README testing section
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** IN PROGRESS — REN-013A DONE (2026-08-08); REN-013B remains Phase 6.
 - **Owning sub-slices:** REN-013A (Phase 1) owns truthful marker/gate selection and
   two-task-slug resource isolation. REN-013B (Phase 6) owns cleanup of false-signal
   or leaked-state tests touched by the accepted product slices.
-- **Partial evidence (2026-08-07):** destructive DB URLs and pytest option/path
+- **REN-013A completion evidence (2026-08-08):** destructive DB URLs and pytest option/path
   injection are rejected before collection; SQLite DB, basetemp and artifact
   roots are task-local; super-smoke is marked `slow` and scheduled separately.
   PostgreSQL-only integration modules now follow the guarded
@@ -726,9 +732,12 @@ used.
   tests/integration`. Collect-only selected all `10` current PostgreSQL tests;
   the same canonical command now fails before pytest when its URL is missing or
   SQLite, preventing a skip-only false-green PostgreSQL job. The
-  final local backend tier passed (`687 passed`, `3 skipped`, `14`
-  PostgreSQL/expensive deselected); sequential `SIM-UNIT` previously passed `637` tests and Simulator
-  build exited `0`. Parallel-worker, live PostgreSQL and E2E evidence remain.
+  final published backend tier passed (`690 passed`, `2 skipped`, `14`
+  PostgreSQL/expensive deselected); the exact live disposable PostgreSQL selector
+  passed all `10` tests with `86` deselected. Two canonical local task slugs each
+  passed the same `11`-test selector with distinct DB, basetemp and artifact roots.
+  Sequential Simulator unit tests passed `637` tests and its build exited `0`.
+  Broader false-signal/E2E cleanup remains explicitly owned by REN-013B.
 - **Rationale / value:** Tests named unit/integration/e2e currently mix TestClient,
   DB setup, placeholders, and dialect-specific semantics. A truthful taxonomy
   makes gates fast and prevents SQLite success from being reported as concurrency

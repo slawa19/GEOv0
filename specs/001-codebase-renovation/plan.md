@@ -4,8 +4,9 @@
 - **Specification:** `specs/001-codebase-renovation/spec.md`
 - **Executable backlog:** `specs/001-codebase-renovation/tasks.md`
 - **State:** owner-approved at exact commit
-  `8f271693e7b763856d86fb3c2f579a56938d6fcb`; Phase 1 is current and its exit
-  criteria remain open. Later phases remain paused.
+  `8f271693e7b763856d86fb3c2f579a56938d6fcb`; Phase 1 completed on 2026-08-08
+  at main commit `31e887fc904ef8060b0c1c9f233957b235ee1aeb`. Phase 2 has not
+  started; Phases 2–7 remain paused.
 
 ## 1. Objective and project fit
 
@@ -162,9 +163,9 @@ contract decision is unresolved.
 
 ### Phase 1 — Make the existing gates and supported runtime truthful
 
-**Status:** current phase; exit criteria open. Work is limited to the frozen
-Phase 1 scope below. Git push and `workflow_dispatch` remain unauthorized until
-the separate owner authorization required by Phase 0 item 8 is recorded.
+**Status:** completed 2026-08-08. The owner authorized publication and
+`workflow_dispatch`; the frozen Phase 1 scope and exit evidence are recorded
+below. No later phase was started by this closeout.
 
 **Purpose:** establish reliable evidence before further behavioral refactoring.
 
@@ -256,6 +257,14 @@ Stop:
 - One supported production-like path boots and stops.
 - Required runtime outputs are isolated or have an explicit Phase 6 producer fix.
 - No product behavior refactor has relied only on a false-green environment.
+
+Exit was accepted at `31e887fc904ef8060b0c1c9f233957b235ee1aeb` using
+[workflow run 31246985920](https://github.com/slawa19/GEOv0/actions/runs/31246985920).
+Required local-equivalent, disposable PostgreSQL, production-like container,
+short Chromium and Simulator super-smoke jobs passed. The same completed run
+truthfully retained failures in the broader scheduled/manual Admin and Simulator
+E2E suites; those are deferred to their already assigned later phases and are not
+described as green Phase 1 gates.
 
 ### Phase 2 — Close only confirmed backend ownership and integrity gaps
 
