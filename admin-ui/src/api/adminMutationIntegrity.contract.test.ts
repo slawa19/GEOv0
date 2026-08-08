@@ -200,6 +200,11 @@ describe('real Admin mutation and integrity response contracts', () => {
       call: () => realApi.setEquivalentActive('TOK', false, 'reason'),
     },
     {
+      name: 'equivalent create timestamp without timezone',
+      data: equivalentWire({ created_at: '2026-08-08T11:00:00' }),
+      call: () => realApi.createEquivalent({ code: 'TOK', precision: 2, description: 'Token' }),
+    },
+    {
       name: 'equivalent delete extra field',
       data: { deleted: 'TOK', debug: true },
       call: () => realApi.deleteEquivalent('TOK', 'reason'),
@@ -319,6 +324,32 @@ describe('mock Admin mutation and integrity response contracts', () => {
     await expect(mockApi.integrityStatus()).rejects.toMatchObject({
       name: 'ApiException',
       code: 'INVALID_RESPONSE',
+    })
+  })
+
+  it('rejects equivalent mutation inputs instead of normalizing code or precision', async () => {
+    useMockApiFixtures()
+
+    await expect(mockApi.createEquivalent({ code: 'tok', precision: 2, description: 'Token' })).resolves.toMatchObject({
+      success: false,
+      error: { code: 'VALIDATION_ERROR' },
+    })
+    await expect(mockApi.createEquivalent({ code: 'TOK', precision: 19, description: 'Token' })).resolves.toMatchObject({
+      success: false,
+      error: { code: 'VALIDATION_ERROR' },
+    })
+
+    expect(assertSuccess(await mockApi.createEquivalent({ code: 'TOK', precision: 2, description: 'Token' })).created).toMatchObject({
+      code: 'TOK',
+      precision: 2,
+    })
+    await expect(mockApi.updateEquivalent('TOK', { precision: -1 })).resolves.toMatchObject({
+      success: false,
+      error: { code: 'VALIDATION_ERROR' },
+    })
+    await expect(mockApi.updateEquivalent('tok', { description: 'normalized before' })).resolves.toMatchObject({
+      success: false,
+      error: { code: 'NOT_FOUND' },
     })
   })
 })

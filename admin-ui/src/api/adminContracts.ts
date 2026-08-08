@@ -46,14 +46,15 @@ export const AdminAbortTxResponseSchema = z
   })
   .strict()
 
-const EquivalentCodeSchema = z.string().regex(/^[A-Z0-9_]{1,16}$/)
+export const AdminEquivalentCodeSchema = z.string().regex(/^[A-Z0-9_]{1,16}$/)
+export const AdminEquivalentPrecisionSchema = z.number().int().min(0).max(18)
 const DateTimeSchema = z.string().datetime({ offset: true })
 
 export const AdminEquivalentWireResponseSchema = z
   .object({
-    code: EquivalentCodeSchema,
+    code: AdminEquivalentCodeSchema,
     symbol: z.string().nullable().optional(),
-    precision: z.number().int().min(0).max(18),
+    precision: AdminEquivalentPrecisionSchema,
     description: z.string().nullable().optional(),
     metadata: z.record(z.string(), z.unknown()).nullable().optional(),
     is_active: z.boolean(),

@@ -35,6 +35,8 @@ class AdminFeatureFlags(BaseModel):
     full_multipath_enabled: bool
     clearing_enabled: bool
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class AdminFeatureFlagsPatchRequest(BaseModel):
     # Partial PATCH: all fields optional; only provided ones are updated.
@@ -66,6 +68,8 @@ class AdminAbortTxRequest(BaseModel):
 class AdminAbortTxResponse(BaseModel):
     tx_id: str
     status: str = Field(..., pattern="^aborted$")
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class AdminAuditLogItem(BaseModel):
@@ -202,6 +206,10 @@ class AdminEquivalentUsageResponse(BaseModel):
     debts: int
     integrity_checkpoints: int
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class AdminDeleteResponse(BaseModel):
     deleted: str
+
+    model_config = ConfigDict(extra="forbid")

@@ -4,7 +4,9 @@ import {
   AdminConfigPatchResponseSchema,
   AdminConfigSchema,
   AdminEquivalentDeleteResponseSchema,
+  AdminEquivalentCodeSchema,
   AdminEquivalentMutationResponseSchema,
+  AdminEquivalentPrecisionSchema,
   AdminEquivalentUsageResponseSchema,
   AdminFeatureFlagsSchema,
   AdminParticipantActionResponseSchema,
@@ -1134,8 +1136,13 @@ export const mockApi = {
     is_active?: boolean
   }): Promise<ApiEnvelope<{ created: Equivalent }>> {
     return withScenario('/api/v1/admin/equivalents', async () => {
-      const code = (input.code || '').trim().toUpperCase()
-      if (!code) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'code is required' } }
+      const code = input.code
+      if (!AdminEquivalentCodeSchema.safeParse(code).success) {
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid equivalent code' } }
+      }
+      if (!AdminEquivalentPrecisionSchema.safeParse(input.precision).success) {
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+      }
       const all = await getEquivalentsDataset()
       if (all.some((e) => e.code === code)) return { success: false, error: { code: 'CONFLICT', message: 'code already exists' } }
 
@@ -1143,7 +1150,7 @@ export const mockApi = {
         AdminEquivalentMutationResponseSchema,
         toMockEquivalentWire({
           code,
-          precision: Math.max(0, Math.min(18, Math.floor(Number(input.precision ?? 2)))),
+          precision: input.precision,
           description: String(input.description || '').trim() || code,
           is_active: Boolean(input.is_active ?? true),
         }),
@@ -1165,7 +1172,10 @@ export const mockApi = {
 
   async updateEquivalent(code: string, patch: Partial<Pick<Equivalent, 'precision' | 'description'>>): Promise<ApiEnvelope<{ updated: Equivalent }>> {
     return withScenario('/api/v1/admin/equivalents', async () => {
-      const key = (code || '').trim().toUpperCase()
+      if (patch.precision !== undefined && !AdminEquivalentPrecisionSchema.safeParse(patch.precision).success) {
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+      }
+      const key = code
       const all = await getEquivalentsDataset()
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
@@ -1174,10 +1184,7 @@ export const mockApi = {
         AdminEquivalentMutationResponseSchema,
         toMockEquivalentWire({
           ...eq,
-          precision:
-            patch.precision === undefined
-              ? eq.precision
-              : Math.max(0, Math.min(18, Math.floor(Number(patch.precision)))),
+          precision: patch.precision === undefined ? eq.precision : patch.precision,
           description:
             patch.description === undefined ? eq.description : String(patch.description || '').trim() || eq.description,
         }),
@@ -1200,7 +1207,7 @@ export const mockApi = {
   async setEquivalentActive(code: string, isActive: boolean, reason: string): Promise<ApiEnvelope<{ updated: Equivalent }>> {
     return withScenario('/api/v1/admin/equivalents/active', async () => {
       if (!String(reason || '').trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
-      const key = (code || '').trim().toUpperCase()
+      const key = code
       const all = await getEquivalentsDataset()
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }

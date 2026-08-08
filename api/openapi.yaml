@@ -2823,6 +2823,7 @@ components:
           type: boolean
         clearing_enabled:
           type: boolean
+      additionalProperties: false
 
     AdminFeatureFlagsPatchRequest:
       type: object
@@ -2959,6 +2960,8 @@ components:
         precision:
           type: integer
           default: 2
+          minimum: 0
+          maximum: 18
         metadata:
           type: object
           nullable: true
@@ -2982,6 +2985,8 @@ components:
         precision:
           type: integer
           nullable: true
+          minimum: 0
+          maximum: 18
         metadata:
           type: object
           nullable: true

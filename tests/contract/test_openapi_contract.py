@@ -36,13 +36,13 @@ TRANSPORT_HEADER_DRIFT_SHA256 = (
 )
 TRANSPORT_HEADER_DRIFT_COUNT = 59
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "193ce41074115384d5bf7bff6f132a2bf52706e649a0653447e10700ade456e6"
+    "7eee1624c958db4900f2d24bf529bf7e6bab92aff055fd15403eb847dd7e5c25"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "e97d788a675120695e999da1e8b4c9324e12d124e3d3adf851461eb991a1781f"
+    "5b119776a364e5c78c65bb122cc35afdaade6beaf7bea2212f9e413310d45840"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 74
+SUCCESS_SCHEMA_DRIFT_COUNT = 71
 ERROR_RESPONSE_DRIFT_SHA256 = (
     "0d173514d6e6d80197dad8f700ba5388c4e6909e7f40262641dc76bf8c6442bc"
 )
@@ -317,10 +317,16 @@ def test_admin_equivalent_mutation_inputs_preserve_canonical_bounds() -> None:
     canonical_schemas = canonical["components"]["schemas"]
     equivalent_code = canonical_schemas["EquivalentCode"]
     equivalent_precision = canonical_schemas["Equivalent"]["properties"]["precision"]
+    canonical_create = canonical_schemas["AdminEquivalentCreateRequest"]["properties"]
+    canonical_update = canonical_schemas["AdminEquivalentUpdateRequest"]["properties"]
 
     assert equivalent_code["pattern"] == r"^[A-Z0-9_]{1,16}$"
     assert equivalent_precision["minimum"] == 0
     assert equivalent_precision["maximum"] == 18
+    assert canonical_create["code"] == {"$ref": "#/components/schemas/EquivalentCode"}
+    for properties in (canonical_create, canonical_update):
+        assert properties["precision"]["minimum"] == equivalent_precision["minimum"]
+        assert properties["precision"]["maximum"] == equivalent_precision["maximum"]
 
     generated_schemas = generated["components"]["schemas"]
     create_properties = generated_schemas["AdminEquivalentCreateRequest"]["properties"]
@@ -352,6 +358,8 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
     generated_schemas = generated["components"]["schemas"]
 
     operation_refs = {
+        ("get", "/admin/feature-flags"): "AdminFeatureFlags",
+        ("patch", "/admin/feature-flags"): "AdminFeatureFlags",
         ("post", "/admin/participants/{pid}/freeze"): "AdminParticipantStatusResponse",
         ("post", "/admin/participants/{pid}/unfreeze"): "AdminParticipantStatusResponse",
         ("post", "/admin/transactions/{tx_id}/abort"): "AdminAbortTxResponse",
@@ -382,6 +390,10 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
         assert generated_schema == {"$ref": expected_ref}
 
     exact_shapes = {
+        "AdminFeatureFlags": (
+            {"multipath_enabled", "full_multipath_enabled", "clearing_enabled"},
+            {"multipath_enabled", "full_multipath_enabled", "clearing_enabled"},
+        ),
         "AdminParticipantStatusResponse": (
             {"pid", "status"},
             {"pid", "status"},
@@ -416,6 +428,35 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
             required=required,
         )
         assert set(generated_schemas[component]["properties"]) == properties
+
+    generated_exact_components = {
+        "AdminFeatureFlags",
+        "AdminParticipantStatusResponse",
+        "AdminAbortTxResponse",
+        "AdminDeleteResponse",
+        "AdminEquivalentUsageResponse",
+        "IntegrityNetMutualDebtsRepairResponse",
+        "IntegrityCapDebtsRepairResponse",
+    }
+    for component in generated_exact_components:
+        properties, required = exact_shapes[component]
+        _assert_exact_object_schema(
+            generated_schemas[component],
+            properties=properties,
+            required=required,
+        )
+
+    # These response models have defaults, so Pydantic's generated construction
+    # schema is intentionally looser than the serialized response projection.
+    # Pin that distinction explicitly instead of letting requiredness/extras go
+    # unchecked; the canonical response remains exact and both routes pass alerts.
+    for component, required in {
+        "IntegrityStatusResponse": {"status", "last_check", "equivalents"},
+        "IntegrityVerifyResponse": {"status", "checked_at", "equivalents"},
+    }.items():
+        generated_schema = generated_schemas[component]
+        assert set(generated_schema["required"]) == required
+        assert "additionalProperties" not in generated_schema
 
     assert schemas["AdminParticipantStatusResponse"]["properties"]["status"][
         "enum"
@@ -452,6 +493,25 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
     )
     assert schemas["Equivalent"]["properties"]["precision"]["minimum"] == 0
     assert schemas["Equivalent"]["properties"]["precision"]["maximum"] == 18
+    assert generated_schemas["Equivalent"]["properties"]["code"]["pattern"] == (
+        schemas["EquivalentCode"]["pattern"]
+    )
+    assert (
+        generated_schemas["Equivalent"]["properties"]["precision"]["minimum"]
+        == schemas["Equivalent"]["properties"]["precision"]["minimum"]
+    )
+    assert (
+        generated_schemas["Equivalent"]["properties"]["precision"]["maximum"]
+        == schemas["Equivalent"]["properties"]["precision"]["maximum"]
+    )
+    for timestamp_field in ("created_at", "updated_at"):
+        assert schemas["Equivalent"]["properties"][timestamp_field]["format"] == (
+            "date-time"
+        )
+        assert (
+            generated_schemas["Equivalent"]["properties"][timestamp_field]["format"]
+            == "date-time"
+        )
 
     health_values = ["healthy", "warning", "critical"]
     assert schemas["IntegrityStatusResponse"]["properties"]["status"]["enum"] == (
