@@ -1253,8 +1253,8 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
     if response is not None:
         assert response.status_code == 500
         assert response.json() == {
-            "code": "E010",
-            "message": "Internal server error",
+            "code": "CLEARING_FAILED",
+            "message": "Clearing failed",
             "details": expected_details,
         }
         assert "raw clearing failure secret" not in response.text
@@ -1265,6 +1265,63 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
     assert emitted[0]["cleared_cycles"] == 1
     assert emitted[0]["cleared_amount"] == "2.5"
     assert "raw clearing failure secret" not in str(emitted[0])
+
+
+@pytest.mark.asyncio
+async def test_action_clearing_real_initial_failure_uses_flat_sanitized_error(
+    client,
+    db_session,
+    interact_actions_enabled,
+    monkeypatch,
+):
+    await _seed_alice_bob_uah(db_session)
+    cycle = [
+        {
+            "debt_id": str(uuid.uuid4()),
+            "debtor": "alice",
+            "creditor": "bob",
+            "amount": "2.5",
+        }
+    ]
+
+    async def _find_cycles(*_args, **_kwargs):
+        return [cycle]
+
+    async def _execute_clearing(*_args, **_kwargs):
+        raise RuntimeError("raw initial clearing secret")
+
+    async def _unexpected_done(*_args, **_kwargs):
+        raise AssertionError("zero-progress failure must not emit clearing.done")
+
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "find_cycles",
+        _find_cycles,
+    )
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "execute_clearing_with_amount",
+        _execute_clearing,
+    )
+    monkeypatch.setattr(
+        interact_actions_enabled,
+        "_emit_interact_clearing_done_best_effort",
+        _unexpected_done,
+    )
+
+    response = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/clearing-real",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json={"equivalent": "UAH", "max_depth": 6},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "code": "CLEARING_FAILED",
+        "message": "Clearing failed",
+        "details": None,
+    }
+    assert "raw initial clearing secret" not in response.text
 
 
 @pytest.mark.asyncio

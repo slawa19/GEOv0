@@ -77,7 +77,6 @@ from app.schemas.simulator import (
     SimulatorPaymentTargetsItem,
 )
 from app.schemas.common import ErrorEnvelope
-from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import (
     BadRequestException,
     ConflictException,
@@ -1643,32 +1642,21 @@ async def action_clearing_real(
             await _emit_known_progress()
         raise
     except Exception as exc:
+        details = dict(exc.details or {}) if isinstance(exc, GeoException) else {}
         if cleared_count > 0:
-            partial_details = {
-                "partial_cleared_cycles": int(cleared_count),
-                "partial_cleared_amount": _fmt_decimal_for_api(total),
-            }
-            await _emit_known_progress()
-            if isinstance(exc, GeoException):
-                details = {**(exc.details or {}), **partial_details}
-                message = (
-                    GeoException().message
-                    if exc.code == ErrorCode.E010.value
-                    else str(exc.message)
-                )
-                return _action_error(
-                    status_code=int(exc.status_code),
-                    code=str(exc.code),
-                    message=message,
-                    details=details,
-                )
-            return _action_error(
-                status_code=500,
-                code=ErrorCode.E010.value,
-                message=GeoException().message,
-                details=partial_details,
+            details.update(
+                {
+                    "partial_cleared_cycles": int(cleared_count),
+                    "partial_cleared_amount": _fmt_decimal_for_api(total),
+                }
             )
-        raise
+            await _emit_known_progress()
+        return _action_error(
+            status_code=500,
+            code="CLEARING_FAILED",
+            message="Clearing failed",
+            details=details or None,
+        )
 
     await _emit_known_progress()
 
