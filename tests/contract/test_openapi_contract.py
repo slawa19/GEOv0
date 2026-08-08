@@ -44,7 +44,7 @@ SUCCESS_SCHEMA_DRIFT_SHA256 = (
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "85f7bffa9f29806531b71732e8fbe05c9ddbff6c70ccc2be01bf7779bd231441"
+    "d16771d2d600ecb2a9e35ced36e5d3a84412bc5f080f835b26b0f74bde9acff2"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 84
 SECURITY_DRIFT_SHA256 = (
@@ -368,6 +368,19 @@ def test_equivalent_reads_preserve_legacy_visibility_without_weakening_mutations
     assert generated_stored["properties"]["precision"]["type"] == "integer"
     assert "minimum" not in generated_stored["properties"]["precision"]
     assert "maximum" not in generated_stored["properties"]["precision"]
+
+    canonical_patch = canonical["paths"]["/admin/equivalents/{code}"]["patch"]
+    canonical_errors = _normalized_responses(canonical_patch, canonical)
+    error_envelope = _normalize_schema(
+        {"$ref": "#/components/schemas/ErrorEnvelope"}, canonical
+    )
+    assert canonical_errors["409"]["content"]["application/json"] == error_envelope
+    generated_409 = generated["paths"]["/api/v1/admin/equivalents/{code}"][
+        "patch"
+    ]["responses"]["409"]
+    assert generated_409["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorEnvelope"
+    }
 
 
 def _assert_exact_object_schema(

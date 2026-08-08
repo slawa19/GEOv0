@@ -6,7 +6,11 @@ from sqlalchemy import select
 
 from app.core.integrity import compute_and_store_integrity_checkpoints
 from app.db.models.equivalent import Equivalent
-from app.schemas.integrity import EquivalentIntegrityStatus
+from app.schemas.integrity import (
+    EquivalentIntegrityStatus,
+    IntegrityAuditLogItem,
+    IntegrityChecksumResponse,
+)
 from tests.integration.test_scenarios import register_and_login
 
 
@@ -42,6 +46,7 @@ async def test_integrity_status_and_verify_and_audit_log(client: AsyncClient, db
     log_payload = resp.json()
     assert isinstance(log_payload.get("items"), list)
     assert any(item.get("action") == "integrity.verify" for item in log_payload["items"])
+    _assert_datetime_has_offset(log_payload["items"][0]["timestamp"])
 
 
 @pytest.mark.asyncio
@@ -59,6 +64,7 @@ async def test_integrity_checksum_returns_404_until_checkpoint_exists(client: As
     payload = resp.json()
     assert payload["equivalent"] == "USD"
     assert isinstance(payload.get("checksum"), str) and len(payload["checksum"]) == 64
+    _assert_datetime_has_offset(payload["created_at"])
 
     invariants_status = payload.get("invariants_status")
     assert isinstance(invariants_status, dict)
@@ -76,13 +82,40 @@ def _assert_datetime_has_offset(value: str) -> None:
     assert parsed.utcoffset() is not None
 
 
-def test_equivalent_integrity_status_preserves_aware_timestamp_offset() -> None:
+@pytest.mark.parametrize(
+    ("model", "field"),
+    [
+        (
+            EquivalentIntegrityStatus(status="healthy", last_verified=None),
+            "last_verified",
+        ),
+        (
+            IntegrityChecksumResponse(
+                equivalent="USD",
+                checksum="checksum",
+                created_at=datetime(2026, 8, 8),
+                invariants_status={},
+            ),
+            "created_at",
+        ),
+        (
+            IntegrityAuditLogItem(
+                timestamp=datetime(2026, 8, 8),
+                action="integrity.verify",
+            ),
+            "timestamp",
+        ),
+    ],
+)
+def test_integrity_wire_models_preserve_aware_timestamp_offset(model, field) -> None:
     source = datetime(2026, 8, 8, 12, 0, tzinfo=timezone(timedelta(hours=3)))
 
-    parsed = EquivalentIntegrityStatus(
-        status="healthy",
-        last_verified=source,
-    ).last_verified
+    parsed = model.__class__(
+        **{
+            **model.model_dump(),
+            field: source,
+        }
+    ).__getattribute__(field)
 
     assert parsed == source
     assert parsed is not None

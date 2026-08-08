@@ -6,6 +6,12 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def _attach_utc_to_naive_timestamp(value: datetime) -> datetime:
+    if value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 class InvariantResult(BaseModel):
     passed: bool
     value: Optional[str] = None
@@ -25,9 +31,7 @@ class EquivalentIntegrityStatus(BaseModel):
         cls,
         value: Optional[datetime],
     ) -> Optional[datetime]:
-        if value is not None and value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
+        return _attach_utc_to_naive_timestamp(value) if value is not None else None
 
 
 class IntegrityStatusResponse(BaseModel):
@@ -42,6 +46,11 @@ class IntegrityChecksumResponse(BaseModel):
     checksum: str
     created_at: datetime
     invariants_status: Dict[str, Any]
+
+    @field_validator("created_at")
+    @classmethod
+    def attach_utc_to_naive_database_timestamp(cls, value: datetime) -> datetime:
+        return _attach_utc_to_naive_timestamp(value)
 
 
 class IntegrityVerifyRequest(BaseModel):
@@ -82,6 +91,11 @@ class IntegrityAuditLogItem(BaseModel):
     object_type: Optional[str] = None
     object_id: Optional[str] = None
     after_state: Optional[Dict[str, Any]] = None
+
+    @field_validator("timestamp")
+    @classmethod
+    def attach_utc_to_naive_database_timestamp(cls, value: datetime) -> datetime:
+        return _attach_utc_to_naive_timestamp(value)
 
 
 class IntegrityAuditLogResponse(BaseModel):

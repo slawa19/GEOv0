@@ -5,6 +5,7 @@ from sqlalchemy import insert, select
 
 from app.config import settings
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+from app.db.models.audit_log import AuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import BadRequestException
@@ -146,3 +147,96 @@ async def test_admin_can_repair_legacy_precision_when_code_is_canonical(
         )
     ).scalar_one()
     assert stored.precision == 18
+
+
+@pytest.mark.asyncio
+async def test_admin_patch_rejects_invalid_legacy_code_before_mutation(
+    client,
+    db_session,
+) -> None:
+    await db_session.execute(
+        insert(Equivalent.__table__).values(
+            code="MY-TOKEN",
+            description="before",
+            precision=2,
+            metadata={},
+            is_active=True,
+        )
+    )
+    await db_session.commit()
+
+    response = await client.patch(
+        "/api/v1/admin/equivalents/MY-TOKEN",
+        headers=_admin_headers(),
+        json={"description": "after"},
+    )
+
+    assert response.status_code == 409, response.text
+    error = response.json()["error"]
+    assert error["code"] == "E008"
+    assert error["details"] == {
+        "code": "MY-TOKEN",
+        "reason": "noncanonical_code",
+        "repair": "manual_cleanup",
+    }
+    stored = (
+        await db_session.execute(
+            select(Equivalent).where(Equivalent.code == "MY-TOKEN")
+        )
+    ).scalar_one()
+    assert stored.description == "before"
+    assert (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "admin.equivalents.patch",
+                AuditLog.object_id == "MY-TOKEN",
+            )
+        )
+    ).scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_admin_patch_rejects_nonrepairing_legacy_precision_before_mutation(
+    client,
+    db_session,
+) -> None:
+    await db_session.execute(
+        insert(Equivalent.__table__).values(
+            code="LEGACY19",
+            description="before",
+            precision=19,
+            metadata={},
+            is_active=True,
+        )
+    )
+    await db_session.commit()
+
+    response = await client.patch(
+        "/api/v1/admin/equivalents/LEGACY19",
+        headers=_admin_headers(),
+        json={"description": "after"},
+    )
+
+    assert response.status_code == 409, response.text
+    error = response.json()["error"]
+    assert error["code"] == "E008"
+    assert error["details"] == {
+        "code": "LEGACY19",
+        "reason": "noncanonical_precision",
+        "repair": "patch_precision",
+    }
+    stored = (
+        await db_session.execute(
+            select(Equivalent).where(Equivalent.code == "LEGACY19")
+        )
+    ).scalar_one()
+    assert stored.description == "before"
+    assert stored.precision == 19
+    assert (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "admin.equivalents.patch",
+                AuditLog.object_id == "LEGACY19",
+            )
+        )
+    ).scalar_one_or_none() is None

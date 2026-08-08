@@ -50,6 +50,7 @@ from app.schemas.admin import (
 )
 from app.schemas.equivalents import Equivalent as EquivalentSchema
 from app.schemas.equivalents import EquivalentsList, StoredEquivalent
+from app.schemas.common import ErrorEnvelope
 from app.schemas.graph import (
     AdminClearingCycleEdge,
     AdminClearingCyclesForEquivalent,
@@ -67,7 +68,7 @@ from app.core.payments.engine import PaymentEngine
 from app.utils.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 from app.utils.request_id import new_request_id, request_id_var, validate_request_id
-from app.utils.validation import validate_equivalent_code
+from app.utils.validation import validate_equivalent_code, validate_equivalent_precision
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
@@ -1071,7 +1072,16 @@ async def admin_create_equivalent(
     return result
 
 
-@router.patch("/equivalents/{code}", response_model=EquivalentSchema)
+@router.patch(
+    "/equivalents/{code}",
+    response_model=EquivalentSchema,
+    responses={
+        409: {
+            "model": ErrorEnvelope,
+            "description": "Stored equivalent requires an explicit legacy-data repair",
+        }
+    },
+)
 async def admin_update_equivalent(
     code: str,
     body: AdminEquivalentUpdateRequest,
@@ -1083,6 +1093,31 @@ async def admin_update_equivalent(
     ).scalar_one_or_none()
     if eq is None:
         raise NotFoundException(f"Equivalent {code} not found")
+
+    try:
+        validate_equivalent_code(eq.code)
+    except BadRequestException:
+        raise ConflictException(
+            "Legacy equivalent code requires manual cleanup",
+            details={
+                "code": eq.code,
+                "reason": "noncanonical_code",
+                "repair": "manual_cleanup",
+            },
+        )
+
+    try:
+        validate_equivalent_precision(eq.precision)
+    except BadRequestException:
+        if body.precision is None:
+            raise ConflictException(
+                "Legacy equivalent precision must be repaired by this PATCH",
+                details={
+                    "code": eq.code,
+                    "reason": "noncanonical_precision",
+                    "repair": "patch_precision",
+                },
+            )
 
     before = {
         "symbol": eq.symbol,
