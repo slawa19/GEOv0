@@ -1081,7 +1081,27 @@ class ClearingService:
         """
         count = 0
         while True:
-            cycles = await self.find_cycles(equivalent_code, max_depth=max_depth)
+            try:
+                cycles = await self.find_cycles(
+                    equivalent_code,
+                    max_depth=max_depth,
+                )
+            except GeoException as exc:
+                if exc.code != ErrorCode.E010.value:
+                    raise
+                raise GeoException(
+                    details={
+                        "cleared_cycles": count,
+                        "partial": count > 0,
+                    }
+                ) from exc
+            except Exception as exc:
+                raise GeoException(
+                    details={
+                        "cleared_cycles": count,
+                        "partial": count > 0,
+                    }
+                ) from exc
             if not cycles:
                 break
 

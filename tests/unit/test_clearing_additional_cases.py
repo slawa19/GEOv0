@@ -449,21 +449,28 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_site", ["execute", "find"])
 async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
     db_session,
     monkeypatch,
+    failure_site,
 ):
     service = ClearingService(db_session)
     cycle = [{"debt_id": str(uuid.uuid4())}]
     execute_calls = 0
+    find_calls = 0
 
     async def _find_cycles(*_args, **_kwargs):
+        nonlocal find_calls
+        find_calls += 1
+        if failure_site == "find" and find_calls == 2:
+            raise GeoException("private discovery detail")
         return [cycle]
 
     async def _execute_clearing(_cycle):
         nonlocal execute_calls
         execute_calls += 1
-        if execute_calls == 1:
+        if execute_calls == 1 or failure_site == "find":
             return True
         raise GeoException("private database detail")
 
@@ -473,11 +480,12 @@ async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
     with pytest.raises(GeoException) as exc_info:
         await service.auto_clear("USD")
 
-    assert execute_calls == 2
+    assert execute_calls == (2 if failure_site == "execute" else 1)
     assert exc_info.value.code == "E010"
     assert exc_info.value.status_code == 500
     assert exc_info.value.details == {"cleared_cycles": 1, "partial": True}
     assert "private database detail" not in str(exc_info.value.to_dict())
+    assert "private discovery detail" not in str(exc_info.value.to_dict())
 
 
 @pytest.mark.asyncio
