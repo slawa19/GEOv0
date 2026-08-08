@@ -3,16 +3,24 @@ import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingDoneE
 export type SimulatorMode = 'fixtures' | 'real'
 
 export type ScenarioSummary = {
+  api_version?: string
   scenario_id: string
-  /** Human-friendly name (preferred over legacy `label`). */
-  name?: string
+  name?: string | null
+  /** UI-only compatibility field; REST decoder accepts only canonical backend fields. */
   label?: string
   mode?: string
-  created_at?: string
+  created_at?: string | null
   updated_at?: string
+  participants_count?: number
+  trustlines_count?: number
+  equivalents?: string[]
+  clusters_count?: number | null
+  hubs_count?: number | null
+  tags?: string[] | null
 }
 
 export type ScenariosListResponse = {
+  api_version?: string
   items: ScenarioSummary[]
 }
 
@@ -213,48 +221,50 @@ export type SimulatorPaymentTargetsResponse = {
   items: SimulatorPaymentTargetsItem[]
 }
 
-export type RunState = 'created' | 'running' | 'paused' | 'stopped' | 'error'
+export type RunState = 'created' | 'idle' | 'running' | 'paused' | 'stopping' | 'stopped' | 'error'
 
 export type RunError = {
   code: string
   message: string
-  at?: string
+  at: string
 }
 
 export type RunStatus = {
+  api_version?: string
   run_id: string
   scenario_id: string
   mode?: SimulatorMode
   state: RunState | string
-  started_at?: string
-  stopped_at?: string
+  started_at?: string | null
+  stopped_at?: string | null
 
   // Why/where stop was requested (best-effort).
-  stop_requested_at?: string
+  stop_requested_at?: string | null
   stop_source?: string | null
   stop_reason?: string | null
   stop_client?: string | null
-  sim_time_ms: number
-  intensity_percent: number
-  ops_sec: number
-  queue_depth: number
+  sim_time_ms?: number | null
+  intensity_percent?: number | null
+  ops_sec?: number | null
+  queue_depth?: number | null
   last_event_type?: string | null
   current_phase?: string | null
   last_error?: RunError | null
 
   // Backend-first cumulative stats (authoritative; sent in every run_status event).
-  attempts_total?: number
-  committed_total?: number
-  rejected_total?: number
-  errors_total?: number
-  timeouts_total?: number
+  attempts_total?: number | null
+  committed_total?: number | null
+  rejected_total?: number | null
+  errors_total?: number | null
+  timeouts_total?: number | null
+  errors_last_1m?: number | null
 
   // Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
   // Only present in SSE run_status events when > 0.
-  consec_all_rejected_ticks?: number
+  consec_all_rejected_ticks?: number | null
 }
 
-export type RunStatusEvent = RunStatus & {
+export type RunStatusEvent = Omit<RunStatus, 'api_version' | 'mode' | 'started_at' | 'stopped_at'> & {
   event_id: string
   ts: string
   type: 'run_status'

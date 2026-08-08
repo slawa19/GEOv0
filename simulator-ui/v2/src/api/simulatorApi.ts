@@ -1,4 +1,10 @@
 import { httpJson, httpUrl, type HttpConfig } from './http'
+import {
+  decodeGraphSnapshotResponse,
+  decodeRunStatusResponse,
+  decodeScenariosListResponse,
+  decodeScenarioSummaryResponse,
+} from './simulatorContracts'
 import type {
   ActiveRunResponse,
   ArtifactIndexResponse,
@@ -30,12 +36,26 @@ import type {
   TxOnceResponse,
 } from './simulatorTypes'
 
+async function simulatorContractJson<T>(
+  cfg: HttpConfig,
+  path: string,
+  decoder: (value: unknown) => T,
+  init?: RequestInit,
+): Promise<T> {
+  const value = await httpJson<unknown>(cfg, path, init)
+  return decoder(value)
+}
+
 export function listScenarios(cfg: HttpConfig): Promise<ScenariosListResponse> {
-  return httpJson(cfg, '/simulator/scenarios')
+  return simulatorContractJson(cfg, '/simulator/scenarios', decodeScenariosListResponse)
 }
 
 export function getScenario(cfg: HttpConfig, scenarioId: string): Promise<ScenarioSummary> {
-  return httpJson(cfg, `/simulator/scenarios/${encodeURIComponent(scenarioId)}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/scenarios/${encodeURIComponent(scenarioId)}`,
+    decodeScenarioSummaryResponse,
+  )
 }
 
 export function getScenarioPreview(
@@ -45,7 +65,11 @@ export function getScenarioPreview(
   opts?: { mode?: SimulatorMode },
 ): Promise<SimulatorGraphSnapshot> {
   const q = new URLSearchParams({ equivalent, ...(opts?.mode ? { mode: opts.mode } : {}) }).toString()
-  return httpJson(cfg, `/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?${q}`,
+    decodeGraphSnapshotResponse,
+  )
 }
 
 export function uploadScenario(cfg: HttpConfig, req: { scenario: unknown; scenario_id?: string }): Promise<ScenarioSummary> {
@@ -67,15 +91,19 @@ export function getActiveRun(cfg: HttpConfig): Promise<ActiveRunResponse> {
 }
 
 export function getRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}`)
+  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}`, decodeRunStatusResponse)
 }
 
 export function pauseRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/pause`, { method: 'POST' })
+  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/pause`, decodeRunStatusResponse, {
+    method: 'POST',
+  })
 }
 
 export function resumeRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' })
+  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/resume`, decodeRunStatusResponse, {
+    method: 'POST',
+  })
 }
 
 export function stopRun(
@@ -88,23 +116,39 @@ export function stopRun(
     ...(opts?.reason ? { reason: opts.reason } : {}),
   }).toString()
   const suffix = q ? `?${q}` : ''
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/stop${suffix}`, { method: 'POST' })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/stop${suffix}`,
+    decodeRunStatusResponse,
+    { method: 'POST' },
+  )
 }
 
 export function restartRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/restart`, { method: 'POST' })
+  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/restart`, decodeRunStatusResponse, {
+    method: 'POST',
+  })
 }
 
 export function setIntensity(cfg: HttpConfig, runId: string, intensity_percent: number): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/intensity`, {
-    method: 'POST',
-    body: JSON.stringify({ intensity_percent }),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/intensity`,
+    decodeRunStatusResponse,
+    {
+      method: 'POST',
+      body: JSON.stringify({ intensity_percent }),
+    },
+  )
 }
 
 export function getSnapshot(cfg: HttpConfig, runId: string, equivalent: string): Promise<SimulatorGraphSnapshot> {
   const q = new URLSearchParams({ equivalent }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?${q}`,
+    decodeGraphSnapshotResponse,
+  )
 }
 
 export function getMetrics(
