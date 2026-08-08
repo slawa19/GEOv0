@@ -60,12 +60,12 @@ pre-commit install
 ### 1.4. Uruchomienie przez Docker
 
 ```bash
-# Uruchom bazę danych i Redis
-docker compose up -d db redis
+# Lokalny development zawsze używa pliku bazowego oraz nakładki dev
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis
 
 # Uruchom aplikację
 # Uwaga: migracje są uruchamiane automatycznie przy starcie kontenera.
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 ### 1.5. Weryfikacja instalacji
@@ -182,6 +182,8 @@ git checkout -b feature/my-feature
 ### 3.3. Uruchomienie w trybie deweloperskim
 
 ```bash
+export ENV=dev
+
 # Uruchom z hot reload
 uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 

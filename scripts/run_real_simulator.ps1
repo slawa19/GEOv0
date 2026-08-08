@@ -57,6 +57,7 @@ $script:UserSpecifiedRedisPort = $PSBoundParameters.ContainsKey('RedisPort')
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
+$script:DevComposeFiles = @('-f', 'docker-compose.yml', '-f', 'docker-compose.dev.yml')
 
 $script:backendOrigin = "http://${HostName}:$ApiPort"
 $script:apiDocsUrl = "${script:backendOrigin}/docs"
@@ -167,7 +168,7 @@ function Invoke-DockerCompose([string[]]$composeArgs) {
   if ($mode -eq 'missing') { Warn-MissingDockerAndExit }
 
   # Force stable output without ANSI, so we can colorize ourselves.
-  $argsWithAnsi = @('--ansi','never') + $composeArgs
+  $argsWithAnsi = @('--ansi','never') + $script:DevComposeFiles + $composeArgs
 
   if ($mode -eq 'native') {
     $out = & docker compose @argsWithAnsi 2>&1

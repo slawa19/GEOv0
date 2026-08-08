@@ -7,6 +7,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import DBAPIError
 
 
+pytestmark = pytest.mark.postgres
+
+
 @pytest.mark.asyncio
 async def test_payment_engine_commit_retries_whole_uow_on_serialization_failure_postgres(
     db_session, monkeypatch

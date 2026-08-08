@@ -1,12 +1,10 @@
-import { watch, type ComputedRef, type Ref } from 'vue'
+import { onScopeDispose, watch, type ComputedRef, type Ref } from 'vue'
 
-import { api } from '../../api'
-import { assertSuccess } from '../../api/envelope'
 import { THROTTLE_GRAPH_REBUILD_MS, THROTTLE_LAYOUT_SPACING_MS } from '../../constants/timing'
 import { throttle } from '../../utils/throttle'
+import { useLatestRequest } from '../../composables/useLatestRequest'
 
 import type { LabelMode, SelectedInfo } from '../../composables/useGraphVisualization'
-import type { ClearingCycles } from './graphTypes'
 
 export function useGraphPageWatchers(opts: {
   isRealMode: ComputedRef<boolean>
@@ -24,11 +22,11 @@ export function useGraphPageWatchers(opts: {
   focusDepth: Ref<1 | 2>
   focusRootPid: Ref<string>
   ensureFocusRootPid: () => void
-  refreshForFocusMode: () => Promise<void>
-  refreshSnapshotForEq: () => Promise<void>
+  refreshForFocusMode: () => Promise<boolean>
+  refreshSnapshotForEq: () => Promise<boolean>
+  refreshClearingCyclesForParticipant: (pid: string) => Promise<boolean>
 
   selected: Ref<SelectedInfo | null>
-  clearingCycles: Ref<ClearingCycles | null>
 
   showLabels: Ref<boolean>
   labelModeBusiness: Ref<LabelMode>
@@ -67,22 +65,34 @@ export function useGraphPageWatchers(opts: {
     opts.graphViz.runLayout()
   }, THROTTLE_LAYOUT_SPACING_MS)
 
-  watch([opts.statusFilter, opts.threshold, opts.showIncidents, opts.hideIsolates], () => {
+  onScopeDispose(() => {
+    throttledRebuild.cancel()
+    throttledLayoutSpacing.cancel()
+  })
+
+  watch([opts.threshold, opts.showIncidents, opts.hideIsolates], () => {
     throttledRebuild()
   })
 
-  let eqReqId = 0
+  watch(opts.statusFilter, () => {
+    if (!opts.focusMode.value) throttledRebuild()
+  })
+
+  const graphRefreshRequests = useLatestRequest()
+
+  async function refreshGraph(
+    refresh: () => Promise<boolean>,
+    rebuildOptions: { fit: boolean },
+  ) {
+    const request = graphRefreshRequests.begin()
+    const applied = await refresh()
+    if (!applied || !request.isCurrent()) return
+    opts.graphViz.rebuildGraph(rebuildOptions)
+  }
 
   watch(opts.eq, () => {
-    void (async () => {
-      if (!opts.focusMode.value) {
-        eqReqId += 1
-        const reqId = eqReqId
-        await opts.refreshSnapshotForEq()
-        if (reqId !== eqReqId) return
-      }
-      opts.graphViz.rebuildGraph({ fit: false })
-    })()
+    if (opts.focusMode.value) return
+    void refreshGraph(opts.refreshSnapshotForEq, { fit: false })
   })
 
   watch([opts.typeFilter, opts.minDegree], () => {
@@ -91,31 +101,37 @@ export function useGraphPageWatchers(opts: {
 
   watch([opts.focusMode, opts.focusDepth, opts.focusRootPid], () => {
     if (opts.focusMode.value) opts.ensureFocusRootPid()
-    void (async () => {
-      await opts.refreshForFocusMode()
-      opts.graphViz.rebuildGraph({ fit: true })
-    })()
+    void refreshGraph(opts.refreshForFocusMode, { fit: true })
   })
+
+  watch(
+    [
+      () => String(opts.eq.value || '').trim().toUpperCase(),
+      () => (opts.statusFilter.value || [])
+        .map((status) => String(status || '').trim().toLowerCase())
+        .filter(Boolean)
+        .sort()
+        .join('\u0000'),
+    ],
+    () => {
+      if (!opts.focusMode.value) return
+      void refreshGraph(opts.refreshForFocusMode, { fit: true })
+    },
+  )
 
   watch(
     () => (opts.selected.value && opts.selected.value.kind === 'node' ? opts.selected.value.pid : ''),
     (pid) => {
       opts.graphViz.clearCycleHighlight()
       opts.graphViz.clearConnectionHighlight()
-      void (async () => {
-        if (opts.isRealMode.value && !opts.focusMode.value) {
-          const p = String(pid || '').trim()
-          if (p) {
-            try {
-              const cc = await api.clearingCycles({ participant_pid: p })
-              opts.clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
-            } catch {
-              // keep previous
-            }
-          }
-        }
-        opts.graphViz.applySelectedHighlight(pid)
-      })()
+      opts.graphViz.applySelectedHighlight(pid)
+
+      if (opts.isRealMode.value && !opts.focusMode.value) {
+        const p = String(pid || '').trim()
+        void opts.refreshClearingCyclesForParticipant(p).catch(() => {
+          // Keep the current cycle data; visual selection is independent of this fetch.
+        })
+      }
     },
   )
 

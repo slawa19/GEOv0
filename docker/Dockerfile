@@ -1,3 +1,6 @@
+# GEO Hub — canonical base/production image
+# Used by docker-compose.yml; docker-entrypoint.sh performs the migration preflight.
+
 # Build stage
 FROM python:3.11-slim as builder
 
@@ -29,3 +32,4 @@ RUN chmod +x docker-entrypoint.sh
 EXPOSE 8000
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

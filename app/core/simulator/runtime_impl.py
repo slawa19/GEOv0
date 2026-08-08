@@ -19,8 +19,6 @@ from app.schemas.simulator import (
     ScenarioSummary,
     SimulatorGraphSnapshot,
     SimulatorRunStatusEvent,
-    SimulatorTxUpdatedEvent,
-    SimulatorClearingDoneEvent,
 )
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.fixtures_runner import FixturesRunner
@@ -878,6 +876,8 @@ class _SimulatorRuntimeBase:
                 run = self.get_run(run_id)
 
                 with self._lock:
+                    if run.state in ("stopped", "stopping", "error"):
+                        return
                     if run.state != "running":
                         continue
 

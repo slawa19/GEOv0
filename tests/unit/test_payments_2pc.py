@@ -3,13 +3,16 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import func, select
 
 from app.core.payments.engine import PaymentEngine
+from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 from app.db.models.prepare_lock import PrepareLock
+from app.utils.exceptions import GeoException
 
 
 @pytest.mark.asyncio
@@ -182,3 +185,198 @@ async def test_commit_updates_transaction_updated_at(db_session):
         after_cmp = after_cmp.replace(tzinfo=timezone.utc)
 
     assert after_cmp > before_cmp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["invalid", "mixed"])
+async def test_commit_fails_closed_and_abort_recovers_invalid_persisted_flows(
+    db_session,
+    case,
+):
+    sender_id = uuid.uuid4()
+    receiver_id = uuid.uuid4()
+    equivalent_id = uuid.uuid4()
+    sender = Participant(
+        id=sender_id,
+        pid=f"STRICT_S_{case}",
+        display_name="Strict sender",
+        public_key=f"strict-sender-{case}",
+    )
+    receiver = Participant(
+        id=receiver_id,
+        pid=f"STRICT_R_{case}",
+        display_name="Strict receiver",
+        public_key=f"strict-receiver-{case}",
+    )
+    equivalent = Equivalent(
+        id=equivalent_id,
+        code=f"S{case[:3]}".upper(),
+        description="Strict parser test",
+        precision=2,
+    )
+    db_session.add_all([sender, receiver, equivalent])
+    db_session.add(
+        TrustLine(
+            id=uuid.uuid4(),
+            from_participant_id=receiver_id,
+            to_participant_id=sender_id,
+            equivalent_id=equivalent_id,
+            limit=Decimal("10.00"),
+            status="active",
+        )
+    )
+    tx_id = str(uuid.uuid4())
+    tx = Transaction(
+        id=uuid.uuid4(),
+        tx_id=tx_id,
+        type="PAYMENT",
+        initiator_id=sender_id,
+        payload={},
+        state="PREPARED",
+    )
+    valid_flow = {
+        "from": str(sender_id),
+        "to": str(receiver_id),
+        "amount": "8.00",
+        "equivalent": str(equivalent_id),
+    }
+    invalid_flow = {
+        "from": str(sender_id),
+        "to": str(receiver_id),
+        "amount": "not-a-decimal",
+        "equivalent": str(equivalent_id),
+    }
+    lock = PrepareLock(
+        tx_id=tx_id,
+        participant_id=sender_id,
+        effects={
+            "flows": [invalid_flow]
+            if case == "invalid"
+            else [valid_flow, invalid_flow]
+        },
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+    db_session.add_all([tx, lock])
+    await db_session.commit()
+
+    with pytest.raises(GeoException) as raised:
+        await PaymentEngine(db_session).commit(tx_id)
+
+    assert raised.value.code == "E010"
+    assert await PaymentEngine(db_session).abort(
+        tx_id,
+        reason="recover malformed persisted effects",
+    )
+    await db_session.refresh(tx)
+    debt_count = await db_session.scalar(
+        select(func.count()).select_from(Debt).where(
+            Debt.equivalent_id == equivalent_id
+        )
+    )
+    remaining_lock = await db_session.scalar(
+        select(PrepareLock).where(PrepareLock.tx_id == tx_id)
+    )
+    assert tx.state == "ABORTED"
+    assert remaining_lock is None
+    assert debt_count == 0
+
+
+@pytest.mark.asyncio
+async def test_commit_fails_closed_when_validated_flows_change_during_lock_wait(
+    db_session,
+    monkeypatch,
+):
+    sender_id = uuid.uuid4()
+    receiver_id = uuid.uuid4()
+    equivalent_id = uuid.uuid4()
+    db_session.add_all(
+        [
+            Participant(
+                id=sender_id,
+                pid="STRICT_WAIT_S",
+                display_name="Strict wait sender",
+                public_key="strict-wait-sender",
+            ),
+            Participant(
+                id=receiver_id,
+                pid="STRICT_WAIT_R",
+                display_name="Strict wait receiver",
+                public_key="strict-wait-receiver",
+            ),
+            Equivalent(
+                id=equivalent_id,
+                code="SWAIT",
+                description="Strict wait test",
+                precision=2,
+            ),
+            TrustLine(
+                id=uuid.uuid4(),
+                from_participant_id=receiver_id,
+                to_participant_id=sender_id,
+                equivalent_id=equivalent_id,
+                limit=Decimal("10.00"),
+                status="active",
+            ),
+        ]
+    )
+    tx_id = str(uuid.uuid4())
+    tx = Transaction(
+        id=uuid.uuid4(),
+        tx_id=tx_id,
+        type="PAYMENT",
+        initiator_id=sender_id,
+        payload={},
+        state="PREPARED",
+    )
+    lock = PrepareLock(
+        tx_id=tx_id,
+        participant_id=sender_id,
+        effects={
+            "flows": [
+                {
+                    "from": str(sender_id),
+                    "to": str(receiver_id),
+                    "amount": "8.00",
+                    "equivalent": str(equivalent_id),
+                }
+            ]
+        },
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+    db_session.add_all([tx, lock])
+    await db_session.commit()
+    engine = PaymentEngine(db_session)
+
+    async def _mutate_after_initial_parse(_keys):
+        lock.effects = {
+            "flows": [
+                {
+                    "from": str(sender_id),
+                    "to": str(receiver_id),
+                    "amount": "7.00",
+                    "equivalent": str(equivalent_id),
+                }
+            ]
+        }
+        await db_session.flush()
+
+    monkeypatch.setattr(
+        engine,
+        "_acquire_segment_advisory_lock_keys",
+        _mutate_after_initial_parse,
+    )
+
+    with pytest.raises(GeoException) as raised:
+        await engine.commit(tx_id)
+
+    assert raised.value.code == "E010"
+    await db_session.refresh(tx)
+    await db_session.refresh(lock)
+    debt_count = await db_session.scalar(
+        select(func.count()).select_from(Debt).where(
+            Debt.equivalent_id == equivalent_id
+        )
+    )
+    assert tx.state == "PREPARED"
+    assert lock.effects["flows"][0]["amount"] == "7.00"
+    assert debt_count == 0

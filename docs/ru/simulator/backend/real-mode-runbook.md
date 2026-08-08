@@ -107,13 +107,15 @@ SQLite удобен для UI/демо, но **не подходит** для п
 - Redis 7
 - app (FastAPI)
 
-Базовый запуск:
-
-- `docker compose up -d --build`
-
-Dev‑override (uvicorn `--reload`, volumes, debug):
+Локальный запуск с dev‑секретами и reload:
 
 - `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`
+
+Production-like запуск использует только base Compose, но лишь после копирования
+`.env.example` в `.env` и заполнения `JWT_SECRET`, `ADMIN_TOKEN`,
+`SIMULATOR_SESSION_SECRET` и `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`:
+
+- `docker compose up -d --build`
 
 Порты по умолчанию:
 
@@ -189,8 +191,8 @@ Dev‑override (uvicorn `--reload`, volumes, debug):
 
 ### 6.4 Docker окружение не стартует
 
-- `docker compose ps`
-- `docker compose logs -f app`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml ps`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f app`
 - Проверьте конфликты портов и healthcheck’и db/redis.
 
 ### 6.5 Симулятор: полезные env-параметры

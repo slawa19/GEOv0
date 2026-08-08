@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import AsyncGenerator, Literal, Optional
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, Request
 from app.utils.exceptions import (
     TooManyRequestsException,
     UnauthorizedException,
@@ -19,7 +19,7 @@ from sqlalchemy import select
 from app.db.session import get_db_session
 from app.utils.security import decode_token
 from app.db.models.participant import Participant
-from app.config import settings
+from app.config import canonicalize_http_origin, settings
 
 reusable_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 optional_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -222,7 +222,8 @@ def _check_csrf_origin(request: Request, actor: "SimulatorActor") -> None:
         return  # Empty allowlist = allow all (dev mode)
 
     allowed = {o.strip() for o in allowlist_raw.split(",") if o.strip()}
-    if origin not in allowed:
+    canonical_origin = canonicalize_http_origin(origin)
+    if canonical_origin is None or canonical_origin not in allowed:
         raise ForbiddenException(
             f"Origin {origin!r} not in CSRF allowlist",
             details={"reason": "csrf_origin", "origin": origin},

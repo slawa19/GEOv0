@@ -60,12 +60,12 @@ pre-commit install
 ### 1.4. Run via Docker
 
 ```bash
-# Start DB and Redis
-docker compose up -d db redis
+# Local development always uses the base file plus the dev overlay
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis
 
 # Start application
 # Note: migrations are applied automatically on container startup.
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 ### 1.5. Installation check
@@ -182,6 +182,8 @@ git checkout -b feature/my-feature
 ### 3.3. Run in development mode
 
 ```bash
+export ENV=dev
+
 # Start with hot reload
 uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 

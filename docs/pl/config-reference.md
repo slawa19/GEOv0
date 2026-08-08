@@ -24,6 +24,22 @@ W bieżących dokumentach niektóre parametry mogą pojawiać się jako zmienne 
 - **Wymagany restart**: zmiana wymaga restartu procesu/poda. Typowo: `protocol.*` (timeouty protokołu) i niektóre `security.*`.
 - **Wymagana migracja**: zmiana wymaga migracji/sprawdzenia kompatybilności stanu. Typowo: `database.*` i niektóre `integrity.*` (jeśli wpływają na format/przechowywanie).
 
+### 1.3. Środowisko i zabezpieczenia startu
+
+- `ENV` jest nazwą kanoniczną, musi zostać podane jawnie i normalizuje wartości
+  do `dev`, `test`, `staging` lub `prod`. Akceptowane aliasy to `development`,
+  `testing`, `stage` i `production`.
+- Stare `ENVIRONMENT` jest obsługiwane dla kompatybilności. Konflikt pomiędzy
+  `ENV` i `ENVIRONMENT` oraz brak, nieznana lub pusta wartość zatrzymują start.
+- Nieznane nazwy process-environment są ignorowane przez bibliotekę settings,
+  ale literówka nie może włączyć trybu permissive: brak dokładnego `ENV` lub
+  `ENVIRONMENT` zatrzymuje start.
+- Tylko `dev` i `test` dopuszczają lokalne wartości domyślne. W `staging` i
+  `prod` sekrety `JWT_SECRET`, `ADMIN_TOKEN` i `SIMULATOR_SESSION_SECRET` muszą
+  mieć co najmniej 32 znaki i nie mogą być placeholderami.
+- `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` przyjmuje dokładne origins `http`/`https`,
+  rozdzielone przecinkami, z hostem i bez path, query, fragment, credentials lub wildcard.
+
 ---
 
 ## 2. Tabela parametrów (według sekcji)

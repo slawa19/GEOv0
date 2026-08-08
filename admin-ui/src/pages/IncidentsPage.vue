@@ -14,6 +14,7 @@ import { useAuthStore } from '../stores/auth'
 import type { Incident } from '../types/domain'
 import { t } from '../i18n'
 import { toLocationQueryRaw } from '../router/query'
+import { useLatestRequest } from '../composables/useLatestRequest'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -22,6 +23,7 @@ const page = ref(1)
 const perPage = ref(20)
 const total = ref(0)
 const items = ref<Incident[]>([])
+const loadRequests = useLatestRequest()
 
 const router = useRouter()
 const route = useRoute()
@@ -50,22 +52,27 @@ function fmtAge(seconds: number): string {
 }
 
 async function load() {
+  const request = loadRequests.begin()
+  const requestPage = page.value
+  const requestPerPage = perPage.value
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await api.listIncidents({ page: page.value, per_page: perPage.value }))
+    const data = assertSuccess(await api.listIncidents({ page: requestPage, per_page: requestPerPage }))
+    if (!request.isCurrent()) return
     total.value = data.total
-    const maxPage = Math.max(1, Math.ceil(total.value / perPage.value))
-    if (page.value > maxPage) {
+    const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
+    if (requestPage > maxPage) {
       page.value = maxPage
       return
     }
     items.value = data.items
   } catch (e: unknown) {
+    if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('incidents.loadFailed')
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 

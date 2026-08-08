@@ -13,6 +13,9 @@ import pytest
 from httpx import AsyncClient
 
 
+pytestmark = pytest.mark.slow
+
+
 class _SuperSimFailure(AssertionError):
     pass
 
@@ -67,9 +70,9 @@ async def _get_snapshot_with_links(
     links: list[dict[str, Any]] = [_ensure_dict(x) for x in links_any]
 
     keys: set[str] = set()
-    for l in links:
-        src = l.get("source")
-        tgt = l.get("target")
+    for link in links:
+        src = link.get("source")
+        tgt = link.get("target")
         if isinstance(src, str) and isinstance(tgt, str):
             keys.add(_edge_key(src, tgt))
 
@@ -162,7 +165,8 @@ class _DumpCollector:
         self.started_at_utc = self._t0.isoformat()
         self.runs: list[_RunCapture] = []
         self.extra: list[dict[str, Any]] = []
-        self.dump_dir = Path("test-results") / "super-simulator"
+        artifact_root = Path(os.environ.get("GEO_TEST_ARTIFACT_ROOT", "test-results"))
+        self.dump_dir = artifact_root / "super-simulator"
 
     def add_run(self, run: _RunCapture) -> None:
         self.runs.append(run)
@@ -587,7 +591,6 @@ async def test_super_smoke_part2_real_logic_deterministic(
 
     async with asyncio.timeout(30.0):
         try:
-            from dataclasses import asdict
             from decimal import Decimal
             import hashlib
             import threading
@@ -677,32 +680,39 @@ async def test_super_smoke_part2_real_logic_deterministic(
 
             # Nested payments (regression guard for transaction context misuse).
             svc = PaymentService(db_session)
+            staged_payments = []
             async with db_session.begin_nested():
-                await svc.create_payment_internal(
-                    a.id,
-                    to_pid=b.pid,
-                    equivalent="UAH",
-                    amount="1.00",
-                    idempotency_key="super-smoke-p1",
-                    commit=False,
+                staged_payments.append(
+                    await svc.create_payment_internal_staged(
+                        a.id,
+                        to_pid=b.pid,
+                        equivalent="UAH",
+                        amount="1.00",
+                        idempotency_key="super-smoke-p1",
+                    )
                 )
-                await svc.create_payment_internal(
-                    b.id,
-                    to_pid=c.pid,
-                    equivalent="UAH",
-                    amount="2.00",
-                    idempotency_key="super-smoke-p2",
-                    commit=False,
+                staged_payments.append(
+                    await svc.create_payment_internal_staged(
+                        b.id,
+                        to_pid=c.pid,
+                        equivalent="UAH",
+                        amount="2.00",
+                        idempotency_key="super-smoke-p2",
+                    )
                 )
-                await svc.create_payment_internal(
-                    c.id,
-                    to_pid=a.pid,
-                    equivalent="UAH",
-                    amount="3.00",
-                    idempotency_key="super-smoke-p3",
-                    commit=False,
+                staged_payments.append(
+                    await svc.create_payment_internal_staged(
+                        c.id,
+                        to_pid=a.pid,
+                        equivalent="UAH",
+                        amount="3.00",
+                        idempotency_key="super-smoke-p3",
+                    )
                 )
             await db_session.commit()
+            for staged_payment in staged_payments:
+                if staged_payment.post_commit_effects is not None:
+                    staged_payment.post_commit_effects.apply_once()
 
             # T7: per-participant balance consistency.
             # Clearing should preserve per-participant net positions; only payments should shift net.

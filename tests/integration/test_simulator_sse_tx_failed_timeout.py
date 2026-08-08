@@ -5,6 +5,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.core.payments.service import PaymentService
+from app.core.simulator.runtime import runtime
 from app.utils.exceptions import TimeoutException
 
 
@@ -12,6 +13,21 @@ from app.utils.exceptions import TimeoutException
 async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
     client: AsyncClient, auth_headers, monkeypatch
 ):
+    injected = 0
+    monkeypatch.setattr(
+        runtime._real_runner,
+        "_real_max_timeouts_per_tick_limit",
+        1,
+    )
+    fail_run_calls: list[tuple[str, str]] = []
+    real_fail_run = runtime._real_runner.fail_run
+
+    async def _record_real_fail_run(run_id: str, *, code: str, message: str) -> None:
+        fail_run_calls.append((code, message))
+        await real_fail_run(run_id, code=code, message=message)
+
+    monkeypatch.setattr(runtime._real_runner, "fail_run", _record_real_fail_run)
+
     async def _always_timeout(
         self,
         sender_id,
@@ -20,12 +36,16 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
         equivalent,
         amount,
         idempotency_key,
-        commit: bool = True,
     ):
+        nonlocal injected
+        injected += 1
         raise TimeoutException("timeout")
 
     monkeypatch.setattr(
-        PaymentService, "create_payment_internal", _always_timeout, raising=True
+        PaymentService,
+        "create_payment_internal_staged",
+        _always_timeout,
+        raising=True,
     )
 
     resp = await client.post(
@@ -84,3 +104,7 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
 
     assert seen_run_status
     assert seen_failed
+    assert injected > 0
+    assert [code for code, _message in fail_run_calls] == [
+        "REAL_MODE_TOO_MANY_TIMEOUTS"
+    ]

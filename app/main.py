@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 import asyncio
+import inspect
 import logging
 import os
 import time
@@ -10,6 +12,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
@@ -17,11 +20,278 @@ from sqlalchemy.engine.url import make_url
 from app.api.router import api_router
 from app.config import settings
 from app.db.session import engine
+from app.schemas.common import ErrorEnvelope, HealthResponse
 from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
 from app.utils.exceptions import GeoException
+from app.utils.background_jobs import (
+    background_health_status,
+    background_job_states as _background_job_states,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+def _record_background_job_event(
+    app: FastAPI,
+    *,
+    name: str,
+    status: str,
+    event: str,
+    error: BaseException | None = None,
+) -> None:
+    state = {"status": status, "event": event}
+    if error is not None:
+        state["error_type"] = type(error).__name__
+    _background_job_states(app)[name] = state
+
+    try:
+        from app.utils.metrics import BACKGROUND_JOB_EVENTS_TOTAL
+
+        BACKGROUND_JOB_EVENTS_TOTAL.labels(job=name, event=event).inc()
+    except Exception:
+        # Job state remains authoritative even if metrics collection is degraded.
+        logger.debug(
+            "background_job.metric_failed name=%s event=%s",
+            name,
+            event,
+            exc_info=True,
+        )
+
+
+def _on_background_task_done(app: FastAPI, name: str, task: asyncio.Task) -> None:
+    stop_event = getattr(app.state, "_bg_stop_event", None)
+    stopping = bool(stop_event is not None and stop_event.is_set())
+
+    if task.cancelled():
+        if stopping:
+            _record_background_job_event(
+                app,
+                name=name,
+                status="stopped",
+                event="cancelled_for_shutdown",
+            )
+        else:
+            error = RuntimeError("background task was cancelled unexpectedly")
+            _record_background_job_event(
+                app,
+                name=name,
+                status="failed",
+                event="unexpected_exit",
+                error=error,
+            )
+            logger.error("background_job.unexpected_exit name=%s cancelled=true", name)
+        return
+
+    error = task.exception()
+    if error is None and stopping:
+        _record_background_job_event(
+            app,
+            name=name,
+            status="stopped",
+            event="stopped",
+        )
+        return
+
+    if error is None:
+        error = RuntimeError("background task exited before shutdown")
+
+    _record_background_job_event(
+        app,
+        name=name,
+        status="failed",
+        event="unexpected_exit",
+        error=error,
+    )
+    logger.error(
+        "background_job.unexpected_exit name=%s",
+        name,
+        exc_info=(type(error), error, error.__traceback__),
+    )
+
+
+def _start_supervised_background_task(
+    app: FastAPI,
+    *,
+    name: str,
+    coroutine_factory: Callable[[], Awaitable[None]],
+) -> asyncio.Task | None:
+    coroutine: Awaitable[None] | None = None
+    _record_background_job_event(
+        app,
+        name=name,
+        status="starting",
+        event="starting",
+    )
+    try:
+        coroutine = coroutine_factory()
+        task = asyncio.create_task(coroutine, name=f"geo:{name}")
+    except Exception as error:
+        if inspect.iscoroutine(coroutine):
+            coroutine.close()
+        _record_background_job_event(
+            app,
+            name=name,
+            status="failed",
+            event="start_failed",
+            error=error,
+        )
+        logger.exception("background_job.start_failed name=%s", name)
+        return None
+
+    app.state._bg_tasks.append(task)
+    _record_background_job_event(
+        app,
+        name=name,
+        status="running",
+        event="started",
+    )
+    task.add_done_callback(
+        lambda completed, job_name=name: _on_background_task_done(
+            app,
+            job_name,
+            completed,
+        )
+    )
+    return task
+
+
+def _emit_integrity_metric(result: str) -> None:
+    try:
+        from app.utils.metrics import RECOVERY_EVENTS_TOTAL
+
+        RECOVERY_EVENTS_TOTAL.labels(
+            event="integrity_checkpoints",
+            result=result,
+        ).inc()
+    except Exception:
+        logger.debug(
+            "integrity.checkpoints_metric_failed result=%s",
+            result,
+            exc_info=True,
+        )
+
+
+async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
+    from app.core.integrity import compute_and_store_integrity_checkpoints
+    from app.db.session import AsyncSessionLocal
+    from app.utils.distributed_lock import redis_distributed_lock
+    from app.utils.exceptions import ConflictException
+
+    interval = int(
+        getattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 300) or 300
+    )
+    lock_ttl_seconds = int(
+        getattr(settings, "INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS", 0) or 0
+    )
+    if lock_ttl_seconds <= 0:
+        lock_ttl_seconds = max(30, interval)
+
+    _emit_integrity_metric(f"{reason}_start")
+    try:
+        async with redis_distributed_lock(
+            getattr(app.state, "redis", None),
+            "geo:integrity:checkpoints",
+            ttl_seconds=lock_ttl_seconds,
+            wait_timeout_seconds=0.0,
+        ):
+            async with AsyncSessionLocal() as session:
+                await compute_and_store_integrity_checkpoints(session)
+    except ConflictException:
+        _emit_integrity_metric(f"{reason}_skipped_locked")
+        _record_background_job_event(
+            app,
+            name="integrity",
+            status="running",
+            event=f"{reason}_skipped_locked",
+        )
+        return True
+    except Exception as error:
+        logger.exception("integrity.checkpoints_failed reason=%s", reason)
+        _emit_integrity_metric(f"{reason}_error")
+        _record_background_job_event(
+            app,
+            name="integrity",
+            status="failed",
+            event=f"{reason}_error",
+            error=error,
+        )
+        return False
+
+    _emit_integrity_metric(f"{reason}_success")
+    _record_background_job_event(
+        app,
+        name="integrity",
+        status="running",
+        event=f"{reason}_success",
+    )
+    return True
+
+
+def _record_recovery_iteration(
+    app: FastAPI,
+    reason: str,
+    error: BaseException | None,
+) -> None:
+    succeeded = error is None
+    _record_background_job_event(
+        app,
+        name="recovery",
+        status="running" if succeeded else "failed",
+        event=f"{reason}_{'success' if succeeded else 'error'}",
+        error=error,
+    )
+
+
+async def _integrity_loop(app: FastAPI) -> None:
+    interval = int(
+        getattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 300) or 300
+    )
+    await _run_integrity_checkpoints_once(app, reason="startup")
+
+    while not app.state._bg_stop_event.is_set():
+        try:
+            await asyncio.wait_for(app.state._bg_stop_event.wait(), timeout=interval)
+            break
+        except asyncio.TimeoutError:
+            await _run_integrity_checkpoints_once(app, reason="periodic")
+
+
+def _start_configured_background_tasks(app: FastAPI) -> None:
+    if getattr(settings, "RECOVERY_ENABLED", True):
+        try:
+            from app.core.recovery import recovery_loop
+            from app.db.session import AsyncSessionLocal
+        except Exception as error:
+            _record_background_job_event(
+                app,
+                name="recovery",
+                status="failed",
+                event="start_failed",
+                error=error,
+            )
+            logger.exception("background_job.start_failed name=recovery")
+        else:
+            _start_supervised_background_task(
+                app,
+                name="recovery",
+                coroutine_factory=lambda: recovery_loop(
+                    session_factory=AsyncSessionLocal,
+                    stop_event=app.state._bg_stop_event,
+                    on_iteration=lambda reason, error: _record_recovery_iteration(
+                        app,
+                        reason,
+                        error,
+                    ),
+                ),
+            )
+
+    if getattr(settings, "INTEGRITY_CHECKPOINT_ENABLED", True):
+        _start_supervised_background_task(
+            app,
+            name="integrity",
+            coroutine_factory=lambda: _integrity_loop(app),
+        )
 
 
 async def _sqlite_ensure_debts_version_column() -> None:
@@ -74,6 +344,7 @@ async def lifespan(app: FastAPI):
     app.state.redis = None
     app.state._bg_stop_event = asyncio.Event()
     app.state._bg_tasks = []
+    app.state.background_jobs = {}
 
     await _sqlite_ensure_debts_version_column()
 
@@ -106,84 +377,27 @@ async def lifespan(app: FastAPI):
         app.state.redis = client
         security.set_redis_client(client)
 
-    # Background tasks (best-effort)
-    if getattr(settings, "RECOVERY_ENABLED", True):
-        try:
-            from app.core.recovery import recovery_loop
-            from app.db.session import AsyncSessionLocal
-
-            task = asyncio.create_task(
-                recovery_loop(session_factory=AsyncSessionLocal, stop_event=app.state._bg_stop_event)
-            )
-            app.state._bg_tasks.append(task)
-        except Exception:
-            pass
-
-    if getattr(settings, "INTEGRITY_CHECKPOINT_ENABLED", True):
-
-        async def _integrity_loop():
-            from app.core.integrity import compute_and_store_integrity_checkpoints
-            from app.db.session import AsyncSessionLocal
-            from app.utils.distributed_lock import redis_distributed_lock
-            from app.utils.exceptions import ConflictException
-            from app.utils.metrics import RECOVERY_EVENTS_TOTAL
-
-            interval = int(getattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 300) or 300)
-            lock_ttl_seconds = int(getattr(settings, "INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS", 0) or 0)
-            if lock_ttl_seconds <= 0:
-                lock_ttl_seconds = max(30, interval)
-
-            def _emit(result: str) -> None:
-                try:
-                    RECOVERY_EVENTS_TOTAL.labels(event="integrity_checkpoints", result=result).inc()
-                except Exception:
-                    pass
-
-            async def _run_once(*, reason: str) -> None:
-                _emit(f"{reason}_start")
-                redis_client = getattr(app.state, "redis", None)
-                try:
-                    async with redis_distributed_lock(
-                        redis_client,
-                        "geo:integrity:checkpoints",
-                        ttl_seconds=lock_ttl_seconds,
-                        wait_timeout_seconds=0.0,
-                    ):
-                        async with AsyncSessionLocal() as session:
-                            await compute_and_store_integrity_checkpoints(session)
-                    _emit(f"{reason}_success")
-                except ConflictException:
-                    _emit(f"{reason}_skipped_locked")
-                except Exception:
-                    logger.exception("integrity.checkpoints_failed reason=%s", reason)
-                    _emit(f"{reason}_error")
-
-            try:
-                await _run_once(reason="startup")
-            except Exception:
-                pass
-
-            while not app.state._bg_stop_event.is_set():
-                try:
-                    await asyncio.wait_for(app.state._bg_stop_event.wait(), timeout=interval)
-                    break
-                except asyncio.TimeoutError:
-                    pass
-
-                try:
-                    await _run_once(reason="periodic")
-                except Exception:
-                    pass
-
-        try:
-            task = asyncio.create_task(_integrity_loop())
-            app.state._bg_tasks.append(task)
-        except Exception:
-            pass
+    # These maintenance jobs are degradable: startup continues, while job state,
+    # logs, metrics, and /health expose their absence or unexpected exit.
+    _start_configured_background_tasks(app)
 
     try:
         yield
     finally:
+        # Mark shutdown before awaiting other components so normal task exits and
+        # cancellations are not reported as unexpected failures.
+        app.state._bg_stop_event.set()
+
+        # Maintenance jobs can still be inside a DB session or Redis-backed
+        # distributed lock. Cancel and join them before tearing down either
+        # resource so their context-manager cleanup remains valid.
+        tasks = list(getattr(app.state, "_bg_tasks", []) or [])
+        if tasks:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        app.state._bg_tasks = []
+
         # Simulator runtime graceful shutdown (best-effort).
         try:
             from app.core.simulator.runtime import runtime
@@ -201,17 +415,6 @@ async def lifespan(app: FastAPI):
                 await client.aclose()
             finally:
                 app.state.redis = None
-
-        try:
-            app.state._bg_stop_event.set()
-        except Exception:
-            pass
-        tasks = list(getattr(app.state, "_bg_tasks", []) or [])
-        if tasks:
-            for t in tasks:
-                t.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-        app.state._bg_tasks = []
 
         # Ensure DB connections/threads are cleaned up when the app shuts down
         # (important for pytest TestClient runs on Windows + aiosqlite).
@@ -344,10 +547,10 @@ if getattr(settings, "METRICS_ENABLED", True):
         return Response(content=payload, media_type=content_type)
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
 async def health_check():
     return {
-        "status": "ok",
+        "status": background_health_status(app),
         "version": _best_effort_version(),
         "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),
         "timestamp": _utc_now_iso(),
@@ -381,3 +584,87 @@ async def health_db_check():
                 "timestamp": _utc_now_iso(),
             },
         )
+
+
+def _register_openapi_model_schema(document: dict, model: type) -> None:
+    schemas = document.setdefault("components", {}).setdefault("schemas", {})
+    model_schema = model.model_json_schema(
+        ref_template="#/components/schemas/{model}"
+    )
+    definitions = model_schema.pop("$defs", {})
+    for name, schema in definitions.items():
+        schemas.setdefault(name, schema)
+    schemas.setdefault(model.__name__, model_schema)
+
+
+def _is_default_fastapi_validation_response(response: object) -> bool:
+    if not isinstance(response, dict):
+        return False
+    schema = (
+        ((response.get("content") or {}).get("application/json") or {}).get("schema")
+    )
+    return schema == {"$ref": "#/components/schemas/HTTPValidationError"}
+
+
+def _custom_openapi() -> dict:
+    if app.openapi_schema is not None:
+        return app.openapi_schema
+
+    document = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+    )
+    from app.schemas.simulator import SimulatorActionError
+
+    _register_openapi_model_schema(document, ErrorEnvelope)
+    _register_openapi_model_schema(document, SimulatorActionError)
+
+    for path, path_item in (document.get("paths") or {}).items():
+        if not isinstance(path_item, dict):
+            continue
+        is_simulator_action = path.startswith("/api/v1/simulator/runs/") and (
+            "/actions/" in path
+        )
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            responses = operation.get("responses") or {}
+            validation_response = responses.get("422")
+            if not _is_default_fastapi_validation_response(validation_response):
+                continue
+            responses.pop("422")
+            if is_simulator_action:
+                responses.setdefault(
+                    "400",
+                    {
+                        "description": "Simulator action validation error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SimulatorActionError"
+                                }
+                            }
+                        },
+                    },
+                )
+            responses["422"] = {
+                "description": (
+                    "Invalid simulator identity transport"
+                    if is_simulator_action
+                    else "Validation error"
+                ),
+                "content": {
+                    "application/json": {
+                        "schema": {"$ref": "#/components/schemas/ErrorEnvelope"}
+                    }
+                },
+            }
+
+    app.openapi_schema = document
+    return document
+
+
+app.openapi = _custom_openapi

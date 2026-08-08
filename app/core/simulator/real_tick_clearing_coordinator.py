@@ -11,6 +11,7 @@ from app.core.simulator.adaptive_clearing_policy import (
     AdaptiveClearingState,
     TickSignals,
 )
+from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 
 
@@ -40,6 +41,57 @@ class RealTickClearingCoordinator:
             self._adaptive_config = cfg
             self._adaptive_state = AdaptiveClearingState(cfg)
             self._adaptive_policy = AdaptiveClearingPolicy(cfg)
+
+    def _apply_payment_effects(self, payments_result: Any | None) -> None:
+        apply_effects = getattr(payments_result, "apply_deferred_effects", None)
+        if callable(apply_effects):
+            try:
+                apply_effects()
+            except Exception:
+                self._logger.warning(
+                    "simulator.real.payment_post_commit_callback_failed",
+                    exc_info=True,
+                )
+
+    def _apply_rollback_observations(self, payments_result: Any | None) -> None:
+        apply_effects = getattr(payments_result, "apply_rollback_observations", None)
+        if callable(apply_effects):
+            try:
+                apply_effects()
+            except Exception:
+                self._logger.warning(
+                    "simulator.real.payment_rollback_callback_failed",
+                    exc_info=True,
+                )
+
+    def _apply_unknown_observations(self, payments_result: Any | None) -> None:
+        apply_effects = getattr(
+            payments_result,
+            "apply_unknown_transaction_observations",
+            None,
+        )
+        if callable(apply_effects):
+            try:
+                apply_effects()
+            except Exception:
+                self._logger.warning(
+                    "simulator.real.payment_unknown_callback_failed",
+                    exc_info=True,
+                )
+
+    async def _commit_and_resolve(
+        self,
+        session: Any,
+        payments_result: Any | None,
+    ) -> None:
+        await resolve_commit_under_cancellation(
+            commit=session.commit,
+            rollback=session.rollback,
+            on_commit=lambda: self._apply_payment_effects(payments_result),
+            on_rollback=lambda: self._apply_rollback_observations(payments_result),
+            on_unknown=lambda: self._apply_unknown_observations(payments_result),
+            logger=self._logger,
+        )
 
     async def maybe_run_clearing(
         self,
@@ -91,6 +143,7 @@ class RealTickClearingCoordinator:
             tick_t0=tick_t0,
             safe_int_env=safe_int_env,
             run_clearing=run_clearing,
+            payments_result=payments_result,
         )
 
     def compute_static_clearing_hard_timeout_sec(
@@ -267,18 +320,14 @@ class RealTickClearingCoordinator:
             return clearing_volume_by_eq
 
         # Commit payments BEFORE clearing (same as static mode)
-        try:
-            commit_t0 = time.monotonic()
-            await session.commit()
-            commit_ms = (time.monotonic() - commit_t0) * 1000.0
-            if commit_ms > 500.0:
-                self._logger.warning(
-                    "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s",
-                    str(run.run_id), tick_index, int(commit_ms),
-                )
-        except Exception:
-            await session.rollback()
-            raise
+        commit_t0 = time.monotonic()
+        await self._commit_and_resolve(session, payments_result)
+        commit_ms = (time.monotonic() - commit_t0) * 1000.0
+        if commit_ms > 500.0:
+            self._logger.warning(
+                "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s",
+                str(run.run_id), tick_index, int(commit_ms),
+            )
 
         self._logger.warning(
             "simulator.real.adaptive_clearing_enter run_id=%s tick=%s eqs=%s",
@@ -394,26 +443,23 @@ class RealTickClearingCoordinator:
         tick_t0: float,
         safe_int_env: Callable[[str, int], int],
         run_clearing: Callable[[], Awaitable[dict[str, float]]],
+        payments_result: Any | None,
     ) -> dict[str, float]:
         clearing_volume_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
         tick_index = int(run.tick_index)
 
         # Commit payments BEFORE clearing to release the DB write lock.
-        try:
-            commit_t0 = time.monotonic()
-            await session.commit()
-            commit_ms = (time.monotonic() - commit_t0) * 1000.0
-            if commit_ms > 500.0:
-                self._logger.warning(
-                    "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
-                    str(run.run_id),
-                    tick_index,
-                    int(commit_ms),
-                    int((time.monotonic() - tick_t0) * 1000.0),
-                )
-        except Exception:
-            await session.rollback()
-            raise
+        commit_t0 = time.monotonic()
+        await self._commit_and_resolve(session, payments_result)
+        commit_ms = (time.monotonic() - commit_t0) * 1000.0
+        if commit_ms > 500.0:
+            self._logger.warning(
+                "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
+                str(run.run_id),
+                tick_index,
+                int(commit_ms),
+                int((time.monotonic() - tick_t0) * 1000.0),
+            )
 
         self._logger.warning(
             "simulator.real.tick_clearing_enter run_id=%s tick=%s eqs=%s planned=%s",

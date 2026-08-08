@@ -16,7 +16,7 @@ from app.db.models.trustline import TrustLine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.prepare_lock import PrepareLock
-from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath, Bottleneck
+from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath
 from app.config import settings
 from app.utils.metrics import ROUTING_FAILURES_TOTAL
 from app.utils.validation import validate_equivalent_code
@@ -149,12 +149,12 @@ class PaymentRouter:
 
         return False
 
-    async def build_graph(self, equivalent_code: str):
+    async def build_graph(self, equivalent_code: str, *, use_shared_cache: bool = True):
         """Loads all trustlines and debts for the given equivalent and builds the capacity graph."""
         validate_equivalent_code(equivalent_code)
         with log_duration(logger, "router.build_graph", equivalent=equivalent_code):
             ttl = int(getattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0) or 0)
-            if ttl > 0:
+            if use_shared_cache and ttl > 0:
                 cached = self._graph_cache.get(equivalent_code)
                 if cached is not None:
                     # Backward-compatible cache unpacking.
@@ -174,9 +174,17 @@ class PaymentRouter:
                         self.uuids = dict(uuids)
                         return
 
-            await self._build_graph_impl(equivalent_code)
+            await self._build_graph_impl(
+                equivalent_code,
+                write_shared_cache=use_shared_cache,
+            )
 
-    async def _build_graph_impl(self, equivalent_code: str) -> None:
+    async def _build_graph_impl(
+        self,
+        equivalent_code: str,
+        *,
+        write_shared_cache: bool = True,
+    ) -> None:
         # 1. Get Equivalent ID
         stmt = select(Equivalent).where(Equivalent.code == equivalent_code)
         result = await self.session.execute(stmt)
@@ -333,7 +341,7 @@ class PaymentRouter:
         # If limit=0 and creditor owes debtor, debt_creditor_owes_debtor still provides positive capacity.
 
         ttl = int(getattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0) or 0)
-        if ttl > 0:
+        if write_shared_cache and ttl > 0:
             self._graph_cache[equivalent_code] = (
                 time.time(),
                 {u: dict(v) for u, v in self.graph.items()},
@@ -685,7 +693,8 @@ class PaymentRouter:
                 
                 # Add reverse flow
                 if u not in residual_graph.get(v, {}):
-                    if v not in residual_graph: residual_graph[v] = {}
+                    if v not in residual_graph:
+                        residual_graph[v] = {}
                     residual_graph[v][u] = 0
                 residual_graph[v][u] += flow
 

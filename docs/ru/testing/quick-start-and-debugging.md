@@ -54,6 +54,7 @@ GEOv0-PROJECT/
 ### 2.2 Только Backend
 
 ```powershell
+$env:ENV = 'dev'
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 18000 --reload
 ```
 

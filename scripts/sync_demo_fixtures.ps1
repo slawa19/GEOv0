@@ -10,11 +10,13 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$previousEnv = [Environment]::GetEnvironmentVariable('ENV', 'Process')
+$previousEnvironment = [Environment]::GetEnvironmentVariable('ENVIRONMENT', 'Process')
 
 $pythonCandidates = @(
     (Join-Path $repoRoot '.venv\Scripts\python.exe'),
-    'py -3',
-    'python'
+    'python',
+    'py -3'
 )
 
 function Resolve-Python {
@@ -42,6 +44,11 @@ function Resolve-Python {
 }
 
 try {
+    # Fixture generation imports application modules. Give that child process an
+    # explicit permissive environment without leaking it into the caller.
+    $env:ENV = 'test'
+    $env:ENVIRONMENT = 'test'
+
     $python = Resolve-Python
 
     if (-not $python) {
@@ -75,4 +82,7 @@ try {
     Write-Warning "Demo fixtures sync failed: $($_.Exception.Message). Using cached."
     if ($Strict) { exit 1 }
     exit 0
+} finally {
+    [Environment]::SetEnvironmentVariable('ENV', $previousEnv, 'Process')
+    [Environment]::SetEnvironmentVariable('ENVIRONMENT', $previousEnvironment, 'Process')
 }

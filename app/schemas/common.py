@@ -1,5 +1,13 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 from pydantic import BaseModel, Field
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    version: str
+    environment: Optional[str] = None
+    uptime_seconds: int = Field(..., ge=0)
+    timestamp: str
 
 class ErrorDetail(BaseModel):
     code: str

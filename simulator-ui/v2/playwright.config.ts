@@ -1,5 +1,8 @@
 import { defineConfig } from '@playwright/test'
 
+const e2ePort = Number.parseInt(process.env.PW_E2E_PORT ?? '', 10) || 5177
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`
+
 // Playwright VS Code extension can run `playwright test-server` in the background
 // for test discovery. That process is long-lived; if we start `webServer` there,
 // it will keep `npm run dev` (Vite watchers) running and can churn HDD.
@@ -14,7 +17,7 @@ export default defineConfig({
     timeout: 10_000,
   },
   use: {
-    baseURL: 'http://127.0.0.1:5177',
+    baseURL: e2eBaseUrl,
     viewport: { width: 1280, height: 720 },
     deviceScaleFactor: 1,
     screenshot: 'only-on-failure',
@@ -23,8 +26,8 @@ export default defineConfig({
   },
   webServer: shouldStartWebServer
     ? {
-        command: 'npm run dev -- --host 127.0.0.1 --port 5177',
-        url: 'http://127.0.0.1:5177/',
+        command: `npm run dev -- --host 127.0.0.1 --port ${e2ePort}`,
+        url: `${e2eBaseUrl}/`,
         reuseExistingServer: process.env.CI ? false : true,
         stdout: 'ignore',
         stderr: 'pipe',

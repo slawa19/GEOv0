@@ -163,11 +163,15 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
     )
 
     # Patch payment service so first action fails, second commits.
-    from app.core.payments.service import PaymentService
+    from app.core.payments.service import (
+        PaymentPostCommitEffects,
+        PaymentService,
+        StagedPaymentResult,
+    )
 
     calls = {"n": 0}
 
-    async def _fake_create_payment_internal(
+    async def _fake_create_payment_internal_staged(
         self,
         sender_id,
         *,
@@ -175,12 +179,11 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
         equivalent,
         amount,
         idempotency_key,
-        commit: bool = True,
     ):
         calls["n"] += 1
         if calls["n"] == 1:
             raise BadRequestException("bad payment")
-        return PaymentResult(
+        result = PaymentResult(
             tx_id="tx1",
             status="COMMITTED",
             **{"from": "A"},
@@ -192,11 +195,25 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
             created_at=_utc_now().isoformat(),
             committed_at=None,
         )
+        return StagedPaymentResult(
+            result=result,
+            post_commit_effects=PaymentPostCommitEffects(
+                equivalent=str(equivalent),
+                recipient_pid=str(to_pid),
+                event_payload={
+                    "tx_id": result.tx_id,
+                    "from": "A",
+                    "to": str(to_pid),
+                    "equivalent": str(equivalent),
+                    "amount": str(amount),
+                },
+            ),
+        )
 
     monkeypatch.setattr(
         PaymentService,
-        "create_payment_internal",
-        _fake_create_payment_internal,
+        "create_payment_internal_staged",
+        _fake_create_payment_internal_staged,
         raising=True,
     )
 
@@ -214,4 +231,6 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
     assert session.nested_ends == 2
     assert session.commits == 1
     assert "tx.failed" in sse.types
-    assert "tx.updated" in sse.types
+    assert sse.types.count("tx.updated") == 1
+    assert run.committed_total == 1
+    assert run.attempts_total == 2

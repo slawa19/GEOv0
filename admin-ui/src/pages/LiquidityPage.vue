@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '../api'
@@ -20,6 +20,7 @@ import { useConfigStore } from '../stores/config'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
+import { useLatestRequest } from '../composables/useLatestRequest'
 
 const router = useRouter()
 const route = useRoute()
@@ -33,6 +34,7 @@ const error = ref<string | null>(null)
 const equivalentsList = ref<Equivalent[]>([])
 const summary = ref<LiquiditySummary | null>(null)
 const lastLoadedAt = ref<Date | null>(null)
+const loadRequests = useLatestRequest()
 
 const configStore = useConfigStore()
 const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
@@ -42,6 +44,7 @@ const threshold = ref<string>('0.10')
 
 let routeSyncInitialized = false
 const debouncedLoad = debounce(() => void load(), DEBOUNCE_SEARCH_MS)
+onBeforeUnmount(() => debouncedLoad.cancel())
 
 function syncFromRoute() {
   // Avoid mutating state / query when this component is in the process of being navigated away from.
@@ -92,23 +95,30 @@ watch(threshold, (v) => {
 })
 
 async function load() {
+  const request = loadRequests.begin()
+  const requestEq = eq.value
+  const requestThreshold = threshold.value
   loading.value = true
   error.value = null
   try {
     const eqRes = assertSuccess(await api.listEquivalents({ include_inactive: false }))
+    if (!request.isCurrent()) return
     equivalentsList.value = (eqRes.items || []) as Equivalent[]
 
-    summary.value = assertSuccess(
-      await api.liquiditySummary({ equivalent: eq.value, threshold: threshold.value, limit: 10 }),
+    const nextSummary = assertSuccess(
+      await api.liquiditySummary({ equivalent: requestEq, threshold: requestThreshold, limit: 10 }),
     ) as LiquiditySummary
+    if (!request.isCurrent()) return
+    summary.value = nextSummary
 
     const ts = String(summary.value.updated_at || '').trim()
     lastLoadedAt.value = ts ? new Date(ts) : new Date()
   } catch (e: unknown) {
+    if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('liquidity.loadFailed')
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 

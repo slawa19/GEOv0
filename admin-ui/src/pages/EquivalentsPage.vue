@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
+import { useLatestRequest } from '../composables/useLatestRequest'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }
@@ -17,6 +18,7 @@ const error = ref<string | null>(null)
 
 const includeInactive = ref(false)
 const items = ref<Equivalent[]>([])
+const loadRequests = useLatestRequest()
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -60,16 +62,20 @@ function onCellMouseEnter(row: Equivalent) {
 }
 
 async function load() {
+  const request = loadRequests.begin()
+  const requestIncludeInactive = includeInactive.value
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await api.listEquivalents({ include_inactive: includeInactive.value }))
+    const data = assertSuccess(await api.listEquivalents({ include_inactive: requestIncludeInactive }))
+    if (!request.isCurrent()) return
     items.value = data.items
   } catch (e: unknown) {
+    if (!request.isCurrent()) return
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('equivalents.loadFailed')
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 

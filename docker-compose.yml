@@ -35,13 +35,19 @@ services:
     ports:
       - "${GEO_API_PORT:-8000}:8000"
     environment:
+      # Base Compose is production-like and fails closed when security values are
+      # not supplied. Use docker-compose.dev.yml for intentional dev defaults.
+      ENV: "${ENV:-prod}"
       DATABASE_URL: postgresql+asyncpg://geo:geo@db:5432/geov0
       REDIS_URL: redis://redis:6379/0
       REDIS_ENABLED: "true"
-      JWT_SECRET: change-me-in-production
+      JWT_SECRET: "${JWT_SECRET:-}"
       JWT_ALGORITHM: HS256
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 15
       JWT_REFRESH_TOKEN_EXPIRE_DAYS: 7
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
+      SIMULATOR_SESSION_SECRET: "${SIMULATOR_SESSION_SECRET:-}"
+      SIMULATOR_CSRF_ORIGIN_ALLOWLIST: "${SIMULATOR_CSRF_ORIGIN_ALLOWLIST:-}"
       LOG_LEVEL: INFO
     depends_on:
       db:

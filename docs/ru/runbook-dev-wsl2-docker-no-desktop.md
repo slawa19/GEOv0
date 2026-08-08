@@ -99,7 +99,13 @@ systemd=true
 
 - `cd ~/projects/GEOv0-PROJECT`
 
-### 4.1 Базовый запуск (без hot-reload)
+### 4.1 Базовый production-like запуск (без hot-reload)
+
+Base Compose задаёт `ENV=prod` и намеренно оставляет security-поля пустыми. До
+запуска скопируйте `.env.example` в `.env` и заполните `JWT_SECRET`,
+`ADMIN_TOKEN`, `SIMULATOR_SESSION_SECRET` и
+`SIMULATOR_CSRF_ORIGIN_ALLOWLIST`. Иначе API корректно завершится с ошибкой
+guardrail, не запустившись с небезопасным placeholder.
 
 1) Поднять сервисы.
 
@@ -134,6 +140,7 @@ systemd=true
 - `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`
 
 Что меняется в dev override:
+- приложение явно получает канонический `ENV=dev` и локальные dev-секреты
 - `app` запускается `uvicorn ... --reload`
 - код и тесты монтируются в контейнер для hot-reload
 - логирование более подробное
@@ -168,12 +175,12 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 ## 6) Быстрая диагностика проблем
 
 ### 6.1 Статус контейнеров
-- `docker compose ps`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml ps`
 
 ### 6.2 Логи
-- `docker compose logs -f app`
-- `docker compose logs -f db`
-- `docker compose logs -f redis`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f app`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f db`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f redis`
 
 ### 6.3 Проверка healthcheck’ов
 В `docker-compose.yml` есть healthcheck для `db` и `redis`.
@@ -232,10 +239,10 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 Если Docker уже установлен и работает в WSL:
 
 1) Поднять всё:
-- `docker compose up -d --build`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`
 
 2) Миграции (обычно не нужно, потому что есть авто-миграции в entrypoint):
-- `docker compose exec app alembic -c migrations/alembic.ini upgrade head`
+- `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app alembic -c migrations/alembic.ini upgrade head`
 
 3) Проверка:
 - http://localhost:8000/health

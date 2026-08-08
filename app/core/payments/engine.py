@@ -2,12 +2,13 @@ import logging
 import asyncio
 import hashlib
 import random
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, List, Tuple, Awaitable, Callable, TypeVar
 from uuid import UUID
 
-from sqlalchemy import select, and_, delete, update, func, or_, text
+from sqlalchemy import select, and_, delete, update, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm.exc import StaleDataError
@@ -29,6 +30,24 @@ logger = logging.getLogger(__name__)
 
 
 _T = TypeVar("_T")
+
+# PostgreSQL's two-int advisory-lock key space is disjoint from the one-BIGINT
+# key space used by segment locks. The first int is a stable domain tag.
+_TX_ADVISORY_LOCK_NAMESPACE = 0x475458
+
+
+@dataclass(frozen=True)
+class _PersistedPaymentFlow:
+    equivalent_id: UUID
+    from_id: UUID
+    to_id: UUID
+    amount: Decimal
+
+
+@dataclass(frozen=True)
+class _ValidatedPrepareLock:
+    lock_id: UUID
+    flows: tuple[_PersistedPaymentFlow, ...]
 
 
 class PaymentEngine:
@@ -64,6 +83,25 @@ class PaymentEngine:
         ).digest()
         return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
+    @staticmethod
+    def _tx_lock_key(tx_id: str) -> int:
+        """Compute a stable signed INT key inside the transaction-lock domain."""
+        digest = hashlib.sha256(str(tx_id).encode("utf-8")).digest()
+        return int.from_bytes(digest[:4], byteorder="big", signed=True)
+
+    async def _acquire_tx_advisory_lock(self, tx_id: str) -> None:
+        """Serialize all state transitions for one tx before authoritative reads."""
+        if not self._is_postgres():
+            return
+
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
+            {
+                "namespace": _TX_ADVISORY_LOCK_NAMESPACE,
+                "key": self._tx_lock_key(tx_id),
+            },
+        )
+
     async def _acquire_segment_advisory_locks(
         self,
         *,
@@ -71,9 +109,6 @@ class PaymentEngine:
         routes: List[Tuple[List[str], Decimal]],
         participant_map: dict[str, UUID],
     ) -> None:
-        if not self._is_postgres():
-            return
-
         keys: set[int] = set()
         for path, _route_amount in routes:
             for i in range(len(path) - 1):
@@ -87,11 +122,86 @@ class PaymentEngine:
                     )
                 )
 
-        for key in sorted(keys):
+        await self._acquire_segment_advisory_lock_keys(keys)
+
+    async def _acquire_segment_advisory_lock_keys(
+        self,
+        keys: set[int] | list[int] | tuple[int, ...],
+    ) -> None:
+        """Acquire unique segment keys in one global deadlock-safe order."""
+        if not self._is_postgres():
+            return
+
+        for key in sorted(set(keys)):
             await self.session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": key},
             )
+
+    @classmethod
+    def _parse_persisted_prepare_locks(
+        cls,
+        locks: list[PrepareLock],
+    ) -> tuple[_ValidatedPrepareLock, ...]:
+        """Strictly validate the persisted effects consumed by commit/abort."""
+        validated: list[_ValidatedPrepareLock] = []
+        for lock in locks:
+            raw_effects = lock.effects
+            if not isinstance(raw_effects, dict):
+                raise GeoException()
+            raw_flows = raw_effects.get("flows")
+            if not isinstance(raw_flows, list) or not raw_flows:
+                raise GeoException()
+
+            flows: list[_PersistedPaymentFlow] = []
+            for flow in raw_flows:
+                if not isinstance(flow, dict):
+                    raise GeoException()
+                try:
+                    equivalent_id = UUID(str(flow["equivalent"]))
+                    from_id = UUID(str(flow["from"]))
+                    to_id = UUID(str(flow["to"]))
+                    amount = Decimal(str(flow["amount"]))
+                    if not amount.is_finite() or amount <= 0:
+                        raise ValueError("invalid persisted payment amount")
+                except (
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    AttributeError,
+                    InvalidOperation,
+                ) as exc:
+                    raise GeoException() from exc
+                flows.append(
+                    _PersistedPaymentFlow(
+                        equivalent_id=equivalent_id,
+                        from_id=from_id,
+                        to_id=to_id,
+                        amount=amount,
+                    )
+                )
+            validated.append(
+                _ValidatedPrepareLock(lock_id=lock.id, flows=tuple(flows))
+            )
+
+        if not validated or not any(item.flows for item in validated):
+            raise GeoException()
+        return tuple(sorted(validated, key=lambda item: str(item.lock_id)))
+
+    @classmethod
+    def _segment_lock_keys_from_validated_flows(
+        cls,
+        validated_locks: tuple[_ValidatedPrepareLock, ...],
+    ) -> set[int]:
+        return {
+            cls._segment_lock_key(
+                equivalent_id=flow.equivalent_id,
+                from_participant_id=flow.from_id,
+                to_participant_id=flow.to_id,
+            )
+            for lock in validated_locks
+            for flow in lock.flows
+        }
 
     def _is_retryable_db_error(self, exc: BaseException) -> bool:
         if not isinstance(exc, DBAPIError):
@@ -180,7 +290,9 @@ class PaymentEngine:
     async def _get_tx(self, tx_id: str) -> Transaction | None:
         return (
             await self.session.execute(
-                select(Transaction).where(Transaction.tx_id == tx_id)
+                select(Transaction)
+                .where(Transaction.tx_id == tx_id)
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
 
@@ -209,11 +321,14 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if not tx:
                 raise GeoException(f"Transaction {tx_id} not found")
 
             if tx.state == "COMMITTED":
+                if commit:
+                    await self.session.commit()
                 try:
                     PAYMENT_EVENTS_TOTAL.labels(
                         event="prepare", result="already_committed"
@@ -241,11 +356,17 @@ class PaymentEngine:
 
             # We need to lock resources. In MVP, we use PrepareLock table.
             # Idempotency: if locks exist and tx is already prepared, treat prepare as no-op.
-            stmt = select(PrepareLock).where(PrepareLock.tx_id == tx_id)
+            stmt = (
+                select(PrepareLock)
+                .where(PrepareLock.tx_id == tx_id)
+                .execution_options(populate_existing=True)
+            )
             result = await self.session.execute(stmt)
             existing_locks = result.scalars().all()
             if existing_locks:
                 if tx.state == "PREPARED":
+                    if commit:
+                        await self.session.commit()
                     try:
                         PAYMENT_EVENTS_TOTAL.labels(
                             event="prepare", result="already_prepared"
@@ -256,6 +377,12 @@ class PaymentEngine:
                 raise ConflictException(
                     f"Transaction {tx_id} already has locks but state={tx.state}"
                 )
+
+            await self._acquire_segment_advisory_locks(
+                equivalent_id=equivalent_id,
+                routes=[(path, amount)],
+                participant_map=participant_map,
+            )
 
             expires_at = datetime.now(timezone.utc) + timedelta(
                 seconds=self.lock_ttl_seconds
@@ -381,10 +508,11 @@ class PaymentEngine:
                 await self.session.flush()
 
             logger.info("event=payment.prepared tx_id=%s", tx_id)
-            try:
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
-            except Exception:
-                pass
+            if commit:
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
+                except Exception:
+                    pass
             return True
 
         if not commit:
@@ -414,11 +542,14 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if not tx:
                 raise GeoException(f"Transaction {tx_id} not found")
 
             if tx.state == "COMMITTED":
+                if commit:
+                    await self.session.commit()
                 try:
                     PAYMENT_EVENTS_TOTAL.labels(
                         event="prepare", result="already_committed"
@@ -433,7 +564,9 @@ class PaymentEngine:
             existing_locks = (
                 (
                     await self.session.execute(
-                        select(PrepareLock).where(PrepareLock.tx_id == tx_id)
+                        select(PrepareLock)
+                        .where(PrepareLock.tx_id == tx_id)
+                        .execution_options(populate_existing=True)
                     )
                 )
                 .scalars()
@@ -441,6 +574,8 @@ class PaymentEngine:
             )
             if existing_locks:
                 if tx.state == "PREPARED":
+                    if commit:
+                        await self.session.commit()
                     try:
                         PAYMENT_EVENTS_TOTAL.labels(
                             event="prepare", result="already_prepared"
@@ -615,10 +750,11 @@ class PaymentEngine:
             else:
                 await self.session.flush()
             logger.info("event=payment.prepared tx_id=%s multipath=true", tx_id)
-            try:
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
-            except Exception:
-                pass
+            if commit:
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
+                except Exception:
+                    pass
             return True
 
         if not commit:
@@ -639,11 +775,14 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if not tx:
                 raise GeoException(f"Transaction {tx_id} not found")
 
             if tx.state == "COMMITTED":
+                if commit:
+                    await self.session.commit()
                 try:
                     PAYMENT_EVENTS_TOTAL.labels(
                         event="commit", result="already_committed"
@@ -659,21 +798,114 @@ class PaymentEngine:
                 )
 
             # 1. Load Locks
-            stmt = select(PrepareLock).where(PrepareLock.tx_id == tx_id)
+            stmt = (
+                select(PrepareLock)
+                .where(PrepareLock.tx_id == tx_id)
+                .execution_options(populate_existing=True)
+            )
             result = await self.session.execute(stmt)
             locks = result.scalars().all()
 
             if not locks:
+                # A concurrent commit may have removed the locks after our initial
+                # transaction-state read. Refresh before preserving the no-lock error.
+                tx_latest = (
+                    await self.session.execute(
+                        select(Transaction)
+                        .where(Transaction.tx_id == tx_id)
+                        .execution_options(populate_existing=True)
+                    )
+                ).scalar_one_or_none()
+                if tx_latest is not None and tx_latest.state == "COMMITTED":
+                    if commit:
+                        await self.session.commit()
+                    try:
+                        PAYMENT_EVENTS_TOTAL.labels(
+                            event="commit", result="already_committed"
+                        ).inc()
+                    except Exception:
+                        pass
+                    return True
+                if tx_latest is not None and tx_latest.state in {"ABORTED", "REJECTED"}:
+                    raise ConflictException(
+                        f"Transaction {tx_id} is {tx_latest.state}"
+                    )
+                if tx_latest is not None and tx_latest.state != "PREPARED":
+                    raise ConflictException(
+                        f"Transaction {tx_id} is not prepared (state={tx_latest.state})"
+                    )
                 raise GeoException(f"No locks found for transaction {tx_id}")
+
+            # Prepare and commit must serialize on the same globally ordered segment
+            # keys. Otherwise commit can update Debt and delete PrepareLocks between a
+            # concurrent prepare's debt reads and reservation read under READ COMMITTED.
+            validated_locks = self._parse_persisted_prepare_locks(locks)
+            commit_segment_keys = self._segment_lock_keys_from_validated_flows(
+                validated_locks
+            )
+            await self._acquire_segment_advisory_lock_keys(commit_segment_keys)
+
+            # The advisory wait may have allowed another same-tx commit/abort to finish.
+            # Refresh both state and locks before applying any persisted effects.
+            tx = (
+                await self.session.execute(
+                    select(Transaction)
+                    .where(Transaction.tx_id == tx_id)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if not tx:
+                raise GeoException(f"Transaction {tx_id} not found")
+            if tx.state == "COMMITTED":
+                if commit:
+                    # Release advisory keys acquired by this idempotent waiter.
+                    await self.session.commit()
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(
+                        event="commit", result="already_committed"
+                    ).inc()
+                except Exception:
+                    pass
+                return True
+            if tx.state in {"ABORTED", "REJECTED"}:
+                raise ConflictException(f"Transaction {tx_id} is {tx.state}")
+            if tx.state != "PREPARED":
+                raise ConflictException(
+                    f"Transaction {tx_id} is not prepared (state={tx.state})"
+                )
+
+            locks = (
+                (
+                    await self.session.execute(
+                        select(PrepareLock)
+                        .where(PrepareLock.tx_id == tx_id)
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not locks:
+                raise GeoException(f"No locks found for transaction {tx_id}")
+            refreshed_validated_locks = self._parse_persisted_prepare_locks(locks)
+            refreshed_segment_keys = self._segment_lock_keys_from_validated_flows(
+                refreshed_validated_locks
+            )
+            if (
+                refreshed_validated_locks != validated_locks
+                or refreshed_segment_keys != commit_segment_keys
+            ):
+                # Never acquire newly appeared keys out of the established global order.
+                raise GeoException()
+            validated_locks = refreshed_validated_locks
 
             # FIX-014: capture integrity checksums before applying flows.
             checkpoints_before: dict[UUID, object] = {}
             try:
                 affected_eq_ids = {
-                    UUID(flow["equivalent"])
-                    for lock in locks
-                    for flow in (lock.effects or {}).get("flows", [])
-                    if isinstance(flow, dict) and "equivalent" in flow
+                    flow.equivalent_id
+                    for lock in validated_locks
+                    for flow in lock.flows
                 }
                 for eq_id in affected_eq_ids:
                     try:
@@ -702,7 +934,12 @@ class PaymentEngine:
                 )
             ).scalar_one_or_none()
             if expired_lock:
-                await self.abort(tx_id, reason="Prepare locks expired before commit", commit=commit)
+                await self.abort(
+                    tx_id,
+                    reason="Prepare locks expired before commit",
+                    commit=commit,
+                    _tx_lock_already_held=True,
+                )
                 raise ConflictException(f"Transaction {tx_id} expired before commit")
 
             # 2. Process each lock (segment)
@@ -710,30 +947,20 @@ class PaymentEngine:
             affected_pids_by_equivalent: dict[UUID, set[UUID]] = {}
             flows_parsed_by_lock: list[list[tuple[UUID, UUID, Decimal, UUID]]] = []
 
-            for lock in locks:
-                parsed: list[tuple[UUID, UUID, Decimal, UUID]] = []
-                raw_effects = lock.effects or {}
-                raw_flows = raw_effects.get("flows", []) if isinstance(raw_effects, dict) else []
-                if isinstance(raw_flows, list):
-                    for flow in raw_flows:
-                        if not isinstance(flow, dict):
-                            continue
-                        try:
-                            from_id = UUID(flow["from"])
-                            to_id = UUID(flow["to"])
-                            amount = Decimal(flow["amount"])
-                            equivalent_id = UUID(flow["equivalent"])
-                        except Exception:
-                            continue
-
-                        parsed.append((from_id, to_id, amount, equivalent_id))
-                        flows_by_equivalent.setdefault(equivalent_id, []).append(
-                            (from_id, to_id, amount)
-                        )
-                        affected = affected_pids_by_equivalent.setdefault(equivalent_id, set())
-                        affected.add(from_id)
-                        affected.add(to_id)
-
+            for lock in validated_locks:
+                parsed = [
+                    (flow.from_id, flow.to_id, flow.amount, flow.equivalent_id)
+                    for flow in lock.flows
+                ]
+                for from_id, to_id, amount, equivalent_id in parsed:
+                    flows_by_equivalent.setdefault(equivalent_id, []).append(
+                        (from_id, to_id, amount)
+                    )
+                    affected = affected_pids_by_equivalent.setdefault(
+                        equivalent_id, set()
+                    )
+                    affected.add(from_id)
+                    affected.add(to_id)
                 flows_parsed_by_lock.append(parsed)
 
             net_positions_before_by_equivalent: dict[UUID, dict[UUID, Decimal]] = {}
@@ -788,6 +1015,7 @@ class PaymentEngine:
                     error_code=getattr(exc, "code", None),
                     details=getattr(exc, "details", None),
                     commit=commit,
+                    _tx_lock_already_held=not commit,
                 )
                 raise
 
@@ -873,10 +1101,11 @@ class PaymentEngine:
             else:
                 await self.session.flush()
             logger.info("event=payment.committed tx_id=%s", tx_id)
-            try:
-                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
-            except Exception:
-                pass
+            if commit:
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
+                except Exception:
+                    pass
             return True
 
         if not commit:
@@ -1118,6 +1347,7 @@ class PaymentEngine:
         commit: bool = True,
         error_code: ErrorCode | str | None = None,
         details: dict[str, Any] | None = None,
+        _tx_lock_already_held: bool = False,
     ):
         """
         Abort transaction: Delete locks, set state to ABORTED.
@@ -1140,32 +1370,13 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            if not _tx_lock_already_held:
+                await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
-
-            existing_error: dict[str, Any] = (tx.error if tx and isinstance(tx.error, dict) else {}) or {}
-            normalized_code = _normalize_code(error_code or existing_error.get("code"))
-            normalized_details: dict[str, Any] = (
-                details
-                if details is not None
-                else (existing_error.get("details") if isinstance(existing_error.get("details"), dict) else {})
-            ) or {}
-            # Always persist a stable error schema for aborted transactions.
-            error_payload: dict[str, Any] = {
-                "code": normalized_code.value,
-                "message": str(existing_error.get("message") or reason or ERROR_MESSAGES[normalized_code]),
-                "details": normalized_details,
-            }
-
             if tx and tx.state == "COMMITTED":
-                # Safety guard: never transition a committed transaction back to ABORTED.
-                # This can happen in the service layer under timeout uncertainty (commit may
-                # have finished, but the caller timed out).
-                delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
-                await self.session.execute(delete_stmt)
                 if commit:
+                    # Preserve the public commit=True transaction boundary.
                     await self.session.commit()
-                else:
-                    await self.session.flush()
                 try:
                     PAYMENT_EVENTS_TOTAL.labels(
                         event="abort", result="already_committed"
@@ -1173,12 +1384,97 @@ class PaymentEngine:
                 except Exception:
                     pass
                 return True
-            if tx and tx.state == "ABORTED":
-                # Idempotency: ensure locks are gone as well.
-                delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
-                await self.session.execute(delete_stmt)
 
-                # Ensure error code is present even on idempotent aborts.
+            initial_locks = (
+                (
+                    await self.session.execute(
+                        select(PrepareLock)
+                        .where(PrepareLock.tx_id == tx_id)
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            initial_validated_locks: tuple[_ValidatedPrepareLock, ...] = ()
+            initial_segment_keys: set[int] = set()
+            initial_locks_malformed = False
+            if initial_locks:
+                try:
+                    initial_validated_locks = self._parse_persisted_prepare_locks(
+                        initial_locks
+                    )
+                except GeoException:
+                    # Abort never applies persisted effects. Legacy/malformed locks are
+                    # recoverable under the tx-scoped lock without segment keys.
+                    initial_locks_malformed = True
+                else:
+                    initial_segment_keys = self._segment_lock_keys_from_validated_flows(
+                        initial_validated_locks
+                    )
+                    await self._acquire_segment_advisory_lock_keys(initial_segment_keys)
+
+            # A competing commit/abort may have completed while we waited. Terminal
+            # state wins; active state requires the exact same authoritative lock flows.
+            tx = (
+                await self.session.execute(
+                    select(Transaction)
+                    .where(Transaction.tx_id == tx_id)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            refreshed_locks = (
+                (
+                    await self.session.execute(
+                        select(PrepareLock)
+                        .where(PrepareLock.tx_id == tx_id)
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            if tx and tx.state == "COMMITTED":
+                if commit:
+                    # Release advisory keys acquired before the terminal re-check.
+                    await self.session.commit()
+                try:
+                    PAYMENT_EVENTS_TOTAL.labels(
+                        event="abort", result="already_committed"
+                    ).inc()
+                except Exception:
+                    pass
+                return True
+
+            existing_error: dict[str, Any] = (
+                tx.error if tx and isinstance(tx.error, dict) else {}
+            ) or {}
+            normalized_code = _normalize_code(error_code or existing_error.get("code"))
+            normalized_details: dict[str, Any] = (
+                details
+                if details is not None
+                else (
+                    existing_error.get("details")
+                    if isinstance(existing_error.get("details"), dict)
+                    else {}
+                )
+            ) or {}
+            error_payload: dict[str, Any] = {
+                "code": normalized_code.value,
+                "message": str(
+                    existing_error.get("message")
+                    or reason
+                    or ERROR_MESSAGES[normalized_code]
+                ),
+                "details": normalized_details,
+            }
+
+            if tx and tx.state == "ABORTED":
+                # Idempotent terminal state wins over the pre-wait lock snapshot.
+                await self.session.execute(
+                    delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
+                )
                 await self.session.execute(
                     update(Transaction)
                     .where(Transaction.tx_id == tx_id)
@@ -1195,6 +1491,29 @@ class PaymentEngine:
                 except Exception:
                     pass
                 return True
+
+            refreshed_validated_locks: tuple[_ValidatedPrepareLock, ...] = ()
+            refreshed_segment_keys: set[int] = set()
+            refreshed_locks_malformed = False
+            if refreshed_locks:
+                try:
+                    refreshed_validated_locks = self._parse_persisted_prepare_locks(
+                        refreshed_locks
+                    )
+                except GeoException:
+                    refreshed_locks_malformed = True
+                else:
+                    refreshed_segment_keys = self._segment_lock_keys_from_validated_flows(
+                        refreshed_validated_locks
+                    )
+            if initial_locks_malformed != refreshed_locks_malformed:
+                raise GeoException()
+            if not initial_locks_malformed and (
+                refreshed_validated_locks != initial_validated_locks
+                or refreshed_segment_keys != initial_segment_keys
+            ):
+                # Do not acquire newly appeared keys outside the established order.
+                raise GeoException()
 
             # Delete locks
             delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)

@@ -10,10 +10,12 @@ services:
     # Use uvicorn with reload for development
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:
-      - ENVIRONMENT=dev
-      - ENABLE_TEST_ENDPOINTS=true
-      - LOG_LEVEL=DEBUG
-      - LOG_FORMAT=text
+      ENV: dev
+      JWT_SECRET: "${JWT_SECRET:-dev-secret-change-me-please-32chars!!}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-dev-admin-token-change-me}"
+      SIMULATOR_SESSION_SECRET: "${SIMULATOR_SESSION_SECRET:-change-me-in-production}"
+      SIMULATOR_CSRF_ORIGIN_ALLOWLIST: "${SIMULATOR_CSRF_ORIGIN_ALLOWLIST:-}"
+      LOG_LEVEL: DEBUG
     volumes:
       # Full mount for hot-reload
       - ./app:/app/app
@@ -34,8 +36,6 @@ services:
       - "5050:80"
     depends_on:
       - db
-    networks:
-      - geo-network
     profiles:
       - tools
 
@@ -49,7 +49,5 @@ services:
       - "8081:8081"
     depends_on:
       - redis
-    networks:
-      - geo-network
     profiles:
       - tools

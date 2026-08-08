@@ -6,7 +6,6 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -106,7 +105,11 @@ async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, session_fact
         await session.commit()
 
         # Force the executor's payment call to fail with a delta-check invariant violation.
+        injected = 0
+
         async def _raise_delta_drift(self, *args, **kwargs):
+            nonlocal injected
+            injected += 1
             raise IntegrityViolationException(
                 "Per-participant delta check failed",
                 details={
@@ -127,7 +130,11 @@ async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, session_fact
 
         from app.core.payments.service import PaymentService
 
-        monkeypatch.setattr(PaymentService, "create_payment_internal", _raise_delta_drift)
+        monkeypatch.setattr(
+            PaymentService,
+            "create_payment_internal_staged",
+            _raise_delta_drift,
+        )
 
         captured: list[dict[str, Any]] = []
 
@@ -164,7 +171,7 @@ async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, session_fact
         # RealPaymentsExecutor drains results starting at seq=0.
         planned = [_PlannedAction(seq=0, equivalent="UAH", sender_pid="p1", receiver_pid="p2", amount="1.00")]
 
-        await asyncio.wait_for(
+        result = await asyncio.wait_for(
             executor.execute_planned_payments(
                 session=session,
                 run_id=run.run_id,
@@ -178,6 +185,12 @@ async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, session_fact
             ),
             timeout=10.0,
         )
+        assert injected == 1
+        assert captured == []
+
+        await session.rollback()
+        assert result.deferred_effects is not None
+        result.deferred_effects.apply_after_rollback()
 
         drift_events = [e for e in captured if e.get("type") == "audit.drift" and e.get("source") == "delta_check"]
         assert drift_events, f"Expected audit.drift(source=delta_check). Got types={[e.get('type') for e in captured]}"

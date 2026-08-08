@@ -14,7 +14,6 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
 
 from app.api.deps import SimulatorActor, _check_csrf_origin
 from app.config import settings as app_settings
@@ -190,6 +189,45 @@ def test_csrf_check_passes_second_origin_in_allowlist(monkeypatch) -> None:
     request = _make_request("POST", origin="https://geo-sim.example.com")
 
     _check_csrf_origin(request, actor)
+
+
+def test_csrf_check_uses_browser_canonical_origin_serialization(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    configured = Settings(
+        _env_file=None,
+        ENV="prod",
+        JWT_SECRET="jwt-7f12a6c90de34b58a1c772dc3405f011",
+        ADMIN_TOKEN="admin-92cbe2405db74a09baf03a9086e110d8",
+        SIMULATOR_SESSION_SECRET="session-287be5604a1f45fd889014d0016a5c71",
+        SIMULATOR_CSRF_ORIGIN_ALLOWLIST="https://Simulator.Example.com:443",
+    )
+    monkeypatch.setattr(
+        app_settings,
+        "SIMULATOR_CSRF_ORIGIN_ALLOWLIST",
+        configured.SIMULATOR_CSRF_ORIGIN_ALLOWLIST,
+    )
+    actor = SimulatorActor(kind="anon", owner_id="anon:abc", is_admin=False)
+
+    _check_csrf_origin(
+        _make_request("POST", origin="https://simulator.example.com"),
+        actor,
+    )
+
+
+def test_csrf_check_preserves_nondefault_origin_port(monkeypatch) -> None:
+    monkeypatch.setattr(
+        app_settings,
+        "SIMULATOR_CSRF_ORIGIN_ALLOWLIST",
+        "https://simulator.example.com:8443",
+    )
+    actor = SimulatorActor(kind="anon", owner_id="anon:abc", is_admin=False)
+
+    _check_csrf_origin(
+        _make_request("POST", origin="HTTPS://Simulator.Example.com:8443"),
+        actor,
+    )
 
 
 def test_csrf_check_blocks_invalid_origin(monkeypatch) -> None:

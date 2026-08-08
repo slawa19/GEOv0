@@ -952,6 +952,9 @@ export function useGraphVisualization(options: {
     updateZoomStyles()
     updateLabelsForZoom()
     updateSearchHighlights()
+    applySelectedHighlight(
+      options.selected.value && options.selected.value.kind === 'node' ? options.selected.value.pid : '',
+    )
     runLayoutAndMaybeFit({ fitOnStop: fit })
   }
 

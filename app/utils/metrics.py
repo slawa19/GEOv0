@@ -42,5 +42,19 @@ RECOVERY_EVENTS_TOTAL = Counter(
 )
 
 
+EVENT_BUS_DROPPED_TOTAL = Counter(
+    "geo_event_bus_dropped_total",
+    "In-process event bus messages dropped before delivery",
+    ["reason"],
+)
+
+
+BACKGROUND_JOB_EVENTS_TOTAL = Counter(
+    "geo_background_job_events_total",
+    "Background job lifecycle events",
+    ["job", "event"],
+)
+
+
 def render_metrics() -> tuple[bytes, str]:
     return generate_latest(), CONTENT_TYPE_LATEST

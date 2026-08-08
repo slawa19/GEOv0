@@ -9,6 +9,12 @@
 
 ## Docker
 
+`docker/Dockerfile` — канонический base/production build. Корневой `Dockerfile`
+— dev-образ для bind mounts и hot reload; его выбирает
+`docker-compose.dev.yml`. Оба образа используют общий
+`docker/docker-entrypoint.sh`: он выполняет migration preflight и Alembic, затем
+без изменений запускает переданный `CMD`/Compose `command`.
+
 Docker-файлы находятся в директории `docker/`:
 - [`docker/Dockerfile`](../../../docker/Dockerfile)
 - [`docker/docker-entrypoint.sh`](../../../docker/docker-entrypoint.sh)

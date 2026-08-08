@@ -7,6 +7,7 @@ from typing import Any, Callable
 import app.db.session as db_session
 import app.core.simulator.storage as simulator_storage
 from app.core.simulator.artifacts import ArtifactsManager
+from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 
 
@@ -35,6 +36,35 @@ class RealTickPersistence:
         self._real_last_tick_write_every_ms = int(real_last_tick_write_every_ms)
         self._real_artifacts_sync_every_ms = int(real_artifacts_sync_every_ms)
 
+    def _apply_callback(self, callback: Callable[[], Any] | None, *, kind: str) -> None:
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            self._logger.warning(
+                "simulator.real.payment_%s_callback_failed",
+                kind,
+                exc_info=True,
+            )
+
+    async def _commit_and_resolve(
+        self,
+        session: Any,
+        *,
+        on_commit: Callable[[], Any] | None,
+        on_rollback: Callable[[], Any] | None,
+        on_unknown: Callable[[], Any] | None,
+    ) -> None:
+        await resolve_commit_under_cancellation(
+            commit=session.commit,
+            rollback=session.rollback,
+            on_commit=lambda: self._apply_callback(on_commit, kind="post_commit"),
+            on_rollback=lambda: self._apply_callback(on_rollback, kind="rollback"),
+            on_unknown=lambda: self._apply_callback(on_unknown, kind="unknown"),
+            logger=self._logger,
+        )
+
     async def persist_tick_tail(
         self,
         *,
@@ -50,6 +80,9 @@ class RealTickPersistence:
         per_eq: dict[str, Any],
         per_eq_metric_values: dict[str, dict[str, float]],
         per_eq_edge_stats: dict[str, Any],
+        on_commit: Callable[[], Any] | None = None,
+        on_rollback: Callable[[], Any] | None = None,
+        on_unknown: Callable[[], Any] | None = None,
     ) -> None:
         computed_at = self._utc_now()
         with self._lock:
@@ -102,21 +135,22 @@ class RealTickPersistence:
             with self._lock:
                 run._real_last_tick_storage_flushed_tick = int(run.tick_index)
 
-        try:
-            commit_t0 = time.monotonic()
-            await session.commit()
-            commit_ms = (time.monotonic() - commit_t0) * 1000.0
-            if commit_ms > 500.0:
-                self._logger.warning(
-                    "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
-                    str(run.run_id),
-                    int(run.tick_index),
-                    int(commit_ms),
-                    int((time.monotonic() - tick_t0) * 1000.0),
-                )
-        except Exception:
-            await session.rollback()
-            raise
+        commit_t0 = time.monotonic()
+        await self._commit_and_resolve(
+            session,
+            on_commit=on_commit,
+            on_rollback=on_rollback,
+            on_unknown=on_unknown,
+        )
+        commit_ms = (time.monotonic() - commit_t0) * 1000.0
+        if commit_ms > 500.0:
+            self._logger.warning(
+                "simulator.real.tick_commit_slow run_id=%s tick=%s commit_ms=%s total_tick_ms=%s",
+                str(run.run_id),
+                int(run.tick_index),
+                int(commit_ms),
+                int((time.monotonic() - tick_t0) * 1000.0),
+            )
 
         now_ms = int(time.time() * 1000)
         tick_write_every_ms = int(self._real_last_tick_write_every_ms)

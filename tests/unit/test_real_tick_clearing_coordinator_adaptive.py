@@ -25,6 +25,17 @@ class _PaymentsResult:
     rejection_codes_by_eq: dict[str, dict[str, int]]
 
 
+@dataclass
+class _DeferredPaymentsResult:
+    applied: int = 0
+
+    def apply_deferred_effects(self) -> bool:
+        if self.applied:
+            return False
+        self.applied += 1
+        return True
+
+
 def _make_run(*, tick_index: int = 0) -> RunRecord:
     run = RunRecord(
         run_id="run-1",
@@ -36,6 +47,36 @@ def _make_run(*, tick_index: int = 0) -> RunRecord:
     # Optional fields used by coordinator guardrails
     setattr(run, "_real_in_flight", 0)
     return run
+
+
+@pytest.mark.asyncio
+async def test_static_clearing_applies_payment_effects_after_commit() -> None:
+    coordinator = RealTickClearingCoordinator(
+        lock=threading.Lock(),
+        logger=logging.getLogger(__name__),
+        clearing_every_n_ticks=1,
+        real_clearing_time_budget_ms=250,
+    )
+    payments_result = _DeferredPaymentsResult()
+
+    await coordinator.maybe_run_clearing(
+        session=_AsyncSession(),
+        run_id="run-1",
+        run=_make_run(tick_index=1),
+        equivalents=["USD"],
+        planned_len=1,
+        tick_t0=0.0,
+        clearing_enabled=True,
+        safe_int_env=lambda _key, default: default,
+        run_clearing=lambda: _return_zero_clearing(),
+        payments_result=payments_result,
+    )
+
+    assert payments_result.applied == 1
+
+
+async def _return_zero_clearing() -> dict[str, float]:
+    return {"USD": 0.0}
 
 
 @pytest.mark.asyncio

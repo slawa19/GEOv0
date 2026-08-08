@@ -5,6 +5,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
+from app.utils.metrics import EVENT_BUS_DROPPED_TOTAL
+
 
 @dataclass
 class _Subscription:
@@ -12,6 +14,7 @@ class _Subscription:
     events: set[str]
     queue: "asyncio.Queue[dict[str, Any]]"
     loop: asyncio.AbstractEventLoop
+    active: bool = True
 
 
 class InMemoryEventBus:
@@ -35,10 +38,45 @@ class InMemoryEventBus:
 
     async def unsubscribe(self, sub: _Subscription) -> None:
         with self._lock:
+            sub.active = False
             try:
                 self._subs.remove(sub)
             except ValueError:
                 return
+
+    @staticmethod
+    def _record_drop(reason: str) -> None:
+        try:
+            EVENT_BUS_DROPPED_TOTAL.labels(reason=reason).inc()
+        except Exception:
+            # Observability must not make a best-effort publication fail.
+            pass
+
+    def _deliver_if_active(
+        self,
+        sub: _Subscription,
+        message: dict[str, Any],
+    ) -> None:
+        dropped = False
+        with self._lock:
+            if not sub.active:
+                return
+            try:
+                sub.queue.put_nowait(message)
+            except asyncio.QueueFull:
+                # Deterministic overload policy: preserve queued messages and drop
+                # the newest publication without blocking the payment path.
+                dropped = True
+        if dropped:
+            self._record_drop("queue_full")
+
+    def _deactivate(self, sub: _Subscription) -> None:
+        with self._lock:
+            sub.active = False
+            try:
+                self._subs.remove(sub)
+            except ValueError:
+                pass
 
     def publish(self, *, recipient_pid: str, event: str, payload: dict[str, Any]) -> None:
         with self._lock:
@@ -47,10 +85,12 @@ class InMemoryEventBus:
         message = {"event": event, "payload": payload}
         for sub in subs:
             try:
-                sub.loop.call_soon_threadsafe(sub.queue.put_nowait, message)
-            except asyncio.QueueFull:
-                # Drop on overload (best-effort)
-                pass
+                sub.loop.call_soon_threadsafe(self._deliver_if_active, sub, message)
+            except RuntimeError:
+                # A closed subscriber loop cannot consume future messages. Remove
+                # it so subsequent publications do not repeat the same failure.
+                self._deactivate(sub)
+                self._record_drop("loop_closed")
 
 
 event_bus = InMemoryEventBus()

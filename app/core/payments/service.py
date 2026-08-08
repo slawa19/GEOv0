@@ -2,7 +2,7 @@ import uuid
 import hashlib
 import logging
 import asyncio
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Literal
 
@@ -38,6 +38,63 @@ from app.utils.error_codes import ErrorCode
 from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_amount_decimal
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PaymentPostCommitEffects:
+    """Best-effort effects that are only valid after the DB transaction commits."""
+
+    equivalent: str
+    recipient_pid: str
+    event_payload: dict[str, str]
+    invalidate_routing_cache: bool = True
+    include_engine_success_metrics: bool = False
+    _applied: bool = field(default=False, init=False, repr=False)
+
+    def apply_once(self) -> bool:
+        if self._applied:
+            return False
+        # Mark first: these effects are process-local and cannot be made exactly-once
+        # across a crash without a transactional outbox.
+        self._applied = True
+
+        if self.invalidate_routing_cache:
+            try:
+                PaymentRouter.invalidate_cache(self.equivalent)
+            except Exception:
+                logger.warning(
+                    "event=payment.post_commit.cache_invalidation_failed equivalent=%s",
+                    self.equivalent,
+                    exc_info=True,
+                )
+
+        try:
+            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+            PAYMENT_EVENTS_TOTAL.labels(event="create", result="success").inc()
+            if self.include_engine_success_metrics:
+                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
+                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
+        except Exception:
+            pass
+
+        try:
+            from app.utils.event_bus import event_bus
+
+            event_bus.publish(
+                recipient_pid=self.recipient_pid,
+                event="payment.received",
+                payload=dict(self.event_payload),
+            )
+        except Exception:
+            pass
+        return True
+
+
+@dataclass(frozen=True)
+class StagedPaymentResult:
+    result: PaymentResult
+    post_commit_effects: PaymentPostCommitEffects | None
 
 
 class PaymentService:
@@ -81,6 +138,12 @@ class PaymentService:
           in-process code.
         """
 
+        if not commit:
+            raise ValueError(
+                "commit=False is staged work; use create_payment_internal_staged() "
+                "and apply its post-commit effects after the caller commits"
+            )
+
         # Internal-only path: tx_id is generated in-process (or derived from idempotency_key)
         # because no external caller is responsible for retries here.
         tx_id = (idempotency_key or "").strip() or str(uuid.uuid4())
@@ -101,6 +164,43 @@ class PaymentService:
             commit=commit,
         )
 
+    async def create_payment_internal_staged(
+        self,
+        sender_id: uuid.UUID,
+        *,
+        to_pid: str,
+        equivalent: str,
+        amount: str,
+        description: str | None = None,
+        constraints: PaymentConstraints | None = None,
+        idempotency_key: str | None = None,
+    ) -> StagedPaymentResult:
+        """Flush an internal payment into the caller transaction without publishing it."""
+
+        tx_id = (idempotency_key or "").strip() or str(uuid.uuid4())
+        req = PaymentCreateRequest(
+            tx_id=tx_id,
+            to=to_pid,
+            equivalent=equivalent,
+            amount=amount,
+            description=description,
+            constraints=constraints,
+            signature="__internal__",
+        )
+        deferred_effects: list[PaymentPostCommitEffects] = []
+        result = await self._create_payment_impl(
+            sender_id,
+            req,
+            idempotency_key=idempotency_key,
+            require_signature=False,
+            commit=False,
+            deferred_effects=deferred_effects,
+        )
+        return StagedPaymentResult(
+            result=result,
+            post_commit_effects=(deferred_effects[0] if deferred_effects else None),
+        )
+
     async def _create_payment_impl(
         self,
         sender_id: uuid.UUID,
@@ -109,6 +209,7 @@ class PaymentService:
         idempotency_key: str | None = None,
         require_signature: bool,
         commit: bool,
+        deferred_effects: list[PaymentPostCommitEffects] | None = None,
     ) -> PaymentResult:
         """
         Create and execute a payment.
@@ -329,8 +430,16 @@ class PaymentService:
             async with asyncio.timeout(total_timeout_s):
                 # Build routing graph + compute routes under spec-aligned timeout budget.
                 try:
+                    if deferred_effects is None:
+                        build_graph = self.router.build_graph(equivalent.code)
+                    else:
+                        build_graph = self.router.build_graph(
+                            equivalent.code,
+                            use_shared_cache=False,
+                        )
                     await asyncio.wait_for(
-                        self.router.build_graph(equivalent.code), timeout=routing_timeout_s
+                        build_graph,
+                        timeout=routing_timeout_s,
                     )
                 except asyncio.TimeoutError:
                     raise TimeoutException("Routing timed out")
@@ -458,14 +567,15 @@ class PaymentService:
                         )
 
                     # Routing graph may incorporate debts/locks; invalidate any TTL cache.
-                    PaymentRouter.invalidate_cache(str(request.equivalent))
+                    if deferred_effects is None:
+                        PaymentRouter.invalidate_cache(str(request.equivalent))
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:
-                    logger.info(
-                        "event=payment.prepare_failed tx_id=%s error=%s",
+                    logger.error(
+                        "event=payment.prepare_failed tx_id=%s error_type=%s",
                         tx_id_str,
-                        str(e),
+                        type(e).__name__,
                     )
                     try:
                         from app.utils.metrics import PAYMENT_EVENTS_TOTAL
@@ -475,25 +585,61 @@ class PaymentService:
                         ).inc()
                     except Exception:
                         pass
+
+                    is_client_error = isinstance(e, GeoException) and 400 <= int(
+                        getattr(e, "status_code", 500) or 500
+                    ) < 500
+                    public_error = e if is_client_error else GeoException()
+                    abort_reason = str(public_error.message)
+                    abort_code = getattr(public_error, "code", ErrorCode.E010)
+                    abort_details = getattr(public_error, "details", None) or {}
+
                     # Abort is idempotent and also cleans up any partial locks.
                     if commit:
-                        await self.engine.abort(
-                            tx_id_str,
-                            reason=f"Prepare failed: {str(e)}",
-                            error_code=ErrorCode.E010,
-                            commit=True,
-                        )
+                        try:
+                            await self.session.rollback()
+                        except Exception as rollback_error:
+                            logger.error(
+                                "event=payment.prepare_rollback_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(rollback_error).__name__,
+                            )
+                            raise GeoException() from rollback_error
+
+                        try:
+                            await self.engine.abort(
+                                tx_id_str,
+                                reason=abort_reason,
+                                error_code=abort_code,
+                                details=abort_details,
+                                commit=True,
+                            )
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.prepare_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+                            raise GeoException() from abort_error
                     else:
                         try:
                             await self.engine.abort(
                                 tx_id_str,
-                                reason=f"Prepare failed: {str(e)}",
-                                error_code=ErrorCode.E010,
+                                reason=abort_reason,
+                                error_code=abort_code,
+                                details=abort_details,
                                 commit=False,
                             )
-                        except Exception:
-                            pass
-                    raise BadRequestException(f"Payment preparation failed: {str(e)}")
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.prepare_nested_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+
+                    if is_client_error:
+                        raise
+                    raise public_error from e
 
                 # 5. Engine Commit
                 # In MVP we commit immediately. In real system, we might wait for receiver ACK.
@@ -504,14 +650,15 @@ class PaymentService:
                     )
 
                     # Debts/locks changed — never serve stale routing graphs.
-                    PaymentRouter.invalidate_cache(str(request.equivalent))
+                    if deferred_effects is None:
+                        PaymentRouter.invalidate_cache(str(request.equivalent))
                 except asyncio.TimeoutError:
                     raise
                 except Exception as e:
-                    logger.info(
-                        "event=payment.commit_failed tx_id=%s error=%s",
+                    logger.error(
+                        "event=payment.commit_failed tx_id=%s error_type=%s",
                         tx_id_str,
-                        str(e),
+                        type(e).__name__,
                     )
                     try:
                         from app.utils.metrics import PAYMENT_EVENTS_TOTAL
@@ -524,69 +671,117 @@ class PaymentService:
 
                     # If the engine raised a user-level GeoException (4xx), preserve it so
                     # simulator real-mode can classify it as REJECTED instead of INTERNAL_ERROR.
-                    if isinstance(e, GeoException) and 400 <= int(getattr(e, "status_code", 500) or 500) < 500:
+                    if isinstance(e, GeoException) and 400 <= int(
+                        getattr(e, "status_code", 500) or 500
+                    ) < 500:
                         if commit:
                             try:
                                 await self.session.rollback()
-                            except Exception:
-                                pass
+                            except Exception as rollback_error:
+                                logger.error(
+                                    "event=payment.commit_rollback_failed tx_id=%s error_type=%s",
+                                    tx_id_str,
+                                    type(rollback_error).__name__,
+                                )
+                                raise GeoException() from rollback_error
 
-                        if commit:
-                            await self.engine.abort(
-                                tx_id_str,
-                                reason=str(getattr(e, "message", None) or str(e)),
-                                error_code=getattr(e, "code", ErrorCode.E010),
-                                details=getattr(e, "details", None),
-                                commit=True,
-                            )
+                            try:
+                                await self.engine.abort(
+                                    tx_id_str,
+                                    reason=str(e.message),
+                                    error_code=e.code,
+                                    details=e.details or {},
+                                    commit=True,
+                                )
+                            except Exception as abort_error:
+                                logger.error(
+                                    "event=payment.commit_abort_failed tx_id=%s error_type=%s",
+                                    tx_id_str,
+                                    type(abort_error).__name__,
+                                )
+                                raise GeoException() from abort_error
                         else:
                             try:
                                 await self.engine.abort(
                                     tx_id_str,
-                                    reason=str(getattr(e, "message", None) or str(e)),
-                                    error_code=getattr(e, "code", ErrorCode.E010),
-                                    details=getattr(e, "details", None),
+                                    reason=str(e.message),
+                                    error_code=e.code,
+                                    details=e.details or {},
                                     commit=False,
                                 )
-                            except Exception:
-                                pass
+                            except Exception as abort_error:
+                                logger.error(
+                                    "event=payment.commit_nested_abort_failed tx_id=%s error_type=%s",
+                                    tx_id_str,
+                                    type(abort_error).__name__,
+                                )
                         raise
 
                     # Under uncertainty (e.g. DB/network errors), commit may have succeeded even if
                     # the caller sees an exception. Read-before-abort to avoid COMMITTED -> ABORTED.
+                    public_error = GeoException()
                     if commit:
                         try:
                             await self.session.rollback()
-                        except Exception:
-                            pass
-
-                        tx_latest = (
-                            await self.session.execute(
-                                select(Transaction).where(Transaction.tx_id == tx_id_str)
+                        except Exception as rollback_error:
+                            logger.error(
+                                "event=payment.commit_rollback_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(rollback_error).__name__,
                             )
-                        ).scalar_one_or_none()
+                            raise public_error from rollback_error
+
+                        try:
+                            tx_latest = (
+                                await self.session.execute(
+                                    select(Transaction).where(
+                                        Transaction.tx_id == tx_id_str
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                        except Exception as read_error:
+                            logger.error(
+                                "event=payment.commit_recovery_read_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(read_error).__name__,
+                            )
+                            raise public_error from read_error
                         if tx_latest is not None and tx_latest.state == "COMMITTED":
                             return self._tx_to_payment_result(tx_latest)
 
                     # Abort is idempotent; if commit failed before applying changes, this releases locks.
                     if commit:
-                        await self.engine.abort(
-                            tx_id_str,
-                            reason=f"Commit failed: {str(e)}",
-                            error_code=ErrorCode.E010,
-                            commit=True,
-                        )
+                        try:
+                            await self.engine.abort(
+                                tx_id_str,
+                                reason=public_error.message,
+                                error_code=ErrorCode.E010,
+                                details={},
+                                commit=True,
+                            )
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.commit_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+                            raise public_error from abort_error
                     else:
                         try:
                             await self.engine.abort(
                                 tx_id_str,
-                                reason=f"Commit failed: {str(e)}",
+                                reason=public_error.message,
                                 error_code=ErrorCode.E010,
+                                details={},
                                 commit=False,
                             )
-                        except Exception:
-                            pass
-                    raise GeoException(f"Payment commit failed: {str(e)}")
+                        except Exception as abort_error:
+                            logger.error(
+                                "event=payment.commit_nested_abort_failed tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(abort_error).__name__,
+                            )
+                    raise public_error from e
         except asyncio.TimeoutError:
             if tx_persisted:
                 # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
@@ -594,27 +789,50 @@ class PaymentService:
                 if commit:
                     try:
                         await self.session.rollback()
-                    except Exception:
-                        pass
-
-                    tx_latest = (
-                        await self.session.execute(
-                            select(Transaction).where(Transaction.tx_id == tx_id_str)
+                    except Exception as rollback_error:
+                        logger.error(
+                            "event=payment.timeout_rollback_failed tx_id=%s error_type=%s",
+                            tx_id_str,
+                            type(rollback_error).__name__,
                         )
-                    ).scalar_one_or_none()
+                        raise GeoException() from rollback_error
+
+                    try:
+                        tx_latest = (
+                            await self.session.execute(
+                                select(Transaction).where(
+                                    Transaction.tx_id == tx_id_str
+                                )
+                            )
+                        ).scalar_one_or_none()
+                    except Exception as read_error:
+                        logger.error(
+                            "event=payment.timeout_recovery_read_failed tx_id=%s error_type=%s",
+                            tx_id_str,
+                            type(read_error).__name__,
+                        )
+                        raise GeoException() from read_error
                     if tx_latest is not None and tx_latest.state == "COMMITTED":
                         return self._tx_to_payment_result(tx_latest)
 
                 # Ensure abort isn't cancelled due to the timeout cancellation context.
                 if commit:
-                    await asyncio.shield(
-                        self.engine.abort(
-                            tx_id_str,
-                            reason="Payment timeout",
-                            commit=True,
-                            error_code=ErrorCode.E007,
+                    try:
+                        await asyncio.shield(
+                            self.engine.abort(
+                                tx_id_str,
+                                reason="Payment timeout",
+                                commit=True,
+                                error_code=ErrorCode.E007,
+                            )
                         )
-                    )
+                    except Exception as abort_error:
+                        logger.error(
+                            "event=payment.timeout_abort_failed tx_id=%s error_type=%s",
+                            tx_id_str,
+                            type(abort_error).__name__,
+                        )
+                        raise GeoException() from abort_error
                 else:
                     try:
                         await asyncio.shield(
@@ -651,33 +869,7 @@ class PaymentService:
             PaymentRoute(path=path, amount=str(route_amount))
             for path, route_amount in routes_found
         ]
-        try:
-            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-            PAYMENT_EVENTS_TOTAL.labels(event="create", result="success").inc()
-            PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
-            PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
-        except Exception:
-            pass
-
-        # Best-effort real-time event for receivers.
-        try:
-            from app.utils.event_bus import event_bus
-
-            event_bus.publish(
-                recipient_pid=receiver.pid,
-                event="payment.received",
-                payload={
-                    "tx_id": tx_id_str,
-                    "from": sender.pid,
-                    "to": receiver.pid,
-                    "equivalent": equivalent.code,
-                    "amount": str(amount),
-                },
-            )
-        except Exception:
-            pass
-        return PaymentResult(
+        result = PaymentResult(
             tx_id=tx_id_str,
             status="COMMITTED",
             **{"from": sender.pid},
@@ -688,6 +880,24 @@ class PaymentService:
             created_at=created_at,
             committed_at=committed_at,
         )
+        effects = PaymentPostCommitEffects(
+            equivalent=str(equivalent.code),
+            recipient_pid=str(receiver.pid),
+            event_payload={
+                "tx_id": tx_id_str,
+                "from": str(sender.pid),
+                "to": str(receiver.pid),
+                "equivalent": str(equivalent.code),
+                "amount": str(amount),
+            },
+            invalidate_routing_cache=deferred_effects is not None,
+            include_engine_success_metrics=deferred_effects is not None,
+        )
+        if deferred_effects is None:
+            effects.apply_once()
+        else:
+            deferred_effects.append(effects)
+        return result
 
     async def get_payment(self, tx_id: str) -> PaymentResult:
         tx = (
