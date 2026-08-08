@@ -1642,6 +1642,13 @@ async def action_clearing_real(
             await _emit_known_progress()
         raise
     except Exception as exc:
+        logger.exception(
+            "event=simulator.interact.clearing_failed run_id=%s "
+            "equivalent=%s cleared_cycles=%s",
+            run_id,
+            eq.code,
+            cleared_count,
+        )
         details = dict(exc.details or {}) if isinstance(exc, GeoException) else {}
         if cleared_count > 0:
             details.update(

@@ -1273,6 +1273,7 @@ async def test_action_clearing_real_initial_failure_uses_flat_sanitized_error(
     db_session,
     interact_actions_enabled,
     monkeypatch,
+    caplog,
 ):
     await _seed_alice_bob_uah(db_session)
     cycle = [
@@ -1322,6 +1323,7 @@ async def test_action_clearing_real_initial_failure_uses_flat_sanitized_error(
         "details": None,
     }
     assert "raw initial clearing secret" not in response.text
+    assert "event=simulator.interact.clearing_failed" in caplog.text
 
 
 @pytest.mark.asyncio
