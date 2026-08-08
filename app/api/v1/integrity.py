@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
+from app.core.payments.router import PaymentRouter
 from app.db.models.audit_log import AuditLog, IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -26,6 +27,7 @@ from app.schemas.integrity import (
     InvariantResult,
 )
 from app.utils.exceptions import IntegrityViolationException, NotFoundException
+from app.utils.request_id import request_id_var
 from app.utils.validation import validate_equivalent_code
 
 router = APIRouter()
@@ -33,6 +35,36 @@ router = APIRouter()
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _commit_required_admin_repair_audit(
+    db: AsyncSession,
+    *,
+    request: Request,
+    action: str,
+    before_state: dict,
+    after_state: dict,
+) -> None:
+    try:
+        db.add(
+            AuditLog(
+                actor_id=None,
+                actor_role="admin",
+                action=action,
+                object_type="integrity",
+                object_id=None,
+                reason=None,
+                before_state=before_state,
+                after_state=after_state,
+                request_id=request_id_var.get(),
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
 
 async def _latest_checkpoint(db: AsyncSession, *, equivalent_id) -> IntegrityCheckpoint | None:
@@ -262,6 +294,7 @@ async def verify_integrity(
 
 @router.post("/repair/net-mutual-debts")
 async def repair_net_mutual_debts(
+    request: Request,
     db: AsyncSession = Depends(deps.get_db),
     _admin=Depends(deps.require_admin),
 ) -> dict:
@@ -271,9 +304,13 @@ async def repair_net_mutual_debts(
     """
 
     debts = (await db.execute(select(Debt))).scalars().all()
+    equivalent_codes = dict(
+        (await db.execute(select(Equivalent.id, Equivalent.code))).all()
+    )
     by_key: dict[tuple, Debt] = {(d.equivalent_id, d.debtor_id, d.creditor_id): d for d in debts}
 
     processed_pairs: set[tuple] = set()
+    affected_equivalent_ids: set = set()
     updated = 0
     deleted = 0
     netted_pairs = 0
@@ -292,6 +329,7 @@ async def repair_net_mutual_debts(
             continue
 
         processed_pairs.add(pair)
+        affected_equivalent_ids.add(eq_id)
         netted_pairs += 1
 
         a = Decimal(str(d_ab.amount))
@@ -316,7 +354,23 @@ async def repair_net_mutual_debts(
             await db.delete(d_ab)
             deleted += 1
 
-    await db.commit()
+    affected_codes = sorted(
+        equivalent_codes[eq_id]
+        for eq_id in affected_equivalent_ids
+        if eq_id in equivalent_codes
+    )
+    await _commit_required_admin_repair_audit(
+        db,
+        request=request,
+        action="admin.integrity.repair.net_mutual_debts",
+        before_state={"debts_scanned": len(debts)},
+        after_state={
+            "affected_equivalents": affected_codes,
+            "netted_pairs": netted_pairs,
+            "updated": updated,
+            "deleted": deleted,
+        },
+    )
 
     return {
         "ok": True,
@@ -329,6 +383,7 @@ async def repair_net_mutual_debts(
 
 @router.post("/repair/cap-debts-to-trust-limits")
 async def repair_cap_debts_to_trust_limits(
+    request: Request,
     db: AsyncSession = Depends(deps.get_db),
     _admin=Depends(deps.require_admin),
 ) -> dict:
@@ -348,9 +403,13 @@ async def repair_cap_debts_to_trust_limits(
         limit_by_edge[key] = Decimal(str(tl.limit))
 
     debts = (await db.execute(select(Debt))).scalars().all()
+    equivalent_codes = dict(
+        (await db.execute(select(Equivalent.id, Equivalent.code))).all()
+    )
     scanned = 0
     updated = 0
     deleted = 0
+    affected_equivalent_ids: set = set()
     tol = Decimal("0.000000001")
 
     for d in debts:
@@ -362,6 +421,7 @@ async def repair_cap_debts_to_trust_limits(
         if amount <= limit + tol:
             continue
 
+        affected_equivalent_ids.add(d.equivalent_id)
         if limit <= tol:
             await db.delete(d)
             deleted += 1
@@ -370,7 +430,25 @@ async def repair_cap_debts_to_trust_limits(
         d.amount = limit
         updated += 1
 
-    await db.commit()
+    affected_codes = sorted(
+        equivalent_codes[eq_id]
+        for eq_id in affected_equivalent_ids
+        if eq_id in equivalent_codes
+    )
+    await _commit_required_admin_repair_audit(
+        db,
+        request=request,
+        action="admin.integrity.repair.cap_debts_to_trust_limits",
+        before_state={"debts_scanned": scanned},
+        after_state={
+            "affected_equivalents": affected_codes,
+            "scanned": scanned,
+            "updated": updated,
+            "deleted": deleted,
+        },
+    )
+    for equivalent_code in affected_codes:
+        PaymentRouter.invalidate_cache(equivalent_code)
 
     return {
         "ok": True,
