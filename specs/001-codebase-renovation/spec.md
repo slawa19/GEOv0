@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 2 COMPLETE — PHASES 3–7 PAUSED
+- **Status:** PHASE 3 COMPLETE — PHASES 4–7 PAUSED
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -218,6 +218,26 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-08:** Phase 3 completed at exact product commit
+  `f8517bc90b119a3b156de0a2945019d1b9381118`; Phase 4 was not started. The
+  selected Admin mutation/config and Simulator REST/SSE ingress contracts,
+  decisions, residuals and review evidence are recorded in
+  `phase3-contract-map.md`. Local backend validation on the last backend-changing
+  commit `032ed86` passed `774` tests (`3` skipped, `15` deselected); final
+  published [workflow run
+  31265705618](https://github.com/slawa19/GEOv0/actions/runs/31265705618) on exact
+  accepted HEAD passed required local-equivalent, PostgreSQL, production-like
+  container/schema, active Chromium and Simulator super-smoke jobs. Required
+  counts were backend `775 passed`, Admin `113 passed`, Simulator `668 passed`;
+  the PostgreSQL matrix/full tier passed `3`/`11` tests. The overall workflow is
+  not “CI green”: Admin retained its prior `2 failed / 2 passed` graph E2E set,
+  and Simulator returned to its exact Phase 2 `6 failed / 13 passed` visual E2E
+  baseline after three stale selected-contract mocks were corrected. Claude Code
+  `2.1.226` produced two accepted read-only reviews with complete exit-`0` JSON
+  and resolved `claude-opus-5`; reproduced findings were remediated and the final
+  internal adversarial reviews were CLEAN. Invalid legacy Equivalent codes remain
+  manual cleanup, `AdminAuditLogItem.timestamp` remains Phase 4, and replay
+  ordering remains Phase 5.
 - **2026-08-08:** Phase 2 completed at exact product commit
   `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`; Phase 3 was not started. The
   bounded range from base `0635a651f0ae6f970d82d7d71b7a18071069262d`

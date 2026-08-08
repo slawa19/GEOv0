@@ -7,7 +7,8 @@
   `8f271693e7b763856d86fb3c2f579a56938d6fcb`; Phase 1 completed on 2026-08-08
   at main commit `31e887fc904ef8060b0c1c9f233957b235ee1aeb`. Phase 2 completed on
   2026-08-08 at product commit `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`;
-  Phases 3–7 remain paused.
+  Phase 3 completed on 2026-08-08 at product commit
+  `f8517bc90b119a3b156de0a2945019d1b9381118`; Phases 4–7 remain paused.
 
 ## 1. Objective and project fit
 
@@ -124,6 +125,10 @@ as evidence but does not authorize more implementation.
 - Phase 2's bounded live PostgreSQL concurrency matrix and complete registered
   marker tier passed on its exact accepted product SHA. Broader scheduled Admin
   and Simulator visual E2E remain truthfully red and owned by later phases.
+- Phase 3 completed the frozen selected Admin REST/OpenAPI and Simulator REST/SSE
+  ingress contracts. Its exact accepted product SHA passed all required and
+  milestone jobs; broader scheduled Admin and Simulator visual E2E retained the
+  exact earlier baseline and remain owned by later phases.
 - Claude Code reviewed the complete Phase 2 product range as well as earlier
   frozen product and planning diffs. Confirmed findings were remediated; rejected
   findings retain manual call-site and contract triage evidence.
@@ -403,6 +408,11 @@ counts and the existing integrity check. For local/demo use this is
 
 ### Phase 3 — Complete the backend-to-frontend contract chain
 
+**Status:** completed 2026-08-08 at product commit
+`f8517bc90b119a3b156de0a2945019d1b9381118`. The frozen decisions, selected
+contracts, residuals, local gates and external/internal review evidence are
+recorded in `phase3-contract-map.md`. Phase 4 was not started by this closeout.
+
 **Purpose:** validate only the contracts used by the frozen functional matrix.
 
 **Maps to:** remaining REN-009 and REN-012B1.
@@ -439,6 +449,18 @@ do not need exhaustive schemas unless they control a mutation or readiness decis
 - Real and mock Admin clients use the same selected decoders.
 - Unknown/malformed Simulator input cannot silently become a trusted event.
 - OpenAPI and affected frontend gates pass.
+
+Exit was accepted for exact product SHA
+`f8517bc90b119a3b156de0a2945019d1b9381118` using published
+[workflow run 31265705618](https://github.com/slawa19/GEOv0/actions/runs/31265705618).
+Required local-equivalent, disposable PostgreSQL, production-like container/schema,
+active Chromium and Simulator super-smoke jobs passed. Intentional selected drift
+is mutation-sensitive, Admin real/mock clients share the selected decoders, and
+malformed/unknown Simulator input cannot advance cursor/state/effects. The overall
+workflow remains truthfully red only for the prior later-phase Admin `2/2` and
+Simulator `6/13` E2E baselines; an initially exposed stale scenario-list mock was
+corrected without weakening the decoder. No Phase 4 loader/operator work or Phase
+5 replay ordering redesign entered this phase.
 
 ### Phase 4 — Finish the Admin UI on actual operator paths
 

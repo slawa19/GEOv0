@@ -19,7 +19,9 @@ authorized publication and `workflow_dispatch`. Exit was accepted at main commit
 `31e887fc904ef8060b0c1c9f233957b235ee1aeb` using
 [workflow run 31246985920](https://github.com/slawa19/GEOv0/actions/runs/31246985920).
 Phase 2 completed on 2026-08-08 at product commit
-`7d0a8a9ca48cec34cc62e0965cdd6d28825370de`; Phases 3–7 remain paused.
+`7d0a8a9ca48cec34cc62e0965cdd6d28825370de`. Phase 3 completed on
+2026-08-08 at product commit
+`f8517bc90b119a3b156de0a2945019d1b9381118`; Phases 4–7 remain paused.
 
 ### Phase 1 evidence ledger
 
@@ -80,7 +82,33 @@ Local evidence recorded on 2026-08-07, before publication:
   P1/P2. Claude Code `2.1.226` reviewed the full accepted product range read-only
   at high effort; exit `0`, complete JSON, `is_error=false`, resolved
   `claude-opus-5`. Its five findings were manually triaged and none survived as a
-  P1/P2. Phase 3 has not started.
+  P1/P2. Phase 3 subsequently completed as recorded below.
+
+### Phase 3 evidence ledger
+
+- Accepted product range:
+  `cf76e096ddaf9b896de161a5a44e208f982484fd..f8517bc90b119a3b156de0a2945019d1b9381118`.
+  `phase3-contract-map.md` records the frozen selected Admin/OpenAPI and Simulator
+  REST/SSE boundaries, Current/Intended/Optimal decisions and explicit residuals.
+- Admin real/mock config, feature-flag and selected mutation paths share strict
+  decoders; feature-flag PATCH is partial. Simulator scenario list/detail, run
+  status, snapshot and selected SSE families reject malformed/unknown input before
+  cursor, dedup, state or effects. Replay ordering remains Phase 5.
+- Local backend validation on the last backend-changing commit `032ed86` passed
+  `774` tests (`3` skipped, `15` deselected); Admin passed `113` tests/build and
+  Simulator passed typecheck, `668` tests/build. The final E2E-only delta passed
+  contract unit (`10`) and typecheck/discovery gates and independent review.
+- Published [workflow run
+  31265705618](https://github.com/slawa19/GEOv0/actions/runs/31265705618) on exact
+  accepted HEAD passed required local-equivalent gates (backend `775`, Admin
+  `113`, Simulator `668`), PostgreSQL matrix/full tier (`3`/`11`), container,
+  active Chromium and super-smoke. Overall status remains `failure`, not “CI
+  green”, because the exact prior Admin `2 failed / 2 passed` and Simulator `6
+  failed / 13 passed` later-phase E2E baselines remain.
+- Two accepted Claude Code reviews resolved `claude-opus-5` at high effort with
+  complete exit-`0` JSON. Reproduced findings were fixed; final internal
+  adversarial reviews, including the E2E mock delta, were CLEAN. Phase 4 has not
+  started.
 
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:
@@ -480,7 +508,13 @@ used.
 - **Priority:** P1
 - **Owner surface:** `api/openapi.yaml`, FastAPI route/schema declarations,
   `tests/contract/test_openapi_contract.py`
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** Phase 3 selected response schemas and
+  mutation-sensitive exact guards close the remaining semantic parity scope at
+  `f8517bc90b119a3b156de0a2945019d1b9381118`. The final OpenAPI selector passed
+  `23` tests; published required backend validation passed `775` tests and the
+  affected Admin/Simulator gates passed. `phase3-contract-map.md` records the
+  selected operations and explicit non-scope.
 - **Working-tree evidence (2026-08-07):** the contract compares semantic
   parameters (including full auth transport shape), request/response media and
   schemas, statuses, error envelopes and security OR/AND/scopes under exact
@@ -488,7 +522,8 @@ used.
   `400` from identity-transport `422 ErrorEnvelope`; both health aliases share a
   typed `ok|degraded` response. The canonical contract selector passed `16`
   tests and two independent adversarial passes found no remaining P1/P2. A
-  published CI contract job has not run, so the task remains `IN PROGRESS`.
+  published CI contract job had not yet run, so the task remained `IN PROGRESS`
+  at that dated checkpoint.
 - **Rationale / value:** The current contract test passes while checking only path
   and method sets; it does not protect parameters, request/response schemas,
   statuses, or security.
@@ -696,7 +731,8 @@ used.
 - **Owner surface:** Simulator HTTP/SSE normalization, real-mode replay/state/effect
   path, existing frontend facades, selected UI/window primitives; backend router
   only when a confirmed transaction/contract fix needs an extraction seam.
-- **Status:** PLANNED — split into REN-012A/B/C below.
+- **Status:** IN PROGRESS — REN-012A not triggered; REN-012B1 DONE (2026-08-08);
+  REN-012B2 and REN-012C remain planned for Phase 5.
 - **Rationale / value:** The material risk is not file length. It is that unchecked
   input, replay logic, state mutation and visual effects are difficult to verify
   independently, while canvas-only selection blocks keyboard use. The target is a
@@ -717,8 +753,15 @@ used.
 
 ### REN-012B — Frontend ingress, replay, state and effect seam
 
-- **Status:** PLANNED. REN-012B1 contract/ingress is owned by Phase 3;
-  REN-012B2 replay/state/effect migration is owned by Phase 5.
+- **Status:** IN PROGRESS. REN-012B1 contract/ingress is DONE (2026-08-08) at
+  `f8517bc90b119a3b156de0a2945019d1b9381118`; REN-012B2 replay/state/effect
+  migration remains planned and is owned by Phase 5.
+- **REN-012B1 completion evidence:** `phase3-contract-map.md` records critical
+  scenario/run/snapshot ingress, accepted-versus-ignored SSE semantics, replay
+  cursor/duplicate/stale/`410` characterization and producer→decoder coverage.
+  Published required Simulator gates passed `668` tests plus typecheck/build;
+  the visual E2E set returned to the exact Phase 2 `6 failed / 13 passed`
+  later-phase baseline after stale selected-contract mocks were corrected.
 - **Exact sequence:**
   1. Characterize scenario/run-status/snapshot HTTP responses and lifecycle,
      topology, payment and clearing SSE families.
