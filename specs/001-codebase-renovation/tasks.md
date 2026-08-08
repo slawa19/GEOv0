@@ -21,7 +21,9 @@ authorized publication and `workflow_dispatch`. Exit was accepted at main commit
 Phase 2 completed on 2026-08-08 at product commit
 `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`. Phase 3 completed on
 2026-08-08 at product commit
-`f8517bc90b119a3b156de0a2945019d1b9381118`; Phases 4–7 remain paused.
+`f8517bc90b119a3b156de0a2945019d1b9381118`. Phase 4 completed locally on
+2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
+Phases 5–7 remain paused.
 
 ### Phase 1 evidence ledger
 
@@ -107,8 +109,42 @@ Local evidence recorded on 2026-08-07, before publication:
   failed / 13 passed` later-phase E2E baselines remain.
 - Two accepted Claude Code reviews resolved `claude-opus-5` at high effort with
   complete exit-`0` JSON. Reproduced findings were fixed; final internal
-  adversarial reviews, including the E2E mock delta, were CLEAN. Phase 4 has not
-  started.
+  adversarial reviews, including the E2E mock delta, were CLEAN. Phase 4
+  subsequently completed as recorded below.
+
+### Phase 4 evidence ledger
+
+- Accepted execution range:
+  `1953845eef960352764c77778e1670456c58f5bf..f0428f9996e511e723ce1980a24c2073b3adadb8`.
+  `phase4-admin-map.md` records the frozen loader/effect classification,
+  Current / Intended / Optimal decisions, selected workflows, Graph lifecycle
+  boundary and explicit residuals.
+- Confirmed overlapping Participants, Trustlines, Audit, Incidents, Equivalents,
+  Liquidity and Graph owners have deterministic reverse-resolution and pending-
+  unmount evidence. The existing generation-token approach is retained; no new
+  query/state framework was introduced.
+- Representative freeze/unfreeze, config/flags, incident abort, Integrity,
+  Equivalent and query-preserving investigation paths cover success and meaningful
+  failure without a combinatorial CRUD matrix. A disposable real-contract smoke
+  passed config/flag audit and participant freeze/unfreeze with cleanup (`2/2`).
+- Graph Core ownership is consolidated in the existing visualization composable.
+  The DOM keyboard route selects nodes and edges, opens existing details, announces
+  state and restores focus; bounded guarded search avoids a broad Cytoscape or ARIA
+  canvas rewrite.
+- Final local Admin gates passed: lint exit `0` (`0` errors, `116` warnings), unit
+  `154/154`, build, and scoped Chromium `5/5`. The confirmed
+  `AdminAuditLogItem.timestamp` selector passed `2/2`. No published workflow ran,
+  so this is not a “CI green” claim.
+- Independent Graph and non-Graph adversarial re-reviews were CLEAN. Claude Code
+  `2.1.226` reviewed the frozen product and remediation deltas from clean
+  credential-free standalone clones with exit `0`, complete JSON and resolved
+  `claude-opus-5`. Reproduced findings were remediated. The final suggestion to
+  auto-search after dependency invalidation was manually rejected because the
+  accepted large-graph policy requires new explicit remote input.
+- Replay ordering and REN-012B2/C remain Phase 5; invalid legacy Equivalent codes
+  remain manual cleanup. Participant/incident naive timestamps are sibling
+  residuals outside the one confirmed audit path. Simulator E2E/bootstrap failures
+  were not touched.
 
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:
@@ -556,8 +592,9 @@ used.
 - **Priority:** P1
 - **Owner surface:** `app/api/v1/payments.py`, `app/api/v1/clearing.py`, write paths
   in `app/api/v1/admin.py`, `app/core/payments/`,
-  `app/core/clearing/service.py`, `app/core/trustlines/service.py`
-- **Status:** IN PROGRESS — REN-010A DONE (2026-08-08); REN-010B remains Phase 4.
+  `app/core/clearing/service.py`, `app/core/trustlines/service.py`, and the selected
+  Admin integration paths under `admin-ui/src/`
+- **Status:** DONE (2026-08-08) — REN-010A and REN-010B complete.
 - **REN-010A completion evidence (2026-08-08):** the compact owner/effect map and
   actor matrix are complete at `phase2-owner-map.md`. Only reproduced ownership,
   cache, audit, idempotency and error-boundary defects were fixed. The final
@@ -566,7 +603,14 @@ used.
   `31256289008`: the three-case live PostgreSQL matrix passed, as did all `11`
   registered PostgreSQL tests. The conditional Admin lost-update matrix case and
   REN-012A adapter were not triggered. Internal and Claude full-range reviews
-  have no sustained P1/P2; parent REN-010 remains open only for Phase 4 REN-010B.
+  have no sustained P1/P2.
+- **REN-010B completion evidence (2026-08-08):** the selected Admin operator
+  integrations expose the accepted durable result without duplicating Phase 2
+  transaction tests. Component/contract paths cover freeze/unfreeze, config/flags,
+  incident abort, bounded Integrity repair semantics and one Equivalent mutation
+  class. The disposable real-contract smoke passed config/flag audit and participant
+  freeze/unfreeze with cleanup (`2/2`). Exact product HEAD and residuals are recorded
+  in `phase4-admin-map.md`.
 - **Committed slice evidence (2026-08-07):** the first vertical slice replaces the
   simulator's implicit `commit=False` convention with an explicit staged payment
   result and ordered post-commit/rollback journal. Outer tick owners now resolve
@@ -688,7 +732,16 @@ used.
 - **Priority:** P1
 - **Owner surface:** `admin-ui/src/api/realApi.ts`, page/composable loaders under
   `admin-ui/src/`, their Vitest suites
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** `phase4-admin-map.md` classifies every
+  frozen loader as overlapping, one-shot or write. Mounted deterministic tests
+  prove B-before-A, stale rejection and pending-unmount behavior for Participants,
+  Trustlines, Audit, Incidents, Equivalents, Liquidity and Graph owners. Graph
+  lifecycle/search effects use the existing generation owners, including bounded
+  debounced keyboard search and deterministic cache invalidation. Final Admin
+  unit passed `154/154`; lint exited `0` with no errors; build and scoped Chromium
+  `5/5` passed. Independent adversarial re-reviews were CLEAN and final accepted
+  product HEAD is `f0428f9996e511e723ce1980a24c2073b3adadb8`.
 - **Working-tree evidence (2026-08-07):** a narrow generation-token primitive is
   applied to confirmed overlapping page/graph loaders; debounce/throttle disposal
   and a single graph view-request owner prevent stale data/error/loading/rebuild

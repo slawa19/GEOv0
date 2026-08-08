@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 3 COMPLETE — PHASES 4–7 PAUSED
+- **Status:** PHASE 4 COMPLETE — PHASES 5–7 PAUSED
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -218,6 +218,25 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-08:** Phase 4 completed locally at exact product commit
+  `f0428f9996e511e723ce1980a24c2073b3adadb8`; Phase 5 was not started. The
+  loader classification, Current / Intended / Optimal decisions, selected
+  operator paths, Graph ownership boundary, gates, reviews and residuals are
+  recorded in `phase4-admin-map.md`. Deterministic mounted evidence now covers
+  the frozen overlapping Admin loaders and pending unmounts; the selected
+  operator contracts pass component/unit tests; Admin lint (`0` errors, `116`
+  warnings), all `154` unit tests, build and scoped Chromium (`5/5`) passed. The
+  disposable real-contract smoke passed `2/2` for config/flag audit and
+  participant freeze/unfreeze with cleanup, and the confirmed audit timestamp
+  selector passed `2/2`. Independent adversarial re-reviews were CLEAN. Claude
+  Code `2.1.226` reviewed the frozen product/remediation deltas from standalone
+  credential-free clones with exit `0`, complete JSON and resolved
+  `claude-opus-5`; reproduced findings were fixed, and the final automatic
+  re-search suggestion was rejected as contrary to the accepted guarded-graph
+  invalidation policy. There is no new published workflow and no “CI green”
+  claim. Replay ordering and REN-012B2/C remain Phase 5, invalid legacy
+  Equivalent codes remain manual cleanup, and sibling participant/incident naive
+  timestamps remain outside the one confirmed Phase 4 audit path.
 - **2026-08-08:** Phase 3 completed at exact product commit
   `f8517bc90b119a3b156de0a2945019d1b9381118`; Phase 4 was not started. The
   selected Admin mutation/config and Simulator REST/SSE ingress contracts,

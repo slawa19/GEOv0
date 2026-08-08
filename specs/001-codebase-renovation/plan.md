@@ -8,7 +8,9 @@
   at main commit `31e887fc904ef8060b0c1c9f233957b235ee1aeb`. Phase 2 completed on
   2026-08-08 at product commit `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`;
   Phase 3 completed on 2026-08-08 at product commit
-  `f8517bc90b119a3b156de0a2945019d1b9381118`; Phases 4–7 remain paused.
+  `f8517bc90b119a3b156de0a2945019d1b9381118`; Phase 4 completed locally on
+  2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
+  Phases 5–7 remain paused.
 
 ## 1. Objective and project fit
 
@@ -464,6 +466,12 @@ corrected without weakening the decoder. No Phase 4 loader/operator work or Phas
 
 ### Phase 4 — Finish the Admin UI on actual operator paths
 
+**Status:** completed locally 2026-08-08 at product commit
+`f0428f9996e511e723ce1980a24c2073b3adadb8`. The loader/effect inventory,
+Current / Intended / Optimal decisions, operator matrix, Graph boundary, exact
+local gates, review triage and residuals are recorded in `phase4-admin-map.md`.
+Phase 5 was not started by this closeout.
+
 **Purpose:** close the async and operator correctness already started, without UI
 redesign or a new data-fetching architecture.
 
@@ -534,6 +542,18 @@ fixture already exists. Firefox/WebKit and visual redesign are not required.
 - Selected contracts and operator workflows pass unit/component tests.
 - Admin lint/unit/build and scoped Chromium smoke pass.
 - Graph has a usable keyboard alternative without a broad Cytoscape rewrite.
+
+Exit was accepted for exact product SHA
+`f0428f9996e511e723ce1980a24c2073b3adadb8`. Final Admin lint exited `0` with
+zero errors and `116` known warnings; unit passed `154/154`; build passed; scoped
+Chromium passed `5/5`. The disposable real-contract smoke passed `2/2` and
+cleaned its owned processes, ports and SQLite artifacts. The selected backend
+audit timestamp selector passed `2/2`. Independent Graph and non-Graph reviews
+were CLEAN. Claude Code remediation reviews resolved `claude-opus-5` at high
+effort with complete exit-`0` JSON; reproduced findings were fixed, and the final
+automatic re-search note was rejected because data/filter/locale changes
+intentionally invalidate large-graph results until new explicit search input.
+No published workflow ran, so this local exit is not a “CI green” claim.
 
 ### Phase 5 — Make Simulator v2 behavior testable at its risky seam
 
