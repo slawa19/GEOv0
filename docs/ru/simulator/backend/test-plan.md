@@ -33,7 +33,9 @@ Source of truth:
 - Базовые фикстуры клиента/БД: `tests/conftest.py`.
 
 Важно про БД в тестах:
-- По умолчанию `TEST_DATABASE_URL` указывает на SQLite (`.pytest_geov0.db`).
+- Канонический verifier назначает task-local SQLite URL под
+  `.local-run/test-runs/<TaskSlug>/test.db`; прямой pytest использует отдельный
+  fallback `direct-pytest/test.db` в том же runtime root.
 - Для **не-SQLite** тестовых БД потребуется `GEO_TEST_ALLOW_DB_RESET=1` (guardrail в `tests/conftest.py`).
 
 ### 2.2 UI e2e (Playwright)
@@ -179,7 +181,8 @@ tests/performance/simulator/
 Что делает smoke-run:
 - создаёт run через control plane (`/simulator/runs`), ждёт `run_seconds`, затем `stop`;
 - скачивает артефакты через API в `.local-run/analysis/<run_id>/`;
-- читает `geov0.db` и печатает распределение `PAYMENT.amount` за окно run (started_at..stopped_at).
+- читает `.local-run/geov0.db` (или явный `--db`) и печатает распределение
+  `PAYMENT.amount` за окно run (started_at..stopped_at).
 
 Критерии успеха (минимум):
 - в выводе есть `payments.over_3 > 0` при `SIMULATOR_REAL_AMOUNT_CAP>=500` (не «залипло» на legacy 1–3);

@@ -58,7 +58,7 @@ Dev convenience (intentional):
 ## 4) Endpoint mapping
 The `realApi` skeleton is expected to implement the same surface as `mockApi`, but using real endpoints.
 
-Use [api/openapi.yaml](../api/openapi.yaml) as the contract source of truth.
+Use [api/openapi.yaml](../../api/openapi.yaml) as the contract source of truth.
 
 Common endpoints used by pages:
 - `GET /api/v1/health`
@@ -153,7 +153,7 @@ Optional seed:
 
 If Docker is unavailable, you can run the backend locally on SQLite:
 
-- Initialize DB schema (creates `geov0.db` in repo root):
+- Initialize DB schema (creates `.local-run/geov0.db`):
   - `python scripts/init_sqlite_db.py`
 - Seed demo data:
   - Recommended for Admin UI testing (fixtures-like rich dataset): `python scripts/seed_db.py --source fixtures`
@@ -171,6 +171,9 @@ Note on Windows terminals:
 Quick DB sanity check:
 - From repo root: `.\.venv\Scripts\python.exe scripts\check_sqlite_db.py`
 - Or via the repo runner: `.\scripts\run_local.ps1 check-db`
+- An existing root `geov0.db` is legacy/user data and is used only with an
+  explicit `DATABASE_URL=sqlite+aiosqlite:///./geov0.db`; it is not moved or
+  deleted automatically.
 - Run API:
   - `python -m uvicorn app.main:app --reload --port 18000`
   - If `18000` is unavailable on Windows, use another port and set `VITE_API_BASE_URL` accordingly.

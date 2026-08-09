@@ -59,7 +59,9 @@
 
 ## 2) Данные для локальной разработки (SQLite) — «fixtures mode»
 
-`scripts/run_local.ps1` по умолчанию использует локальную SQLite базу `geov0.db`.
+`scripts/run_local.ps1` по умолчанию использует локальную SQLite базу
+`.local-run/geov0.db`. Корневой `geov0.db` — legacy/user data и требует явного
+`DATABASE_URL`; runner не переносит и не удаляет его автоматически.
 
 Если базы нет — она создаётся и засеивается.
 

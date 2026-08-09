@@ -335,8 +335,8 @@ async def _sqlite_ensure_debts_version_column() -> None:
         # Fail fast with a clearer message than the later SQLAlchemy error.
         raise RuntimeError(
             "SQLite DB schema appears outdated and auto-fix failed. "
-            "Delete ./.local-run/geov0.db (or point DATABASE_URL to a fresh file) "
-            "and restart."
+            "For the default local database, replace ./.local-run/geov0.db; "
+            "for an explicit DATABASE_URL, repair it or point to a fresh file."
         ) from exc
 
 
