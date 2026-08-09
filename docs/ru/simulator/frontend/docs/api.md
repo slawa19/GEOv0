@@ -1,6 +1,9 @@
-# GEO Simulator API (MVP, черновик)
+# GEO Simulator API — consumer guide
 
-Этот документ — **источник правды** для контракта `/api/v1/simulator/*`.
+Это пояснение для frontend-потребителя, а не параллельная wire-schema. Источник
+правды для `/api/v1/simulator/*`, union `SimulatorEvent`, aliases и required fields —
+[`api/openapi.yaml`](../../../../../api/openapi.yaml). При расхождении этот текст
+исправляется по OpenAPI и наблюдаемому runtime, а не наоборот.
 
 Принципы (как в доработках графа Admin UI):
 - Фронтенд **не вычисляет** семантику визуализации (цвет/размер/биннинг/приоритеты). Всё это приходит как `viz_*`.
@@ -90,7 +93,7 @@ Dev-диагностика (localhost only):
 - `POST /api/v1/simulator/runs/{run_id}/actions/tx-once`
 - `POST /api/v1/simulator/runs/{run_id}/actions/clearing-once`
 
-Спецификация: [../backend/backend-driven-demo-mode-spec.md](../backend/backend-driven-demo-mode-spec.md)
+Спецификация: [../../backend/backend-driven-demo-mode-spec.md](../../backend/backend-driven-demo-mode-spec.md)
 
 ### Snapshot (namespace by run)
 - `GET /api/v1/simulator/runs/{run_id}/graph/snapshot?equivalent=UAH`

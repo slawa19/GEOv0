@@ -112,6 +112,21 @@ npm --prefix admin-ui run validate:fixtures
 
 Рабочие спеки для доработок UI находятся в [specs/README.md](specs/README.md).
 
+## Проверка текущей реализации
+
+Phase 4 operator path включает контекстную аналитику, детерминированные советы,
+синхронизацию latest-request и keyboard-доступную навигацию графа. Проверяйте его
+behavioral unit-тестами и Admin Playwright smoke, а не статусом старой spec.
+
+```powershell
+npm --prefix admin-ui run test
+npm --prefix admin-ui run build
+```
+
+Required repository milestone запускается через `scripts/verify_local.ps1`.
+Playwright output по умолчанию находится под `.local-run/playwright/admin/` и не
+является fixture.
+
 ---
 
 Примечание: материалы админки были перенесены из исторического пути `docs/ru/admin/*` в домен `docs/ru/admin-ui/*`.

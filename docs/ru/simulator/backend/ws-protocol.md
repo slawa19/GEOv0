@@ -128,8 +128,12 @@ MVP правило: `run_status` — единственный обязатель
 - `tx.updated`
 - `tx.failed`
 - `clearing.done`
+- `audit.drift`
+- `topology.changed`
 
-См. `docs/ru/simulator/frontend/docs/api.md` — там source of truth для полей `viz_*`.
+Пояснения для UI находятся в
+[`../frontend/docs/api.md`](../frontend/docs/api.md); wire source of truth для
+событий и `viz_*` полей — [`api/openapi.yaml`](../../../../api/openapi.yaml).
 
 ## 5) Ошибки
 - При ошибке выполнения backend:
@@ -166,5 +170,7 @@ MVP правило: `run_status` — единственный обязатель
 | `tx.updated` | SSE | визуальные подсветки транзакций |
 | `tx.failed` | SSE | отказ/ошибка платежа (нормализованный код в `error.code`) |
 | `clearing.done` | SSE | завершение клиринга + `cycle_edges` для FX |
+| `audit.drift` | SSE | обнаруженный integrity drift |
+| `topology.changed` | SSE | изменение topology/graph state |
 
 Команды (REST): `pause`, `resume`, `stop`, `restart` (опц.), `intensity`.
