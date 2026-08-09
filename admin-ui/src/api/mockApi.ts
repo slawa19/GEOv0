@@ -1,7 +1,10 @@
 import { ApiException, type ApiEnvelope } from './envelope'
 import {
   AdminAbortTxResponseSchema,
+  AdminAuditLogEntrySchema,
+  AdminAuditLogSchema,
   AdminConfigPatchResponseSchema,
+  AdminConfigPatchSchema,
   AdminConfigSchema,
   AdminEquivalentDeleteResponseSchema,
   AdminEquivalentCodeSchema,
@@ -208,6 +211,7 @@ let mockFlags: AdminFeatureFlags | null = null
 let mockParticipants: Participant[] | null = null
 let mockEquivalents: Equivalent[] | null = null
 let mockAuditLog: AuditLogEntry[] | null = null
+let mockIncidents: Incident[] | null = null
 
 function roleFromLocalStorage(): string {
   const v = (localStorage.getItem('admin-ui.role') || '').trim().toLowerCase()
@@ -219,8 +223,12 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-function newId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
+function newUuid(): string {
+  if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID()
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const value = Math.floor(Math.random() * 16)
+    return (char === 'x' ? value : (value & 0x3) | 0x8).toString(16)
+  })
 }
 
 async function getParticipantsDataset(): Promise<Participant[]> {
@@ -234,8 +242,22 @@ async function getEquivalentsDataset(): Promise<Equivalent[]> {
 }
 
 async function getAuditLogDataset(): Promise<AuditLogEntry[]> {
-  if (!mockAuditLog) mockAuditLog = await loadJson<AuditLogEntry[]>('datasets/audit-log.json')
-  return mockAuditLog
+  if (mockAuditLog) return mockAuditLog
+  const decoded = decodeAdminResponse(
+    AdminAuditLogSchema,
+    await loadJson<unknown>('datasets/audit-log.json'),
+    'mock GET /api/v1/admin/audit-log',
+  )
+  mockAuditLog = decoded
+  return decoded
+}
+
+async function getIncidentsDataset(): Promise<Incident[]> {
+  if (!mockIncidents) {
+    const dataset = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
+    mockIncidents = dataset.items
+  }
+  return mockIncidents
 }
 
 function normalizeEqCode(code: string): string {
@@ -329,14 +351,21 @@ async function getIntegrityStatusDataset(): Promise<IntegrityStatusResponse> {
   )
 }
 
-async function appendAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp' | 'actor_role'> & { actor_role?: string }) {
+async function appendAuditLog(
+  entry: Omit<AuditLogEntry, 'id' | 'timestamp' | 'actor_id' | 'actor_role'> & { actor_role?: string },
+) {
   const all = await getAuditLogDataset()
-  const full: AuditLogEntry = {
-    id: newId('audit'),
-    timestamp: nowIso(),
-    actor_role: entry.actor_role || roleFromLocalStorage(),
-    ...entry,
-  }
+  const full = decodeAdminResponse(
+    AdminAuditLogEntrySchema,
+    {
+      id: newUuid(),
+      timestamp: nowIso(),
+      actor_id: null,
+      actor_role: entry.actor_role || roleFromLocalStorage(),
+      ...entry,
+    },
+    'mock audit mutation',
+  )
   all.unshift(full)
 }
 
@@ -729,6 +758,17 @@ export const mockApi = {
 
   async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminConfigPatchResponse>> {
     return withScenario('/api/v1/admin/config', async () => {
+      const validatedPatch = AdminConfigPatchSchema.safeParse(patch)
+      if (!validatedPatch.success) {
+        return {
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'config patch contains unknown keys or invalid values',
+            details: validatedPatch.error.issues,
+          },
+        }
+      }
       if (!mockConfig) {
         mockConfig = decodeAdminResponse(
           AdminConfigSchema,
@@ -736,12 +776,22 @@ export const mockApi = {
           'mock GET /api/v1/admin/config',
         )
       }
-      const updated = Object.keys(patch)
+      const updated = Object.keys(validatedPatch.data)
+      const beforeState = Object.fromEntries(updated.map((key) => [key, mockConfig![key]]))
       mockConfig = decodeAdminResponse(
         AdminConfigSchema,
-        { ...mockConfig, ...patch },
+        { ...mockConfig, ...validatedPatch.data },
         'mock PATCH /api/v1/admin/config',
       )
+      const afterState = Object.fromEntries(updated.map((key) => [key, mockConfig![key]]))
+      await appendAuditLog({
+        action: 'admin.config.patch',
+        object_type: 'config',
+        object_id: null,
+        reason: null,
+        before_state: beforeState,
+        after_state: afterState,
+      })
       return {
         success: true,
         data: decodeAdminResponse(
@@ -777,6 +827,7 @@ export const mockApi = {
       }
 
       const next = { ...mockFlags }
+      const before = { ...mockFlags }
       for (const key of ['multipath_enabled', 'full_multipath_enabled', 'clearing_enabled'] as const) {
         if (typeof patch[key] === 'boolean') next[key] = patch[key]
       }
@@ -785,6 +836,14 @@ export const mockApi = {
         next,
         'mock PATCH /api/v1/admin/feature-flags',
       )
+      await appendAuditLog({
+        action: 'admin.feature_flags.patch',
+        object_type: 'feature_flags',
+        object_id: null,
+        reason: null,
+        before_state: before,
+        after_state: { ...mockFlags },
+      })
       return { success: true, data: mockFlags }
     })
   },
@@ -1011,8 +1070,7 @@ export const mockApi = {
       )
       p.status = response.status
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'participant.freeze',
+        action: 'admin.participants.freeze',
         object_type: 'participant',
         object_id: pid,
         reason,
@@ -1037,8 +1095,7 @@ export const mockApi = {
       )
       p.status = response.status
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'participant.unfreeze',
+        action: 'admin.participants.unfreeze',
         object_type: 'participant',
         object_id: pid,
         reason,
@@ -1116,8 +1173,8 @@ export const mockApi = {
 
   async listIncidents(params: { page?: number; per_page?: number }): Promise<ApiEnvelope<Paginated<Incident>>> {
     return withScenario('/api/v1/admin/incidents', async () => {
-      const ds = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
-      return { success: true, data: paginate(ds.items, params.page ?? 1, params.per_page ?? 20) }
+      const incidents = await getIncidentsDataset()
+      return { success: true, data: paginate(incidents, params.page ?? 1, params.per_page ?? 20) }
     })
   },
 
@@ -1158,8 +1215,7 @@ export const mockApi = {
       )
       all.unshift(created)
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'equivalent.create',
+        action: 'admin.equivalents.create',
         object_type: 'equivalent',
         object_id: code,
         reason: 'create',
@@ -1192,8 +1248,7 @@ export const mockApi = {
       )
       Object.assign(eq, updated)
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'equivalent.update',
+        action: 'admin.equivalents.patch',
         object_type: 'equivalent',
         object_id: key,
         reason: 'update',
@@ -1219,8 +1274,7 @@ export const mockApi = {
       )
       Object.assign(eq, updated)
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: isActive ? 'equivalent.activate' : 'equivalent.deactivate',
+        action: 'admin.equivalents.patch',
         object_type: 'equivalent',
         object_id: key,
         reason,
@@ -1275,8 +1329,7 @@ export const mockApi = {
       all.splice(idx, 1)
 
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'equivalent.delete',
+        action: 'admin.equivalents.delete',
         object_type: 'equivalent',
         object_id: key,
         reason,
@@ -1296,19 +1349,25 @@ export const mockApi = {
           error: { code: 'VALIDATION_ERROR', message: 'reason is required' },
         }
       }
+      const incidents = await getIncidentsDataset()
+      const incidentIndex = incidents.findIndex((incident) => incident.tx_id === txId)
+      if (incidentIndex < 0) {
+        return { success: false, error: { code: 'NOT_FOUND', message: 'transaction incident not found' } }
+      }
+      const before = { ...incidents[incidentIndex] }
       const response = decodeAdminResponse(
         AdminAbortTxResponseSchema,
         { tx_id: txId, status: 'aborted' },
         'mock POST /api/v1/admin/transactions/{tx_id}/abort',
       )
+      incidents.splice(incidentIndex, 1)
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'transaction.abort',
+        action: 'admin.transactions.abort',
         object_type: 'transaction',
         object_id: txId,
         reason,
-        before_state: { state: 'stuck' },
-        after_state: { state: 'aborted' },
+        before_state: before,
+        after_state: { state: 'ABORTED' },
       })
       return { success: true, data: response }
     })
@@ -1324,7 +1383,7 @@ export const mockApi = {
 
       const [trustlines, incidents, equivalents, debts, auditLog, transactions] = await Promise.all([
         loadJson<Trustline[]>('datasets/trustlines.json'),
-        loadJson<{ items: Incident[] }>('datasets/incidents.json').then((r) => r.items || []),
+        getIncidentsDataset(),
         loadJson<Equivalent[]>('datasets/equivalents.json'),
         loadOptionalJson<Debt[]>('datasets/debts.json', []),
         loadOptionalJson<AuditLogEntry[]>('datasets/audit-log.json', []),
@@ -1431,6 +1490,7 @@ export function __resetMockApiForTests() {
   mockParticipants = null
   mockEquivalents = null
   mockAuditLog = null
+  mockIncidents = null
   lastToastAt = 0
   lastToastMsg = ''
 }

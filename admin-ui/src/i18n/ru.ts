@@ -618,7 +618,7 @@ export const RU: Record<string, string> = {
   'graph.analytics.activity.incidentsInitiator': 'Инциденты (инициатор)',
   'graph.analytics.activity.incidentsInitiatorTooltip': 'Количество инцидентов, где участник — initiator_pid, по окнам created_at.',
   'graph.analytics.activity.participantOps': 'Операции с участником (audit-log)',
-  'graph.analytics.activity.participantOpsTooltip': 'Количество audit-log действий с префиксом PARTICIPANT_* для этого pid (object_id) по окнам timestamp.',
+  'graph.analytics.activity.participantOpsTooltip': 'Количество audit-log действий с префиксом admin.participants. для этого pid (object_id) по окнам timestamp.',
   'graph.analytics.activity.paymentsCommitted': 'Платежи committed',
   'graph.analytics.activity.paymentsCommittedTooltip': 'Количество committed PAYMENT транзакций с участием этого участника (sender/receiver) по окнам updated_at.',
   'graph.analytics.activity.clearingCommitted': 'Clearing committed',

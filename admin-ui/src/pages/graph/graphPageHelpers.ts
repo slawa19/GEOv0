@@ -140,18 +140,33 @@ export function guardedGraphSearchCacheAction(
 }
 
 export async function reloadGraphView(options: {
-  loadData: () => Promise<void>
+  loadData: () => Promise<boolean>
   isCurrent: () => boolean
   afterLoad: () => Promise<void>
-  ensureInitialized: () => void
-  rebuild: (options: GraphRebuildOptions) => void
+  applyView: (options: GraphRebuildOptions) => boolean
   rebuildOptions: GraphRebuildOptions
 }): Promise<boolean> {
-  await options.loadData()
+  if (!await options.loadData()) return false
   if (!options.isCurrent()) return false
   await options.afterLoad()
   if (!options.isCurrent()) return false
-  options.ensureInitialized()
+  return options.applyView(options.rebuildOptions)
+}
+
+export function syncGraphCoreForView(options: {
+  guarded: boolean
+  hasCore: () => boolean
+  initialize: () => void
+  destroy: () => void
+  rebuild: (options: GraphRebuildOptions) => void
+  rebuildOptions: GraphRebuildOptions
+}): boolean {
+  if (options.guarded) {
+    if (options.hasCore()) options.destroy()
+    return false
+  }
+  if (!options.hasCore()) options.initialize()
+  if (!options.hasCore()) return false
   options.rebuild(options.rebuildOptions)
   return true
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { useLatestRequest } from '../../composables/useLatestRequest'
 
 import {
   atomsToDecimal,
@@ -13,6 +14,7 @@ import {
   modeToLabelParts,
   pct,
   reloadGraphView,
+  syncGraphCoreForView,
 } from './graphPageHelpers'
 
 describe('graphPageHelpers', () => {
@@ -177,20 +179,84 @@ describe('graphPageHelpers', () => {
     ['normal reload', { fit: true }],
     ['drawer refresh', { fit: false, preserveViewport: true }],
   ] as const)('preserves fit semantics for %s', async (_label, rebuildOptions) => {
-    const ensureInitialized = vi.fn()
-    const rebuild = vi.fn()
+    const applyView = vi.fn().mockReturnValue(true)
 
     await expect(reloadGraphView({
-      loadData: vi.fn().mockResolvedValue(undefined),
+      loadData: vi.fn().mockResolvedValue(true),
       isCurrent: () => true,
       afterLoad: vi.fn().mockResolvedValue(undefined),
-      ensureInitialized,
-      rebuild,
+      applyView,
       rebuildOptions,
     })).resolves.toBe(true)
 
-    expect(ensureInitialized).toHaveBeenCalledTimes(1)
-    expect(rebuild).toHaveBeenCalledWith(rebuildOptions)
+    expect(applyView).toHaveBeenCalledWith(rebuildOptions)
+  })
+
+  it('removes an existing Core when a small graph transitions into the render guard', () => {
+    let hasCore = true
+    const rebuild = vi.fn()
+    const destroy = vi.fn(() => { hasCore = false })
+
+    expect(syncGraphCoreForView({
+      guarded: true,
+      hasCore: () => hasCore,
+      initialize: vi.fn(),
+      destroy,
+      rebuild,
+      rebuildOptions: { fit: false },
+    })).toBe(false)
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(rebuild).not.toHaveBeenCalled()
+    expect(hasCore).toBe(false)
+  })
+
+  it('initializes and rebuilds when a guarded graph transitions back to an allowed size', () => {
+    let hasCore = false
+    const initialize = vi.fn(() => { hasCore = true })
+    const rebuild = vi.fn()
+
+    expect(syncGraphCoreForView({
+      guarded: false,
+      hasCore: () => hasCore,
+      initialize,
+      destroy: vi.fn(),
+      rebuild,
+      rebuildOptions: { fit: true },
+    })).toBe(true)
+
+    expect(initialize).toHaveBeenCalledTimes(1)
+    expect(rebuild).toHaveBeenCalledWith({ fit: true })
+  })
+
+  it('prevents an older manual refresh from applying effects after a newer watcher refresh', async () => {
+    let resolveOlder!: (value: boolean) => void
+    let resolveLatest!: (value: boolean) => void
+    const olderLoad = new Promise<boolean>((resolve) => { resolveOlder = resolve })
+    const latestLoad = new Promise<boolean>((resolve) => { resolveLatest = resolve })
+    const owner = useLatestRequest()
+    const applied: string[] = []
+
+    const older = reloadGraphView({
+      loadData: () => olderLoad,
+      isCurrent: owner.begin().isCurrent,
+      afterLoad: async () => {},
+      applyView: () => { applied.push('manual'); return true },
+      rebuildOptions: { fit: true },
+    })
+    const latest = reloadGraphView({
+      loadData: () => latestLoad,
+      isCurrent: owner.begin().isCurrent,
+      afterLoad: async () => {},
+      applyView: () => { applied.push('watcher'); return true },
+      rebuildOptions: { fit: false },
+    })
+
+    resolveLatest(true)
+    await expect(latest).resolves.toBe(true)
+    resolveOlder(true)
+    await expect(older).resolves.toBe(false)
+    expect(applied).toEqual(['watcher'])
   })
 
   it('extractPidFromText finds PID tokens', () => {

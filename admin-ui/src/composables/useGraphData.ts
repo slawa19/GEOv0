@@ -158,7 +158,7 @@ export function useGraphData(opts: {
     transactions.value = p.transactions || []
   }
 
-  async function loadData() {
+  async function loadData(): Promise<boolean> {
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
     loading.value = true
@@ -198,10 +198,12 @@ export function useGraphData(opts: {
         clearingCycles.value = nextClearingCycles
         fullClearingCycles = nextClearingCycles
       }
+      return viewRequest.isCurrent()
     } catch (e: unknown) {
-      if (!viewRequest.isCurrent()) return
+      if (!viewRequest.isCurrent()) return false
       const msg = e instanceof Error ? e.message : String(e)
       error.value = msg || t('graph.data.loadFailed')
+      return false
     } finally {
       if (viewRequest.isCurrent()) loading.value = false
     }

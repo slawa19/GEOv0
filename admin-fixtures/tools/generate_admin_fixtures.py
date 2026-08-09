@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
+from uuid import UUID
 from typing import Any
 
 
@@ -219,18 +220,18 @@ def _paginate(items: list[dict[str, Any]], page: int, per_page: int) -> dict[str
 
 def generate_audit_log(total: int = 180) -> list[dict[str, Any]]:
     actions = [
-        ("CONFIG_PATCH", "config"),
-        ("FEATURE_FLAG_SET", "feature_flag"),
-        ("PARTICIPANT_FREEZE", "participant"),
-        ("PARTICIPANT_UNFREEZE", "participant"),
-        ("EQUIVALENT_UPSERT", "equivalent"),
-        ("TX_ABORT", "transaction"),
+        ("admin.config.patch", "config"),
+        ("admin.feature_flags.patch", "feature_flags"),
+        ("admin.participants.freeze", "participant"),
+        ("admin.participants.unfreeze", "participant"),
+        ("admin.equivalents.patch", "equivalent"),
+        ("admin.transactions.abort", "transaction"),
     ]
 
     actors = [
-        {"actor_id": "admin:root", "actor_role": "admin"},
-        {"actor_id": "operator:ops-1", "actor_role": "operator"},
-        {"actor_id": "auditor:audit-1", "actor_role": "auditor"},
+        {"actor_id": str(UUID(int=10_001, version=4)), "actor_role": "admin"},
+        {"actor_id": str(UUID(int=10_002, version=4)), "actor_role": "operator"},
+        {"actor_id": str(UUID(int=10_003, version=4)), "actor_role": "auditor"},
     ]
 
     out: list[dict[str, Any]] = []
@@ -242,13 +243,13 @@ def generate_audit_log(total: int = 180) -> list[dict[str, Any]]:
 
         object_id = None
         if obj == "config":
-            object_id = "routing.max_paths_per_payment"
-        elif obj == "feature_flag":
-            object_id = "feature_flags.multipath_enabled"
+            object_id = "ROUTING_MAX_PATHS"
+        elif obj == "feature_flags":
+            object_id = None
         elif obj == "participant":
             object_id = f"PID_U{(i % 55) + 1:04d}_{(((i % 55) + 1) * 2654435761) % 2**32:08x}"
         elif obj == "equivalent":
-            object_id = ["UAH", "USD", "POINT", "TOK", "CO2"][i % 5]
+            object_id = ["UAH", "EUR", "HOUR"][i % 3]
         elif obj == "transaction":
             object_id = f"TX_{(i * 104729) % 10**8:08d}"
 
@@ -256,27 +257,28 @@ def generate_audit_log(total: int = 180) -> list[dict[str, Any]]:
         after_state = None
         reason = None
 
-        if action == "CONFIG_PATCH":
-            before_state = {"routing.max_paths_per_payment": 4}
-            after_state = {"routing.max_paths_per_payment": 6 if i % 2 == 0 else 5}
-        elif action == "FEATURE_FLAG_SET":
+        if action == "admin.config.patch":
+            before_state = {"ROUTING_MAX_PATHS": 2}
+            after_state = {"ROUTING_MAX_PATHS": 3}
+        elif action == "admin.feature_flags.patch":
             before_state = {"multipath_enabled": (i % 2 != 0)}
             after_state = {"multipath_enabled": (i % 2 == 0)}
-        elif action in ("PARTICIPANT_FREEZE", "PARTICIPANT_UNFREEZE"):
-            reason = "операционное обслуживание" if action == "PARTICIPANT_FREEZE" else "восстановление"
-            before_state = {"status": "active" if action == "PARTICIPANT_FREEZE" else "frozen"}
-            after_state = {"status": "frozen" if action == "PARTICIPANT_FREEZE" else "active"}
-        elif action == "EQUIVALENT_UPSERT":
+        elif action in ("admin.participants.freeze", "admin.participants.unfreeze"):
+            freezing = action == "admin.participants.freeze"
+            reason = "operational maintenance" if freezing else "maintenance complete"
+            before_state = {"status": "active" if freezing else "suspended"}
+            after_state = {"status": "suspended" if freezing else "active"}
+        elif action == "admin.equivalents.patch":
             before_state = {"is_active": True}
             after_state = {"is_active": True, "description": "updated"}
-        elif action == "TX_ABORT":
+        elif action == "admin.transactions.abort":
             reason = "stuck tx unblock"
             before_state = {"state": "PREPARE_IN_PROGRESS"}
             after_state = {"state": "ABORTED"}
 
         out.append(
             {
-                "id": f"audit_{i+1:04d}",
+                "id": str(UUID(int=i + 1, version=4)),
                 "timestamp": _iso(ts),
                 **actor,
                 "action": action,
@@ -287,6 +289,7 @@ def generate_audit_log(total: int = 180) -> list[dict[str, Any]]:
                 "after_state": after_state,
                 "request_id": f"req_{(i * 99991) % 10**8:08d}",
                 "ip_address": f"10.0.{(i % 50) + 1}.{(i % 200) + 10}",
+                "user_agent": "admin-fixtures/1",
             }
         )
 
@@ -295,14 +298,18 @@ def generate_audit_log(total: int = 180) -> list[dict[str, Any]]:
 
 def generate_config() -> dict[str, Any]:
     return {
-        "feature_flags.multipath_enabled": True,
-        "feature_flags.full_multipath_enabled": False,
-        "clearing.enabled": True,
-        "routing.max_paths_per_payment": 6,
-        "routing.multipath_mode": "auto",
-        "clearing.trigger_cycles_max_length": 6,
-        "limits.default_trustline_limit": "1000.00",
-        "observability.log_level": "INFO",
+        "LOG_LEVEL": "INFO",
+        "RATE_LIMIT_ENABLED": True,
+        "ROUTING_MAX_HOPS": 6,
+        "ROUTING_MAX_PATHS": 3,
+        "INTEGRITY_CHECKPOINT_ENABLED": True,
+        "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS": 300,
+        "RECOVERY_ENABLED": True,
+        "RECOVERY_INTERVAL_SECONDS": 60,
+        "PAYMENT_TX_STUCK_TIMEOUT_SECONDS": 120,
+        "FEATURE_FLAGS_MULTIPATH_ENABLED": True,
+        "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED": False,
+        "CLEARING_ENABLED": True,
     }
 
 

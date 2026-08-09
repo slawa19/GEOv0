@@ -42,6 +42,9 @@ export function useGraphPageWatchers(opts: {
   layoutName: Ref<'fcose' | 'grid' | 'circle'>
   layoutSpacing: Ref<number>
 
+  graphEffectRequests?: ReturnType<typeof useLatestRequest>
+  applyGraphView?: (opts: GraphRebuildOptions) => boolean
+
   graphViz: {
     rebuildGraph: (opts?: GraphRebuildOptions) => void
     runLayout: () => void
@@ -57,8 +60,14 @@ export function useGraphPageWatchers(opts: {
     syncZoomFromControl: (z: number) => void
   }
 }) {
+  const graphEffectRequests = opts.graphEffectRequests ?? useLatestRequest()
+  const applyGraphView = opts.applyGraphView ?? ((rebuildOptions: GraphRebuildOptions) => {
+    opts.graphViz.rebuildGraph(rebuildOptions)
+    return true
+  })
+
   const throttledRebuild = throttle(() => {
-    opts.graphViz.rebuildGraph({ fit: false })
+    applyGraphView({ fit: false })
   }, THROTTLE_GRAPH_REBUILD_MS)
 
   const throttledLayoutSpacing = throttle(() => {
@@ -78,16 +87,14 @@ export function useGraphPageWatchers(opts: {
     if (!opts.focusMode.value) throttledRebuild()
   })
 
-  const graphRefreshRequests = useLatestRequest()
-
   async function refreshGraph(
     refresh: () => Promise<boolean>,
     rebuildOptions: { fit: boolean },
   ) {
-    const request = graphRefreshRequests.begin()
+    const request = graphEffectRequests.begin()
     const applied = await refresh()
     if (!applied || !request.isCurrent()) return
-    opts.graphViz.rebuildGraph(rebuildOptions)
+    applyGraphView(rebuildOptions)
   }
 
   watch(opts.eq, () => {

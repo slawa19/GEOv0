@@ -591,7 +591,7 @@ export function useGraphAnalytics(opts: {
     for (const a of opts.auditLog.value || []) {
       if (String(a.object_id || '') !== pid) continue
       const action = String(a.action || '')
-      if (!action.startsWith('PARTICIPANT_')) continue
+      if (!action.startsWith('admin.participants.')) continue
       const ms = parseIsoMillis(a.timestamp)
       if (ms === null) continue
       const ageDays = (now - ms) / dayMs

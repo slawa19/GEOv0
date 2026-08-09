@@ -219,6 +219,35 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     expect(first.other).toBe('PID_B')
   })
 
+  it('counts canonical participant audit actions in fixture-mode activity', () => {
+    const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
+    const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => false),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map([['EUR', 2]])),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([{
+        id: '00000000-0000-4000-8000-000000000001',
+        timestamp: new Date().toISOString(),
+        action: 'admin.participants.freeze',
+        object_type: 'participant',
+        object_id: 'PID_A',
+      }]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected,
+    })
+
+    expect(graph.selectedActivity.value?.participantOps[7]).toBe(1)
+  })
+
   it('does not let an older metrics rejection replace the latest metrics state', async () => {
     const older = deferred<ReturnType<typeof metricsEnvelope>>()
     const latest = deferred<ReturnType<typeof metricsEnvelope>>()

@@ -18,6 +18,24 @@ function useRealApiEnv() {
   meta.env.VITE_ADMIN_TOKEN = 'test-token'
 }
 
+function runtimeConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    LOG_LEVEL: 'INFO',
+    RATE_LIMIT_ENABLED: true,
+    ROUTING_MAX_HOPS: 6,
+    ROUTING_MAX_PATHS: 3,
+    INTEGRITY_CHECKPOINT_ENABLED: true,
+    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: 300,
+    RECOVERY_ENABLED: true,
+    RECOVERY_INTERVAL_SECONDS: 60,
+    PAYMENT_TX_STUCK_TIMEOUT_SECONDS: 120,
+    FEATURE_FLAGS_MULTIPATH_ENABLED: true,
+    FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: false,
+    CLEARING_ENABLED: true,
+    ...overrides,
+  }
+}
+
 function useMockApiEnv(fixtures: { config?: unknown; featureFlags?: unknown }) {
   const url = new URL('http://localhost/?scenario=happy')
   vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
@@ -30,6 +48,7 @@ function useMockApiEnv(fixtures: { config?: unknown; featureFlags?: unknown }) {
     if (requestUrl.includes('/admin-fixtures/v1/datasets/feature-flags.json')) {
       return jsonResponse(fixtures.featureFlags)
     }
+    if (requestUrl.includes('/admin-fixtures/v1/datasets/audit-log.json')) return jsonResponse([])
     return new Response('Not Found', { status: 404, statusText: 'Not Found' })
   })
   vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -49,10 +68,7 @@ describe('Admin config and feature-flag contracts', () => {
         jsonResponse({
           success: true,
           data: {
-            items: [
-              { key: 'routing.max_hops', value: 6, mutable: true },
-              { key: 'clearing.enabled', value: false, mutable: false },
-            ],
+            items: Object.entries(runtimeConfig()).map(([key, value]) => ({ key, value, mutable: true })),
           },
         }),
       ) as unknown as typeof fetch,
@@ -60,7 +76,7 @@ describe('Admin config and feature-flag contracts', () => {
 
     await expect(realApi.getConfig()).resolves.toEqual({
       success: true,
-      data: { 'routing.max_hops': 6, 'clearing.enabled': false },
+      data: runtimeConfig(),
     })
   })
 
@@ -73,7 +89,7 @@ describe('Admin config and feature-flag contracts', () => {
     {
       name: 'config PATCH',
       data: { updated: 'routing.max_hops' },
-      call: () => realApi.patchConfig({ 'routing.max_hops': 6 }),
+      call: () => realApi.patchConfig({ ROUTING_MAX_HOPS: 6 }),
     },
     {
       name: 'feature flags GET',
@@ -102,7 +118,7 @@ describe('Admin config and feature-flag contracts', () => {
 
   it('validates mock outputs and returns the canonical full feature-flag response', async () => {
     useMockApiEnv({
-      config: { routing: { max_hops: 6 } },
+      config: runtimeConfig(),
       featureFlags: {
         multipath_enabled: true,
         full_multipath_enabled: false,
@@ -110,9 +126,9 @@ describe('Admin config and feature-flag contracts', () => {
       },
     })
 
-    expect(assertSuccess(await mockApi.getConfig())).toEqual({ routing: { max_hops: 6 } })
-    expect(assertSuccess(await mockApi.patchConfig({ clearing: { max_cycle_len: 6 } }))).toEqual({
-      updated: ['clearing'],
+    expect(assertSuccess(await mockApi.getConfig())).toEqual(runtimeConfig())
+    expect(assertSuccess(await mockApi.patchConfig({ ROUTING_MAX_PATHS: 4 }))).toEqual({
+      updated: ['ROUTING_MAX_PATHS'],
     })
 
     expect(assertSuccess(await mockApi.getFeatureFlags())).toEqual({
@@ -133,6 +149,19 @@ describe('Admin config and feature-flag contracts', () => {
       full_multipath_enabled: false,
       clearing_enabled: false,
     })
+  })
+
+  it.each([
+    ['unknown key', { ROUTING_MAX_PATHS: 4, routing: { max_paths: 4 } }],
+    ['wrong value type', { ROUTING_MAX_PATHS: '4' }],
+  ])('rejects a mock config patch with an %s', async (_label, patch) => {
+    useMockApiEnv({ config: runtimeConfig(), featureFlags: undefined })
+
+    await expect(mockApi.patchConfig(patch)).resolves.toMatchObject({
+      success: false,
+      error: { code: 'VALIDATION_ERROR' },
+    })
+    expect(assertSuccess(await mockApi.getConfig())).toEqual(runtimeConfig())
   })
 
   it.each([

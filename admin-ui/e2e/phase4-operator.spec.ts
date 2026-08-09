@@ -7,30 +7,23 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('config save, local rejection, and auditor read-only stay truthful', async ({ page }) => {
+test('canonical config save and auditor read-only stay truthful', async ({ page }) => {
   await page.goto('/config')
 
-  const clearingRow = page.locator('.el-table__row', { hasText: 'clearing' }).first()
-  const editor = clearingRow.locator('textarea')
+  const routingRow = page.locator('.el-table__row', { hasText: 'ROUTING_MAX_PATHS' }).first()
+  const editor = routingRow.locator('input').last()
   const save = page.getByRole('button', { name: 'Save', exact: true })
 
   await expect(editor).toBeVisible()
-  const original = JSON.parse(await editor.inputValue()) as { max_cycle_len: number }
-  const changed = { ...original, max_cycle_len: original.max_cycle_len + 1 }
-  await editor.fill(JSON.stringify(changed, null, 2))
+  const original = Number(await editor.inputValue())
+  const changed = original + 1
+  await editor.fill(String(changed))
   await expect(save).toBeEnabled()
   await save.click()
 
   await expect(page.getByText('Saved (1 keys)', { exact: true })).toBeVisible()
-  await expect(editor).toHaveValue(JSON.stringify(changed, null, 2))
+  await expect(editor).toHaveValue(String(changed))
   await expect(save).toBeDisabled()
-
-  await editor.fill('{')
-  await save.click()
-
-  await expect(page.getByText('Invalid JSON for clearing', { exact: true })).toBeVisible()
-  await expect(editor).toHaveValue('{')
-  await expect(save).toBeEnabled()
 
   const roleSelect = page.locator('.header__right .el-select').nth(1)
   await roleSelect.click()

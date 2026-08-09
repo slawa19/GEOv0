@@ -49,16 +49,17 @@ export type Equivalent = {
 export type AuditLogEntry = {
   id: string
   timestamp: string
-  actor_id: string
-  actor_role: string
+  actor_id?: string | null
+  actor_role?: string | null
   action: string
-  object_type: string
-  object_id: string
+  object_type?: string | null
+  object_id?: string | null
   reason?: string | null
   before_state?: unknown
   after_state?: unknown
-  request_id?: string
-  ip_address?: string
+  request_id?: string | null
+  ip_address?: string | null
+  user_agent?: string | null
 }
 
 export type Debt = {

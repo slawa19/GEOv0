@@ -2,7 +2,41 @@ import { z, type ZodType } from 'zod'
 
 import { ApiException } from './envelope'
 
-export const AdminConfigSchema = z.record(z.string(), z.unknown())
+export const ADMIN_CONFIG_KEYS = [
+  'LOG_LEVEL',
+  'RATE_LIMIT_ENABLED',
+  'ROUTING_MAX_HOPS',
+  'ROUTING_MAX_PATHS',
+  'INTEGRITY_CHECKPOINT_ENABLED',
+  'INTEGRITY_CHECKPOINT_INTERVAL_SECONDS',
+  'RECOVERY_ENABLED',
+  'RECOVERY_INTERVAL_SECONDS',
+  'PAYMENT_TX_STUCK_TIMEOUT_SECONDS',
+  'FEATURE_FLAGS_MULTIPATH_ENABLED',
+  'FEATURE_FLAGS_FULL_MULTIPATH_ENABLED',
+  'CLEARING_ENABLED',
+] as const
+
+export const AdminConfigKeySchema = z.enum(ADMIN_CONFIG_KEYS)
+
+export const AdminConfigSchema = z
+  .object({
+    LOG_LEVEL: z.string(),
+    RATE_LIMIT_ENABLED: z.boolean(),
+    ROUTING_MAX_HOPS: z.number().int(),
+    ROUTING_MAX_PATHS: z.number().int(),
+    INTEGRITY_CHECKPOINT_ENABLED: z.boolean(),
+    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: z.number().int(),
+    RECOVERY_ENABLED: z.boolean(),
+    RECOVERY_INTERVAL_SECONDS: z.number().int(),
+    PAYMENT_TX_STUCK_TIMEOUT_SECONDS: z.number().int(),
+    FEATURE_FLAGS_MULTIPATH_ENABLED: z.boolean(),
+    FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: z.boolean(),
+    CLEARING_ENABLED: z.boolean(),
+  })
+  .strict()
+
+export const AdminConfigPatchSchema = AdminConfigSchema.partial().strict()
 
 export const AdminConfigResponseSchema = z
   .object({
@@ -20,7 +54,7 @@ export const AdminConfigResponseSchema = z
 
 export const AdminConfigPatchResponseSchema = z
   .object({
-    updated: z.array(z.string()),
+    updated: z.array(AdminConfigKeySchema),
   })
   .passthrough()
 
@@ -49,6 +83,26 @@ export const AdminAbortTxResponseSchema = z
 export const AdminEquivalentCodeSchema = z.string().regex(/^[A-Z0-9_]{1,16}$/)
 export const AdminEquivalentPrecisionSchema = z.number().int().min(0).max(18)
 const DateTimeSchema = z.string().datetime({ offset: true })
+
+export const AdminAuditLogEntrySchema = z
+  .object({
+    id: z.string().uuid(),
+    timestamp: DateTimeSchema,
+    actor_id: z.string().uuid().nullable().optional(),
+    actor_role: z.string().nullable().optional(),
+    action: z.string(),
+    object_type: z.string().nullable().optional(),
+    object_id: z.string().nullable().optional(),
+    reason: z.string().nullable().optional(),
+    before_state: z.record(z.string(), z.unknown()).nullable().optional(),
+    after_state: z.record(z.string(), z.unknown()).nullable().optional(),
+    request_id: z.string().nullable().optional(),
+    ip_address: z.string().nullable().optional(),
+    user_agent: z.string().nullable().optional(),
+  })
+  .strict()
+
+export const AdminAuditLogSchema = z.array(AdminAuditLogEntrySchema)
 
 export const AdminEquivalentWireResponseSchema = z
   .object({

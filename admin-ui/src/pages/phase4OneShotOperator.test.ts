@@ -76,38 +76,38 @@ beforeEach(() => {
 })
 
 describe('Phase 4 Config operator workflow', () => {
-  it('keeps untouched JSON rows clean', async () => {
+  it('keeps untouched runtime config rows clean', async () => {
     apiMock.getConfig.mockResolvedValue({
       success: true,
-      data: { routing: { max_paths: 3 }, clearing: { max_cycle_len: 6 } },
+      data: { ROUTING_MAX_PATHS: 3, CLEARING_ENABLED: true },
     })
 
     const { wrapper } = await mountPage(ConfigPage, '/config')
 
-    expect(wrapper.findAll('textarea')).toHaveLength(2)
+    expect(wrapper.findAll('textarea')).toHaveLength(0)
     expect(primaryButton(wrapper).attributes('disabled')).toBeDefined()
     expect(apiMock.patchConfig).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
-  it('patches exactly one key after one JSON value changes', async () => {
-    const initial = { routing: { max_paths: 3 }, clearing: { max_cycle_len: 6 } }
-    const changed = { routing: { max_paths: 3 }, clearing: { max_cycle_len: 7 } }
+  it('patches exactly one canonical numeric key after one value changes', async () => {
+    const initial = { ROUTING_MAX_PATHS: 3, ROUTING_MAX_HOPS: 6 }
+    const changed = { ROUTING_MAX_PATHS: 4, ROUTING_MAX_HOPS: 6 }
     apiMock.getConfig
       .mockResolvedValueOnce({ success: true, data: initial })
       .mockResolvedValueOnce({ success: true, data: changed })
-    apiMock.patchConfig.mockResolvedValue({ success: true, data: { updated: ['clearing'] } })
+    apiMock.patchConfig.mockResolvedValue({ success: true, data: { updated: ['ROUTING_MAX_PATHS'] } })
     vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
 
     const { wrapper } = await mountPage(ConfigPage, '/config')
-    const clearingRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('clearing'))
-    expect(clearingRow).toBeDefined()
-    await clearingRow!.find('textarea').setValue(JSON.stringify(changed.clearing, null, 2))
+    const routingRow = wrapper.findAll('.el-table__row').find((row) => row.text().includes('ROUTING_MAX_PATHS'))
+    expect(routingRow).toBeDefined()
+    await routingRow!.find('input').setValue('4')
     await primaryButton(wrapper).trigger('click')
     await flushPromises()
 
     expect(apiMock.patchConfig).toHaveBeenCalledTimes(1)
-    expect(apiMock.patchConfig).toHaveBeenCalledWith({ clearing: { max_cycle_len: 7 } })
+    expect(apiMock.patchConfig).toHaveBeenCalledWith({ ROUTING_MAX_PATHS: 4 })
     expect(apiMock.getConfig).toHaveBeenCalledTimes(2)
     expect(primaryButton(wrapper).attributes('disabled')).toBeDefined()
     wrapper.unmount()
@@ -115,9 +115,9 @@ describe('Phase 4 Config operator workflow', () => {
 
   it('saves one changed value and reloads the durable visible result', async () => {
     apiMock.getConfig
-      .mockResolvedValueOnce({ success: true, data: { TEST_FLAG: false } })
-      .mockResolvedValueOnce({ success: true, data: { TEST_FLAG: true } })
-    apiMock.patchConfig.mockResolvedValue({ success: true, data: { updated: ['TEST_FLAG'] } })
+      .mockResolvedValueOnce({ success: true, data: { CLEARING_ENABLED: false } })
+      .mockResolvedValueOnce({ success: true, data: { CLEARING_ENABLED: true } })
+    apiMock.patchConfig.mockResolvedValue({ success: true, data: { updated: ['CLEARING_ENABLED'] } })
     const success = vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
 
     const { wrapper } = await mountPage(ConfigPage, '/config')
@@ -131,33 +131,15 @@ describe('Phase 4 Config operator workflow', () => {
     await save.trigger('click')
     await flushPromises()
 
-    expect(apiMock.patchConfig).toHaveBeenCalledWith({ TEST_FLAG: true })
+    expect(apiMock.patchConfig).toHaveBeenCalledWith({ CLEARING_ENABLED: true })
     expect(apiMock.getConfig).toHaveBeenCalledTimes(2)
     expect(success).toHaveBeenCalledTimes(1)
     expect(primaryButton(wrapper).attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 
-  it('keeps invalid JSON dirty, reports rejection, and never calls the mutation', async () => {
-    apiMock.getConfig.mockResolvedValue({ success: true, data: { routing: { max_paths: 3 } } })
-    const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => undefined as never)
-
-    const { wrapper } = await mountPage(ConfigPage, '/config')
-    const textarea = wrapper.find('textarea')
-    expect(textarea.exists()).toBe(true)
-    await textarea.setValue('{')
-    await primaryButton(wrapper).trigger('click')
-    await flushPromises()
-
-    expect(apiMock.patchConfig).not.toHaveBeenCalled()
-    expect(error).toHaveBeenCalledTimes(1)
-    expect((textarea.element as HTMLTextAreaElement).value).toBe('{')
-    expect(primaryButton(wrapper).attributes('disabled')).toBeUndefined()
-    wrapper.unmount()
-  })
-
   it('makes auditor mode read-only without issuing a mutation', async () => {
-    apiMock.getConfig.mockResolvedValue({ success: true, data: { TEST_FLAG: false } })
+    apiMock.getConfig.mockResolvedValue({ success: true, data: { CLEARING_ENABLED: false } })
     const { wrapper } = await mountPage(ConfigPage, '/config', 'auditor')
 
     expect(wrapper.find('.el-switch').classes()).toContain('is-disabled')

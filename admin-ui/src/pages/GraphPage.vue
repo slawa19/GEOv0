@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGraphData } from '../composables/useGraphData'
 import { useGraphAnalytics } from '../composables/useGraphAnalytics'
 import { graphSelectionAnnouncement, useGraphVisualization } from '../composables/useGraphVisualization'
-import type { DrawerTab, GraphElementOption, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
+import type { DrawerTab, GraphElementOption, GraphRebuildOptions, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
 import {
   DEFAULT_FOCUS_DEPTH,
   DEFAULT_LAYOUT_SPACING,
@@ -37,6 +37,7 @@ import {
   modeToLabelParts,
   pct,
   reloadGraphView,
+  syncGraphCoreForView,
   type LabelPart,
 } from './graph/graphPageHelpers'
 import { useGraphConnections } from './graph/useGraphConnections'
@@ -329,7 +330,7 @@ const {
  * The in-file implementation has been removed to keep `GraphPage.vue` focused.
  */
 
-const reloadRequests = useLatestRequest()
+const graphEffectRequests = useLatestRequest()
 
 onMounted(async () => {
   restoreStorage()
@@ -345,25 +346,29 @@ const isTooLargeToAutoRender = computed(() => {
 })
 const graphRenderGuardActive = computed(() => isTooLargeToAutoRender.value && !renderOverride.value)
 
-function ensureCyInitialized() {
-  if (graphViz.getCy()) return
-  if (graphRenderGuardActive.value) return
-  graphViz.initCy()
+function applyGraphView(rebuildOptions: GraphRebuildOptions) {
+  return syncGraphCoreForView({
+    guarded: graphRenderGuardActive.value,
+    hasCore: () => Boolean(graphViz.getCy()),
+    initialize: graphViz.initCy,
+    destroy: graphViz.destroyCy,
+    rebuild: graphViz.rebuildGraph,
+    rebuildOptions,
+  })
 }
 
 function renderAnyway() {
   renderOverride.value = true
-  ensureCyInitialized()
+  applyGraphView({ fit: true })
 }
 
 async function reloadGraph(rebuildOptions: { fit: boolean; preserveViewport?: boolean }) {
-  const request = reloadRequests.begin()
+  const request = graphEffectRequests.begin()
   await reloadGraphView({
     loadData,
     isCurrent: request.isCurrent,
     afterLoad: async () => { await nextTick() },
-    ensureInitialized: ensureCyInitialized,
-    rebuild: graphViz.rebuildGraph,
+    applyView: applyGraphView,
     rebuildOptions,
   })
 }
@@ -404,6 +409,8 @@ useGraphPageWatchers({
   zoom,
   layoutName,
   layoutSpacing,
+  graphEffectRequests,
+  applyGraphView,
   graphViz,
 })
 
