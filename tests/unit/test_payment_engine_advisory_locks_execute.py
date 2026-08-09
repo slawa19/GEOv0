@@ -82,10 +82,12 @@ async def test_acquire_segment_advisory_locks_executes_pg_advisory_xact_lock_for
         participant_map=participant_map,
     )
 
-    # Unique segments across the two routes: A->B, B->D, A->C, C->D.
-    assert len(session.executed) == 4
-    assert all("pg_advisory_xact_lock" in sql for sql, _params in session.executed)
-    assert all("key" in params for _sql, params in session.executed)
+    # One transaction-local timeout plus four unique segment locks.
+    assert len(session.executed) == 5
+    assert "SET LOCAL lock_timeout" in session.executed[0][0]
+    lock_calls = session.executed[1:]
+    assert all("pg_advisory_xact_lock" in sql for sql, _params in lock_calls)
+    assert all("key" in params for _sql, params in lock_calls)
 
 
 @pytest.mark.asyncio
@@ -95,7 +97,8 @@ async def test_acquire_segment_advisory_lock_keys_deduplicates_and_sorts_globall
 
     await engine._acquire_segment_advisory_lock_keys([9, -4, 9, 2, -4])
 
-    assert [params["key"] for _sql, params in session.executed] == [-4, 2, 9]
+    assert "SET LOCAL lock_timeout" in session.executed[0][0]
+    assert [params["key"] for _sql, params in session.executed[1:]] == [-4, 2, 9]
 
 
 @pytest.mark.asyncio
@@ -110,8 +113,10 @@ async def test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys(
     await engine._acquire_tx_advisory_lock(tx_id)
     await engine._acquire_segment_advisory_lock_keys([17])
 
-    tx_sql, tx_params = session.executed[0]
-    segment_sql, segment_params = session.executed[1]
+    tx_sql, tx_params = session.executed[1]
+    segment_sql, segment_params = session.executed[3]
+    assert "SET LOCAL lock_timeout" in session.executed[0][0]
+    assert "SET LOCAL lock_timeout" in session.executed[2][0]
     assert "pg_advisory_xact_lock" in tx_sql
     assert set(tx_params) == {"namespace", "key"}
     assert "pg_advisory_xact_lock" in segment_sql

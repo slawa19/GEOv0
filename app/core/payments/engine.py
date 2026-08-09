@@ -63,6 +63,10 @@ class PaymentEngine:
         self._retry_attempts = settings.COMMIT_RETRY_ATTEMPTS
         self._retry_base_delay_s = settings.COMMIT_RETRY_BASE_DELAY_MS / 1000.0
         self._retry_max_delay_s = settings.COMMIT_RETRY_MAX_DELAY_MS / 1000.0
+        self._advisory_lock_timeout_ms = max(
+            1,
+            int(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS * 1000),
+        )
 
     def _is_postgres(self) -> bool:
         bind = getattr(self.session, "bind", None)
@@ -94,6 +98,7 @@ class PaymentEngine:
         if not self._is_postgres():
             return
 
+        await self._set_local_advisory_lock_timeout()
         await self.session.execute(
             text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
             {
@@ -132,11 +137,18 @@ class PaymentEngine:
         if not self._is_postgres():
             return
 
+        await self._set_local_advisory_lock_timeout()
         for key in sorted(set(keys)):
             await self.session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": key},
             )
+
+    async def _set_local_advisory_lock_timeout(self) -> None:
+        timeout_ms = max(1, int(self._advisory_lock_timeout_ms))
+        await self.session.execute(
+            text(f"SET LOCAL lock_timeout = '{timeout_ms}ms'")
+        )
 
     @classmethod
     def _parse_persisted_prepare_locks(
@@ -203,7 +215,7 @@ class PaymentEngine:
             for flow in lock.flows
         }
 
-    def _is_retryable_db_error(self, exc: BaseException) -> bool:
+    def _is_retryable_db_error(self, exc: BaseException, *, op: str) -> bool:
         if not isinstance(exc, DBAPIError):
             return False
 
@@ -217,8 +229,13 @@ class PaymentEngine:
             or getattr(orig, "pgcode", None)
             or getattr(orig, "code", None)
         )
-        # 40P01: deadlock_detected, 40001: serialization_failure
-        return sqlstate in {"40P01", "40001"}
+        # 40P01: deadlock_detected, 40001: serialization_failure. Under the
+        # default SERIALIZABLE isolation, a same-tx commit that waited on the
+        # advisory lock can observe an invisible concurrent insert as 23505;
+        # retrying the whole commit then resolves through the terminal tx state.
+        return sqlstate in {"40P01", "40001"} or (
+            sqlstate == "23505" and op in {"commit", "commit_nocommit"}
+        )
 
     def _get_pgcode(self, exc: BaseException) -> str | None:
         if not isinstance(exc, DBAPIError):
@@ -240,7 +257,8 @@ class PaymentEngine:
         """Retry wrapper for SERIALIZABLE/deadlock errors.
 
         Policy:
-        - Catch DBAPIError with Postgres sqlstate 40001/40P01.
+        - Catch Postgres 40001/40P01, plus commit-only 23505 caused by an
+          invisible concurrent insert after a SERIALIZABLE advisory-lock wait.
         - Rollback.
         - Exponential backoff with jitter, bounded.
         - Re-run the whole unit-of-work `fn()`.
@@ -261,7 +279,7 @@ class PaymentEngine:
                 # inside a surrounding transaction context manager can close that context
                 # and cause follow-up errors like:
                 # "Can't operate on closed transaction inside context manager".
-                is_retryable = self._is_retryable_db_error(exc)
+                is_retryable = self._is_retryable_db_error(exc, op=op)
                 if attempt >= self._retry_attempts or not is_retryable:
                     raise
 
@@ -1393,6 +1411,9 @@ class PaymentEngine:
                 await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if tx and tx.state == "COMMITTED":
+                await self.session.execute(
+                    delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
+                )
                 if commit:
                     # Preserve the public commit=True transaction boundary.
                     await self.session.commit()
@@ -1455,6 +1476,9 @@ class PaymentEngine:
             )
 
             if tx and tx.state == "COMMITTED":
+                await self.session.execute(
+                    delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
+                )
                 if commit:
                     # Release advisory keys acquired before the terminal re-check.
                     await self.session.commit()

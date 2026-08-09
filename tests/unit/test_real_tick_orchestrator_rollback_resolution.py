@@ -77,6 +77,11 @@ class _Emitter:
 class _PaymentEffect:
     def __init__(self) -> None:
         self.calls = 0
+        self.cache_invalidations = 0
+
+    def invalidate_routing_cache_once(self) -> bool:
+        self.cache_invalidations += 1
+        return True
 
     def apply_once(self) -> bool:
         self.calls += 1
@@ -263,7 +268,7 @@ async def test_rollback_failure_resolves_only_failure_observations_as_unknown(
 
 
 @pytest.mark.asyncio
-async def test_double_cancellation_drains_final_rollback_before_resolution(
+async def test_double_cancellation_bounds_final_rollback_and_resolves_unknown(
     monkeypatch,
 ) -> None:
     logger = logging.getLogger("test.rollback_double_cancellation")
@@ -289,14 +294,12 @@ async def test_double_cancellation_drains_final_rollback_before_resolution(
     task.cancel("second cancellation")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert not task.done()
-
-    session.release_rollback.set()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert session.rollback_calls == 1
+    assert session.rollback_calls == 0
     assert committed_effect.calls == 0
+    assert committed_effect.cache_invalidations == 1
     assert emitter.updated == 0
     assert emitter.failed == 2
     assert run.attempts_total == 2
@@ -305,3 +308,6 @@ async def test_double_cancellation_drains_final_rollback_before_resolution(
     assert run.errors_total == 1
     assert phase.apply_rollback_observations() is False
     assert phase.apply_unknown_transaction_observations() is False
+
+    session.release_rollback.set()
+    await asyncio.sleep(0)

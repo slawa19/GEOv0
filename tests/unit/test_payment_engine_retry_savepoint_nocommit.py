@@ -71,3 +71,26 @@ async def test_uow_retry_uses_savepoint_and_does_not_rollback_session(monkeypatc
 
     # When using savepoints, we must NOT rollback the whole session.
     assert session.rollback_calls == 0
+
+
+def test_unique_violation_retry_is_limited_to_commit_operations(monkeypatch):
+    from app.core.payments.engine import PaymentEngine
+
+    session = _FakeAsyncSession()
+    eng = PaymentEngine(session)  # type: ignore[arg-type]
+    monkeypatch.setattr(eng, "_is_postgres", lambda: True)
+
+    class _FakePgError(Exception):
+        sqlstate = "23505"
+
+    error = DBAPIError(
+        statement="INSERT INTO debts",
+        params=None,
+        orig=_FakePgError("unique_violation"),
+        connection_invalidated=False,
+    )
+
+    assert eng._is_retryable_db_error(error, op="commit") is True
+    assert eng._is_retryable_db_error(error, op="commit_nocommit") is True
+    assert eng._is_retryable_db_error(error, op="prepare") is False
+    assert eng._is_retryable_db_error(error, op="abort") is False

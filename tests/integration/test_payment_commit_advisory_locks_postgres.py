@@ -317,10 +317,20 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
     exercise_completed = False
 
     async with TestingSessionLocal() as holder_session, TestingSessionLocal() as waiter_session:
-        await _use_read_committed(holder_session)
-        await _use_read_committed(waiter_session)
+        holder_isolation = (
+            await holder_session.execute(text("SHOW transaction_isolation"))
+        ).scalar_one()
+        waiter_isolation = (
+            await waiter_session.execute(text("SHOW transaction_isolation"))
+        ).scalar_one()
+        assert str(holder_isolation).lower() == "serializable"
+        assert str(waiter_isolation).lower() == "serializable"
         holder_engine = PaymentEngine(holder_session)
         waiter_engine = PaymentEngine(waiter_session)
+        holder_engine._retry_base_delay_s = 0.0
+        holder_engine._retry_max_delay_s = 0.0
+        waiter_engine._retry_base_delay_s = 0.0
+        waiter_engine._retry_max_delay_s = 0.0
         holder_segment_acquire = holder_engine._acquire_segment_advisory_lock_keys
         waiter_execute = waiter_session.execute
 

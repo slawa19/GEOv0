@@ -84,6 +84,14 @@ async def test_abort_is_noop_when_already_committed(db_session):
         state="COMMITTED",
     )
     db_session.add(tx)
+    db_session.add(
+        PrepareLock(
+            tx_id=tx_id,
+            participant_id=uuid.uuid4(),
+            effects={},
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+    )
     await db_session.commit()
 
     engine = PaymentEngine(db_session)
@@ -91,6 +99,14 @@ async def test_abort_is_noop_when_already_committed(db_session):
 
     await db_session.refresh(tx)
     assert tx.state == "COMMITTED"
+    assert (
+        await db_session.scalar(
+            select(func.count())
+            .select_from(PrepareLock)
+            .where(PrepareLock.tx_id == tx_id)
+        )
+        == 0
+    )
 
 
 @pytest.mark.asyncio
