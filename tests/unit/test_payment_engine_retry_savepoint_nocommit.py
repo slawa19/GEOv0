@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from sqlalchemy.exc import DBAPIError
 
@@ -23,12 +25,16 @@ class _FakeAsyncSession:
         self.begin_nested_enters = 0
         self.begin_nested_exits = 0
         self.rollback_calls = 0
+        self.executed: list[tuple[str, dict]] = []
 
     def begin_nested(self):
         return _NestedCtx(self)
 
     async def rollback(self):
         self.rollback_calls += 1
+
+    async def execute(self, stmt, params=None):
+        self.executed.append((str(stmt), dict(params or {})))
 
 
 @pytest.mark.asyncio
@@ -91,6 +97,53 @@ def test_unique_violation_retry_is_limited_to_commit_operations(monkeypatch):
     )
 
     assert eng._is_retryable_db_error(error, op="commit") is True
-    assert eng._is_retryable_db_error(error, op="commit_nocommit") is True
+    assert eng._is_retryable_db_error(error, op="commit_nocommit") is False
     assert eng._is_retryable_db_error(error, op="prepare") is False
     assert eng._is_retryable_db_error(error, op="abort") is False
+
+
+@pytest.mark.asyncio
+async def test_savepoint_uow_does_not_leak_local_lock_timeout(monkeypatch):
+    from app.core.payments.engine import PaymentEngine
+
+    session = _FakeAsyncSession()
+    eng = PaymentEngine(session)  # type: ignore[arg-type]
+    monkeypatch.setattr(eng, "_is_postgres", lambda: True)
+
+    async def _fn():
+        await eng._acquire_segment_advisory_lock_keys([7])
+        return "ok"
+
+    assert (
+        await eng._run_uow_with_retry(
+            op="commit_nocommit",
+            fn=_fn,
+            use_savepoint=True,
+        )
+        == "ok"
+    )
+    assert len(session.executed) == 1
+    assert "pg_advisory_xact_lock" in session.executed[0][0]
+
+
+@pytest.mark.asyncio
+async def test_lock_not_available_is_mapped_to_asyncio_timeout(monkeypatch):
+    from app.core.payments.engine import PaymentEngine
+
+    session = _FakeAsyncSession()
+    eng = PaymentEngine(session)  # type: ignore[arg-type]
+    monkeypatch.setattr(eng, "_is_postgres", lambda: True)
+
+    class _FakePgError(Exception):
+        sqlstate = "55P03"
+
+    async def _fn():
+        raise DBAPIError(
+            statement="SELECT pg_advisory_xact_lock(1)",
+            params=None,
+            orig=_FakePgError("lock_not_available"),
+            connection_invalidated=False,
+        )
+
+    with pytest.raises(asyncio.TimeoutError, match="advisory lock"):
+        await eng._run_uow_with_retry(op="commit", fn=_fn)

@@ -2,6 +2,7 @@ import logging
 import asyncio
 import hashlib
 import random
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -63,10 +64,14 @@ class PaymentEngine:
         self._retry_attempts = settings.COMMIT_RETRY_ATTEMPTS
         self._retry_base_delay_s = settings.COMMIT_RETRY_BASE_DELAY_MS / 1000.0
         self._retry_max_delay_s = settings.COMMIT_RETRY_MAX_DELAY_MS / 1000.0
-        self._advisory_lock_timeout_ms = max(
-            1,
-            int(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS * 1000),
+        total_timeout_s = float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10)
+        commit_timeout_s = float(settings.COMMIT_TIMEOUT_SECONDS or 5)
+        self._advisory_lock_budget_s = max(
+            0.001,
+            min(total_timeout_s, commit_timeout_s),
         )
+        self._advisory_lock_timeout_enabled = True
+        self._advisory_lock_deadline: float | None = None
 
     def _is_postgres(self) -> bool:
         bind = getattr(self.session, "bind", None)
@@ -137,15 +142,23 @@ class PaymentEngine:
         if not self._is_postgres():
             return
 
-        await self._set_local_advisory_lock_timeout()
         for key in sorted(set(keys)):
+            await self._set_local_advisory_lock_timeout()
             await self.session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": key},
             )
 
     async def _set_local_advisory_lock_timeout(self) -> None:
-        timeout_ms = max(1, int(self._advisory_lock_timeout_ms))
+        if not self._advisory_lock_timeout_enabled:
+            return
+        now = time.monotonic()
+        if self._advisory_lock_deadline is None:
+            self._advisory_lock_deadline = now + self._advisory_lock_budget_s
+        timeout_ms = max(
+            1,
+            int((self._advisory_lock_deadline - now) * 1000),
+        )
         await self.session.execute(
             text(f"SET LOCAL lock_timeout = '{timeout_ms}ms'")
         )
@@ -234,7 +247,7 @@ class PaymentEngine:
         # advisory lock can observe an invisible concurrent insert as 23505;
         # retrying the whole commit then resolves through the terminal tx state.
         return sqlstate in {"40P01", "40001"} or (
-            sqlstate == "23505" and op in {"commit", "commit_nocommit"}
+            sqlstate == "23505" and op == "commit"
         )
 
     def _get_pgcode(self, exc: BaseException) -> str | None:
@@ -264,46 +277,75 @@ class PaymentEngine:
         - Re-run the whole unit-of-work `fn()`.
         """
 
+        previous_timeout_enabled = self._advisory_lock_timeout_enabled
+        previous_deadline = self._advisory_lock_deadline
+        self._advisory_lock_timeout_enabled = (
+            previous_timeout_enabled and not use_savepoint
+        )
+        if self._advisory_lock_timeout_enabled:
+            candidate_deadline = time.monotonic() + self._advisory_lock_budget_s
+            self._advisory_lock_deadline = (
+                min(previous_deadline, candidate_deadline)
+                if previous_deadline is not None
+                else candidate_deadline
+            )
+        else:
+            # SET LOCAL would leak into the caller-owned outer transaction after
+            # a successful savepoint. The outer service timeout owns this path.
+            self._advisory_lock_deadline = None
+
         attempt = 0
-        while True:
-            try:
-                if use_savepoint:
-                    async with self.session.begin_nested():
-                        return await fn()
-                return await fn()
-            except DBAPIError as exc:
-                attempt += 1
+        try:
+            while True:
+                try:
+                    if use_savepoint:
+                        async with self.session.begin_nested():
+                            return await fn()
+                    return await fn()
+                except DBAPIError as exc:
+                    attempt += 1
 
-                # Only rollback when we are actually going to retry.
-                # For non-retryable DBAPIError (or on non-Postgres backends), rolling back
-                # inside a surrounding transaction context manager can close that context
-                # and cause follow-up errors like:
-                # "Can't operate on closed transaction inside context manager".
-                is_retryable = self._is_retryable_db_error(exc, op=op)
-                if attempt >= self._retry_attempts or not is_retryable:
-                    raise
+                    # A bounded advisory-lock wait is an operational timeout,
+                    # not a generic database failure. Callers already own the
+                    # rollback/abort policy for asyncio timeouts.
+                    if self._get_pgcode(exc) == "55P03":
+                        raise asyncio.TimeoutError(
+                            "Payment advisory lock timed out"
+                        ) from exc
 
-                if not use_savepoint:
-                    try:
-                        await self.session.rollback()
-                    except Exception:
-                        pass
+                    # Only rollback when we are actually going to retry.
+                    # For non-retryable DBAPIError (or on non-Postgres backends), rolling back
+                    # inside a surrounding transaction context manager can close that context
+                    # and cause follow-up errors like:
+                    # "Can't operate on closed transaction inside context manager".
+                    is_retryable = self._is_retryable_db_error(exc, op=op)
+                    if attempt >= self._retry_attempts or not is_retryable:
+                        raise
 
-                base = max(0.0, self._retry_base_delay_s)
-                cap = max(base, self._retry_max_delay_s)
-                delay = min(cap, base * (2 ** (attempt - 1)))
-                # Small jitter (0..25%) to avoid thundering herd.
-                delay = delay * (1.0 + 0.25 * random.random())
+                    if not use_savepoint:
+                        try:
+                            await self.session.rollback()
+                        except Exception:
+                            pass
 
-                logger.warning(
-                    "event=payment.uow_retry op=%s attempt=%s/%s delay_s=%.3f pgcode=%s",
-                    op,
-                    attempt,
-                    self._retry_attempts,
-                    delay,
-                    self._get_pgcode(exc),
-                )
-                await asyncio.sleep(delay)
+                    base = max(0.0, self._retry_base_delay_s)
+                    cap = max(base, self._retry_max_delay_s)
+                    delay = min(cap, base * (2 ** (attempt - 1)))
+                    # Small jitter (0..25%) to avoid thundering herd.
+                    delay = delay * (1.0 + 0.25 * random.random())
+
+                    logger.warning(
+                        "event=payment.uow_retry op=%s attempt=%s/%s delay_s=%.3f pgcode=%s",
+                        op,
+                        attempt,
+                        self._retry_attempts,
+                        delay,
+                        self._get_pgcode(exc),
+                    )
+                    await asyncio.sleep(delay)
+        finally:
+            self._advisory_lock_timeout_enabled = previous_timeout_enabled
+            self._advisory_lock_deadline = previous_deadline
 
     async def _get_tx(self, tx_id: str) -> Transaction | None:
         return (

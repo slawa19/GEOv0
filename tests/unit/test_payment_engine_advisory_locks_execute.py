@@ -82,10 +82,11 @@ async def test_acquire_segment_advisory_locks_executes_pg_advisory_xact_lock_for
         participant_map=participant_map,
     )
 
-    # One transaction-local timeout plus four unique segment locks.
-    assert len(session.executed) == 5
-    assert "SET LOCAL lock_timeout" in session.executed[0][0]
-    lock_calls = session.executed[1:]
+    # The remaining transaction budget is applied before every unique lock.
+    assert len(session.executed) == 8
+    timeout_calls = session.executed[0::2]
+    lock_calls = session.executed[1::2]
+    assert all("SET LOCAL lock_timeout" in sql for sql, _params in timeout_calls)
     assert all("pg_advisory_xact_lock" in sql for sql, _params in lock_calls)
     assert all("key" in params for _sql, params in lock_calls)
 
@@ -97,8 +98,11 @@ async def test_acquire_segment_advisory_lock_keys_deduplicates_and_sorts_globall
 
     await engine._acquire_segment_advisory_lock_keys([9, -4, 9, 2, -4])
 
-    assert "SET LOCAL lock_timeout" in session.executed[0][0]
-    assert [params["key"] for _sql, params in session.executed[1:]] == [-4, 2, 9]
+    assert all(
+        "SET LOCAL lock_timeout" in sql
+        for sql, _params in session.executed[0::2]
+    )
+    assert [params["key"] for _sql, params in session.executed[1::2]] == [-4, 2, 9]
 
 
 @pytest.mark.asyncio
@@ -121,6 +125,41 @@ async def test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys(
     assert set(tx_params) == {"namespace", "key"}
     assert "pg_advisory_xact_lock" in segment_sql
     assert segment_params == {"key": 17}
+
+
+@pytest.mark.asyncio
+async def test_segment_lock_timeout_uses_one_decreasing_commit_budget(
+    monkeypatch,
+):
+    from app.config import settings
+    from app.core.payments import engine as engine_module
+
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 10)
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 5)
+    monotonic_values = iter([100.0, 101.0])
+    monkeypatch.setattr(
+        engine_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(monotonic_values)),
+    )
+    session = _Session()
+    engine = PaymentEngine(session)
+
+    await engine._acquire_segment_advisory_lock_keys([1, 2])
+
+    assert "5000ms" in session.executed[0][0]
+    assert "4000ms" in session.executed[2][0]
+
+
+def test_advisory_lock_budget_matches_service_zero_default(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0)
+
+    engine = PaymentEngine(_Session())
+
+    assert engine._advisory_lock_budget_s == 5.0
 
 
 @pytest.mark.asyncio
