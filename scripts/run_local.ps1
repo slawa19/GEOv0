@@ -79,6 +79,7 @@ Remove-Item Env:ENVIRONMENT -ErrorAction SilentlyContinue
 # --- Configuration & Paths ---
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $StateDir = Join-Path $RepoRoot '.local-run'
+$FullStackOwnershipDir = Join-Path $StateDir 'full-stack'
 $UiDir = Join-Path $RepoRoot 'admin-ui'
 $EnvLocalPath = Join-Path $UiDir '.env.local'
 $DefaultDatabaseUrl = 'sqlite+aiosqlite:///./.local-run/geov0.db'
@@ -94,6 +95,9 @@ if (-not (Test-Path $StateDir)) {
 # Пути к PID и логам
 $BackendPidPath = Join-Path $StateDir 'backend.pid'
 $UiPidPath = Join-Path $StateDir 'admin-ui.pid'
+$FullStackBackendOwnershipPath = Join-Path $FullStackOwnershipDir 'backend.owner.json'
+$FullStackAdminUiOwnershipPath = Join-Path $FullStackOwnershipDir 'admin-ui.owner.json'
+$FullStackSimulatorUiOwnershipPath = Join-Path $FullStackOwnershipDir 'simulator-ui.owner.json'
 $BackendOutLog = Join-Path $StateDir 'backend.out.log'
 $BackendErrLog = Join-Path $StateDir 'backend.err.log'
 
@@ -269,6 +273,135 @@ function Get-ListeningPid {
         Write-Verbose "Port $Port is not in LISTEN state or access denied."
     }
     return $null
+}
+
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if (-not $Id -or $Id -le 0) {
+        return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+    }
+    try {
+        $process = [System.Diagnostics.Process]::GetProcessById($Id)
+    } catch [System.ArgumentException] {
+        return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+    } catch {
+        return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
+    }
+    try {
+        $ticks = $process.StartTime.ToUniversalTime().Ticks.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        $fingerprint = "utc-ticks:$ticks"
+    } catch {
+        return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
+    }
+    $status = if ($fingerprint -eq $ExpectedStartFingerprint) { 'Exact' } else { 'Mismatch' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
+}
+
+function Get-FullStackOwnershipMetadata {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        $metadata = (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop) |
+            ConvertFrom-Json -ErrorAction Stop
+        $pidValue = 0
+        if (-not [int]::TryParse([string]$metadata.pid, [ref]$pidValue) -or $pidValue -le 0) {
+            throw 'invalid pid'
+        }
+        $fingerprint = [string]$metadata.process_start_fingerprint
+        if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+        return [pscustomobject]@{
+            Valid = [bool]($metadata.version -eq 1)
+            Pid = $pidValue
+            ProcessStartFingerprint = $fingerprint
+            ServiceName = [string]$metadata.service_name
+            Port = [int]$metadata.port
+        }
+    } catch {
+        return [pscustomobject]@{ Valid = $false }
+    }
+}
+
+function Get-FullStackOwnershipServices {
+    return @(
+        [pscustomobject]@{ Name = 'Backend'; OwnershipFile = $FullStackBackendOwnershipPath },
+        [pscustomobject]@{ Name = 'Admin UI'; OwnershipFile = $FullStackAdminUiOwnershipPath },
+        [pscustomobject]@{ Name = 'Simulator UI'; OwnershipFile = $FullStackSimulatorUiOwnershipPath }
+    )
+}
+
+function Get-FullStackOwnershipState {
+    param([object]$Service)
+    $metadata = Get-FullStackOwnershipMetadata -Path $Service.OwnershipFile
+    if ($null -eq $metadata) {
+        return [pscustomobject]@{
+            Service = $Service
+            Conflict = $false
+            Reason = $null
+            StaleOwnershipFile = $false
+        }
+    }
+    if (-not $metadata.Valid -or $metadata.ServiceName -ne $Service.Name -or $metadata.Port -le 0) {
+        return [pscustomobject]@{
+            Service = $Service
+            Conflict = $true
+            Reason = 'full-stack ownership metadata is unreadable or invalid and was retained'
+            StaleOwnershipFile = $false
+        }
+    }
+
+    $identity = Get-ProcessIdentityObservation `
+        -Id $metadata.Pid `
+        -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
+    $listener = Get-ListeningPid -Port $metadata.Port
+    $conflict = $false
+    $reason = $null
+    if ($identity.Status -eq 'Exact' -and $listener -eq $metadata.Pid) {
+        $conflict = $true
+        $reason = "full-stack owns exact PID $($metadata.Pid) on port $($metadata.Port)"
+    } elseif ($identity.Status -eq 'Exact') {
+        $conflict = $true
+        $reason = "full-stack exact PID $($metadata.Pid) is alive but not its expected listener"
+    } elseif ($identity.Status -eq 'Unreadable') {
+        $conflict = $true
+        $reason = 'full-stack process identity is unreadable; metadata was retained'
+    } elseif ($listener) {
+        $conflict = $true
+        $reason = "full-stack metadata is stale but port $($metadata.Port) has listener PID $listener"
+    }
+    $staleOwnershipFile = [bool](
+        -not $conflict -and -not $listener -and
+        $identity.Status -in @('Missing', 'Mismatch')
+    )
+    return [pscustomobject]@{
+        Service = $Service
+        Conflict = $conflict
+        Reason = $reason
+        StaleOwnershipFile = $staleOwnershipFile
+    }
+}
+
+function Assert-NoActiveFullStackOwnership {
+    $states = @(Get-FullStackOwnershipServices | ForEach-Object {
+        Get-FullStackOwnershipState -Service $_
+    })
+    $conflicts = @($states | Where-Object { $_.Conflict })
+    foreach ($state in $conflicts) {
+        Write-Warning "$($state.Service.Name): $($state.Reason). run_local did not stop or adopt it."
+    }
+    if ($conflicts.Count -gt 0) {
+        throw 'run_local refused because full-stack ownership is active or cannot be safely disproven.'
+    }
+
+    foreach ($state in @($states | Where-Object { $_.StaleOwnershipFile })) {
+        # Re-observe immediately before cleanup. A newly active, replaced, or
+        # unreadable owner must win over the earlier stale observation.
+        $finalState = Get-FullStackOwnershipState -Service $state.Service
+        if ($finalState.Conflict -or -not $finalState.StaleOwnershipFile) {
+            throw "run_local refused because full-stack ownership changed during stale cleanup for $($state.Service.Name)."
+        }
+        Remove-Item -LiteralPath $state.Service.OwnershipFile -Force -ErrorAction Stop
+        Write-Warning "$($state.Service.Name): removed full-stack metadata only after its process identity was proven stale."
+    }
 }
 
 function Stop-IfListeningAndOurs {
@@ -594,6 +727,10 @@ Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
 Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
 $Python = $Tools.Python
 $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
+
+if ($Action -in @('start', 'stop', 'restart', 'restart-backend')) {
+    Assert-NoActiveFullStackOwnership
+}
 
 switch ($Action) {
     'status' {

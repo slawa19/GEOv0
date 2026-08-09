@@ -10,6 +10,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RUN_FULL_STACK = _ROOT / "scripts" / "run_full_stack.ps1"
+_RUN_LOCAL = _ROOT / "scripts" / "run_local.ps1"
 
 
 def _powershell_executables() -> tuple[Path, ...]:
@@ -345,6 +346,7 @@ def _ownership_command(body: str) -> str:
 $script:MetadataByFile = @{}
 $script:ListenerByPort = @{}
 $script:FingerprintByPid = @{}
+$script:IdentityStatusByPid = @{}
 $script:ListenerCalls = @{}
 $script:StoppedPids = @()
 $script:RemovedPidFiles = @()
@@ -365,9 +367,16 @@ function Get-ListeningPid {
     }
     return $value
 }
-function Get-ProcessStartTimeFingerprint {
-    param([int]$Id)
-    return $script:FingerprintByPid[$Id]
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $fingerprint = $script:FingerprintByPid[$Id]
+    $status = $script:IdentityStatusByPid[$Id]
+    if (-not $status) {
+        if (-not $fingerprint) { $status = 'Missing' }
+        elseif ($fingerprint -eq $ExpectedStartFingerprint) { $status = 'Exact' }
+        else { $status = 'Mismatch' }
+    }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
 }
 function Stop-ProcessById {
     param([int]$Id, [string]$ExpectedStartFingerprint)
@@ -529,6 +538,58 @@ if ($script:RemovedPidFiles.Count -ne 1 -or $script:RemovedPidFiles[0] -ne 'back
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_unreadable_process_identity_is_a_conflict_and_retains_metadata(
+    powershell: Path,
+) -> None:
+    body = r"""
+$service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a'
+$script:IdentityStatusByPid[101] = 'Unreadable'
+try {
+    Stop-AllServices -Services @($service) -FailOnConflict
+    throw 'Unreadable identity unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Unreadable identity unexpectedly succeeded') { throw }
+}
+if ($script:StoppedPids.Count -ne 0) { throw 'Unreadable process identity was stopped' }
+if ($script:RemovedPidFiles.Count -ne 0) { throw 'Unreadable ownership metadata was removed' }
+[Console]::Out.Write('unreadable-identity-fail-closed')
+"""
+    result = _run_powershell(powershell, _ownership_command(body))
+
+    assert "unreadable-identity-fail-closed" in result.stdout
+    assert "identity is unreadable" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_exact_live_non_listener_has_an_actionable_conflict_reason(
+    powershell: Path,
+) -> None:
+    body = r"""
+$service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a'
+$script:FingerprintByPid[101] = 'start-a'
+$state = Get-ServiceStopState -Service $service
+if (-not $state.Conflict) { throw 'Exact live non-listener was not a conflict' }
+if ($state.Reason -notlike '*alive but is not listening on port 18000*') {
+    throw "Unexpected conflict reason: $($state.Reason)"
+}
+[Console]::Out.Write($state.Reason)
+"""
+    result = _run_powershell(powershell, _ownership_command(body))
+
+    assert "owned PID 101 is alive but is not listening on port 18000" in result.stdout
+
+
+def test_status_displays_the_exact_conflict_reason() -> None:
+    source = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
+
+    assert '$status = "Conflict: $($state.Reason)"' in source
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
 def test_stop_failure_propagates_and_retains_all_ownership_files(
     powershell: Path,
 ) -> None:
@@ -601,6 +662,10 @@ Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwners
 $script:OwnershipWrites = @()
 $script:StoppedPids = @()
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
+}
 function Get-ListeningPid { param([int]$Port) return 202 }
 function Write-ServiceOwnershipMetadata {
     param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
@@ -641,6 +706,10 @@ def test_startup_timeout_cleans_up_exact_launched_process(powershell: Path) -> N
 Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
 $script:StoppedPids = @()
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
+}
 function Get-ListeningPid { param([int]$Port) return $null }
 function Stop-ProcessById {
     param([int]$Id, [string]$ExpectedStartFingerprint)
@@ -669,6 +738,42 @@ if ($script:StoppedPids.Count -ne 1 -or $script:StoppedPids[0] -ne 101) {
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_startup_child_that_already_exited_is_not_a_cleanup_failure(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+function Get-ProcessStartTimeFingerprint { param([int]$Id) return $null }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+}
+function Get-ListeningPid { param([int]$Port) return $null }
+function Stop-ProcessById { throw 'Already-exited child was stopped' }
+$service = [pscustomobject]@{ Name = 'Backend'; Port = 18000; PidFile = 'backend.pid' }
+$process = [pscustomobject]@{ Id = 101 }
+try {
+    Wait-ForLaunchedServiceOwnership -Service $service -Process $process -TimeoutSec 0
+    throw 'Startup timeout unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Startup timeout unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -notlike '*identity is unavailable*') { throw }
+    if ($_.Exception.Message -like '*Startup cleanup also failed*') {
+        throw 'Already-exited child was reported as a cleanup failure'
+    }
+}
+[Console]::Out.Write('already-exited-child-cleanup-ok')
+"""
+    )
+    result = _run_powershell(powershell, command)
+
+    assert result.stdout == "already-exited-child-cleanup-ok"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
 def test_startup_cleanup_failure_preserves_primary_and_cleanup_evidence(
     powershell: Path,
 ) -> None:
@@ -677,6 +782,10 @@ def test_startup_cleanup_failure_preserves_primary_and_cleanup_evidence(
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
+}
 function Get-ListeningPid { param([int]$Port) return 202 }
 function Stop-ProcessById {
     param([int]$Id, [string]$ExpectedStartFingerprint)
@@ -793,7 +902,10 @@ def test_native_stop_failure_is_not_swallowed(powershell: Path) -> None:
         _AST_SETUP
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Stop-ProcessById')
-function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
+}
 function Stop-Process { param([int]$Id, [switch]$Force, [object]$ErrorAction); throw 'native-stop-failed' }
 try {
     Stop-ProcessById -Id 101 -ExpectedStartFingerprint 'start-a'
@@ -808,3 +920,215 @@ try {
     result = _run_powershell(powershell, command)
 
     assert result.stdout == "native-stop-failure-propagated"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_unreadable_identity_after_native_stop_is_not_reported_as_stopped(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Stop-ProcessById')
+$script:IdentityCalls = 0
+$script:DateCalls = 0
+$script:NativeStopCalls = 0
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:IdentityCalls += 1
+    if ($script:IdentityCalls -eq 1) {
+        return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
+    }
+    return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
+}
+function Stop-Process {
+    param([int]$Id, [switch]$Force, [object]$ErrorAction)
+    $script:NativeStopCalls += 1
+}
+function Get-Date {
+    $script:DateCalls += 1
+    $origin = [datetime]'2026-08-09T00:00:00Z'
+    if ($script:DateCalls -le 2) { return $origin }
+    return $origin.AddSeconds(6)
+}
+function Start-Sleep { param([int]$Milliseconds) }
+try {
+    Stop-ProcessById -Id 101 -ExpectedStartFingerprint 'start-a'
+    throw 'Unreadable post-stop identity was reported as stopped'
+} catch {
+    if ($_.Exception.Message -eq 'Unreadable post-stop identity was reported as stopped') { throw }
+    if ($_.Exception.Message -notlike '*did not stop*') { throw }
+}
+if ($script:NativeStopCalls -ne 1) { throw 'Native stop was not invoked exactly once' }
+if ($script:IdentityCalls -lt 2) { throw 'Post-stop identity was not observed' }
+[Console]::Out.Write('unreadable-post-stop-fail-closed')
+"""
+    )
+    result = _run_powershell(powershell, command)
+
+    assert result.stdout == "unreadable-post-stop-fail-closed"
+
+
+_RUN_LOCAL_GUARD_FUNCTIONS = (
+    "Get-FullStackOwnershipState",
+    "Assert-NoActiveFullStackOwnership",
+)
+
+
+def _run_local_guard_command(body: str) -> str:
+    imports = "\n".join(
+        f"Invoke-Expression (Get-LauncherFunctionText -Name '{name}')"
+        for name in _RUN_LOCAL_GUARD_FUNCTIONS
+    )
+    return (
+        _AST_SETUP
+        + imports
+        + r"""
+$script:FullStackMetadata = $null
+$script:IdentityStatus = 'Missing'
+$script:ListenerPid = $null
+$script:RemovedOwnershipFiles = @()
+function Get-FullStackOwnershipServices {
+    return @([pscustomobject]@{ Name = 'Backend'; OwnershipFile = 'full-stack/backend.owner.json' })
+}
+function Get-FullStackOwnershipMetadata {
+    param([string]$Path)
+    return $script:FullStackMetadata
+}
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = $script:IdentityStatus; Fingerprint = $ExpectedStartFingerprint }
+}
+function Get-ListeningPid {
+    param([int]$Port)
+    return $script:ListenerPid
+}
+function Remove-Item {
+    param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction)
+    $script:RemovedOwnershipFiles += $LiteralPath
+    $script:FullStackMetadata = $null
+}
+function New-FullStackMetadata {
+    return [pscustomobject]@{
+        Valid = $true
+        Pid = 101
+        ProcessStartFingerprint = 'utc-ticks:638903664000000000'
+        ServiceName = 'Backend'
+        Port = 18000
+    }
+}
+"""
+        + body
+    )
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    ("identity_status", "listener_pid", "expected_reason"),
+    (
+        ("Exact", "101", "full-stack owns exact PID 101"),
+        ("Exact", "", "is alive but not its expected listener"),
+        ("Unreadable", "", "process identity is unreadable"),
+    ),
+    ids=("active-listener", "exact-non-listener", "unreadable"),
+)
+def test_run_local_refuses_active_or_unreadable_full_stack_ownership(
+    powershell: Path,
+    identity_status: str,
+    listener_pid: str,
+    expected_reason: str,
+) -> None:
+    body = r"""
+$script:FullStackMetadata = New-FullStackMetadata
+$script:IdentityStatus = $env:PHASE7_IDENTITY_STATUS
+if ($env:PHASE7_LISTENER_PID) { $script:ListenerPid = [int]$env:PHASE7_LISTENER_PID }
+try {
+    Assert-NoActiveFullStackOwnership
+    throw 'run_local unexpectedly accepted full-stack ownership'
+} catch {
+    if ($_.Exception.Message -eq 'run_local unexpectedly accepted full-stack ownership') { throw }
+    if ($_.Exception.Message -notlike '*run_local refused*') { throw }
+}
+[Console]::Out.Write('run-local-full-stack-conflict-ok')
+"""
+    result = _run_powershell(
+        powershell,
+        _run_local_guard_command(body),
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_IDENTITY_STATUS": identity_status,
+            "PHASE7_LISTENER_PID": listener_pid,
+        },
+    )
+
+    assert "run-local-full-stack-conflict-ok" in result.stdout
+    assert expected_reason in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize("identity_status", ("Missing", "Mismatch"))
+def test_run_local_only_cleans_disproved_stale_full_stack_ownership(
+    powershell: Path,
+    identity_status: str,
+) -> None:
+    body = r"""
+$script:FullStackMetadata = New-FullStackMetadata
+$script:IdentityStatus = $env:PHASE7_IDENTITY_STATUS
+Assert-NoActiveFullStackOwnership
+if ($script:RemovedOwnershipFiles.Count -ne 1 -or
+    $script:RemovedOwnershipFiles[0] -ne 'full-stack/backend.owner.json') {
+    throw 'Disproved stale full-stack metadata was not removed exactly once'
+}
+[Console]::Out.Write('run-local-stale-full-stack-disproved')
+"""
+    result = _run_powershell(
+        powershell,
+        _run_local_guard_command(body),
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_IDENTITY_STATUS": identity_status,
+        },
+    )
+
+    assert "run-local-stale-full-stack-disproved" in result.stdout
+    assert "proven stale" in result.stdout
+
+
+def test_launcher_ownership_namespaces_are_disjoint_and_actions_are_guarded() -> None:
+    full_stack_source = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
+    run_local_source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+
+    assert "Join-Path $FullStackOwnershipDir 'backend.owner.json'" in full_stack_source
+    assert "Join-Path $StateDir 'backend.pid'" in run_local_source
+    guard_index = run_local_source.index(
+        "if ($Action -in @('start', 'stop', 'restart', 'restart-backend'))"
+    )
+    assert run_local_source.index("Assert-NoActiveFullStackOwnership", guard_index) < (
+        run_local_source.index("switch ($Action)", guard_index)
+    )
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_full_stack_refuses_a_run_local_listener_without_full_stack_metadata(
+    powershell: Path,
+) -> None:
+    body = r"""
+$service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'full-stack/backend.owner.json'
+$script:ListenerByPort[18000] = 303
+try {
+    Stop-AllServices -Services @($service) -FailOnConflict
+    throw 'run_local listener was treated as full-stack owned'
+} catch {
+    if ($_.Exception.Message -eq 'run_local listener was treated as full-stack owned') { throw }
+}
+if ($script:StoppedPids.Count -ne 0) { throw 'run_local listener was stopped by full-stack' }
+[Console]::Out.Write('full-stack-run-local-conflict-ok')
+"""
+    result = _run_powershell(powershell, _ownership_command(body))
+
+    assert "full-stack-run-local-conflict-ok" in result.stdout
+    assert "no ownership metadata exists" in result.stdout

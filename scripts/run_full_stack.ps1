@@ -87,6 +87,7 @@ function Set-EnvOverrides {
 # --- Configuration & Paths ---
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $StateDir = Join-Path $RepoRoot '.local-run'
+$FullStackOwnershipDir = Join-Path $StateDir 'full-stack'
 $AdminUiDir = Join-Path $RepoRoot 'admin-ui'
 $SimulatorUiDir = Join-Path $RepoRoot 'simulator-ui/v2'
 $AdminEnvLocalPath = Join-Path $AdminUiDir '.env.local'
@@ -100,12 +101,16 @@ $LegacyRootDatabasePath = Join-Path $RepoRoot 'geov0.db'
 if (-not (Test-Path $StateDir)) {
     $null = New-Item -ItemType Directory -Force -Path $StateDir
 }
+if (-not (Test-Path $FullStackOwnershipDir)) {
+    $null = New-Item -ItemType Directory -Force -Path $FullStackOwnershipDir
+}
 
-# Per-service ownership metadata paths. The historical *.pid names are retained
-# for compatibility, but the contents are versioned JSON rather than a bare PID.
-$BackendPidPath = Join-Path $StateDir 'backend.pid'
-$AdminUiPidPath = Join-Path $StateDir 'admin-ui.pid'
-$SimulatorUiPidPath = Join-Path $StateDir 'simulator-ui.pid'
+# Dedicated full-stack ownership paths must not overlap run_local's legacy bare
+# PID files. This makes cross-entrypoint conflicts observable instead of letting
+# one launcher reinterpret or overwrite the other launcher's state.
+$BackendPidPath = Join-Path $FullStackOwnershipDir 'backend.owner.json'
+$AdminUiPidPath = Join-Path $FullStackOwnershipDir 'admin-ui.owner.json'
+$SimulatorUiPidPath = Join-Path $FullStackOwnershipDir 'simulator-ui.owner.json'
 
 $AdminUiOutLogPath = Join-Path $StateDir 'admin-ui.out.log'
 $AdminUiErrLogPath = Join-Path $StateDir 'admin-ui.err.log'
@@ -160,6 +165,37 @@ function Get-ProcessStartTimeFingerprint {
     }
 }
 
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if (-not $Id -or $Id -le 0) {
+        return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+    }
+
+    try {
+        $process = [System.Diagnostics.Process]::GetProcessById($Id)
+    } catch [System.ArgumentException] {
+        return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+    } catch {
+        return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
+    }
+
+    try {
+        $ticks = $process.StartTime.ToUniversalTime().Ticks.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        $fingerprint = "utc-ticks:$ticks"
+    } catch {
+        return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
+    }
+
+    $status = if ([string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) {
+        'Observed'
+    } elseif ($fingerprint -eq $ExpectedStartFingerprint) {
+        'Exact'
+    } else {
+        'Mismatch'
+    }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
+}
+
 function Write-ServiceOwnershipMetadata {
     param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
     if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$') {
@@ -194,19 +230,21 @@ function Stop-ProcessById {
         throw 'Unable to stop service because its exact process identity is unavailable.'
     }
 
-    $currentFingerprint = Get-ProcessStartTimeFingerprint -Id $Id
-    if ($currentFingerprint -ne $ExpectedStartFingerprint) {
+    $identity = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+    if ($identity.Status -ne 'Exact') {
         throw 'Unable to stop service because its process identity changed.'
     }
 
     Stop-Process -Id $Id -Force -ErrorAction Stop
     $deadline = (Get-Date).AddSeconds(5)
     while ((Get-Date) -lt $deadline) {
-        $currentFingerprint = Get-ProcessStartTimeFingerprint -Id $Id
-        if ($currentFingerprint -ne $ExpectedStartFingerprint) {
+        $identity = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+        if ($identity.Status -in @('Missing', 'Mismatch')) {
             Write-Host "     Stopped PID $Id" -ForegroundColor Gray
             return
         }
+        # Unreadable does not prove termination. Keep polling so a temporary
+        # access/inspection failure cannot be reported as a successful stop.
         Start-Sleep -Milliseconds 100
     }
     throw "Owned process PID $Id did not stop."
@@ -542,15 +580,13 @@ function Get-ServiceStopState {
         $metadata.ServiceName -eq $Service.Name -and
         $metadata.Port -eq $Service.Port
     )
-    $currentFingerprint = if ($metadataMatchesService) {
-        Get-ProcessStartTimeFingerprint -Id $metadata.Pid
+    $identity = if ($metadataMatchesService) {
+        Get-ProcessIdentityObservation -Id $metadata.Pid -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
     } else {
-        $null
+        $unboundStatus = if ($metadataPresent) { 'Unreadable' } else { 'Missing' }
+        [pscustomobject]@{ Status = $unboundStatus; Fingerprint = $null }
     }
-    $exactProcess = [bool](
-        $metadataMatchesService -and $currentFingerprint -and
-        $currentFingerprint -eq $metadata.ProcessStartFingerprint
-    )
+    $exactProcess = [bool]($metadataMatchesService -and $identity.Status -eq 'Exact')
     $owned = [bool]($exactProcess -and $listener -and $metadata.Pid -eq $listener)
     $conflict = $false
     $reason = $null
@@ -568,10 +604,14 @@ function Get-ServiceStopState {
     } elseif ($listener -and $metadata.Pid -ne $listener) {
         $conflict = $true
         $reason = "port $($Service.Port) is listening on PID $listener but owned PID $($metadata.Pid) was expected"
+    } elseif (-not $listener -and $identity.Status -eq 'Unreadable') {
+        $conflict = $true
+        $reason = "owned PID $($metadata.Pid) identity is unreadable; metadata was retained"
     } elseif (-not $listener -and $exactProcess) {
         $conflict = $true
         $reason = "owned PID $($metadata.Pid) is alive but is not listening on port $($Service.Port)"
-    } elseif (-not $listener -and $metadataPresent) {
+    } elseif (-not $listener -and $metadataPresent -and
+        $identity.Status -in @('Missing', 'Mismatch')) {
         # It is safe to remove metadata only when it cannot identify the exact
         # currently-live process instance. PID reuse is never a reason to kill.
         $staleOwnershipFile = $true
@@ -585,7 +625,8 @@ function Get-ServiceStopState {
         MetadataMatchesService = $metadataMatchesService
         SavedPid = if ($metadataMatchesService) { $metadata.Pid } else { $null }
         SavedProcessStartFingerprint = if ($metadataMatchesService) { $metadata.ProcessStartFingerprint } else { $null }
-        CurrentProcessStartFingerprint = $currentFingerprint
+        CurrentProcessStartFingerprint = $identity.Fingerprint
+        ProcessIdentityStatus = $identity.Status
         ListenerPid = $listener
         Owned = [bool]$owned
         Conflict = [bool]$conflict
@@ -620,7 +661,7 @@ function Test-ServiceStopPlansEqual {
         $after = $FinalPlan[$i]
         foreach ($property in @(
             'MetadataPresent', 'MetadataValid', 'MetadataMatchesService',
-            'SavedPid', 'SavedProcessStartFingerprint', 'CurrentProcessStartFingerprint',
+            'SavedPid', 'SavedProcessStartFingerprint', 'CurrentProcessStartFingerprint', 'ProcessIdentityStatus',
             'ListenerPid', 'Owned', 'Conflict', 'StaleOwnershipFile'
         )) {
             if ($before.$property -ne $after.$property) { return $false }
@@ -702,17 +743,22 @@ function Wait-ForLaunchedServiceOwnership {
         if (-not $ownershipPersisted -and $launchedPid -gt 0) {
             try {
                 if ([string]::IsNullOrWhiteSpace($launchedFingerprint)) {
-                    throw 'Exact launched process identity was unavailable for startup cleanup.'
+                    $cleanupIdentity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint ''
+                    if ($cleanupIdentity.Status -ne 'Missing') {
+                        throw 'Exact launched process identity was unavailable for startup cleanup.'
+                    }
+                } else {
+                    $cleanupIdentity = Get-ProcessIdentityObservation `
+                        -Id $launchedPid `
+                        -ExpectedStartFingerprint $launchedFingerprint
+                    if ($cleanupIdentity.Status -eq 'Exact') {
+                        Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $launchedFingerprint
+                    } elseif ($cleanupIdentity.Status -eq 'Unreadable') {
+                        throw 'Exact launched process identity was unreadable during startup cleanup.'
+                    }
                 }
-                $cleanupFingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
-                if ([string]::IsNullOrWhiteSpace($cleanupFingerprint)) {
-                    throw 'Exact launched process could not be re-identified for startup cleanup.'
-                }
-                if ($cleanupFingerprint -eq $launchedFingerprint) {
-                    Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $launchedFingerprint
-                }
-                # A different non-empty fingerprint proves PID reuse. The exact
-                # launched process is gone; the replacement must never be killed.
+                # Missing means the child already exited; Mismatch proves PID
+                # reuse. Neither case is a cleanup failure or a reason to kill.
             } catch {
                 $cleanupFailure = $_.Exception
                 if ($null -eq $primaryFailure) {
@@ -838,8 +884,8 @@ switch ($Action) {
             if ($state.Owned) {
                 $status = "Running (owned PID $($state.ListenerPid))"
                 $color = "Green"
-            } elseif ($state.ListenerPid) {
-                $status = "Port occupied (unowned PID $($state.ListenerPid))"
+            } elseif ($state.Conflict) {
+                $status = "Conflict: $($state.Reason)"
                 $color = "Yellow"
             } elseif ($state.StaleOwnershipFile) {
                 $status = "Stale ownership metadata (run stop to clean safely)"
