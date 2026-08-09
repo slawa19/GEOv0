@@ -165,7 +165,12 @@ class _DumpCollector:
         self.started_at_utc = self._t0.isoformat()
         self.runs: list[_RunCapture] = []
         self.extra: list[dict[str, Any]] = []
-        artifact_root = Path(os.environ.get("GEO_TEST_ARTIFACT_ROOT", "test-results"))
+        artifact_root = Path(
+            os.environ.get(
+                "GEO_TEST_ARTIFACT_ROOT",
+                ".local-run/test-runs/direct-pytest/artifacts",
+            )
+        )
         self.dump_dir = artifact_root / "super-simulator"
 
     def add_run(self, run: _RunCapture) -> None:

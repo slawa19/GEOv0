@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig, devices } from '@playwright/test'
 
 const uiPort = Number.parseInt(process.env.PHASE4_UI_PORT ?? '', 10) || 41741
@@ -11,7 +13,8 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [['list']],
-  outputDir: process.env.PHASE4_PLAYWRIGHT_OUTPUT,
+  outputDir: process.env.PHASE4_PLAYWRIGHT_OUTPUT
+    ?? fileURLToPath(new URL('../.local-run/playwright/admin/phase4-real/', import.meta.url)),
   use: {
     baseURL,
     trace: 'retain-on-failure',

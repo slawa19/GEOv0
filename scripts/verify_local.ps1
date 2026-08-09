@@ -110,7 +110,13 @@ try {
             & $pythonExe scripts/validate_test_database_url.py @databaseGuardArgs
         }
         Invoke-RequiredStep -Name 'Backend tests (pytest)' -Command {
-            $pytestArgs = @('-m', 'pytest', '--basetemp', $baseTemp, '-q')
+            $pytestCache = Join-Path $taskRoot 'cache'
+            $pytestArgs = @(
+                '-m', 'pytest',
+                '--basetemp', $baseTemp,
+                '-o', "cache_dir=$pytestCache",
+                '-q'
+            )
             if ($BackendMarker) {
                 $pytestArgs += @('-m', $BackendMarker)
             }

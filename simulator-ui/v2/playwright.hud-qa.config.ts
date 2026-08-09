@@ -3,6 +3,8 @@
  * Connects to the already-running dev server on port 5176
  * (started via scripts/run_simulator_ui.cmd with VITE_DEMO_FIXTURES=1).
  */
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
@@ -11,6 +13,8 @@ export default defineConfig({
   expect: {
     timeout: 10_000,
   },
+  outputDir: process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR
+    ?? fileURLToPath(new URL('../../.local-run/playwright/simulator/hud-qa-results/', import.meta.url)),
   use: {
     baseURL: 'http://127.0.0.1:5176',
     viewport: { width: 1280, height: 720 },

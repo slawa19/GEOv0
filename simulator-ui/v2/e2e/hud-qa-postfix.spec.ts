@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirnameCurrent = dirname(__filename)
 const REPO_ROOT = resolve(__dirnameCurrent, '../../../')
-const ARTIFACTS_DIR = resolve(REPO_ROOT, '.tmp/hud-qa-postfix')
+const ARTIFACTS_DIR = process.env.GEO_SIMULATOR_HUD_QA_ARTIFACT_DIR
+  ? resolve(process.env.GEO_SIMULATOR_HUD_QA_ARTIFACT_DIR)
+  : resolve(REPO_ROOT, '.local-run/playwright/simulator/hud-qa-artifacts')
 
 /** Wait until the app signals data-ready (same convention as console-guard.spec.ts). */
 async function waitReady(page: Page) {

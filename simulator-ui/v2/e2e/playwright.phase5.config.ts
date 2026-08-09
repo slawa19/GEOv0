@@ -14,7 +14,8 @@ export default defineConfig({
   },
   workers: 1,
   reporter: 'list',
-  outputDir: fileURLToPath(new URL('../../../.local-run/phase5-e2e/', import.meta.url)),
+  outputDir: process.env.PHASE5_PLAYWRIGHT_OUTPUT
+    ?? fileURLToPath(new URL('../../../.local-run/playwright/simulator/phase5/', import.meta.url)),
   use: {
     baseURL,
     viewport: { width: 1280, height: 720 },

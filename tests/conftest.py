@@ -31,7 +31,7 @@ from scripts.validate_test_database_url import assert_safe_test_database_url  # 
 # Defaulting to settings.DATABASE_URL is unsafe because it may point at a developer DB.
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "sqlite+aiosqlite:///./.pytest_geov0.db",
+    "sqlite+aiosqlite:///./.local-run/test-runs/direct-pytest/test.db",
 )
 
 _validated_test_database_url = assert_safe_test_database_url(
@@ -46,6 +46,13 @@ settings.RECOVERY_ENABLED = False
 settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
 _is_sqlite = _validated_test_database_url.get_backend_name() == "sqlite"
+if _is_sqlite:
+    sqlite_database = _validated_test_database_url.database
+    if sqlite_database and sqlite_database != ":memory:":
+        sqlite_path = Path(sqlite_database)
+        if not sqlite_path.is_absolute():
+            sqlite_path = Path(__file__).resolve().parents[1] / sqlite_path
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 _use_migrated_schema = os.environ.get("GEO_TEST_USE_MIGRATED_SCHEMA") == "1"
 if _use_migrated_schema and _is_sqlite:
     raise RuntimeError(
