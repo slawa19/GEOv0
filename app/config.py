@@ -240,11 +240,13 @@ class Settings(BaseSettings):
     def _normalize_legacy_environment(cls, value: object) -> str | None:
         if value is None:
             return None
-        # ENVIRONMENT is a compatibility input shared with unrelated tooling in
-        # some deployments. Only values from our documented legacy vocabulary
-        # participate in alias resolution; canonical ENV remains strict.
+        # Pydantic has already merged constructor, process-environment and dotenv
+        # sources before field validation, so source origin is not available here.
+        # Apply one deterministic rule to every source: supported legacy aliases
+        # participate in conflict resolution; unsupported values are retained so
+        # _resolve_environment_alias can diagnose them when canonical ENV is absent.
         raw = str(value or "").strip().lower()
-        return cls._ENV_ALIASES.get(raw)
+        return cls._ENV_ALIASES.get(raw, raw)
 
     def model_post_init(self, __context: Any) -> None:
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
@@ -256,16 +258,28 @@ class Settings(BaseSettings):
     def _resolve_environment_alias(self) -> None:
         canonical_env = self.ENV
         legacy_env = self.LEGACY_ENVIRONMENT
+        legacy_env_supported = legacy_env in self._ENV_ALIASES.values()
         if canonical_env is None and legacy_env is None:
             raise RuntimeError(
                 "ENV must be explicitly set to dev, test, staging, or prod "
                 "(legacy ENVIRONMENT is also accepted)"
             )
-        if canonical_env is not None and legacy_env is not None and canonical_env != legacy_env:
+        if canonical_env is None and not legacy_env_supported:
+            raise RuntimeError(
+                "ENV must be explicitly set to dev, test, staging, or prod; "
+                "legacy ENVIRONMENT is set to an unsupported value"
+            )
+        if (
+            canonical_env is not None
+            and legacy_env_supported
+            and canonical_env != legacy_env
+        ):
             raise RuntimeError(
                 "ENV and legacy ENVIRONMENT select different environments; "
                 "remove ENVIRONMENT and keep the canonical ENV value"
             )
+        # Canonical ENV wins over an unsupported compatibility value regardless
+        # of whether that value came from init kwargs, process env, or dotenv.
         self.ENV = canonical_env or legacy_env
 
     def _guardrail_simulator_session_secret(self) -> None:
@@ -308,7 +322,7 @@ class Settings(BaseSettings):
                     "SIMULATOR_CSRF_ORIGIN_ALLOWLIST "
                     f"entry {entry_index} is invalid. "
                     "Each entry must be an exact HTTP(S) origin with scheme, host, "
-                    "and optional port, without credentials, whitespace, path "
+                    "and optional port, without credentials, embedded whitespace, path "
                     "(including a trailing slash), query, or fragment."
                 )
             if normalized_origin not in normalized_origins:

@@ -189,7 +189,38 @@ def test_unrelated_ambient_legacy_environment_does_not_override_canonical_env(
     configured = Settings(_env_file=None, ENV="prod", **_SECURE_NON_DEV_SETTINGS)
 
     assert configured.ENV == "prod"
-    assert configured.LEGACY_ENVIRONMENT is None
+    assert configured.LEGACY_ENVIRONMENT == "qa"
+
+
+def test_unsupported_explicit_legacy_environment_does_not_override_canonical_env() -> None:
+    from app.config import Settings
+
+    configured = Settings(
+        _env_file=None,
+        ENV="prod",
+        ENVIRONMENT="qa",
+        **_SECURE_NON_DEV_SETTINGS,
+    )
+
+    assert configured.ENV == "prod"
+    assert configured.LEGACY_ENVIRONMENT == "qa"
+
+
+@pytest.mark.parametrize("legacy_value", ["qa", "", "   "])
+def test_unsupported_legacy_environment_without_canonical_env_is_precise(
+    monkeypatch,
+    legacy_value: str,
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.delenv("ENV", raising=False)
+
+    with pytest.raises(RuntimeError, match="ENV.*legacy ENVIRONMENT.*unsupported"):
+        Settings(
+            _env_file=None,
+            ENVIRONMENT=legacy_value,
+            **_SECURE_NON_DEV_SETTINGS,
+        )
 
 
 def test_supported_ambient_legacy_environment_still_conflicts_with_canonical_env(

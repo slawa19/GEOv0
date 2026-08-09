@@ -79,6 +79,11 @@ Compose создаёт persistent named volume `postgres_data`. Его удал�
 `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`. Backend fail-fast guard отклоняет dev-заглушки
 в `staging`/`prod`.
 
+`ENV` — канонический ключ окружения. Поддерживаемый legacy `ENVIRONMENT`
+участвует в проверке конфликта; неподдерживаемое значение legacy игнорируется при
+явном `ENV`, но без `ENV` приводит к точной startup-ошибке конфигурации. Это
+правило одинаково для process environment, `.env` и constructor input Pydantic.
+
 ## Миграции и данные
 
 Alembic управляет схемой. Уже применённые migrations не переписываются; новая

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, func
+from sqlalchemy import delete, func, select
 
 from app.core.payments.engine import PaymentEngine
 from app.core.recovery import (
@@ -54,8 +54,11 @@ async def test_cleanup_expired_prepare_locks_aborts_related_tx_and_deletes_locks
     db_session.add(lock)
     await db_session.commit()
 
-    deleted = await cleanup_expired_prepare_locks(db_session)
-    assert deleted == 1
+    result = await cleanup_expired_prepare_locks(db_session)
+    assert result.expired_lock_ids_resolved == 1
+    assert result.transactions_aborted == 1
+    assert result.terminal_transactions_seen == 0
+    assert result.item_failures == 0
 
     # Locks deleted
     remaining_locks = (
@@ -101,8 +104,10 @@ async def test_abort_stale_payment_transactions_aborts_old_active_tx(db_session)
     db_session.add(lock)
     await db_session.commit()
 
-    aborted = await abort_stale_payment_transactions(db_session)
-    assert aborted == 1
+    result = await abort_stale_payment_transactions(db_session)
+    assert result.transactions_aborted == 1
+    assert result.terminal_transactions_seen == 0
+    assert result.abort_failures == 0
 
     await db_session.refresh(tx)
     assert tx.state == "ABORTED"
@@ -177,18 +182,30 @@ async def test_recovery_iteration_preserves_expired_lock_progress_when_one_abort
     monkeypatch.setattr(PaymentEngine, "abort", abort_with_one_failure)
     caplog.set_level("INFO", logger="app.core.recovery")
 
-    assert await run_recovery_once(db_session) is True
+    assert await run_recovery_once(db_session) is False
 
     await db_session.refresh(successful_tx)
     await db_session.refresh(failed_tx)
     assert successful_tx.state == "ABORTED"
     assert failed_tx.state == "PREPARED"
+    remaining_tx_ids = set(
+        (await db_session.execute(select(PrepareLock.tx_id))).scalars().all()
+    )
+    assert remaining_tx_ids == {failed_tx_id}
+    assert "expired_lock_ids_resolved=1 stale_payments_aborted=0" in caplog.text
+    assert (
+        "expired_lock_ids_resolved=1 transactions_aborted=1 "
+        "terminal_transactions_seen=0 item_failures=1"
+    ) in caplog.text
+
+    monkeypatch.setattr(PaymentEngine, "abort", original_abort)
+    assert await run_recovery_once(db_session) is True
+    await db_session.refresh(failed_tx)
+    assert failed_tx.state == "ABORTED"
     remaining_locks = (
         await db_session.execute(select(func.count()).select_from(PrepareLock))
     ).scalar_one()
     assert remaining_locks == 0
-    assert "expired_locks_deleted=2 stale_payments_aborted=0" in caplog.text
-    assert "transactions_aborted=1 abort_failures=1" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -197,11 +214,16 @@ async def test_recovery_iteration_preserves_stale_abort_progress_when_one_abort_
     monkeypatch,
     caplog,
 ):
-    successful_tx_id = "TX_STALE_SUCCESS"
     failed_tx_id = "TX_STALE_FAILURE"
-    stale_at = datetime.now(timezone.utc) - timedelta(hours=1)
-    successful_tx = _payment_transaction(successful_tx_id, updated_at=stale_at)
-    failed_tx = _payment_transaction(failed_tx_id, updated_at=stale_at)
+    successful_tx_id = "TX_STALE_SUCCESS"
+    failed_tx = _payment_transaction(
+        failed_tx_id,
+        updated_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    successful_tx = _payment_transaction(
+        successful_tx_id,
+        updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
     unexpired_at = datetime.now(timezone.utc) + timedelta(hours=1)
     db_session.add_all(
         [
@@ -215,15 +237,26 @@ async def test_recovery_iteration_preserves_stale_abort_progress_when_one_abort_
 
     original_abort = PaymentEngine.abort
 
+    rollback_calls = 0
+    original_rollback = db_session.rollback
+
+    async def tracked_rollback():
+        nonlocal rollback_calls
+        rollback_calls += 1
+        await original_rollback()
+
     async def abort_with_one_failure(self, tx_id, *args, **kwargs):
         if tx_id == failed_tx_id:
-            raise RuntimeError("simulated item abort failure")
+            self.session.add(_payment_transaction(failed_tx_id))
+            await self.session.flush()
         return await original_abort(self, tx_id, *args, **kwargs)
 
+    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
     monkeypatch.setattr(PaymentEngine, "abort", abort_with_one_failure)
     caplog.set_level("INFO", logger="app.core.recovery")
 
-    assert await run_recovery_once(db_session) is True
+    assert await run_recovery_once(db_session) is False
+    assert rollback_calls == 1
 
     await db_session.refresh(successful_tx)
     await db_session.refresh(failed_tx)
@@ -241,5 +274,114 @@ async def test_recovery_iteration_preserves_stale_abort_progress_when_one_abort_
         .all()
     )
     assert remaining_tx_ids == {failed_tx_id}
-    assert "expired_locks_deleted=0 stale_payments_aborted=1" in caplog.text
-    assert "transactions_aborted=1 abort_failures=1" in caplog.text
+    assert "expired_lock_ids_resolved=0 stale_payments_aborted=1" in caplog.text
+    assert (
+        "transactions_aborted=1 terminal_transactions_seen=0 abort_failures=1"
+    ) in caplog.text
+
+    monkeypatch.setattr(PaymentEngine, "abort", original_abort)
+    assert await run_recovery_once(db_session) is True
+    await db_session.refresh(failed_tx)
+    assert failed_tx.state == "ABORTED"
+
+
+@pytest.mark.asyncio
+async def test_stale_recovery_counts_only_new_abort_outcomes(db_session, monkeypatch):
+    first_tx_id = "TX_STALE_OUTCOME_SUCCESS"
+    terminal_tx_id = "TX_STALE_OUTCOME_TERMINAL"
+    stale_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    db_session.add_all(
+        [
+            _payment_transaction(first_tx_id, updated_at=stale_at),
+            _payment_transaction(terminal_tx_id, updated_at=stale_at),
+        ]
+    )
+    await db_session.commit()
+
+    async def abort_with_outcomes(self, tx_id, *args, **kwargs):
+        assert kwargs["return_outcome"] is True
+        if tx_id == first_tx_id:
+            return "success"
+        if tx_id == terminal_tx_id:
+            return "already_committed"
+        raise AssertionError(f"unexpected tx_id {tx_id}")
+
+    monkeypatch.setattr(PaymentEngine, "abort", abort_with_outcomes)
+
+    result = await abort_stale_payment_transactions(db_session)
+
+    assert result.transactions_aborted == 1
+    assert result.terminal_transactions_seen == 1
+    assert result.abort_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_expired_lock_cleanup_counts_observed_resolved_ids_for_terminal_outcomes(
+    db_session,
+    monkeypatch,
+):
+    success_tx_id = "TX_EXPIRED_OUTCOME_SUCCESS"
+    terminal_tx_id = "TX_EXPIRED_OUTCOME_TERMINAL"
+    expired_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.add_all(
+        [
+            _payment_transaction(success_tx_id),
+            _payment_transaction(terminal_tx_id),
+            _prepare_lock(success_tx_id, expires_at=expired_at),
+            _prepare_lock(terminal_tx_id, expires_at=expired_at),
+        ]
+    )
+    await db_session.commit()
+
+    async def abort_with_outcomes(self, tx_id, *args, **kwargs):
+        assert kwargs["return_outcome"] is True
+        if tx_id == success_tx_id:
+            await self.session.execute(
+                delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
+            )
+            await self.session.commit()
+            return "success"
+        if tx_id == terminal_tx_id:
+            return "already_committed"
+        raise AssertionError(f"unexpected tx_id {tx_id}")
+
+    monkeypatch.setattr(PaymentEngine, "abort", abort_with_outcomes)
+
+    result = await cleanup_expired_prepare_locks(db_session)
+
+    assert result.expired_lock_ids_resolved == 2
+    assert result.transactions_aborted == 1
+    assert result.terminal_transactions_seen == 1
+    assert result.item_failures == 0
+    remaining_locks = (
+        await db_session.execute(select(func.count()).select_from(PrepareLock))
+    ).scalar_one()
+    assert remaining_locks == 0
+
+
+@pytest.mark.asyncio
+async def test_recovery_item_rollback_failure_escalates_the_batch(
+    db_session,
+    monkeypatch,
+):
+    tx_id = "TX_STALE_ROLLBACK_FAILURE"
+    db_session.add(
+        _payment_transaction(
+            tx_id,
+            updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+    )
+    await db_session.commit()
+
+    async def fail_abort(self, candidate_tx_id, *args, **kwargs):
+        assert candidate_tx_id == tx_id
+        raise RuntimeError("simulated abort failure")
+
+    async def fail_rollback():
+        raise RuntimeError("simulated rollback failure")
+
+    monkeypatch.setattr(PaymentEngine, "abort", fail_abort)
+    monkeypatch.setattr(db_session, "rollback", fail_rollback)
+
+    with pytest.raises(RuntimeError, match="simulated rollback failure"):
+        await abort_stale_payment_transactions(db_session)
