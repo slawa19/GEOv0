@@ -2068,7 +2068,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('does not treat focus in a different edge-detail owner as the completed Close Line flow', async () => {
+  it('does not capture body as the strict Close Line owner or steal later focus', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
     setUrl('/?mode=real&ui=interact')
     stubMissingResizeObserver()
@@ -2085,7 +2085,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
 
       const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
-      closeLine?.focus()
+      expect(document.activeElement).toBe(document.body)
       closeLine?.click()
       await nextTick()
       closeLine?.click()

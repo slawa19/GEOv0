@@ -287,7 +287,15 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
 
     win.__rafQueue.shift()!(3800)
     expect(hasFloatingLabel).toBe(false)
+    expect(win.setTimeout).toHaveBeenCalled()
+
+    vi.runOnlyPendingTimers()
+    expect(win.__rafQueue.length).toBe(1)
+    const timeoutCallsBeforeDeepIdle = win.setTimeout.mock.calls.length
+
+    win.__rafQueue.shift()!(7000)
     expect(win.__rafQueue.length).toBe(0)
+    expect(win.setTimeout.mock.calls.length).toBe(timeoutCallsBeforeDeepIdle)
   })
 
   it('expires DOM floating labels even while snapshot rendering prerequisites are unavailable', () => {

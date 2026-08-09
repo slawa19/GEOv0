@@ -791,6 +791,7 @@ let interactFlowOpener: HTMLElement | null = null
 let interactFlowFallback: HTMLElement | null = null
 let interactFlowFocusOwnerType = 'interact-panel'
 let interactFlowStrictFocusOwner: Element | null = null
+let interactFlowUsesStrictFocusOwner = false
 
 function captureInteractFlowOpener(
   fallbackSelector?: string,
@@ -801,7 +802,12 @@ function captureInteractFlowOpener(
   interactFlowFallback = fallback instanceof HTMLElement ? fallback : null
   interactFlowOpener = opts.preferFallback ? null : active instanceof HTMLElement ? active : null
   interactFlowFocusOwnerType = opts.focusOwnerType ?? 'interact-panel'
-  interactFlowStrictFocusOwner = opts.strictFocusOwner && active instanceof Element ? active : null
+  interactFlowUsesStrictFocusOwner = opts.strictFocusOwner === true
+  const activeWindow = active instanceof Element ? active.closest('[data-win-type]') : null
+  interactFlowStrictFocusOwner =
+    interactFlowUsesStrictFocusOwner && activeWindow?.getAttribute('data-win-type') === interactFlowFocusOwnerType
+      ? active
+      : null
 }
 
 function inspectNodeFromNavigator(nodeId: string): void {
@@ -827,6 +833,7 @@ function cancelInteractWindowFromUi(): void {
     interactFlowFallback = null
     interactFlowFocusOwnerType = 'interact-panel'
     interactFlowStrictFocusOwner = null
+    interactFlowUsesStrictFocusOwner = false
     void nextTick(() => {
       const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
       if (document.activeElement !== document.body || !target?.isConnected || target.matches(':disabled')) return
@@ -838,6 +845,7 @@ function cancelInteractWindowFromUi(): void {
   interactFlowFallback = null
   interactFlowFocusOwnerType = 'interact-panel'
   interactFlowStrictFocusOwner = null
+  interactFlowUsesStrictFocusOwner = false
   interact.mode.cancel()
 }
 
@@ -1076,16 +1084,18 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     const fallback = interactFlowFallback
     const focusOwnerType = interactFlowFocusOwnerType
     const strictFocusOwner = interactFlowStrictFocusOwner
+    const usesStrictFocusOwner = interactFlowUsesStrictFocusOwner
     interactFlowOpener = null
     interactFlowFallback = null
     interactFlowFocusOwnerType = 'interact-panel'
     interactFlowStrictFocusOwner = null
+    interactFlowUsesStrictFocusOwner = false
     void nextTick(() => {
       const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
       const active = document.activeElement
       const activeWindow = active instanceof Element ? active.closest('[data-win-type]') : null
-      const focusStillOwnedByFlow = strictFocusOwner
-        ? active === strictFocusOwner || (active instanceof Node && strictFocusOwner.contains(active))
+      const focusStillOwnedByFlow = usesStrictFocusOwner
+        ? Boolean(strictFocusOwner && (active === strictFocusOwner || (active instanceof Node && strictFocusOwner.contains(active))))
         : activeWindow?.getAttribute('data-win-type') === focusOwnerType
       if (
         (active !== document.body && !focusStillOwnedByFlow) ||
