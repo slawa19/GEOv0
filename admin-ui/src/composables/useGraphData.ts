@@ -96,12 +96,15 @@ export function useGraphData(opts: {
   const loading = ref(false)
   const viewError = ref<string | null>(null)
   const fullCycleError = ref<string | null>(null)
+  const focusCycleError = ref<string | null>(null)
   const participantCycleError = ref<string | null>(null)
   const activeParticipantPid = ref('')
   const participantCycleState = ref<'idle' | 'pending' | 'visible' | 'fallback'>('idle')
-  const cycleError = computed(() => (
-    activeParticipantPid.value ? participantCycleError.value : fullCycleError.value
-  ))
+  const cycleError = computed(() => {
+    if (opts.focusMode.value) return focusCycleError.value
+    if (activeParticipantPid.value) return participantCycleError.value
+    return fullCycleError.value
+  })
   const error = computed(() => viewError.value ?? cycleError.value)
 
   const participants = ref<Participant[]>([])
@@ -281,7 +284,7 @@ export function useGraphData(opts: {
     resetParticipantCycleVisibility()
     loading.value = true
     viewError.value = null
-    fullCycleError.value = null
+    focusCycleError.value = null
 
     const query = buildFocusModeQuery({
       enabled: Boolean(opts.focusMode.value),
@@ -325,12 +328,12 @@ export function useGraphData(opts: {
           if (!activeParticipantPid.value) {
             clearingCycles.value = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
           }
-          fullCycleError.value = null
+          focusCycleError.value = null
         } catch (e: unknown) {
           if (viewRequest.isCurrent()) {
             const msg = e instanceof Error ? e.message : String(e)
             const failure = msg || t('graph.focusMode.loadFailed')
-            fullCycleError.value = failure
+            focusCycleError.value = failure
             ElMessage.warning(failure)
           }
         }
@@ -353,9 +356,11 @@ export function useGraphData(opts: {
       resetParticipantCycleVisibility()
       return true
     }
+    const participantChanged = activeParticipantPid.value !== pid
     activeParticipantPid.value = pid
     participantCycleState.value = 'pending'
     participantCycleError.value = null
+    if (participantChanged) clearingCycles.value = fullClearingCycles
     const participantRequest = participantCycleRequests.begin()
     try {
       const cc = await api.clearingCycles({ participant_pid: pid })
